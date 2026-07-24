@@ -14,9 +14,7 @@ from bot.constants import (
 )
 from utils.security import SafeResolver, allow_local_networks
 
-
 logger = logging.getLogger(__name__)
-
 
 _http_session: Optional[aiohttp.ClientSession] = None
 
@@ -29,11 +27,9 @@ class CircuitBreaker:
     ):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
-
         self.failure_count = 0
         self.state = "CLOSED"
         self.last_failure_time = 0.0
-
         self._lock = asyncio.Lock()
 
     async def is_available(self) -> bool:
@@ -42,7 +38,6 @@ class CircuitBreaker:
                 elapsed = (
                     time.monotonic() - self.last_failure_time
                 )
-
                 if elapsed > self.recovery_timeout:
                     logger.info(
                         "Circuit breaker: half-open, "
@@ -50,14 +45,10 @@ class CircuitBreaker:
                         "(was OPEN for %.0fs)",
                         elapsed,
                     )
-
                     self.state = "CLOSED"
                     self.failure_count = 0
-
                     return True
-
                 return False
-
             return True
 
     async def record_success(self):
@@ -68,7 +59,6 @@ class CircuitBreaker:
                     "resetting failure count (%s -> 0)",
                     self.failure_count,
                 )
-
             self.failure_count = 0
             self.state = "CLOSED"
 
@@ -76,7 +66,6 @@ class CircuitBreaker:
         async with self._lock:
             self.failure_count += 1
             self.last_failure_time = time.monotonic()
-
             if self.failure_count >= self.failure_threshold:
                 if self.state != "OPEN":
                     logger.warning(
@@ -85,7 +74,6 @@ class CircuitBreaker:
                         self.failure_count,
                         self.recovery_timeout,
                     )
-
                 self.state = "OPEN"
 
     @property
@@ -102,17 +90,14 @@ def _get_circuit_breaker(api_url: str) -> CircuitBreaker:
             failure_threshold=5,
             recovery_timeout=60.0,
         )
-
     return _circuit_breakers[api_url]
 
 
 def cleanup_server_circuit_breakers(api_url: str) -> None:
     api_url = (api_url or "").rstrip("/")
-
     if api_url in _circuit_breakers:
         del _circuit_breakers[api_url]
         logger.debug("Circuit breaker cleaned for %s", api_url)
-
     if api_url in _rate_limiters:
         del _rate_limiters[api_url]
         logger.debug("Rate limiter cleaned for %s", api_url)
@@ -122,35 +107,27 @@ class TokenBucketRateLimiter:
     def __init__(self, rate: float = 3.0, burst: int = 5):
         self.rate = rate
         self.burst = burst
-
         self.tokens = float(burst)
         self.last_refill = time.monotonic()
-
         self._lock = asyncio.Lock()
 
     async def acquire(self, timeout: float = 30.0) -> bool:
         deadline = time.monotonic() + timeout
-
         while True:
             async with self._lock:
                 now = time.monotonic()
                 elapsed = now - self.last_refill
-
                 self.tokens = min(
                     self.burst,
                     self.tokens + elapsed * self.rate,
                 )
-
                 self.last_refill = now
-
                 if self.tokens >= 1.0:
                     self.tokens -= 1.0
                     return True
-
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return False
-
             await asyncio.sleep(
                 min(1.0 / self.rate, remaining)
             )
@@ -165,7 +142,6 @@ def _get_rate_limiter(api_url: str) -> TokenBucketRateLimiter:
             rate=3.0,
             burst=5,
         )
-
     return _rate_limiters[api_url]
 
 
@@ -187,11 +163,9 @@ class AmneziaClientListItem(BaseModel):
     username: str = ""
     peer_name: str = ""
     status: str = "active"
-
     traffics: AmneziaClientTraffic = Field(
         default_factory=AmneziaClientTraffic
     )
-
     lastHandshake: Optional[float] = None
     lastSeen: Optional[float] = None
     updatedAt: Optional[float] = None
@@ -208,10 +182,8 @@ class AmneziaClientListItem(BaseModel):
 class AmneziaServerInfo(BaseModel):
     name: str = ""
     protocols: List[str] = Field(default_factory=list)
-
     maxPeers: int = 0
     serverMaxPeers: int = 0
-
     SERVER_MAX_PEERS: int = 250
 
     def get_effective_max_peers(self) -> int:
@@ -224,7 +196,6 @@ class AmneziaServerInfo(BaseModel):
 
 async def get_http_session() -> aiohttp.ClientSession:
     global _http_session
-
     if _http_session is None:
         connector = aiohttp.TCPConnector(
             limit=100,
@@ -233,20 +204,16 @@ async def get_http_session() -> aiohttp.ClientSession:
                 allow_local=allow_local_networks(),
             ),
         )
-
         timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
-
         _http_session = aiohttp.ClientSession(
             connector=connector,
             timeout=timeout,
         )
-
     return _http_session
 
 
 async def close_http_session():
     global _http_session
-
     if _http_session:
         await _http_session.close()
         _http_session = None
@@ -256,12 +223,10 @@ class AmneziaClient:
     def __init__(self, api_url: str, api_key: str):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
-
         self._headers = {
             "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
-
         self._key_error_logged = False
 
     async def _request(
@@ -286,11 +251,9 @@ class AmneziaClient:
                     path,
                 )
                 self._key_error_logged = True
-
             return None
 
         url = f"{self.api_url}{path}"
-
         cb = _get_circuit_breaker(self.api_url)
 
         if not await cb.is_available():
@@ -316,7 +279,6 @@ class AmneziaClient:
                 return None
 
             session = await get_http_session()
-
             try:
                 async with session.request(
                     method,
@@ -328,19 +290,14 @@ class AmneziaClient:
                     if response.status == 204:
                         await cb.record_success()
                         return {}
-
                     elif 200 <= response.status < 300:
                         await cb.record_success()
-
                         try:
                             return await response.json()
                         except aiohttp.ContentTypeError:
                             return None
-
                     elif 300 <= response.status < 400:
-                        # Redirects запрещены.
                         await cb.record_failure()
-
                         logger.warning(
                             "API %s%s returned redirect %s. "
                             "Redirects are disabled.",
@@ -348,13 +305,10 @@ class AmneziaClient:
                             path,
                             response.status,
                         )
-
                         return None
-
                     elif response.status == 429:
                         if attempt < API_RETRY_COUNT:
                             backoff = 2 ** (attempt + 1)
-
                             logger.warning(
                                 "API %s%s returned 429, "
                                 "retrying in %ss",
@@ -362,19 +316,15 @@ class AmneziaClient:
                                 path,
                                 backoff,
                             )
-
                             await asyncio.sleep(backoff)
                             continue
-
                         logger.warning(
                             "API %s%s returned 429 after all retries "
                             "(rate limited, NOT a server failure)",
                             self.api_url,
                             path,
                         )
-
                         return None
-
                     elif 400 <= response.status < 500:
                         if (
                             not_found_as_success
@@ -382,12 +332,9 @@ class AmneziaClient:
                         ):
                             await cb.record_success()
                             return {}
-
                         await cb.record_failure()
-
                         try:
                             error_text = await response.text()
-
                             logger.warning(
                                 "API %s%s returned %s "
                                 "(client error): %s",
@@ -398,16 +345,13 @@ class AmneziaClient:
                             )
                         except Exception:
                             pass
-
                         return None
-
                     else:
                         if (
                             attempt < API_RETRY_COUNT
                             and response.status >= 500
                         ):
                             backoff = 2 ** attempt
-
                             logger.warning(
                                 "API %s%s returned %s, "
                                 "retrying in %ss (attempt %s)",
@@ -417,12 +361,9 @@ class AmneziaClient:
                                 backoff,
                                 attempt + 1,
                             )
-
                             await asyncio.sleep(backoff)
                             continue
-
                         await cb.record_failure()
-
                         return None
 
             except (
@@ -431,7 +372,6 @@ class AmneziaClient:
             ) as e:
                 if attempt < API_RETRY_COUNT:
                     backoff = 2 ** attempt
-
                     logger.warning(
                         "Network error for %s%s: %s, "
                         "retrying in %ss (attempt %s)",
@@ -441,24 +381,18 @@ class AmneziaClient:
                         backoff,
                         attempt + 1,
                     )
-
                     await asyncio.sleep(backoff)
-
                 else:
                     await cb.record_failure()
-
                     logger.error(
                         "All retries exhausted for %s%s: %s",
                         self.api_url,
                         path,
                         type(e).__name__,
                     )
-
                     return None
-
             except Exception as e:
                 await cb.record_failure()
-
                 logger.error(
                     "Unexpected error for %s%s: %s: %s",
                     self.api_url,
@@ -466,7 +400,6 @@ class AmneziaClient:
                     type(e).__name__,
                     e,
                 )
-
                 return None
 
         return None
@@ -481,13 +414,11 @@ class AmneziaClient:
             "protocol": AMNEZIA_PROTOCOL,
             "expiresAt": expires_at,
         }
-
         result = await self._request(
             "POST",
             "/clients",
             json=data,
         )
-
         if result and "client" in result:
             try:
                 return AmneziaClientCreateResponse(
@@ -499,7 +430,6 @@ class AmneziaClient:
                     e,
                 )
                 return None
-
         return None
 
     async def delete_user(self, client_id: str) -> bool:
@@ -507,14 +437,12 @@ class AmneziaClient:
             "clientId": client_id,
             "protocol": AMNEZIA_PROTOCOL,
         }
-
         result = await self._request(
             "DELETE",
             "/clients",
             json=data,
             not_found_as_success=True,
         )
-
         return result is not None
 
     async def update_client(
@@ -528,20 +456,10 @@ class AmneziaClient:
             "clientId": client_id,
             "protocol": AMNEZIA_PROTOCOL,
         }
-
         if expires_at is not None and status is None:
             status = "active"
-
         if status is not None:
             data["status"] = status
-
-        #
-        # Для вечных подписок нужно уметь явно очищать expiresAt.
-        #
-        # Если просто не передавать expiresAt, некоторые API
-        # могут оставить старое значение без изменений.
-        # Поэтому при clear_expires_at=True отправляем null.
-        #
         if clear_expires_at:
             data["expiresAt"] = None
         elif expires_at is not None:
@@ -552,14 +470,12 @@ class AmneziaClient:
             "/clients",
             json=data,
         )
-
         return result is not None
 
     async def get_server_info(
         self,
     ) -> Optional[AmneziaServerInfo]:
         result = await self._request("GET", "/server")
-
         if result:
             try:
                 return AmneziaServerInfo(**result)
@@ -569,7 +485,6 @@ class AmneziaClient:
                     e,
                 )
                 return None
-
         return None
 
     async def healthcheck(self) -> bool:
@@ -598,26 +513,13 @@ class AmneziaClient:
         3) {"data": [...]}
         4) [...]
         5) вложенные peers:
-           [
-             {
-               "username": "...",
-               "peers": [ ... ]
-             }
-           ]
+           [{"username": "...", "peers": [...]}]
         6) плоские клиенты:
-           [
-             {
-               "id": "...",
-               "username": "...",
-               "traffic": {...}
-             }
-           ]
+           [{"id": "...", "username": "...", "traffic": {...}}]
         """
         all_clients: List[AmneziaClientListItem] = []
-
         page_size = 100
         page_count = 0
-
         MAX_SAFETY_PAGES = 100
 
         while page_count < MAX_SAFETY_PAGES:
@@ -647,7 +549,6 @@ class AmneziaClient:
                     or result.get("data")
                     or []
                 )
-
                 if isinstance(items_raw, dict):
                     items_raw = [items_raw]
             else:
@@ -690,7 +591,21 @@ class AmneziaClient:
 
             all_clients.extend(page_clients)
 
-            if len(page_clients) < page_size:
+            #
+            # ИСПРАВЛЕНО: пагинация по количеству СЫРЫХ элементов
+            # из API, а не по количеству распарсенных пиров.
+            #
+            # Раньше: len(page_clients) < page_size
+            # Проблема: при вложенном формате (1 элемент → 50 пиров)
+            # или при ошибках парсинга page_clients может быть
+            # меньше page_size, хотя API вернул полную страницу
+            # и есть ещё данные.
+            #
+            # Теперь: len(items_raw) < page_size
+            # Если API вернул меньше сырых элементов, чем запрошено,
+            # значит страниц больше нет.
+            #
+            if len(items_raw) < page_size:
                 break
 
             page_count += 1
@@ -709,7 +624,6 @@ class AmneziaClient:
             len(all_clients),
             page_count + 1,
         )
-
         return all_clients
 
     @staticmethod
@@ -752,7 +666,6 @@ class AmneziaClient:
                     or peer.get("peerId")
                     or peer.get("publicKey")
                 )
-
                 if not peer_id:
                     continue
 
@@ -770,13 +683,11 @@ class AmneziaClient:
                         or traffic_raw.get("totalDownload")
                         or 0
                     )
-
                     sent = (
                         traffic_raw.get("sent")
                         or traffic_raw.get("totalUpload")
                         or 0
                     )
-
                     traffic = AmneziaClientTraffic(
                         totalDownload=received,
                         totalUpload=sent,
@@ -820,9 +731,7 @@ class AmneziaClient:
                             or item.get("updatedAt")
                         ),
                     )
-
                     clients.append(client_item)
-
                 except Exception as e:
                     logger.warning(
                         "Failed to parse peer item: %s, peer=%s",
