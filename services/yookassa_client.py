@@ -1,5 +1,6 @@
 import logging
 import socket
+import uuid
 from typing import Optional
 from decimal import Decimal
 
@@ -88,16 +89,6 @@ class YooKassaClient:
         return_url: str = "",
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
-        """
-        Создаёт платёж в YooKassa.
-        Возвращает dict с полями:
-        - id: str
-        - status: str ("pending")
-        - confirmation.confirmation_url: str
-        - amount.value, amount.currency
-        - metadata
-        При ошибке возвращает None.
-        """
         url = f"{YOOKASSA_API_BASE}/payments"
         body: dict = {
             "amount": {
@@ -113,13 +104,19 @@ class YooKassaClient:
         if metadata:
             body["metadata"] = metadata
 
+        # ── ИСПРАВЛЕНИЕ: добавляем Idempotence-Key ──
+        idempotence_key = str(uuid.uuid4())
+
         try:
             session = await _get_session()
             async with session.post(
                 url,
                 json=body,
                 auth=self._auth,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "Idempotence-Key": idempotence_key,   # ← ДОБАВИТЬ
+                },
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
