@@ -70,9 +70,24 @@ async def close_redis() -> None:
 
 
 def _to_decimal(value) -> Decimal | None:
+    """
+    Безопасно конвертирует значение в Decimal.
+    ИСПРАВЛЕНО: никогда не используем float для денег.
+    Decimal(str(Decimal)) работает корректно.
+    Decimal(str(float)) — НЕ вызываем, т.к. str(float)
+    даёт артефакты двоичного представления.
+    """
     if value is None:
         return None
+    if isinstance(value, Decimal):
+        return value
     try:
+        # str() от Decimal, int, str — безопасно.
+        # float сюда попадать не должен, но если попал —
+        # str(float) даст "100.1" для 100.1, а не
+        # "100.09999999999999431565811391..."
+        # Точность теряется только если float уже был
+        # испорчен ДО вызова этой функции.
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None

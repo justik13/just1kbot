@@ -2,6 +2,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from aiohttp import web
@@ -19,6 +20,31 @@ from services.yookassa_client import YooKassaClient
 logger = logging.getLogger(__name__)
 
 WEBHOOK_MAX_AGE_SECONDS = 600  # 10 минут
+
+# IP-диапазоны YooKassa для опциональной проверки
+# https://yookassa.ru/developers/using-api/webhooks
+YOOKASSA_IP_RANGES = [
+    "185.71.76.0/27",
+    "185.71.77.0/27",
+    "77.75.153.0/25",
+    "77.75.154.128/25",
+    "77.75.156.0/25",
+    "77.75.156.128/25",
+    "2a02:5180::/32",
+]
+
+
+def _is_yookassa_ip(ip: str) -> bool:
+    """Проверяет, принадлежит ли IP диапазонам YooKassa."""
+    import ipaddress
+    try:
+        client_ip = ipaddress.ip_address(ip)
+        for cidr in YOOKASSA_IP_RANGES:
+            if client_ip in ipaddress.ip_network(cidr):
+                return True
+        return False
+    except ValueError:
+        return False
 
 
 def _is_recent_timestamp(
@@ -56,24 +82,12 @@ def _is_recent_timestamp(
 class YooKassaWebhookData(BaseModel):
     """
     Структура webhook-уведомления YooKassa.
-
-    Пример:
-    {
-      "type": "notification",
-      "event": "payment.succeeded",
-      "object": {
-        "id": "2abc...",
-        "status": "succeeded",
-        "amount": {"value": "100.00", "currency": "RUB"},
-        "description": "Payment #123",
-        "metadata": {"payment_id": "123"},
-        "paid": true,
-        "created_at": "2024-01-01T00:00:00.000+00:00"
-      }
-    }
     """
     type: str = "notification"
-    event: str = Field(..., description="payment.succeeded | payment.canceled | refund.succeeded")
+    event: str = Field(
+        ...,
+        description="payment.succeeded | payment.canceled | refund.succeeded",
+    )
     object: dict = Field(default_factory=dict)
 
     model_config = {"extra": "allow"}
@@ -103,8 +117,17 @@ class YooKassaWebhookData(BaseModel):
         return self.object.get("created_at")
 
     def normalize_status(self) -> str:
-        client = YooKassaClient
-        return client.normalize_webhook_event(self.event)
+        return YooKassaClient.normalize_webhook_event(self.event)
+
+
+def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
+    """Безопасно конвертирует строку в Decimal. Никогда не через float."""
+    if value is None:
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
 
 async def yookassa_webhook_handler(
@@ -117,17 +140,37 @@ async def yookassa_webhook_handler(
 
     try:
         # ── Аутентификация webhook ──
+        # ИСПРАВЛЕНО: YooKassa НЕ отправляет X-ShopId / X-Secret.
+        # Безопасность обеспечивается:
+        #   1) IP-whitelisting (опционально)
+        #   2) Верификацией через API (object.id + сумма + статус)
+        #
+        # Если заголовки всё-таки присутствуют (например, прокси
+        # их инжектит), проверяем. Если отсутствуют — пропускаем.
         shop_id = request.headers.get("X-ShopId", "")
         secret = request.headers.get("X-Secret", "")
 
-        client = YooKassaClient()
-        if not client.validate_webhook(shop_id, secret):
-            logger.warning(
-                "[%s] Invalid YooKassa webhook credentials: %s",
-                request_id,
-                shop_id,
-            )
-            return web.Response(status=401, text="Unauthorized")
+        if shop_id or secret:
+            # Заголовки присутствуют — проверяем
+            client = YooKassaClient()
+            if not client.validate_webhook(shop_id, secret):
+                logger.warning(
+                    "[%s] Invalid YooKassa webhook credentials: %s",
+                    request_id,
+                    shop_id,
+                )
+                return web.Response(status=401, text="Unauthorized")
+        else:
+            # Заголовков нет — проверяем IP (опционально)
+            peer_ip = request.remote or ""
+            if peer_ip and not _is_yookassa_ip(peer_ip):
+                logger.warning(
+                    "[%s] Webhook from unknown IP: %s. "
+                    "Proceeding with API verification.",
+                    request_id,
+                    peer_ip,
+                )
+            # Не блокируем — верификация через API ниже
 
         # ── Парсинг JSON ──
         try:
@@ -182,14 +225,10 @@ async def yookassa_webhook_handler(
             )
 
         # ── Replay / stale защита ──
+        # ИСПРАВЛЕНО: Decimal вместо float
         callback_amount_str = webhook_data.get_amount_value()
         callback_currency = webhook_data.get_amount_currency()
-        callback_amount = None
-        if callback_amount_str is not None:
-            try:
-                callback_amount = float(callback_amount_str)
-            except (ValueError, TypeError):
-                pass
+        callback_amount = _safe_decimal(callback_amount_str)
 
         created_at = webhook_data.get_created_at()
         if created_at:
@@ -219,13 +258,14 @@ async def yookassa_webhook_handler(
                         text="Stale webhook unverified",
                     )
                 # Обновляем amount/currency из API
+                client = YooKassaClient()
                 api_data = await client.get_payment(
                     transaction_id
                 )
                 if api_data:
                     api_amount = api_data.get("amount", {})
                     if api_amount.get("value"):
-                        callback_amount = float(
+                        callback_amount = _safe_decimal(
                             api_amount["value"]
                         )
                     if api_amount.get("currency"):
@@ -272,6 +312,7 @@ async def yookassa_webhook_handler(
                 )
 
         # ── Обработка платежа ──
+        # ИСПРАВЛЕНО: callback_amount передаётся как Decimal
         success, result_code = (
             await PaymentService.handle_yookassa_callback(
                 session=session,
@@ -376,6 +417,7 @@ async def _verify_stale_webhook_via_api(
 ) -> bool:
     """
     Дополнительная проверка старого webhook через YooKassa API.
+    ИСПРАВЛЕНО: Decimal вместо float для сравнения сумм.
     """
     client = YooKassaClient()
     api_data = await client.get_payment(transaction_id)
@@ -403,14 +445,16 @@ async def _verify_stale_webhook_via_api(
         )
         return False
 
-    # Проверка суммы
+    # Проверка суммы — ИСПРАВЛЕНО: Decimal
     callback_amount_str = webhook_data.get_amount_value()
     api_amount = api_data.get("amount", {})
     api_amount_str = api_amount.get("value")
 
     if callback_amount_str and api_amount_str:
-        try:
-            if float(callback_amount_str) != float(api_amount_str):
+        cb_decimal = _safe_decimal(callback_amount_str)
+        api_decimal = _safe_decimal(api_amount_str)
+        if cb_decimal is not None and api_decimal is not None:
+            if cb_decimal != api_decimal:
                 logger.warning(
                     "Stale webhook amount mismatch: "
                     "callback=%s, api=%s, payment=%s",
@@ -419,8 +463,6 @@ async def _verify_stale_webhook_via_api(
                     transaction_id,
                 )
                 return False
-        except (ValueError, TypeError):
-            pass
 
     return True
 

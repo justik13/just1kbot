@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +55,18 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 
+def _safe_decimal(value) -> Decimal | None:
+    """Конвертирует в Decimal без float. Для сумм из API."""
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
 async def _log_event_safe(
     session: AsyncSession,
     payment_id: int,
@@ -87,6 +100,7 @@ async def _log_event_safe(
 
 
 class PaymentService:
+
     @staticmethod
     async def _apply_payment_snapshot(
         session: AsyncSession,
@@ -123,14 +137,11 @@ class PaymentService:
         payment.status = "requires_manual_review"
         payment.manual_review_reason = reason
         await session.flush()
-
         await _log_event_safe(
             session, payment.id, "manual_review",
             reason=reason, source=source,
         )
-
         snapshot = _build_payment_snapshot(payment)
-
         await AuditService.log_action(
             session,
             admin_id=0,
@@ -139,7 +150,6 @@ class PaymentService:
             target_id=payment.id,
             details=f"reason={reason}, source={source}",
         )
-
         queue_post_commit_task(
             session,
             lambda s=snapshot, r=reason, src=source: (
@@ -150,7 +160,6 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────
     # Обработка успешного платежа
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def handle_successful_payment(
         session: AsyncSession,
@@ -162,7 +171,6 @@ class PaymentService:
 
         redis_lock = None
         acquired = False
-
         try:
             redis = await _get_redis()
             user_lock_key = (
@@ -191,6 +199,9 @@ class PaymentService:
                 if payment.status == "completed":
                     return True, "already_processed"
 
+                # ИСПРАВЛЕНО: Paid After Cancel —
+                # автоматически выдаём подписку, а не
+                # отправляем в ручную проверку.
                 if payment.status == "cancelled":
                     snapshot = _build_payment_snapshot(payment)
                     await _log_event_safe(
@@ -210,19 +221,12 @@ class PaymentService:
                             f"{snapshot.get('currency')}"
                         ),
                     )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _send_paid_after_cancel_alert_now(s)
-                        ),
-                    )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _notify_client_paid_after_cancel_now(s)
-                        ),
-                    )
-                    return True, "paid_after_cancel"
+                    # Возвращаем в pending, чтобы
+                    # handle_successful_payment сработал
+                    payment.status = "pending"
+                    await session.flush()
+                    # Не делаем return — идём дальше
+                    # по пути CONFIRMED и выдаём подписку
 
                 if payment.status == "refunded":
                     return False, "refunded"
@@ -240,7 +244,6 @@ class PaymentService:
 
                 user = payment.user
                 tariff = payment.tariff
-
                 manual_review_reason = None
                 duration_days = _get_payment_snapshot_duration(
                     payment
@@ -277,7 +280,6 @@ class PaymentService:
                 payment.status = "completed"
                 payment.paid_at = now_utc()
                 await session.flush()
-
                 await _log_event_safe(
                     session, payment.id, "completed",
                     source="handle_successful_payment",
@@ -323,7 +325,6 @@ class PaymentService:
                 is_first_payment = (
                     len(successful_payments) == 1
                 )
-
                 if user.referred_by:
                     try:
                         await ReferralService.process_bonus(
@@ -369,7 +370,6 @@ class PaymentService:
                 payment_id, e, exc_info=True,
             )
             return False, "error"
-
         finally:
             if redis_lock is not None and acquired:
                 try:
@@ -380,7 +380,6 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────
     # Ручная выдача
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def force_grant_payment(
         session: AsyncSession,
@@ -388,7 +387,6 @@ class PaymentService:
         admin_id: int,
     ) -> tuple:
         allowed_statuses = MANUAL_GRANT_ALLOWED_STATUSES
-
         try:
             async with session.begin_nested():
                 payment = await get_payment_by_id_for_update(
@@ -396,13 +394,10 @@ class PaymentService:
                 )
                 if not payment:
                     return False, "Платёж не найден"
-
                 if payment.status == "completed":
                     return False, "Платёж уже выдан"
-
                 if payment.status == "refunded":
                     return False, "Платёж возвращён"
-
                 if payment.status not in allowed_statuses:
                     return False, "Недопустимый статус"
 
@@ -420,7 +415,6 @@ class PaymentService:
                 device_limit = _get_payment_snapshot_device_limit(
                     payment
                 )
-
                 if duration_days is None or device_limit is None:
                     return False, "Не найдены условия покупки"
 
@@ -428,7 +422,6 @@ class PaymentService:
                 if not payment.paid_at:
                     payment.paid_at = now_utc()
                 await session.flush()
-
                 await _log_event_safe(
                     session, payment.id, "manual_grant",
                     source="force_grant_payment",
@@ -471,7 +464,6 @@ class PaymentService:
                 is_first_payment = (
                     len(successful_payments) == 1
                 )
-
                 if user.referred_by:
                     try:
                         await ReferralService.process_bonus(
@@ -516,7 +508,6 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────
     # Создание платежа через YooKassa
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def create_yookassa_payment(
         session: AsyncSession,
@@ -527,8 +518,8 @@ class PaymentService:
         bot_username: str,
     ) -> tuple:
         from config.settings import get_settings
-
         settings = get_settings()
+
         decimal_amount = _to_decimal(amount)
         if decimal_amount is None:
             logger.error(
@@ -551,7 +542,6 @@ class PaymentService:
         await PaymentService._apply_payment_snapshot(
             session, payment, tariff,
         )
-
         await _log_event_safe(
             session, payment.id, "payment_created",
             source="yookassa",
@@ -628,28 +618,44 @@ class PaymentService:
 
     # ─────────────────────────────────────────────────────────────
     # Обработка webhook от YooKassa
+    # ИСПРАВЛЕНО:
+    #   1) Сначала API-запрос (вне транзакции), потом FOR UPDATE
+    #   2) Decimal вместо float для сумм
+    #   3) Paid After Cancel → автовыдача
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def handle_yookassa_callback(
         session: AsyncSession,
         transaction_id: str,
         status: str,
         payload: str,
-        callback_amount: float | None = None,
+        callback_amount: Decimal | float | None = None,
         callback_payload: str | None = None,
         callback_currency: str | None = None,
     ) -> tuple:
-        #
-        # ИСПРАВЛЕНО (Фаза 3, фикс 9):
-        #
-        # Добавлен statement_timeout для защиты от deadlock.
-        # SELECT FOR UPDATE блокирует строку до конца транзакции.
-        # Если транзакция долгая (extend_subscription, referral,
-        # audit), параллельные webhook'и висят в очереди.
-        #
-        # SET LOCAL действует только до конца текущей транзакции.
-        #
+        # ИСПРАВЛЕНО: конвертируем callback_amount в Decimal
+        # ДО входа в транзакцию, чтобы не делать float→Decimal
+        # внутри FOR UPDATE.
+        if callback_amount is not None:
+            callback_amount = _safe_decimal(callback_amount)
+
+        # ИСПРАВЛЕНО (Фикс 3): Сначала получаем данные из API
+        # ВНЕ транзакции БД, чтобы не держать блокировку строки
+        # во время HTTP-запроса.
+        api_data = None
+        if callback_amount is None or callback_currency is None:
+            client = YooKassaClient()
+            api_data = await client.get_payment(transaction_id)
+            if api_data:
+                api_amount = api_data.get("amount", {})
+                if api_amount.get("value") and callback_amount is None:
+                    callback_amount = _safe_decimal(
+                        api_amount["value"]
+                    )
+                if api_amount.get("currency") and callback_currency is None:
+                    callback_currency = api_amount["currency"]
+
+        # Теперь открываем транзакцию и лочим строку
         try:
             await session.execute(
                 text("SET LOCAL statement_timeout = '10s'")
@@ -685,6 +691,7 @@ class PaymentService:
             if payment.status == "completed":
                 return True, "already_processed"
 
+            # ИСПРАВЛЕНО: Paid After Cancel → автовыдача
             if payment.status == "cancelled":
                 snapshot = _build_payment_snapshot(payment)
                 await _log_event_safe(
@@ -703,35 +710,15 @@ class PaymentService:
                         f"user={payment.user_id}"
                     ),
                 )
-                queue_post_commit_task(
-                    session,
-                    lambda s=snapshot: (
-                        _send_paid_after_cancel_alert_now(s)
-                    ),
-                )
-                queue_post_commit_task(
-                    session,
-                    lambda s=snapshot: (
-                        _notify_client_paid_after_cancel_now(s)
-                    ),
-                )
-                return True, "paid_after_cancel"
+                # Возвращаем в pending для автовыдачи
+                payment.status = "pending"
+                await session.flush()
+                # Идём дальше по пути CONFIRMED
 
             if payment.status == "refunded":
                 return False, "refunded"
 
-            # Верификация суммы
-            if callback_amount is None:
-                client = YooKassaClient()
-                api_data = await client.get_payment(
-                    transaction_id,
-                )
-                if api_data:
-                    api_amount = api_data.get("amount", {})
-                    val = api_amount.get("value")
-                    if val:
-                        callback_amount = float(val)
-
+            # Верификация суммы — ИСПРАВЛЕНО: Decimal
             if callback_amount is None:
                 await PaymentService._set_manual_review(
                     session, payment.id,
@@ -740,7 +727,7 @@ class PaymentService:
                 )
                 return False, "manual_review"
 
-            callback_decimal = _to_decimal(callback_amount)
+            callback_decimal = _safe_decimal(callback_amount)
             if callback_decimal is None:
                 await PaymentService._set_manual_review(
                     session, payment.id,
@@ -798,7 +785,6 @@ class PaymentService:
         elif status == "CANCELED":
             if payment.status == "refunded":
                 return True, "already_processed"
-
             if payment.status == "cancelled":
                 return True, "already_processed"
 
@@ -832,13 +818,11 @@ class PaymentService:
 
             payment.status = "cancelled"
             await session.flush()
-
             await _log_event_safe(
                 session, payment.id, "cancelled",
                 provider_status=status,
                 source="yookassa_callback",
             )
-
             try:
                 await AuditService.log_action(
                     session, admin_id=0,
@@ -852,7 +836,6 @@ class PaymentService:
                 )
             except Exception:
                 pass
-
             return True, "success"
 
         elif status == "CHARGEBACKED":
@@ -865,7 +848,6 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────
     # Проверка статуса платежа (кнопка «Я оплатил»)
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def check_yookassa_payment(
         session: AsyncSession,
@@ -890,7 +872,9 @@ class PaymentService:
                 provider_status = api_data.get("status")
                 if provider_status == "succeeded":
                     amount_obj = api_data.get("amount", {})
-                    cb_amount = amount_obj.get("value")
+                    cb_amount = _safe_decimal(
+                        amount_obj.get("value")
+                    )
                     if cb_amount is None:
                         await PaymentService._set_manual_review(
                             session, payment.id,
@@ -899,11 +883,7 @@ class PaymentService:
                         )
                         return False, "manual_review"
 
-                    cb_decimal = _to_decimal(cb_amount)
-                    if (
-                        cb_decimal is None
-                        or payment.amount != cb_decimal
-                    ):
+                    if payment.amount != cb_amount:
                         await PaymentService._set_manual_review(
                             session, payment.id,
                             "amount_mismatch",
@@ -930,10 +910,8 @@ class PaymentService:
                             session, payment.id,
                         )
                     )
-
                 if provider_status == "canceled":
                     return False, "cancelled"
-
             return False, "cancelled"
 
         if payment.status == "requires_manual_review":
@@ -955,7 +933,7 @@ class PaymentService:
 
         if provider_status == "succeeded":
             amount_obj = api_data.get("amount", {})
-            cb_amount = amount_obj.get("value")
+            cb_amount = _safe_decimal(amount_obj.get("value"))
             if cb_amount is None:
                 await PaymentService._set_manual_review(
                     session, payment.id,
@@ -964,8 +942,7 @@ class PaymentService:
                 )
                 return False, "manual_review"
 
-            cb_decimal = _to_decimal(cb_amount)
-            if cb_decimal is None or payment.amount != cb_decimal:
+            if payment.amount != cb_amount:
                 await PaymentService._set_manual_review(
                     session, payment.id,
                     "amount_mismatch",
@@ -1022,7 +999,6 @@ class PaymentService:
     # ─────────────────────────────────────────────────────────────
     # Manual review
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def _set_manual_review(
         session: AsyncSession,
@@ -1063,14 +1039,11 @@ class PaymentService:
         payment = await get_payment_by_id(
             session, payment_id,
         )
-
         await _log_event_safe(
             session, payment_id, "manual_review",
             reason=reason, source=source,
         )
-
         snapshot = _build_payment_snapshot(payment)
-
         await AuditService.log_action(
             session, admin_id=0,
             action="PAYMENT_MANUAL_REVIEW",
@@ -1081,20 +1054,17 @@ class PaymentService:
                 f"user={payment.user_id if payment else '—'}"
             ),
         )
-
         queue_post_commit_task(
             session,
             lambda s=snapshot, r=reason, src=source: (
                 _send_manual_review_alert_now(s, r, src)
             ),
         )
-
         return True, "manual_review"
 
     # ─────────────────────────────────────────────────────────────
     # Chargeback
     # ─────────────────────────────────────────────────────────────
-
     @staticmethod
     async def _process_chargeback(
         session: AsyncSession,
@@ -1115,11 +1085,9 @@ class PaymentService:
                 was_completed = (
                     payment.status == "completed"
                 )
-
                 payment.status = "refunded"
                 payment.manual_review_reason = None
                 await session.flush()
-
                 await _log_event_safe(
                     session, payment.id, "chargeback",
                     provider_status="CHARGEBACKED",
@@ -1132,124 +1100,120 @@ class PaymentService:
                 user = payment.user
                 if user:
                     current_time = now_utc()
-
                     if was_completed:
                         user.subscription_end = current_time
                         user.current_tariff_id = None
                         user.device_limit = 0
                         await session.flush()
 
-                        duration_days = (
-                            _get_payment_snapshot_duration(
-                                payment
-                            ) or 0
-                        )
-
-                        if (
-                            user.referred_by
-                            and duration_days >= 30
-                        ):
-                            try:
-                                completed_before = (
-                                    await session.scalar(
-                                        select(
-                                            func.count(
-                                                Payment.id
-                                            )
-                                        ).where(
-                                            Payment.user_id
-                                            == user.id,
-                                            Payment.status
-                                            == "completed",
-                                            Payment.id
-                                            != payment.id,
-                                        )
-                                    )
-                                )
-                                was_first = (
-                                    completed_before == 0
-                                )
-                                bonus_ref = 3 if was_first else 1
-                                bonus_user = 5 if was_first else 0
-
-                                referrer = (
-                                    await get_user_by_telegram_id(
-                                        session,
-                                        user.referred_by,
-                                    )
-                                )
-                                if (
-                                    referrer
-                                    and bonus_ref > 0
-                                ):
-                                    if (
-                                        referrer.referral_days
-                                        and referrer.referral_days
-                                        >= bonus_ref
-                                    ):
-                                        referrer.referral_days -= (
-                                            bonus_ref
-                                        )
-                                    if (
-                                        referrer.subscription_end
-                                        and referrer
-                                        .subscription_end
-                                        > current_time
-                                        and referrer
-                                        .subscription_end.year
-                                        < 2100
-                                    ):
-                                        referrer.subscription_end = (
-                                            referrer
-                                            .subscription_end
-                                            - timedelta(
-                                                days=bonus_ref,
-                                            )
-                                        )
-
-                                    if (
-                                        bonus_user > 0
-                                        and user.subscription_end
-                                        and user.subscription_end
-                                        > current_time
-                                        and user
-                                        .subscription_end.year
-                                        < 2100
-                                    ):
-                                        user.subscription_end = (
-                                            user.subscription_end
-                                            - timedelta(
-                                                days=bonus_user
-                                            )
-                                        )
-                            except Exception as e:
-                                logger.error(
-                                    "Chargeback referral "
-                                    "rollback failed: %s",
-                                    e, exc_info=True,
-                                )
-
+                    duration_days = (
+                        _get_payment_snapshot_duration(
+                            payment
+                        ) or 0
+                    )
+                    if (
+                        user.referred_by
+                        and duration_days >= 30
+                    ):
                         try:
-                            await (
-                                ProfileDeletionService
-                                .delete_profiles_for_user(
-                                    session,
-                                    user.id,
-                                    reason="chargeback_delete",
-                                    background=True,
+                            completed_before = (
+                                await session.scalar(
+                                    select(
+                                        func.count(
+                                            Payment.id
+                                        )
+                                    ).where(
+                                        Payment.user_id
+                                        == user.id,
+                                        Payment.status
+                                        == "completed",
+                                        Payment.id
+                                        != payment.id,
+                                    )
                                 )
                             )
+                            was_first = (
+                                completed_before == 0
+                            )
+                            bonus_ref = 3 if was_first else 1
+                            bonus_user = 5 if was_first else 0
+
+                            referrer = (
+                                await get_user_by_telegram_id(
+                                    session,
+                                    user.referred_by,
+                                )
+                            )
+                            if (
+                                referrer
+                                and bonus_ref > 0
+                            ):
+                                if (
+                                    referrer.referral_days
+                                    and referrer.referral_days
+                                    >= bonus_ref
+                                ):
+                                    referrer.referral_days -= (
+                                        bonus_ref
+                                    )
+                                if (
+                                    referrer.subscription_end
+                                    and referrer
+                                    .subscription_end
+                                    > current_time
+                                    and referrer
+                                    .subscription_end.year
+                                    < 2100
+                                ):
+                                    referrer.subscription_end = (
+                                        referrer
+                                        .subscription_end
+                                        - timedelta(
+                                            days=bonus_ref,
+                                        )
+                                    )
+                                if (
+                                    bonus_user > 0
+                                    and user.subscription_end
+                                    and user.subscription_end
+                                    > current_time
+                                    and user
+                                    .subscription_end.year
+                                    < 2100
+                                ):
+                                    user.subscription_end = (
+                                        user.subscription_end
+                                        - timedelta(
+                                            days=bonus_user
+                                        )
+                                    )
                         except Exception as e:
                             logger.error(
-                                "Chargeback profile delete "
-                                "failed: %s",
+                                "Chargeback referral "
+                                "rollback failed: %s",
                                 e, exc_info=True,
                             )
+
+                    try:
+                        await (
+                            ProfileDeletionService
+                            .delete_profiles_for_user(
+                                session,
+                                user.id,
+                                reason="chargeback_delete",
+                                background=True,
+                            )
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "Chargeback profile delete "
+                            "failed: %s",
+                            e, exc_info=True,
+                        )
 
                     invalidate_user_cache(user.telegram_id)
 
                 snapshot = _build_payment_snapshot(payment)
-
                 try:
                     await AuditService.log_action(
                         session, admin_id=0,
@@ -1277,7 +1241,6 @@ class PaymentService:
                         _notify_client_chargeback_now(s)
                     ),
                 )
-
                 return True, "success"
 
         except Exception as e:
