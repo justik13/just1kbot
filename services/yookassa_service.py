@@ -2,22 +2,25 @@ import logging
 from decimal import Decimal
 from typing import Optional
 
-from aioyookassa import Client as AioYooKassaClient
+from aioyookassa import YooKassa
+from aioyookassa.types.payment import PaymentAmount, Confirmation
+from aioyookassa.types.enum import ConfirmationType
+from aioyookassa.types.params import CreatePaymentParams
 
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_client: Optional[AioYooKassaClient] = None
+_client: Optional[YooKassa] = None
 
 
-def _get_client() -> AioYooKassaClient:
+def _get_client() -> YooKassa:
     global _client
     if _client is None:
         settings = get_settings()
-        _client = AioYooKassaClient(
+        _client = YooKassa(
+            api_key=settings.YOOKASSA_SECRET_KEY,
             shop_id=settings.YOOKASSA_SHOP_ID,
-            secret_key=settings.YOOKASSA_SECRET_KEY,
         )
         logger.info("[YooKassa] aioyookassa client initialized")
     return _client
@@ -27,11 +30,7 @@ async def close_yookassa_client() -> None:
     global _client
     if _client is not None:
         try:
-            close_fn = getattr(_client, "close", None)
-            if close_fn is not None:
-                result = close_fn()
-                if hasattr(result, "__await__"):
-                    await result
+            await _client.close()
         except Exception as e:
             logger.warning("[YooKassa] Error closing client: %s", e)
         finally:
@@ -39,47 +38,53 @@ async def close_yookassa_client() -> None:
             logger.info("[YooKassa] Client closed")
 
 
-def _to_dict(obj) -> Optional[dict]:
-    if obj is None:
+def _payment_to_dict(payment) -> Optional[dict]:
+    """
+    Convert aioyookassa Payment (Pydantic model) → plain dict,
+    compatible with the rest of the codebase.
+
+    Key normalizations:
+      • confirmation.url  →  confirmation.confirmation_url
+      • amount.value      →  str
+      • status            →  plain str
+    """
+    if payment is None:
         return None
-    if isinstance(obj, dict):
-        return obj
-    for method_name in ("model_dump", "dict", "to_dict"):
-        fn = getattr(obj, method_name, None)
-        if callable(fn):
-            try:
-                return fn()
-            except Exception:
-                pass
-    result: dict = {}
-    for attr in (
-        "id", "status", "description", "created_at",
-        "paid_at", "expires_at", "metadata",
-    ):
-        val = getattr(obj, attr, None)
-        if val is not None:
-            result[attr] = val
-    amount = getattr(obj, "amount", None)
-    if amount is not None:
-        if isinstance(amount, dict):
-            result["amount"] = amount
-        else:
-            result["amount"] = {
-                "value": str(getattr(amount, "value", "")),
-                "currency": str(getattr(amount, "currency", "RUB")),
-            }
-    confirmation = getattr(obj, "confirmation", None)
-    if confirmation is not None:
-        if isinstance(confirmation, dict):
-            result["confirmation"] = confirmation
-        else:
-            result["confirmation"] = {
-                "type": str(getattr(confirmation, "type", "redirect")),
-                "confirmation_url": str(
-                    getattr(confirmation, "confirmation_url", "")
-                ),
-            }
-    return result if result else None
+
+    # Pydantic v2
+    try:
+        # by_alias=True  →  Confirmation.url serializes as "confirmation_url"
+        data = payment.model_dump(mode="json", by_alias=True)
+    except AttributeError:
+        # Pydantic v1 fallback
+        try:
+            data = payment.dict(by_alias=True)
+        except Exception:
+            return None
+    except Exception:
+        return None
+
+    if not isinstance(data, dict):
+        return None
+
+    # ── belt-and-suspenders: guarantee confirmation_url ──
+    confirmation = data.get("confirmation")
+    if isinstance(confirmation, dict):
+        url = confirmation.get("confirmation_url") or confirmation.get("url")
+        if url:
+            confirmation["confirmation_url"] = url
+
+    # ── amount.value → str (codebase expects str for Decimal parsing) ──
+    amount = data.get("amount")
+    if isinstance(amount, dict) and "value" in amount:
+        amount["value"] = str(amount["value"])
+
+    # ── status → plain lowercase string ──
+    status = data.get("status")
+    if status is not None:
+        data["status"] = str(status).lower()
+
+    return data
 
 
 class YooKassaService:
@@ -93,19 +98,21 @@ class YooKassaService:
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
         client = _get_client()
-        body: dict = {
-            "amount": {"value": str(amount), "currency": currency},
-            "description": description,
-            "confirmation": {
-                "type": "redirect",
-                "return_url": return_url,
-            },
-        }
-        if metadata:
-            body["metadata"] = metadata
+
         try:
-            payment = await client.create_payment(body)
-            data = _to_dict(payment)
+            params = CreatePaymentParams(
+                amount=PaymentAmount(value=amount, currency=currency),
+                confirmation=Confirmation(
+                    type=ConfirmationType.REDIRECT,
+                    return_url=return_url,
+                ),
+                description=description,
+                metadata=metadata,
+            )
+
+            payment = await client.payments.create_payment(params)
+            data = _payment_to_dict(payment)
+
             if data:
                 logger.info(
                     "YooKassa payment created: id=%s, status=%s",
@@ -113,6 +120,7 @@ class YooKassaService:
                     data.get("status"),
                 )
             return data
+
         except Exception as e:
             logger.error(
                 "YooKassa create_payment exception: %s",
@@ -125,8 +133,8 @@ class YooKassaService:
     async def get_payment(payment_id: str) -> Optional[dict]:
         client = _get_client()
         try:
-            payment = await client.get_payment(payment_id)
-            return _to_dict(payment)
+            payment = await client.payments.get_payment(payment_id)
+            return _payment_to_dict(payment)
         except Exception as e:
             logger.error(
                 "YooKassa get_payment exception: %s",
@@ -140,15 +148,17 @@ class YooKassaService:
         payment_id: str,
         reason: str = "",
     ) -> Optional[dict]:
+        """
+        aioyookassa 2.x cancel_payment() accepts only payment_id.
+        `reason` is kept in the signature for backward compatibility
+        with callers but is not sent to the API.
+        """
         client = _get_client()
         try:
-            payment = await client.cancel_payment(payment_id)
-            data = _to_dict(payment)
+            payment = await client.payments.cancel_payment(payment_id)
+            data = _payment_to_dict(payment)
             if data:
-                logger.info(
-                    "YooKassa payment cancelled: id=%s",
-                    payment_id,
-                )
+                logger.info("YooKassa payment cancelled: id=%s", payment_id)
             return data
         except Exception as e:
             logger.error(
