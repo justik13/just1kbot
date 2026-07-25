@@ -34,7 +34,7 @@ from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
 from services.amnezia_client import close_http_session
-from services.yookassa_client import close_yookassa_session
+from services.yookassa_service import close_yookassa_client
 from services.workers import (
     start_background_workers,
     stop_background_workers,
@@ -65,7 +65,7 @@ for handler in root_logger.handlers:
 logger = logging.getLogger(__name__)
 
 _error_alert_cache: TTLCache[str, bool] = TTLCache(
-    maxsize=10000, ttl=300.0,
+    maxsize=10000, ttl=300.0
 )
 
 _SECRET_PATTERNS = [
@@ -119,9 +119,7 @@ def _sanitize_short(text: str, limit: int = 200) -> str:
 async def global_error_handler(
     event: ErrorEvent, **kwargs
 ) -> bool:
-    from bot.middlewares.correlation import (
-        get_current_request_id,
-    )
+    from bot.middlewares.correlation import get_current_request_id
 
     request_id = get_current_request_id()
     exception = event.exception
@@ -129,23 +127,21 @@ async def global_error_handler(
 
     try:
         tb_lines = traceback.format_exception(
-            type(exception),
-            exception,
-            exception.__traceback__,
+            type(exception), exception, exception.__traceback__
         )
         tb_text = "".join(tb_lines)
         tb_sanitized = _sanitize_text(tb_text)
         if len(tb_sanitized) > 4000:
             tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
-
         logger.critical(
             "[%s] Unhandled exception: %s\n%s",
-            request_id, error_type, tb_sanitized,
+            request_id,
+            error_type,
+            tb_sanitized,
         )
     except Exception:
         logger.critical(
-            "[%s] Unhandled exception: %s",
-            request_id, error_type,
+            "[%s] Unhandled exception: %s", request_id, error_type
         )
 
     state = kwargs.get("state")
@@ -161,40 +157,32 @@ async def global_error_handler(
         error_short = html.escape(
             _sanitize_short(str(exception), 200)
         )
-
         error_msg = texts.ALERT_CRITICAL_BOT_ERROR.format(
             request_id=request_id,
             error_type=error_type_safe,
             error_short=error_short,
         )
-
         alert_key = f"{error_type_safe}:{error_short}"
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
             for admin_id in settings.ADMIN_IDS:
                 try:
                     await event.bot.send_message(
-                        admin_id, error_msg,
-                        parse_mode="HTML",
+                        admin_id, error_msg, parse_mode="HTML"
                     )
                 except Exception:
                     pass
     except Exception as e:
-        logger.error(
-            "[%s] Failed to send error alert: %s",
-            request_id, e,
-        )
+        logger.error("[%s] Failed to send error alert: %s", request_id, e)
 
     try:
         if event.update.callback_query:
             await event.update.callback_query.answer(
-                texts.ERROR_TECHNICAL_ALERT,
-                show_alert=True,
+                texts.ERROR_TECHNICAL_ALERT, show_alert=True
             )
         elif event.update.message:
             await event.update.message.answer(
-                texts.ERROR_TECHNICAL_MESSAGE,
-                parse_mode="HTML",
+                texts.ERROR_TECHNICAL_MESSAGE, parse_mode="HTML"
             )
     except Exception:
         pass
@@ -204,48 +192,34 @@ async def global_error_handler(
 
 async def setup_bot_commands(bot: Bot):
     commands = [
-        BotCommand(
-            command="start",
-            description="🚀 Запустить бота",
-        ),
+        BotCommand(command="start", description="🚀 Запустить бота"),
     ]
     await bot.set_my_commands(
-        commands, scope=BotCommandScopeDefault(),
+        commands, scope=BotCommandScopeDefault()
     )
-    await bot.set_chat_menu_button(
-        menu_button=MenuButtonCommands(),
-    )
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def setup_bot() -> tuple[Bot, Dispatcher]:
     settings = get_settings()
-
     bot = Bot(token=settings.BOT_TOKEN)
     storage = RedisStorage.from_url(settings.REDIS_URL)
     dp = Dispatcher(storage=storage)
 
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
-
     dp.message.middleware(PrivateChatMiddleware())
     dp.callback_query.middleware(PrivateChatMiddleware())
-
     dp.message.middleware(DBSessionMiddleware())
     dp.callback_query.middleware(DBSessionMiddleware())
-
     dp.message.middleware(CleanChatMiddleware())
-
     dp.message.middleware(UserContextMiddleware())
     dp.callback_query.middleware(UserContextMiddleware())
-
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
-
     dp.message.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(ThrottlingMiddleware())
-
     dp.callback_query.middleware(ActionLockMiddleware())
-
     dp.message.middleware(ChatActionMiddleware())
 
     from bot.handlers.admin.broadcast import (
@@ -260,12 +234,8 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     from bot.handlers.admin.tariffs import (
         router as admin_tariffs_router,
     )
-    from bot.handlers.admin.users import (
-        router as admin_users_router,
-    )
-    from bot.handlers.connection import (
-        router as connection_router,
-    )
+    from bot.handlers.admin.users import router as admin_users_router
+    from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
     from bot.handlers.profile import router as profile_router
@@ -288,66 +258,30 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)
-
     await setup_bot_commands(bot)
-
     return bot, dp
 
 
 async def start_webhook_server(port: int):
     app = web.Application()
     setup_webhook_routes(app)
-
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", port)
     await site.start()
-    logger.info(
-        "Webhook server started on 127.0.0.1:%d", port,
-    )
+    logger.info("Webhook server started on 127.0.0.1:%d", port)
     return runner
-
-
-def _validate_yookassa_config() -> bool:
-    settings = get_settings()
-    has_shop = bool(settings.YOOKASSA_SHOP_ID.strip())
-    has_secret = bool(settings.YOOKASSA_SECRET_KEY.strip())
-
-    if has_shop and not has_secret:
-        logger.critical(
-            "❌ YOOKASSA_SHOP_ID задан, но "
-            "YOOKASSA_SECRET_KEY пуст! "
-            "Webhook будет принимать поддельные запросы. "
-            "Укажите YOOKASSA_SECRET_KEY в .env."
-        )
-        return False
-
-    if has_secret and not has_shop:
-        logger.critical(
-            "❌ YOOKASSA_SECRET_KEY задан, но "
-            "YOOKASSA_SHOP_ID пуст! "
-            "Укажите оба параметра или удалите оба."
-        )
-        return False
-
-    return True
 
 
 async def _stop_broadcast_tasks():
     for event in _broadcast_stop_events.values():
         event.set()
-
     tasks = list(_background_tasks)
     for task in tasks:
         task.cancel()
-
     if tasks:
         await asyncio.wait(tasks, timeout=10)
-
-    logger.info(
-        "Broadcast tasks stopped (%s tasks)",
-        len(tasks),
-    )
+    logger.info("Broadcast tasks stopped (%s tasks)", len(tasks))
 
 
 async def main():
@@ -357,7 +291,6 @@ async def main():
         if not settings.DB_ENCRYPTION_KEY:
             logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
             return
-
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
         except Exception as e:
@@ -367,7 +300,15 @@ async def main():
             )
             return
 
-        if not _validate_yookassa_config():
+        if settings.YOOKASSA_SHOP_ID and not settings.YOOKASSA_SECRET_KEY:
+            logger.critical(
+                "❌ YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY пуст!"
+            )
+            return
+        if settings.YOOKASSA_SECRET_KEY and not settings.YOOKASSA_SHOP_ID:
+            logger.critical(
+                "❌ YOOKASSA_SECRET_KEY задан, но YOOKASSA_SHOP_ID пуст!"
+            )
             return
 
         logger.info("Инициализация БД...")
@@ -382,10 +323,7 @@ async def main():
         set_bot_ref(bot)
 
         webhook_runner = None
-        if (
-            settings.YOOKASSA_SHOP_ID
-            and settings.YOOKASSA_SECRET_KEY
-        ):
+        if settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY:
             webhook_runner = await start_webhook_server(
                 settings.YOOKASSA_WEBHOOK_PORT
             )
@@ -396,9 +334,7 @@ async def main():
         loop = asyncio.get_running_loop()
 
         def _signal_handler():
-            logger.info(
-                "Received shutdown signal (SIGTERM/SIGINT)"
-            )
+            logger.info("Received shutdown signal (SIGTERM/SIGINT)")
             shutdown_event.set()
 
         for sig in (signal.SIGTERM, signal.SIGINT):
@@ -410,12 +346,8 @@ async def main():
         await start_background_workers(bot)
 
         logger.info("Запуск polling...")
-        polling_task = asyncio.create_task(
-            dp.start_polling(bot)
-        )
-        shutdown_task = asyncio.create_task(
-            shutdown_event.wait()
-        )
+        polling_task = asyncio.create_task(dp.start_polling(bot))
+        shutdown_task = asyncio.create_task(shutdown_event.wait())
 
         done, pending = await asyncio.wait(
             [polling_task, shutdown_task],
@@ -423,9 +355,7 @@ async def main():
         )
 
         if shutdown_event.is_set():
-            logger.info(
-                "Shutdown requested, stopping polling..."
-            )
+            logger.info("Shutdown requested, stopping polling...")
             await dp.stop_polling()
             polling_task.cancel()
             try:
@@ -435,9 +365,7 @@ async def main():
         else:
             for task in done:
                 exc = (
-                    task.exception()
-                    if not task.cancelled()
-                    else None
+                    task.exception() if not task.cancelled() else None
                 )
                 if exc:
                     logger.critical(
@@ -446,66 +374,52 @@ async def main():
                     )
 
     except Exception as e:
-        logger.critical(
-            "Fatal error in main: %s", e, exc_info=True,
-        )
+        logger.critical("Fatal error in main: %s", e, exc_info=True)
 
     finally:
         logger.info("Stopping background workers...")
         try:
             await stop_background_workers()
         except Exception as e:
-            logger.error(
-                "Error stopping workers: %s", e,
-            )
+            logger.error("Error stopping workers: %s", e)
 
         try:
             await _stop_broadcast_tasks()
         except Exception as e:
-            logger.error(
-                "Error stopping broadcast tasks: %s", e,
-            )
+            logger.error("Error stopping broadcast tasks: %s", e)
 
         try:
             await stop_clean_chat_worker()
         except Exception as e:
-            logger.error(
-                "Error stopping CleanChat worker: %s", e,
-            )
+            logger.error("Error stopping CleanChat worker: %s", e)
 
         logger.info("Cleaning up resources...")
 
         if "webhook_runner" in locals() and webhook_runner:
             await webhook_runner.cleanup()
 
-        # Amnezia API HTTP session (aiohttp)
         await close_http_session()
-
-        # YooKassa HTTP session (aiohttp)
-        await close_yookassa_session()
+        await close_yookassa_client()
 
         try:
             from services.device_service import (
                 close_redis as close_device_redis,
             )
+
             await close_device_redis()
         except Exception as e:
-            logger.error(
-                "Failed to close device Redis: %s", e,
-            )
+            logger.error("Failed to close device Redis: %s", e)
 
         try:
             from services.payment_service import (
                 close_redis as close_payment_redis,
             )
+
             await close_payment_redis()
         except Exception as e:
-            logger.error(
-                "Failed to close payment Redis: %s", e,
-            )
+            logger.error("Failed to close payment Redis: %s", e)
 
         await close_db()
-
         logger.info("Работа бота завершена")
 
 

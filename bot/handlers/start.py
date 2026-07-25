@@ -12,7 +12,6 @@ from bot.keyboards.common import get_hub_keyboard
 from bot.middlewares.user_context import invalidate_user_cache
 from config.settings import get_settings
 from database.models import User
-from database.repositories.payments_repo import mark_payment_as_cancelled
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
@@ -39,20 +38,13 @@ async def _update_user_profile_if_changed(
     updates = {}
     new_username = message.from_user.username
     new_first_name = message.from_user.first_name
-
     if new_username is not None and user.username != new_username:
         updates["username"] = new_username
     if new_first_name is not None and user.first_name != new_first_name:
         updates["first_name"] = new_first_name
-
     if not updates:
         return user
-
-    updated_user = await update_user(
-        session,
-        user,
-        **updates,
-    )
+    updated_user = await update_user(session, user, **updates)
     invalidate_user_cache(user.telegram_id)
     logger.info(
         "User %s profile updated on /start: %s",
@@ -69,26 +61,10 @@ async def cmd_start(
     command: Command,
     session: AsyncSession,
 ):
-    data = await state.get_data()
-    payment_id = data.get("payment_id")
-
-    # ИСПРАВЛЕНО: /start больше НЕ отменяет платёж.
-    if payment_id:
-        logger.info(
-            "User %s pressed /start with active payment %s. "
-            "Payment NOT cancelled.",
-            message.from_user.id,
-            payment_id,
-        )
-
     await state.clear()
 
     telegram_id = message.from_user.id
-    ref_id = (
-        parse_referral_id(command.args)
-        if command.args
-        else None
-    )
+    ref_id = parse_referral_id(command.args) if command.args else None
 
     user = await SubscriptionService.process_onboarding(
         session,
@@ -97,7 +73,6 @@ async def cmd_start(
         message.from_user.first_name,
         ref_id,
     )
-
     if user is None:
         logger.error(
             "cmd_start: user is still None after onboarding "
@@ -107,31 +82,16 @@ async def cmd_start(
         await message.answer(texts.ERROR_TECHNICAL_MESSAGE)
         return
 
-    user = await _update_user_profile_if_changed(
-        session,
-        user,
-        message,
-    )
+    user = await _update_user_profile_if_changed(session, user, message)
 
     is_active = await SubscriptionService.check_access(
-        session,
-        user.telegram_id,
+        session, user.telegram_id
     )
     is_admin = user.telegram_id in get_settings().ADMIN_IDS
     name = safe(user.first_name or "Пользователь")
-
     text = texts.HUB_HEADER.format(name=name)
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-    )
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        text,
-        kb,
-    )
+    kb = get_hub_keyboard(is_admin=is_admin, is_active=is_active)
+    await render_hub(message.bot, message.chat.id, text, kb)
 
 
 @router.callback_query(F.data == "back_to_main_menu")
@@ -142,22 +102,12 @@ async def back_to_main_menu(
     session: AsyncSession = None,
 ):
     await callback.answer()
-
-    data = await state.get_data()
-    payment_id = data.get("payment_id")
-    if payment_id:
-        try:
-            await mark_payment_as_cancelled(session, payment_id)
-        except Exception:
-            pass
-
     await state.clear()
 
     if not db_user:
         if session is None:
             await callback.answer(
-                texts.ERROR_USER_NOT_FOUND,
-                show_alert=True,
+                texts.ERROR_USER_NOT_FOUND, show_alert=True
             )
             return
         db_user = await SubscriptionService.process_onboarding(
@@ -171,27 +121,15 @@ async def back_to_main_menu(
 
     if not db_user:
         await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
+            texts.ERROR_USER_NOT_FOUND, show_alert=True
         )
         return
 
     is_active = await SubscriptionService.check_access(
-        session,
-        db_user.telegram_id,
+        session, db_user.telegram_id
     )
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
     name = safe(db_user.first_name or "Пользователь")
-
     text = texts.HUB_HEADER.format(name=name)
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-    )
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        kb,
-    )
+    kb = get_hub_keyboard(is_admin=is_admin, is_active=is_active)
+    await render_hub(callback.bot, callback.message.chat.id, text, kb)

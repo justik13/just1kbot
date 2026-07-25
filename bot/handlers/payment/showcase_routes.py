@@ -12,10 +12,7 @@ from bot.keyboards import (
     get_renew_keyboard,
     get_tariff_duration_keyboard,
 )
-from config.settings import get_settings
-from database.repositories.profiles_repo import (
-    get_user_profiles_count,
-)
+from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
@@ -38,16 +35,13 @@ router = Router()
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(
-    text="🚀 Начать",
-    callback_data="back_to_main_menu",
+    text="🚀 Начать", callback_data="back_to_main_menu"
 )
 _START_KEYBOARD_BUILDER.adjust(1)
 _START_KEYBOARD = _START_KEYBOARD_BUILDER.as_markup()
 
 
-@router.callback_query(
-    F.data.in_(["menu_buy", "menu_subscription"])
-)
+@router.callback_query(F.data.in_(["menu_buy", "menu_subscription"]))
 async def hub_menu_payment(
     callback: CallbackQuery,
     state: FSMContext,
@@ -56,7 +50,6 @@ async def hub_menu_payment(
 ) -> None:
     await callback.answer()
     await state.clear()
-
     if not db_user:
         await render_hub(
             callback.bot,
@@ -65,18 +58,15 @@ async def hub_menu_payment(
             _START_KEYBOARD,
         )
         return
-
     if session is None:
         return
-
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
         await _render_maintenance(
-            callback, session, back_to="back_to_main_menu",
+            callback, session, back_to="back_to_main_menu"
         )
         return
-
     is_active = await _is_subscription_active(db_user)
     if is_active:
         await _show_hub(callback, db_user, session)
@@ -93,10 +83,10 @@ async def show_tariff_showcase_callback(
     if session is None:
         return
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
         await _render_maintenance(
-            callback, session, back_to="back_to_main_menu",
+            callback, session, back_to="back_to_main_menu"
         )
         return
     await _show_showcase(callback, session)
@@ -137,25 +127,22 @@ async def select_tariff(
         return
 
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
         await callback.answer()
-        await _render_maintenance(
-            callback, session, back_to=back_to,
-        )
+        await _render_maintenance(callback, session, back_to=back_to)
         return
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff or not tariff.is_active:
         await callback.answer(
-            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True,
+            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
         )
         return
 
     device_limit = getattr(tariff, "device_limit", 2)
-
     error_text = await _check_tariff_change_allowed(
-        session, db_user, tariff,
+        session, db_user, tariff
     )
     if error_text:
         await render_hub(
@@ -167,43 +154,30 @@ async def select_tariff(
         await callback.answer()
         return
 
-    settings = get_settings()
-    payment_enabled = bool(
-        settings.YOOKASSA_SHOP_ID
-        and settings.YOOKASSA_SECRET_KEY
-    )
-
     tariff_name = get_tariff_display_name(device_limit)
     text = texts.PAYMENT_CHECKOUT_TEXT.format(
         tariff_name=tariff_name,
         duration_days=tariff.duration_days,
         price_rub=tariff.price_rub,
     )
-
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
         get_payment_method_keyboard(
-            tariff.id,
-            device_limit,
-            payment_enabled=payment_enabled,
-            source=source,
+            tariff.id, device_limit, source=source
         ),
     )
     await callback.answer()
 
 
-@router.callback_query(
-    F.data.in_(["payment_quick_renew", "payment_renew"])
-)
+@router.callback_query(F.data.in_(["payment_quick_renew", "payment_renew"]))
 async def show_quick_renew(
     callback: CallbackQuery,
     db_user=None,
     session: AsyncSession = None,
 ) -> None:
     await callback.answer()
-
     if not db_user:
         await render_hub(
             callback.bot,
@@ -212,27 +186,22 @@ async def show_quick_renew(
             _START_KEYBOARD,
         )
         return
-
     if session is None:
         return
-
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
         await _render_maintenance(
-            callback, session, back_to="menu_subscription",
+            callback, session, back_to="menu_subscription"
         )
         return
-
     tariffs = await get_active_tariffs(session)
-    current_limit = await _get_effective_device_limit(
-        session, db_user,
-    )
+    current_limit = await _get_effective_device_limit(session, db_user)
     renew_tariffs = [
-        t for t in tariffs
+        t
+        for t in tariffs
         if getattr(t, "device_limit", 2) == current_limit
     ]
-
     if not renew_tariffs:
         await render_hub(
             callback.bot,
@@ -241,7 +210,6 @@ async def show_quick_renew(
             get_back_button("menu_subscription"),
         )
         return
-
     tariff_name = get_tariff_display_name(current_limit)
     text = texts.PAYMENT_QUICK_RENEW_HEADER.format(
         tariff_name=tariff_name,
@@ -249,10 +217,7 @@ async def show_quick_renew(
     )
     keyboard = get_renew_keyboard(renew_tariffs)
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        keyboard,
+        callback.bot, callback.message.chat.id, text, keyboard
     )
 
 
@@ -263,7 +228,6 @@ async def show_change_tariff(
     session: AsyncSession = None,
 ) -> None:
     await callback.answer()
-
     if not db_user:
         await render_hub(
             callback.bot,
@@ -272,18 +236,15 @@ async def show_change_tariff(
             _START_KEYBOARD,
         )
         return
-
     if session is None:
         return
-
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
         await _render_maintenance(
-            callback, session, back_to="menu_subscription",
+            callback, session, back_to="menu_subscription"
         )
         return
-
     tariffs = await get_active_tariffs(session)
     if not tariffs:
         await render_hub(
@@ -293,33 +254,22 @@ async def show_change_tariff(
             get_back_button("menu_subscription"),
         )
         return
-
-    current_limit = await _get_effective_device_limit(
-        session, db_user,
-    )
+    current_limit = await _get_effective_device_limit(session, db_user)
     tariff_name = get_tariff_display_name(current_limit)
     is_active = await _is_subscription_active(db_user)
-
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
         valid_until=format_datetime(db_user.subscription_end),
     )
     keyboard = get_change_tariff_keyboard(
-        tariffs,
-        current_limit,
-        is_subscription_active=is_active,
+        tariffs, current_limit, is_subscription_active=is_active
     )
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        keyboard,
+        callback.bot, callback.message.chat.id, text, keyboard
     )
 
 
-@router.callback_query(
-    F.data.startswith("select_tariff_type:")
-)
+@router.callback_query(F.data.startswith("select_tariff_type:"))
 async def select_tariff_type(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -342,18 +292,16 @@ async def select_tariff_type(
     }.get(source, "payment_showcase")
 
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id,
+        session, callback.from_user.id
     ):
-        await _render_maintenance(
-            callback, session, back_to=back_to,
-        )
+        await _render_maintenance(callback, session, back_to=back_to)
         return
 
     if db_user:
         is_active = await _is_subscription_active(db_user)
         if is_active:
             current_limit = await _get_effective_device_limit(
-                session, db_user,
+                session, db_user
             )
             if device_limit < current_limit:
                 await render_hub(
@@ -363,15 +311,14 @@ async def select_tariff_type(
                         current_limit=current_limit,
                         new_limit=device_limit,
                         valid_until=format_datetime(
-                            db_user.subscription_end,
+                            db_user.subscription_end
                         ),
                     ),
                     get_back_button(back_to),
                 )
                 return
-
         profiles_count = await get_user_profiles_count(
-            session, db_user.id,
+            session, db_user.id
         )
         if profiles_count > device_limit:
             await render_hub(
@@ -387,10 +334,10 @@ async def select_tariff_type(
 
     tariffs = await get_active_tariffs(session)
     type_tariffs = [
-        t for t in tariffs
+        t
+        for t in tariffs
         if getattr(t, "device_limit", 2) == device_limit
     ]
-
     if not type_tariffs:
         await render_hub(
             callback.bot,
@@ -400,16 +347,9 @@ async def select_tariff_type(
         )
         return
 
-    description = texts.PAYMENT_TARIFF_DESCRIPTION.get(
-        device_limit, "",
-    )
+    description = texts.PAYMENT_TARIFF_DESCRIPTION.get(device_limit, "")
     text = description + texts.PAYMENT_DURATION_HEADER
-    keyboard = get_tariff_duration_keyboard(
-        type_tariffs, source=source,
-    )
+    keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        text,
-        keyboard,
+        callback.bot, callback.message.chat.id, text, keyboard
     )

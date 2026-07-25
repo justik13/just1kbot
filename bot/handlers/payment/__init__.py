@@ -7,6 +7,4 @@ router = Router()
 router.include_router(showcase_router)
 router.include_router(yookassa_router)
 
-__all__ = [
-    "router",
-]
+__all__ = ["router"]

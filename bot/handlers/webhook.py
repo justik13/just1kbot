@@ -6,7 +6,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from aiohttp import web
-from pydantic import BaseModel, Field, ValidationError
 
 from bot.middlewares.correlation import set_request_id
 from database.connection import session_scope
@@ -15,14 +14,12 @@ from services.payment_service import PaymentService
 from services.payment_service.alerts import (
     _send_payment_not_found_alert_now,
 )
-from services.yookassa_client import YooKassaClient
+from services.yookassa_service import YooKassaService
 
 logger = logging.getLogger(__name__)
 
-WEBHOOK_MAX_AGE_SECONDS = 600  # 10 минут
+WEBHOOK_MAX_AGE_SECONDS = 300
 
-# IP-диапазоны YooKassa для опциональной проверки
-# https://yookassa.ru/developers/using-api/webhooks
 YOOKASSA_IP_RANGES = [
     "185.71.76.0/27",
     "185.71.77.0/27",
@@ -35,7 +32,6 @@ YOOKASSA_IP_RANGES = [
 
 
 def _is_yookassa_ip(ip: str) -> bool:
-    """Проверяет, принадлежит ли IP диапазонам YooKassa."""
     import ipaddress
 
     try:
@@ -66,74 +62,17 @@ def _is_recent_timestamp(
     except (ValueError, TypeError, OverflowError):
         pass
     try:
-        dt = datetime.fromisoformat(
-            created_at.replace("Z", "+00:00")
-        )
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        age = (
-            datetime.now(timezone.utc) - dt
-        ).total_seconds()
+        age = (datetime.now(timezone.utc) - dt).total_seconds()
         return age <= max_age_seconds
     except (ValueError, TypeError, OverflowError):
         pass
     return True
 
 
-class YooKassaWebhookData(BaseModel):
-    """
-    Структура webhook-уведомления YooKassa.
-    """
-
-    type: str = "notification"
-    event: str = Field(
-        ...,
-        description=(
-            "payment.succeeded | payment.canceled "
-            "| refund.succeeded"
-        ),
-    )
-    object: dict = Field(default_factory=dict)
-
-    model_config = {"extra": "allow"}
-
-    def get_payment_id(self) -> Optional[str]:
-        return self.object.get("id")
-
-    def get_status(self) -> str:
-        return self.object.get("status", "")
-
-    def get_amount_value(self) -> Optional[str]:
-        amount = self.object.get("amount")
-        if isinstance(amount, dict):
-            return amount.get("value")
-        return None
-
-    def get_amount_currency(self) -> Optional[str]:
-        amount = self.object.get("amount")
-        if isinstance(amount, dict):
-            return amount.get("currency")
-        return None
-
-    def get_metadata(self) -> dict:
-        return self.object.get("metadata") or {}
-
-    def get_created_at(self) -> Optional[str]:
-        return self.object.get("created_at")
-
-    def normalize_status(self) -> str:
-        return YooKassaClient.normalize_webhook_event(
-            self.event
-        )
-
-
-def _safe_decimal(
-    value: Optional[str],
-) -> Optional[Decimal]:
-    """
-    Безопасно конвертирует строку в Decimal.
-    Никогда не через float.
-    """
+def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
     if value is None:
         return None
     try:
@@ -142,286 +81,12 @@ def _safe_decimal(
         return None
 
 
-async def yookassa_webhook_handler(
-    request: web.Request,
-) -> web.Response:
-    request_id = uuid.uuid4().hex[:8]
-    set_request_id(request_id)
-
-    transaction_id = None
-    status = None
-
-    try:
-        # ── Аутентификация webhook ──
-        #
-        # YooKassa НЕ отправляет заголовки X-ShopId / X-Secret
-        # в webhook-уведомлениях.
-        #
-        # Безопасность обеспечивается:
-        #   1) IP-whitelisting (опционально, только лог);
-        #   2) Верификацией через API (object.id + сумма + статус).
-        #
-        peer_ip = request.remote or ""
-        if peer_ip and not _is_yookassa_ip(peer_ip):
-            logger.warning(
-                "[%s] Webhook from unknown IP: %s. "
-                "Proceeding with API verification.",
-                request_id,
-                peer_ip,
-            )
-
-        # ── Парсинг JSON ──
-        try:
-            raw_data = await request.json()
-        except Exception as e:
-            logger.error(
-                "[%s] Failed to parse YooKassa webhook JSON: %s",
-                request_id,
-                e,
-            )
-            return web.Response(
-                status=400, text="Invalid JSON"
-            )
-
-        # ── Валидация структуры ──
-        try:
-            webhook_data = YooKassaWebhookData(**raw_data)
-        except ValidationError as e:
-            logger.error(
-                "[%s] YooKassa webhook validation failed: %s",
-                request_id,
-                e,
-            )
-            return web.Response(
-                status=400,
-                text=f"Validation error: {e.errors()}",
-            )
-
-        transaction_id = webhook_data.get_payment_id()
-        status = webhook_data.normalize_status()
-
-        if not transaction_id:
-            logger.warning(
-                "[%s] YooKassa webhook missing payment ID.",
-                request_id,
-            )
-            return web.Response(
-                status=400,
-                text="Missing payment ID in webhook object",
-            )
-
-        valid_statuses = {"CONFIRMED", "CANCELED", "CHARGEBACKED"}
-        if status not in valid_statuses:
-            logger.warning(
-                "[%s] YooKassa webhook unknown status: %s "
-                "(payment=%s)",
-                request_id,
-                status,
-                transaction_id,
-            )
-            return web.Response(
-                status=400,
-                text="Invalid webhook status",
-            )
-
-        # ── Replay / stale защита ──
-        callback_amount_str = webhook_data.get_amount_value()
-        callback_currency = webhook_data.get_amount_currency()
-        callback_amount = _safe_decimal(callback_amount_str)
-
-        created_at = webhook_data.get_created_at()
-        if created_at:
-            if not _is_recent_timestamp(created_at):
-                logger.info(
-                    "[%s] YooKassa webhook is stale: "
-                    "created_at=%s. Verifying via API. "
-                    "payment=%s",
-                    request_id,
-                    created_at,
-                    transaction_id,
-                )
-                stale_ok, stale_api_data = (
-                    await _verify_stale_webhook_via_api(
-                        webhook_data,
-                        status,
-                        transaction_id,
-                    )
-                )
-                if not stale_ok:
-                    logger.warning(
-                        "[%s] Stale webhook rejected: "
-                        "payment=%s",
-                        request_id,
-                        transaction_id,
-                    )
-                    return web.Response(
-                        status=400,
-                        text="Stale webhook unverified",
-                    )
-                if stale_api_data:
-                    api_amount = stale_api_data.get(
-                        "amount", {}
-                    )
-                    if api_amount.get("value"):
-                        callback_amount = _safe_decimal(
-                            api_amount["value"]
-                        )
-                    if api_amount.get("currency"):
-                        callback_currency = api_amount[
-                            "currency"
-                        ]
-
-        # ── Извлекаем payload из metadata ──
-        metadata = webhook_data.get_metadata()
-        payload = metadata.get("payload", "")
-
-        logger.info(
-            "[%s] YooKassa webhook received: payment=%s, "
-            "status=%s, amount=%s, currency=%s",
-            request_id,
-            transaction_id,
-            status,
-            callback_amount,
-            callback_currency,
-        )
-
-        # ── Аудит ──
-        async with session_scope() as session:
-            try:
-                await AuditService.log_action(
-                    session,
-                    admin_id=0,
-                    action="YOOKASSA_CALLBACK",
-                    target_type="Payment",
-                    target_id=None,
-                    details=(
-                        f"[{request_id}] "
-                        f"payment={transaction_id}, "
-                        f"status={status}, "
-                        f"amount={callback_amount}"
-                    ),
-                )
-            except Exception as e:
-                logger.error(
-                    "[%s] Failed to log YooKassa callback "
-                    "to audit: %s",
-                    request_id,
-                    e,
-                )
-
-        # ── Обработка платежа ──
-        success, result_code = (
-            await PaymentService.handle_yookassa_callback(
-                session=session,
-                transaction_id=transaction_id,
-                status=status,
-                payload=payload,
-                callback_amount=callback_amount,
-                callback_payload=payload,
-                callback_currency=callback_currency,
-            )
-        )
-
-        if success:
-            if result_code == "not_found":
-                logger.warning(
-                    "[%s] YooKassa callback: payment not "
-                    "found for payment=%s",
-                    request_id,
-                    transaction_id,
-                )
-                try:
-                    await _send_payment_not_found_alert_now(
-                        {
-                            "transaction_id": transaction_id,
-                            "status": status,
-                            "source": "yookassa_webhook",
-                        }
-                    )
-                except Exception as alert_error:
-                    logger.error(
-                        "[%s] Failed to send alert: %s",
-                        request_id,
-                        alert_error,
-                    )
-                return web.Response(
-                    status=404,
-                    text="Payment not found",
-                )
-            elif result_code == "already_processed":
-                return web.Response(status=200, text="OK")
-            elif result_code == "paid_after_cancel":
-                return web.Response(status=200, text="OK")
-            elif result_code == "manual_review":
-                return web.Response(status=200, text="OK")
-            else:
-                return web.Response(status=200, text="OK")
-        else:
-            if result_code == "not_found":
-                try:
-                    await _send_payment_not_found_alert_now(
-                        {
-                            "transaction_id": transaction_id,
-                            "status": status,
-                            "source": "yookassa_webhook",
-                        }
-                    )
-                except Exception as alert_error:
-                    logger.error(
-                        "[%s] Failed to send alert: %s",
-                        request_id,
-                        alert_error,
-                    )
-                return web.Response(
-                    status=404,
-                    text="Payment not found",
-                )
-            elif result_code in (
-                "amount_mismatch",
-                "payload_mismatch",
-                "manual_review",
-                "refunded",
-            ):
-                return web.Response(status=200, text="OK")
-            elif result_code == "error":
-                return web.Response(
-                    status=500,
-                    text="Processing failed",
-                )
-            else:
-                return web.Response(
-                    status=500,
-                    text="Unknown error",
-                )
-
-    except Exception as e:
-        logger.error(
-            "[%s] YooKassa webhook error: %s",
-            request_id,
-            e,
-            exc_info=True,
-        )
-        return web.Response(
-            status=500,
-            text="Internal server error",
-        )
-
-
 async def _verify_stale_webhook_via_api(
-    webhook_data: YooKassaWebhookData,
+    webhook_object: dict,
     normalized_status: str,
     transaction_id: str,
 ) -> tuple[bool, Optional[dict]]:
-    """
-    Дополнительная проверка старого webhook через YooKassa API.
-
-    Возвращает (bool, dict | None):
-      - bool — прошла ли верификация;
-      - dict — данные из API (для переиспользования,
-        чтобы избежать повторного HTTP-запроса).
-    """
-    client = YooKassaClient()
-    api_data = await client.get_payment(transaction_id)
+    api_data = await YooKassaService.get_payment(transaction_id)
     if not api_data:
         return False, None
 
@@ -432,24 +97,26 @@ async def _verify_stale_webhook_via_api(
         "pending": "PENDING",
         "processing": "PROCESSING",
     }
-    api_status = api_status_map.get(
-        api_status_raw, api_status_raw.upper()
-    )
+    api_status = api_status_map.get(api_status_raw, api_status_raw.upper())
 
     if api_status != normalized_status:
         logger.warning(
-            "Stale webhook status mismatch: "
-            "callback=%s, api=%s, payment=%s",
+            "Stale webhook status mismatch: callback=%s, api=%s, payment=%s",
             normalized_status,
             api_status,
             transaction_id,
         )
         return False, None
 
-    # Проверка суммы — Decimal, никогда не float
-    callback_amount_str = webhook_data.get_amount_value()
+    callback_amount_str = None
+    amount_obj = webhook_object.get("amount")
+    if isinstance(amount_obj, dict):
+        callback_amount_str = amount_obj.get("value")
+
     api_amount = api_data.get("amount", {})
-    api_amount_str = api_amount.get("value")
+    api_amount_str = (
+        api_amount.get("value") if isinstance(api_amount, dict) else None
+    )
 
     if callback_amount_str and api_amount_str:
         cb_decimal = _safe_decimal(callback_amount_str)
@@ -468,25 +135,182 @@ async def _verify_stale_webhook_via_api(
     return True, api_data
 
 
-async def healthcheck_handler(
-    request: web.Request,
-) -> web.Response:
+async def yookassa_webhook_handler(request: web.Request) -> web.Response:
+    request_id = uuid.uuid4().hex[:8]
+    set_request_id(request_id)
+    transaction_id = None
+    status = None
+
+    try:
+        peer_ip = request.remote or ""
+        if peer_ip and not _is_yookassa_ip(peer_ip):
+            logger.warning(
+                "[%s] Webhook BLOCKED from unknown IP: %s",
+                request_id,
+                peer_ip,
+            )
+            return web.Response(status=403, text="Forbidden")
+
+        try:
+            raw_data = await request.json()
+        except Exception as e:
+            logger.error(
+                "[%s] Failed to parse webhook JSON: %s", request_id, e
+            )
+            return web.Response(status=400, text="Invalid JSON")
+
+        event = raw_data.get("event", "")
+        webhook_object = raw_data.get("object", {})
+
+        transaction_id = webhook_object.get("id")
+        status = YooKassaService.normalize_webhook_event(event)
+
+        if not transaction_id:
+            logger.warning("[%s] Webhook missing payment ID.", request_id)
+            return web.Response(status=400, text="Missing payment ID")
+
+        valid_statuses = {"CONFIRMED", "CANCELED", "CHARGEBACKED"}
+        if status not in valid_statuses:
+            logger.warning(
+                "[%s] Unknown webhook status: %s (payment=%s)",
+                request_id,
+                status,
+                transaction_id,
+            )
+            return web.Response(status=400, text="Invalid status")
+
+        callback_amount_str = None
+        callback_currency = None
+        amount_obj = webhook_object.get("amount")
+        if isinstance(amount_obj, dict):
+            callback_amount_str = amount_obj.get("value")
+            callback_currency = amount_obj.get("currency")
+
+        callback_amount = _safe_decimal(callback_amount_str)
+
+        created_at = webhook_object.get("created_at")
+        if created_at and not _is_recent_timestamp(created_at):
+            logger.info(
+                "[%s] Stale webhook detected, verifying via API. payment=%s",
+                request_id,
+                transaction_id,
+            )
+            stale_ok, stale_api_data = await _verify_stale_webhook_via_api(
+                webhook_object,
+                status,
+                transaction_id,
+            )
+            if not stale_ok:
+                logger.warning(
+                    "[%s] Stale webhook rejected: payment=%s",
+                    request_id,
+                    transaction_id,
+                )
+                return web.Response(status=400, text="Stale webhook unverified")
+            if stale_api_data:
+                api_amount = stale_api_data.get("amount", {})
+                if isinstance(api_amount, dict):
+                    if api_amount.get("value"):
+                        callback_amount = _safe_decimal(api_amount["value"])
+                    if api_amount.get("currency"):
+                        callback_currency = api_amount["currency"]
+
+        metadata = webhook_object.get("metadata") or {}
+        payload = metadata.get("payload", "")
+
+        logger.info(
+            "[%s] Webhook received: payment=%s, status=%s, "
+            "amount=%s, currency=%s",
+            request_id,
+            transaction_id,
+            status,
+            callback_amount,
+            callback_currency,
+        )
+
+        async with session_scope() as session:
+            try:
+                await AuditService.log_action(
+                    session,
+                    admin_id=0,
+                    action="YOOKASSA_CALLBACK",
+                    target_type="Payment",
+                    target_id=None,
+                    details=(
+                        f"[{request_id}] "
+                        f"payment={transaction_id}, "
+                        f"status={status}, "
+                        f"amount={callback_amount}"
+                    ),
+                )
+            except Exception as e:
+                logger.error("[%s] Failed to log audit: %s", request_id, e)
+
+        success, result_code = await PaymentService.handle_yookassa_callback(
+            transaction_id=transaction_id,
+            status=status,
+            payload=payload,
+            callback_amount=callback_amount,
+            callback_currency=callback_currency,
+        )
+
+        if success:
+            if result_code == "not_found":
+                logger.warning(
+                    "[%s] Payment not found: %s",
+                    request_id,
+                    transaction_id,
+                )
+                try:
+                    await _send_payment_not_found_alert_now(
+                        {
+                            "transaction_id": transaction_id,
+                            "status": status,
+                            "source": "yookassa_webhook",
+                        }
+                    )
+                except Exception:
+                    pass
+                return web.Response(status=404, text="Payment not found")
+            return web.Response(status=200, text="OK")
+        else:
+            if result_code == "not_found":
+                try:
+                    await _send_payment_not_found_alert_now(
+                        {
+                            "transaction_id": transaction_id,
+                            "status": status,
+                            "source": "yookassa_webhook",
+                        }
+                    )
+                except Exception:
+                    pass
+                return web.Response(status=404, text="Payment not found")
+            elif result_code in (
+                "amount_mismatch",
+                "payload_mismatch",
+                "manual_review",
+                "refunded",
+            ):
+                return web.Response(status=200, text="OK")
+            elif result_code == "error":
+                return web.Response(status=500, text="Processing failed")
+            else:
+                return web.Response(status=500, text="Unknown error")
+
+    except Exception as e:
+        logger.error(
+            "[%s] Webhook error: %s", request_id, e, exc_info=True
+        )
+        return web.Response(status=500, text="Internal server error")
+
+
+async def healthcheck_handler(request: web.Request) -> web.Response:
     return web.Response(status=200, text="OK")
 
 
 def setup_webhook_routes(app: web.Application):
-    app.router.add_post(
-        "/webhook/yookassa",
-        yookassa_webhook_handler,
-    )
-    app.router.add_get(
-        "/health",
-        healthcheck_handler,
-    )
-    logger.info(
-        "YooKassa webhook route registered: "
-        "POST /webhook/yookassa"
-    )
-    logger.info(
-        "Healthcheck endpoint registered: GET /health"
-    )
+    app.router.add_post("/webhook/yookassa", yookassa_webhook_handler)
+    app.router.add_get("/health", healthcheck_handler)
+    logger.info("YooKassa webhook route registered: POST /webhook/yookassa")
+    logger.info("Healthcheck endpoint registered: GET /health")

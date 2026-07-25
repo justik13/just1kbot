@@ -8,18 +8,10 @@ from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_alerted_paid_after_cancel: TTLCache = TTLCache(
-    maxsize=100000, ttl=86400,
-)
-_notified_paid_after_cancel: TTLCache = TTLCache(
-    maxsize=100000, ttl=86400,
-)
-_alerted_manual_review: TTLCache = TTLCache(
-    maxsize=100000, ttl=86400,
-)
-_alerted_payment_not_found: TTLCache = TTLCache(
-    maxsize=100000, ttl=3600,
-)
+_alerted_paid_after_cancel: TTLCache = TTLCache(maxsize=100000, ttl=86400)
+_notified_paid_after_cancel: TTLCache = TTLCache(maxsize=100000, ttl=86400)
+_alerted_manual_review: TTLCache = TTLCache(maxsize=100000, ttl=86400)
+_alerted_payment_not_found: TTLCache = TTLCache(maxsize=100000, ttl=3600)
 
 _redis_client: aioredis.Redis | None = None
 
@@ -70,33 +62,23 @@ async def close_redis() -> None:
 
 
 def _to_decimal(value) -> Decimal | None:
-    """
-    Безопасно конвертирует значение в Decimal.
-    ИСПРАВЛЕНО: никогда не используем float для денег.
-    Decimal(str(Decimal)) работает корректно.
-    Decimal(str(float)) — НЕ вызываем, т.к. str(float)
-    даёт артефакты двоичного представления.
-    """
     if value is None:
         return None
     if isinstance(value, Decimal):
         return value
+    if isinstance(value, float):
+        raise TypeError(
+            f"float is not allowed for money: {value!r}. "
+            "Use str or Decimal."
+        )
     try:
-        # str() от Decimal, int, str — безопасно.
-        # float сюда попадать не должен, но если попал —
-        # str(float) даст "100.1" для 100.1, а не
-        # "100.09999999999999431565811391..."
-        # Точность теряется только если float уже был
-        # испорчен ДО вызова этой функции.
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
         return None
 
 
 def _get_payment_snapshot_duration(payment) -> int | None:
-    snapshot_value = getattr(
-        payment, "snapshot_duration_days", None,
-    )
+    snapshot_value = getattr(payment, "snapshot_duration_days", None)
     if snapshot_value is not None:
         try:
             return int(snapshot_value)
@@ -109,9 +91,7 @@ def _get_payment_snapshot_duration(payment) -> int | None:
 
 
 def _get_payment_snapshot_device_limit(payment) -> int | None:
-    snapshot_value = getattr(
-        payment, "snapshot_device_limit", None,
-    )
+    snapshot_value = getattr(payment, "snapshot_device_limit", None)
     if snapshot_value is not None:
         try:
             return int(snapshot_value)
@@ -129,30 +109,14 @@ def _build_payment_snapshot(payment) -> dict:
     device_limit = _get_payment_snapshot_device_limit(payment)
     tariff_name = "—"
     if duration_days is not None and device_limit is not None:
-        tariff_name = (
-            f"{duration_days} дн. / {device_limit} устр."
-        )
+        tariff_name = f"{duration_days} дн. / {device_limit} устр."
     return {
         "payment_id": payment.id,
-        "user_telegram_id": (
-            user.telegram_id if user else None
-        ),
-        "username": (
-            f"@{user.username}"
-            if user and user.username
-            else "—"
-        ),
+        "user_telegram_id": user.telegram_id if user else None,
+        "username": f"@{user.username}" if user and user.username else "—",
         "amount": str(payment.amount),
         "currency": payment.currency,
         "tariff_name": tariff_name,
-        "payment_method": (
-            payment.payment_method
-            if getattr(payment, "payment_method", None)
-            else "—"
-        ),
-        "external_id": (
-            payment.external_id
-            if getattr(payment, "external_id", None)
-            else "—"
-        ),
+        "payment_method": getattr(payment, "payment_method", None) or "—",
+        "external_id": getattr(payment, "external_id", None) or "—",
     }

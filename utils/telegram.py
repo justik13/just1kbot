@@ -305,31 +305,6 @@ async def send_hub_document(
         return msg.message_id
 
 
-async def send_hub_invoice(
-    bot,
-    chat_id: int,
-    reply_markup: Optional[InlineKeyboardMarkup] = None,
-    **kwargs,
-) -> int:
-    _maybe_cleanup_cache()
-
-    lock = _get_hub_render_lock(chat_id)
-    async with lock:
-        old_ids = await _load_hub_ids_from_db(chat_id)
-
-        if reply_markup:
-            kwargs["reply_markup"] = reply_markup
-
-        msg = await bot.send_invoice(chat_id=chat_id, **kwargs)
-
-        if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
-
-        await _store_hub_id_in_db(chat_id, msg.message_id)
-
-        return msg.message_id
-
-
 async def append_hub_document(
     bot,
     chat_id: int,
