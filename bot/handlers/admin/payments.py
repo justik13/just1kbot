@@ -22,18 +22,15 @@ from database.repositories.payments_repo import (
 from services.audit_service import AuditService
 from services.payment_service import PaymentService
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
+from utils.text_limits import truncate_button_text
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 PAYMENTS_PER_PAGE = 20
-
-
-# ──────────────────────────────────────────────────────────
-# Клавиатуры (локальные, чтобы не трогать keyboards/)
-# ──────────────────────────────────────────────────────────
 
 
 def _get_payment_card_keyboard(
@@ -65,13 +62,10 @@ def _get_payment_card_keyboard(
         text="← К списку платежей",
         callback_data="admin_payments",
     )
+
     builder.adjust(1)
+
     return builder
-
-
-# ──────────────────────────────────────────────────────────
-# Список платежей
-# ──────────────────────────────────────────────────────────
 
 
 async def _build_payments_list_text_and_kb(
@@ -84,6 +78,7 @@ async def _build_payments_list_text_and_kb(
         f"🛠 Админка › 💳 <b>Платежи</b>\n"
         f"(стр. {page}/{total_pages}) · Всего: {total}\n"
     )
+
     builder = InlineKeyboardBuilder()
 
     if not payments:
@@ -91,24 +86,25 @@ async def _build_payments_list_text_and_kb(
     else:
         for payment in payments:
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                payment.status, "❓",
+                payment.status,
+                "❓",
             )
-            date = format_datetime(
-                payment.paid_at or payment.created_at,
-            )
+
             if payment.user and payment.user.username:
-                user_label = f"@{safe(payment.user.username)}"
+                user_label = f"@{payment.user.username}"
             elif payment.user:
                 user_label = f"ID:{payment.user.telegram_id}"
             else:
                 user_label = "—"
 
+            button_text = truncate_button_text(
+                f"{status_icon} #{payment.id} · "
+                f"{user_label} · "
+                f"{payment.amount}₽"
+            )
+
             builder.button(
-                text=(
-                    f"{status_icon} #{payment.id} · "
-                    f"{user_label} · "
-                    f"{payment.amount}₽"
-                ),
+                text=button_text,
                 callback_data=f"admin_payment_card:{payment.id}",
             )
 
@@ -117,6 +113,7 @@ async def _build_payments_list_text_and_kb(
             text="⬅️",
             callback_data=f"admin_payments_page:{page - 1}",
         )
+
     if page < total_pages:
         builder.button(
             text="➡️",
@@ -127,7 +124,9 @@ async def _build_payments_list_text_and_kb(
         text="← В админку",
         callback_data="admin_menu",
     )
+
     builder.adjust(1)
+
     return rendered, builder
 
 
@@ -139,11 +138,17 @@ async def _show_payments_list(
     total_payments = await session.scalar(
         select(func.count(Payment.id)),
     ) or 0
+
     total_pages = max(
         1,
         math.ceil(total_payments / PAYMENTS_PER_PAGE),
     )
+
+    if page > total_pages:
+        page = total_pages
+
     offset = (page - 1) * PAYMENTS_PER_PAGE
+
     stmt = (
         select(Payment)
         .options(
@@ -154,12 +159,17 @@ async def _show_payments_list(
         .offset(offset)
         .limit(PAYMENTS_PER_PAGE)
     )
+
     result = await session.execute(stmt)
     payments = result.scalars().all()
 
     rendered, kb = await _build_payments_list_text_and_kb(
-        payments, page, total_pages, total_payments,
+        payments,
+        page,
+        total_pages,
+        total_payments,
     )
+
     try:
         await callback.message.edit_text(
             rendered,
@@ -168,7 +178,8 @@ async def _show_payments_list(
         )
     except TelegramBadRequest as e:
         logger.debug(
-            "_show_payments_list edit_text failed: %s", e,
+            "_show_payments_list edit_text failed: %s",
+            e,
         )
 
 
@@ -184,6 +195,7 @@ async def show_payments_list(
             show_alert=True,
         )
         return
+
     await state.clear()
     await _show_payments_list(callback, session, page=1)
     await callback.answer()
@@ -203,15 +215,19 @@ async def payments_pagination(
             show_alert=True,
         )
         return
+
+    page = parse_callback_id(callback.data, 1)
+
+    if page is None or page < 1:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
-    page = int(callback.data.split(":")[1])
     await _show_payments_list(callback, session, page=page)
     await callback.answer()
-
-
-# ──────────────────────────────────────────────────────────
-# Карточка платежа
-# ──────────────────────────────────────────────────────────
 
 
 @router.callback_query(
@@ -228,10 +244,20 @@ async def show_payment_card(
             show_alert=True,
         )
         return
+
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
 
-    payment_id = int(callback.data.split(":")[1])
     payment = await get_payment_by_id(session, payment_id)
+
     if not payment:
         await callback.answer(
             "Платёж не найден",
@@ -239,7 +265,6 @@ async def show_payment_card(
         )
         return
 
-    # Пользователь
     if payment.user and payment.user.username:
         user_label = (
             f"@{safe(payment.user.username)} "
@@ -253,15 +278,16 @@ async def show_payment_card(
         user_label = "—"
         user_telegram_id = None
 
-    # Статус
     status_name = texts.PAYMENT_STATUS_NAMES.get(
-        payment.status, payment.status,
-    )
-    status_icon = texts.PAYMENT_STATUS_ICONS.get(
-        payment.status, "❓",
+        payment.status,
+        payment.status,
     )
 
-    # Тариф
+    status_icon = texts.PAYMENT_STATUS_ICONS.get(
+        payment.status,
+        "❓",
+    )
+
     if payment.tariff:
         tariff_label = (
             f"{payment.tariff.duration_days} дн. / "
@@ -270,8 +296,8 @@ async def show_payment_card(
     else:
         tariff_label = "—"
 
-    # Причина manual review
     reason_line = ""
+
     if (
         payment.status == "requires_manual_review"
         and payment.manual_review_reason
@@ -283,7 +309,7 @@ async def show_payment_card(
 
     rendered = (
         f"🛠 Админка › 💳 Платежи › "
-        f"<b>Платёж #{payment.id}</b>\n\n"
+        f"<b>Платёж #{payment.id}</b>\n"
         f"<b>ID:</b> {payment.id}\n"
         f"<b>Пользователь:</b> {user_label}\n"
         f"<b>Сумма:</b> {payment.amount} {payment.currency}\n"
@@ -310,14 +336,11 @@ async def show_payment_card(
         )
     except TelegramBadRequest as e:
         logger.debug(
-            "show_payment_card edit_text failed: %s", e,
+            "show_payment_card edit_text failed: %s",
+            e,
         )
+
     await callback.answer()
-
-
-# ──────────────────────────────────────────────────────────
-# Возврат (chargeback)
-# ──────────────────────────────────────────────────────────
 
 
 @router.callback_query(
@@ -334,16 +357,27 @@ async def refund_payment_confirm(
             show_alert=True,
         )
         return
+
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
 
-    payment_id = int(callback.data.split(":")[1])
     payment = await get_payment_by_id(session, payment_id)
+
     if not payment:
         await callback.answer(
             "Платёж не найден",
             show_alert=True,
         )
         return
+
     if payment.status != "completed":
         await callback.answer(
             "Возврат доступен только для "
@@ -353,21 +387,22 @@ async def refund_payment_confirm(
         return
 
     user_label = "—"
+
     if payment.user and payment.user.username:
         user_label = f"@{safe(payment.user.username)}"
     elif payment.user:
         user_label = f"ID:{payment.user.telegram_id}"
 
     text = (
-        f"⚠️ <b>Подтверждение возврата</b>\n\n"
+        f"⚠️ <b>Подтверждение возврата</b>\n"
         f"Платёж: <b>#{payment.id}</b>\n"
         f"Клиент: <b>{user_label}</b>\n"
-        f"Сумма: <b>{payment.amount} {payment.currency}</b>\n\n"
+        f"Сумма: <b>{payment.amount} {payment.currency}</b>\n"
         f"Что произойдёт:\n"
         f"• Подписка клиента будет отозвана\n"
         f"• Все устройства будут удалены\n"
         f"• Реферальные бонусы будут откатаны\n"
-        f"• Клиент получит уведомление\n\n"
+        f"• Клиент получит уведомление\n"
         f"<i>Это действие необратимо.</i>"
     )
 
@@ -389,6 +424,7 @@ async def refund_payment_confirm(
             "refund_payment_confirm edit_text failed: %s",
             e,
         )
+
     await callback.answer()
 
 
@@ -406,16 +442,27 @@ async def refund_payment_apply(
             show_alert=True,
         )
         return
+
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
 
-    payment_id = int(callback.data.split(":")[1])
     payment = await get_payment_by_id(session, payment_id)
+
     if not payment:
         await callback.answer(
             "Платёж не найден",
             show_alert=True,
         )
         return
+
     if payment.status != "completed":
         await callback.answer(
             "Платёж уже не в статусе completed",
@@ -439,6 +486,7 @@ async def refund_payment_apply(
             e,
             exc_info=True,
         )
+
         await callback.answer(
             f"Ошибка: {type(e).__name__}",
             show_alert=True,
@@ -454,6 +502,7 @@ async def refund_payment_apply(
             payment_id,
             f"manual_refund by admin {callback.from_user.id}",
         )
+
         await callback.answer(
             "✅ Возврат обработан. "
             "Доступ отозван, устройства удалены.",
@@ -465,31 +514,38 @@ async def refund_payment_apply(
             show_alert=True,
         )
 
-    # Обновляем карточку платежа
     refreshed = await get_payment_by_id(session, payment_id)
+
     if refreshed:
         user_telegram_id = (
             refreshed.user.telegram_id
             if refreshed.user
             else None
         )
+
         status_name = texts.PAYMENT_STATUS_NAMES.get(
-            refreshed.status, refreshed.status,
+            refreshed.status,
+            refreshed.status,
         )
+
         status_icon = texts.PAYMENT_STATUS_ICONS.get(
-            refreshed.status, "❓",
+            refreshed.status,
+            "❓",
         )
+
         rendered = (
             f"🛠 Админка › 💳 Платежи › "
-            f"<b>Платёж #{refreshed.id}</b>\n\n"
+            f"<b>Платёж #{refreshed.id}</b>\n"
             f"<b>Статус:</b> {status_icon} {status_name}\n"
             f"<i>Возврат обработан.</i>"
         )
+
         kb = _get_payment_card_keyboard(
             refreshed.id,
             refreshed.status,
             user_telegram_id,
         )
+
         try:
             await callback.message.edit_text(
                 rendered,

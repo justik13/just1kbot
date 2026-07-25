@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from aiogram import Bot
 from cachetools import TTLCache
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
@@ -18,6 +18,13 @@ logger = logging.getLogger("BackgroundWorker")
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 
 PAYMENTS_START_DELAY = 60.0
+
+# Порог для очистки pending-платежей без external_id.
+# Если платёж создан локально, но YooKassa-платёж не был создан
+# (например, бот упал между create_payment и YooKassa API),
+# такой платёж никогда не будет обработан webhook'ом.
+# Через 1 час помечаем его как failed.
+ORPHAN_PENDING_THRESHOLD_HOURS = 1
 
 
 async def _preload_alerted_stale_payments():
@@ -64,6 +71,7 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
 
     while not shutdown_event.is_set():
         try:
+            await _cleanup_orphan_pending_payments()
             await _process_stale_payments(bot, settings)
         except asyncio.CancelledError:
             logger.info("Stale payments worker cancelled")
@@ -84,6 +92,54 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
             continue
 
     logger.info("Stale payments worker stopped gracefully")
+
+
+async def _cleanup_orphan_pending_payments():
+    """
+    Очищает pending-платежи, у которых нет external_id.
+    Такие платежи были созданы локально, но YooKassa-платёж
+    не был создан (бот упал, timeout, и т.д.).
+    Они никогда не будут обработаны webhook'ом, поэтому
+    через ORPHAN_PENDING_THRESHOLD_HOURS помечаем как failed.
+    """
+    current_time = now_utc()
+    threshold = current_time - timedelta(hours=ORPHAN_PENDING_THRESHOLD_HOURS)
+
+    try:
+        async with session_scope() as session:
+            stmt = (
+                select(Payment.id)
+                .where(
+                    Payment.status == "pending",
+                    Payment.external_id == None,
+                    Payment.created_at < threshold,
+                )
+                .limit(100)
+            )
+
+            result = await session.execute(stmt)
+            orphan_ids = [row[0] for row in result.all()]
+
+            if not orphan_ids:
+                return
+
+            await session.execute(
+                update(Payment)
+                .where(Payment.id.in_(orphan_ids))
+                .values(
+                    status="failed",
+                    manual_review_reason="payment_create_error",
+                )
+            )
+
+            logger.info(
+                "Cleaned up %s orphan pending payments (no external_id, older than %sh)",
+                len(orphan_ids),
+                ORPHAN_PENDING_THRESHOLD_HOURS,
+            )
+
+    except Exception as e:
+        logger.warning("Failed to cleanup orphan pending payments: %s", e)
 
 
 async def _process_stale_payments(bot: Bot, settings):
@@ -145,18 +201,24 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         return
 
     msg = (
-        f"⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>\n"
-        f"{'─' * 20}\n"
-        f"Количество: <b>{len(new_stale_for_alert)}</b>\n"
+        f"⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>
+"
+        f"{'─' * 20}
+"
+        f"Количество: <b>{len(new_stale_for_alert)}</b>
+"
     )
 
     for payment, telegram_id in new_stale_for_alert[:10]:
         method = payment.payment_method or "—"
         status_icon = "🧪" if payment.status == "requires_manual_review" else "⏳"
-        msg += f"{status_icon} ID: <code>{payment.id}</code> · User: <code>{telegram_id}</code> · {payment.amount} {payment.currency} · {method}\n"
+
+        msg += f"{status_icon} ID: <code>{payment.id}</code> · User: <code>{telegram_id}</code> · {payment.amount} {payment.currency} · {method}
+"
 
     if len(new_stale_for_alert) > 10:
-        msg += f"\n<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
+        msg += f"
+<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
 
     for admin_id in settings.ADMIN_IDS:
         try:

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 
 from .common import _show_servers_list
 
@@ -17,8 +18,6 @@ async def show_servers_list(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -26,7 +25,9 @@ async def show_servers_list(
         )
         return
 
+    await callback.answer()
     await state.clear()
+
     await _show_servers_list(callback, session, page=1)
 
 
@@ -36,8 +37,6 @@ async def servers_pagination(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -45,7 +44,16 @@ async def servers_pagination(
         )
         return
 
+    page = parse_callback_id(callback.data, 1)
+
+    if page is None or page < 1:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
 
-    page = int(callback.data.split(":")[1])
     await _show_servers_list(callback, session, page=page)

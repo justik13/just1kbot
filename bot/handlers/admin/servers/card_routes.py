@@ -14,6 +14,7 @@ from database.repositories.servers_repo import (
 )
 from services.audit_service import AuditService
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.telegram import safe
 
 from .common import _show_server_card
@@ -28,8 +29,6 @@ async def show_server_card(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -37,10 +36,20 @@ async def show_server_card(
         )
         return
 
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
-    server_id = int(callback.data.split(":")[1])
 
     server = await get_server_by_id(session, server_id)
+
     if not server:
         await callback.answer(
             texts.ERROR_SERVER_NOT_FOUND,
@@ -64,10 +73,20 @@ async def toggle_server_confirm(
         )
         return
 
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
-    server_id = int(callback.data.split(":")[1])
 
     server = await get_server_by_id(session, server_id)
+
     if not server:
         await callback.answer(
             texts.ERROR_SERVER_NOT_FOUND,
@@ -76,6 +95,7 @@ async def toggle_server_confirm(
         return
 
     new_status = not server.is_active
+
     flag = server.country_flag or "🌍"
 
     if new_status:
@@ -101,8 +121,6 @@ async def toggle_server_confirm(
     except TelegramBadRequest as e:
         logger.debug(f"toggle_server_confirm edit_text failed: {e}")
 
-    await callback.answer()
-
 
 @router.callback_query(F.data.startswith("admin_server_toggle_apply:"))
 async def toggle_server_apply(
@@ -117,10 +135,20 @@ async def toggle_server_apply(
         )
         return
 
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
-    server_id = int(callback.data.split(":")[1])
 
     server = await get_server_by_id(session, server_id)
+
     if not server:
         await callback.answer(
             texts.ERROR_SERVER_NOT_FOUND,
@@ -162,4 +190,5 @@ async def toggle_server_apply(
     )
 
     refreshed = await get_server_by_id(session, server_id)
+
     await _show_server_card(callback, session, refreshed)

@@ -13,6 +13,7 @@ from database.repositories.profiles_repo import (
     update_profile,
 )
 from services.subscription import SubscriptionService
+from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
 from .common import DEVICE_NAME_REGEX
@@ -29,7 +30,11 @@ async def rename_device_start(
 ):
     await callback.answer()
 
-    profile_id = int(callback.data.split(":")[1])
+    profile_id = parse_callback_id(callback.data, 1)
+
+    if profile_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
 
     profile = await get_profile_by_id(session, profile_id)
 
@@ -75,7 +80,6 @@ async def rename_device_process(
         return
 
     data = await state.get_data()
-
     profile_id = data.get("profile_id")
 
     profile = await get_profile_by_id(session, profile_id)
@@ -89,7 +93,6 @@ async def rename_device_process(
             texts.ERROR_ACCESS_DENIED,
             get_back_button("back_to_connections"),
         )
-
         return
 
     has_access = await SubscriptionService.check_access(
@@ -106,7 +109,6 @@ async def rename_device_process(
             texts.DEVICE_ACCESS_INACTIVE,
             get_back_button("back_to_connections"),
         )
-
         return
 
     new_name = message.text.strip()

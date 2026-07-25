@@ -21,6 +21,7 @@ from database.repositories.servers_repo import (
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
+from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +40,13 @@ URL_REGEX = re.compile(
 
 def normalize_api_url(url: str) -> str:
     url = url.strip()
+
     parts = urlsplit(url)
+
     scheme = parts.scheme.lower()
     netloc = parts.netloc.lower()
     path = parts.path.rstrip("/")
+
     return urlunsplit(
         (
             scheme,
@@ -64,36 +68,49 @@ async def _build_servers_list_text_and_kb(
         f"🛠 Админка › 🌍 <b>Серверы</b>\n"
         f"(стр. {page}/{total_pages}) · Всего: {total}\n"
     )
+
     builder = InlineKeyboardBuilder()
+
     if not servers:
         rendered += "<i>Серверов пока нет</i>\n"
     else:
         for server in servers:
             flag = server.country_flag or "🌍"
             status = "🟢" if server.is_active else "🔴"
+
+            button_text = truncate_button_text(
+                f"{status} {flag} {server.name} · {server.protocol}"
+            )
+
             builder.button(
-                text=f"{status} {flag} {safe(server.name)} · {server.protocol}",
+                text=button_text,
                 callback_data=f"admin_server_card:{server.id}",
             )
+
     if page > 1:
         builder.button(
             text="⬅️",
             callback_data=f"admin_servers_page:{page - 1}",
         )
+
     if page < total_pages:
         builder.button(
             text="➡️",
             callback_data=f"admin_servers_page:{page + 1}",
         )
+
     builder.button(
         text="➕ Добавить сервер",
         callback_data="admin_server_add",
     )
+
     builder.button(
         text="← В админку",
         callback_data="admin_menu",
     )
+
     builder.adjust(1)
+
     return rendered, builder
 
 
@@ -103,21 +120,28 @@ async def _show_servers_list(
     page: int = 1,
 ):
     total_servers = await get_server_count(session)
+
     total_pages = max(
         1,
         math.ceil(total_servers / SERVERS_PER_PAGE),
     )
+
+    if page > total_pages:
+        page = total_pages
+
     servers = await get_servers_paginated(
         session,
         page=page,
         per_page=SERVERS_PER_PAGE,
     )
+
     rendered, kb = await _build_servers_list_text_and_kb(
         servers,
         page,
         total_pages,
         total_servers,
     )
+
     try:
         await callback.message.edit_text(
             rendered,
@@ -134,11 +158,13 @@ async def _show_server_card(
     server,
 ):
     flag = server.country_flag or "🌍"
+
     status = (
         "🟢 Активен"
         if server.is_active
         else "🔴 Отключен"
     )
+
     rendered = texts.ADMIN_SERVER_CARD.format(
         flag=flag,
         name=safe(server.name),
@@ -148,6 +174,7 @@ async def _show_server_card(
         api_url=safe(server.api_url),
         max_clients=server.max_clients,
     )
+
     try:
         await callback.message.edit_text(
             rendered,
@@ -170,15 +197,20 @@ async def _bulk_delete_peers_from_api(
         return 0, []
 
     client = AmneziaClient(api_url, api_key)
+
     sem = asyncio.Semaphore(20)
+
     fail = 0
     failed_peers: list[tuple[int, str]] = []
+
     lock = asyncio.Lock()
 
     async def _delete_limited(profile_id: int, peer_id: str):
         nonlocal fail
+
         async with sem:
             ok = await client.delete_user(client_id=peer_id)
+
             async with lock:
                 if not ok:
                     fail += 1
@@ -220,15 +252,8 @@ async def _delete_server_background(
             api_key,
         )
 
-        #
-        # ИСПРАВЛЕНО: при успешном удалении пира удаляем
-        # соответствующую запись PendingAPIDeletion.
-        #
-        # Раньше PendingAPIDeletion создавался только при ошибке.
-        # Теперь (см. delete_routes.py) записи создаются ДО commit
-        # для ВСЕХ пиров. При успешном удалении их нужно убрать.
-        #
         failed_peer_ids = {peer_id for _, peer_id in failed_peers}
+
         success_peer_ids = [
             peer_id
             for _, peer_id in profiles_data
@@ -255,6 +280,7 @@ async def _delete_server_background(
             try:
                 async with session_scope() as session:
                     current_time = now_utc()
+
                     for profile_id, peer_id in failed_peers:
                         await session.execute(
                             update(PendingAPIDeletion)

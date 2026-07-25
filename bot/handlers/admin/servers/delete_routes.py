@@ -19,6 +19,7 @@ from database.repositories.servers_repo import (
 from services.amnezia_client import cleanup_server_circuit_breakers
 from services.audit_service import AuditService
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
 
@@ -34,7 +35,6 @@ async def request_delete_server(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -42,8 +42,19 @@ async def request_delete_server(
         )
         return
 
-    server_id = int(callback.data.split(":")[1])
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
+
     server = await get_server_by_id(session, server_id)
+
     if not server:
         await callback.answer(
             texts.ERROR_SERVER_NOT_FOUND,
@@ -56,7 +67,9 @@ async def request_delete_server(
             VPNProfile.server_id == server.id
         ),
     )
+
     profiles_count = len(result.all())
+
     flag = server.country_flag or "🌍"
 
     await state.update_data(delete_server_id=server_id)
@@ -79,7 +92,6 @@ async def confirm_delete_server(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -88,6 +100,7 @@ async def confirm_delete_server(
         return
 
     current_state = await state.get_state()
+
     if current_state != AdminStates.confirming_server_delete:
         await callback.answer(
             "⚠️ Сессия подтверждения истекла",
@@ -95,16 +108,28 @@ async def confirm_delete_server(
         )
         return
 
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
 
-    server_id = int(callback.data.split(":")[1])
     server = await get_server_by_id(session, server_id)
+
     if not server:
         await callback.answer(
             texts.ERROR_SERVER_NOT_FOUND,
             show_alert=True,
         )
+
         await _show_servers_list(callback, session, page=1)
+
         return
 
     server_name = server.name
@@ -119,24 +144,16 @@ async def confirm_delete_server(
             VPNProfile.server_id == server.id
         ),
     )
-    #
-    # ИСПРАВЛЕНО (Фаза 1, фикс 3):
-    #
-    # Раньше profiles_data = result.all() возвращал list[Row].
-    # Row-объекты SQLAlchemy привязаны к курсору и могут стать
-    # невалидными после session.close() в session_scope.finally.
-    # Background task _delete_server_background делал
-    # `for pid, peer in profiles_data` → crash в фоне.
-    #
-    # Теперь материализуем в plain tuples ДО queue_post_commit_task.
-    #
+
     profiles_data = [(row[0], row[1]) for row in result.all()]
 
     deleted_profiles = await delete_profiles_by_server_id(
         session,
         server_id,
     )
+
     await delete_server(session, server)
+
     cleanup_server_circuit_breakers(api_url)
 
     await AuditService.log_action(
@@ -148,11 +165,9 @@ async def confirm_delete_server(
         f"{server_name}: {deleted_profiles} profiles deleted",
     )
 
-    #
-    # PendingAPIDeletion создаётся ДО commit.
-    #
     if profiles_data:
         current_time = now_utc()
+
         for profile_id, peer_id in profiles_data:
             pending = PendingAPIDeletion(
                 server_name=server_name,
@@ -164,13 +179,16 @@ async def confirm_delete_server(
                 attempts=0,
                 created_at=current_time,
             )
+
             session.add(pending)
+
         await session.flush()
 
     await callback.answer(
         f"✅ Сервер {server_name} удалён ({deleted_profiles} устр.)",
         show_alert=True,
     )
+
     logger.info(
         f"Admin {callback.from_user.id} fully deleted server {server_id} "
         f"({server_name}) with {deleted_profiles} profiles"
@@ -178,11 +196,6 @@ async def confirm_delete_server(
 
     await _show_servers_list(callback, session, page=1)
 
-    #
-    # Post-commit task пытается удалить пиры сразу.
-    # При успехе — удалит записи из pending.
-    # При ошибке — записи остаются, cleanup повторит.
-    #
     if profiles_data:
         queue_post_commit_task(
             session,

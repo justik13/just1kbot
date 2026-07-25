@@ -1,4 +1,5 @@
 import logging
+
 from decimal import Decimal
 
 from aiogram import Router, F
@@ -26,6 +27,7 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from services.maintenance_service import MaintenanceService
 from services.payment_service import PaymentService
 from services.payment_service.common import get_payment_tariff_name
+from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub, safe
@@ -42,28 +44,46 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _is_yookassa_configured() -> bool:
+    settings = get_settings()
+    return bool(settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY)
+
+
 @router.callback_query(F.data.startswith("pay_yookassa:"))
 async def pay_yookassa(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession = None,
+    session: AsyncSession,
 ) -> None:
-    if session is None:
-        await callback.answer()
+    parts = parse_callback_parts(callback.data, 2)
+
+    if parts is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
 
-    parts = callback.data.split(":")
-    try:
-        tariff_id = int(parts[1])
-        source = parts[2] if len(parts) > 2 else "showcase"
-    except (ValueError, IndexError):
-        await callback.answer()
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
+
+    source = parts[2] if len(parts) > 2 else "showcase"
 
     back_callback = {
         "change": "payment_change_tariff",
         "renew": "payment_quick_renew",
     }.get(source, f"select_tariff:{tariff_id}:{source}")
+
+    if not _is_yookassa_configured():
+        await callback.answer()
+
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.ERROR_PAYMENT_SERVICE,
+            get_back_button(back_callback),
+        )
+        return
 
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
@@ -76,11 +96,13 @@ async def pay_yookassa(
         await callback.answer(texts.PAYMENT_CREATING)
 
         tariff = await get_tariff_by_id(session, tariff_id)
+
         if not tariff:
             await callback.answer(
                 texts.ERROR_TARIFF_NOT_FOUND, show_alert=True
             )
             return
+
         if not tariff.is_active:
             await render_hub(
                 callback.bot,
@@ -93,6 +115,7 @@ async def pay_yookassa(
         db_user = await get_user_by_telegram_id(
             session, callback.from_user.id
         )
+
         if not db_user:
             await callback.answer(
                 texts.ERROR_USER_NOT_FOUND, show_alert=True
@@ -102,6 +125,7 @@ async def pay_yookassa(
         error_text = await _check_tariff_change_allowed(
             session, db_user, tariff
         )
+
         if error_text:
             await render_hub(
                 callback.bot,
@@ -138,6 +162,7 @@ async def pay_yookassa(
             amount=tariff.price_rub,
             payment_url=safe(payment.payment_url),
         )
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -157,56 +182,54 @@ async def pay_yookassa(
 async def check_payment_status(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession = None,
+    session: AsyncSession,
     db_user=None,
 ) -> None:
     await callback.answer(texts.PAYMENT_CHECKING_STATUS)
 
-    try:
-        payment_id = int(callback.data.split(":")[1])
-    except (ValueError, IndexError):
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
         await callback.answer(texts.PAYMENT_INVALID, show_alert=True)
         return
 
-    if not db_user or not session:
+    if not db_user:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     payment_simple = await get_payment_by_id_simple(session, payment_id)
+
     if not payment_simple:
         await callback.answer(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
+
     if payment_simple.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    # ──────────────────────────────────────────────────────
-    # ИСПРАВЛЕНО: notify_user=False.
-    #
-    # Хендлер сам рисует экран успеха через render_hub
-    # сразу после проверки. Фоновое уведомление из
-    # handle_successful_payment не нужно — иначе будет
-    # дубль (hub + одиночное сообщение).
-    # ──────────────────────────────────────────────────────
     success, result_code = await PaymentService.check_yookassa_payment(
         session, payment_id, notify_user=False
     )
 
     if success and result_code in ("success", "already_processed"):
         payment = await get_payment_by_id(session, payment_id)
+
         user = await get_user_by_telegram_id(
             session, callback.from_user.id
         )
+
         profiles = (
             await get_user_profiles(session, user.id) if user else []
         )
+
         valid_until = (
             format_datetime(user.subscription_end)
             if user and user.subscription_end
             else "—"
         )
+
         tariff_name = get_payment_tariff_name(payment)
 
         text = (
@@ -218,6 +241,7 @@ async def check_payment_status(
                 tariff_name=tariff_name, valid_until=valid_until
             )
         )
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -228,6 +252,7 @@ async def check_payment_status(
     elif result_code == "paid_after_cancel":
         settings = get_settings()
         support_username = settings.SUPPORT_USERNAME.lstrip("@")
+
         payment = await get_payment_by_id(session, payment_id)
         tariff_name = get_payment_tariff_name(payment)
 
@@ -237,6 +262,7 @@ async def check_payment_status(
             tariff_name=tariff_name,
             payment_id=payment_id,
         )
+
         builder = InlineKeyboardBuilder()
         builder.button(
             text="💬 Написать в поддержку",
@@ -246,6 +272,7 @@ async def check_payment_status(
             text="🏠 В главное меню", callback_data="back_to_main_menu"
         )
         builder.adjust(1, 1)
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -256,6 +283,7 @@ async def check_payment_status(
     elif result_code == "manual_review":
         settings = get_settings()
         support_username = settings.SUPPORT_USERNAME.lstrip("@")
+
         builder = InlineKeyboardBuilder()
         builder.button(
             text="💬 Написать в поддержку",
@@ -265,6 +293,7 @@ async def check_payment_status(
             text="🏠 В главное меню", callback_data="back_to_main_menu"
         )
         builder.adjust(1, 1)
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -295,31 +324,45 @@ async def check_payment_status(
 async def cancel_invoice(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession = None,
+    session: AsyncSession,
     db_user=None,
 ) -> None:
-    parts = callback.data.split(":")
-    try:
-        payment_id = int(parts[1])
-        tariff_id = int(parts[2])
-        source = parts[3] if len(parts) > 3 else "showcase"
-    except (ValueError, IndexError):
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
         await callback.answer(texts.PAYMENT_INVALID, show_alert=True)
         return
 
-    if not db_user or not session:
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(texts.PAYMENT_INVALID, show_alert=True)
+        return
+
+    tariff_id = parse_callback_id(callback.data, 2)
+
+    if tariff_id is None:
+        await callback.answer(texts.PAYMENT_INVALID, show_alert=True)
+        return
+
+    source = parts[3] if len(parts) > 3 else "showcase"
+
+    if not db_user:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     payment = await get_payment_by_id_simple(session, payment_id)
+
     if not payment:
         await callback.answer(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
+
     if payment.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
     if payment.status == "completed":
         await callback.answer(
             texts.PAYMENT_ALREADY_PROCESSED, show_alert=True
@@ -330,13 +373,16 @@ async def cancel_invoice(
         api_cancelled = await PaymentService.cancel_payment_via_api(
             session, payment_id
         )
+
         if not api_cancelled:
             logger.warning(
                 "cancel_invoice: API cancel returned False for payment %s. "
                 "Payment may still be active in YooKassa.",
                 payment_id,
             )
+
         await mark_payment_as_cancelled(session, payment_id)
+
     except Exception as e:
         logger.warning(f"Failed to cancel payment {payment_id}: {e}")
 
@@ -344,14 +390,17 @@ async def cancel_invoice(
     await callback.answer(texts.PAYMENT_INVOICE_CANCELLED)
 
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if tariff and tariff.is_active:
         device_limit = getattr(tariff, "device_limit", 2)
         tariff_name = get_tariff_display_name(device_limit)
+
         text = texts.PAYMENT_CHECKOUT_TEXT.format(
             tariff_name=tariff_name,
             duration_days=tariff.duration_days,
             price_rub=tariff.price_rub,
         )
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -363,6 +412,7 @@ async def cancel_invoice(
         return
 
     user = await get_user_by_telegram_id(session, callback.from_user.id)
+
     if user and await _is_subscription_active(user):
         await _show_hub(callback, user, session)
     else:

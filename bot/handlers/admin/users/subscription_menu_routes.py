@@ -11,6 +11,7 @@ from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
 
@@ -28,8 +29,6 @@ async def admin_subscription_menu(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -37,9 +36,19 @@ async def admin_subscription_menu(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await get_user_by_telegram_id(session, telegram_id)
+
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -61,8 +70,10 @@ async def admin_subscription_menu(
             session,
             user.current_tariff_id,
         )
+
         if tariff:
             device_limit = tariff.device_limit
+
             tariff_name = (
                 f"{get_tariff_display_name(device_limit)} "
                 f"({device_limit} устр.)"
@@ -76,11 +87,13 @@ async def admin_subscription_menu(
             devices_count=profiles_count,
             device_limit=device_limit,
         )
+
     elif user.subscription_end:
         status_block = texts.ADMIN_SUB_STATUS_INACTIVE.format(
             tariff_name=tariff_name,
             valid_until=format_datetime(user.subscription_end),
         )
+
     else:
         status_block = texts.ADMIN_SUB_STATUS_NONE.format(
             devices_count=profiles_count,

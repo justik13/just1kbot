@@ -2,11 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from utils.tariff_names import get_tariff_group_name
-
-
-# ═══════════════════════════════════════════════════════════
-# 👤 КАРТОЧКА ПОЛЬЗОВАТЕЛЯ (с динамической кнопкой бана)
-# ═══════════════════════════════════════════════════════════
+from utils.text_limits import truncate_button_text
 
 
 def get_admin_user_card_keyboard(
@@ -19,6 +15,7 @@ def get_admin_user_card_keyboard(
         text="📅 Подписка",
         callback_data=f"admin_subscription:{user_id}",
     )
+
     builder.button(
         text="🔧 Устройства",
         callback_data=f"admin_user_devices:{user_id}",
@@ -45,11 +42,6 @@ def get_admin_user_card_keyboard(
     return builder.as_markup()
 
 
-# ═══════════════════════════════════════════════════════════
-# 📅 ПОДПИСКА
-# ═══════════════════════════════════════════════════════════
-
-
 def get_admin_subscription_keyboard(
     telegram_id: int,
     has_active_sub: bool,
@@ -61,10 +53,12 @@ def get_admin_subscription_keyboard(
             text="💎 Сменить тариф",
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
+
         builder.button(
             text="➕ Продлить доступ",
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
+
         builder.button(
             text="➖ Уменьшить дни",
             callback_data=f"admin_sub_reduce:{telegram_id}",
@@ -108,7 +102,7 @@ def get_admin_change_tariff_keyboard(
             label += " ✅"
 
         builder.button(
-            text=label,
+            text=truncate_button_text(label),
             callback_data=(
                 f"admin_sub_select_group:{telegram_id}:{device_limit}"
             ),
@@ -134,7 +128,7 @@ def get_admin_grant_tariff_keyboard(
         label = get_tariff_group_name(device_limit)
 
         builder.button(
-            text=label,
+            text=truncate_button_text(label),
             callback_data=(
                 f"admin_sub_grant_group:{telegram_id}:{device_limit}"
             ),
@@ -235,6 +229,7 @@ def get_admin_confirm_action_keyboard(
         text="✅ Подтвердить",
         callback_data=confirm_callback,
     )
+
     builder.button(
         text="❌ Отмена",
         callback_data=cancel_callback,
@@ -243,11 +238,6 @@ def get_admin_confirm_action_keyboard(
     builder.adjust(2)
 
     return builder.as_markup()
-
-
-# ═══════════════════════════════════════════════════════════
-# 🔧 УПРАВЛЕНИЕ УСТРОЙСТВАМИ
-# ═══════════════════════════════════════════════════════════
 
 
 def get_admin_user_devices_keyboard(
@@ -263,7 +253,7 @@ def get_admin_user_devices_keyboard(
         )
 
         builder.button(
-            text=f"🗑 {name}",
+            text=truncate_button_text(f"🗑 {name}"),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),

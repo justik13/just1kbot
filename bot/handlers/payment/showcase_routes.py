@@ -18,6 +18,7 @@ from database.repositories.tariffs_repo import (
     get_tariff_by_id,
 )
 from services.maintenance_service import MaintenanceService
+from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -45,11 +46,12 @@ _START_KEYBOARD = _START_KEYBOARD_BUILDER.as_markup()
 async def hub_menu_payment(
     callback: CallbackQuery,
     state: FSMContext,
+    session: AsyncSession,
     db_user=None,
-    session: AsyncSession = None,
 ) -> None:
     await callback.answer()
     await state.clear()
+
     if not db_user:
         await render_hub(
             callback.bot,
@@ -58,8 +60,7 @@ async def hub_menu_payment(
             _START_KEYBOARD,
         )
         return
-    if session is None:
-        return
+
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -67,7 +68,9 @@ async def hub_menu_payment(
             callback, session, back_to="back_to_main_menu"
         )
         return
+
     is_active = await _is_subscription_active(db_user)
+
     if is_active:
         await _show_hub(callback, db_user, session)
     else:
@@ -80,8 +83,7 @@ async def show_tariff_showcase_callback(
     session: AsyncSession,
 ) -> None:
     await callback.answer()
-    if session is None:
-        return
+
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -89,6 +91,7 @@ async def show_tariff_showcase_callback(
             callback, session, back_to="back_to_main_menu"
         )
         return
+
     await _show_showcase(callback, session)
 
 
@@ -96,20 +99,22 @@ async def show_tariff_showcase_callback(
 async def select_tariff(
     callback: CallbackQuery,
     state: FSMContext,
+    session: AsyncSession,
     db_user=None,
-    session: AsyncSession = None,
 ) -> None:
-    if session is None:
-        await callback.answer()
+    parts = parse_callback_parts(callback.data, 2)
+
+    if parts is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
 
-    parts = callback.data.split(":")
-    try:
-        tariff_id = int(parts[1])
-        source = parts[2] if len(parts) > 2 else "showcase"
-    except (ValueError, IndexError):
-        await callback.answer()
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
+
+    source = parts[2] if len(parts) > 2 else "showcase"
 
     back_to = {
         "change": "payment_change_tariff",
@@ -118,6 +123,7 @@ async def select_tariff(
 
     if not db_user:
         await callback.answer()
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -134,6 +140,7 @@ async def select_tariff(
         return
 
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff or not tariff.is_active:
         await callback.answer(
             texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
@@ -141,9 +148,11 @@ async def select_tariff(
         return
 
     device_limit = getattr(tariff, "device_limit", 2)
+
     error_text = await _check_tariff_change_allowed(
         session, db_user, tariff
     )
+
     if error_text:
         await render_hub(
             callback.bot,
@@ -155,11 +164,13 @@ async def select_tariff(
         return
 
     tariff_name = get_tariff_display_name(device_limit)
+
     text = texts.PAYMENT_CHECKOUT_TEXT.format(
         tariff_name=tariff_name,
         duration_days=tariff.duration_days,
         price_rub=tariff.price_rub,
     )
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -168,16 +179,18 @@ async def select_tariff(
             tariff.id, device_limit, source=source
         ),
     )
+
     await callback.answer()
 
 
 @router.callback_query(F.data.in_(["payment_quick_renew", "payment_renew"]))
 async def show_quick_renew(
     callback: CallbackQuery,
+    session: AsyncSession,
     db_user=None,
-    session: AsyncSession = None,
 ) -> None:
     await callback.answer()
+
     if not db_user:
         await render_hub(
             callback.bot,
@@ -186,8 +199,7 @@ async def show_quick_renew(
             _START_KEYBOARD,
         )
         return
-    if session is None:
-        return
+
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -195,13 +207,16 @@ async def show_quick_renew(
             callback, session, back_to="menu_subscription"
         )
         return
+
     tariffs = await get_active_tariffs(session)
     current_limit = await _get_effective_device_limit(session, db_user)
+
     renew_tariffs = [
         t
         for t in tariffs
         if getattr(t, "device_limit", 2) == current_limit
     ]
+
     if not renew_tariffs:
         await render_hub(
             callback.bot,
@@ -210,12 +225,16 @@ async def show_quick_renew(
             get_back_button("menu_subscription"),
         )
         return
+
     tariff_name = get_tariff_display_name(current_limit)
+
     text = texts.PAYMENT_QUICK_RENEW_HEADER.format(
         tariff_name=tariff_name,
         valid_until=format_datetime(db_user.subscription_end),
     )
+
     keyboard = get_renew_keyboard(renew_tariffs)
+
     await render_hub(
         callback.bot, callback.message.chat.id, text, keyboard
     )
@@ -224,10 +243,11 @@ async def show_quick_renew(
 @router.callback_query(F.data == "payment_change_tariff")
 async def show_change_tariff(
     callback: CallbackQuery,
+    session: AsyncSession,
     db_user=None,
-    session: AsyncSession = None,
 ) -> None:
     await callback.answer()
+
     if not db_user:
         await render_hub(
             callback.bot,
@@ -236,8 +256,7 @@ async def show_change_tariff(
             _START_KEYBOARD,
         )
         return
-    if session is None:
-        return
+
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
@@ -245,7 +264,9 @@ async def show_change_tariff(
             callback, session, back_to="menu_subscription"
         )
         return
+
     tariffs = await get_active_tariffs(session)
+
     if not tariffs:
         await render_hub(
             callback.bot,
@@ -254,16 +275,20 @@ async def show_change_tariff(
             get_back_button("menu_subscription"),
         )
         return
+
     current_limit = await _get_effective_device_limit(session, db_user)
     tariff_name = get_tariff_display_name(current_limit)
     is_active = await _is_subscription_active(db_user)
+
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
         valid_until=format_datetime(db_user.subscription_end),
     )
+
     keyboard = get_change_tariff_keyboard(
         tariffs, current_limit, is_subscription_active=is_active
     )
+
     await render_hub(
         callback.bot, callback.message.chat.id, text, keyboard
     )
@@ -276,15 +301,20 @@ async def select_tariff_type(
     db_user=None,
 ) -> None:
     await callback.answer()
-    if session is None:
+
+    parts = parse_callback_parts(callback.data, 2)
+
+    if parts is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
 
-    parts = callback.data.split(":")
-    try:
-        device_limit = int(parts[1])
-        source = parts[2] if len(parts) > 2 else "showcase"
-    except (ValueError, IndexError):
+    device_limit = parse_callback_id(callback.data, 1)
+
+    if device_limit is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
         return
+
+    source = parts[2] if len(parts) > 2 else "showcase"
 
     back_to = {
         "change": "payment_change_tariff",
@@ -299,10 +329,12 @@ async def select_tariff_type(
 
     if db_user:
         is_active = await _is_subscription_active(db_user)
+
         if is_active:
             current_limit = await _get_effective_device_limit(
                 session, db_user
             )
+
             if device_limit < current_limit:
                 await render_hub(
                     callback.bot,
@@ -317,9 +349,11 @@ async def select_tariff_type(
                     get_back_button(back_to),
                 )
                 return
+
         profiles_count = await get_user_profiles_count(
             session, db_user.id
         )
+
         if profiles_count > device_limit:
             await render_hub(
                 callback.bot,
@@ -333,11 +367,13 @@ async def select_tariff_type(
             return
 
     tariffs = await get_active_tariffs(session)
+
     type_tariffs = [
         t
         for t in tariffs
         if getattr(t, "device_limit", 2) == device_limit
     ]
+
     if not type_tariffs:
         await render_hub(
             callback.bot,
@@ -349,7 +385,9 @@ async def select_tariff_type(
 
     description = texts.PAYMENT_TARIFF_DESCRIPTION.get(device_limit, "")
     text = description + texts.PAYMENT_DURATION_HEADER
+
     keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
+
     await render_hub(
         callback.bot, callback.message.chat.id, text, keyboard
     )

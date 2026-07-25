@@ -1,4 +1,5 @@
 import logging
+import re
 from decimal import Decimal
 from typing import Optional
 
@@ -12,6 +13,45 @@ from config.settings import get_settings
 logger = logging.getLogger(__name__)
 
 _client: Optional[YooKassa] = None
+
+# Паттерн для валидации email.
+# Отсекаем фиктивные адреса вида {telegram_id}@receipt.local.
+_EMAIL_REGEX = re.compile(
+    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+)
+
+_BLOCKED_EMAIL_DOMAINS = {
+    "receipt.local",
+    "example.com",
+    "example.org",
+    "example.net",
+    "test.com",
+    "localhost",
+}
+
+
+def _is_valid_receipt_email(email: str) -> bool:
+    """
+    Проверяет, что email подходит для отправки чека.
+    Отсекаем:
+    - пустые и None;
+    - невалидные по формату;
+    - фиктивные домены (receipt.local и т.д.).
+    """
+    if not email or not isinstance(email, str):
+        return False
+
+    email = email.strip().lower()
+
+    if not _EMAIL_REGEX.match(email):
+        return False
+
+    domain = email.rsplit("@", 1)[-1]
+
+    if domain in _BLOCKED_EMAIL_DOMAINS:
+        return False
+
+    return True
 
 
 def _get_client() -> YooKassa:
@@ -106,7 +146,17 @@ class YooKassaService:
                 capture=True,
             )
 
-            if receipt_email and settings.YOOKASSA_RECEIPTS_ENABLED:
+            # Чеки отправляются только если:
+            # 1. YOOKASSA_RECEIPTS_ENABLED = true в .env;
+            # 2. receipt_email валидный и не фиктивный.
+            #
+            # Фиктивные адреса вида {telegram_id}@receipt.local
+            # больше НЕ отправляются в YooKassa.
+            if (
+                settings.YOOKASSA_RECEIPTS_ENABLED
+                and receipt_email
+                and _is_valid_receipt_email(receipt_email)
+            ):
                 params_kwargs["receipt"] = {
                     "customer": {"email": receipt_email},
                     "items": [
@@ -121,6 +171,12 @@ class YooKassaService:
                         }
                     ],
                 }
+            elif settings.YOOKASSA_RECEIPTS_ENABLED and receipt_email:
+                logger.warning(
+                    "Receipt email rejected as invalid/fake: %s. "
+                    "Payment will be created without receipt.",
+                    receipt_email[:50],
+                )
 
             params = CreatePaymentParams(**params_kwargs)
 

@@ -28,6 +28,7 @@ from services.device_service import (
 )
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
+from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
 from .common import (
@@ -112,6 +113,7 @@ async def start_add_device(
         return
 
     user = db_user or await get_user_by_telegram_id(session, user_id)
+
     if not user or not await SubscriptionService.check_access(session, user.telegram_id):
         await render_hub(
             callback.bot,
@@ -126,6 +128,7 @@ async def start_add_device(
     await state.clear()
 
     servers = await get_available_servers(session)
+
     if not servers:
         await render_hub(
             callback.bot,
@@ -136,6 +139,7 @@ async def start_add_device(
         return
 
     builder = InlineKeyboardBuilder()
+
     for server in servers:
         flag = server.country_flag or "🌍"
         builder.button(
@@ -175,6 +179,7 @@ async def select_server(
         return
 
     user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
+
     if not user or not await SubscriptionService.check_access(session, user.telegram_id):
         await render_hub(
             callback.bot,
@@ -186,7 +191,14 @@ async def select_server(
         await state.clear()
         return
 
-    server_id = int(callback.data.split(":")[1])
+    server_id = parse_callback_id(callback.data, 1)
+
+    if server_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        _creating_devices.pop(callback.from_user.id, None)
+        await state.clear()
+        return
+
     server = await get_server_by_id(session, server_id)
 
     if not server:
@@ -211,8 +223,6 @@ async def select_server(
 
     flag = server.country_flag or "🌍"
 
-    # Критично: снимаем блокировку до ввода имени,
-    # иначе пользователь не сможет перейти к следующему шагу.
     _creating_devices.pop(callback.from_user.id, None)
 
     await render_hub(
@@ -239,6 +249,7 @@ async def enter_device_name(
         return
 
     user = db_user or await get_user_by_telegram_id(session, user_id)
+
     if not user or not await SubscriptionService.check_access(session, user.telegram_id):
         await render_hub(
             message.bot,
@@ -300,6 +311,7 @@ async def enter_device_name(
             return
 
         existing_profiles = await get_user_profiles(session, user.id)
+
         for p in existing_profiles:
             if p.server_id == server_id and p.device_name.lower() == device_name.lower():
                 await render_hub(
@@ -346,6 +358,7 @@ async def enter_device_name(
             return
         except DeviceLimitExceeded:
             device_limit = await _get_effective_device_limit(user, session)
+
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -384,6 +397,7 @@ async def enter_device_name(
             return
         except Exception as e:
             logger.error(f"Unexpected error in enter_device_name: {e}", exc_info=True)
+
             await render_hub(
                 message.bot,
                 message.chat.id,
