@@ -78,9 +78,7 @@ async def show_admin_menu(
         return
 
     await state.clear()
-
     await _show_admin_dashboard(callback, session)
-
     await callback.answer()
 
 
@@ -113,15 +111,12 @@ async def show_admin_audit(
             )
 
             target = ""
-
             if log.target_type:
                 target = f" · {safe(log.target_type)}"
-
-            if log.target_id:
-                target += f" #{log.target_id}"
+                if log.target_id:
+                    target += f" #{log.target_id}"
 
             details = ""
-
             if log.details:
                 details = f"\n{safe(truncate_details(log.details, 300))}"
 

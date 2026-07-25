@@ -47,19 +47,16 @@ async def manage_device(
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
-
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
-
     if not profile or not db_user or profile.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     server = await get_server_by_id(session, profile.server_id)
-
     flag = server.country_flag if server else "🌍"
     server_name = server.name if server else "Неизвестно"
     protocol = _format_protocol(server.protocol if server else None)
@@ -83,13 +80,9 @@ async def manage_device(
         keyboard = get_device_keyboard(profile.id)
     else:
         rendered += (
-            "
-⚠️ <b>Доступ неактивен</b>
-"
-            "Ключ и файлы конфигурации недоступны.
-"
-            "Устройство можно удалить.
-"
+            "\n⚠️ <b>Доступ неактивен</b>\n"
+            "Ключ и файлы конфигурации недоступны.\n"
+            "Устройство можно удалить.\n"
         )
 
         builder = InlineKeyboardBuilder()
@@ -113,25 +106,21 @@ async def show_config(
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
-
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
-
     if not profile or not db_user or profile.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
-
     if not has_access:
         await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
 
     raw_config = profile.raw_config or ""
-
     if not raw_config:
         await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
         return
@@ -179,19 +168,16 @@ async def download_conf(
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
-
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
-
     if not profile or not db_user or profile.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
-
     if not has_access:
         await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
@@ -203,7 +189,6 @@ async def download_conf(
     ).strip() or "client"
 
     raw_config = profile.raw_config or ""
-
     if not raw_config:
         await render_hub(
             callback.bot, callback.message.chat.id,
@@ -213,7 +198,6 @@ async def download_conf(
         return
 
     decoded = decode_vpn_uri_to_json(raw_config)
-
     if decoded is None:
         await render_hub(
             callback.bot, callback.message.chat.id,

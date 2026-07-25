@@ -4,7 +4,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 
 from config.settings import get_settings
-
 from .common import (
     MANUAL_REVIEW_REASONS,
     _alerted_manual_review,
@@ -64,6 +63,7 @@ async def _send_manual_review_alert_now(
     payment_id = snapshot.get("payment_id")
     if payment_id is None:
         return
+
     if payment_id in _alerted_manual_review:
         return
 
@@ -113,6 +113,7 @@ async def _send_paid_after_cancel_alert_now(
     payment_id = snapshot.get("payment_id")
     if payment_id is None:
         return
+
     if payment_id in _alerted_paid_after_cancel:
         return
 
@@ -157,18 +158,12 @@ async def _send_paid_after_cancel_alert_now(
 async def _notify_client_paid_after_cancel_now(
     snapshot: dict,
 ) -> None:
-    """
-    Уведомление клиенту: оплата пришла после отмены.
-
-    ИСПРАВЛЕНО: добавлена кнопка «✅ Прочитано (убрать)».
-    Сообщение остаётся standalone (не hub), потому что
-    это критический алерт с url-кнопкой в поддержку.
-    Но пользователь может убрать его сам — не мусорит.
-    """
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
+
     if payment_id is None or user_telegram_id is None:
         return
+
     if payment_id in _notified_paid_after_cancel:
         return
 
@@ -241,18 +236,12 @@ async def _notify_client_paid_after_cancel_now(
 async def _notify_client_chargeback_now(
     snapshot: dict,
 ) -> None:
-    """
-    Уведомление клиенту: chargeback / возврат средств.
-
-    ИСПРАВЛЕНО: добавлена кнопка «✅ Прочитано (убрать)».
-    Сообщение остаётся standalone (не hub), потому что
-    это критический алерт с url-кнопкой в поддержку.
-    Но пользователь может убрать его сам — не мусорит.
-    """
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
+
     if payment_id is None or user_telegram_id is None:
         return
+
     if payment_id in _notified_chargeback:
         return
 
@@ -317,6 +306,7 @@ async def _send_cancel_after_completed_alert_now(
     builder = InlineKeyboardBuilder()
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
+
     builder.button(
         text="👤 Профиль клиента",
         callback_data=(
@@ -354,6 +344,7 @@ async def _send_chargeback_alert_now(
     builder = InlineKeyboardBuilder()
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
+
     builder.button(
         text="👤 Профиль пользователя",
         callback_data=(
@@ -396,6 +387,7 @@ async def _send_payment_not_found_alert_now(
     alert_key = (
         f"{source}:{transaction_id}:{status}:{user_telegram_id}"
     )
+
     if alert_key in _alerted_payment_not_found:
         return
 

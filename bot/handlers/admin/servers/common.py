@@ -40,13 +40,10 @@ URL_REGEX = re.compile(
 
 def normalize_api_url(url: str) -> str:
     url = url.strip()
-
     parts = urlsplit(url)
-
     scheme = parts.scheme.lower()
     netloc = parts.netloc.lower()
     path = parts.path.rstrip("/")
-
     return urlunsplit(
         (
             scheme,
@@ -77,11 +74,9 @@ async def _build_servers_list_text_and_kb(
         for server in servers:
             flag = server.country_flag or "🌍"
             status = "🟢" if server.is_active else "🔴"
-
             button_text = truncate_button_text(
                 f"{status} {flag} {server.name} · {server.protocol}"
             )
-
             builder.button(
                 text=button_text,
                 callback_data=f"admin_server_card:{server.id}",
@@ -92,7 +87,6 @@ async def _build_servers_list_text_and_kb(
             text="⬅️",
             callback_data=f"admin_servers_page:{page - 1}",
         )
-
     if page < total_pages:
         builder.button(
             text="➡️",
@@ -103,12 +97,10 @@ async def _build_servers_list_text_and_kb(
         text="➕ Добавить сервер",
         callback_data="admin_server_add",
     )
-
     builder.button(
         text="← В админку",
         callback_data="admin_menu",
     )
-
     builder.adjust(1)
 
     return rendered, builder
@@ -120,7 +112,6 @@ async def _show_servers_list(
     page: int = 1,
 ):
     total_servers = await get_server_count(session)
-
     total_pages = max(
         1,
         math.ceil(total_servers / SERVERS_PER_PAGE),
@@ -158,7 +149,6 @@ async def _show_server_card(
     server,
 ):
     flag = server.country_flag or "🌍"
-
     status = (
         "🟢 Активен"
         if server.is_active
@@ -197,20 +187,15 @@ async def _bulk_delete_peers_from_api(
         return 0, []
 
     client = AmneziaClient(api_url, api_key)
-
     sem = asyncio.Semaphore(20)
-
     fail = 0
     failed_peers: list[tuple[int, str]] = []
-
     lock = asyncio.Lock()
 
     async def _delete_limited(profile_id: int, peer_id: str):
         nonlocal fail
-
         async with sem:
             ok = await client.delete_user(client_id=peer_id)
-
             async with lock:
                 if not ok:
                     fail += 1
@@ -253,7 +238,6 @@ async def _delete_server_background(
         )
 
         failed_peer_ids = {peer_id for _, peer_id in failed_peers}
-
         success_peer_ids = [
             peer_id
             for _, peer_id in profiles_data
@@ -280,7 +264,6 @@ async def _delete_server_background(
             try:
                 async with session_scope() as session:
                     current_time = now_utc()
-
                     for profile_id, peer_id in failed_peers:
                         await session.execute(
                             update(PendingAPIDeletion)

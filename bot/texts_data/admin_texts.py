@@ -20,7 +20,6 @@ TEXTS = {
 
     "DASHBOARD_MAINTENANCE_ON": """
 🛠 <b>Технические работы:</b> 🔴 ВКЛЮЧЕНЫ
-
 <i>Новые подключения и оплата временно ограничены.</i>
 """,
 
@@ -32,7 +31,9 @@ TEXTS = {
     # MAINTENANCE ADMIN
     # ============================================================
     "ADMIN_MAINTENANCE_MENU_ENABLED": """🛠 <b>Режим технических работ</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 Текущий статус: 🔴 <b>ВКЛЮЧЕН</b>
 
 Что сейчас ограничено:
@@ -51,7 +52,9 @@ TEXTS = {
 Все ограничения для пользователей будут сняты.""",
 
     "ADMIN_MAINTENANCE_MENU_DISABLED": """🛠 <b>Режим технических работ</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 Текущий статус: 🟢 <b>ВЫКЛЮЧЕН</b>
 
 ⚠️ <b>Включить режим технических работ?</b>
@@ -129,7 +132,7 @@ Admin <code>{admin_id}</code>
 
 Поддерживается HTML-разметка (<b>жирный</b>, <i>курсив</i>, <code>код</code>)""",
 
-    "BROADCAST_PREVIEW": "📢 <b>Предпросмотр рассылки ({content_type}):</b>\n\n{text}",
+    "BROADCAST_PREVIEW": "📢 <b>Предпросмотр рассылки ({content_type}):</b>\n{text}",
 
     "BROADCAST_RESULT": """✅ Рассылка завершена!
 
@@ -210,7 +213,6 @@ Admin <code>{admin_id}</code>
 Пользователь: <code>{telegram_id}</code>
 
 Пользователь будет заблокирован.
-
 Все его устройства будут удалены без возможности восстановления.
 Ожидающие платежи будут отменены.
 
@@ -221,7 +223,6 @@ Admin <code>{admin_id}</code>
 Пользователь: <code>{telegram_id}</code>
 
 Пользователь будет разблокирован.
-
 Устройства не будут восстановлены.
 Пользователь сможет создать их заново, если подписка активна.
 
@@ -238,6 +239,7 @@ Admin <code>{admin_id}</code>
 Пользователь: <code>{telegram_id}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
+
 {status_block}""",
 
     "ADMIN_SUB_STATUS_ACTIVE": """🟢 <b>Статус:</b> Активна
@@ -264,6 +266,7 @@ Admin <code>{admin_id}</code>
 Устройств: <b>{devices_count}</b>
 
 ━━━━━━━━━━━━━━━━━━━━
+
 Выберите новый тариф:""",
 
     "ADMIN_SUB_CONFIRM_TARIFF": """⚠️ <b>Подтверждение смены тарифа</b>
@@ -302,6 +305,7 @@ Admin <code>{admin_id}</code>
 Действует до: <b>{valid_until}</b>
 
 ━━━━━━━━━━━━━━━━━━━━
+
 Выберите срок продления:""",
 
     "ADMIN_SUB_CONFIRM_EXTEND": """⚠️ <b>Подтверждение продления</b>
@@ -347,6 +351,7 @@ Admin <code>{admin_id}</code>
 Пользователь: <code>{telegram_id}</code>
 
 ━━━━━━━━━━━━━━━━━━━━
+
 Выберите тариф:""",
 
     "ADMIN_SUB_GRANT_DAYS_HEADER": """🛠 Админка › 🎫 Выдать доступ
@@ -355,6 +360,7 @@ Admin <code>{admin_id}</code>
 Тариф: <b>{tariff_name}</b>
 
 ━━━━━━━━━━━━━━━━━━━━
+
 Выберите срок:""",
 
     "ADMIN_SUB_GRANT_CUSTOM_PROMPT": """🛠 Админка › 🎫 Выдать доступ › ⌨️ <b>Ручной срок</b>
@@ -400,23 +406,31 @@ Admin <code>{admin_id}</code>
     # ADMIN MANUAL GRANT
     # ============================================================
     "ADMIN_MANUAL_GRANT_CONFIRM": """⚠️ <b>Подтверждение ручной выдачи</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Клиент:</b> <code>{user_telegram_id}</code>
 💎 <b>Тариф:</b> {tariff_name}
 💰 <b>Сумма:</b> {amount} {currency}
 📦 <b>Статус:</b> {status_name}
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Подписка будет выдана вручную. Клиент получит уведомление.</i>""",
 
     "ADMIN_MANUAL_GRANT_SUCCESS_ANSWER": "✅ Подписка выдана вручную для {user_telegram_id}",
 
     "ADMIN_MANUAL_GRANT_SUCCESS_MESSAGE": """✅ <b>Подписка выдана вручную</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Клиент:</b> <code>{user_telegram_id}</code>
 🛠 <b>Админ:</b> <code>{admin_id}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Клиент получил доступ автоматически.</i>""",
 
     "ADMIN_MANUAL_GRANT_FAILED": "❌ Ошибка при выдаче подписки",
@@ -456,7 +470,9 @@ API: <code>{api_url}</code>""",
 ✏️ Введите имя сервера (например: Нидерланды):""",
 
     "ADMIN_SERVER_FLAG_PROMPT": "🏳️ Введите флаг страны (эмодзи, например: 🇳🇱):",
+
     "ADMIN_SERVER_URL_PROMPT": "🔗 Введите API URL сервера (например: http://127.0.0.1:4001):",
+
     "ADMIN_SERVER_KEY_PROMPT": "🔑 Введите API ключ сервера:",
 
     "ADMIN_SERVER_RENAME_PROMPT": """🛠 Админка › 🌍 Серверы › ✏️ <b>Редактирование</b>
@@ -506,7 +522,6 @@ URL: <code>{api_url}</code>
 
     "ADMIN_SERVER_DELETE_BACKGROUND_PARTIAL": """⚠️ Сервер {server_name} удалён из БД ({deleted_profiles} устр.),
 но {api_fail}/{total_profiles} пиров не удалось удалить из API.
-
 Worker Cleanup подчистит позже.""",
 
     "ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM": """⚠️ <b>Подтверждение включения сервера</b>
@@ -573,7 +588,6 @@ Worker Cleanup подчистит позже.""",
     "ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING": """⚠️ <b>Отключение тарифа заблокировано</b>
 
 По этому тарифу есть ожидающие платежи.
-
 Сначала обработайте или отмените их, затем выключите тариф.""",
 
     "PAYMENT_STATUS_NAMES": {
@@ -589,70 +603,96 @@ Worker Cleanup подчистит позже.""",
     # ALERTS TO ADMINS
     # ============================================================
     "ALERT_CRITICAL_BOT_ERROR": """🚨 <b>КРИТИЧЕСКАЯ ОШИБКА БОТА</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 🔍 <b>Request ID:</b> <code>{request_id}</code>
 ⚠️ <b>Тип:</b> <code>{error_type}</code>
 📝 <b>Описание:</b> <i>{error_short}</i>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Полный лог доступен через:
 <code>journalctl -u projectx-bot | grep {request_id}</code></i>""",
 
     "ALERT_PAYMENT_MANUAL_REVIEW": """⚠️ <b>Платёж требует ручной проверки</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Клиент:</b> <code>{user_telegram_id}</code> ({username})
 💎 <b>Тариф:</b> {tariff_name}
 💰 <b>Сумма:</b> {amount} {currency}
 🧩 <b>Причина:</b> {reason_text}
 📍 <b>Источник:</b> <code>{source}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Доступ не выдан автоматически.</i>""",
 
     "ALERT_PAID_AFTER_CANCEL": """⚠️ <b>Оплата после отмены</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Клиент:</b> <code>{user_telegram_id}</code> ({username})
 💎 <b>Тариф:</b> {tariff_name}
 💰 <b>Сумма:</b> {amount} {currency}
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Деньги поступили, но платёж был ранее отменён.
 Клиент уведомлён автоматически.
 Выберите действие:</i>""",
 
     "ALERT_CANCEL_AFTER_COMPLETED": """🚨 <b>Критическая платёжная ситуация</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Клиент:</b> <code>{user_telegram_id}</code> ({username})
 💎 <b>Тариф:</b> {tariff_name}
 💰 <b>Сумма:</b> {amount} {currency}
 🔗 <b>Transaction:</b> <code>{transaction_id}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Платёж уже был completed, но пришёл CANCELED.
 Требуется ручная проверка. Возможна отмена/chargeback.</i>""",
 
     "ALERT_CHARGEBACK": """🚨 <b>Возврат средств</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 💳 <b>Платёж ID:</b> <code>{payment_id}</code>
 👤 <b>Пользователь:</b> <code>{user_telegram_id}</code> ({username})
 💎 <b>Тариф:</b> {tariff_name}
 💰 <b>Сумма:</b> {amount} {currency}
 🔗 <b>Transaction:</b> <code>{transaction_id}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Доступ отозван. Устройства удалены.
 Реферальные бонусы откатаны.
 Клиент уведомлён автоматически.</i>""",
 
     "ALERT_PAYMENT_NOT_FOUND": """🚨 <b>Платёж не найден / не сопоставлен</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 🔗 <b>Transaction / payload:</b> <code>{transaction_id}</code>
 📦 <b>Статус события:</b> <code>{status}</code>
 👤 <b>Telegram ID:</b> <code>{user_telegram_id}</code>
 📍 <b>Источник:</b> <code>{source}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Проверьте платёж вручную.</i>""",
 
     "ALERT_STALE_PAYMENTS_NEW": """⚠️ <b>Новые зависшие платежи (pending > 1ч)</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 Количество: <b>{count}</b>
 
 {lines}""",
@@ -668,41 +708,58 @@ Worker Cleanup подчистит позже.""",
 💡 Проверьте сервер вручную""",
 
     "ALERT_QUOTA_EXCEEDED": """⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 👤 <b>Пользователь:</b> <code>{telegram_id}</code>
 🌍 <b>Сервер:</b> {server_name}
 📊 <b>Использовано:</b> <b>{traffic_tb} TiB</b>
 🆔 <b>Profile ID:</b> <code>{profile_id}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Пользователь скачал более 1 TiB трафика.
 Рекомендуется связаться с ним или принять меры.
 Доступ НЕ отключен автоматически (Fair Usage Policy).</i>""",
 
     "ALERT_PENDING_DELETION_EXPIRED": """🚨 <b>Не удалось удалить устройства на сервере</b>
-━━━━━━━━━━━━━━━━━━━━
-<b>{count}</b> записей достигли лимита попыток.
 
+━━━━━━━━━━━━━━━━━━━━
+
+<b>{count}</b> записей достигли лимита попыток.
 Они удалены из очереди, но могли остаться на сервере.
 
 <i>Требуется ручная проверка.</i>""",
 
     "ALERT_WORKER_CRASH": """🚨 <b>Фоновый воркер упал</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 🧩 <b>Воркер:</b> <code>{worker_name}</code>
 ⚠️ <b>Ошибка:</b> <code>{error_text}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Supervisor пытается перезапустить воркер.</i>""",
 
     "ALERT_WORKER_CRASH_CRITICAL": """🚨 <b>Фоновый воркер не удалось восстановить</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 🧩 <b>Воркер:</b> <code>{worker_name}</code>
 🔁 <b>Попыток перезапуска:</b> {count}
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Требуется ручное вмешательство.</i>""",
 
     "ALERT_WORKER_SUPERVISOR_CRASH": """🚨 <b>Supervisor фоновых воркеров упал</b>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 ⚠️ <b>Ошибка:</b> <code>{error_text}</code>
+
 ━━━━━━━━━━━━━━━━━━━━
+
 <i>Требуется ручное вмешательство. Воркеры могут больше не перезапускаться.</i>""",
 }

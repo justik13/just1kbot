@@ -62,7 +62,6 @@ async def _send_worker_crash_alert(
 ):
     try:
         settings = get_settings()
-
         message = (
             "🚨 <b>Фоновый воркер упал</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -71,7 +70,6 @@ async def _send_worker_crash_alert(
             "━━━━━━━━━━━━━━━━━━━━\n"
             "<i>Supervisor пытается перезапустить воркер.</i>"
         )
-
         for admin_id in settings.ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -79,13 +77,10 @@ async def _send_worker_crash_alert(
                     message,
                     parse_mode="HTML",
                 )
-
             except Exception:
                 pass
-
     except Exception as e:
         logger.error("Failed to send worker crash alert: %s", e)
-
 
 async def _send_supervisor_crash_alert(
     bot: Bot,
@@ -93,7 +88,6 @@ async def _send_supervisor_crash_alert(
 ):
     try:
         settings = get_settings()
-
         message = (
             "🚨 <b>Supervisor фоновых воркеров упал</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -102,7 +96,6 @@ async def _send_supervisor_crash_alert(
             "<i>Требуется ручное вмешательство. "
             "Воркеры могут больше не перезапускаться.</i>"
         )
-
         for admin_id in settings.ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -110,10 +103,8 @@ async def _send_supervisor_crash_alert(
                     message,
                     parse_mode="HTML",
                 )
-
             except Exception:
                 pass
-
     except Exception as e:
         logger.error("Failed to send supervisor crash alert: %s", e)
 
@@ -209,11 +200,9 @@ async def _supervise_workers(bot: Bot):
                     "Not restarting anymore.",
                     worker_name,
                     _MAX_WORKER_RESTARTS,
-                )
-
+                    )
                 try:
                     settings = get_settings()
-
                     critical_message = (
                         "🚨 <b>Фоновый воркер не удалось восстановить</b>\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -221,24 +210,21 @@ async def _supervise_workers(bot: Bot):
                         f"🔁 <b>Попыток перезапуска:</b> {count}\n"
                         "━━━━━━━━━━━━━━━━━━━━\n"
                         "<i>Требуется ручное вмешательство.</i>"
-                    )
-
+                        )
                     for admin_id in settings.ADMIN_IDS:
                         try:
                             await bot.send_message(
                                 admin_id,
                                 critical_message,
                                 parse_mode="HTML",
-                            )
-
+                                )
                         except Exception:
                             pass
-
                 except Exception as e:
                     logger.error(
                         "Failed to send critical worker alert: %s",
                         e,
-                    )
+                        )
 
                 # ВАЖНО:
                 # убираем задачу, чтобы supervisor не отправлял

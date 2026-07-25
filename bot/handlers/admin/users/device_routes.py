@@ -41,7 +41,6 @@ async def admin_user_devices(
         return
 
     telegram_id = parse_callback_id(callback.data, 1)
-
     if telegram_id is None:
         await callback.answer(
             "Некорректный запрос",
@@ -52,7 +51,6 @@ async def admin_user_devices(
     await callback.answer()
 
     user = await _get_user_with_profiles(session, telegram_id)
-
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -73,13 +71,11 @@ async def admin_user_devices(
         text = texts.ADMIN_USER_DEVICES_HEADER.format(
             telegram_id=telegram_id
         )
-
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
                 or f"Устройство #{profile.id}"
             )
-
             text += f"\n• {safe(name)}"
 
     try:
@@ -108,7 +104,6 @@ async def admin_delete_device_confirm(
         return
 
     parts = parse_callback_parts(callback.data, 3)
-
     if parts is None:
         await callback.answer(
             "Некорректный запрос",
@@ -129,7 +124,6 @@ async def admin_delete_device_confirm(
     await callback.answer()
 
     profile = await get_profile_by_id(session, profile_id)
-
     if not profile:
         await callback.answer(
             texts.ERROR_PROFILE_NOT_FOUND,
@@ -138,7 +132,6 @@ async def admin_delete_device_confirm(
         return
 
     server = await get_server_by_id(session, profile.server_id)
-
     flag = server.country_flag if server else "🌍"
     server_name = server.name if server else "Неизвестно"
 
@@ -182,7 +175,6 @@ async def admin_delete_device_apply(
         return
 
     parts = parse_callback_parts(callback.data, 3)
-
     if parts is None:
         await callback.answer(
             "Некорректный запрос",
@@ -204,7 +196,6 @@ async def admin_delete_device_apply(
 
     try:
         profile = await get_profile_by_id(session, profile_id)
-
         if not profile:
             await callback.answer(
                 texts.ERROR_PROFILE_NOT_FOUND,
@@ -250,9 +241,7 @@ async def admin_delete_device_apply(
             f"admin_delete_device_apply error: {e}",
             exc_info=True,
         )
-
         await session.rollback()
-
         await callback.answer(
             texts.ADMIN_DELETE_DEVICE_ERROR,
             show_alert=True,

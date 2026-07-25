@@ -250,14 +250,12 @@ async def _process_server_traffic(server_info, api_clients):
 async def _send_quota_alert(telegram_id: int, server_name: str, total_bytes: int, profile_id: int):
     try:
         from services.workers.heartbeat import get_bot_ref
-
         bot = get_bot_ref()
         if not bot:
             return
 
         settings = get_settings()
         admin_ids = settings.ADMIN_IDS
-
         if not admin_ids:
             return
 
@@ -277,7 +275,6 @@ async def _send_quota_alert(telegram_id: int, server_name: str, total_bytes: int
         )
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
-
         builder = InlineKeyboardBuilder()
         builder.button(text="👤 Профиль пользователя", callback_data=f"admin_user_card:{telegram_id}")
         builder.adjust(1)

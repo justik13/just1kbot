@@ -4,6 +4,7 @@ import logging
 import re
 import signal
 import traceback
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
@@ -16,6 +17,7 @@ from aiogram.utils.chat_action import ChatActionMiddleware
 from cachetools import TTLCache
 from cryptography.fernet import Fernet
 from aiohttp import web
+
 from bot import texts
 from bot.middlewares import (
     DBSessionMiddleware,
@@ -129,6 +131,7 @@ async def global_error_handler(
         )
         tb_text = "".join(tb_lines)
         tb_sanitized = _sanitize_text(tb_text)
+
         if len(tb_sanitized) > 4000:
             tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
 
@@ -164,8 +167,10 @@ async def global_error_handler(
         )
 
         alert_key = f"{error_type_safe}:{error_short}"
+
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
+
             for admin_id in settings.ADMIN_IDS:
                 try:
                     await event.bot.send_message(
@@ -203,6 +208,7 @@ async def setup_bot_commands(bot: Bot):
 
 async def setup_bot() -> tuple[Bot, Dispatcher]:
     settings = get_settings()
+
     bot = Bot(token=settings.BOT_TOKEN)
     storage = RedisStorage.from_url(settings.REDIS_URL)
     dp = Dispatcher(storage=storage)
