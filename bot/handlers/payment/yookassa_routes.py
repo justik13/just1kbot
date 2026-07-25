@@ -81,7 +81,6 @@ async def pay_yookassa(
                 texts.ERROR_TARIFF_NOT_FOUND, show_alert=True
             )
             return
-
         if not tariff.is_active:
             await render_hub(
                 callback.bot,
@@ -139,7 +138,6 @@ async def pay_yookassa(
             amount=tariff.price_rub,
             payment_url=safe(payment.payment_url),
         )
-
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -180,13 +178,20 @@ async def check_payment_status(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
-
     if payment_simple.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
+    # ──────────────────────────────────────────────────────
+    # ИСПРАВЛЕНО: notify_user=False.
+    #
+    # Хендлер сам рисует экран успеха через render_hub
+    # сразу после проверки. Фоновое уведомление из
+    # handle_successful_payment не нужно — иначе будет
+    # дубль (hub + одиночное сообщение).
+    # ──────────────────────────────────────────────────────
     success, result_code = await PaymentService.check_yookassa_payment(
-        session, payment_id
+        session, payment_id, notify_user=False
     )
 
     if success and result_code in ("success", "already_processed"):
@@ -202,7 +207,6 @@ async def check_payment_status(
             if user and user.subscription_end
             else "—"
         )
-        # ИСПРАВЛЕНО (пункт 15): используем общую функцию
         tariff_name = get_payment_tariff_name(payment)
 
         text = (
@@ -313,18 +317,15 @@ async def cancel_invoice(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
-
     if payment.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-
     if payment.status == "completed":
         await callback.answer(
             texts.PAYMENT_ALREADY_PROCESSED, show_alert=True
         )
         return
 
-    # ИСПРАВЛЕНО (пункт 3): проверяем результат cancel_payment_via_api
     try:
         api_cancelled = await PaymentService.cancel_payment_via_api(
             session, payment_id
@@ -335,9 +336,6 @@ async def cancel_invoice(
                 "Payment may still be active in YooKassa.",
                 payment_id,
             )
-        # В любом случае помечаем как cancelled в БД,
-        # потому что пользователь нажал "Отменить".
-        # Если API не отменил — вебхук придёт и обработается как paid_after_cancel.
         await mark_payment_as_cancelled(session, payment_id)
     except Exception as e:
         logger.warning(f"Failed to cancel payment {payment_id}: {e}")

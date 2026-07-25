@@ -21,6 +21,7 @@ from services.payment_service.common import get_payment_tariff_name
 from services.workers.heartbeat import get_bot_ref
 from utils.admin import is_admin
 from utils.formatters import format_datetime
+from utils.telegram import render_hub
 
 from .common import (
     MANUAL_GRANT_ALLOWED_STATUSES,
@@ -36,7 +37,6 @@ async def admin_manual_grant(
     session: AsyncSession,
 ):
     await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -53,21 +53,18 @@ async def admin_manual_grant(
             show_alert=True,
         )
         return
-
     if payment.status == "completed":
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_ALREADY_COMPLETED,
             show_alert=True,
         )
         return
-
     if payment.status == "refunded":
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_REFUNDED,
             show_alert=True,
         )
         return
-
     if payment.status not in MANUAL_GRANT_ALLOWED_STATUSES:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_INVALID_STATUS,
@@ -82,14 +79,12 @@ async def admin_manual_grant(
             show_alert=True,
         )
         return
-
     if user.is_deleted:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_USER_DELETED,
             show_alert=True,
         )
         return
-
     if user.is_banned:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_USER_BANNED,
@@ -97,9 +92,7 @@ async def admin_manual_grant(
         )
         return
 
-    # ИСПРАВЛЕНО (пункт 15): используем общую функцию
     tariff_name = get_payment_tariff_name(payment)
-
     status_name = texts.PAYMENT_STATUS_NAMES.get(
         payment.status,
         payment.status,
@@ -135,7 +128,6 @@ async def admin_manual_grant_apply(
     session: AsyncSession,
 ):
     await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -184,6 +176,13 @@ async def admin_manual_grant_apply(
                     f"admin_manual_grant_apply edit_text failed: {e}"
                 )
 
+            # ──────────────────────────────────────────────
+            # ИСПРАВЛЕНО: render_hub вместо bot.send_message.
+            #
+            # Уведомление клиенту теперь заменяет текущий
+            # hub клиента и само заменяется при навигации.
+            # Одиночных сообщений в чате не остаётся.
+            # ──────────────────────────────────────────────
             try:
                 bot = get_bot_ref()
                 if bot and payment and payment.user:
@@ -192,10 +191,12 @@ async def admin_manual_grant_apply(
                     valid_until = format_datetime(
                         user.subscription_end
                     )
+
                     client_msg = texts.USER_MANUAL_GRANT_NOTIFICATION.format(
                         tariff_name=tariff_name,
                         valid_until=valid_until,
                     )
+
                     builder = InlineKeyboardBuilder()
                     builder.button(
                         text="🔌 Подключить устройство",
@@ -206,12 +207,14 @@ async def admin_manual_grant_apply(
                         callback_data="back_to_main_menu",
                     )
                     builder.adjust(1, 1)
-                    await bot.send_message(
+
+                    await render_hub(
+                        bot,
                         user.telegram_id,
                         client_msg,
-                        reply_markup=builder.as_markup(),
-                        parse_mode="HTML",
+                        builder.as_markup(),
                     )
+
             except TelegramForbiddenError:
                 logger.info(
                     "Manual grant notification: user %s "
@@ -238,6 +241,7 @@ async def admin_manual_grant_apply(
                     "Failed to notify client after manual grant: "
                     f"{notify_error}"
                 )
+
         else:
             await callback.answer(
                 texts.ADMIN_BAN_FAILED.format(message=result),

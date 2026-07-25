@@ -68,6 +68,7 @@ async def _send_manual_review_alert_now(
         return
 
     reason_text = MANUAL_REVIEW_REASONS.get(reason, reason)
+
     builder = InlineKeyboardBuilder()
     builder.button(
         text="✅ Выдать подписку",
@@ -156,6 +157,14 @@ async def _send_paid_after_cancel_alert_now(
 async def _notify_client_paid_after_cancel_now(
     snapshot: dict,
 ) -> None:
+    """
+    Уведомление клиенту: оплата пришла после отмены.
+
+    ИСПРАВЛЕНО: добавлена кнопка «✅ Прочитано (убрать)».
+    Сообщение остаётся standalone (не hub), потому что
+    это критический алерт с url-кнопкой в поддержку.
+    Но пользователь может убрать его сам — не мусорит.
+    """
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
     if payment_id is None or user_telegram_id is None:
@@ -186,7 +195,11 @@ async def _notify_client_paid_after_cancel_now(
         text="🏠 В главное меню",
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text="✅ Прочитано (убрать)",
+        callback_data="dismiss_notification",
+    )
+    builder.adjust(1, 1, 1)
     keyboard = builder.as_markup()
 
     message = (
@@ -228,6 +241,14 @@ async def _notify_client_paid_after_cancel_now(
 async def _notify_client_chargeback_now(
     snapshot: dict,
 ) -> None:
+    """
+    Уведомление клиенту: chargeback / возврат средств.
+
+    ИСПРАВЛЕНО: добавлена кнопка «✅ Прочитано (убрать)».
+    Сообщение остаётся standalone (не hub), потому что
+    это критический алерт с url-кнопкой в поддержку.
+    Но пользователь может убрать его сам — не мусорит.
+    """
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
     if payment_id is None or user_telegram_id is None:
@@ -259,7 +280,11 @@ async def _notify_client_chargeback_now(
         text="🏠 В главное меню",
         callback_data="back_to_main_menu",
     )
-    builder.adjust(1, 1)
+    builder.button(
+        text="✅ Прочитано (убрать)",
+        callback_data="dismiss_notification",
+    )
+    builder.adjust(1, 1, 1)
     keyboard = builder.as_markup()
 
     try:
@@ -318,6 +343,7 @@ async def _send_cancel_after_completed_alert_now(
         f"<i>Платёж уже был completed, но пришёл CANCELED.\n"
         f"Требуется ручная проверка.</i>"
     )
+
     await _send_alert_to_admins(message, keyboard)
 
 
@@ -355,6 +381,7 @@ async def _send_chargeback_alert_now(
         f"Реферальные бонусы откатаны.\n"
         f"Клиент уведомлён автоматически.</i>"
     )
+
     await _send_alert_to_admins(message, keyboard)
 
 
