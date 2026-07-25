@@ -16,17 +16,6 @@ YOOKASSA_API_BASE = "https://api.yookassa.ru/v3"
 
 
 async def _get_session() -> aiohttp.ClientSession:
-    """
-    Создаёт или возвращает переиспользуемую aiohttp-сессию с защитой от утечек.
-
-    Ключевые улучшения:
-    1. connect=5 — жёсткий таймаут на TCP handshake (не висим 30 сек)
-    2. family=AF_INET — только IPv4 (убираем случайность с IPv6)
-    3. limit=10 — ограниченный пул соединений (не забиваем conntrack)
-    4. ttl_dns_cache=300 — кэшируем DNS на 5 минут (стабильный порядок IP)
-    5. enable_cleanup_closed=True — принудительно закрываем битые сокеты
-    6. force_close=True — закрываем соединения после каждого запроса
-    """
     global _http_session
     if _http_session is None:
         timeout = aiohttp.ClientTimeout(
@@ -55,7 +44,6 @@ async def _get_session() -> aiohttp.ClientSession:
 
 
 async def close_yookassa_session() -> None:
-    """Закрывает глобальную сессию (вызывается при shutdown бота)."""
     global _http_session
     if _http_session is not None:
         await _http_session.close()
@@ -78,9 +66,6 @@ class YooKassaClient:
             password=self.secret_key,
         )
 
-    # ─────────────────────────────────────────────────────────────
-    # Создание платежа
-    # ─────────────────────────────────────────────────────────────
     async def create_payment(
         self,
         amount: Decimal,
@@ -104,9 +89,7 @@ class YooKassaClient:
         if metadata:
             body["metadata"] = metadata
 
-        # ── ИСПРАВЛЕНИЕ: добавляем Idempotence-Key ──
         idempotence_key = str(uuid.uuid4())
-
         try:
             session = await _get_session()
             async with session.post(
@@ -115,7 +98,7 @@ class YooKassaClient:
                 auth=self._auth,
                 headers={
                     "Content-Type": "application/json",
-                    "Idempotence-Key": idempotence_key,   # ← ДОБАВИТЬ
+                    "Idempotence-Key": idempotence_key,
                 },
             ) as resp:
                 if resp.status == 200:
@@ -143,23 +126,10 @@ class YooKassaClient:
             )
             return None
 
-    # ─────────────────────────────────────────────────────────────
-    # Проверка статуса платежа
-    # ─────────────────────────────────────────────────────────────
     async def get_payment(
         self,
         payment_id: str,
     ) -> Optional[dict]:
-        """
-        Получает информацию о платеже по его ID в YooKassa.
-        Возвращает dict:
-        - id, status ("pending"|"processing"|"succeeded"|"canceled")
-        - amount {value, currency}
-        - metadata
-        - paid: bool
-        - created_at, expires_at
-        При ошибке возвращает None.
-        """
         url = f"{YOOKASSA_API_BASE}/payments/{payment_id}"
         try:
             session = await _get_session()
@@ -193,41 +163,35 @@ class YooKassaClient:
             )
             return None
 
-    # ─────────────────────────────────────────────────────────────
-    # Валидация webhook-уведомления
-    # ─────────────────────────────────────────────────────────────
-    def validate_webhook(
+    def validate_webhook_credentials(
         self,
-        merchant_id: str,
+        shop_id: str,
         secret: str,
     ) -> bool:
         """
-        Проверяет credentials из заголовков webhook-запроса.
+        Проверяет shopId и secretKey.
 
-        ВАЖНО: YooKassa НЕ отправляет заголовки X-ShopId и X-Secret
-        в вебхуках по умолчанию. Безопасность вебхуков YooKassa
-        строится на IP-whitelisting или проверке object.id через
-        GET-запрос к API.
+        ВАЖНО: YooKassa НЕ отправляет заголовки аутентификации
+        в webhook-уведомлениях. Безопасность webhook обеспечивается:
+          1) IP-whitelisting (диапазоны YooKassa);
+          2) Верификацией object.id + суммы + статуса через API.
 
-        Этот метод оставлен для обратной совместимости, но
-        в webhook.py проверка через него отключена.
+        Метод оставлен для ручной проверки или кастомных прокси.
         """
         return (
-            merchant_id == self.shop_id
+            shop_id == self.shop_id
             and secret == self.secret_key
         )
 
-    # ─────────────────────────────────────────────────────────────
-    # Нормализация статуса из webhook
-    # ─────────────────────────────────────────────────────────────
     @staticmethod
     def normalize_webhook_event(event: str) -> str:
         """
         Приводит event из webhook YooKassa к внутреннему статусу.
+
         YooKassa events:
-        - payment.succeeded  → CONFIRMED
-        - payment.canceled   → CANCELED
-        - refund.succeeded   → CHARGEBACKED
+          - payment.succeeded  → CONFIRMED
+          - payment.canceled   → CANCELED
+          - refund.succeeded   → CHARGEBACKED
         """
         mapping = {
             "payment.succeeded": "CONFIRMED",

@@ -34,7 +34,6 @@ from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
 from services.amnezia_client import close_http_session
-from services.yookassa_client import close_yookassa_session
 from services.workers import (
     start_background_workers,
     stop_background_workers,
@@ -137,6 +136,7 @@ async def global_error_handler(
         tb_sanitized = _sanitize_text(tb_text)
         if len(tb_sanitized) > 4000:
             tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
+
         logger.critical(
             "[%s] Unhandled exception: %s\n%s",
             request_id, error_type, tb_sanitized,
@@ -160,11 +160,13 @@ async def global_error_handler(
         error_short = html.escape(
             _sanitize_short(str(exception), 200)
         )
+
         error_msg = texts.ALERT_CRITICAL_BOT_ERROR.format(
             request_id=request_id,
             error_type=error_type_safe,
             error_short=error_short,
         )
+
         alert_key = f"{error_type_safe}:{error_short}"
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
@@ -216,24 +218,33 @@ async def setup_bot_commands(bot: Bot):
 
 async def setup_bot() -> tuple[Bot, Dispatcher]:
     settings = get_settings()
+
     bot = Bot(token=settings.BOT_TOKEN)
     storage = RedisStorage.from_url(settings.REDIS_URL)
     dp = Dispatcher(storage=storage)
 
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
+
     dp.message.middleware(PrivateChatMiddleware())
     dp.callback_query.middleware(PrivateChatMiddleware())
+
     dp.message.middleware(DBSessionMiddleware())
     dp.callback_query.middleware(DBSessionMiddleware())
+
     dp.message.middleware(CleanChatMiddleware())
+
     dp.message.middleware(UserContextMiddleware())
     dp.callback_query.middleware(UserContextMiddleware())
+
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
+
     dp.message.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(ThrottlingMiddleware())
+
     dp.callback_query.middleware(ActionLockMiddleware())
+
     dp.message.middleware(ChatActionMiddleware())
 
     from bot.handlers.admin.broadcast import (
@@ -276,13 +287,16 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)
+
     await setup_bot_commands(bot)
+
     return bot, dp
 
 
 async def start_webhook_server(port: int):
     app = web.Application()
     setup_webhook_routes(app)
+
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", port)
@@ -297,6 +311,7 @@ def _validate_yookassa_config() -> bool:
     settings = get_settings()
     has_shop = bool(settings.YOOKASSA_SHOP_ID.strip())
     has_secret = bool(settings.YOOKASSA_SECRET_KEY.strip())
+
     if has_shop and not has_secret:
         logger.critical(
             "❌ YOOKASSA_SHOP_ID задан, но "
@@ -305,6 +320,7 @@ def _validate_yookassa_config() -> bool:
             "Укажите YOOKASSA_SECRET_KEY в .env."
         )
         return False
+
     if has_secret and not has_shop:
         logger.critical(
             "❌ YOOKASSA_SECRET_KEY задан, но "
@@ -312,13 +328,11 @@ def _validate_yookassa_config() -> bool:
             "Укажите оба параметра или удалите оба."
         )
         return False
+
     return True
 
 
 async def _stop_broadcast_tasks():
-    """
-    Останавливает фоновые задачи рассылки при shutdown.
-    """
     for event in _broadcast_stop_events.values():
         event.set()
 
@@ -434,6 +448,7 @@ async def main():
         logger.critical(
             "Fatal error in main: %s", e, exc_info=True,
         )
+
     finally:
         logger.info("Stopping background workers...")
         try:
@@ -443,7 +458,6 @@ async def main():
                 "Error stopping workers: %s", e,
             )
 
-        # ИСПРАВЛЕНО: остановка broadcast tasks.
         try:
             await _stop_broadcast_tasks()
         except Exception as e:
@@ -451,7 +465,6 @@ async def main():
                 "Error stopping broadcast tasks: %s", e,
             )
 
-        # ИСПРАВЛЕНО: остановка CleanChat worker.
         try:
             await stop_clean_chat_worker()
         except Exception as e:
@@ -464,8 +477,12 @@ async def main():
         if "webhook_runner" in locals() and webhook_runner:
             await webhook_runner.cleanup()
 
+        # Amnezia API HTTP session (aiohttp)
         await close_http_session()
-        await close_yookassa_session()
+
+        # YooKassa SDK не требует закрытия сессии —
+        # он использует requests внутри asyncio.to_thread(),
+        # сессии управляются SDK автоматически.
 
         try:
             from services.device_service import (
@@ -488,6 +505,7 @@ async def main():
             )
 
         await close_db()
+
         logger.info("Работа бота завершена")
 
 
