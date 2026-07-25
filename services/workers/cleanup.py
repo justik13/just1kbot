@@ -51,7 +51,6 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
             await _process_pending_deletions()
 
             now = time.monotonic()
-
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
                 await _cleanup_old_records()
                 _last_old_cleanup = now
@@ -65,10 +64,8 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
                 e,
                 exc_info=True,
             )
-
             if shutdown_event.is_set():
                 break
-
             try:
                 await asyncio.wait_for(
                     shutdown_event.wait(),
@@ -96,7 +93,6 @@ async def _cleanup_expired_profiles_grace():
             .order_by(User.subscription_end.asc())
             .limit(50)
         )
-
         result = await session.execute(stmt)
         user_ids = [row[0] for row in result.all()]
 
@@ -119,16 +115,12 @@ async def _cleanup_expired_profiles_grace():
 
                 if user is None:
                     continue
-
                 if user.is_deleted:
                     continue
-
                 if user.subscription_end is None:
                     continue
-
                 if user.subscription_end.year >= 2100:
                     continue
-
                 if user.subscription_end >= threshold:
                     continue
 
@@ -151,7 +143,6 @@ async def _cleanup_expired_profiles_grace():
                 if deleted > 0:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
-
                     logger.info(
                         "Grace cleanup: removed %s expired profiles "
                         "for user_id=%s (subscription_end=%s)",
@@ -203,16 +194,15 @@ async def _queue_zombie_deletion(
                 last_attempt_at=now_utc(),
                 last_error=error_text,
             )
-
             session.add(pending)
             await session.flush()
 
-            logger.warning(
-                "Queued zombie peer for pending deletion: "
-                "server=%s, peer=%s..., reason=zombie_peer_cleanup_failed",
-                server_info["name"],
-                peer_id[:16],
-            )
+        logger.warning(
+            "Queued zombie peer for pending deletion: "
+            "server=%s, peer=%s..., reason=zombie_peer_cleanup_failed",
+            server_info["name"],
+            peer_id[:16],
+        )
 
     except Exception as e:
         logger.error(
@@ -235,16 +225,16 @@ async def _cleanup_dangling_peers():
         result = await session.execute(select(VPNProfile.peer_id))
         db_peer_ids = {row[0] for row in result.all() if row[0]}
 
-    servers_data = [
-        {
-            "api_url": s.api_url,
-            "api_key": s.api_key,
-            "name": s.name,
-            "id": s.id,
-        }
-        for s in servers
-        if s.api_url and s.api_key
-    ]
+        servers_data = [
+            {
+                "api_url": s.api_url,
+                "api_key": s.api_key,
+                "name": s.name,
+                "id": s.id,
+            }
+            for s in servers
+            if s.api_url and s.api_key
+        ]
 
     if not servers_data:
         return
@@ -254,15 +244,11 @@ async def _cleanup_dangling_peers():
             server_info["api_url"],
             server_info["api_key"],
         )
-
         try:
             api_clients_list = await client.get_all_clients()
-
             if api_clients_list is None:
                 return server_info, []
-
             return server_info, api_clients_list
-
         except Exception as e:
             logger.error(
                 "Ошибка получения списка пиров на %s: %s",
@@ -279,7 +265,6 @@ async def _cleanup_dangling_peers():
             continue
 
         server_info, api_clients_list = result
-
         if not api_clients_list:
             continue
 
@@ -294,7 +279,6 @@ async def _cleanup_dangling_peers():
                 continue
 
             peer_exists_in_db = False
-
             try:
                 async with session_scope() as session:
                     fresh_result = await session.execute(
@@ -321,7 +305,6 @@ async def _cleanup_dangling_peers():
                         .where(PendingAPIDeletion.peer_id == client_id)
                         .limit(1)
                     )
-
                     if existing_pending:
                         continue
             except Exception as e:
@@ -364,7 +347,6 @@ async def _cleanup_dangling_peers():
                     server_info["name"],
                     client_id[:16],
                 )
-
                 await _queue_zombie_deletion(
                     server_info=server_info,
                     peer_id=client_id,
@@ -390,7 +372,6 @@ async def _process_pending_deletions():
             )
             .limit(200)
         )
-
         result = await session.execute(stmt)
         pending_deletions = result.scalars().all()
 
@@ -412,7 +393,6 @@ async def _process_pending_deletions():
                 time_since_last = (
                     current_time - deletion.last_attempt_at
                 ).total_seconds()
-
                 if time_since_last < PENDING_RETRY_INTERVAL:
                     continue
 
@@ -448,7 +428,6 @@ async def _process_pending_deletions():
         if deletion_data.get("expired"):
             expired_count += 1
             expired_ids.append(deletion_id)
-
             logger.warning(
                 "Pending deletion expired after %s attempts: "
                 "server=%s, peer=%s..., reason=%s",
@@ -486,9 +465,7 @@ async def _process_pending_deletions():
                         PendingAPIDeletion.id == deletion_id
                     )
                 )
-
                 success_count += 1
-
                 logger.info(
                     "Pending peer deleted: server=%s, peer=%s... "
                     "(attempt %s, reason=%s)",
@@ -510,7 +487,6 @@ async def _process_pending_deletions():
                         ),
                     )
                 )
-
                 fail_count += 1
 
     if expired_ids:
@@ -536,19 +512,14 @@ async def _process_pending_deletions():
             from config.settings import get_settings
 
             bot = get_bot_ref()
-
             if bot:
                 settings = get_settings()
 
                 alert_msg = (
-                    "🚨 <b>Не удалось удалить устройства на сервере</b>
-"
-                    "━━━━━━━━━━━━━━━━━━━━
-"
-                    f"<b>{expired_count}</b> записей достигли лимита попыток.
-"
-                    "Они удалены из очереди, но могли остаться на сервере.
-"
+                    "🚨 <b>Не удалось удалить устройства на сервере</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    f"<b>{expired_count}</b> записей достигли лимита попыток.\n"
+                    "Они удалены из очереди, но могли остаться на сервере.\n"
                     "<i>Требуется ручная проверка.</i>"
                 )
 
@@ -574,7 +545,6 @@ async def _cleanup_old_records():
         current_time = now_utc()
 
         threshold_broadcasts = current_time - timedelta(days=7)
-
         stmt_broadcasts = (
             delete(BroadcastProgress)
             .where(
@@ -584,7 +554,6 @@ async def _cleanup_old_records():
             )
             .where(BroadcastProgress.updated_at < threshold_broadcasts)
         )
-
         result_broadcasts = await session.execute(stmt_broadcasts)
         broadcasts_deleted = result_broadcasts.rowcount
 
@@ -597,12 +566,10 @@ async def _cleanup_old_records():
         # Эти записи нужны только для удаления старых хаб-сообщений.
         # Если сообщение не удалось удалить за сутки, запись больше не нужна.
         threshold_hub = current_time - timedelta(days=1)
-
         stmt_hub = (
             delete(HubMessage)
             .where(HubMessage.created_at < threshold_hub)
         )
-
         result_hub = await session.execute(stmt_hub)
         hub_deleted = result_hub.rowcount
 
