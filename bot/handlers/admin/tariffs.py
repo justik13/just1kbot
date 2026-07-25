@@ -6,47 +6,30 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_admin_tariff_card_keyboard,
-    get_back_button,
-)
+from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
-from bot.middlewares.user_context import (
-    clear_user_cache,
-    invalidate_user_cache,
-)
 from bot.states import AdminStates
-from database.models import Payment, User, VPNProfile
+from database.models import Payment
 from database.repositories.tariffs_repo import (
-    delete_tariff,
     get_tariff_by_id,
     get_tariff_count,
     get_tariffs_paginated,
     update_tariff,
 )
-from database.repositories.users_repo import count_users_with_tariff
 from services.audit_service import AuditService
 from utils.admin import is_admin
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 TARIFFS_PER_PAGE = 10
-
-#
-# Порог для полной очистки кэша пользователей.
-# Если тариф используют больше пользователей, чем этот порог,
-# дешевле очистить весь кэш, чем вызывать pop() для каждого.
-#
-_CACHE_CLEAR_THRESHOLD = 50
 
 
 async def _build_tariffs_list_text_and_kb(
@@ -60,20 +43,21 @@ async def _build_tariffs_list_text_and_kb(
         f"(стр. {page}/{total_pages}) · Всего: {total}\n"
     )
     builder = InlineKeyboardBuilder()
+
     if not tariffs:
         rendered += "<i>Тарифов пока нет</i>\n"
     else:
         for tariff in tariffs:
             status = "🟢" if tariff.is_active else "🔴"
-            device_limit = getattr(tariff, "device_limit", 2)
             builder.button(
                 text=(
-                    f"{status} {tariff.duration_days} дн. · "
-                    f"{device_limit} устр. · "
+                    f"{status} {safe(tariff.name)} · "
+                    f"{tariff.duration_days} дн. · "
                     f"{tariff.price_rub}₽"
                 ),
                 callback_data=f"admin_tariff_card:{tariff.id}",
             )
+
     if page > 1:
         builder.button(
             text="⬅️",
@@ -84,6 +68,7 @@ async def _build_tariffs_list_text_and_kb(
             text="➡️",
             callback_data=f"admin_tariffs_page:{page + 1}",
         )
+
     builder.button(
         text="← В админку",
         callback_data="admin_menu",
@@ -120,18 +105,9 @@ async def _show_tariffs_list(
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug(f"_show_tariffs_list edit_text failed: {e}")
-
-
-async def _get_payments_count_for_tariff(
-    session: AsyncSession,
-    tariff_id: int,
-) -> int:
-    stmt = select(func.count(Payment.id)).where(
-        Payment.tariff_id == tariff_id,
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one() or 0
+        logger.debug(
+            f"_show_tariffs_list edit_text failed: {e}"
+        )
 
 
 async def _get_pending_payments_count_for_tariff(
@@ -195,25 +171,48 @@ async def _show_tariff_card(
         if tariff.is_active
         else "🔴 Отключён"
     )
-    device_limit = getattr(tariff, "device_limit", 2)
-    rendered = texts.ADMIN_TARIFF_CARD.format(
-        id=tariff.id,
-        duration_days=tariff.duration_days,
-        device_limit=device_limit,
-        price_rub=tariff.price_rub,
-        status=status,
+    rendered = (
+        f"🛠 Админка › 💰 Тарифы › <b>Тариф</b>\n\n"
+        f"<b>ID:</b> {tariff.id}\n"
+        f"<b>Название:</b> {safe(tariff.name)}\n"
+        f"<b>Описание:</b> {safe(tariff.description or '—')}\n"
+        f"<b>Дней:</b> {tariff.duration_days}\n"
+        f"<b>Устройств:</b> {tariff.device_limit}\n"
+        f"<b>Цена ₽:</b> {tariff.price_rub}\n"
+        f"<b>Статус:</b> {status}"
     )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✏️ Изменить цену ₽",
+        callback_data=f"admin_tariff_edit_rub:{tariff.id}",
+    )
+    if tariff.is_active:
+        builder.button(
+            text="🔴 Выключить",
+            callback_data=f"admin_tariff_toggle:{tariff.id}",
+        )
+    else:
+        builder.button(
+            text="🟢 Включить",
+            callback_data=f"admin_tariff_toggle:{tariff.id}",
+        )
+    builder.button(
+        text="← К списку тарифов",
+        callback_data="admin_tariffs",
+    )
+    builder.adjust(1)
+
     try:
         await callback.message.edit_text(
             rendered,
-            reply_markup=get_admin_tariff_card_keyboard(
-                tariff.id,
-                tariff.is_active,
-            ),
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug(f"_show_tariff_card edit_text failed: {e}")
+        logger.debug(
+            f"_show_tariff_card edit_text failed: {e}"
+        )
 
 
 @router.callback_query(F.data.startswith("admin_tariff_card:"))
@@ -241,6 +240,11 @@ async def show_tariff_card(
     await callback.answer()
 
 
+# ──────────────────────────────────────────────────────────
+# ВКЛ / ВЫКЛ тарифа
+# ──────────────────────────────────────────────────────────
+
+
 @router.callback_query(F.data.startswith("admin_tariff_toggle:"))
 async def toggle_tariff_confirm(
     callback: CallbackQuery,
@@ -254,6 +258,7 @@ async def toggle_tariff_confirm(
         )
         return
     await state.clear()
+
     tariff_id = int(callback.data.split(":")[1])
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff:
@@ -264,34 +269,53 @@ async def toggle_tariff_confirm(
         return
 
     new_status = not tariff.is_active
-    device_limit = getattr(tariff, "device_limit", 2)
 
     if new_status:
-        text = texts.ADMIN_TARIFF_TOGGLE_ENABLE_CONFIRM.format(
-            duration_days=tariff.duration_days,
-            device_limit=device_limit,
+        text = (
+            f"⚠️ <b>Подтверждение включения тарифа</b>\n\n"
+            f"Тариф: <b>{safe(tariff.name)} "
+            f"({tariff.duration_days} дн. / "
+            f"{tariff.device_limit} устр.)</b>\n\n"
+            f"Тариф снова будет доступен пользователям\n"
+            f"при покупке доступа.\n\n"
+            f"<i>Уже купленные подписки продолжат "
+            f"работать.</i>"
         )
     else:
-        text = texts.ADMIN_TARIFF_TOGGLE_DISABLE_CONFIRM.format(
-            duration_days=tariff.duration_days,
-            device_limit=device_limit,
+        text = (
+            f"⚠️ <b>Подтверждение отключения тарифа</b>\n\n"
+            f"Тариф: <b>{safe(tariff.name)} "
+            f"({tariff.duration_days} дн. / "
+            f"{tariff.device_limit} устр.)</b>\n\n"
+            f"Тариф будет скрыт из списка доступных\n"
+            f"при покупке доступа.\n\n"
+            f"<i>Уже купленные подписки продолжат "
+            f"работать.</i>"
         )
 
     try:
         await callback.message.edit_text(
             text,
             reply_markup=get_admin_confirm_action_keyboard(
-                confirm_callback=f"admin_tariff_toggle_apply:{tariff_id}",
-                cancel_callback=f"admin_tariff_card:{tariff_id}",
+                confirm_callback=(
+                    f"admin_tariff_toggle_apply:{tariff_id}"
+                ),
+                cancel_callback=(
+                    f"admin_tariff_card:{tariff_id}"
+                ),
             ),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug(f"toggle_tariff_confirm edit_text failed: {e}")
+        logger.debug(
+            f"toggle_tariff_confirm edit_text failed: {e}"
+        )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("admin_tariff_toggle_apply:"))
+@router.callback_query(
+    F.data.startswith("admin_tariff_toggle_apply:")
+)
 async def toggle_tariff_apply(
     callback: CallbackQuery,
     state: FSMContext,
@@ -304,6 +328,7 @@ async def toggle_tariff_apply(
         )
         return
     await state.clear()
+
     tariff_id = int(callback.data.split(":")[1])
     tariff = await get_tariff_by_id(session, tariff_id)
     if not tariff:
@@ -316,9 +341,11 @@ async def toggle_tariff_apply(
     new_status = not tariff.is_active
 
     if not new_status:
-        pending_count = await _get_pending_payments_count_for_tariff(
-            session,
-            tariff_id,
+        pending_count = (
+            await _get_pending_payments_count_for_tariff(
+                session,
+                tariff_id,
+            )
         )
         if pending_count > 0:
             await callback.answer(
@@ -357,11 +384,17 @@ async def toggle_tariff_apply(
     await _show_tariff_card(callback, refreshed)
 
 
-@router.callback_query(F.data.startswith("admin_tariff_delete:"))
-async def delete_tariff_handler(
+# ──────────────────────────────────────────────────────────
+# ИЗМЕНЕНИЕ ЦЕНЫ (единственное редактируемое поле)
+# ──────────────────────────────────────────────────────────
+
+
+@router.callback_query(
+    F.data.startswith("admin_tariff_edit_rub:")
+)
+async def start_edit_tariff_rub(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(
@@ -370,210 +403,28 @@ async def delete_tariff_handler(
         )
         return
     await state.clear()
-    tariff_id = int(callback.data.split(":")[1])
-    tariff = await get_tariff_by_id(session, tariff_id)
-    if not tariff:
-        await callback.answer(
-            texts.ERROR_TARIFF_NOT_FOUND,
-            show_alert=True,
-        )
-        return
 
-    user_count = await count_users_with_tariff(session, tariff_id)
-    if user_count > 0:
-        try:
-            await callback.message.edit_text(
-                texts.ERROR_TARIFF_IN_USE.format(user_count=user_count),
-                reply_markup=get_back_button(
-                    f"admin_tariff_card:{tariff_id}"
-                ),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as e:
-            logger.debug(f"delete_tariff_handler edit_text failed: {e}")
-        await callback.answer()
-        return
-
-    payments_count = await _get_payments_count_for_tariff(
-        session,
-        tariff_id,
-    )
-    if payments_count > 0:
-        text = texts.ADMIN_TARIFF_DELETE_BLOCKED_PAYMENTS.format(
-            payments_count=payments_count,
-        )
-        try:
-            await callback.message.edit_text(
-                text,
-                reply_markup=get_back_button(
-                    f"admin_tariff_card:{tariff_id}"
-                ),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as e:
-            logger.debug(
-                f"delete_tariff_handler payments edit_text failed: {e}"
-            )
-        await callback.answer()
-        return
-
-    device_limit = getattr(tariff, "device_limit", 2)
-    text = texts.ADMIN_TARIFF_DELETE_CONFIRM.format(
-        duration_days=tariff.duration_days,
-        device_limit=device_limit,
-        price_rub=tariff.price_rub,
-    )
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_admin_confirm_action_keyboard(
-                confirm_callback=f"admin_tariff_delete_apply:{tariff_id}",
-                cancel_callback=f"admin_tariff_card:{tariff_id}",
-            ),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(f"delete_tariff_handler confirm edit_text failed: {e}")
-    await callback.answer()
-
-
-@router.callback_query(F.data.startswith("admin_tariff_delete_apply:"))
-async def delete_tariff_apply(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-    await state.clear()
-    tariff_id = int(callback.data.split(":")[1])
-    tariff = await get_tariff_by_id(session, tariff_id)
-    if not tariff:
-        await callback.answer(
-            texts.ERROR_TARIFF_NOT_FOUND,
-            show_alert=True,
-        )
-        return
-
-    user_count = await count_users_with_tariff(session, tariff_id)
-    if user_count > 0:
-        try:
-            await callback.message.edit_text(
-                texts.ERROR_TARIFF_IN_USE.format(user_count=user_count),
-                reply_markup=get_back_button(
-                    f"admin_tariff_card:{tariff_id}"
-                ),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as e:
-            logger.debug(f"delete_tariff_apply in_use edit_text failed: {e}")
-        await callback.answer()
-        return
-
-    payments_count = await _get_payments_count_for_tariff(
-        session,
-        tariff_id,
-    )
-    if payments_count > 0:
-        text = texts.ADMIN_TARIFF_DELETE_BLOCKED_PAYMENTS.format(
-            payments_count=payments_count,
-        )
-        try:
-            await callback.message.edit_text(
-                text,
-                reply_markup=get_back_button(
-                    f"admin_tariff_card:{tariff_id}"
-                ),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as e:
-            logger.debug(
-                f"delete_tariff_apply payments edit_text failed: {e}"
-            )
-        await callback.answer()
-        return
-
-    device_limit = getattr(tariff, "device_limit", 2)
-
-    try:
-        await delete_tariff(session, tariff)
-    except IntegrityError:
-        await session.rollback()
-        text = texts.ADMIN_TARIFF_DELETE_BLOCKED_RELATIONS
-        try:
-            await callback.message.edit_text(
-                text,
-                reply_markup=get_back_button(
-                    f"admin_tariff_card:{tariff_id}"
-                ),
-                parse_mode="HTML",
-            )
-        except TelegramBadRequest as e:
-            logger.debug(
-                f"delete_tariff_apply integrity edit_text failed: {e}"
-            )
-        await callback.answer()
-        return
-
-    await AuditService.log_action(
-        session,
-        callback.from_user.id,
-        "DELETE_TARIFF",
-        "Tariff",
-        tariff_id,
-        f"{tariff.duration_days}d/{device_limit}dev/{tariff.price_rub}rub",
-    )
-
-    await callback.answer(
-        texts.ADMIN_TARIFF_DELETE_SUCCESS.format(
-            duration_days=tariff.duration_days,
-            device_limit=device_limit,
-        ),
-        show_alert=True,
-    )
-    await _show_tariffs_list(callback, session, page=1)
-
-
-async def _start_edit_tariff(
-    callback: CallbackQuery,
-    state: FSMContext,
-    field_state,
-    prompt_text: str,
-):
-    if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
-        return
-    await state.clear()
     tariff_id = int(callback.data.split(":")[1])
     await state.update_data(tariff_id=tariff_id)
-    await state.set_state(field_state)
+    await state.set_state(AdminStates.editing_tariff_rub)
+
     try:
         await callback.message.edit_text(
-            prompt_text,
+            texts.ADMIN_TARIFF_EDIT_RUB_PROMPT,
             reply_markup=get_back_button("admin_tariffs"),
         )
     except TelegramBadRequest as e:
-        logger.debug(f"_start_edit_tariff edit_text failed: {e}")
+        logger.debug(
+            f"start_edit_tariff_rub edit_text failed: {e}"
+        )
     await callback.answer()
 
 
-async def _apply_tariff_int_edit(
+@router.message(AdminStates.editing_tariff_rub)
+async def process_edit_tariff_rub(
     message: Message,
     state: FSMContext,
     session: AsyncSession,
-    *,
-    field_name: str,
-    validator,
-    validator_error: str,
-    success_message,
-    audit_detail_fn,
 ):
     if not is_admin(message.from_user.id):
         await state.clear()
@@ -583,7 +434,7 @@ async def _apply_tariff_int_edit(
         await render_hub(
             message.bot,
             message.chat.id,
-            validator_error,
+            texts.ERROR_POSITIVE_NUMBER,
             get_back_button("admin_tariffs"),
         )
         return
@@ -600,13 +451,13 @@ async def _apply_tariff_int_edit(
 
     try:
         new_value = int(message.text.strip())
-        if not validator(new_value):
+        if new_value <= 0:
             raise ValueError
     except ValueError:
         await render_hub(
             message.bot,
             message.chat.id,
-            validator_error,
+            texts.ERROR_POSITIVE_NUMBER,
             get_back_button("admin_tariffs"),
         )
         return
@@ -624,108 +475,13 @@ async def _apply_tariff_int_edit(
         await state.clear()
         return
 
-    old_value = getattr(tariff, field_name)
-
-    if field_name in ("duration_days", "device_limit"):
-        pending_count = await _get_pending_payments_count_for_tariff(
-            session,
-            tariff_id,
-        )
-        if pending_count > 0:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ADMIN_TARIFF_EDIT_BLOCKED_PENDING,
-                get_back_button("admin_tariffs"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-    if field_name == "device_limit":
-        stmt = (
-            select(User.telegram_id)
-            .join(
-                VPNProfile,
-                VPNProfile.user_id == User.id,
-            )
-            .where(
-                User.current_tariff_id == tariff_id,
-                User.is_deleted == False,
-            )
-            .group_by(User.telegram_id)
-            .having(func.count(VPNProfile.id) > new_value)
-        )
-        result = await session.execute(stmt)
-        first_blocked_user = result.first()
-        if first_blocked_user:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ADMIN_TARIFF_EDIT_BLOCKED_DEVICE_LIMIT,
-                get_back_button("admin_tariffs"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
-
-    affected_telegram_ids: list[int] = []
-    if field_name == "device_limit":
-        users_stmt = select(User.telegram_id).where(
-            User.current_tariff_id == tariff_id,
-            User.is_deleted == False,
-        )
-        users_result = await session.execute(users_stmt)
-        affected_telegram_ids = [
-            row[0] for row in users_result.all()
-        ]
+    old_value = tariff.price_rub
 
     await update_tariff(
         session,
         tariff,
-        **{field_name: new_value},
+        price_rub=new_value,
     )
-
-    if field_name == "device_limit":
-        await session.execute(
-            update(User)
-            .where(
-                User.current_tariff_id == tariff_id,
-                User.is_deleted == False,
-            )
-            .values(device_limit=new_value)
-        )
-        await session.flush()
-
-        #
-        # ИСПРАВЛЕНО (Фаза 3, фикс 12):
-        #
-        # Раньше: invalidate_user_cache(telegram_id) в цикле
-        # для каждого пользователя тарифа.
-        # При 5000 пользователях — 5000 вызовов dict.pop(),
-        # блокирующих event loop.
-        #
-        # Теперь: если пользователей > _CACHE_CLEAR_THRESHOLD,
-        # очищаем весь кэш одним вызовом clear().
-        #
-        if len(affected_telegram_ids) > _CACHE_CLEAR_THRESHOLD:
-            clear_user_cache()
-            logger.info(
-                "Cleared entire user cache (%s users affected "
-                "by tariff %s device_limit change)",
-                len(affected_telegram_ids),
-                tariff_id,
-            )
-        else:
-            for telegram_id in affected_telegram_ids:
-                invalidate_user_cache(telegram_id)
-
-        logger.info(
-            "Synced user.device_limit for tariff %s: %s -> %s",
-            tariff_id,
-            old_value,
-            new_value,
-        )
 
     await AuditService.log_action(
         session,
@@ -733,111 +489,20 @@ async def _apply_tariff_int_edit(
         "EDIT_TARIFF",
         "Tariff",
         tariff_id,
-        audit_detail_fn(old_value, new_value),
+        f"RUB: {old_value} -> {new_value}",
     )
 
     await render_hub(
         message.bot,
         message.chat.id,
-        success_message(new_value),
+        texts.ADMIN_TARIFF_EDIT_RUB_SUCCESS.format(
+            value=new_value
+        ),
         get_back_button("admin_tariffs"),
     )
 
     logger.info(
-        f"Admin {message.from_user.id} updated tariff {tariff_id} "
-        f"{field_name}: {old_value} -> {new_value}"
+        f"Admin {message.from_user.id} updated tariff "
+        f"{tariff_id} price_rub: {old_value} -> {new_value}"
     )
     await state.clear()
-
-
-@router.callback_query(F.data.startswith("admin_tariff_edit_days:"))
-async def start_edit_tariff_days(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-    await _start_edit_tariff(
-        callback,
-        state,
-        AdminStates.editing_tariff_days,
-        texts.ADMIN_TARIFF_EDIT_DAYS_PROMPT,
-    )
-
-
-@router.message(AdminStates.editing_tariff_days)
-async def process_edit_tariff_days(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    await _apply_tariff_int_edit(
-        message,
-        state,
-        session,
-        field_name="duration_days",
-        validator=lambda x: x >= 1,
-        validator_error=texts.ERROR_NUMBER_GT_ZERO,
-        success_message=lambda v: texts.ADMIN_TARIFF_EDIT_DAYS_SUCCESS.format(value=v),
-        audit_detail_fn=lambda old, new: f"days: {old} -> {new}",
-    )
-
-
-@router.callback_query(F.data.startswith("admin_tariff_edit_devices:"))
-async def start_edit_tariff_devices(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-    await _start_edit_tariff(
-        callback,
-        state,
-        AdminStates.editing_tariff_device_limit,
-        texts.ADMIN_TARIFF_EDIT_DEVICES_PROMPT,
-    )
-
-
-@router.message(AdminStates.editing_tariff_device_limit)
-async def process_edit_tariff_devices(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    await _apply_tariff_int_edit(
-        message,
-        state,
-        session,
-        field_name="device_limit",
-        validator=lambda x: x >= 1,
-        validator_error=texts.ERROR_NUMBER_GT_ZERO,
-        success_message=lambda v: texts.ADMIN_TARIFF_EDIT_DEVICES_SUCCESS.format(value=v),
-        audit_detail_fn=lambda old, new: f"device_limit: {old} -> {new}",
-    )
-
-
-@router.callback_query(F.data.startswith("admin_tariff_edit_rub:"))
-async def start_edit_tariff_rub(
-    callback: CallbackQuery,
-    state: FSMContext,
-):
-    await _start_edit_tariff(
-        callback,
-        state,
-        AdminStates.editing_tariff_rub,
-        texts.ADMIN_TARIFF_EDIT_RUB_PROMPT,
-    )
-
-
-@router.message(AdminStates.editing_tariff_rub)
-async def process_edit_tariff_rub(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-):
-    await _apply_tariff_int_edit(
-        message,
-        state,
-        session,
-        field_name="price_rub",
-        validator=lambda x: x > 0,
-        validator_error=texts.ERROR_POSITIVE_NUMBER,
-        success_message=lambda v: texts.ADMIN_TARIFF_EDIT_RUB_SUCCESS.format(value=v),
-        audit_detail_fn=lambda old, new: f"RUB: {old} -> {new}",
-    )

@@ -1,12 +1,10 @@
 import logging
 from decimal import Decimal
 from typing import Optional
-
 from aioyookassa import YooKassa
 from aioyookassa.types.payment import PaymentAmount, Confirmation
 from aioyookassa.types.enum import ConfirmationType
 from aioyookassa.types.params import CreatePaymentParams
-
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -39,18 +37,8 @@ async def close_yookassa_client() -> None:
 
 
 def _payment_to_dict(payment) -> Optional[dict]:
-    """
-    Convert aioyookassa Payment (Pydantic model) → plain dict,
-    compatible with the rest of the codebase.
-
-    Key normalizations:
-    • confirmation.url  →  confirmation.confirmation_url
-    • amount.value      →  str
-    • status            →  plain str
-    """
     if payment is None:
         return None
-
     try:
         data = payment.model_dump(mode="json", by_alias=True)
     except AttributeError:
@@ -60,29 +48,23 @@ def _payment_to_dict(payment) -> Optional[dict]:
             return None
     except Exception:
         return None
-
     if not isinstance(data, dict):
         return None
-
     confirmation = data.get("confirmation")
     if isinstance(confirmation, dict):
         url = confirmation.get("confirmation_url") or confirmation.get("url")
         if url:
             confirmation["confirmation_url"] = url
-
     amount = data.get("amount")
     if isinstance(amount, dict) and "value" in amount:
         amount["value"] = str(amount["value"])
-
     status = data.get("status")
     if status is not None:
         data["status"] = str(status).lower()
-
     return data
 
 
 class YooKassaService:
-
     @staticmethod
     async def create_payment(
         amount: Decimal,
@@ -90,10 +72,11 @@ class YooKassaService:
         description: str = "",
         return_url: str = "",
         metadata: Optional[dict] = None,
+        receipt_email: str = "",
     ) -> Optional[dict]:
         client = _get_client()
         try:
-            params = CreatePaymentParams(
+            params_kwargs = dict(
                 amount=PaymentAmount(value=str(amount), currency=currency),
                 confirmation=Confirmation(
                     type=ConfirmationType.REDIRECT,
@@ -101,15 +84,31 @@ class YooKassaService:
                 ),
                 description=description,
                 metadata=metadata,
-                # ──────────────────────────────────────────────
-                # ИСПРАВЛЕНО: одностадийная оплата.
-                # Без capture=True тестовый магазин ЮKassa
-                # использует двухстадийную схему и присылает
-                # payment.waiting_for_capture вместо
-                # payment.succeeded.
-                # ──────────────────────────────────────────────
                 capture=True,
             )
+
+            # ──────────────────────────────────────────────────────
+            # Чеки для самозанятости (vat_code=6, без НДС).
+            # YooKassa сама формирует и отправляет чек покупателю.
+            # В кабинете YooKassa должен быть привязан ИНН.
+            # ──────────────────────────────────────────────────────
+            if receipt_email:
+                params_kwargs["receipt"] = {
+                    "customer": {"email": receipt_email},
+                    "items": [
+                        {
+                            "description": description or "Подписка VPN",
+                            "quantity": "1.00",
+                            "amount": {
+                                "value": str(amount),
+                                "currency": currency,
+                            },
+                            "vat_code": 6,
+                        }
+                    ],
+                }
+
+            params = CreatePaymentParams(**params_kwargs)
             payment = await client.payments.create_payment(params)
             data = _payment_to_dict(payment)
             if data:
@@ -146,11 +145,6 @@ class YooKassaService:
         payment_id: str,
         reason: str = "",
     ) -> Optional[dict]:
-        """
-        aioyookassa 2.x cancel_payment() accepts only payment_id.
-        `reason` is kept in the signature for backward compatibility
-        with callers but is not sent to the API.
-        """
         client = _get_client()
         try:
             payment = await client.payments.cancel_payment(payment_id)
@@ -172,11 +166,6 @@ class YooKassaService:
             "payment.succeeded": "CONFIRMED",
             "payment.canceled": "CANCELED",
             "refund.succeeded": "CHARGEBACKED",
-            # ──────────────────────────────────────────────
-            # ИСПРАВЛЕНО: маппинг для двухстадийной оплаты.
-            # Даже при capture=True тестовый магазин может
-            # прислать waiting_for_capture.
-            # ──────────────────────────────────────────────
             "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
         }
         return mapping.get(event, event.upper())

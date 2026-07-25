@@ -80,9 +80,9 @@ def _to_decimal(value) -> Decimal | None:
 
 def _safe_decimal(value) -> Decimal | None:
     """
-    ИСПРАВЛЕНО (пункт 11):
-    Теперь float также отклоняется, как и в _to_decimal.
-    Это исключает расхождения при обработке денежных сумм.
+    Безопасная конвертация для входящих данных (webhook, API).
+    float конвертируется через str() с предупреждением.
+    Для критичных сумм используйте _to_decimal.
     """
     if value is None:
         return None
@@ -94,12 +94,6 @@ def _safe_decimal(value) -> Decimal | None:
             "Callers should pass str or Decimal for money.",
             value,
         )
-        # Конвертируем через str для совместимости, но логируем.
-        # Для критичных сумм используйте _to_decimal.
-        try:
-            return Decimal(str(value))
-        except (InvalidOperation, ValueError, TypeError):
-            return None
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
@@ -144,18 +138,21 @@ def _build_payment_snapshot(payment) -> dict:
     return {
         "payment_id": payment.id,
         "user_telegram_id": user.telegram_id if user else None,
-        "username": f"@{user.username}" if user and user.username else "—",
+        "username": (
+            f"@{user.username}" if user and user.username else "—"
+        ),
         "amount": str(payment.amount),
         "currency": payment.currency,
         "tariff_name": tariff_name,
-        "payment_method": getattr(payment, "payment_method", None) or "—",
+        "payment_method": (
+            getattr(payment, "payment_method", None) or "—"
+        ),
         "external_id": getattr(payment, "external_id", None) or "—",
     }
 
 
 def get_payment_tariff_name(payment) -> str:
     """
-    ИСПРАВЛЕНО (пункт 15):
     Единая функция для получения отображаемого имени тарифа.
     Используется в yookassa_routes.py и manual_grant_routes.py.
     """

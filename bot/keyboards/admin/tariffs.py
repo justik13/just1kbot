@@ -8,14 +8,14 @@ def get_admin_tariff_card_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    builder.button(
-        text="✏️ Изменить дни",
-        callback_data=f"admin_tariff_edit_days:{tariff_id}",
-    )
-    builder.button(
-        text="✏️ Изменить лимит устр.",
-        callback_data=f"admin_tariff_edit_devices:{tariff_id}",
-    )
+    # ──────────────────────────────────────────────────
+    # ИСПРАВЛЕНО: убраны кнопки «Изменить дни»,
+    # «Изменить лимит устр.», «Удалить тариф».
+    #
+    # Тарифы захардкожены. В админке доступно только:
+    #   • изменение цены;
+    #   • вкл / выкл (видимость на витрине).
+    # ──────────────────────────────────────────────────
     builder.button(
         text="✏️ Изменить цену ₽",
         callback_data=f"admin_tariff_edit_rub:{tariff_id}",
@@ -25,19 +25,14 @@ def get_admin_tariff_card_keyboard(
         status_text = "🔴 Выключить"
     else:
         status_text = "🟢 Включить"
-
     builder.button(
         text=status_text,
         callback_data=f"admin_tariff_toggle:{tariff_id}",
     )
-    builder.button(
-        text="🗑 Удалить тариф",
-        callback_data=f"admin_tariff_delete:{tariff_id}",
-    )
+
     builder.button(
         text="← К списку тарифов",
         callback_data="admin_tariffs",
     )
-
-    builder.adjust(1, 1, 1, 1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()

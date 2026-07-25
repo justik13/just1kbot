@@ -1,14 +1,12 @@
 import logging
 from contextlib import asynccontextmanager
 from typing import Awaitable, Callable
-
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-
 from config.settings import get_settings
 from database.models import Base, MaintenanceMode, Tariff
 
@@ -16,20 +14,19 @@ _engine = None
 _sessionmaker = None
 
 DEFAULT_TARIFFS = [
-    {"duration_days": 7, "device_limit": 2, "price_rub": 35, "sort_order": 10},
-    {"duration_days": 30, "device_limit": 2, "price_rub": 90, "sort_order": 11},
-    {"duration_days": 90, "device_limit": 2, "price_rub": 240, "sort_order": 12},
-    {"duration_days": 30, "device_limit": 5, "price_rub": 180, "sort_order": 20},
-    {"duration_days": 90, "device_limit": 5, "price_rub": 480, "sort_order": 21},
-    {"duration_days": 30, "device_limit": 10, "price_rub": 320, "sort_order": 30},
-    {"duration_days": 90, "device_limit": 10, "price_rub": 850, "sort_order": 31},
+    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35,  "sort_order": 10},
+    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 30, "device_limit": 2,  "price_rub": 90,  "sort_order": 11},
+    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 90, "device_limit": 2,  "price_rub": 240, "sort_order": 12},
+    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 30, "device_limit": 5,  "price_rub": 180, "sort_order": 20},
+    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 90, "device_limit": 5,  "price_rub": 480, "sort_order": 21},
+    {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 30, "device_limit": 10, "price_rub": 320, "sort_order": 30},
+    {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 90, "device_limit": 10, "price_rub": 850, "sort_order": 31},
 ]
 
 
 async def init_db():
     global _engine, _sessionmaker
     settings = get_settings()
-
     _engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,
@@ -39,13 +36,11 @@ async def init_db():
         pool_pre_ping=True,
     )
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
-
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await _seed_default_tariffs(conn)
         await _seed_maintenance_mode(conn)
         await _apply_additional_indexes(conn)
-
     logging.info("PostgreSQL database initialized at %s", settings.DATABASE_URL)
     return _engine, _sessionmaker
 

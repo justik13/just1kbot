@@ -2,11 +2,9 @@ import asyncio
 import logging
 from datetime import timedelta
 from typing import Optional
-
 from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from bot.constants import (
     PERMANENT_SUBSCRIPTION_DAYS,
     PERMANENT_END_DATE,
@@ -75,14 +73,12 @@ class SubscriptionService:
         ref_id: int | None = None,
     ) -> Optional[User]:
         user = await get_user_by_telegram_id_any(session, telegram_id)
-
         if user is not None and user.is_deleted:
             user.is_deleted = False
             user.deleted_at = None
             await session.flush()
             invalidate_user_cache(telegram_id)
             logger.info("Restored soft-deleted user %s on onboarding", telegram_id)
-
         if user is not None:
             changed = False
             if username is not None and user.username != username:
@@ -101,15 +97,12 @@ class SubscriptionService:
                 await session.flush()
                 invalidate_user_cache(telegram_id)
             return user
-
         referred_by = None
         if ref_id is not None:
             is_valid = await SubscriptionService._validate_referral(session, telegram_id, ref_id)
             if is_valid:
                 referred_by = ref_id
                 logger.info("New user %s referred by %s", telegram_id, ref_id)
-
-        # ИСПРАВЛЕНО (БАГ 1): try/except IntegrityError.
         try:
             user = await create_user(session, telegram_id, username, first_name, referred_by)
         except IntegrityError:
@@ -119,11 +112,10 @@ class SubscriptionService:
                 user.is_deleted = False
                 user.deleted_at = None
                 await session.flush()
-            logger.info(
-                "process_onboarding: IntegrityError caught for telegram_id=%s, re-read existing user",
-                telegram_id,
-            )
-
+                logger.info(
+                    "process_onboarding: IntegrityError caught for telegram_id=%s, re-read existing user",
+                    telegram_id,
+                )
         invalidate_user_cache(telegram_id)
         return user
 
@@ -138,7 +130,6 @@ class SubscriptionService:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
             return None
-
         if new_device_limit is not None:
             profiles_count = await get_user_profiles_count(session, user.id)
             if profiles_count > new_device_limit:
@@ -146,14 +137,47 @@ class SubscriptionService:
                     f"Cannot downgrade: {profiles_count} devices > "
                     f"{new_device_limit} limit. User must delete devices first."
                 )
-
         now = now_utc()
         had_active_subscription = bool(
             user.subscription_end and user.subscription_end > now
         )
 
-        if days == 0 and not had_active_subscription:
+        # ──────────────────────────────────────────────────────────
+        # ИСПРАВЛЕНО: защита от абуза смены тарифа.
+        #
+        # Если пользователь покупает тариф с ДРУГИМ device_limit
+        # и у него уже есть активная подписка — дни НЕ наслаиваются.
+        # Подписка начинается заново: now + days.
+        #
+        # Если это продление того же тарифа — дни добавляются
+        # к текущему subscription_end (старое поведение).
+        #
+        # days == 0 (админская смена тарифа) — срок не меняется.
+        # ──────────────────────────────────────────────────────────
+        is_tariff_change = (
+            new_tariff_id is not None
+            and user.current_tariff_id is not None
+            and new_tariff_id != user.current_tariff_id
+            and had_active_subscription
+            and days > 0
+        )
+
+        if days == 0:
             new_end = user.subscription_end
+        elif is_tariff_change:
+            new_end = (
+                PERMANENT_END_DATE
+                if days >= PERMANENT_SUBSCRIPTION_DAYS
+                else now + timedelta(days=days)
+            )
+            logger.info(
+                "extend_subscription: tariff change detected for user %s "
+                "(old_tariff=%s, new_tariff=%s). Subscription restarted "
+                "from now, not stacked.",
+                telegram_id,
+                user.current_tariff_id,
+                new_tariff_id,
+            )
         else:
             current_end = (
                 user.subscription_end
@@ -174,7 +198,6 @@ class SubscriptionService:
         user.notified_grace_12h = False
         user.notification_retry_count = 0
         user.last_notification_attempt = None
-
         if new_device_limit is not None:
             old_device_limit = user.device_limit
             user.device_limit = new_device_limit
@@ -182,13 +205,12 @@ class SubscriptionService:
                 user.device_creations_today = 0
                 user.last_creation_date = None
                 logger.info(
-                    "extend_subscription: user %s upgraded from %s to %s devices. Daily creations counter reset to 0.",
+                    "extend_subscription: user %s upgraded from %s to %s devices. "
+                    "Daily creations counter reset to 0.",
                     telegram_id, old_device_limit, new_device_limit,
                 )
-
         if new_tariff_id is not None:
             user.current_tariff_id = new_tariff_id
-
         await session.flush()
         invalidate_user_cache(telegram_id)
         await SubscriptionService._sync_access_state(session, user)
@@ -201,11 +223,9 @@ class SubscriptionService:
             and not is_expired(user.subscription_end)
             and not user.is_banned
         )
-
         profiles = await get_user_profiles(session, user.id)
         if not profiles:
             return
-
         profile_ids = [profile.id for profile in profiles]
         await session.execute(
             update(VPNProfile)
@@ -213,14 +233,12 @@ class SubscriptionService:
             .values(is_active=target_active)
         )
         await session.flush()
-
         expires_ts = (
             await SubscriptionService.get_expires_timestamp(user)
             if target_active
             else None
         )
         target_status = "active" if target_active else "disabled"
-
         queue_post_commit_task(
             session,
             lambda uid=user.id, ts=expires_ts, st=target_status: (
@@ -235,20 +253,17 @@ class SubscriptionService:
         target_status: str = "active",
     ):
         from database.connection import session_scope
-
         try:
             async with session_scope() as session:
                 profiles = await get_user_profiles(session, user_id)
                 if not profiles:
                     return
-
                 server_ids = {p.server_id for p in profiles}
                 servers_map = {}
                 for sid in server_ids:
                     server = await get_server_by_id(session, sid)
                     if server and server.api_url and server.api_key:
                         servers_map[sid] = server
-
                 tasks = []
                 for profile in profiles:
                     server = servers_map.get(profile.server_id)
@@ -266,7 +281,6 @@ class SubscriptionService:
                             clear_expires_at=clear_expires_at,
                         )
                     )
-
                 if tasks:
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     success = sum(1 for r in results if r is True)

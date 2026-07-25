@@ -46,7 +46,6 @@ class User(Base):
     referral_days: Mapped[int] = mapped_column(Integer, default=0)
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_banned: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_bot_blocked: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -98,13 +97,11 @@ class VPNProfile(Base):
     )
     device_name: Mapped[str] = mapped_column(String(255), nullable=False)
     peer_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    raw_config: Mapped[str] = mapped_column(EncryptedString(critical=False), nullable=False)
+    raw_config: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
     traffic_down: Mapped[int] = mapped_column(BigInteger, default=0)
     traffic_up: Mapped[int] = mapped_column(BigInteger, default=0)
     last_connected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    last_ip: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    sync_fail_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
     user = relationship("User", back_populates="profiles")
@@ -117,7 +114,6 @@ class Server(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     country_flag: Mapped[str | None] = mapped_column(String(10), nullable=True)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_url: Mapped[str] = mapped_column(String(500), nullable=False)
     api_key: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
     protocol: Mapped[str] = mapped_column(String(50), default="amneziawg2")
@@ -130,6 +126,8 @@ class Tariff(Base):
     __tablename__ = "tariffs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     device_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     price_rub: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -180,7 +178,6 @@ class Payment(Base):
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     payment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    qr_code: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_method: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     user = relationship("User", back_populates="payments")
