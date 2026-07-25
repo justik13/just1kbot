@@ -31,7 +31,6 @@ async def _preload_alerted_stale_payments():
     try:
         async with session_scope() as session:
             threshold = now_utc() - timedelta(hours=1)
-
             stmt = (
                 select(Payment.id)
                 .where(
@@ -41,18 +40,15 @@ async def _preload_alerted_stale_payments():
                 .order_by(Payment.created_at.desc())
                 .limit(10000)
             )
-
             result = await session.execute(stmt)
-
             for (payment_id,) in result.all():
                 _alerted_stale_payments[payment_id] = True
 
-            if _alerted_stale_payments:
-                logger.info(
-                    "Preloaded %s existing stale payment IDs to suppress duplicate alerts after restart",
-                    len(_alerted_stale_payments),
-                )
-
+        if _alerted_stale_payments:
+            logger.info(
+                "Preloaded %s existing stale payment IDs to suppress duplicate alerts after restart",
+                len(_alerted_stale_payments),
+            )
     except Exception as e:
         logger.warning("Failed to preload stale payment IDs: %s", e)
 
@@ -78,10 +74,8 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
             break
         except Exception as e:
             logger.error("Критическая ошибка в stale_payments_checker: %s", e, exc_info=True)
-
             if shutdown_event.is_set():
                 break
-
             await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
             continue
 
@@ -116,7 +110,6 @@ async def _cleanup_orphan_pending_payments():
                 )
                 .limit(100)
             )
-
             result = await session.execute(stmt)
             orphan_ids = [row[0] for row in result.all()]
 
@@ -137,7 +130,6 @@ async def _cleanup_orphan_pending_payments():
                 len(orphan_ids),
                 ORPHAN_PENDING_THRESHOLD_HOURS,
             )
-
     except Exception as e:
         logger.warning("Failed to cleanup orphan pending payments: %s", e)
 
@@ -159,9 +151,7 @@ async def _process_stale_payments(bot: Bot, settings):
             .order_by(Payment.created_at.desc())
             .limit(50)
         )
-
         result = await session.execute(stmt)
-
         for payment, telegram_id in result.all():
             if payment.external_id and payment.status == "pending":
                 yookassa_payment_ids.append(payment.id)
@@ -191,7 +181,6 @@ async def _alert_new_stale_payments(bot: Bot, settings):
             .order_by(Payment.created_at.desc())
             .limit(1000)
         )
-
         fresh_result = await session.execute(fresh_stmt)
         fresh_stale = [(payment, telegram_id) for payment, telegram_id in fresh_result.all()]
 
@@ -201,24 +190,23 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         return
 
     msg = (
-        f"⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>
-"
-        f"{'─' * 20}
-"
-        f"Количество: <b>{len(new_stale_for_alert)}</b>
-"
+        "⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>\n"
+        "────────────────────\n"
+        f"Количество: <b>{len(new_stale_for_alert)}</b>\n"
     )
 
     for payment, telegram_id in new_stale_for_alert[:10]:
         method = payment.payment_method or "—"
         status_icon = "🧪" if payment.status == "requires_manual_review" else "⏳"
-
-        msg += f"{status_icon} ID: <code>{payment.id}</code> · User: <code>{telegram_id}</code> · {payment.amount} {payment.currency} · {method}
-"
+        msg += (
+            f"{status_icon} ID: <code>{payment.id}</code> · "
+            f"User: <code>{telegram_id}</code> · "
+            f"{payment.amount} {payment.currency} · "
+            f"{method}\n"
+        )
 
     if len(new_stale_for_alert) > 10:
-        msg += f"
-<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
+        msg += f"\n<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
 
     for admin_id in settings.ADMIN_IDS:
         try:
