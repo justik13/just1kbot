@@ -20,6 +20,7 @@ from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.formatters import format_datetime
 from utils.telegram import safe
+from utils.text_limits import truncate_details
 
 # Совместимость со старыми импортами, если они где-то остались.
 from bot.keyboards.admin.dashboard import (  # noqa: F401
@@ -78,7 +79,9 @@ async def show_admin_menu(
         return
 
     await state.clear()
+
     await _show_admin_dashboard(callback, session)
+
     await callback.answer()
 
 
@@ -100,6 +103,7 @@ async def show_admin_audit(
     logs = await get_recent_audit_logs(session, limit=10)
 
     text = texts.AUDIT_LOG_HEADER
+
     if not logs:
         text += texts.AUDIT_LOG_EMPTY
     else:
@@ -110,14 +114,17 @@ async def show_admin_audit(
             )
 
             target = ""
+
             if log.target_type:
                 target = f" · {safe(log.target_type)}"
-                if log.target_id:
-                    target += f" #{log.target_id}"
+
+            if log.target_id:
+                target += f" #{log.target_id}"
 
             details = ""
+
             if log.details:
-                details = f"\n{safe(log.details)}"
+                details = f"\n{safe(truncate_details(log.details, 300))}"
 
             text += texts.AUDIT_ENTRY.format(
                 date=format_datetime(log.created_at),
@@ -155,6 +162,7 @@ async def show_admin_maintenance(
     await state.clear()
 
     enabled = await MaintenanceService.is_enabled(session)
+
     text = (
         texts.ADMIN_MAINTENANCE_MENU_ENABLED
         if enabled

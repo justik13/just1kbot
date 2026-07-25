@@ -23,6 +23,11 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.admin import is_admin
+from utils.callbacks import (
+    parse_callback_id,
+    parse_callback_int,
+    parse_callback_parts,
+)
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
 from utils.telegram import render_hub
@@ -38,8 +43,6 @@ async def admin_sub_extend(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -47,9 +50,19 @@ async def admin_sub_extend(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await get_user_by_telegram_id(session, telegram_id)
+
     if not user or not user.subscription_end:
         await callback.answer(
             texts.ADMIN_SUB_NO_SUBSCRIPTION,
@@ -81,8 +94,6 @@ async def admin_sub_confirm_extend(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -90,11 +101,34 @@ async def admin_sub_confirm_extend(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    days = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    days = parse_callback_int(parts, 2)
+
+    if (
+        telegram_id is None
+        or days is None
+        or days < 1
+        or days > PERMANENT_SUBSCRIPTION_DAYS
+    ):
+        await callback.answer(
+            "Некорректное количество дней",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await get_user_by_telegram_id(session, telegram_id)
+
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -102,6 +136,7 @@ async def admin_sub_confirm_extend(
         return
 
     current_time = now_utc()
+
     current_end = (
         user.subscription_end
         if (
@@ -155,8 +190,6 @@ async def admin_sub_apply_extend(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -164,15 +197,38 @@ async def admin_sub_apply_extend(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    days = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    days = parse_callback_int(parts, 2)
+
+    if (
+        telegram_id is None
+        or days is None
+        or days < 1
+        or days > PERMANENT_SUBSCRIPTION_DAYS
+    ):
+        await callback.answer(
+            "Некорректное количество дней",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     try:
         user = await get_user_by_telegram_id(
             session,
             telegram_id,
         )
+
         if not user:
             await callback.message.edit_text(
                 texts.ERROR_USER_NOT_FOUND
@@ -239,7 +295,9 @@ async def admin_sub_apply_extend(
             f"admin_sub_apply_extend error: {e}",
             exc_info=True,
         )
+
         await session.rollback()
+
         await callback.answer(
             texts.ADMIN_SUB_EXTEND_FAILED,
             show_alert=True,
@@ -251,8 +309,6 @@ async def admin_sub_extend_custom_start(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -260,9 +316,18 @@ async def admin_sub_extend_custom_start(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
 
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
     await state.clear()
+
     await state.set_state(AdminStates.admin_extending_custom)
     await state.update_data(admin_telegram_id=telegram_id)
 
@@ -302,6 +367,7 @@ async def admin_sub_extend_custom_process(
         return
 
     days = _validate_positive_int(message.text)
+
     if days is None:
         await render_hub(
             message.bot,
@@ -315,6 +381,7 @@ async def admin_sub_extend_custom_process(
     await state.clear()
 
     user = await get_user_by_telegram_id(session, telegram_id)
+
     if not user:
         await render_hub(
             message.bot,
@@ -325,6 +392,7 @@ async def admin_sub_extend_custom_process(
         return
 
     current_time = now_utc()
+
     current_end = (
         user.subscription_end
         if (

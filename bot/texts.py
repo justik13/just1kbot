@@ -5,22 +5,14 @@
 # Все тексты хранятся в:
 # - bot/texts_data/user_texts.py
 # - bot/texts_data/admin_texts.py
+# - bot/texts_data/overrides.py
 #
 # Этот файл:
-# 1. Загружает оба словаря.
+# 1. Загружает user_texts и admin_texts.
 # 2. Проверяет, что нет дублирующихся ключей.
-# 3. Проверяет, что все ключи являются валидными Python identifier.
-# 4. Публикует ключи как атрибуты модуля.
-#
-# Использование остаётся прежним:
-#
-#   from bot import texts
-#   texts.HUB_HEADER.format(name="Test")
-#
-# Или:
-#
-#   from bot.texts import get_text
-#   get_text("HUB_HEADER")
+# 3. Применяет точечные overrides.
+# 4. Проверяет, что все ключи являются валидными Python identifier.
+# 5. Публикует ключи как атрибуты модуля.
 
 import logging
 from importlib import reload
@@ -28,6 +20,7 @@ from typing import Any
 
 from bot.texts_data import admin_texts as _admin_texts_module
 from bot.texts_data import user_texts as _user_texts_module
+from bot.texts_data import overrides as _overrides_module
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +42,7 @@ def _merge_texts() -> dict[str, Any]:
     admin_texts = dict(_admin_texts_module.TEXTS)
 
     duplicates = sorted(set(user_texts.keys()) & set(admin_texts.keys()))
+
     if duplicates:
         raise RuntimeError(
             "Duplicate text keys between user_texts and admin_texts: "
@@ -71,13 +65,16 @@ def _merge_texts() -> dict[str, Any]:
 
             merged[key] = value
 
+    # Точечные переопределения применяются последними.
+    for key, value in dict(_overrides_module.OVERRIDES).items():
+        _validate_key(key)
+        merged[key] = value
+
     return merged
 
 
 _TEXTS = _merge_texts()
 
-# Публикуем все тексты как атрибуты модуля.
-# Это сохраняет совместимость со старым bot/texts.py.
 globals().update(_TEXTS)
 
 __all__ = list(_TEXTS.keys()) + [
@@ -110,6 +107,7 @@ def reload_texts() -> None:
 
     reload(_user_texts_module)
     reload(_admin_texts_module)
+    reload(_overrides_module)
 
     _TEXTS = _merge_texts()
     globals().update(_TEXTS)

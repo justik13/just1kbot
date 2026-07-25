@@ -24,46 +24,49 @@ class BanCheckMiddleware(BaseMiddleware):
     ) -> Any:
         user_id = event.from_user.id if event.from_user else None
 
-        #
-        # Владелец/админ из ADMIN_IDS не должен блокироваться ban check.
-        #
-        # Это защита от lockout, если в БД случайно окажется is_banned=True
-        # для администратора.
-        #
+        # Админ из ADMIN_IDS не должен блокироваться ban check.
         if user_id is not None:
             settings = get_settings()
             if user_id in settings.ADMIN_IDS:
                 return await handler(event, data)
 
         db_user = data.get("db_user")
+
         if db_user is None:
             return await handler(event, data)
 
         if getattr(db_user, "is_banned", False):
             if user_id and user_id not in _ban_alert_cache:
                 _ban_alert_cache[user_id] = True
+
                 logger.info(
                     "Banned user %s attempted action: %s (alert sent)",
                     db_user.telegram_id,
                     type(event).__name__,
                 )
 
-            if isinstance(event, CallbackQuery):
-                try:
-                    await event.answer(texts.ERROR_BANNED_ALERT, show_alert=True)
-                except Exception:
-                    pass
-            elif isinstance(event, Message):
-                try:
-                    await event.answer(texts.ERROR_BANNED_MESSAGE)
-                except Exception:
-                    pass
-        else:
-            logger.debug(
-                "Banned user %s attempted action: %s (alert throttled)",
-                db_user.telegram_id if db_user else "unknown",
-                type(event).__name__,
-            )
+                if isinstance(event, CallbackQuery):
+                    try:
+                        await event.answer(
+                            texts.ERROR_BANNED_ALERT,
+                            show_alert=True,
+                        )
+                    except Exception:
+                        pass
+
+                elif isinstance(event, Message):
+                    try:
+                        await event.answer(texts.ERROR_BANNED_MESSAGE)
+                    except Exception:
+                        pass
+
+            else:
+                logger.debug(
+                    "Banned user %s attempted action: %s (alert throttled)",
+                    db_user.telegram_id if db_user else "unknown",
+                    type(event).__name__,
+                )
+
             return None
 
-        return None
+        return await handler(event, data)

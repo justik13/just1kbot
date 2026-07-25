@@ -16,12 +16,18 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.admin import is_admin
+from utils.callbacks import (
+    parse_callback_id,
+    parse_callback_int,
+    parse_callback_parts,
+)
 from utils.tariff_names import get_tariff_group_name
 
 from .common import (
     _get_representative_tariff,
     _get_tariff_groups,
     _get_user_with_profiles,
+    _is_subscription_active,
 )
 
 router = Router()
@@ -33,8 +39,6 @@ async def admin_sub_change_tariff(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -42,9 +46,19 @@ async def admin_sub_change_tariff(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await _get_user_with_profiles(session, telegram_id)
+
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -60,11 +74,13 @@ async def admin_sub_change_tariff(
     )
 
     current_tariff_name = "—"
+
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(
             session,
             user.current_tariff_id,
         )
+
         if tariff:
             current_tariff_name = get_tariff_group_name(
                 tariff.device_limit
@@ -97,8 +113,6 @@ async def admin_sub_select_group(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -106,11 +120,29 @@ async def admin_sub_select_group(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    device_limit = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    device_limit = parse_callback_int(parts, 2)
+
+    if telegram_id is None or device_limit is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await _get_user_with_profiles(session, telegram_id)
+
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -157,6 +189,7 @@ async def admin_sub_select_group(
                 "admin_sub_select_group downgrade "
                 f"edit_text failed: {e}"
             )
+
         return
 
     if user.current_tariff_id == new_tariff.id:
@@ -167,11 +200,13 @@ async def admin_sub_select_group(
         return
 
     old_tariff_name = "—"
+
     if user.current_tariff_id:
         old_tariff = await get_tariff_by_id(
             session,
             user.current_tariff_id,
         )
+
         if old_tariff:
             old_tariff_name = get_tariff_group_name(
                 old_tariff.device_limit
@@ -212,8 +247,6 @@ async def admin_sub_apply_tariff(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -221,22 +254,48 @@ async def admin_sub_apply_tariff(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    tariff_id = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    tariff_id = parse_callback_int(parts, 2)
+
+    if telegram_id is None or tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     try:
         user = await _get_user_with_profiles(
             session,
             telegram_id,
         )
+
         if not user:
             await callback.message.edit_text(
                 texts.ERROR_USER_NOT_FOUND
             )
             return
 
+        if not _is_subscription_active(user):
+            await callback.answer(
+                texts.ADMIN_SUB_NO_SUBSCRIPTION,
+                show_alert=True,
+            )
+            return
+
         new_tariff = await get_tariff_by_id(session, tariff_id)
+
         if not new_tariff:
             await callback.answer(
                 texts.ERROR_TARIFF_NOT_FOUND,
@@ -264,6 +323,7 @@ async def admin_sub_apply_tariff(
                 ),
                 parse_mode="HTML",
             )
+
             return
 
         await SubscriptionService.extend_subscription(
@@ -313,7 +373,9 @@ async def admin_sub_apply_tariff(
             f"admin_sub_apply_tariff error: {e}",
             exc_info=True,
         )
+
         await session.rollback()
+
         await callback.answer(
             texts.ADMIN_SUB_CHANGE_FAILED,
             show_alert=True,

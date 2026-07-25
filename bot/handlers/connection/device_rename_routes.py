@@ -9,6 +9,7 @@ from bot.states import DeviceManagementStates
 from database.models import User
 from database.repositories.profiles_repo import (
     get_profile_by_id,
+    get_user_profiles,
     update_profile,
 )
 from services.subscription import SubscriptionService
@@ -31,6 +32,7 @@ async def rename_device_start(
     profile_id = int(callback.data.split(":")[1])
 
     profile = await get_profile_by_id(session, profile_id)
+
     if not profile or not db_user or profile.user_id != db_user.id:
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -73,17 +75,21 @@ async def rename_device_process(
         return
 
     data = await state.get_data()
+
     profile_id = data.get("profile_id")
 
     profile = await get_profile_by_id(session, profile_id)
+
     if not profile or not db_user or profile.user_id != db_user.id:
         await state.clear()
+
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_ACCESS_DENIED,
             get_back_button("back_to_connections"),
         )
+
         return
 
     has_access = await SubscriptionService.check_access(
@@ -93,12 +99,14 @@ async def rename_device_process(
 
     if not has_access:
         await state.clear()
+
         await render_hub(
             message.bot,
             message.chat.id,
             texts.DEVICE_ACCESS_INACTIVE,
             get_back_button("back_to_connections"),
         )
+
         return
 
     new_name = message.text.strip()
@@ -115,6 +123,22 @@ async def rename_device_process(
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
+
+    existing_profiles = await get_user_profiles(session, db_user.id)
+
+    for p in existing_profiles:
+        if (
+            p.id != profile.id
+            and p.server_id == profile.server_id
+            and p.device_name.lower() == new_name.lower()
+        ):
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.DEVICE_NAME_DUPLICATE.format(device_name=safe(new_name)),
+                get_back_button(f"manage_device:{profile.id}"),
+            )
+            return
 
     await update_profile(
         session,

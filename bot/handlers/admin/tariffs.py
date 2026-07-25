@@ -24,12 +24,15 @@ from database.repositories.tariffs_repo import (
 )
 from services.audit_service import AuditService
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
+from utils.text_limits import truncate_button_text
 
 router = Router()
 logger = logging.getLogger(__name__)
 
 TARIFFS_PER_PAGE = 10
+MAX_TARIFF_PRICE = 1_000_000
 
 
 async def _build_tariffs_list_text_and_kb(
@@ -42,6 +45,7 @@ async def _build_tariffs_list_text_and_kb(
         f"🛠 Админка › 💰 <b>Тарифы</b>\n"
         f"(стр. {page}/{total_pages}) · Всего: {total}\n"
     )
+
     builder = InlineKeyboardBuilder()
 
     if not tariffs:
@@ -49,12 +53,15 @@ async def _build_tariffs_list_text_and_kb(
     else:
         for tariff in tariffs:
             status = "🟢" if tariff.is_active else "🔴"
+
+            button_text = truncate_button_text(
+                f"{status} {tariff.name} · "
+                f"{tariff.duration_days} дн. · "
+                f"{tariff.price_rub}₽"
+            )
+
             builder.button(
-                text=(
-                    f"{status} {safe(tariff.name)} · "
-                    f"{tariff.duration_days} дн. · "
-                    f"{tariff.price_rub}₽"
-                ),
+                text=button_text,
                 callback_data=f"admin_tariff_card:{tariff.id}",
             )
 
@@ -63,6 +70,7 @@ async def _build_tariffs_list_text_and_kb(
             text="⬅️",
             callback_data=f"admin_tariffs_page:{page - 1}",
         )
+
     if page < total_pages:
         builder.button(
             text="➡️",
@@ -73,7 +81,9 @@ async def _build_tariffs_list_text_and_kb(
         text="← В админку",
         callback_data="admin_menu",
     )
+
     builder.adjust(1)
+
     return rendered, builder
 
 
@@ -83,21 +93,25 @@ async def _show_tariffs_list(
     page: int = 1,
 ):
     total_tariffs = await get_tariff_count(session)
+
     total_pages = max(
         1,
         math.ceil(total_tariffs / TARIFFS_PER_PAGE),
     )
+
     tariffs = await get_tariffs_paginated(
         session,
         page=page,
         per_page=TARIFFS_PER_PAGE,
     )
+
     rendered, kb = await _build_tariffs_list_text_and_kb(
         tariffs,
         page,
         total_pages,
         total_tariffs,
     )
+
     try:
         await callback.message.edit_text(
             rendered,
@@ -123,7 +137,9 @@ async def _get_pending_payments_count_for_tariff(
             ]
         ),
     )
+
     result = await session.execute(stmt)
+
     return result.scalar_one() or 0
 
 
@@ -139,9 +155,11 @@ async def show_tariffs_list(
             show_alert=True,
         )
         return
+
     await state.clear()
-    await _show_tariffs_list(callback, session, page=1)
     await callback.answer()
+
+    await _show_tariffs_list(callback, session, page=1)
 
 
 @router.callback_query(F.data.startswith("admin_tariffs_page:"))
@@ -156,10 +174,20 @@ async def tariffs_pagination(
             show_alert=True,
         )
         return
+
+    page = parse_callback_id(callback.data, 1)
+
+    if page is None or page < 1:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
-    page = int(callback.data.split(":")[1])
-    await _show_tariffs_list(callback, session, page=page)
     await callback.answer()
+
+    await _show_tariffs_list(callback, session, page=page)
 
 
 async def _show_tariff_card(
@@ -171,8 +199,9 @@ async def _show_tariff_card(
         if tariff.is_active
         else "🔴 Отключён"
     )
+
     rendered = (
-        f"🛠 Админка › 💰 Тарифы › <b>Тариф</b>\n\n"
+        f"🛠 Админка › 💰 Тарифы › <b>Тариф</b>\n"
         f"<b>ID:</b> {tariff.id}\n"
         f"<b>Название:</b> {safe(tariff.name)}\n"
         f"<b>Описание:</b> {safe(tariff.description or '—')}\n"
@@ -183,10 +212,12 @@ async def _show_tariff_card(
     )
 
     builder = InlineKeyboardBuilder()
+
     builder.button(
         text="✏️ Изменить цену ₽",
         callback_data=f"admin_tariff_edit_rub:{tariff.id}",
     )
+
     if tariff.is_active:
         builder.button(
             text="🔴 Выключить",
@@ -197,10 +228,12 @@ async def _show_tariff_card(
             text="🟢 Включить",
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
+
     builder.button(
         text="← К списку тарифов",
         callback_data="admin_tariffs",
     )
+
     builder.adjust(1)
 
     try:
@@ -227,22 +260,29 @@ async def show_tariff_card(
             show_alert=True,
         )
         return
+
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
-    tariff_id = int(callback.data.split(":")[1])
+    await callback.answer()
+
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await callback.answer(
             texts.ERROR_TARIFF_NOT_FOUND,
             show_alert=True,
         )
         return
+
     await _show_tariff_card(callback, tariff)
-    await callback.answer()
-
-
-# ──────────────────────────────────────────────────────────
-# ВКЛ / ВЫКЛ тарифа
-# ──────────────────────────────────────────────────────────
 
 
 @router.callback_query(F.data.startswith("admin_tariff_toggle:"))
@@ -257,10 +297,21 @@ async def toggle_tariff_confirm(
             show_alert=True,
         )
         return
-    await state.clear()
 
-    tariff_id = int(callback.data.split(":")[1])
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await state.clear()
+    await callback.answer()
+
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await callback.answer(
             texts.ERROR_TARIFF_NOT_FOUND,
@@ -272,23 +323,23 @@ async def toggle_tariff_confirm(
 
     if new_status:
         text = (
-            f"⚠️ <b>Подтверждение включения тарифа</b>\n\n"
+            f"⚠️ <b>Подтверждение включения тарифа</b>\n"
             f"Тариф: <b>{safe(tariff.name)} "
             f"({tariff.duration_days} дн. / "
-            f"{tariff.device_limit} устр.)</b>\n\n"
+            f"{tariff.device_limit} устр.)</b>\n"
             f"Тариф снова будет доступен пользователям\n"
-            f"при покупке доступа.\n\n"
+            f"при покупке доступа.\n"
             f"<i>Уже купленные подписки продолжат "
             f"работать.</i>"
         )
     else:
         text = (
-            f"⚠️ <b>Подтверждение отключения тарифа</b>\n\n"
+            f"⚠️ <b>Подтверждение отключения тарифа</b>\n"
             f"Тариф: <b>{safe(tariff.name)} "
             f"({tariff.duration_days} дн. / "
-            f"{tariff.device_limit} устр.)</b>\n\n"
+            f"{tariff.device_limit} устр.)</b>\n"
             f"Тариф будет скрыт из списка доступных\n"
-            f"при покупке доступа.\n\n"
+            f"при покупке доступа.\n"
             f"<i>Уже купленные подписки продолжат "
             f"работать.</i>"
         )
@@ -310,7 +361,6 @@ async def toggle_tariff_confirm(
         logger.debug(
             f"toggle_tariff_confirm edit_text failed: {e}"
         )
-    await callback.answer()
 
 
 @router.callback_query(
@@ -327,10 +377,20 @@ async def toggle_tariff_apply(
             show_alert=True,
         )
         return
+
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await state.clear()
 
-    tariff_id = int(callback.data.split(":")[1])
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await callback.answer(
             texts.ERROR_TARIFF_NOT_FOUND,
@@ -347,6 +407,7 @@ async def toggle_tariff_apply(
                 tariff_id,
             )
         )
+
         if pending_count > 0:
             await callback.answer(
                 texts.ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING,
@@ -381,12 +442,8 @@ async def toggle_tariff_apply(
         )
 
     refreshed = await get_tariff_by_id(session, tariff_id)
+
     await _show_tariff_card(callback, refreshed)
-
-
-# ──────────────────────────────────────────────────────────
-# ИЗМЕНЕНИЕ ЦЕНЫ (единственное редактируемое поле)
-# ──────────────────────────────────────────────────────────
 
 
 @router.callback_query(
@@ -402,9 +459,19 @@ async def start_edit_tariff_rub(
             show_alert=True,
         )
         return
-    await state.clear()
 
-    tariff_id = int(callback.data.split(":")[1])
+    tariff_id = parse_callback_id(callback.data, 1)
+
+    if tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await state.clear()
+    await callback.answer()
+
     await state.update_data(tariff_id=tariff_id)
     await state.set_state(AdminStates.editing_tariff_rub)
 
@@ -417,7 +484,6 @@ async def start_edit_tariff_rub(
         logger.debug(
             f"start_edit_tariff_rub edit_text failed: {e}"
         )
-    await callback.answer()
 
 
 @router.message(AdminStates.editing_tariff_rub)
@@ -441,6 +507,7 @@ async def process_edit_tariff_rub(
 
     if message.text.startswith("/"):
         await state.clear()
+
         await render_hub(
             message.bot,
             message.chat.id,
@@ -451,8 +518,6 @@ async def process_edit_tariff_rub(
 
     try:
         new_value = int(message.text.strip())
-        if new_value <= 0:
-            raise ValueError
     except ValueError:
         await render_hub(
             message.bot,
@@ -462,9 +527,20 @@ async def process_edit_tariff_rub(
         )
         return
 
+    if new_value <= 0 or new_value > MAX_TARIFF_PRICE:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"⚠️ Цена должна быть от 1 до {MAX_TARIFF_PRICE} ₽.",
+            get_back_button("admin_tariffs"),
+        )
+        return
+
     data = await state.get_data()
     tariff_id = data["tariff_id"]
+
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await render_hub(
             message.bot,
@@ -472,7 +548,9 @@ async def process_edit_tariff_rub(
             texts.ERROR_TARIFF_NOT_FOUND,
             get_back_button("admin_tariffs"),
         )
+
         await state.clear()
+
         return
 
     old_value = tariff.price_rub
@@ -505,4 +583,5 @@ async def process_edit_tariff_rub(
         f"Admin {message.from_user.id} updated tariff "
         f"{tariff_id} price_rub: {old_value} -> {new_value}"
     )
+
     await state.clear()

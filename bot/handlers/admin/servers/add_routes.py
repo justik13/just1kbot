@@ -70,6 +70,7 @@ async def process_add_server(
 
     if message.text.startswith("/"):
         await state.clear()
+
         await render_hub(
             message.bot,
             message.chat.id,
@@ -161,6 +162,7 @@ async def process_add_server(
             return
 
         existing = await get_server_by_api_url(session, api_url)
+
         if existing:
             await render_hub(
                 message.bot,
@@ -171,7 +173,9 @@ async def process_add_server(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
+
             await state.clear()
+
             return
 
         await state.update_data(api_url=api_url, step="api_key")
@@ -220,10 +224,13 @@ async def process_add_server(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
+
             await state.clear()
+
             return
 
         server_info = await client.get_server_info()
+
         if not server_info:
             await render_hub(
                 message.bot,
@@ -232,7 +239,9 @@ async def process_add_server(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
+
             await state.clear()
+
             return
 
         protocols = server_info.protocols
@@ -249,10 +258,24 @@ async def process_add_server(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
+
             await state.clear()
+
             return
 
         api_max_peers = server_info.get_effective_max_peers()
+
+        # Если API не вернул реальный лимит и используется fallback 250,
+        # ставим более безопасный лимит.
+        if api_max_peers == server_info.SERVER_MAX_PEERS:
+            logger.warning(
+                "Amnezia API did not return max peers for %s. "
+                "Using safe default 200 instead of 250.",
+                all_data["api_url"],
+            )
+
+            api_max_peers = 200
+
         api_server_name = server_info.name or all_data["name"]
 
         existing = await get_server_by_api_url(
@@ -270,7 +293,9 @@ async def process_add_server(
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
+
             await state.clear()
+
             return
 
         server = await create_server(
@@ -307,7 +332,9 @@ async def process_add_server(
         )
 
         logger.info(
-            f"Admin {message.from_user.id} added server: {server.id}"
+            "Admin %s added server: %s",
+            message.from_user.id,
+            server.id,
         )
 
         await state.clear()

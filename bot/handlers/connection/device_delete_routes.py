@@ -13,12 +13,13 @@ from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import DeviceService
+from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
+
 from .common import _render_connections
 
 router = Router()
 
-# ИСПРАВЛЕНО: TTLCache вместо бесконечного set.
 _deleting_devices: TTLCache[int, bool] = TTLCache(
     maxsize=5000,
     ttl=300,
@@ -35,7 +36,12 @@ async def request_delete_device(
     await callback.answer()
     await state.clear()
 
-    profile_id = int(callback.data.split(":")[1])
+    profile_id = parse_callback_id(callback.data, 1)
+
+    if profile_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+
     profile = await get_profile_by_id(session, profile_id)
 
     if not profile or not db_user or profile.user_id != db_user.id:
@@ -58,7 +64,13 @@ async def cancel_delete_device(
     db_user: User | None = None,
 ):
     await state.clear()
-    profile_id = int(callback.data.split(":")[1])
+
+    profile_id = parse_callback_id(callback.data, 1)
+
+    if profile_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+
     profile = await get_profile_by_id(session, profile_id)
 
     if not profile or not db_user or profile.user_id != db_user.id:
@@ -66,7 +78,13 @@ async def cancel_delete_device(
         return
 
     await callback.answer(texts.DEVICE_DELETE_CANCELLED)
-    await render_hub(callback.bot, callback.message.chat.id, texts.DEVICE_MANAGE_TITLE, get_device_keyboard(profile_id))
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        texts.DEVICE_MANAGE_TITLE,
+        get_device_keyboard(profile_id),
+    )
 
 
 @router.callback_query(F.data.startswith("confirm_delete_device:"))
@@ -76,7 +94,17 @@ async def confirm_delete_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    profile_id = int(callback.data.split(":")[1])
+    profile_id = parse_callback_id(callback.data, 1)
+
+    if profile_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+
+    profile = await get_profile_by_id(session, profile_id)
+
+    if not profile or not db_user or profile.user_id != db_user.id:
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
 
     if profile_id in _deleting_devices:
         await callback.answer(texts.DEVICE_DELETE_IN_PROGRESS, show_alert=True)
@@ -88,17 +116,24 @@ async def confirm_delete_device(
         await callback.answer(texts.DEVICE_DELETING_PROGRESS)
         await state.clear()
 
-        profile = await get_profile_by_id(session, profile_id)
-        if not profile or not db_user or profile.user_id != db_user.id:
-            await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        if not await DeviceService.delete_device(
+            session,
+            profile,
+            actor_id=callback.from_user.id,
+        ):
+            await callback.answer(
+                texts.ERROR_SERVER_UNAVAILABLE_GENERIC,
+                show_alert=True,
+            )
             return
 
-        if not await DeviceService.delete_device(session, profile, actor_id=callback.from_user.id):
-            await callback.answer(texts.ERROR_SERVER_UNAVAILABLE_GENERIC, show_alert=True)
-            return
+        user = db_user or await get_user_by_telegram_id(
+            session,
+            callback.from_user.id,
+        )
 
-        user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
         if user:
             await _render_connections(callback.message, user, session)
+
     finally:
         _deleting_devices.pop(profile_id, None)

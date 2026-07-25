@@ -19,6 +19,7 @@ router = Router()
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
     await state.clear()
+
     await render_hub(
         message.bot,
         message.chat.id,
@@ -29,6 +30,15 @@ async def fsm_media_guard(message: Message, state: FSMContext):
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
+    if message.successful_payment:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "✅ Оплата получена!",
+            get_back_button("menu_subscription"),
+        )
+        return
+
     if not message.text:
         return
 
@@ -36,6 +46,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
         return
 
     await state.clear()
+
     await render_hub(
         message.bot,
         message.chat.id,
@@ -47,7 +58,21 @@ async def handle_unknown_text(message: Message, state: FSMContext):
 @router.callback_query(F.data == "dismiss_notification")
 async def dismiss_notification(callback: CallbackQuery):
     await callback.answer()
+
     try:
         await callback.message.delete()
     except TelegramBadRequest:
+        pass
+
+
+@router.callback_query()
+async def stale_callback_fallback(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+
+    try:
+        await callback.answer(
+            "Сессия устарела. Вернитесь в меню.",
+            show_alert=True,
+        )
+    except Exception:
         pass

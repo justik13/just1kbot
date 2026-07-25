@@ -25,6 +25,11 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
 from services.subscription import SubscriptionService
 from utils.admin import is_admin
+from utils.callbacks import (
+    parse_callback_id,
+    parse_callback_int,
+    parse_callback_parts,
+)
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_group_name
@@ -45,8 +50,6 @@ async def admin_sub_grant(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -54,9 +57,19 @@ async def admin_sub_grant(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await get_user_by_telegram_id(session, telegram_id)
+
     if not user:
         await callback.answer(
             texts.ERROR_USER_NOT_FOUND,
@@ -102,8 +115,6 @@ async def admin_sub_grant_group(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -111,9 +122,26 @@ async def admin_sub_grant_group(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    device_limit = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    device_limit = parse_callback_int(parts, 2)
+
+    if telegram_id is None or device_limit is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     groups = await _get_tariff_groups(session)
 
@@ -154,8 +182,6 @@ async def admin_sub_grant_confirm(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -163,12 +189,36 @@ async def admin_sub_grant_confirm(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    tariff_id = int(parts[2])
-    days = int(parts[3])
+    parts = parse_callback_parts(callback.data, 4)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    tariff_id = parse_callback_int(parts, 2)
+    days = parse_callback_int(parts, 3)
+
+    if (
+        telegram_id is None
+        or tariff_id is None
+        or days is None
+        or days < 1
+        or days > PERMANENT_SUBSCRIPTION_DAYS
+    ):
+        await callback.answer(
+            "Некорректное количество дней",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await callback.answer(
             texts.ERROR_TARIFF_NOT_FOUND,
@@ -177,6 +227,7 @@ async def admin_sub_grant_confirm(
         return
 
     current_time = now_utc()
+
     new_end = (
         PERMANENT_END_DATE
         if days >= PERMANENT_SUBSCRIPTION_DAYS
@@ -225,8 +276,6 @@ async def admin_sub_grant_custom_start(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -234,11 +283,27 @@ async def admin_sub_grant_custom_start(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    tariff_id = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    tariff_id = parse_callback_int(parts, 2)
+
+    if telegram_id is None or tariff_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
 
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await callback.answer(
             texts.ERROR_TARIFF_NOT_FOUND,
@@ -246,8 +311,11 @@ async def admin_sub_grant_custom_start(
         )
         return
 
+    await callback.answer()
     await state.clear()
+
     await state.set_state(AdminStates.admin_grant_custom_days)
+
     await state.update_data(
         admin_telegram_id=telegram_id,
         admin_tariff_id=tariff_id,
@@ -286,6 +354,7 @@ async def admin_sub_grant_custom_process(
         return
 
     data = await state.get_data()
+
     telegram_id = data.get("admin_telegram_id")
     tariff_id = data.get("admin_tariff_id")
 
@@ -294,6 +363,7 @@ async def admin_sub_grant_custom_process(
         return
 
     days = _validate_positive_int(message.text)
+
     if days is None:
         await render_hub(
             message.bot,
@@ -309,6 +379,7 @@ async def admin_sub_grant_custom_process(
     await state.clear()
 
     tariff = await get_tariff_by_id(session, tariff_id)
+
     if not tariff:
         await render_hub(
             message.bot,
@@ -319,6 +390,7 @@ async def admin_sub_grant_custom_process(
         return
 
     current_time = now_utc()
+
     new_end = (
         PERMANENT_END_DATE
         if days >= PERMANENT_SUBSCRIPTION_DAYS
@@ -362,8 +434,6 @@ async def admin_sub_grant_apply(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -371,16 +441,40 @@ async def admin_sub_grant_apply(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    tariff_id = int(parts[2])
-    days = int(parts[3])
+    parts = parse_callback_parts(callback.data, 4)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    tariff_id = parse_callback_int(parts, 2)
+    days = parse_callback_int(parts, 3)
+
+    if (
+        telegram_id is None
+        or tariff_id is None
+        or days is None
+        or days < 1
+        or days > PERMANENT_SUBSCRIPTION_DAYS
+    ):
+        await callback.answer(
+            "Некорректное количество дней",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     try:
         user = await get_user_by_telegram_id(
             session,
             telegram_id,
         )
+
         if not user:
             await callback.answer(
                 texts.ERROR_USER_NOT_FOUND,
@@ -403,6 +497,7 @@ async def admin_sub_grant_apply(
             return
 
         tariff = await get_tariff_by_id(session, tariff_id)
+
         if not tariff:
             await callback.answer(
                 texts.ERROR_TARIFF_NOT_FOUND,
@@ -473,7 +568,9 @@ async def admin_sub_grant_apply(
             f"admin_sub_grant_apply error: {e}",
             exc_info=True,
         )
+
         await session.rollback()
+
         await callback.answer(
             texts.ADMIN_SUB_GRANT_FAILED,
             show_alert=True,

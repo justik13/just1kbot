@@ -25,11 +25,15 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: str = ""
     REDIS_KEY_PREFIX: str = "projectx_bot:"
 
-    # ── YooKassa (единственный платёжный провайдер) ──
+    # ── YooKassa ──
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "https://t.me/{bot_username}"
     YOOKASSA_WEBHOOK_PORT: int = 8080
+
+    # Включать ли автоматические чеки YooKassa.
+    # По умолчанию выключено, чтобы не отправлять фиктивные receipt email.
+    YOOKASSA_RECEIPTS_ENABLED: bool = False
 
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
