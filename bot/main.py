@@ -34,6 +34,7 @@ from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
 from services.amnezia_client import close_http_session
+from services.yookassa_client import close_yookassa_session
 from services.workers import (
     start_background_workers,
     stop_background_workers,
@@ -480,9 +481,8 @@ async def main():
         # Amnezia API HTTP session (aiohttp)
         await close_http_session()
 
-        # YooKassa SDK не требует закрытия сессии —
-        # он использует requests внутри asyncio.to_thread(),
-        # сессии управляются SDK автоматически.
+        # YooKassa HTTP session (aiohttp)
+        await close_yookassa_session()
 
         try:
             from services.device_service import (

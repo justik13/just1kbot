@@ -54,7 +54,14 @@ async def close_yookassa_session() -> None:
 class YooKassaClient:
     """
     Клиент для работы с YooKassa API v3.
+
     Аутентификация: HTTP Basic Auth (shopId:secretKey).
+    Все запросы к https://api.yookassa.ru/v3.
+
+    Безопасность webhook обеспечивается:
+      1) IP-whitelisting (диапазоны YooKassa);
+      2) Верификацией object.id + суммы + статуса через API.
+    YooKassa НЕ отправляет заголовки аутентификации в webhook.
     """
 
     def __init__(self) -> None:
@@ -74,6 +81,14 @@ class YooKassaClient:
         return_url: str = "",
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
+        """
+        Создаёт платёж в YooKassa.
+
+        POST /v3/payments
+        Idempotence-Key генерируется автоматически.
+
+        Возвращает dict ответа API или None при ошибке.
+        """
         url = f"{YOOKASSA_API_BASE}/payments"
         body: dict = {
             "amount": {
@@ -130,6 +145,13 @@ class YooKassaClient:
         self,
         payment_id: str,
     ) -> Optional[dict]:
+        """
+        Запрашивает платёж из YooKassa по его ID.
+
+        GET /v3/payments/{payment_id}
+
+        Возвращает dict ответа API или None.
+        """
         url = f"{YOOKASSA_API_BASE}/payments/{payment_id}"
         try:
             session = await _get_session()
@@ -163,30 +185,11 @@ class YooKassaClient:
             )
             return None
 
-    def validate_webhook_credentials(
-        self,
-        shop_id: str,
-        secret: str,
-    ) -> bool:
-        """
-        Проверяет shopId и secretKey.
-
-        ВАЖНО: YooKassa НЕ отправляет заголовки аутентификации
-        в webhook-уведомлениях. Безопасность webhook обеспечивается:
-          1) IP-whitelisting (диапазоны YooKassa);
-          2) Верификацией object.id + суммы + статуса через API.
-
-        Метод оставлен для ручной проверки или кастомных прокси.
-        """
-        return (
-            shop_id == self.shop_id
-            and secret == self.secret_key
-        )
-
     @staticmethod
     def normalize_webhook_event(event: str) -> str:
         """
-        Приводит event из webhook YooKassa к внутреннему статусу.
+        Приводит event из webhook YooKassa
+        к внутреннему статусу.
 
         YooKassa events:
           - payment.succeeded  → CONFIRMED
