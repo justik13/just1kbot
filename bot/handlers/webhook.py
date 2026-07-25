@@ -50,19 +50,16 @@ def _get_real_ip(request: web.Request) -> str:
     За nginx request.remote == 127.0.0.1.
     Читаем X-Real-IP / X-Forwarded-For, которые ставит nginx.
     """
-    # X-Real-IP ставится nginx: proxy_set_header X-Real-IP $remote_addr;
     real_ip = request.headers.get("X-Real-IP", "").strip()
     if real_ip:
         return real_ip
 
-    # X-Forwarded-For: первый IP — оригинальный клиент
     forwarded = request.headers.get("X-Forwarded-For", "").strip()
     if forwarded:
         first_ip = forwarded.split(",")[0].strip()
         if first_ip:
             return first_ip
 
-    # Fallback: прямой connection (без nginx)
     return request.remote or ""
 
 
@@ -122,6 +119,10 @@ async def _verify_stale_webhook_via_api(
         "canceled": "CANCELED",
         "pending": "PENDING",
         "processing": "PROCESSING",
+        # ──────────────────────────────────────────────
+        # ИСПРАВЛЕНО: маппинг waiting_for_capture
+        # ──────────────────────────────────────────────
+        "waiting_for_capture": "WAITING_FOR_CAPTURE",
     }
     api_status = api_status_map.get(api_status_raw, api_status_raw.upper())
 
@@ -134,7 +135,6 @@ async def _verify_stale_webhook_via_api(
         )
         return False, None
 
-    # Проверка суммы
     callback_amount_str = None
     amount_obj = webhook_object.get("amount")
     if isinstance(amount_obj, dict):
@@ -159,7 +159,6 @@ async def _verify_stale_webhook_via_api(
                 )
                 return False, None
 
-    # ИСПРАВЛЕНО (пункт 6): проверка payload/metadata
     callback_metadata = webhook_object.get("metadata") or {}
     callback_payload = callback_metadata.get("payload", "")
     api_metadata = api_data.get("metadata") or {}
@@ -187,7 +186,6 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     status = None
 
     try:
-        # ИСПРАВЛЕНО (пункт 1): используем _get_real_ip вместо request.remote
         peer_ip = _get_real_ip(request)
         if peer_ip and not _is_yookassa_ip(peer_ip):
             logger.warning(
@@ -214,7 +212,26 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             logger.warning("[%s] Webhook missing payment ID.", request_id)
             return web.Response(status=400, text="Missing payment ID")
 
-        valid_statuses = {"CONFIRMED", "CANCELED", "CHARGEBACKED"}
+        # ──────────────────────────────────────────────────────
+        # ИСПРАВЛЕНО: WAITING_FOR_CAPTURE добавлен в допустимые.
+        #
+        # Раньше:
+        #   valid_statuses = {"CONFIRMED", "CANCELED", "CHARGEBACKED"}
+        #   → payment.waiting_for_capture → 400 → ретраи ЮKassa
+        #
+        # Теперь:
+        #   WAITING_FOR_CAPTURE принимается, логируется
+        #   и возвращается 200 OK.
+        #   При capture=True этот статус не должен приходить,
+        #   но если придёт — бот не сломается.
+        # ──────────────────────────────────────────────────────
+        valid_statuses = {
+            "CONFIRMED",
+            "CANCELED",
+            "CHARGEBACKED",
+            "WAITING_FOR_CAPTURE",
+        }
+
         if status not in valid_statuses:
             logger.warning(
                 "[%s] Unknown webhook status: %s (payment=%s)",
@@ -223,6 +240,26 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                 transaction_id,
             )
             return web.Response(status=400, text="Invalid status")
+
+        # ──────────────────────────────────────────────────────
+        # ИСПРАВЛЕНО: обработка WAITING_FOR_CAPTURE.
+        #
+        # Платёж авторизован, но ещё не захвачен.
+        # При capture=True ЮKassa захватит автоматически
+        # и пришлёт payment.succeeded следующим вебхуком.
+        #
+        # Здесь просто логируем и возвращаем 200 OK,
+        # чтобы ЮKassa не считала доставку ошибочной.
+        # ──────────────────────────────────────────────────────
+        if status == "WAITING_FOR_CAPTURE":
+            logger.info(
+                "[%s] Webhook received: payment=%s, "
+                "status=WAITING_FOR_CAPTURE (authorized, "
+                "waiting for auto-capture). Returning 200 OK.",
+                request_id,
+                transaction_id,
+            )
+            return web.Response(status=200, text="OK")
 
         callback_amount_str = None
         callback_currency = None

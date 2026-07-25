@@ -42,6 +42,7 @@ def _payment_to_dict(payment) -> Optional[dict]:
     """
     Convert aioyookassa Payment (Pydantic model) → plain dict,
     compatible with the rest of the codebase.
+
     Key normalizations:
     • confirmation.url  →  confirmation.confirmation_url
     • amount.value      →  str
@@ -81,6 +82,7 @@ def _payment_to_dict(payment) -> Optional[dict]:
 
 
 class YooKassaService:
+
     @staticmethod
     async def create_payment(
         amount: Decimal,
@@ -91,9 +93,6 @@ class YooKassaService:
     ) -> Optional[dict]:
         client = _get_client()
         try:
-            # ИСПРАВЛЕНО: Decimal → str для JSON-сериализации.
-            # aioyookassa использует json.dumps внутри aiohttp,
-            # который не умеет сериализовать Decimal.
             params = CreatePaymentParams(
                 amount=PaymentAmount(value=str(amount), currency=currency),
                 confirmation=Confirmation(
@@ -102,6 +101,14 @@ class YooKassaService:
                 ),
                 description=description,
                 metadata=metadata,
+                # ──────────────────────────────────────────────
+                # ИСПРАВЛЕНО: одностадийная оплата.
+                # Без capture=True тестовый магазин ЮKassa
+                # использует двухстадийную схему и присылает
+                # payment.waiting_for_capture вместо
+                # payment.succeeded.
+                # ──────────────────────────────────────────────
+                capture=True,
             )
             payment = await client.payments.create_payment(params)
             data = _payment_to_dict(payment)
@@ -165,5 +172,11 @@ class YooKassaService:
             "payment.succeeded": "CONFIRMED",
             "payment.canceled": "CANCELED",
             "refund.succeeded": "CHARGEBACKED",
+            # ──────────────────────────────────────────────
+            # ИСПРАВЛЕНО: маппинг для двухстадийной оплаты.
+            # Даже при capture=True тестовый магазин может
+            # прислать waiting_for_capture.
+            # ──────────────────────────────────────────────
+            "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
         }
         return mapping.get(event, event.upper())
