@@ -17,10 +17,10 @@ from database.connection import session_scope
 from database.repositories.payments_repo import get_payment_by_id
 from database.repositories.users_repo import mark_user_bot_blocked
 from services.payment_service import PaymentService
+from services.payment_service.common import get_payment_tariff_name
 from services.workers.heartbeat import get_bot_ref
 from utils.admin import is_admin
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name
 
 from .common import (
     MANUAL_GRANT_ALLOWED_STATUSES,
@@ -28,31 +28,6 @@ from .common import (
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-
-def _get_manual_grant_tariff_name(payment) -> str:
-    """
-    Возвращает отображаемое имя тарифа для ручной выдачи.
-
-    Приоритет:
-    1. snapshot_device_limit из платежа;
-    2. текущий тариф, если snapshot отсутствует.
-    """
-    device_limit = getattr(
-        payment,
-        "snapshot_device_limit",
-        None,
-    )
-    if device_limit is None and payment.tariff:
-        device_limit = getattr(
-            payment.tariff,
-            "device_limit",
-            2,
-        )
-    if device_limit is None:
-        device_limit = 2
-
-    return get_tariff_display_name(device_limit)
 
 
 @router.callback_query(F.data.startswith("admin_manual_grant:"))
@@ -70,8 +45,8 @@ async def admin_manual_grant(
         return
 
     payment_id = int(callback.data.split(":")[1])
-
     payment = await get_payment_by_id(session, payment_id)
+
     if not payment:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_PAYMENT_NOT_FOUND,
@@ -122,7 +97,9 @@ async def admin_manual_grant(
         )
         return
 
-    tariff_name = _get_manual_grant_tariff_name(payment)
+    # ИСПРАВЛЕНО (пункт 15): используем общую функцию
+    tariff_name = get_payment_tariff_name(payment)
+
     status_name = texts.PAYMENT_STATUS_NAMES.get(
         payment.status,
         payment.status,
@@ -211,18 +188,14 @@ async def admin_manual_grant_apply(
                 bot = get_bot_ref()
                 if bot and payment and payment.user:
                     user = payment.user
-                    tariff_name = _get_manual_grant_tariff_name(
-                        payment
-                    )
+                    tariff_name = get_payment_tariff_name(payment)
                     valid_until = format_datetime(
                         user.subscription_end
                     )
-
                     client_msg = texts.USER_MANUAL_GRANT_NOTIFICATION.format(
                         tariff_name=tariff_name,
                         valid_until=valid_until,
                     )
-
                     builder = InlineKeyboardBuilder()
                     builder.button(
                         text="🔌 Подключить устройство",
@@ -233,7 +206,6 @@ async def admin_manual_grant_apply(
                         callback_data="back_to_main_menu",
                     )
                     builder.adjust(1, 1)
-
                     await bot.send_message(
                         user.telegram_id,
                         client_msg,

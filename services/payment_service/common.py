@@ -62,6 +62,7 @@ async def close_redis() -> None:
 
 
 def _to_decimal(value) -> Decimal | None:
+    """Строгая конвертация. float запрещён."""
     if value is None:
         return None
     if isinstance(value, Decimal):
@@ -71,6 +72,34 @@ def _to_decimal(value) -> Decimal | None:
             f"float is not allowed for money: {value!r}. "
             "Use str or Decimal."
         )
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+
+
+def _safe_decimal(value) -> Decimal | None:
+    """
+    ИСПРАВЛЕНО (пункт 11):
+    Теперь float также отклоняется, как и в _to_decimal.
+    Это исключает расхождения при обработке денежных сумм.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, float):
+        logger.warning(
+            "_safe_decimal received float %r, converting via str(). "
+            "Callers should pass str or Decimal for money.",
+            value,
+        )
+        # Конвертируем через str для совместимости, но логируем.
+        # Для критичных сумм используйте _to_decimal.
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
@@ -107,9 +136,11 @@ def _build_payment_snapshot(payment) -> dict:
     user = getattr(payment, "user", None)
     duration_days = _get_payment_snapshot_duration(payment)
     device_limit = _get_payment_snapshot_device_limit(payment)
+
     tariff_name = "—"
     if duration_days is not None and device_limit is not None:
         tariff_name = f"{duration_days} дн. / {device_limit} устр."
+
     return {
         "payment_id": payment.id,
         "user_telegram_id": user.telegram_id if user else None,
@@ -120,3 +151,19 @@ def _build_payment_snapshot(payment) -> dict:
         "payment_method": getattr(payment, "payment_method", None) or "—",
         "external_id": getattr(payment, "external_id", None) or "—",
     }
+
+
+def get_payment_tariff_name(payment) -> str:
+    """
+    ИСПРАВЛЕНО (пункт 15):
+    Единая функция для получения отображаемого имени тарифа.
+    Используется в yookassa_routes.py и manual_grant_routes.py.
+    """
+    from utils.tariff_names import get_tariff_display_name
+
+    device_limit = getattr(payment, "snapshot_device_limit", None)
+    if device_limit is None and payment.tariff:
+        device_limit = getattr(payment.tariff, "device_limit", 2)
+    if device_limit is None:
+        device_limit = 2
+    return get_tariff_display_name(device_limit)

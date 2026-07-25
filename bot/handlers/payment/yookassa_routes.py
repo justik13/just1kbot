@@ -25,6 +25,7 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.maintenance_service import MaintenanceService
 from services.payment_service import PaymentService
+from services.payment_service.common import get_payment_tariff_name
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub, safe
@@ -39,15 +40,6 @@ from .common import (
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-
-def _get_payment_tariff_name(payment) -> str:
-    device_limit = getattr(payment, "snapshot_device_limit", None)
-    if device_limit is None and payment.tariff:
-        device_limit = getattr(payment.tariff, "device_limit", 2)
-    if device_limit is None:
-        device_limit = 2
-    return get_tariff_display_name(device_limit)
 
 
 @router.callback_query(F.data.startswith("pay_yookassa:"))
@@ -89,6 +81,7 @@ async def pay_yookassa(
                 texts.ERROR_TARIFF_NOT_FOUND, show_alert=True
             )
             return
+
         if not tariff.is_active:
             await render_hub(
                 callback.bot,
@@ -146,6 +139,7 @@ async def pay_yookassa(
             amount=tariff.price_rub,
             payment_url=safe(payment.payment_url),
         )
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -155,6 +149,7 @@ async def pay_yookassa(
             ),
             parse_mode="HTML",
         )
+
     except Exception as e:
         logger.error(f"pay_yookassa error: {e}", exc_info=True)
         await callback.answer(texts.PAYMENT_CREATE_ERROR, show_alert=True)
@@ -185,6 +180,7 @@ async def check_payment_status(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
+
     if payment_simple.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
@@ -206,7 +202,9 @@ async def check_payment_status(
             if user and user.subscription_end
             else "—"
         )
-        tariff_name = _get_payment_tariff_name(payment)
+        # ИСПРАВЛЕНО (пункт 15): используем общую функцию
+        tariff_name = get_payment_tariff_name(payment)
+
         text = (
             texts.PAYMENT_SUCCESS_RENEW.format(
                 tariff_name=tariff_name, valid_until=valid_until
@@ -222,11 +220,13 @@ async def check_payment_status(
             text,
             get_payment_success_keyboard(),
         )
+
     elif result_code == "paid_after_cancel":
         settings = get_settings()
         support_username = settings.SUPPORT_USERNAME.lstrip("@")
         payment = await get_payment_by_id(session, payment_id)
-        tariff_name = _get_payment_tariff_name(payment)
+        tariff_name = get_payment_tariff_name(payment)
+
         text = texts.PAYMENT_PAID_AFTER_CANCEL.format(
             amount=payment.amount if payment else "—",
             currency=payment.currency if payment else "—",
@@ -248,6 +248,7 @@ async def check_payment_status(
             text,
             builder.as_markup(),
         )
+
     elif result_code == "manual_review":
         settings = get_settings()
         support_username = settings.SUPPORT_USERNAME.lstrip("@")
@@ -266,16 +267,20 @@ async def check_payment_status(
             texts.PAYMENT_MANUAL_REVIEW_TEXT,
             builder.as_markup(),
         )
+
     elif result_code == "api_error":
         await callback.answer(texts.PAYMENT_API_ERROR, show_alert=True)
+
     elif result_code == "refunded":
         await callback.answer(
             texts.PAYMENT_REFUNDED_SHORT, show_alert=True
         )
+
     elif result_code == "cancelled":
         await callback.answer(
             texts.PAYMENT_CANCELLED_SHORT, show_alert=True
         )
+
     else:
         await callback.answer(
             texts.PAYMENT_NOT_RECEIVED, show_alert=True
@@ -308,17 +313,31 @@ async def cancel_invoice(
             texts.PAYMENT_NOT_FOUND_SHORT, show_alert=True
         )
         return
+
     if payment.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
     if payment.status == "completed":
         await callback.answer(
             texts.PAYMENT_ALREADY_PROCESSED, show_alert=True
         )
         return
 
+    # ИСПРАВЛЕНО (пункт 3): проверяем результат cancel_payment_via_api
     try:
-        await PaymentService.cancel_payment_via_api(session, payment_id)
+        api_cancelled = await PaymentService.cancel_payment_via_api(
+            session, payment_id
+        )
+        if not api_cancelled:
+            logger.warning(
+                "cancel_invoice: API cancel returned False for payment %s. "
+                "Payment may still be active in YooKassa.",
+                payment_id,
+            )
+        # В любом случае помечаем как cancelled в БД,
+        # потому что пользователь нажал "Отменить".
+        # Если API не отменил — вебхук придёт и обработается как paid_after_cancel.
         await mark_payment_as_cancelled(session, payment_id)
     except Exception as e:
         logger.warning(f"Failed to cancel payment {payment_id}: {e}")

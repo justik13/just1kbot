@@ -26,7 +26,7 @@ async def _preload_alerted_stale_payments():
         async with session_scope() as session:
             threshold = now_utc() - timedelta(hours=1)
             stmt = select(Payment.id).where(
-                Payment.status == "pending",
+                Payment.status.in_(["pending", "requires_manual_review"]),
                 Payment.created_at < threshold,
             )
             result = await session.execute(stmt)
@@ -78,19 +78,24 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
 async def _process_stale_payments(bot: Bot, settings):
     current_time = now_utc()
     threshold = current_time - timedelta(hours=1)
+
     yookassa_payment_ids = []
 
     async with session_scope() as session:
+        # ИСПРАВЛЕНО (пункт 9): проверяем и requires_manual_review
         stmt = (
             select(Payment, User.telegram_id)
             .join(User, Payment.user_id == User.id)
-            .where(Payment.status == "pending", Payment.created_at < threshold)
+            .where(
+                Payment.status.in_(["pending", "requires_manual_review"]),
+                Payment.created_at < threshold,
+            )
             .order_by(Payment.created_at.desc())
             .limit(50)
         )
         result = await session.execute(stmt)
         for payment, telegram_id in result.all():
-            if payment.external_id:
+            if payment.external_id and payment.status == "pending":
                 yookassa_payment_ids.append(payment.id)
 
     for payment_id in yookassa_payment_ids:
@@ -108,10 +113,14 @@ async def _alert_new_stale_payments(bot: Bot, settings):
     threshold = current_time - timedelta(hours=1)
 
     async with session_scope() as session:
+        # ИСПРАВЛЕНО (пункт 9): includes requires_manual_review
         fresh_stmt = (
             select(Payment, User.telegram_id)
             .join(User, Payment.user_id == User.id)
-            .where(Payment.status == "pending", Payment.created_at < threshold)
+            .where(
+                Payment.status.in_(["pending", "requires_manual_review"]),
+                Payment.created_at < threshold,
+            )
             .order_by(Payment.created_at.desc())
         )
         fresh_result = await session.execute(fresh_stmt)
@@ -123,13 +132,15 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         return
 
     msg = (
-        f"⚠️ <b>Новые зависшие платежи (pending > 1ч)</b>\n"
+        f"⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>\n"
         f"{'─' * 20}\n"
         f"Количество: <b>{len(new_stale_for_alert)}</b>\n"
     )
     for payment, telegram_id in new_stale_for_alert[:10]:
         method = payment.payment_method or "—"
-        msg += f"ID: <code>{payment.id}</code> · User: <code>{telegram_id}</code> · {payment.amount} {payment.currency} · {method}\n"
+        status_icon = "🧪" if payment.status == "requires_manual_review" else "⏳"
+        msg += f"{status_icon} ID: <code>{payment.id}</code> · User: <code>{telegram_id}</code> · {payment.amount} {payment.currency} · {method}\n"
+
     if len(new_stale_for_alert) > 10:
         msg += f"\n<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
 

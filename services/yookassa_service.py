@@ -42,21 +42,17 @@ def _payment_to_dict(payment) -> Optional[dict]:
     """
     Convert aioyookassa Payment (Pydantic model) → plain dict,
     compatible with the rest of the codebase.
-
     Key normalizations:
-      • confirmation.url  →  confirmation.confirmation_url
-      • amount.value      →  str
-      • status            →  plain str
+    • confirmation.url  →  confirmation.confirmation_url
+    • amount.value      →  str
+    • status            →  plain str
     """
     if payment is None:
         return None
 
-    # Pydantic v2
     try:
-        # by_alias=True  →  Confirmation.url serializes as "confirmation_url"
         data = payment.model_dump(mode="json", by_alias=True)
     except AttributeError:
-        # Pydantic v1 fallback
         try:
             data = payment.dict(by_alias=True)
         except Exception:
@@ -67,19 +63,16 @@ def _payment_to_dict(payment) -> Optional[dict]:
     if not isinstance(data, dict):
         return None
 
-    # ── belt-and-suspenders: guarantee confirmation_url ──
     confirmation = data.get("confirmation")
     if isinstance(confirmation, dict):
         url = confirmation.get("confirmation_url") or confirmation.get("url")
         if url:
             confirmation["confirmation_url"] = url
 
-    # ── amount.value → str (codebase expects str for Decimal parsing) ──
     amount = data.get("amount")
     if isinstance(amount, dict) and "value" in amount:
         amount["value"] = str(amount["value"])
 
-    # ── status → plain lowercase string ──
     status = data.get("status")
     if status is not None:
         data["status"] = str(status).lower()
@@ -88,7 +81,6 @@ def _payment_to_dict(payment) -> Optional[dict]:
 
 
 class YooKassaService:
-
     @staticmethod
     async def create_payment(
         amount: Decimal,
@@ -98,10 +90,12 @@ class YooKassaService:
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
         client = _get_client()
-
         try:
+            # ИСПРАВЛЕНО: Decimal → str для JSON-сериализации.
+            # aioyookassa использует json.dumps внутри aiohttp,
+            # который не умеет сериализовать Decimal.
             params = CreatePaymentParams(
-                amount=PaymentAmount(value=amount, currency=currency),
+                amount=PaymentAmount(value=str(amount), currency=currency),
                 confirmation=Confirmation(
                     type=ConfirmationType.REDIRECT,
                     return_url=return_url,
@@ -109,10 +103,8 @@ class YooKassaService:
                 description=description,
                 metadata=metadata,
             )
-
             payment = await client.payments.create_payment(params)
             data = _payment_to_dict(payment)
-
             if data:
                 logger.info(
                     "YooKassa payment created: id=%s, status=%s",
@@ -120,7 +112,6 @@ class YooKassaService:
                     data.get("status"),
                 )
             return data
-
         except Exception as e:
             logger.error(
                 "YooKassa create_payment exception: %s",

@@ -44,15 +44,39 @@ def _is_yookassa_ip(ip: str) -> bool:
         return False
 
 
+def _get_real_ip(request: web.Request) -> str:
+    """
+    ИСПРАВЛЕНО (пункт 1 аудита):
+    За nginx request.remote == 127.0.0.1.
+    Читаем X-Real-IP / X-Forwarded-For, которые ставит nginx.
+    """
+    # X-Real-IP ставится nginx: proxy_set_header X-Real-IP $remote_addr;
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if real_ip:
+        return real_ip
+
+    # X-Forwarded-For: первый IP — оригинальный клиент
+    forwarded = request.headers.get("X-Forwarded-For", "").strip()
+    if forwarded:
+        first_ip = forwarded.split(",")[0].strip()
+        if first_ip:
+            return first_ip
+
+    # Fallback: прямой connection (без nginx)
+    return request.remote or ""
+
+
 def _is_recent_timestamp(
     created_at: str,
     max_age_seconds: int = WEBHOOK_MAX_AGE_SECONDS,
 ) -> bool:
     if not created_at or not isinstance(created_at, str):
         return True
+
     created_at = created_at.strip()
     if not created_at:
         return True
+
     try:
         ts = float(created_at)
         if ts > 1e12:
@@ -61,6 +85,7 @@ def _is_recent_timestamp(
         return age <= max_age_seconds
     except (ValueError, TypeError, OverflowError):
         pass
+
     try:
         dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         if dt.tzinfo is None:
@@ -69,6 +94,7 @@ def _is_recent_timestamp(
         return age <= max_age_seconds
     except (ValueError, TypeError, OverflowError):
         pass
+
     return True
 
 
@@ -108,6 +134,7 @@ async def _verify_stale_webhook_via_api(
         )
         return False, None
 
+    # Проверка суммы
     callback_amount_str = None
     amount_obj = webhook_object.get("amount")
     if isinstance(amount_obj, dict):
@@ -132,17 +159,36 @@ async def _verify_stale_webhook_via_api(
                 )
                 return False, None
 
+    # ИСПРАВЛЕНО (пункт 6): проверка payload/metadata
+    callback_metadata = webhook_object.get("metadata") or {}
+    callback_payload = callback_metadata.get("payload", "")
+    api_metadata = api_data.get("metadata") or {}
+    api_payload = api_metadata.get("payload", "")
+
+    if callback_payload and api_payload:
+        if callback_payload != api_payload:
+            logger.warning(
+                "Stale webhook payload mismatch: "
+                "callback=%s, api=%s, payment=%s",
+                callback_payload,
+                api_payload,
+                transaction_id,
+            )
+            return False, None
+
     return True, api_data
 
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     request_id = uuid.uuid4().hex[:8]
     set_request_id(request_id)
+
     transaction_id = None
     status = None
 
     try:
-        peer_ip = request.remote or ""
+        # ИСПРАВЛЕНО (пункт 1): используем _get_real_ip вместо request.remote
+        peer_ip = _get_real_ip(request)
         if peer_ip and not _is_yookassa_ip(peer_ip):
             logger.warning(
                 "[%s] Webhook BLOCKED from unknown IP: %s",
@@ -161,7 +207,6 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
         event = raw_data.get("event", "")
         webhook_object = raw_data.get("object", {})
-
         transaction_id = webhook_object.get("id")
         status = YooKassaService.normalize_webhook_event(event)
 
@@ -207,6 +252,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
                     transaction_id,
                 )
                 return web.Response(status=400, text="Stale webhook unverified")
+
             if stale_api_data:
                 api_amount = stale_api_data.get("amount", {})
                 if isinstance(api_amount, dict):
@@ -246,57 +292,58 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             except Exception as e:
                 logger.error("[%s] Failed to log audit: %s", request_id, e)
 
-        success, result_code = await PaymentService.handle_yookassa_callback(
-            transaction_id=transaction_id,
-            status=status,
-            payload=payload,
-            callback_amount=callback_amount,
-            callback_currency=callback_currency,
-        )
+            success, result_code = await PaymentService.handle_yookassa_callback(
+                transaction_id=transaction_id,
+                status=status,
+                payload=payload,
+                callback_amount=callback_amount,
+                callback_currency=callback_currency,
+            )
 
-        if success:
-            if result_code == "not_found":
-                logger.warning(
-                    "[%s] Payment not found: %s",
-                    request_id,
-                    transaction_id,
-                )
-                try:
-                    await _send_payment_not_found_alert_now(
-                        {
-                            "transaction_id": transaction_id,
-                            "status": status,
-                            "source": "yookassa_webhook",
-                        }
+            if success:
+                if result_code == "not_found":
+                    logger.warning(
+                        "[%s] Payment not found: %s",
+                        request_id,
+                        transaction_id,
                     )
-                except Exception:
-                    pass
-                return web.Response(status=404, text="Payment not found")
-            return web.Response(status=200, text="OK")
-        else:
-            if result_code == "not_found":
-                try:
-                    await _send_payment_not_found_alert_now(
-                        {
-                            "transaction_id": transaction_id,
-                            "status": status,
-                            "source": "yookassa_webhook",
-                        }
-                    )
-                except Exception:
-                    pass
-                return web.Response(status=404, text="Payment not found")
-            elif result_code in (
-                "amount_mismatch",
-                "payload_mismatch",
-                "manual_review",
-                "refunded",
-            ):
+                    try:
+                        await _send_payment_not_found_alert_now(
+                            {
+                                "transaction_id": transaction_id,
+                                "status": status,
+                                "source": "yookassa_webhook",
+                            }
+                        )
+                    except Exception:
+                        pass
+                    return web.Response(status=404, text="Payment not found")
+
                 return web.Response(status=200, text="OK")
-            elif result_code == "error":
-                return web.Response(status=500, text="Processing failed")
             else:
-                return web.Response(status=500, text="Unknown error")
+                if result_code == "not_found":
+                    try:
+                        await _send_payment_not_found_alert_now(
+                            {
+                                "transaction_id": transaction_id,
+                                "status": status,
+                                "source": "yookassa_webhook",
+                            }
+                        )
+                    except Exception:
+                        pass
+                    return web.Response(status=404, text="Payment not found")
+                elif result_code in (
+                    "amount_mismatch",
+                    "payload_mismatch",
+                    "manual_review",
+                    "refunded",
+                ):
+                    return web.Response(status=200, text="OK")
+                elif result_code == "error":
+                    return web.Response(status=500, text="Processing failed")
+                else:
+                    return web.Response(status=500, text="Unknown error")
 
     except Exception as e:
         logger.error(
