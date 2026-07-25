@@ -1,6 +1,6 @@
 import logging
 from datetime import timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,6 +64,7 @@ async def _log_event_safe(
 ) -> None:
     if log_payment_event is None:
         return
+
     try:
         async with session.begin_nested():
             await log_payment_event(
@@ -85,10 +86,6 @@ async def _log_event_safe(
 
 
 async def _invalidate_cache_task(telegram_id: int) -> None:
-    """
-    Вызывается как post-commit task, т.е. ПОСЛЕ commit.
-    Если транзакция откатится — кэш не будет сброшен преждевременно.
-    """
     invalidate_user_cache(telegram_id)
 
 
@@ -97,10 +94,6 @@ async def _notify_payment_success(
     tariff_name: str,
     valid_until: str,
 ) -> None:
-    """
-    Отправляет пользователю уведомление «Доступ активирован»
-    после успешной оплаты. Вызывается как post-commit task.
-    """
     from aiogram.exceptions import TelegramForbiddenError
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     from database.repositories.users_repo import mark_user_bot_blocked
@@ -161,6 +154,7 @@ class PaymentService:
     ) -> None:
         if not tariff:
             return
+
         snapshot_fields = {
             "snapshot_duration_days": getattr(
                 tariff, "duration_days", None
@@ -171,11 +165,13 @@ class PaymentService:
             "snapshot_amount": payment.amount,
             "snapshot_currency": payment.currency,
         }
+
         changed = False
         for field_name, field_value in snapshot_fields.items():
             if hasattr(payment, field_name):
                 setattr(payment, field_name, field_value)
                 changed = True
+
         if changed:
             await session.flush()
 
@@ -218,6 +214,63 @@ class PaymentService:
         )
 
     @staticmethod
+    async def _mark_paid_after_cancel(
+        session: AsyncSession,
+        payment: Payment,
+        source: str,
+    ) -> tuple:
+        if (
+            payment.status == "requires_manual_review"
+            and payment.manual_review_reason == "paid_after_cancel"
+        ):
+            return True, "paid_after_cancel"
+
+        snapshot = _build_payment_snapshot(payment)
+
+        await _log_event_safe(
+            session,
+            payment.id,
+            "paid_after_cancel",
+            source=source,
+        )
+
+        payment.status = "requires_manual_review"
+        payment.manual_review_reason = "paid_after_cancel"
+        if not payment.paid_at:
+            payment.paid_at = now_utc()
+
+        await session.flush()
+
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action="PAID_AFTER_CANCEL",
+            target_type="Payment",
+            target_id=payment.id,
+            details=(
+                f"user={snapshot.get('user_telegram_id')}, "
+                f"amount={snapshot.get('amount')} "
+                f"{snapshot.get('currency')}, source={source}"
+            ),
+        )
+
+        queue_post_commit_task(
+            session,
+            lambda s=snapshot: (
+                _send_paid_after_cancel_alert_now(s)
+            ),
+        )
+
+        queue_post_commit_task(
+            session,
+            lambda s=snapshot: (
+                _notify_client_paid_after_cancel_now(s)
+            ),
+        )
+
+        return True, "paid_after_cancel"
+
+    @staticmethod
     async def handle_successful_payment(
         session: AsyncSession,
         payment_id: int,
@@ -228,6 +281,7 @@ class PaymentService:
 
         redis_lock = None
         acquired = False
+
         try:
             redis = await _get_redis()
             user_lock_key = (
@@ -251,6 +305,7 @@ class PaymentService:
                 payment = await get_payment_by_id_for_update(
                     session, payment_id
                 )
+
                 if not payment:
                     return False, "not_found"
 
@@ -258,39 +313,11 @@ class PaymentService:
                     return True, "already_processed"
 
                 if payment.status == "cancelled":
-                    snapshot = _build_payment_snapshot(payment)
-                    await _log_event_safe(
+                    return await PaymentService._mark_paid_after_cancel(
                         session,
-                        payment.id,
-                        "paid_after_cancel",
-                        source="handle_successful_payment",
+                        payment,
+                        "handle_successful_payment",
                     )
-                    await AuditService.log_action(
-                        session,
-                        admin_id=0,
-                        action="PAID_AFTER_CANCEL",
-                        target_type="Payment",
-                        target_id=payment_id,
-                        details=(
-                            f"user={snapshot.get('user_telegram_id')}, "
-                            f"amount={snapshot.get('amount')} "
-                            f"{snapshot.get('currency')}"
-                        ),
-                    )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _send_paid_after_cancel_alert_now(s)
-                        ),
-                    )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _notify_client_paid_after_cancel_now(s)
-                        ),
-                    )
-                    payment.status = "pending"
-                    await session.flush()
 
                 if payment.status == "refunded":
                     return False, "refunded"
@@ -311,6 +338,7 @@ class PaymentService:
                 tariff = payment.tariff
 
                 manual_review_reason = None
+
                 duration_days = _get_payment_snapshot_duration(
                     payment
                 )
@@ -349,11 +377,6 @@ class PaymentService:
                     source="handle_successful_payment",
                 )
 
-                # ──────────────────────────────────────────────
-                # extend_subscription сам определит
-                # is_tariff_change и не будет наслаивать дни
-                # при смене тарифа (защита от абуза).
-                # ──────────────────────────────────────────────
                 try:
                     await SubscriptionService.extend_subscription(
                         session,
@@ -417,9 +440,6 @@ class PaymentService:
                 user.last_payment_at = now_utc()
                 await session.flush()
 
-                # ──────────────────────────────────────────────
-                # invalidate_user_cache через post-commit task
-                # ──────────────────────────────────────────────
                 telegram_id_for_cache = user.telegram_id
                 queue_post_commit_task(
                     session,
@@ -428,9 +448,6 @@ class PaymentService:
                     ),
                 )
 
-                # ──────────────────────────────────────────────
-                # Уведомление «Доступ активирован»
-                # ──────────────────────────────────────────────
                 tariff_display = (
                     f"{duration_days} дн. / "
                     f"{device_limit} устр."
@@ -440,6 +457,7 @@ class PaymentService:
                     if user.subscription_end
                     else "—"
                 )
+
                 queue_post_commit_task(
                     session,
                     lambda tid=user.telegram_id,
@@ -477,6 +495,7 @@ class PaymentService:
                 exc_info=True,
             )
             return False, "error"
+
         finally:
             if redis_lock is not None and acquired:
                 try:
@@ -491,11 +510,13 @@ class PaymentService:
         admin_id: int,
     ) -> tuple:
         allowed_statuses = MANUAL_GRANT_ALLOWED_STATUSES
+
         try:
             async with session.begin_nested():
                 payment = await get_payment_by_id_for_update(
                     session, payment_id
                 )
+
                 if not payment:
                     return False, "Платёж не найден"
 
@@ -531,6 +552,7 @@ class PaymentService:
                 payment.status = "completed"
                 if not payment.paid_at:
                     payment.paid_at = now_utc()
+
                 await session.flush()
 
                 await _log_event_safe(
@@ -679,12 +701,8 @@ class PaymentService:
         return_url = settings.YOOKASSA_RETURN_URL.format(
             bot_username=clean_username
         )
-        payload = f"payment_{payment.id}"
 
-        # ──────────────────────────────────────────────────
-        # Чеки для самозанятости (vat_code=6).
-        # receipt_email передаётся в YooKassaService.
-        # ──────────────────────────────────────────────────
+        payload = f"payment_{payment.id}"
         receipt_email = f"{telegram_id}@receipt.local"
 
         yk_payment = await YooKassaService.create_payment(
@@ -699,10 +717,12 @@ class PaymentService:
         if not yk_payment:
             payment.status = "failed"
             payment.manual_review_reason = "payment_create_error"
+
             try:
                 await session.flush()
             except Exception:
                 pass
+
             await _log_event_safe(
                 session,
                 payment.id,
@@ -710,6 +730,7 @@ class PaymentService:
                 reason="provider_create_failed",
                 source="yookassa",
             )
+
             try:
                 await AuditService.log_action(
                     session,
@@ -725,6 +746,7 @@ class PaymentService:
                 )
             except Exception:
                 pass
+
             return None, None
 
         external_id = yk_payment.get("id")
@@ -737,10 +759,12 @@ class PaymentService:
         if not external_id or not payment_url:
             payment.status = "failed"
             payment.manual_review_reason = "payment_create_error"
+
             try:
                 await session.flush()
             except Exception:
                 pass
+
             await _log_event_safe(
                 session,
                 payment.id,
@@ -748,10 +772,12 @@ class PaymentService:
                 reason="missing_id_or_url",
                 source="yookassa",
             )
+
             return None, None
 
         payment.payment_url = str(payment_url)
         payment.payment_method = "yookassa"
+
         await session.flush()
 
         return payment, None
@@ -772,6 +798,7 @@ class PaymentService:
             api_data = await YooKassaService.get_payment(
                 transaction_id
             )
+
             if api_data:
                 api_amount = api_data.get("amount", {})
                 if isinstance(api_amount, dict):
@@ -782,6 +809,7 @@ class PaymentService:
                         callback_amount = _safe_decimal(
                             api_amount["value"]
                         )
+
                     if (
                         api_amount.get("currency")
                         and callback_currency is None
@@ -807,6 +835,7 @@ class PaymentService:
                 .where(Payment.external_id == transaction_id)
                 .with_for_update()
             )
+
             result = await session.execute(stmt)
             payment = result.scalar_one_or_none()
 
@@ -827,39 +856,11 @@ class PaymentService:
                     return True, "already_processed"
 
                 if payment.status == "cancelled":
-                    snapshot = _build_payment_snapshot(payment)
-                    await _log_event_safe(
+                    return await PaymentService._mark_paid_after_cancel(
                         session,
-                        payment.id,
-                        "paid_after_cancel",
-                        provider_status=status,
-                        source="yookassa_callback",
+                        payment,
+                        "yookassa_callback",
                     )
-                    await AuditService.log_action(
-                        session,
-                        admin_id=0,
-                        action="PAID_AFTER_CANCEL",
-                        target_type="Payment",
-                        target_id=payment.id,
-                        details=(
-                            f"transaction={transaction_id}, "
-                            f"user={payment.user_id}"
-                        ),
-                    )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _send_paid_after_cancel_alert_now(s)
-                        ),
-                    )
-                    queue_post_commit_task(
-                        session,
-                        lambda s=snapshot: (
-                            _notify_client_paid_after_cancel_now(s)
-                        ),
-                    )
-                    payment.status = "pending"
-                    await session.flush()
 
                 if payment.status == "refunded":
                     return False, "refunded"
@@ -902,6 +903,7 @@ class PaymentService:
                 if callback_currency:
                     cb_cur = str(callback_currency).upper()
                     db_cur = str(payment.currency).upper()
+
                     if db_cur != cb_cur:
                         await PaymentService._set_manual_review(
                             session,
@@ -929,6 +931,7 @@ class PaymentService:
                         session, payment.id
                     )
                 )
+
                 return success, result_code
 
             elif status == "CANCELED":
@@ -940,6 +943,7 @@ class PaymentService:
 
                 if payment.status == "completed":
                     snapshot = _build_payment_snapshot(payment)
+
                     await _log_event_safe(
                         session,
                         payment.id,
@@ -947,6 +951,7 @@ class PaymentService:
                         provider_status=status,
                         source="yookassa_callback",
                     )
+
                     await AuditService.log_action(
                         session,
                         admin_id=0,
@@ -958,6 +963,7 @@ class PaymentService:
                             f"user={payment.user_id}"
                         ),
                     )
+
                     queue_post_commit_task(
                         session,
                         lambda s=snapshot, tid=transaction_id: (
@@ -966,6 +972,7 @@ class PaymentService:
                             )
                         ),
                     )
+
                     return True, "manual_review"
 
                 payment.status = "cancelled"
@@ -1009,6 +1016,7 @@ class PaymentService:
         payment_id: int,
     ) -> tuple:
         payment = await get_payment_by_id(session, payment_id)
+
         if not payment or not payment.external_id:
             return False, "not_found"
 
@@ -1019,13 +1027,16 @@ class PaymentService:
             api_data = await YooKassaService.get_payment(
                 payment.external_id
             )
+
             if api_data:
                 provider_status = api_data.get("status")
+
                 if provider_status == "succeeded":
                     amount_obj = api_data.get("amount", {})
                     cb_amount = _safe_decimal(
                         amount_obj.get("value")
                     )
+
                     if cb_amount is None:
                         await PaymentService._set_manual_review(
                             session,
@@ -1081,6 +1092,7 @@ class PaymentService:
         api_data = await YooKassaService.get_payment(
             payment.external_id
         )
+
         if not api_data:
             return False, "api_error"
 
@@ -1089,6 +1101,7 @@ class PaymentService:
         if provider_status == "succeeded":
             amount_obj = api_data.get("amount", {})
             cb_amount = _safe_decimal(amount_obj.get("value"))
+
             if cb_amount is None:
                 await PaymentService._set_manual_review(
                     session,
@@ -1129,6 +1142,7 @@ class PaymentService:
             if payment.status == "completed":
                 snapshot = _build_payment_snapshot(payment)
                 tid = payment.external_id or "—"
+
                 await _log_event_safe(
                     session,
                     payment.id,
@@ -1136,6 +1150,7 @@ class PaymentService:
                     provider_status=provider_status,
                     source="check_yookassa_payment",
                 )
+
                 queue_post_commit_task(
                     session,
                     lambda s=snapshot, t=tid: (
@@ -1144,11 +1159,13 @@ class PaymentService:
                         )
                     ),
                 )
+
                 return False, "manual_review"
 
             if payment.status != "cancelled":
                 payment.status = "cancelled"
                 await session.flush()
+
             return False, "cancelled"
 
         return False, "pending"
@@ -1161,14 +1178,18 @@ class PaymentService:
         payment = await get_payment_by_id_simple(
             session, payment_id
         )
+
         if not payment or not payment.external_id:
             return False
+
         if payment.status != "pending":
             return False
+
         result = await YooKassaService.cancel_payment(
             payment.external_id,
             reason="Cancelled by user in bot",
         )
+
         return result is not None
 
     @staticmethod
@@ -1192,18 +1213,22 @@ class PaymentService:
                 paid_at=None,
             )
         )
+
         result = await session.execute(stmt)
         await session.flush()
 
         if result.rowcount == 0:
             current = await session.get(Payment, payment_id)
+
             if current and current.status == "completed":
                 return True, "already_processed"
+
             if (
                 current
                 and current.status == "requires_manual_review"
             ):
                 return True, "manual_review"
+
             return (
                 False,
                 current.status if current else "not_found",
@@ -1253,6 +1278,7 @@ class PaymentService:
                 payment = await get_payment_by_id_for_update(
                     session, payment_id
                 )
+
                 if not payment:
                     return False, "not_found"
 
@@ -1263,6 +1289,7 @@ class PaymentService:
 
                 payment.status = "refunded"
                 payment.manual_review_reason = None
+
                 await session.flush()
 
                 await _log_event_safe(
@@ -1277,6 +1304,7 @@ class PaymentService:
                 )
 
                 user = payment.user
+
                 if user:
                     current_time = now_utc()
 
@@ -1307,7 +1335,9 @@ class PaymentService:
                                     )
                                 )
                             )
+
                             was_first = completed_before == 0
+
                             bonus_ref = 3 if was_first else 1
                             bonus_user = 5 if was_first else 0
 
@@ -1316,6 +1346,7 @@ class PaymentService:
                                     session, user.referred_by
                                 )
                             )
+
                             if referrer and bonus_ref > 0:
                                 if (
                                     referrer.referral_days
@@ -1325,31 +1356,34 @@ class PaymentService:
                                     referrer.referral_days -= (
                                         bonus_ref
                                     )
+
+                                    if (
+                                        referrer.subscription_end
+                                        and referrer.subscription_end
+                                        > current_time
+                                        and referrer.subscription_end.year
+                                        < 2100
+                                    ):
+                                        referrer.subscription_end = (
+                                            referrer.subscription_end
+                                            - timedelta(
+                                                days=bonus_ref
+                                            )
+                                        )
+
                                 if (
-                                    referrer.subscription_end
-                                    and referrer.subscription_end
+                                    bonus_user > 0
+                                    and user.subscription_end
+                                    and user.subscription_end
                                     > current_time
-                                    and referrer.subscription_end.year
+                                    and user.subscription_end.year
                                     < 2100
                                 ):
-                                    referrer.subscription_end = (
-                                        referrer.subscription_end
-                                        - timedelta(
-                                            days=bonus_ref
-                                        )
+                                    user.subscription_end = (
+                                        user.subscription_end
+                                        - timedelta(days=bonus_user)
                                     )
-                            if (
-                                bonus_user > 0
-                                and user.subscription_end
-                                and user.subscription_end
-                                > current_time
-                                and user.subscription_end.year
-                                < 2100
-                            ):
-                                user.subscription_end = (
-                                    user.subscription_end
-                                    - timedelta(days=bonus_user)
-                                )
+
                         except Exception as e:
                             logger.error(
                                 "Chargeback referral rollback "
@@ -1407,6 +1441,7 @@ class PaymentService:
                         _send_chargeback_alert_now(s, tid)
                     ),
                 )
+
                 queue_post_commit_task(
                     session,
                     lambda s=snapshot: (

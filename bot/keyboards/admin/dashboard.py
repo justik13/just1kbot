@@ -11,22 +11,22 @@ def get_admin_menu(
         text="👥 Пользователи",
         callback_data="admin_users",
     )
-
     builder.button(
         text="📢 Рассылка",
         callback_data="admin_broadcast",
     )
-
     builder.button(
-        text="🌍 Серверы",
+        text="🌐 Серверы",
         callback_data="admin_servers",
     )
-
     builder.button(
         text="💰 Тарифы",
         callback_data="admin_tariffs",
     )
-
+    builder.button(
+        text="💳 Платежи",
+        callback_data="admin_payments",
+    )
     builder.button(
         text="📜 Аудит-лог",
         callback_data="admin_audit",
@@ -48,42 +48,33 @@ def get_admin_menu(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(2, 2, 1, 1, 1)
-
+    builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
 
 def get_audit_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
     builder.button(
         text="🔄 Обновить",
         callback_data="admin_audit",
     )
-
     builder.button(
         text="← В админку",
         callback_data="admin_menu",
     )
-
     builder.adjust(1, 1)
-
     return builder.as_markup()
 
 
 def get_maintenance_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
     builder.button(
         text="✅ Подтвердить",
         callback_data="admin_maintenance_toggle_apply",
     )
-
     builder.button(
         text="❌ Отмена",
         callback_data="admin_menu",
     )
-
     builder.adjust(2)
-
     return builder.as_markup()

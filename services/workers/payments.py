@@ -15,7 +15,6 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
 
-# ИСПРАВЛЕНО: TTLCache вместо бесконечного set.
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 
 PAYMENTS_START_DELAY = 60.0
@@ -25,18 +24,28 @@ async def _preload_alerted_stale_payments():
     try:
         async with session_scope() as session:
             threshold = now_utc() - timedelta(hours=1)
-            stmt = select(Payment.id).where(
-                Payment.status.in_(["pending", "requires_manual_review"]),
-                Payment.created_at < threshold,
+
+            stmt = (
+                select(Payment.id)
+                .where(
+                    Payment.status.in_(["pending", "requires_manual_review"]),
+                    Payment.created_at < threshold,
+                )
+                .order_by(Payment.created_at.desc())
+                .limit(10000)
             )
+
             result = await session.execute(stmt)
+
             for (payment_id,) in result.all():
                 _alerted_stale_payments[payment_id] = True
+
             if _alerted_stale_payments:
                 logger.info(
                     "Preloaded %s existing stale payment IDs to suppress duplicate alerts after restart",
                     len(_alerted_stale_payments),
                 )
+
     except Exception as e:
         logger.warning("Failed to preload stale payment IDs: %s", e)
 
@@ -61,8 +70,10 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
             break
         except Exception as e:
             logger.error("Критическая ошибка в stale_payments_checker: %s", e, exc_info=True)
+
             if shutdown_event.is_set():
                 break
+
             await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
             continue
 
@@ -82,7 +93,6 @@ async def _process_stale_payments(bot: Bot, settings):
     yookassa_payment_ids = []
 
     async with session_scope() as session:
-        # ИСПРАВЛЕНО (пункт 9): проверяем и requires_manual_review
         stmt = (
             select(Payment, User.telegram_id)
             .join(User, Payment.user_id == User.id)
@@ -93,7 +103,9 @@ async def _process_stale_payments(bot: Bot, settings):
             .order_by(Payment.created_at.desc())
             .limit(50)
         )
+
         result = await session.execute(stmt)
+
         for payment, telegram_id in result.all():
             if payment.external_id and payment.status == "pending":
                 yookassa_payment_ids.append(payment.id)
@@ -113,7 +125,6 @@ async def _alert_new_stale_payments(bot: Bot, settings):
     threshold = current_time - timedelta(hours=1)
 
     async with session_scope() as session:
-        # ИСПРАВЛЕНО (пункт 9): includes requires_manual_review
         fresh_stmt = (
             select(Payment, User.telegram_id)
             .join(User, Payment.user_id == User.id)
@@ -122,7 +133,9 @@ async def _alert_new_stale_payments(bot: Bot, settings):
                 Payment.created_at < threshold,
             )
             .order_by(Payment.created_at.desc())
+            .limit(1000)
         )
+
         fresh_result = await session.execute(fresh_stmt)
         fresh_stale = [(payment, telegram_id) for payment, telegram_id in fresh_result.all()]
 
@@ -136,6 +149,7 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         f"{'─' * 20}\n"
         f"Количество: <b>{len(new_stale_for_alert)}</b>\n"
     )
+
     for payment, telegram_id in new_stale_for_alert[:10]:
         method = payment.payment_method or "—"
         status_icon = "🧪" if payment.status == "requires_manual_review" else "⏳"

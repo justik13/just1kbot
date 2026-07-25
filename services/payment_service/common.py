@@ -28,6 +28,7 @@ MANUAL_REVIEW_REASONS = {
     "status_failed": "Платёж находился в статусе failed",
     "payment_create_error": "Ошибка создания платежа",
     "cancel_after_completed": "Отмена после успешной оплаты",
+    "paid_after_cancel": "Оплата после отмены платежа",
     "not_found": "Платёж не найден",
     "owner_mismatch": "Платёж не принадлежит пользователю",
 }
@@ -42,6 +43,7 @@ MANUAL_GRANT_ALLOWED_STATUSES = {
 
 async def _get_redis() -> aioredis.Redis:
     global _redis_client
+
     if _redis_client is None:
         settings = get_settings()
         _redis_client = aioredis.from_url(
@@ -49,11 +51,13 @@ async def _get_redis() -> aioredis.Redis:
             decode_responses=True,
             socket_timeout=5.0,
         )
+
     return _redis_client
 
 
 async def close_redis() -> None:
     global _redis_client
+
     if _redis_client is not None:
         try:
             await _redis_client.close()
@@ -62,16 +66,18 @@ async def close_redis() -> None:
 
 
 def _to_decimal(value) -> Decimal | None:
-    """Строгая конвертация. float запрещён."""
     if value is None:
         return None
+
     if isinstance(value, Decimal):
         return value
+
     if isinstance(value, float):
         raise TypeError(
             f"float is not allowed for money: {value!r}. "
             "Use str or Decimal."
         )
+
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
@@ -79,21 +85,19 @@ def _to_decimal(value) -> Decimal | None:
 
 
 def _safe_decimal(value) -> Decimal | None:
-    """
-    Безопасная конвертация для входящих данных (webhook, API).
-    float конвертируется через str() с предупреждением.
-    Для критичных сумм используйте _to_decimal.
-    """
     if value is None:
         return None
+
     if isinstance(value, Decimal):
         return value
+
     if isinstance(value, float):
         logger.warning(
             "_safe_decimal received float %r, converting via str(). "
             "Callers should pass str or Decimal for money.",
             value,
         )
+
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
@@ -107,9 +111,11 @@ def _get_payment_snapshot_duration(payment) -> int | None:
             return int(snapshot_value)
         except (TypeError, ValueError):
             pass
+
     tariff = getattr(payment, "tariff", None)
     if tariff:
         return getattr(tariff, "duration_days", None)
+
     return None
 
 
@@ -120,14 +126,17 @@ def _get_payment_snapshot_device_limit(payment) -> int | None:
             return int(snapshot_value)
         except (TypeError, ValueError):
             pass
+
     tariff = getattr(payment, "tariff", None)
     if tariff:
         return getattr(tariff, "device_limit", None)
+
     return None
 
 
 def _build_payment_snapshot(payment) -> dict:
     user = getattr(payment, "user", None)
+
     duration_days = _get_payment_snapshot_duration(payment)
     device_limit = _get_payment_snapshot_device_limit(payment)
 
@@ -152,15 +161,14 @@ def _build_payment_snapshot(payment) -> dict:
 
 
 def get_payment_tariff_name(payment) -> str:
-    """
-    Единая функция для получения отображаемого имени тарифа.
-    Используется в yookassa_routes.py и manual_grant_routes.py.
-    """
     from utils.tariff_names import get_tariff_display_name
 
     device_limit = getattr(payment, "snapshot_device_limit", None)
+
     if device_limit is None and payment.tariff:
         device_limit = getattr(payment.tariff, "device_limit", 2)
+
     if device_limit is None:
         device_limit = 2
+
     return get_tariff_display_name(device_limit)

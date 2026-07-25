@@ -4,7 +4,6 @@ import logging
 import re
 import signal
 import traceback
-
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
@@ -17,7 +16,6 @@ from aiogram.utils.chat_action import ChatActionMiddleware
 from cachetools import TTLCache
 from cryptography.fernet import Fernet
 from aiohttp import web
-
 from bot import texts
 from bot.middlewares import (
     DBSessionMiddleware,
@@ -133,6 +131,7 @@ async def global_error_handler(
         tb_sanitized = _sanitize_text(tb_text)
         if len(tb_sanitized) > 4000:
             tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
+
         logger.critical(
             "[%s] Unhandled exception: %s\n%s",
             request_id,
@@ -157,11 +156,13 @@ async def global_error_handler(
         error_short = html.escape(
             _sanitize_short(str(exception), 200)
         )
+
         error_msg = texts.ALERT_CRITICAL_BOT_ERROR.format(
             request_id=request_id,
             error_type=error_type_safe,
             error_short=error_short,
         )
+
         alert_key = f"{error_type_safe}:{error_short}"
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
@@ -208,18 +209,26 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
 
     dp.message.middleware(CorrelationMiddleware())
     dp.callback_query.middleware(CorrelationMiddleware())
+
     dp.message.middleware(PrivateChatMiddleware())
     dp.callback_query.middleware(PrivateChatMiddleware())
+
     dp.message.middleware(DBSessionMiddleware())
     dp.callback_query.middleware(DBSessionMiddleware())
+
     dp.message.middleware(CleanChatMiddleware())
+
     dp.message.middleware(UserContextMiddleware())
     dp.callback_query.middleware(UserContextMiddleware())
+
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
+
     dp.message.middleware(ThrottlingMiddleware())
     dp.callback_query.middleware(ThrottlingMiddleware())
+
     dp.callback_query.middleware(ActionLockMiddleware())
+
     dp.message.middleware(ChatActionMiddleware())
 
     from bot.handlers.admin.broadcast import (
@@ -235,6 +244,9 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
         router as admin_tariffs_router,
     )
     from bot.handlers.admin.users import router as admin_users_router
+    from bot.handlers.admin.payments import (
+        router as admin_payments_router,
+    )
     from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
@@ -253,22 +265,28 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
         admin_servers_router,
         admin_tariffs_router,
         admin_broadcast_router,
+        admin_payments_router,
         fallback_router,
     ]:
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)
+
     await setup_bot_commands(bot)
+
     return bot, dp
 
 
 async def start_webhook_server(port: int):
     app = web.Application()
     setup_webhook_routes(app)
+
     runner = web.AppRunner(app)
     await runner.setup()
+
     site = web.TCPSite(runner, "127.0.0.1", port)
     await site.start()
+
     logger.info("Webhook server started on 127.0.0.1:%d", port)
     return runner
 
@@ -276,11 +294,14 @@ async def start_webhook_server(port: int):
 async def _stop_broadcast_tasks():
     for event in _broadcast_stop_events.values():
         event.set()
+
     tasks = list(_background_tasks)
     for task in tasks:
         task.cancel()
+
     if tasks:
         await asyncio.wait(tasks, timeout=10)
+
     logger.info("Broadcast tasks stopped (%s tasks)", len(tasks))
 
 
@@ -291,6 +312,7 @@ async def main():
         if not settings.DB_ENCRYPTION_KEY:
             logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
             return
+
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
         except Exception as e:
@@ -305,6 +327,7 @@ async def main():
                 "❌ YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY пуст!"
             )
             return
+
         if settings.YOOKASSA_SECRET_KEY and not settings.YOOKASSA_SHOP_ID:
             logger.critical(
                 "❌ YOOKASSA_SECRET_KEY задан, но YOOKASSA_SHOP_ID пуст!"
@@ -405,7 +428,6 @@ async def main():
             from services.device_service import (
                 close_redis as close_device_redis,
             )
-
             await close_device_redis()
         except Exception as e:
             logger.error("Failed to close device Redis: %s", e)
@@ -414,12 +436,12 @@ async def main():
             from services.payment_service import (
                 close_redis as close_payment_redis,
             )
-
             await close_payment_redis()
         except Exception as e:
             logger.error("Failed to close payment Redis: %s", e)
 
         await close_db()
+
         logger.info("Работа бота завершена")
 
 
