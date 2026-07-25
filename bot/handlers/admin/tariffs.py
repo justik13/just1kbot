@@ -99,6 +99,9 @@ async def _show_tariffs_list(
         math.ceil(total_tariffs / TARIFFS_PER_PAGE),
     )
 
+    if page > total_pages:
+        page = total_pages
+
     tariffs = await get_tariffs_paginated(
         session,
         page=page,
@@ -157,9 +160,8 @@ async def show_tariffs_list(
         return
 
     await state.clear()
-    await callback.answer()
-
     await _show_tariffs_list(callback, session, page=1)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("admin_tariffs_page:"))
@@ -185,9 +187,8 @@ async def tariffs_pagination(
         return
 
     await state.clear()
-    await callback.answer()
-
     await _show_tariffs_list(callback, session, page=page)
+    await callback.answer()
 
 
 async def _show_tariff_card(
@@ -271,7 +272,6 @@ async def show_tariff_card(
         return
 
     await state.clear()
-    await callback.answer()
 
     tariff = await get_tariff_by_id(session, tariff_id)
 
@@ -283,6 +283,7 @@ async def show_tariff_card(
         return
 
     await _show_tariff_card(callback, tariff)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("admin_tariff_toggle:"))
@@ -308,7 +309,6 @@ async def toggle_tariff_confirm(
         return
 
     await state.clear()
-    await callback.answer()
 
     tariff = await get_tariff_by_id(session, tariff_id)
 
@@ -361,6 +361,8 @@ async def toggle_tariff_confirm(
         logger.debug(
             f"toggle_tariff_confirm edit_text failed: {e}"
         )
+
+    await callback.answer()
 
 
 @router.callback_query(
@@ -470,8 +472,6 @@ async def start_edit_tariff_rub(
         return
 
     await state.clear()
-    await callback.answer()
-
     await state.update_data(tariff_id=tariff_id)
     await state.set_state(AdminStates.editing_tariff_rub)
 
@@ -484,6 +484,8 @@ async def start_edit_tariff_rub(
         logger.debug(
             f"start_edit_tariff_rub edit_text failed: {e}"
         )
+
+    await callback.answer()
 
 
 @router.message(AdminStates.editing_tariff_rub)

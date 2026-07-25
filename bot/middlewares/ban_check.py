@@ -12,7 +12,10 @@ from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-_ban_alert_cache: TTLCache[int, bool] = TTLCache(maxsize=10000, ttl=300.0)
+_ban_alert_cache: TTLCache[int, bool] = TTLCache(
+    maxsize=10000,
+    ttl=300.0,
+)
 
 
 class BanCheckMiddleware(BaseMiddleware):
@@ -27,6 +30,7 @@ class BanCheckMiddleware(BaseMiddleware):
         # Админ из ADMIN_IDS не должен блокироваться ban check.
         if user_id is not None:
             settings = get_settings()
+
             if user_id in settings.ADMIN_IDS:
                 return await handler(event, data)
 
@@ -56,7 +60,9 @@ class BanCheckMiddleware(BaseMiddleware):
 
                 elif isinstance(event, Message):
                     try:
-                        await event.answer(texts.ERROR_BANNED_MESSAGE)
+                        await event.answer(
+                            texts.ERROR_BANNED_MESSAGE,
+                        )
                     except Exception:
                         pass
 

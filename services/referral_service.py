@@ -1,8 +1,10 @@
 import logging
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.middlewares.user_context import invalidate_user_cache
+from database.models import User
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
@@ -13,9 +15,9 @@ logger = logging.getLogger(__name__)
 
 MIN_DURATION_FOR_REFERRAL = 30
 
-REFERRAL_FIRST_PURCHASE_BONUS = 5   # Реферал при первой покупке (тариф >= 30д)
-REFERRER_FIRST_PURCHASE_BONUS = 3   # Пригласитель при первой покупке
-REFERRER_RENEWAL_BONUS = 1          # Пригласитель при продлении
+REFERRAL_FIRST_PURCHASE_BONUS = 5
+REFERRER_FIRST_PURCHASE_BONUS = 3
+REFERRER_RENEWAL_BONUS = 1
 
 
 class ReferralService:
@@ -72,9 +74,13 @@ class ReferralService:
             )
             return 0, 0
 
-        referrer = await get_user_by_telegram_id(
-            session,
-            referrer_telegram_id,
+        referrer = await session.scalar(
+            select(User)
+            .where(
+                User.telegram_id == referrer_telegram_id,
+                User.is_deleted == False,
+            )
+            .with_for_update()
         )
 
         if not referrer:

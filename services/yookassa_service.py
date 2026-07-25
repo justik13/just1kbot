@@ -106,7 +106,6 @@ class YooKassaService:
                 capture=True,
             )
 
-            # Чеки включаются только если это явно разрешено.
             if receipt_email and settings.YOOKASSA_RECEIPTS_ENABLED:
                 params_kwargs["receipt"] = {
                     "customer": {"email": receipt_email},

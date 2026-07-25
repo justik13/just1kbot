@@ -53,12 +53,6 @@ def _is_yookassa_ip(ip: str) -> bool:
 
 
 def _get_real_ip(request: web.Request) -> str:
-    """
-    Доверяем X-Real-IP / X-Forwarded-For только если запрос пришёл
-    из локального proxy (127.0.0.1 / ::1).
-
-    Это защищает от подделки заголовков при прямом доступе.
-    """
     remote = (request.remote or "").strip()
 
     trusted_proxy = remote in {"127.0.0.1", "::1"}
@@ -161,8 +155,6 @@ async def _verify_stale_webhook_via_api(
         api_status_raw.upper(),
     )
 
-    # Для chargeback/refund достаточно подтвердить, что платёж
-    # реально отменён/возвращён в YooKassa.
     if normalized_status == "CHARGEBACKED":
         if api_status not in {"REFUNDED", "CANCELED", "CHARGEBACKED"}:
             logger.warning(
@@ -247,7 +239,7 @@ async def yookassa_webhook_handler(
     try:
         peer_ip = _get_real_ip(request)
 
-        if peer_ip and not _is_yookassa_ip(peer_ip):
+        if not peer_ip or not _is_yookassa_ip(peer_ip):
             logger.warning(
                 "[%s] Webhook BLOCKED from unknown IP: %s",
                 request_id,
@@ -387,7 +379,9 @@ async def yookassa_webhook_handler(
                         )
 
                     if api_amount.get("currency"):
-                        callback_currency = api_amount["currency"]
+                        callback_currency = api_amount[
+                            "currency"
+                        ]
 
         metadata = webhook_object.get("metadata") or {}
         payload = metadata.get("payload", "")

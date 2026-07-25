@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import PERMANENT_SUBSCRIPTION_DAYS
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -30,8 +31,6 @@ from .common import _validate_positive_int
 
 router = Router()
 logger = logging.getLogger(__name__)
-
-MAX_REDUCE_DAYS = 36500
 
 
 @router.callback_query(F.data.startswith("admin_sub_reduce:"))
@@ -100,6 +99,7 @@ async def admin_sub_reduce_process(
         return
 
     data = await state.get_data()
+
     telegram_id = data.get("admin_telegram_id")
 
     if not telegram_id:
@@ -184,7 +184,7 @@ async def admin_sub_apply_reduce(
         telegram_id is None
         or days is None
         or days < 1
-        or days > MAX_REDUCE_DAYS
+        or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
             "Некорректное количество дней",

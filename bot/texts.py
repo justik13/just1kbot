@@ -75,6 +75,7 @@ def _merge_texts() -> dict[str, Any]:
 
 _TEXTS = _merge_texts()
 
+# Публикуем все тексты как атрибуты модуля.
 globals().update(_TEXTS)
 
 __all__ = list(_TEXTS.keys()) + [

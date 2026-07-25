@@ -31,7 +31,9 @@ class DBSessionMiddleware(BaseMiddleware):
                         show_alert=True,
                     )
                 elif isinstance(event, Message):
-                    await event.answer(texts.ERROR_TECHNICAL_MESSAGE)
+                    await event.answer(
+                        texts.ERROR_TECHNICAL_MESSAGE,
+                    )
             except Exception:
                 pass
 

@@ -15,6 +15,7 @@ from database.repositories.users_repo import get_user_referrals
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_days_left, format_user_card_text
 from utils.telegram import render_hub, safe
+from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def _validate_positive_int(text: str | None) -> int | None:
         return None
 
     value = int(text.strip())
+
     MAX_DAYS = 36500
 
     if value < 1 or value > MAX_DAYS:
@@ -44,6 +46,7 @@ def _validate_positive_int(text: str | None) -> int | None:
 def _is_subscription_active(user: User) -> bool:
     if not user.subscription_end:
         return False
+
     return not is_expired(user.subscription_end)
 
 
@@ -70,6 +73,7 @@ def _format_time_left(subscription_end) -> str:
         return f"{days} дн. {hours} ч."
 
     minutes = (delta.seconds % 3600) // 60
+
     return f"{hours} ч. {minutes} мин."
 
 
@@ -79,6 +83,7 @@ async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
         .where(Tariff.is_active == True)
         .order_by(Tariff.device_limit)
     )
+
     return list(result.scalars().all())
 
 
@@ -88,10 +93,13 @@ async def _get_tariff_groups(
     tariffs = await _get_active_tariffs(session)
 
     groups: dict[int, list[Tariff]] = {}
+
     for tariff in tariffs:
         limit = tariff.device_limit
+
         if limit not in groups:
             groups[limit] = []
+
         groups[limit].append(tariff)
 
     return groups
@@ -113,7 +121,9 @@ async def _get_user_with_profiles(
         .where(User.telegram_id == telegram_id)
         .options(selectinload(User.profiles))
     )
+
     result = await session.execute(stmt)
+
     return result.scalar_one_or_none()
 
 
@@ -143,24 +153,30 @@ async def _build_users_list_text_and_kb(
                 and user.subscription_end > current_time
                 else "🔴"
             )
+
             ban = "🚫" if user.is_banned else ""
+
             username = (
-                f"@{safe(user.username)}"
+                f"@{user.username}"
                 if user.username
                 else f"ID:{user.telegram_id}"
             )
+
             days = format_days_left(user.subscription_end)
+
             profiles_count = (
                 len(user.profiles)
                 if user.profiles
                 else 0
             )
 
+            button_text = truncate_button_text(
+                f"{status}{ban} {username} · "
+                f"{days} · {profiles_count} устр."
+            )
+
             builder.button(
-                text=(
-                    f"{status}{ban} {username} · "
-                    f"{days} · {profiles_count} устр."
-                ),
+                text=button_text,
                 callback_data=f"admin_user_card:{user.telegram_id}",
             )
 
@@ -169,6 +185,7 @@ async def _build_users_list_text_and_kb(
             text="⬅️",
             callback_data=f"admin_users_page:{page - 1}",
         )
+
     if page < total_pages:
         builder.button(
             text="➡️",
@@ -179,12 +196,14 @@ async def _build_users_list_text_and_kb(
         text="🔍 Поиск по ID",
         callback_data="admin_users_search",
     )
+
     builder.button(
         text="← В админку",
         callback_data="admin_menu",
     )
 
     builder.adjust(1)
+
     return rendered, builder
 
 
@@ -194,12 +213,14 @@ async def _render_user_card(
     session: AsyncSession,
 ):
     profiles = user.profiles if user.profiles else []
+
     referrals = await get_user_referrals(
         session,
         user.telegram_id,
     )
 
     current_time = now_utc()
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -226,12 +247,14 @@ async def _show_user_card_edit(
     session: AsyncSession,
 ):
     profiles = await get_user_profiles(session, user.id)
+
     referrals = await get_user_referrals(
         session,
         user.telegram_id,
     )
 
     current_time = now_utc()
+
     rendered = format_user_card_text(
         user,
         profiles,
@@ -250,6 +273,7 @@ async def _show_user_card_edit(
         )
     except TelegramBadRequest as e:
         logger.debug(f"_show_user_card_edit edit_text failed: {e}")
+
         await render_hub(
             message.bot,
             message.chat.id,

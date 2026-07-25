@@ -33,4 +33,7 @@ class TokenBucketRateLimiter:
 
 
 # Общий limiter для broadcast, notifications и других массовых отправок.
-global_send_limiter = TokenBucketRateLimiter(rate=25.0, burst=25)
+global_send_limiter = TokenBucketRateLimiter(
+    rate=25.0,
+    burst=25,
+)

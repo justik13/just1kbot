@@ -10,6 +10,8 @@ from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from config.settings import get_settings
 from services.ban_service import BanService
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
+
 from .common import (
     _get_user_with_profiles,
     _render_user_card,
@@ -24,8 +26,6 @@ async def admin_ban_confirm(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    # ИСПРАВЛЕНО (БАГ 5):
-    # Проверка админа ПЕРЕД answer.
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -33,10 +33,19 @@ async def admin_ban_confirm(
         )
         return
 
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
     await callback.answer()
 
-    telegram_id = int(callback.data.split(":")[1])
     settings = get_settings()
+
     if telegram_id in settings.ADMIN_IDS:
         await callback.answer(
             texts.ERROR_ADMIN_BAN_FORBIDDEN,
@@ -45,6 +54,7 @@ async def admin_ban_confirm(
         return
 
     text = texts.ADMIN_BAN_CONFIRM.format(telegram_id=telegram_id)
+
     try:
         await callback.message.edit_text(
             text,
@@ -64,28 +74,52 @@ async def admin_ban_apply(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
         return
 
     await callback.answer()
-    telegram_id = int(callback.data.split(":")[1])
 
     settings = get_settings()
+
     if telegram_id in settings.ADMIN_IDS:
-        await callback.answer(texts.ERROR_ADMIN_BAN_FORBIDDEN, show_alert=True)
+        await callback.answer(
+            texts.ERROR_ADMIN_BAN_FORBIDDEN,
+            show_alert=True,
+        )
         return
 
     success, message = await BanService.toggle_ban(
-        session, callback.from_user.id, telegram_id,
+        session,
+        callback.from_user.id,
+        telegram_id,
     )
 
     if not success:
-        await callback.answer(texts.ADMIN_BAN_FAILED.format(message=message), show_alert=True)
+        await callback.answer(
+            texts.ADMIN_BAN_FAILED.format(message=message),
+            show_alert=True,
+        )
         return
 
-    await callback.answer(texts.ADMIN_BAN_SUCCESS.format(message=message), show_alert=True)
+    await callback.answer(
+        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        show_alert=True,
+    )
 
     user = await _get_user_with_profiles(session, telegram_id)
+
     if user:
         await _render_user_card(callback, user, session)
 
@@ -96,13 +130,25 @@ async def admin_unban_confirm(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
         return
 
     await callback.answer()
-    telegram_id = int(callback.data.split(":")[1])
 
     text = texts.ADMIN_UNBAN_CONFIRM.format(telegram_id=telegram_id)
+
     try:
         await callback.message.edit_text(
             text,
@@ -122,22 +168,42 @@ async def admin_unban_apply(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
         return
 
     await callback.answer()
-    telegram_id = int(callback.data.split(":")[1])
 
     success, message = await BanService.toggle_ban(
-        session, callback.from_user.id, telegram_id,
+        session,
+        callback.from_user.id,
+        telegram_id,
     )
 
     if not success:
-        await callback.answer(texts.ADMIN_BAN_FAILED.format(message=message), show_alert=True)
+        await callback.answer(
+            texts.ADMIN_BAN_FAILED.format(message=message),
+            show_alert=True,
+        )
         return
 
-    await callback.answer(texts.ADMIN_BAN_SUCCESS.format(message=message), show_alert=True)
+    await callback.answer(
+        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        show_alert=True,
+    )
 
     user = await _get_user_with_profiles(session, telegram_id)
+
     if user:
         await _render_user_card(callback, user, session)

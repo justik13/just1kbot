@@ -23,14 +23,14 @@ from .common import URL_REGEX, normalize_api_url
 router = Router()
 logger = logging.getLogger(__name__)
 
+SAFE_DEFAULT_MAX_PEERS = 200
+
 
 @router.callback_query(F.data == "admin_server_add")
 async def start_add_server(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -38,6 +38,7 @@ async def start_add_server(
         )
         return
 
+    await callback.answer()
     await state.clear()
 
     await callback.message.edit_text(
@@ -265,16 +266,16 @@ async def process_add_server(
 
         api_max_peers = server_info.get_effective_max_peers()
 
-        # Если API не вернул реальный лимит и используется fallback 250,
-        # ставим более безопасный лимит.
         if api_max_peers == server_info.SERVER_MAX_PEERS:
             logger.warning(
                 "Amnezia API did not return max peers for %s. "
-                "Using safe default 200 instead of 250.",
+                "Using safe default %s instead of %s.",
                 all_data["api_url"],
+                SAFE_DEFAULT_MAX_PEERS,
+                server_info.SERVER_MAX_PEERS,
             )
 
-            api_max_peers = 200
+            api_max_peers = SAFE_DEFAULT_MAX_PEERS
 
         api_server_name = server_info.name or all_data["name"]
 
@@ -332,9 +333,7 @@ async def process_add_server(
         )
 
         logger.info(
-            "Admin %s added server: %s",
-            message.from_user.id,
-            server.id,
+            f"Admin {message.from_user.id} added server: {server.id}"
         )
 
         await state.clear()

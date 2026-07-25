@@ -66,7 +66,10 @@ async def dismiss_notification(callback: CallbackQuery):
 
 
 @router.callback_query()
-async def stale_callback_fallback(callback: CallbackQuery, state: FSMContext):
+async def stale_callback_fallback(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
     await state.clear()
 
     try:

@@ -98,6 +98,7 @@ class SubscriptionService:
         if user is not None and user.is_deleted:
             user.is_deleted = False
             user.deleted_at = None
+            user.is_bot_blocked = False
 
             await session.flush()
             invalidate_user_cache(telegram_id)
@@ -177,6 +178,7 @@ class SubscriptionService:
             if user is not None and user.is_deleted:
                 user.is_deleted = False
                 user.deleted_at = None
+                user.is_bot_blocked = False
 
                 await session.flush()
 
@@ -232,6 +234,7 @@ class SubscriptionService:
 
         # Продуктовая логика:
         # - продление всегда добавляет дни к текущему концу подписки;
+        # - если подписка неактивна, отсчёт начинается с текущего момента;
         # - смена тарифа/лимита применяется сразу;
         # - даунгрейд запрещён выше по коду.
         if days == 0:

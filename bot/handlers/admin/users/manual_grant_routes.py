@@ -20,6 +20,7 @@ from services.payment_service import PaymentService
 from services.payment_service.common import get_payment_tariff_name
 from services.workers.heartbeat import get_bot_ref
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
 from utils.telegram import render_hub
 
@@ -36,7 +37,6 @@ async def admin_manual_grant(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -44,7 +44,17 @@ async def admin_manual_grant(
         )
         return
 
-    payment_id = int(callback.data.split(":")[1])
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
+
     payment = await get_payment_by_id(session, payment_id)
 
     if not payment:
@@ -53,18 +63,21 @@ async def admin_manual_grant(
             show_alert=True,
         )
         return
+
     if payment.status == "completed":
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_ALREADY_COMPLETED,
             show_alert=True,
         )
         return
+
     if payment.status == "refunded":
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_REFUNDED,
             show_alert=True,
         )
         return
+
     if payment.status not in MANUAL_GRANT_ALLOWED_STATUSES:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_INVALID_STATUS,
@@ -73,18 +86,21 @@ async def admin_manual_grant(
         return
 
     user = payment.user
+
     if not user:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_USER_NOT_FOUND,
             show_alert=True,
         )
         return
+
     if user.is_deleted:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_USER_DELETED,
             show_alert=True,
         )
         return
+
     if user.is_banned:
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_USER_BANNED,
@@ -93,6 +109,7 @@ async def admin_manual_grant(
         return
 
     tariff_name = get_payment_tariff_name(payment)
+
     status_name = texts.PAYMENT_STATUS_NAMES.get(
         payment.status,
         payment.status,
@@ -127,7 +144,6 @@ async def admin_manual_grant_apply(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -135,7 +151,16 @@ async def admin_manual_grant_apply(
         )
         return
 
-    payment_id = int(callback.data.split(":")[1])
+    payment_id = parse_callback_id(callback.data, 1)
+
+    if payment_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     try:
         success, result = await PaymentService.force_grant_payment(
@@ -149,6 +174,7 @@ async def admin_manual_grant_apply(
                 session,
                 payment_id,
             )
+
             user_tg_id = (
                 payment.user.telegram_id
                 if payment and payment.user
@@ -176,18 +202,14 @@ async def admin_manual_grant_apply(
                     f"admin_manual_grant_apply edit_text failed: {e}"
                 )
 
-            # ──────────────────────────────────────────────
-            # ИСПРАВЛЕНО: render_hub вместо bot.send_message.
-            #
-            # Уведомление клиенту теперь заменяет текущий
-            # hub клиента и само заменяется при навигации.
-            # Одиночных сообщений в чате не остаётся.
-            # ──────────────────────────────────────────────
             try:
                 bot = get_bot_ref()
+
                 if bot and payment and payment.user:
                     user = payment.user
+
                     tariff_name = get_payment_tariff_name(payment)
+
                     valid_until = format_datetime(
                         user.subscription_end
                     )
@@ -198,15 +220,23 @@ async def admin_manual_grant_apply(
                     )
 
                     builder = InlineKeyboardBuilder()
+
                     builder.button(
                         text="🔌 Подключить устройство",
                         callback_data="menu_connections",
                     )
+
                     builder.button(
                         text="🏠 В главное меню",
                         callback_data="back_to_main_menu",
                     )
-                    builder.adjust(1, 1)
+
+                    builder.button(
+                        text="✅ Прочитано (убрать)",
+                        callback_data="dismiss_notification",
+                    )
+
+                    builder.adjust(1, 1, 1)
 
                     await render_hub(
                         bot,
@@ -223,6 +253,7 @@ async def admin_manual_grant_apply(
                     if payment and payment.user
                     else "?",
                 )
+
                 try:
                     if payment and payment.user:
                         async with session_scope() as notify_session:
@@ -236,6 +267,7 @@ async def admin_manual_grant_apply(
                         "after manual grant notification: %s",
                         block_error,
                     )
+
             except Exception as notify_error:
                 logger.error(
                     "Failed to notify client after manual grant: "
@@ -253,6 +285,7 @@ async def admin_manual_grant_apply(
             f"admin_manual_grant_apply error: {e}",
             exc_info=True,
         )
+
         await callback.answer(
             texts.ADMIN_MANUAL_GRANT_FAILED,
             show_alert=True,

@@ -15,6 +15,11 @@ from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
 from services.device_service import DeviceService
 from utils.admin import is_admin
+from utils.callbacks import (
+    parse_callback_id,
+    parse_callback_int,
+    parse_callback_parts,
+)
 from utils.telegram import safe
 
 from .common import _get_user_with_profiles
@@ -28,8 +33,6 @@ async def admin_user_devices(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -37,9 +40,19 @@ async def admin_user_devices(
         )
         return
 
-    telegram_id = int(callback.data.split(":")[1])
+    telegram_id = parse_callback_id(callback.data, 1)
+
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     user = await _get_user_with_profiles(session, telegram_id)
+
     if not user:
         await callback.message.edit_text(
             texts.ERROR_USER_NOT_FOUND
@@ -60,11 +73,13 @@ async def admin_user_devices(
         text = texts.ADMIN_USER_DEVICES_HEADER.format(
             telegram_id=telegram_id
         )
+
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
                 or f"Устройство #{profile.id}"
             )
+
             text += f"\n• {safe(name)}"
 
     try:
@@ -85,8 +100,6 @@ async def admin_delete_device_confirm(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -94,11 +107,29 @@ async def admin_delete_device_confirm(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    profile_id = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    profile_id = parse_callback_int(parts, 2)
+
+    if telegram_id is None or profile_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     profile = await get_profile_by_id(session, profile_id)
+
     if not profile:
         await callback.answer(
             texts.ERROR_PROFILE_NOT_FOUND,
@@ -107,6 +138,7 @@ async def admin_delete_device_confirm(
         return
 
     server = await get_server_by_id(session, profile.server_id)
+
     flag = server.country_flag if server else "🌍"
     server_name = server.name if server else "Неизвестно"
 
@@ -142,8 +174,6 @@ async def admin_delete_device_apply(
     callback: CallbackQuery,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -151,12 +181,30 @@ async def admin_delete_device_apply(
         )
         return
 
-    parts = callback.data.split(":")
-    telegram_id = int(parts[1])
-    profile_id = int(parts[2])
+    parts = parse_callback_parts(callback.data, 3)
+
+    if parts is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    telegram_id = parse_callback_int(parts, 1)
+    profile_id = parse_callback_int(parts, 2)
+
+    if telegram_id is None or profile_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
 
     try:
         profile = await get_profile_by_id(session, profile_id)
+
         if not profile:
             await callback.answer(
                 texts.ERROR_PROFILE_NOT_FOUND,
@@ -166,16 +214,6 @@ async def admin_delete_device_apply(
 
         device_name = profile.device_name
 
-        #
-        # actor_id нужен для корректного аудита.
-        #
-        # Здесь удаление выполняет админ,
-        # поэтому actor_id = callback.from_user.id.
-        #
-        # Дополнительный ручной AuditService.log_action здесь не нужен,
-        # потому что DeviceService.delete_device уже пишет аудит
-        # DEVICE_DELETED с правильным actor_id.
-        #
         success = await DeviceService.delete_device(
             session,
             profile,
@@ -212,7 +250,9 @@ async def admin_delete_device_apply(
             f"admin_delete_device_apply error: {e}",
             exc_info=True,
         )
+
         await session.rollback()
+
         await callback.answer(
             texts.ADMIN_DELETE_DEVICE_ERROR,
             show_alert=True,

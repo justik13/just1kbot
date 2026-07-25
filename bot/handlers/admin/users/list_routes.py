@@ -16,6 +16,7 @@ from database.repositories.users_repo import (
     get_users_paginated_with_profiles,
 )
 from utils.admin import is_admin
+from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub
 
 from .common import (
@@ -36,8 +37,6 @@ async def show_users_list(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -45,6 +44,7 @@ async def show_users_list(
         )
         return
 
+    await callback.answer()
     await state.clear()
 
     total_users = await get_user_count(session)
@@ -83,8 +83,6 @@ async def users_pagination(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -92,9 +90,17 @@ async def users_pagination(
         )
         return
 
-    await state.clear()
+    page = parse_callback_id(callback.data, 1)
 
-    page = int(callback.data.split(":")[1])
+    if page is None or page < 1:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
+    await state.clear()
 
     total_users = await get_user_count(session)
 
@@ -102,6 +108,9 @@ async def users_pagination(
         1,
         math.ceil(total_users / USERS_PER_PAGE),
     )
+
+    if page > total_pages:
+        page = total_pages
 
     users = await get_users_paginated_with_profiles(
         session,
@@ -131,8 +140,6 @@ async def start_search_user(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -140,6 +147,7 @@ async def start_search_user(
         )
         return
 
+    await callback.answer()
     await state.clear()
 
     try:
@@ -196,10 +204,13 @@ async def process_search_user(
             f"❌ Пользователь с ID {telegram_id} не найден.",
             get_back_button("admin_users"),
         )
+
         await state.clear()
+
         return
 
     await _show_user_card_edit(message, user, session)
+
     await state.clear()
 
 
@@ -209,8 +220,6 @@ async def show_user_card(
     state: FSMContext,
     session: AsyncSession,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -218,9 +227,17 @@ async def show_user_card(
         )
         return
 
-    await state.clear()
+    telegram_id = parse_callback_id(callback.data, 1)
 
-    telegram_id = int(callback.data.split(":")[1])
+    if telegram_id is None:
+        await callback.answer(
+            "Некорректный запрос",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
+    await state.clear()
 
     user = await _get_user_with_profiles(session, telegram_id)
 

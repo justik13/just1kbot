@@ -14,6 +14,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_broadcast_confirm_keyboard
 from bot.keyboards.admin.broadcast import (
     get_broadcast_close_keyboard,
@@ -27,17 +28,11 @@ from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
-from utils.telegram import (
-    render_hub,
-    send_hub_document,
-    send_hub_photo,
-    safe,
-)
+from utils.telegram import render_hub, send_hub_document, send_hub_photo, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
 
-TELEGRAM_MESSAGE_LIMIT = 4096
 TELEGRAM_CAPTION_LIMIT = 1024
 
 _broadcast_stop_events: dict[int, asyncio.Event] = {}
@@ -68,8 +63,6 @@ async def start_broadcast(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    await callback.answer()
-
     if not is_admin(callback.from_user.id):
         await callback.answer(
             texts.ERROR_ACCESS_DENIED,
@@ -77,6 +70,7 @@ async def start_broadcast(
         )
         return
 
+    await callback.answer()
     await state.clear()
 
     try:
@@ -85,7 +79,7 @@ async def start_broadcast(
             reply_markup=get_back_button("admin_menu"),
         )
     except TelegramBadRequest as e:
-        logger.debug("start_broadcast edit_text failed: %s", e)
+        logger.debug(f"start_broadcast edit_text failed: {e}")
 
     await state.set_state(AdminStates.entering_broadcast_message)
 
@@ -192,14 +186,7 @@ async def process_broadcast_message(
         )
 
 
-async def _send_with_html(
-    bot,
-    uid,
-    text,
-    media_id,
-    content_type,
-    kb,
-):
+async def _send_with_html(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
         await bot.send_photo(
             uid,
@@ -225,14 +212,7 @@ async def _send_with_html(
         )
 
 
-async def _send_plain(
-    bot,
-    uid,
-    text,
-    media_id,
-    content_type,
-    kb,
-):
+async def _send_plain(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
         await bot.send_photo(
             uid,
@@ -248,20 +228,10 @@ async def _send_plain(
             reply_markup=kb,
         )
     else:
-        await bot.send_message(
-            uid,
-            text,
-            reply_markup=kb,
-        )
+        await bot.send_message(uid, text, reply_markup=kb)
 
 
-async def _dispatch_message(
-    bot,
-    uid,
-    text,
-    media_id,
-    content_type,
-):
+async def _dispatch_message(bot, uid, text, media_id, content_type):
     kb = get_broadcast_close_keyboard()
 
     try:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -8,10 +9,7 @@ from cachetools import TTLCache
 from sqlalchemy import or_, select
 
 from bot import texts
-from bot.constants import (
-    NOTIFICATION_INTERVAL,
-    WORKER_ERROR_SLEEP_INTERVAL,
-)
+from bot.constants import NOTIFICATION_INTERVAL, WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import User
 from utils.datetime_helpers import now_utc
@@ -37,7 +35,7 @@ def _get_backoff_delay(retry_count: int) -> int:
     return BACKOFF_BASE_INTERVAL * (2 ** capped)
 
 
-def _format_countdown(delta) -> str:
+def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
         return "в ближайшее время"
 
@@ -139,7 +137,7 @@ async def _send_pre_expiry_notifications(
             select(User.id)
             .where(
                 User.subscription_end > current_time,
-                User.subscription_end <= current_time + asyncio.timedelta(days=3),
+                User.subscription_end <= current_time + timedelta(days=3),
                 User.is_banned == False,
                 User.is_bot_blocked == False,
                 User.is_deleted == False,
@@ -180,7 +178,7 @@ async def _send_pre_expiry_notifications(
                 ):
                     continue
 
-                if user.subscription_end > current_time + asyncio.timedelta(days=3):
+                if user.subscription_end > current_time + timedelta(days=3):
                     continue
 
                 retry_count = user.notification_retry_count or 0
@@ -209,21 +207,21 @@ async def _send_pre_expiry_notifications(
                 notification_type = None
 
                 if (
-                    time_left <= asyncio.timedelta(hours=2)
+                    time_left <= timedelta(hours=2)
                     and not user.notified_2h
                 ):
                     msg = texts.NOTIFY_2H
                     notification_type = "2h"
 
                 elif (
-                    time_left <= asyncio.timedelta(days=1)
+                    time_left <= timedelta(days=1)
                     and not user.notified_1d
                 ):
                     msg = texts.NOTIFY_1D
                     notification_type = "1d"
 
                 elif (
-                    time_left <= asyncio.timedelta(days=3)
+                    time_left <= timedelta(days=3)
                     and not user.notified_3d
                 ):
                     msg = texts.NOTIFY_3D
@@ -296,7 +294,7 @@ async def _send_post_expiry_notifications(
     bot: Bot,
     current_time,
 ):
-    grace_start = current_time - asyncio.timedelta(hours=GRACE_PERIOD_HOURS)
+    grace_start = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
 
     async with session_scope() as session:
         stmt = (
@@ -344,7 +342,7 @@ async def _send_post_expiry_notifications(
                 if user.is_banned or user.is_bot_blocked or user.is_deleted:
                     continue
 
-                deletion_time = user.subscription_end + asyncio.timedelta(
+                deletion_time = user.subscription_end + timedelta(
                     hours=GRACE_PERIOD_HOURS,
                 )
 
@@ -377,7 +375,7 @@ async def _send_post_expiry_notifications(
 
                 if (
                     not user.notified_grace_12h
-                    and current_time >= deletion_time - asyncio.timedelta(hours=12)
+                    and current_time >= deletion_time - timedelta(hours=12)
                 ):
                     msg = texts.NOTIFY_GRACE_12H
                     notification_type = "grace_12h"

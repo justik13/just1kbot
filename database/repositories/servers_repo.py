@@ -1,6 +1,8 @@
 from typing import List, Optional, TypedDict
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
 
@@ -26,36 +28,58 @@ async def get_active_servers(
         .where(Server.is_active == True)
         .order_by(Server.name)
     )
+
     result = await session.execute(stmt)
+
     return result.scalars().all()
 
 
 async def get_available_servers(
     session: AsyncSession,
 ) -> List[Server]:
-    profile_counts = (
+    """
+    Возвращает активные серверы, на которых есть свободные слоты.
+
+    Важно:
+    - сначала используем реальное количество пиров из slots_cache,
+      если оно доступно;
+    - если реальных данных нет, используем количество профилей в БД.
+
+    Это уменьшает риск показать пользователю сервер как свободный,
+    когда API реально уже заполнен.
+    """
+    servers = await get_active_servers(session)
+
+    if not servers:
+        return []
+
+    counts_stmt = (
         select(
             VPNProfile.server_id,
-            func.count(VPNProfile.id).label("profile_count"),
+            func.count(VPNProfile.id),
         )
         .group_by(VPNProfile.server_id)
-        .subquery()
     )
-    stmt = (
-        select(Server)
-        .outerjoin(
-            profile_counts,
-            Server.id == profile_counts.c.server_id,
-        )
-        .where(Server.is_active == True)
-        .where(
-            func.coalesce(profile_counts.c.profile_count, 0)
-            < Server.max_clients
-        )
-        .order_by(Server.name)
-    )
-    result = await session.execute(stmt)
-    return result.scalars().all()
+
+    counts_result = await session.execute(counts_stmt)
+
+    db_counts = {
+        row[0]: row[1]
+        for row in counts_result.all()
+    }
+
+    available: List[Server] = []
+
+    for server in servers:
+        real_count = get_cached_peer_count(server.id)
+
+        if real_count is None:
+            real_count = db_counts.get(server.id, 0)
+
+        if real_count < server.max_clients:
+            available.append(server)
+
+    return available
 
 
 async def get_server_by_id(
@@ -63,7 +87,9 @@ async def get_server_by_id(
     server_id: int,
 ) -> Optional[Server]:
     stmt = select(Server).where(Server.id == server_id)
+
     result = await session.execute(stmt)
+
     return result.scalar_one_or_none()
 
 
@@ -84,9 +110,12 @@ async def create_server(
         protocol=protocol,
         max_clients=max_clients,
     )
+
     session.add(server)
+
     await session.flush()
     await session.refresh(server)
+
     return server
 
 
@@ -98,10 +127,13 @@ async def update_server(
     for key, value in kwargs.items():
         if key in PROTECTED_SERVER_FIELDS:
             continue
+
         if hasattr(server, key):
             setattr(server, key, value)
+
     await session.flush()
     await session.refresh(server)
+
     return server
 
 
@@ -117,6 +149,7 @@ async def get_total_free_ips(
     session: AsyncSession,
 ) -> int:
     active_servers = await get_active_servers(session)
+
     if not active_servers:
         return 0
 
@@ -127,19 +160,25 @@ async def get_total_free_ips(
         )
         .group_by(VPNProfile.server_id)
     )
+
     counts_result = await session.execute(counts_stmt)
+
     db_counts = {
         row[0]: row[1]
         for row in counts_result.all()
     }
 
     total_free = 0
+
     for server in active_servers:
         real_count = get_cached_peer_count(server.id)
+
         if real_count is None:
             real_count = db_counts.get(server.id, 0)
+
         free_slots = server.max_clients - real_count
         total_free += max(0, free_slots)
+
     return total_free
 
 
@@ -147,7 +186,9 @@ async def get_server_count(
     session: AsyncSession,
 ) -> int:
     stmt = select(func.count(Server.id))
+
     result = await session.execute(stmt)
+
     return result.scalar_one()
 
 
@@ -157,12 +198,14 @@ async def get_servers_paginated(
     per_page: int = 10,
 ) -> list[Server]:
     offset = (page - 1) * per_page
+
     result = await session.execute(
         select(Server)
         .order_by(Server.name)
         .offset(offset)
         .limit(per_page)
     )
+
     return result.scalars().all()
 
 
@@ -171,7 +214,9 @@ async def get_server_by_api_url(
     api_url: str,
 ) -> Optional[Server]:
     stmt = select(Server).where(Server.api_url == api_url)
+
     result = await session.execute(stmt)
+
     return result.scalar_one_or_none()
 
 
@@ -180,9 +225,13 @@ async def delete_profiles_by_server_id(
     server_id: int,
 ) -> int:
     from sqlalchemy import delete as sql_delete
+
     stmt = sql_delete(VPNProfile).where(
         VPNProfile.server_id == server_id,
     )
+
     result = await session.execute(stmt)
+
     await session.flush()
+
     return result.rowcount

@@ -302,6 +302,8 @@ async def admin_sub_grant_custom_start(
         )
         return
 
+    await callback.answer()
+
     tariff = await get_tariff_by_id(session, tariff_id)
 
     if not tariff:
@@ -311,9 +313,7 @@ async def admin_sub_grant_custom_start(
         )
         return
 
-    await callback.answer()
     await state.clear()
-
     await state.set_state(AdminStates.admin_grant_custom_days)
 
     await state.update_data(

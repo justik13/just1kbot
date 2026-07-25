@@ -1302,7 +1302,6 @@ class PaymentService:
 
                     await session.flush()
 
-                    # Точный откат реферального бонуса пригласителю.
                     referrer_bonus = payment.referral_referrer_bonus_days or 0
 
                     if referrer_bonus > 0 and user.referred_by:
@@ -1319,11 +1318,12 @@ class PaymentService:
                             referrer = await session.scalar(referrer_stmt)
 
                             if referrer:
-                                if (
-                                    referrer.referral_days
-                                    and referrer.referral_days >= referrer_bonus
-                                ):
-                                    referrer.referral_days -= referrer_bonus
+                                old_referral_days = referrer.referral_days or 0
+
+                                referrer.referral_days = max(
+                                    0,
+                                    old_referral_days - referrer_bonus,
+                                )
 
                                 if (
                                     referrer.subscription_end
