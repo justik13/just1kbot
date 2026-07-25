@@ -47,7 +47,6 @@ def _is_valid_receipt_email(email: str) -> bool:
         return False
 
     domain = email.rsplit("@", 1)[-1]
-
     if domain in _BLOCKED_EMAIL_DOMAINS:
         return False
 
@@ -56,23 +55,18 @@ def _is_valid_receipt_email(email: str) -> bool:
 
 def _get_client() -> YooKassa:
     global _client
-
     if _client is None:
         settings = get_settings()
-
         _client = YooKassa(
             api_key=settings.YOOKASSA_SECRET_KEY,
             shop_id=settings.YOOKASSA_SHOP_ID,
         )
-
         logger.info("[YooKassa] aioyookassa client initialized")
-
     return _client
 
 
 async def close_yookassa_client() -> None:
     global _client
-
     if _client is not None:
         try:
             await _client.close()
@@ -101,20 +95,16 @@ def _payment_to_dict(payment) -> Optional[dict]:
         return None
 
     confirmation = data.get("confirmation")
-
     if isinstance(confirmation, dict):
         url = confirmation.get("confirmation_url") or confirmation.get("url")
-
         if url:
             confirmation["confirmation_url"] = url
 
     amount = data.get("amount")
-
     if isinstance(amount, dict) and "value" in amount:
         amount["value"] = str(amount["value"])
 
     status = data.get("status")
-
     if status is not None:
         data["status"] = str(status).lower()
 
@@ -161,7 +151,10 @@ class YooKassaService:
                     "customer": {"email": receipt_email},
                     "items": [
                         {
-                            "description": description or "Подписка VPN",
+                            "description": (
+                                description
+                                or "Предоставление доступа к вычислительному серверу"
+                            ),
                             "quantity": "1.00",
                             "amount": {
                                 "value": str(amount),
@@ -179,19 +172,16 @@ class YooKassaService:
                 )
 
             params = CreatePaymentParams(**params_kwargs)
-
             payment = await client.payments.create_payment(params)
 
             data = _payment_to_dict(payment)
-
             if data:
                 logger.info(
                     "YooKassa payment created: id=%s, status=%s",
                     data.get("id"),
                     data.get("status"),
                 )
-
-            return data
+                return data
 
         except Exception as e:
             logger.error(
@@ -199,12 +189,12 @@ class YooKassaService:
                 e,
                 exc_info=True,
             )
-            return None
+
+        return None
 
     @staticmethod
     async def get_payment(payment_id: str) -> Optional[dict]:
         client = _get_client()
-
         try:
             payment = await client.payments.get_payment(payment_id)
             return _payment_to_dict(payment)
@@ -222,17 +212,12 @@ class YooKassaService:
         reason: str = "",
     ) -> Optional[dict]:
         client = _get_client()
-
         try:
             payment = await client.payments.cancel_payment(payment_id)
-
             data = _payment_to_dict(payment)
-
             if data:
                 logger.info("YooKassa payment cancelled: id=%s", payment_id)
-
-            return data
-
+                return data
         except Exception as e:
             logger.error(
                 "YooKassa cancel_payment exception: %s",
@@ -250,5 +235,4 @@ class YooKassaService:
             "refund.succeeded": "CHARGEBACKED",
             "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
         }
-
         return mapping.get(event, event.upper())

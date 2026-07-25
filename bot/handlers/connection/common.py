@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z0-9\s_-]+$")
 
 _PROTOCOL_DISPLAY = {
-    "amneziawg2": "AmneziaWG 2.0",
+    "amneziawg2": "AWG 2.0",
 }
 
 GRACE_PERIOD_HOURS = 48
@@ -51,15 +51,16 @@ async def _get_effective_device_limit(
         )
         if tariff:
             return tariff.device_limit
-
     return user.device_limit or 0
 
 
 def _get_grace_deletion_time(user: User):
     if not user.subscription_end:
         return None
+
     if user.subscription_end.year >= 2100:
         return None
+
     return user.subscription_end + timedelta(
         hours=GRACE_PERIOD_HOURS,
     )
@@ -108,6 +109,7 @@ async def _build_connections_screen(
 ) -> tuple[str, InlineKeyboardBuilder]:
     profiles = await get_user_profiles(session, user.id)
     profiles_count = len(profiles)
+
     device_limit = await _get_effective_device_limit(
         user,
         session,
@@ -120,6 +122,7 @@ async def _build_connections_screen(
 
     if read_only:
         deletion_time = _get_grace_deletion_time(user)
+
         if deletion_time:
             countdown = _format_grace_countdown(deletion_time)
             rendered += texts.CONNECTION_EXPIRED_READ_ONLY.format(
@@ -135,6 +138,7 @@ async def _build_connections_screen(
     else:
         for profile in profiles:
             server = profile.server
+
             flag = server.country_flag if server else "🌍"
             server_name = server.name if server else "Неизвестно"
 
@@ -173,6 +177,7 @@ async def _build_connections_screen(
         )
 
     builder.adjust(1)
+
     return rendered, builder
 
 

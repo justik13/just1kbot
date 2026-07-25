@@ -4,12 +4,12 @@
 OVERRIDES = {
     "ADMIN_SERVER_URL_PROMPT": (
         "🔗 Введите API URL сервера "
-        "(например: https://vpn.example.com:8443):"
+        "(например: https://api.example.com:8443):"
     ),
 
     "ERROR_INVALID_URL": """⚠️ Некорректный формат URL.
 
 URL должен начинаться с <code>https://</code>
 
-Пример: <code>https://vpn.example.com:8443</code>""",
+Пример: <code>https://api.example.com:8443</code>""",
 }
