@@ -1,3 +1,4 @@
+import ipaddress
 import logging
 import time
 import uuid
@@ -37,8 +38,6 @@ REFUND_EVENTS = {
 
 
 def _is_yookassa_ip(ip: str) -> bool:
-    import ipaddress
-
     try:
         client_ip = ipaddress.ip_address(ip)
 

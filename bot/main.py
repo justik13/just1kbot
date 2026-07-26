@@ -424,7 +424,7 @@ async def main():
 
         logger.info("Cleaning up resources...")
 
-        if "webhook_runner" in locals() and webhook_runner:
+        if webhook_runner is not None:
             await webhook_runner.cleanup()
 
         await close_http_session()

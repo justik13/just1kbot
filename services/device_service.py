@@ -435,7 +435,10 @@ class DeviceService:
                     raise
 
                 except IntegrityError:
-                    await session.rollback()
+                    # session.begin_nested() savepoint автоматически
+                    # откатится при выходе из async with.
+                    # НЕ вызываем session.rollback() — это откатит
+                    # всю транзакцию, а не только savepoint.
                     try:
                         deleted = await client.delete_user(client_id=peer_id)
                         if not deleted:
@@ -464,7 +467,10 @@ class DeviceService:
                     raise
 
                 except Exception as e:
-                    await session.rollback()
+                    # session.begin_nested() savepoint автоматически
+                    # откатится при выходе из async with.
+                    # НЕ вызываем session.rollback() — это откатит
+                    # всю транзакцию, а не только savepoint.
                     if peer_id and client:
                         try:
                             deleted = await client.delete_user(client_id=peer_id)
