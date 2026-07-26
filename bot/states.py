@@ -10,10 +10,6 @@ class DeviceManagementStates(StatesGroup):
     rename_device = State()
 
 
-class PaymentStates(StatesGroup):
-    entering_receipt_email = State()
-
-
 class AdminStates(StatesGroup):
     searching_user = State()
     entering_broadcast_message = State()
