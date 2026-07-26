@@ -12,7 +12,7 @@ from config.settings import get_settings
 logger = logging.getLogger("BackgroundWorker")
 
 _PROJECT_DIR = os.environ.get(
-    "PROJECTX_DIR",
+    "just1kbot_DIR",
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
 )
 HEARTBEAT_FILE = Path(_PROJECT_DIR) / ".heartbeat"

@@ -11,16 +11,16 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
 
-PROJECT_NAME="projectx-bot"
+PROJECT_NAME="just1kbot-bot"
 START_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="/opt/projectx-bot"
+PROJECT_DIR="/opt/just1kbot-bot"
 VENV_DIR="$PROJECT_DIR/venv"
-SERVICE_NAME="projectx-bot"
+SERVICE_NAME="just1kbot-bot"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
-BACKUP_DIR="/root/backups/projectx"
-LOG_FILE="/var/log/projectx-deploy.log"
-SNAPSHOT_DIR="/root/.projectx-snapshots"
-ROLLBACK_LOG="/var/log/projectx-rollback.log"
+BACKUP_DIR="/root/backups/just1kbot"
+LOG_FILE="/var/log/just1kbot-deploy.log"
+SNAPSHOT_DIR="/root/.just1kbot-snapshots"
+ROLLBACK_LOG="/var/log/just1kbot-rollback.log"
 
 PG_PASS_FILE=""
 REDIS_PASSWORD=""
@@ -69,7 +69,7 @@ update_redis_env_if_exists() {
         sed -i '/^REDIS_URL=/d' "$PROJECT_DIR/.env"
         echo "REDIS_PASSWORD='${REDIS_PASSWORD}'" >> "$PROJECT_DIR/.env"
         echo "REDIS_URL='redis://:${REDIS_PASSWORD}@localhost:6379/0'" >> "$PROJECT_DIR/.env"
-        chown projectx:projectx "$PROJECT_DIR/.env" 2>/dev/null || true
+        chown just1kbot:just1kbot "$PROJECT_DIR/.env" 2>/dev/null || true
         chmod 600 "$PROJECT_DIR/.env"
     fi
 }
@@ -192,7 +192,7 @@ read_db_password() {
     local pass=""
 
     while true; do
-        read -s -p "Введите пароль для пользователя БД projectx: " pass
+        read -s -p "Введите пароль для пользователя БД just1kbot: " pass
         echo ""
 
         if [[ "$pass" == "/cancel" ]]; then
@@ -277,11 +277,11 @@ $(tail -20 "$install_log")"
 
     success "Системные зависимости установлены"
 
-    if ! id "projectx" &>/dev/null; then
-        useradd -r -s /bin/false -d /nonexistent projectx || error "Ошибка создания пользователя"
-        success "Создан системный пользователь projectx"
+    if ! id "just1kbot" &>/dev/null; then
+        useradd -r -s /bin/false -d /nonexistent just1kbot || error "Ошибка создания пользователя"
+        success "Создан системный пользователь just1kbot"
     else
-        success "Пользователь projectx уже существует"
+        success "Пользователь just1kbot уже существует"
     fi
 }
 
@@ -316,12 +316,12 @@ setup_postgresql() {
     done
     success "PostgreSQL запущен и слушает порт $PG_PORT"
 
-    PG_PASS_FILE="$(mktemp /tmp/projectx_pg_pass.XXXXXX)"
+    PG_PASS_FILE="$(mktemp /tmp/just1kbot_pg_pass.XXXXXX)"
     chmod 600 "$PG_PASS_FILE"
 
     # ── БД уже существует → просим пароль с проверкой ──
-    if su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='projectx_bot'\"" 2>/dev/null | grep -q 1; then
-        warn "База данных projectx_bot уже существует."
+    if su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'\"" 2>/dev/null | grep -q 1; then
+        warn "База данных just1kbot_bot уже существует."
 
         local DB_PASSWORD=""
         local db_ok=false
@@ -334,7 +334,7 @@ setup_postgresql() {
                 error "Слишком много неудачных попыток подключения к БД."
             fi
 
-            read -s -p "Введите пароль от PostgreSQL (projectx): " DB_PASSWORD
+            read -s -p "Введите пароль от PostgreSQL (just1kbot): " DB_PASSWORD
             echo ""
 
             if [[ -z "$DB_PASSWORD" ]]; then
@@ -342,7 +342,7 @@ setup_postgresql() {
                 continue
             fi
 
-            if PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U projectx -d projectx_bot -c "SELECT 1;" >/dev/null 2>&1; then
+            if PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U just1kbot -d just1kbot_bot -c "SELECT 1;" >/dev/null 2>&1; then
                 db_ok=true
                 success "Подключение к существующей БД подтверждено"
             else
@@ -366,13 +366,13 @@ setup_postgresql() {
     su - postgres -c "psql -v ON_ERROR_STOP=1" <<EOF
 DO \$\$
 BEGIN
-IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'projectx') THEN
-CREATE USER projectx WITH PASSWORD '$DB_PASSWORD';
+IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'just1kbot') THEN
+CREATE USER just1kbot WITH PASSWORD '$DB_PASSWORD';
 END IF;
 END
 \$\$;
-CREATE DATABASE projectx_bot OWNER projectx;
-GRANT ALL PRIVILEGES ON DATABASE projectx_bot TO projectx;
+CREATE DATABASE just1kbot_bot OWNER just1kbot;
+GRANT ALL PRIVILEGES ON DATABASE just1kbot_bot TO just1kbot;
 EOF
     if [[ $? -ne 0 ]]; then
         error "Не удалось создать БД."
@@ -388,7 +388,7 @@ EOF
         if [[ $attempts -gt 3 ]]; then
             error "БД создана, но подключение не проходит после 3 попыток. Проверьте pg_hba.conf."
         fi
-        if PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U projectx -d projectx_bot -c "SELECT 1;" >/dev/null 2>&1; then
+        if PGPASSWORD="$DB_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U just1kbot -d just1kbot_bot -c "SELECT 1;" >/dev/null 2>&1; then
             db_ok=true
         else
             input_error "БД создана, но подключение не проходит. Попытка $attempts/3."
@@ -397,7 +397,7 @@ EOF
         fi
     done
 
-    success "Пользователь projectx и база projectx_bot созданы и проверены"
+    success "Пользователь just1kbot и база just1kbot_bot созданы и проверены"
     printf '%s\n' "$DB_PASSWORD" > "$PG_PASS_FILE"
 }
 
@@ -431,7 +431,7 @@ setup_redis() {
         sed -i '/^appendonly /d' "$redis_conf"
         sed -i '/^requirepass /d' "$redis_conf"
         echo "" >> "$redis_conf"
-        echo "# === ProjectX Bot Config ===" >> "$redis_conf"
+        echo "# === just1kbot Bot Config ===" >> "$redis_conf"
         echo "bind 127.0.0.1" >> "$redis_conf"
         echo "maxmemory 256mb" >> "$redis_conf"
         echo "maxmemory-policy allkeys-lru" >> "$redis_conf"
@@ -664,7 +664,7 @@ setup_env() {
         rm -f "$PG_PASS_FILE"
         PG_PASS_FILE=""
     else
-        if ! read_required_secret "Введите пароль от PostgreSQL (projectx): " DB_PASSWORD; then
+        if ! read_required_secret "Введите пароль от PostgreSQL (just1kbot): " DB_PASSWORD; then
             warn "Настройка .env отменена."
             return
         fi
@@ -690,13 +690,13 @@ setup_env() {
 
     local DB_PASSWORD_ENC
     DB_PASSWORD_ENC=$(printf '%s' "$DB_PASSWORD" | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote_plus(sys.stdin.read()))')
-    write_env_var "DATABASE_URL" "postgresql+asyncpg://projectx:${DB_PASSWORD_ENC}@localhost:${PG_PORT}/projectx_bot"
+    write_env_var "DATABASE_URL" "postgresql+asyncpg://just1kbot:${DB_PASSWORD_ENC}@localhost:${PG_PORT}/just1kbot_bot"
 
     write_env_var "REDIS_PASSWORD" "$REDIS_PASSWORD"
     write_env_var "REDIS_URL" "redis://:${REDIS_PASSWORD}@localhost:6379/0"
     write_env_var "ALLOW_LOCAL_HTTP" "false"
     write_env_var "ALLOW_LOCAL_HTTPS" "false"
-    write_env_var "REDIS_KEY_PREFIX" "projectx_bot:"
+    write_env_var "REDIS_KEY_PREFIX" "just1kbot_bot:"
 
     if [ -n "$YOOKASSA_SHOP_ID" ]; then
         write_env_var "YOOKASSA_SHOP_ID" "$YOOKASSA_SHOP_ID"
@@ -705,7 +705,7 @@ setup_env() {
         write_env_var "YOOKASSA_WEBHOOK_PORT" "8080"
     fi
 
-    chown projectx:projectx "$PROJECT_DIR/.env"
+    chown just1kbot:just1kbot "$PROJECT_DIR/.env"
     chmod 600 "$PROJECT_DIR/.env"
 
     # ── Финальная валидация файла ──
@@ -730,7 +730,7 @@ setup_env() {
 # ══════════════════════════════════════════════════════════════
 
 verify_permissions() {
-    chown -R projectx:projectx "$PROJECT_DIR"
+    chown -R just1kbot:just1kbot "$PROJECT_DIR"
     find "$PROJECT_DIR" -type d -exec chmod 750 {} \;
     find "$PROJECT_DIR" -type f -name "*.py" -exec chmod 640 {} \;
     find "$PROJECT_DIR" -type f -name "*.txt" -exec chmod 640 {} \;
@@ -745,7 +745,7 @@ verify_permissions() {
 init_database() {
     log "Инициализация схемы БД PostgreSQL..."
     cd "$PROJECT_DIR"
-    if ! runuser -u projectx -- "$VENV_DIR/bin/python" -c "
+    if ! runuser -u just1kbot -- "$VENV_DIR/bin/python" -c "
 import asyncio
 from database.connection import init_db
 asyncio.run(init_db())
@@ -761,14 +761,14 @@ setup_systemd() {
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
     cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=ProjectX Telegram Bot
+Description=just1kbot Telegram Bot
 After=network.target postgresql.service redis-server.service
 Requires=postgresql.service redis-server.service
 
 [Service]
 Type=simple
-User=projectx
-Group=projectx
+User=just1kbot
+Group=just1kbot
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$VENV_DIR/bin:/usr/bin"
 EnvironmentFile=$PROJECT_DIR/.env
@@ -821,7 +821,7 @@ setup_nginx_ssl() {
     done
 
     rm -f /etc/nginx/sites-enabled/default
-    cat > "/etc/nginx/sites-available/projectx" << NGINXEOF
+    cat > "/etc/nginx/sites-available/just1kbot" << NGINXEOF
 limit_req_zone \$binary_remote_addr zone=mylimit:10m rate=10r/s;
 
 server {
@@ -856,7 +856,7 @@ server {
 }
 NGINXEOF
 
-    ln -sf /etc/nginx/sites-available/projectx /etc/nginx/sites-enabled/
+    ln -sf /etc/nginx/sites-available/just1kbot /etc/nginx/sites-enabled/
     if nginx -t >/dev/null 2>&1; then
         systemctl reload nginx
         success "Nginx настроен"
@@ -880,36 +880,36 @@ NGINXEOF
 setup_backup() {
     log "Настройка бэкапов..."
     mkdir -p "$BACKUP_DIR"
-    chown projectx:projectx "$BACKUP_DIR"
+    chown just1kbot:just1kbot "$BACKUP_DIR"
 
-    cat > /usr/local/bin/projectx-backup.sh << 'EOF'
+    cat > /usr/local/bin/just1kbot-backup.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
-DIR="/root/backups/projectx"
+DIR="/root/backups/just1kbot"
 DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$DIR"
-if su - postgres -c "pg_dump -Fc projectx_bot" | gzip > "$DIR/db_$DATE.sql.gz"; then
+if su - postgres -c "pg_dump -Fc just1kbot_bot" | gzip > "$DIR/db_$DATE.sql.gz"; then
     echo "[$(date)] PostgreSQL backup created"
 else
     echo "[$(date)] PostgreSQL backup FAILED" >&2
     exit 1
 fi
-cp /opt/projectx-bot/.env "$DIR/env_$DATE.bak"
+cp /opt/just1kbot-bot/.env "$DIR/env_$DATE.bak"
 gzip "$DIR/env_$DATE.bak"
 chmod 600 "$DIR/env_$DATE.bak.gz" 2>/dev/null || true
 find "$DIR" -type f -mtime +30 -delete
 EOF
-    chmod +x /usr/local/bin/projectx-backup.sh
+    chmod +x /usr/local/bin/just1kbot-backup.sh
 
-    cat > /usr/local/bin/projectx-restore.sh << 'EOF'
+    cat > /usr/local/bin/just1kbot-restore.sh << 'EOF'
 #!/bin/bash
 set -euo pipefail
-DIR="/root/backups/projectx"
-SERVICE_NAME="projectx-bot"
-PROJECT_DIR="/opt/projectx-bot"
+DIR="/root/backups/just1kbot"
+SERVICE_NAME="just1kbot-bot"
+PROJECT_DIR="/opt/just1kbot-bot"
 
 if [[ $# -lt 1 ]]; then
-    echo "Использование: projectx-restore.sh <YYYYMMDD_HHMMSS>"
+    echo "Использование: just1kbot-restore.sh <YYYYMMDD_HHMMSS>"
     echo ""
     echo "Доступные бэкапы:"
     ls -1 "$DIR"/db_*.sql.gz 2>/dev/null | sed -E 's#.*/db_([0-9_]+)\.sql\.gz#\1#' | sort -r || true
@@ -938,24 +938,24 @@ fi
 systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 
 echo "Terminating PostgreSQL connections..."
-su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='projectx_bot' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+su - postgres -c "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='just1kbot_bot' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
 
 echo "Restoring database..."
-zcat "$DB_FILE" | su - postgres -c "pg_restore --clean --if-exists --dbname=projectx_bot"
+zcat "$DB_FILE" | su - postgres -c "pg_restore --clean --if-exists --dbname=just1kbot_bot"
 
 if [[ -n "$ENV_FILE" ]]; then
     echo "Restoring .env..."
     zcat "$ENV_FILE" > "$PROJECT_DIR/.env"
-    chown projectx:projectx "$PROJECT_DIR/.env"
+    chown just1kbot:just1kbot "$PROJECT_DIR/.env"
     chmod 600 "$PROJECT_DIR/.env"
 fi
 
 systemctl start "$SERVICE_NAME"
 echo "✅ Restore completed"
 EOF
-    chmod +x /usr/local/bin/projectx-restore.sh
+    chmod +x /usr/local/bin/just1kbot-restore.sh
 
-    (crontab -l 2>/dev/null | grep -v "projectx-backup" || true; echo "0 3 * * * /usr/local/bin/projectx-backup.sh") | crontab -
+    (crontab -l 2>/dev/null | grep -v "just1kbot-backup" || true; echo "0 3 * * * /usr/local/bin/just1kbot-backup.sh") | crontab -
 
     success "Автобэкапы и restore-скрипт настроены"
 }
@@ -963,12 +963,12 @@ EOF
 setup_monitoring() {
     log "Настройка Healthcheck..."
 
-    cat > /usr/local/bin/projectx-healthcheck.sh << 'EOF'
+    cat > /usr/local/bin/just1kbot-healthcheck.sh << 'EOF'
 #!/bin/bash
-CRASH_FILE="/opt/projectx-bot/.crash-count"
-HEARTBEAT_FILE="/opt/projectx-bot/.heartbeat"
+CRASH_FILE="/opt/just1kbot-bot/.crash-count"
+HEARTBEAT_FILE="/opt/just1kbot-bot/.heartbeat"
 MAX_AGE=300
-SERVICE_NAME="projectx-bot"
+SERVICE_NAME="just1kbot-bot"
 
 if [ "$(systemctl is-enabled $SERVICE_NAME 2>/dev/null)" != "enabled" ]; then
     exit 0
@@ -1030,9 +1030,9 @@ else
     echo $((COUNT + 1)) > "$CRASH_FILE"
 fi
 EOF
-    chmod +x /usr/local/bin/projectx-healthcheck.sh
+    chmod +x /usr/local/bin/just1kbot-healthcheck.sh
 
-    (crontab -l 2>/dev/null | grep -v "projectx-healthcheck" || true; echo "*/5 * * * * /usr/local/bin/projectx-healthcheck.sh") | crontab -
+    (crontab -l 2>/dev/null | grep -v "just1kbot-healthcheck" || true; echo "*/5 * * * * /usr/local/bin/just1kbot-healthcheck.sh") | crontab -
 
     success "Healthcheck настроен"
 }
@@ -1065,7 +1065,7 @@ start_bot() {
 # ══════════════════════════════════════════════════════════════
 
 main() {
-    echo -e "${GREEN}🚀 ProjectX Bot Deploy v10.0 (Resilient Input + YooKassa)${NC}
+    echo -e "${GREEN}🚀 just1kbot Bot Deploy v10.0 (Resilient Input + YooKassa)${NC}
 "
 
     mkdir -p /var/log "$SNAPSHOT_DIR"
@@ -1108,10 +1108,10 @@ case "${1:-}" in
         systemctl start "$SERVICE_NAME"
         ;;
     --backup)
-        /usr/local/bin/projectx-backup.sh
+        /usr/local/bin/just1kbot-backup.sh
         ;;
     --restore)
-        /usr/local/bin/projectx-restore.sh "${2:-}"
+        /usr/local/bin/just1kbot-restore.sh "${2:-}"
         ;;
     --help|-h)
         echo "Использование: ./deploy.sh [--status|--logs|--restart|--stop|--start|--backup|--restore <stamp>]"

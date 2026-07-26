@@ -8,7 +8,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-UNINSTALL_LOG="/var/log/projectx-uninstall.log"
+UNINSTALL_LOG="/var/log/just1kbot-uninstall.log"
 TEMP_FILES=()
 
 log() { echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$UNINSTALL_LOG"; }
@@ -26,16 +26,16 @@ mkdir -p /var/log
 echo "=== Uninstall started: $(date) ===" > "$UNINSTALL_LOG"
 
 log "Остановка сервиса..."
-if systemctl is-active --quiet projectx-bot; then
-    systemctl stop projectx-bot
-    systemctl disable projectx-bot
+if systemctl is-active --quiet just1kbot-bot; then
+    systemctl stop just1kbot-bot
+    systemctl disable just1kbot-bot
     success "Сервис остановлен"
 fi
 
 log "Сканирование рабочей директории..."
-PROJECT_DIR=$(systemctl show -p WorkingDirectory projectx-bot 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
+PROJECT_DIR=$(systemctl show -p WorkingDirectory just1kbot-bot 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
 if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "[not set]" ]]; then
-    PROJECT_DIR="/opt/projectx-bot"
+    PROJECT_DIR="/opt/just1kbot-bot"
 fi
 
 if [[ -n "$PROJECT_DIR" ]]; then
@@ -46,8 +46,8 @@ if [[ -z "$PROJECT_DIR" || "$PROJECT_DIR" == "/" || "$PROJECT_DIR" == "/opt" || 
     error "Обнаружен небезопасный путь: '$PROJECT_DIR'. Прерывание."
 fi
 
-if [[ ! "$PROJECT_DIR" =~ projectx ]]; then
-    error "Путь '$PROJECT_DIR' не содержит 'projectx'. Прерывание."
+if [[ ! "$PROJECT_DIR" =~ just1kbot ]]; then
+    error "Путь '$PROJECT_DIR' не содержит 'just1kbot'. Прерывание."
 fi
 
 success "Целевая директория: $PROJECT_DIR"
@@ -68,24 +68,24 @@ case $choice in
         fi
 
         log "Принудительный разрыв сессий PostgreSQL..."
-        sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='projectx_bot' AND pid <> pg_backend_pid();" > /dev/null 2>&1 || true
+        sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='just1kbot_bot' AND pid <> pg_backend_pid();" > /dev/null 2>&1 || true
         
         log "Удаление БД и пользователя..."
-        sudo -u postgres psql -c "DROP DATABASE IF EXISTS projectx_bot;" > /dev/null 2>&1 || warn "Не удалось удалить БД"
-        sudo -u postgres psql -c "DROP USER IF EXISTS projectx;" > /dev/null 2>&1 || warn "Не удалось удалить юзера"
+        sudo -u postgres psql -c "DROP DATABASE IF EXISTS just1kbot_bot;" > /dev/null 2>&1 || warn "Не удалось удалить БД"
+        sudo -u postgres psql -c "DROP USER IF EXISTS just1kbot;" > /dev/null 2>&1 || warn "Не удалось удалить юзера"
         success "PostgreSQL очищен"
 
         log "Тотальное удаление файлов..."
         if [[ -d "$PROJECT_DIR" ]]; then rm -rf "$PROJECT_DIR"; success "Папка проекта удалена"; fi
-        if [[ -d "/root/backups/projectx" ]]; then rm -rf "/root/backups/projectx"; success "Бэкапы удалены"; fi
+        if [[ -d "/root/backups/just1kbot" ]]; then rm -rf "/root/backups/just1kbot"; success "Бэкапы удалены"; fi
         ;;
     2)
         log "Создание безопасного архива..."
         TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-        SAFE_BACKUP_DIR="/root/projectx-backup-$TIMESTAMP"
+        SAFE_BACKUP_DIR="/root/just1kbot-backup-$TIMESTAMP"
         mkdir -p "$SAFE_BACKUP_DIR"
 
-        sudo -u postgres pg_dump -Fc projectx_bot > "$SAFE_BACKUP_DIR/projectx_db.dump" 2>/dev/null && success "БД сохранена" || warn "Дамп БД не удался"
+        sudo -u postgres pg_dump -Fc just1kbot_bot > "$SAFE_BACKUP_DIR/just1kbot_db.dump" 2>/dev/null && success "БД сохранена" || warn "Дамп БД не удался"
         if [[ -f "$PROJECT_DIR/.env" ]]; then cp "$PROJECT_DIR/.env" "$SAFE_BACKUP_DIR/"; success ".env сохранён"; fi
         
         rm -rf "$PROJECT_DIR"
@@ -96,28 +96,28 @@ case $choice in
 esac
 
 log "Очистка системных конфигураций..."
-rm -f /etc/nginx/sites-enabled/projectx /etc/nginx/sites-available/projectx
+rm -f /etc/nginx/sites-enabled/just1kbot /etc/nginx/sites-available/just1kbot
 systemctl reload nginx 2>/dev/null || true
 
-rm -f /etc/systemd/system/projectx-bot.service
+rm -f /etc/systemd/system/just1kbot-bot.service
 systemctl daemon-reload
 
 if crontab -l >/dev/null 2>&1; then
     CRONTAB_TMP=$(mktemp)
     TEMP_FILES+=("$CRONTAB_TMP")
-    crontab -l | grep -v "projectx-" > "$CRONTAB_TMP" || true
+    crontab -l | grep -v "just1kbot-" > "$CRONTAB_TMP" || true
     if [ -s "$CRONTAB_TMP" ]; then crontab "$CRONTAB_TMP"; else crontab -r || true; fi
 fi
 
-rm -f /usr/local/bin/projectx-backup.sh /usr/local/bin/projectx-healthcheck.sh
-rm -f /var/log/projectx-*.log 2>/dev/null
+rm -f /usr/local/bin/just1kbot-backup.sh /usr/local/bin/just1kbot-healthcheck.sh
+rm -f /var/log/just1kbot-*.log 2>/dev/null
 
-if id "projectx" &>/dev/null; then
-    pkill -u projectx 2>/dev/null || true
+if id "just1kbot" &>/dev/null; then
+    pkill -u just1kbot 2>/dev/null || true
     sleep 1
-    userdel projectx 2>/dev/null || true
-    groupdel projectx 2>/dev/null || true
-    success "Пользователь projectx удалён"
+    userdel just1kbot 2>/dev/null || true
+    groupdel just1kbot 2>/dev/null || true
+    success "Пользователь just1kbot удалён"
 fi
 
 echo ""

@@ -613,7 +613,7 @@ Worker Cleanup подчистит позже.""",
 ━━━━━━━━━━━━━━━━━━━━
 
 <i>Полный лог доступен через:
-<code>journalctl -u projectx-bot | grep {request_id}</code></i>""",
+<code>journalctl -u just1kbot-bot | grep {request_id}</code></i>""",
 
     "ALERT_PAYMENT_MANUAL_REVIEW": """⚠️ <b>Платёж требует ручной проверки</b>
 
