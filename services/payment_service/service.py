@@ -63,6 +63,7 @@ async def _log_event_safe(
 ) -> None:
     if log_payment_event is None:
         return
+
     try:
         async with session.begin_nested():
             await log_payment_event(
@@ -636,6 +637,7 @@ class PaymentService:
         amount: Decimal,
         telegram_id: int,
         bot_username: str,
+        receipt_email: str = "",
     ) -> tuple:
         from config.settings import get_settings
 
@@ -681,7 +683,13 @@ class PaymentService:
         )
 
         payload = f"payment_{payment.id}"
-        receipt_email = f"{telegram_id}@receipt.local"
+
+        # Email для чека:
+        # - если передан реальный email из бота — используем его;
+        # - если не передан — используем заглушку (чек не отправится,
+        #   потому что yookassa_service отклонит фиктивный email).
+        if not receipt_email:
+            receipt_email = f"{telegram_id}@receipt.local"
 
         yk_payment = await YooKassaService.create_payment(
             amount=decimal_amount,
