@@ -78,6 +78,10 @@ _SECRET_PATTERNS = [
         r"\1=[REDACTED]",
     ),
     (
+        re.compile(r"[a-z]+://[^:]+:[^@]+@"),
+        "[DB_URL_REDACTED]",
+    ),
+    (
         re.compile(r"(?i)Fernet\([^\)]*\)"),
         "Fernet([REDACTED])",
     ),

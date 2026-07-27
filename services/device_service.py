@@ -211,7 +211,7 @@ class DeviceService:
                 redis = await _get_redis()
                 lock_key = f"lock:create_device:server:{server.id}"
                 redis_lock = redis.lock(
-                    lock_key, timeout=60, blocking_timeout=10,
+                    lock_key, timeout=90, blocking_timeout=10,
                 )
                 acquired = await redis_lock.acquire()
                 using_redis = True

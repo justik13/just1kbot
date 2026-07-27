@@ -25,10 +25,8 @@ WEBHOOK_MAX_AGE_SECONDS = 300
 YOOKASSA_IP_RANGES = [
     "185.71.76.0/27",
     "185.71.77.0/27",
-    "77.75.153.0/25",
-    "77.75.154.128/25",
-    "77.75.156.0/25",
-    "77.75.156.128/25",
+    "77.75.156.11/32",
+    "77.75.156.35/32",
     "2a02:5180::/32",
 ]
 
@@ -139,6 +137,44 @@ async def _verify_stale_webhook_via_api(
                 normalized_status, api_status, transaction_id,
             )
             return False, None
+
+        # Проверка суммы для chargeback
+        callback_amount_str = None
+        amount_obj = webhook_object.get("amount")
+        if isinstance(amount_obj, dict):
+            callback_amount_str = amount_obj.get("value")
+        api_amount = api_data.get("amount", {})
+        api_amount_str = (
+            api_amount.get("value")
+            if isinstance(api_amount, dict)
+            else None
+        )
+        if callback_amount_str and api_amount_str:
+            cb_decimal = _safe_decimal(callback_amount_str)
+            api_decimal = _safe_decimal(api_amount_str)
+            if cb_decimal is not None and api_decimal is not None:
+                if cb_decimal != api_decimal:
+                    logger.warning(
+                        "Stale webhook chargeback amount mismatch: "
+                        "callback=%s, api=%s, payment=%s",
+                        callback_amount_str, api_amount_str,
+                        transaction_id,
+                    )
+                    return False, None
+
+        # Проверка payload для chargeback
+        callback_metadata = webhook_object.get("metadata") or {}
+        callback_payload = callback_metadata.get("payload", "")
+        api_metadata = api_data.get("metadata") or {}
+        api_payload = api_metadata.get("payload", "")
+        if callback_payload != api_payload:
+            logger.warning(
+                "Stale webhook chargeback payload mismatch: "
+                "callback=%s, api=%s, payment=%s",
+                callback_payload, api_payload, transaction_id,
+            )
+            return False, None
+
         return True, api_data
 
     if api_status != normalized_status:
@@ -311,36 +347,37 @@ async def yookassa_webhook_handler(
             callback_amount, callback_currency,
         )
 
-        async with session_scope() as session:
-            try:
-                await AuditService.log_action(
-                    session,
-                    admin_id=0,
-                    action="YOOKASSA_CALLBACK",
-                    target_type="Payment",
-                    target_id=None,
-                    details=(
-                        f"[{request_id}] "
-                        f"payment={transaction_id}, "
-                        f"status={status}, "
-                        f"amount={callback_amount}"
-                    ),
-                )
-            except Exception as e:
-                logger.error(
-                    "[%s] Failed to log audit: %s",
-                    request_id, e,
-                )
+        try:
+            async with session_scope() as session:
+                try:
+                    await AuditService.log_action(
+                        session,
+                        admin_id=0,
+                        action="YOOKASSA_CALLBACK",
+                        target_type="Payment",
+                        target_id=None,
+                        details=(
+                            f"[{request_id}] "
+                            f"payment={transaction_id}, "
+                            f"status={status}, "
+                            f"amount={callback_amount}"
+                        ),
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[%s] Failed to log audit: %s",
+                        request_id, e,
+                    )
 
-            success, result_code = (
-                await PaymentService.handle_yookassa_callback(
-                    transaction_id=transaction_id,
-                    status=status,
-                    payload=payload,
-                    callback_amount=callback_amount,
-                    callback_currency=callback_currency,
+                success, result_code = (
+                    await PaymentService.handle_yookassa_callback(
+                        transaction_id=transaction_id,
+                        status=status,
+                        payload=payload,
+                        callback_amount=callback_amount,
+                        callback_currency=callback_currency,
+                    )
                 )
-            )
 
             if success:
                 if result_code == "not_found":
@@ -393,6 +430,15 @@ async def yookassa_webhook_handler(
                     return web.Response(
                         status=500, text="Unknown error",
                     )
+
+        except Exception as e:
+            logger.error(
+                "[%s] Webhook DB error: %s",
+                request_id, e, exc_info=True,
+            )
+            return web.Response(
+                status=500, text="Internal server error",
+            )
 
     except Exception as e:
         logger.error(
