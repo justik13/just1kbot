@@ -340,10 +340,6 @@ async def start_edit_server_url(
     )
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: при смене URL обновляются credentials
-# в PendingAPIDeletion для этого сервера.
-# ──────────────────────────────────────────────────────────────
 @router.message(AdminStates.editing_server_url)
 async def process_edit_server_url(
     message: Message,
@@ -574,10 +570,6 @@ async def start_edit_server_key(
     )
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: при смене key обновляются credentials
-# в PendingAPIDeletion для этого сервера.
-# ──────────────────────────────────────────────────────────────
 @router.message(AdminStates.editing_server_key)
 async def process_edit_server_key(
     message: Message,

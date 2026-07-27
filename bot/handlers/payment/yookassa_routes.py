@@ -53,8 +53,8 @@ def _is_yookassa_configured() -> bool:
 
 # ──────────────────────────────────────────────────────────────
 # ИСПРАВЛЕНО: отправка URL пользователю перенесена
-# в post-commit task. Если бот упадёт между созданием
-# платежа и commit — orphan payment не останется.
+# в post-commit task. Crash между созданием платежа
+# и commit больше не оставляет orphan payment.
 # ──────────────────────────────────────────────────────────────
 async def _send_payment_url_to_user(
     bot,
@@ -100,20 +100,19 @@ async def _create_and_show_payment(
         )
         return
 
-    # Отправка URL — после commit, а не до
     queue_post_commit_task(
         session,
         lambda b=target.bot,
-        cid=target.chat.id,
-        purl=payment.payment_url,
-        pid=payment.id,
-        tid=tariff.id,
-        tp=tariff.price_rub,
-        s=source: (
-            _send_payment_url_to_user(
-                b, cid, purl, pid, tid, tp, s,
-            )
-        ),
+              cid=target.chat.id,
+              purl=payment.payment_url,
+              pid=payment.id,
+              tid=tariff.id,
+              tp=tariff.price_rub,
+              s=source: (
+                  _send_payment_url_to_user(
+                      b, cid, purl, pid, tid, tp, s,
+                  )
+              ),
     )
 
 

@@ -122,10 +122,6 @@ async def _cleanup_orphan_pending_payments():
         logger.warning("Failed to cleanup orphan pending payments: %s", e)
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: requires_manual_review с external_id теперь
-# тоже перепроверяется через YooKassa API.
-# ──────────────────────────────────────────────────────────────
 async def _process_stale_payments(bot: Bot, settings):
     current_time = now_utc()
     threshold = current_time - timedelta(hours=1)

@@ -337,9 +337,6 @@ class PaymentService:
                 tariff = payment.tariff
 
                 # ── ДОБАВЛЕНО: FOR UPDATE fallback при Redis down ──
-                # Если Redis lock не был получен, блокируем строку
-                # User в БД, чтобы два одновременных платежа
-                # не дали дубль referral bonus.
                 if not acquired and user:
                     await session.execute(
                         select(User.id)
