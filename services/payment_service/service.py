@@ -676,7 +676,6 @@ class PaymentService:
         amount: Decimal,
         telegram_id: int,
         bot_username: str,
-        receipt_email: str = "",
     ) -> tuple:
         from config.settings import get_settings
 
@@ -720,16 +719,12 @@ class PaymentService:
         )
         payload = f"payment_{payment.id}"
 
-        if not receipt_email:
-            receipt_email = f"{telegram_id}@receipt.local"
-
         yk_payment = await YooKassaService.create_payment(
             amount=decimal_amount,
             currency="RUB",
             description=description,
             return_url=return_url,
             metadata={"payload": payload},
-            receipt_email=receipt_email,
         )
 
         if not yk_payment:
