@@ -14,6 +14,7 @@ from database.connection import session_scope
 from database.models import User
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
+from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger("BackgroundWorker")
 

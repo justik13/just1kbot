@@ -409,6 +409,19 @@ class AmneziaClient:
         client_name: str,
         expires_at: Optional[int] = None,
     ) -> Optional[AmneziaClientCreateResponse]:
+        # Проверяем емкость сервера перед созданием клиента
+        server_info = await self.get_server_info()
+        if server_info:
+            effective_max = server_info.get_effective_max_peers()
+            current_clients = await self.get_all_clients()
+            if current_clients is not None and len(current_clients) >= effective_max:
+                logger.warning(
+                    "Cannot create user: server reached capacity (%s/%s)",
+                    len(current_clients),
+                    effective_max,
+                )
+                return None
+        
         data = {
             "clientName": client_name,
             "protocol": AMNEZIA_PROTOCOL,

@@ -11,6 +11,7 @@ from cachetools import TTLCache
 from bot.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
 from database.connection import session_scope
 from database.repositories import hub_repo
+from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
 
@@ -230,12 +231,34 @@ async def render_hub(
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
 
-        msg = await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
+        text_parts = split_text_by_lines(text, limit=4096)
+
+        if not text_parts:
+            text_parts = ["—"]
+
+        msg = None
+        for i, part in enumerate(text_parts):
+            if i == 0:
+                msg = await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+            else:
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    parse_mode=parse_mode,
+                )
+
+        if msg is None:
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=text_parts[0] if text_parts else "—",
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
@@ -341,13 +364,22 @@ async def append_hub_message(
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        msg = await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
+        text_parts = split_text_by_lines(text, limit=4096)
 
-        await _store_hub_id_in_db(chat_id, msg.message_id)
+        if not text_parts:
+            text_parts = ["—"]
 
-        return msg.message_id
+        msg_id = None
+        for i, part in enumerate(text_parts):
+            msg = await bot.send_message(
+                chat_id=chat_id,
+                text=part,
+                reply_markup=reply_markup if i == 0 else None,
+                parse_mode=parse_mode,
+            )
+            if i == 0:
+                msg_id = msg.message_id
+
+        await _store_hub_id_in_db(chat_id, msg_id)
+
+        return msg_id
