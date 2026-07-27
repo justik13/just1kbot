@@ -49,7 +49,7 @@ confirm() {
     local prompt
     [[ "$default" =~ ^[Yy]$ ]] && prompt="(Y/n)" || prompt="(y/N)"
     echo ""
-    read -p "$message $prompt: " response
+    read -r -p "$message $prompt: " response
     response=${response:-$default}
     [[ "$response" =~ ^[Yy]$ ]] && return 0 || return 1
 }
@@ -119,7 +119,7 @@ read_required() {
     local value=""
 
     while true; do
-        read -p "$prompt" value
+        read -r -p "$prompt" value
         if [[ "$value" == "/cancel" ]]; then
             return 1
         fi
@@ -140,7 +140,7 @@ read_required_secret() {
     local value=""
 
     while true; do
-        read -s -p "$prompt" value
+        read -r -s -p "$prompt" value
         echo ""
         if [[ "$value" == "/cancel" ]]; then
             return 1
@@ -161,7 +161,7 @@ read_admin_ids() {
     local json=""
 
     while true; do
-        read -p "Введите ADMIN_IDS (Telegram ID через запятую): " raw
+        read -r -p "Введите ADMIN_IDS (Telegram ID через запятую): " raw
 
         if [[ "$raw" == "/cancel" ]]; then
             return 1
@@ -192,7 +192,7 @@ read_db_password() {
     local pass=""
 
     while true; do
-        read -s -p "Введите пароль для пользователя БД just1kbot: " pass
+        read -r -s -p "Введите пароль для пользователя БД just1kbot: " pass
         echo ""
 
         if [[ "$pass" == "/cancel" ]]; then
@@ -334,7 +334,7 @@ setup_postgresql() {
                 error "Слишком много неудачных попыток подключения к БД."
             fi
 
-            read -s -p "Введите пароль от PostgreSQL (just1kbot): " DB_PASSWORD
+            read -r -s -p "Введите пароль от PostgreSQL (just1kbot): " DB_PASSWORD
             echo ""
 
             if [[ -z "$DB_PASSWORD" ]]; then
@@ -576,7 +576,7 @@ setup_env() {
     echo -e "${BLUE}[1/4]${NC} Telegram Bot Token"
     local BOT_TOKEN=""
     while true; do
-        read -s -p "Введите BOT_TOKEN (скрыт): " BOT_TOKEN
+        read -r -s -p "Введите BOT_TOKEN (скрыт): " BOT_TOKEN
         echo ""
         if [[ "$BOT_TOKEN" == "/cancel" ]]; then
             warn "Настройка .env отменена. Используется существующий .env (если есть)."
@@ -607,7 +607,7 @@ setup_env() {
     # ── 3/4: SUPPORT_USERNAME ──
     echo -e "${BLUE}[3/4]${NC} Username поддержки [support]"
     local SUPPORT_USERNAME=""
-    read -p "Введите SUPPORT_USERNAME: " SUPPORT_USERNAME
+    read -r -p "Введите SUPPORT_USERNAME: " SUPPORT_USERNAME
     if [[ "$SUPPORT_USERNAME" == "/cancel" ]]; then
         warn "Настройка .env отменена."
         return
@@ -620,7 +620,7 @@ setup_env() {
     echo -e "${BLUE}[4/4]${NC} YooKassa (Enter для пропуска)"
     local YOOKASSA_SHOP_ID=""
     local YOOKASSA_SECRET_KEY=""
-    read -p "Введите YOOKASSA_SHOP_ID: " YOOKASSA_SHOP_ID
+    read -r -p "Введите YOOKASSA_SHOP_ID: " YOOKASSA_SHOP_ID
     if [[ "$YOOKASSA_SHOP_ID" == "/cancel" ]]; then
         warn "Настройка .env отменена."
         return
@@ -628,7 +628,7 @@ setup_env() {
 
     if [ -n "$YOOKASSA_SHOP_ID" ]; then
         while true; do
-            read -s -p "Введите YOOKASSA_SECRET_KEY (скрыт): " YOOKASSA_SECRET_KEY
+            read -r -s -p "Введите YOOKASSA_SECRET_KEY (скрыт): " YOOKASSA_SECRET_KEY
             echo ""
             if [[ "$YOOKASSA_SECRET_KEY" == "/cancel" ]]; then
                 warn "Настройка .env отменена."
@@ -811,7 +811,7 @@ setup_nginx_ssl() {
 
     local DOMAIN=""
     while true; do
-        read -p "Домен для webhook (например: api.example.com, Enter для пропуска): " DOMAIN
+        read -r -p "Домен для webhook (например: api.example.com, Enter для пропуска): " DOMAIN
         if [[ -z "$DOMAIN" ]]; then
             warn "Домен не указан, пропускаю настройку Nginx/SSL"
             return
@@ -867,7 +867,7 @@ NGINXEOF
     fi
 
     local LE_EMAIL=""
-    read -p "Email для SSL (certbot, Enter для пропуска): " LE_EMAIL
+    read -r -p "Email для SSL (certbot, Enter для пропуска): " LE_EMAIL
     if [[ -z "$LE_EMAIL" ]]; then
         warn "Email не указан, пропускаю получение SSL"
         return
@@ -931,7 +931,7 @@ echo "Будет восстановлено:"
 echo "  DB:  $DB_FILE"
 echo "  ENV: ${ENV_FILE:-не найден}"
 echo ""
-read -p "Продолжить восстановление? (yes/no): " CONFIRM
+read -r -p "Продолжить восстановление? (yes/no): " CONFIRM
 if [[ "$CONFIRM" != "yes" ]]; then
     echo "Отменено"
     exit 0
