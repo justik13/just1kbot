@@ -419,7 +419,8 @@ async def cancel_invoice(
         else:
             await callback.answer(
                 texts.PAYMENT_INVOICE_CANCELLED,
-, show_alert=False)
+                show_alert=False,
+            )
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if tariff and tariff.is_active:

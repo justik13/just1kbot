@@ -47,7 +47,7 @@ def _cleanup_render_locks(now: float) -> None:
     old = [
         cid
         for cid, (lock, last_used) in _hub_render_locks.items()
-        if now - last_used > _RENDER_LOCK_TTL
+        if now - last_used > _RENDER_LOCK_TTL and not lock.locked()
     ]
 
     for cid in old:
