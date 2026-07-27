@@ -137,7 +137,7 @@ async def pay_yookassa(
     }.get(source, f"select_tariff:{tariff_id}:{source}")
 
     if not _is_yookassa_configured():
-        await callback.answer()
+        await callback.answer(show_alert=False)
         await render_hub(
             callback.bot, callback.message.chat.id,
             texts.ERROR_PAYMENT_SERVICE,
@@ -148,14 +148,14 @@ async def pay_yookassa(
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
-        await callback.answer()
+        await callback.answer(show_alert=False)
         await _render_maintenance(
             callback, session, back_to=back_callback
         )
         return
 
     try:
-        await callback.answer(texts.PAYMENT_CREATING)
+        await callback.answer(texts.PAYMENT_CREATING, show_alert=False)
         tariff = await get_tariff_by_id(session, tariff_id)
         if not tariff:
             await callback.answer(
@@ -204,7 +204,7 @@ async def check_payment_status(
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer(texts.PAYMENT_CHECKING_STATUS)
+    await callback.answer(texts.PAYMENT_CHECKING_STATUS, show_alert=False)
     payment_id = parse_callback_id(callback.data, 1)
     if payment_id is None:
         await callback.answer(
@@ -398,7 +398,7 @@ async def cancel_invoice(
     await state.clear()
 
     if was_cancelled:
-        await callback.answer(texts.PAYMENT_INVOICE_CANCELLED)
+        await callback.answer(texts.PAYMENT_INVOICE_CANCELLED, show_alert=False)
     else:
         refreshed = await get_payment_by_id_simple(
             session, payment_id,
@@ -419,7 +419,7 @@ async def cancel_invoice(
         else:
             await callback.answer(
                 texts.PAYMENT_INVOICE_CANCELLED,
-            )
+, show_alert=False)
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if tariff and tariff.is_active:

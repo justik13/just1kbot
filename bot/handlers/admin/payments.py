@@ -153,7 +153,7 @@ async def show_payments_list(
         return
     await state.clear()
     await _show_payments_list(callback, session, page=1)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("admin_payments_page:"))
@@ -175,7 +175,7 @@ async def payments_pagination(
         return
     await state.clear()
     await _show_payments_list(callback, session, page=page)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("admin_payment_card:"))
@@ -266,4 +266,4 @@ async def show_payment_card(
         )
     except TelegramBadRequest as e:
         logger.debug("show_payment_card edit_text failed: %s", e)
-    await callback.answer()
+    await callback.answer(show_alert=False)

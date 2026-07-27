@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timezone
 
 from aiogram import BaseMiddleware
@@ -8,6 +9,25 @@ from bot import texts
 from utils.user_locks import get_user_action_lock
 
 logger = logging.getLogger(__name__)
+
+# Regex patterns for validating callback data parameters
+CALLBACK_PARAM_PATTERNS = {
+    # Device IDs: positive integers
+    r'device_id=(\d+)': r'^\d+$',
+    r'devices/(\d+)': r'^\d+$',
+    r':(\d+):': r'^\d+$',
+    # Server IDs: positive integers  
+    r'server:(\d+)': r'^\d+$',
+    r'servers/(\d+)': r'^\d+$',
+    # Tariff IDs: positive integers
+    r'tariff:(\d+)': r'^\d+$',
+    r'tariffs/(\d+)': r'^\d+$',
+    # User IDs: positive integers
+    r'user:(\d+)': r'^\d+$',
+    r'users/(\d+)': r'^\d+$',
+    # Payment amounts: decimal numbers
+    r'amount:(\d+(?:\.\d+)?)': r'^\d+(?:\.\d+)?$',
+}
 
 LOCKED_ACTION_PREFIXES = (
     # Создание устройства пользователем.
@@ -79,6 +99,54 @@ STALE_ACTION_PREFIXES = (
 STALE_MAX_AGE_SECONDS = 600
 
 
+def _validate_callback_params(callback_data: str) -> bool:
+    """
+    Validate callback data parameters to prevent injection attacks.
+    Returns True if valid, False if suspicious patterns detected.
+    """
+    if not callback_data:
+        return False
+    
+    # Check for SQL injection patterns
+    dangerous_patterns = [
+        r';\s*DROP\s+',
+        r';\s*DELETE\s+',
+        r';\s*UPDATE\s+',
+        r';\s*INSERT\s+',
+        r'--',
+        r'/\*',
+        r'\*/',
+        r'OR\s+\d+\s*=\s*\d+',
+        r'AND\s+\d+\s*=\s*\d+',
+        r'UNION',
+        r'SELECT',
+    ]
+    
+    for pattern in dangerous_patterns:
+        if re.search(pattern, callback_data, re.IGNORECASE):
+            logger.warning("Potential SQL injection in callback data: %s", callback_data[:100])
+            return False
+    
+    # Check for command injection patterns
+    if any(char in callback_data for char in ['|', '`', '$', '&', ';', '<', '>']):
+        logger.warning("Potential command injection in callback data: %s", callback_data[:100])
+        return False
+    
+    # Validate numeric parameters match expected patterns
+    for param_pattern, validation_pattern in CALLBACK_PARAM_PATTERNS.items():
+        matches = re.findall(param_pattern, callback_data)
+        for match in matches:
+            if not re.match(validation_pattern, str(match)):
+                logger.warning(
+                    "Invalid callback parameter value: %s in %s",
+                    match,
+                    callback_data[:100],
+                )
+                return False
+    
+    return True
+
+
 def _is_locked_action(callback_data: str) -> bool:
     if not callback_data:
         return False
@@ -124,6 +192,24 @@ class ActionLockMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         callback_data = event.data or ""
+
+        # Validate callback data for injection attacks
+        if not _validate_callback_params(callback_data):
+            try:
+                await event.answer(
+                    "Некорректный запрос",
+                    show_alert=True,
+                )
+            except Exception:
+                pass
+
+            logger.warning(
+                "Invalid callback data rejected for user %d: %s",
+                user_id,
+                callback_data[:100],
+            )
+
+            return None
 
         # Защита от старых confirm/apply кнопок.
         if _is_stale_action(callback_data) and _is_stale_callback(event):

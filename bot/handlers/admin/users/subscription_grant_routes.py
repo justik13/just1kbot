@@ -66,7 +66,7 @@ async def admin_sub_grant(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await get_user_by_telegram_id(session, telegram_id)
 
@@ -141,7 +141,7 @@ async def admin_sub_grant_group(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     groups = await _get_tariff_groups(session)
 
@@ -215,7 +215,7 @@ async def admin_sub_grant_confirm(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     tariff = await get_tariff_by_id(session, tariff_id)
 
@@ -302,7 +302,7 @@ async def admin_sub_grant_custom_start(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     tariff = await get_tariff_by_id(session, tariff_id)
 
@@ -467,7 +467,7 @@ async def admin_sub_grant_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         user = await get_user_by_telegram_id(

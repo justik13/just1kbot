@@ -45,7 +45,7 @@ async def admin_subscription_menu(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await get_user_by_telegram_id(session, telegram_id)
 

@@ -53,7 +53,7 @@ async def admin_manual_grant(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     payment = await get_payment_by_id(session, payment_id)
 
@@ -160,7 +160,7 @@ async def admin_manual_grant_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         success, result = await PaymentService.force_grant_payment(

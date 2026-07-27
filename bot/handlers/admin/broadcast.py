@@ -68,7 +68,7 @@ async def start_broadcast(
             show_alert=True,
         )
         return
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
     try:
         await callback.message.edit_text(
@@ -690,7 +690,7 @@ async def dismiss_broadcast_result(callback: CallbackQuery):
             texts.ERROR_ACCESS_DENIED, show_alert=True,
         )
         return
-    await callback.answer()
+    await callback.answer(show_alert=False)
     try:
         await callback.message.delete()
     except TelegramBadRequest as e:
@@ -699,7 +699,7 @@ async def dismiss_broadcast_result(callback: CallbackQuery):
 
 @router.callback_query(F.data == "dismiss_broadcast")
 async def dismiss_broadcast_message(callback: CallbackQuery):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     try:
         await callback.message.delete()
     except TelegramBadRequest as e:

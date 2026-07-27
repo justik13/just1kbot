@@ -38,7 +38,7 @@ async def start_add_server(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await callback.message.edit_text(

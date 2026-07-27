@@ -43,7 +43,7 @@ async def manage_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -102,7 +102,7 @@ async def show_config(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -182,7 +182,7 @@ async def download_conf(
         await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
 
-    await callback.answer(texts.DEVICE_CONFIG_GENERATING)
+    await callback.answer(texts.DEVICE_CONFIG_GENERATING, show_alert=False)
 
     safe_device_name = "".join(
         c for c in profile.device_name if c.isalnum() or c in (" ", "_", "-")

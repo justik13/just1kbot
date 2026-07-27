@@ -79,7 +79,7 @@ async def show_admin_menu(
 
     await state.clear()
     await _show_admin_dashboard(callback, session)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data == "admin_audit")
@@ -137,7 +137,7 @@ async def show_admin_audit(
     except TelegramBadRequest as e:
         logger.debug("admin audit edit_text failed: %s", e)
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data == "admin_maintenance")
@@ -172,7 +172,7 @@ async def show_admin_maintenance(
     except TelegramBadRequest as e:
         logger.debug("admin maintenance edit_text failed: %s", e)
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data == "admin_maintenance_toggle_apply")

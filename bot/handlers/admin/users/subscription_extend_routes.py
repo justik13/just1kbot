@@ -59,7 +59,7 @@ async def admin_sub_extend(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await get_user_by_telegram_id(session, telegram_id)
 
@@ -125,7 +125,7 @@ async def admin_sub_confirm_extend(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await get_user_by_telegram_id(session, telegram_id)
 
@@ -221,7 +221,7 @@ async def admin_sub_apply_extend(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         user = await get_user_by_telegram_id(
@@ -325,7 +325,7 @@ async def admin_sub_extend_custom_start(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await state.set_state(AdminStates.admin_extending_custom)

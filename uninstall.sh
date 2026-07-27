@@ -58,11 +58,11 @@ echo -e "1) ${RED}Полное очищение${NC} (удалить ВСЁ)"
 echo -e "2) ${GREEN}Удаление с сохранением данных${NC} (БД и .env в архив)"
 echo -e "3) Отмена"
 echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-read -p "Выберите вариант [1-3]: " choice
+read -r -p "Выберите вариант [1-3]: " choice
 
 case $choice in
     1)
-        read -p "⚠️ ${RED}ВНИМАНИЕ!${NC} Удалить ВСЁ безвозвратно? (yes/no): " confirm
+        read -r -p "⚠️ ${RED}ВНИМАНИЕ!${NC} Удалить ВСЁ безвозвратно? (yes/no): " confirm
         if [[ "$(echo "$confirm" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" != "yes" ]]; then
             success "Отменено"; exit 0
         fi
@@ -85,7 +85,11 @@ case $choice in
         SAFE_BACKUP_DIR="/root/just1kbot-backup-$TIMESTAMP"
         mkdir -p "$SAFE_BACKUP_DIR"
 
-        sudo -u postgres pg_dump -Fc just1kbot_bot > "$SAFE_BACKUP_DIR/just1kbot_db.dump" 2>/dev/null && success "БД сохранена" || warn "Дамп БД не удался"
+        if sudo -u postgres pg_dump -Fc just1kbot_bot 2>/dev/null | tee "$SAFE_BACKUP_DIR/just1kbot_db.dump" >/dev/null; then
+            success "БД сохранена"
+        else
+            warn "Дамп БД не удался"
+        fi
         if [[ -f "$PROJECT_DIR/.env" ]]; then cp "$PROJECT_DIR/.env" "$SAFE_BACKUP_DIR/"; success ".env сохранён"; fi
         
         rm -rf "$PROJECT_DIR"

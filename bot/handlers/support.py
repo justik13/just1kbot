@@ -49,7 +49,7 @@ async def hub_menu_support(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     username = get_settings().SUPPORT_USERNAME.lstrip("@")
@@ -64,7 +64,7 @@ async def hub_menu_support(
 
 @router.callback_query(F.data == "faq")
 async def show_faq(callback: CallbackQuery):
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     await render_hub(
         callback.bot,

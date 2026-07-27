@@ -42,7 +42,7 @@ async def admin_ban_confirm(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     settings = get_settings()
 
@@ -89,7 +89,7 @@ async def admin_ban_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     settings = get_settings()
 
@@ -145,7 +145,7 @@ async def admin_unban_confirm(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     text = texts.ADMIN_UNBAN_CONFIRM.format(telegram_id=telegram_id)
 
@@ -183,7 +183,7 @@ async def admin_unban_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     success, message = await BanService.toggle_ban(
         session,
