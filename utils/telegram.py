@@ -236,36 +236,43 @@ async def render_hub(
         if not text_parts:
             text_parts = ["—"]
 
-        msg = None
+        sent_ids = []
         for i, part in enumerate(text_parts):
-            if i == 0:
+            is_last = (i == len(text_parts) - 1)
+            kb = reply_markup if is_last else None
+            
+            try:
                 msg = await bot.send_message(
                     chat_id=chat_id,
                     text=part,
-                    reply_markup=reply_markup,
+                    reply_markup=kb,
                     parse_mode=parse_mode,
                 )
-            else:
-                await bot.send_message(
-                    chat_id=chat_id,
-                    text=part,
-                    parse_mode=parse_mode,
-                )
-
-        if msg is None:
-            msg = await bot.send_message(
-                chat_id=chat_id,
-                text=text_parts[0] if text_parts else "—",
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
-            )
+            except TelegramBadRequest as e:
+                err_str = str(e).lower()
+                if "parse" in err_str or "entities" in err_str:
+                    logger.warning(
+                        "HTML parse failed in render_hub for chat %s, fallback to plain text: %s",
+                        chat_id,
+                        e,
+                    )
+                    msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text=part,
+                        reply_markup=kb,
+                    )
+                else:
+                    raise
+            
+            sent_ids.append(msg.message_id)
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
 
-        await _store_hub_id_in_db(chat_id, msg.message_id)
+        for mid in sent_ids:
+            await _store_hub_id_in_db(chat_id, mid)
 
-        return msg.message_id
+        return sent_ids[-1]
 
 
 async def send_hub_photo(
@@ -369,17 +376,37 @@ async def append_hub_message(
         if not text_parts:
             text_parts = ["—"]
 
-        msg_id = None
+        sent_ids = []
         for i, part in enumerate(text_parts):
-            msg = await bot.send_message(
-                chat_id=chat_id,
-                text=part,
-                reply_markup=reply_markup if i == 0 else None,
-                parse_mode=parse_mode,
-            )
-            if i == 0:
-                msg_id = msg.message_id
+            is_last = (i == len(text_parts) - 1)
+            kb = reply_markup if is_last else None
+            
+            try:
+                msg = await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    reply_markup=kb,
+                    parse_mode=parse_mode,
+                )
+            except TelegramBadRequest as e:
+                err_str = str(e).lower()
+                if "parse" in err_str or "entities" in err_str:
+                    logger.warning(
+                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
+                        chat_id,
+                        e,
+                    )
+                    msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text=part,
+                        reply_markup=kb,
+                    )
+                else:
+                    raise
+            
+            sent_ids.append(msg.message_id)
 
-        await _store_hub_id_in_db(chat_id, msg_id)
+        for mid in sent_ids:
+            await _store_hub_id_in_db(chat_id, mid)
 
-        return msg_id
+        return sent_ids[-1]
