@@ -197,13 +197,73 @@ class PaymentService:
             ),
         )
 
-        # ── ДОБАВЛЕНО: уведомление пользователю ──
         queue_post_commit_task(
             session,
             lambda s=snapshot: (
                 _notify_client_manual_review_now(s)
             ),
         )
+
+    # ──────────────────────────────────────────────────────────
+    # ВОЗВРАЩЁН: был случайно удалён в коммите 0318fc1,
+    # но вызовы в handle_successful_payment и
+    # handle_yookassa_callback остались.
+    # Без этого метода → AttributeError при webhook.
+    # ──────────────────────────────────────────────────────────
+    @staticmethod
+    async def _mark_paid_after_cancel(
+        session: AsyncSession,
+        payment: Payment,
+        source: str,
+    ) -> tuple:
+        if (
+            payment.status == "requires_manual_review"
+            and payment.manual_review_reason == "paid_after_cancel"
+        ):
+            return True, "paid_after_cancel"
+
+        snapshot = _build_payment_snapshot(payment)
+
+        await _log_event_safe(
+            session,
+            payment.id,
+            "paid_after_cancel",
+            source=source,
+        )
+
+        payment.status = "requires_manual_review"
+        payment.manual_review_reason = "paid_after_cancel"
+        if not payment.paid_at:
+            payment.paid_at = now_utc()
+        await session.flush()
+
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action="PAID_AFTER_CANCEL",
+            target_type="Payment",
+            target_id=payment.id,
+            details=(
+                f"user={snapshot.get('user_telegram_id')}, "
+                f"amount={snapshot.get('amount')} "
+                f"{snapshot.get('currency')}, source={source}"
+            ),
+        )
+
+        queue_post_commit_task(
+            session,
+            lambda s=snapshot: (
+                _send_paid_after_cancel_alert_now(s)
+            ),
+        )
+        queue_post_commit_task(
+            session,
+            lambda s=snapshot: (
+                _notify_client_paid_after_cancel_now(s)
+            ),
+        )
+
+        return True, "paid_after_cancel"
 
     @staticmethod
     async def handle_successful_payment(
@@ -280,10 +340,9 @@ class PaymentService:
                 # Если Redis lock не был получен, блокируем строку
                 # User в БД, чтобы два одновременных платежа
                 # не дали дубль referral bonus.
-                if not acquired:
-                    from sqlalchemy import select as sa_select
+                if not acquired and user:
                     await session.execute(
-                        sa_select(User.id)
+                        select(User.id)
                         .where(User.id == user.id)
                         .with_for_update()
                     )
@@ -1160,7 +1219,6 @@ class PaymentService:
             ),
         )
 
-        # ── ДОБАВЛЕНО: уведомление пользователю ──
         queue_post_commit_task(
             session,
             lambda s=snapshot: (
@@ -1170,10 +1228,6 @@ class PaymentService:
 
         return True, "manual_review"
 
-    # ──────────────────────────────────────────────────────────
-    # ИСПРАВЛЕНО: chargeback вычитает snapshot_duration_days
-    # из подписки, а не обнуляет всю подписку.
-    # ──────────────────────────────────────────────────────────
     @staticmethod
     async def _process_chargeback(
         session: AsyncSession,
@@ -1213,8 +1267,6 @@ class PaymentService:
                 if user and was_completed:
                     current_time = now_utc()
 
-                    # ── ИСПРАВЛЕНО: вычитаем только дни
-                    #    этого платежа, а не обнуляем всё ──
                     snapshot_days = (
                         payment.snapshot_duration_days
                     )
@@ -1235,15 +1287,12 @@ class PaymentService:
                             user.current_tariff_id = None
                             user.device_limit = 0
                     else:
-                        # Fallback: нет snapshot или
-                        # вечная подписка → обнуляем
                         user.subscription_end = current_time
                         user.current_tariff_id = None
                         user.device_limit = 0
 
                     await session.flush()
 
-                    # Откат реферальных бонусов
                     referrer_bonus = (
                         payment.referral_referrer_bonus_days or 0
                     )
