@@ -1,13 +1,30 @@
-.aider*
-.aider.conf.yml
+```
+# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
 env/
 venv/
-ENV/
+.venv/
+.ENV
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/modules/
+.hypothesis/
+.pytest_cache/
+
+# Distribution / packaging
+.Python
 build/
 develop-eggs/
 dist/
@@ -23,25 +40,23 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# Environment
 .env
-.env.local
-.env.*.local
+.venv
+env/
+venv/
+ENV
+.ENV
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
+*.tmp
+
+# OS
 .DS_Store
 Thumbs.db
-*.db
-*.sqlite
-*.sqlite3
-*.log
-logs/
-tmp/
-temp/
-.coverage
-htmlcov/
-.pytest_cache/
-.roo/
-STABILIZATION_PLAN.md
+```

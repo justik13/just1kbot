@@ -16,6 +16,7 @@ from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id_any,
 )
+from utils.rate_limiter import user_creation_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -85,32 +86,42 @@ class UserContextMiddleware(BaseMiddleware):
             elif existing_any is not None and not existing_any.is_deleted:
                 user = existing_any
             else:
-                try:
-                    async with session.begin_nested():
-                        user = await create_user(
-                            session,
-                            telegram_id=telegram_id,
-                            username=event.from_user.username,
-                            first_name=event.from_user.first_name,
-                            referred_by=None,
+                # Проверяем rate limit перед созданием пользователя
+                if not await user_creation_rate_limiter.is_allowed(telegram_id):
+                    logger.warning(
+                        "User creation blocked by rate limiter: telegram_id=%s",
+                        telegram_id,
+                    )
+                    user = None
+                else:
+                    try:
+                        async with session.begin_nested():
+                            user = await create_user(
+                                session,
+                                telegram_id=telegram_id,
+                                username=event.from_user.username,
+                                first_name=event.from_user.first_name,
+                                referred_by=None,
+                            )
+                        # Очищаем rate limit после успешного создания
+                        user_creation_rate_limiter.cleanup(telegram_id)
+                        logger.info(
+                            "Auto-registered user %s on %s",
+                            telegram_id,
+                            type(event).__name__,
                         )
-                    logger.info(
-                        "Auto-registered user %s on %s",
-                        telegram_id,
-                        type(event).__name__,
-                    )
-                except IntegrityError:
-                    existing_any = await get_user_by_telegram_id_any(
-                        session,
-                        telegram_id,
-                    )
-                    if (
-                        existing_any is not None
-                        and not existing_any.is_deleted
-                    ):
-                        user = existing_any
-                    else:
-                        user = None
+                    except IntegrityError:
+                        existing_any = await get_user_by_telegram_id_any(
+                            session,
+                            telegram_id,
+                        )
+                        if (
+                            existing_any is not None
+                            and not existing_any.is_deleted
+                        ):
+                            user = existing_any
+                        else:
+                            user = None
 
         _user_cache[telegram_id] = user
         data["db_user"] = user

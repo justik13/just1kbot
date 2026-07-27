@@ -210,8 +210,10 @@ class DeviceService:
             try:
                 redis = await _get_redis()
                 lock_key = f"lock:create_device:server:{server.id}"
+                # Увеличен таймаут с 60s до 120s для надёжности при высоких нагрузках
+                # blocking_timeout увеличен с 10s до 30s
                 redis_lock = redis.lock(
-                    lock_key, timeout=60, blocking_timeout=10,
+                    lock_key, timeout=120, blocking_timeout=30,
                 )
                 acquired = await redis_lock.acquire()
                 using_redis = True

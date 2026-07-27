@@ -529,6 +529,53 @@ class PaymentService:
                 if payment.status not in allowed_statuses:
                     return False, "Недопустимый статус"
 
+                # Верификация через YooKassa API для всех статусов кроме requires_manual_review
+                if payment.status != "requires_manual_review":
+                    api_data = await YooKassaService.get_payment(str(payment.transaction_id))
+                    if api_data:
+                        api_status_raw = api_data.get("status", "")
+                        api_status_map = {
+                            "succeeded": "CONFIRMED",
+                            "canceled": "CANCELED",
+                            "pending": "PENDING",
+                            "processing": "PROCESSING",
+                            "waiting_for_capture": "WAITING_FOR_CAPTURE",
+                            "refunded": "REFUNDED",
+                        }
+                        api_status = api_status_map.get(
+                            api_status_raw, api_status_raw.upper(),
+                        )
+                        
+                        # Проверяем сумму
+                        api_amount = api_data.get("amount", {})
+                        api_amount_value = (
+                            _safe_decimal(api_amount.get("value"))
+                            if isinstance(api_amount, dict)
+                            else None
+                        )
+                        if api_amount_value is not None and payment.amount is not None:
+                            if api_amount_value != payment.amount:
+                                logger.warning(
+                                    "force_grant_payment: amount mismatch for payment %s. "
+                                    "DB: %s, API: %s",
+                                    payment_id, payment.amount, api_amount_value,
+                                )
+                                return False, "Сумма платежа не совпадает с данными YooKassa"
+                        
+                        # Блокируем выдачу если платёж в YooKassa имеет статус succeeded/confirmed
+                        if api_status in {"CONFIRMED", "SUCCEEDED"}:
+                            logger.warning(
+                                "force_grant_payment: payment %s already confirmed in YooKassa API",
+                                payment_id,
+                            )
+                            return False, "Платёж уже подтверждён в YooKassa"
+                    else:
+                        logger.warning(
+                            "force_grant_payment: could not fetch payment %s from YooKassa API",
+                            payment_id,
+                        )
+                        # Не блокируем, если API недоступен, но логируем
+
                 user = payment.user
                 if not user:
                     return False, "Пользователь не найден"
@@ -1262,11 +1309,20 @@ class PaymentService:
 
                 user = payment.user
                 if user and was_completed:
+                    # Блокируем пользователя при chargeback
+                    user.is_banned = True
+                    user.ban_reason = "Chargeback detected"
+                    
                     current_time = now_utc()
 
                     snapshot_days = (
                         payment.snapshot_duration_days
                     )
+                    # Откатываем referral_user_bonus_days если он был
+                    referral_user_bonus = payment.referral_user_bonus_days or 0
+                    if referral_user_bonus > 0:
+                        snapshot_days += referral_user_bonus
+                    
                     if (
                         snapshot_days
                         and user.subscription_end

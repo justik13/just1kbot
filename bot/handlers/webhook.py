@@ -27,8 +27,8 @@ YOOKASSA_IP_RANGES = [
     "185.71.77.0/27",
     "77.75.153.0/25",
     "77.75.154.128/25",
-    "77.75.156.0/25",
-    "77.75.156.128/25",
+    "77.75.156.11",      # конкретный IP из официальной документации
+    "77.75.156.35",      # конкретный IP из официальной документации
     "2a02:5180::/32",
 ]
 
@@ -139,6 +139,31 @@ async def _verify_stale_webhook_via_api(
                 normalized_status, api_status, transaction_id,
             )
             return False, None
+        
+        # Проверяем сумму для chargeback
+        callback_amount_str = None
+        amount_obj = webhook_object.get("amount")
+        if isinstance(amount_obj, dict):
+            callback_amount_str = amount_obj.get("value")
+        api_amount = api_data.get("amount", {})
+        api_amount_str = (
+            api_amount.get("value")
+            if isinstance(api_amount, dict)
+            else None
+        )
+        if callback_amount_str and api_amount_str:
+            cb_decimal = _safe_decimal(callback_amount_str)
+            api_decimal = _safe_decimal(api_amount_str)
+            if cb_decimal is not None and api_decimal is not None:
+                if cb_decimal != api_decimal:
+                    logger.warning(
+                        "Stale webhook chargeback amount mismatch: "
+                        "callback=%s, api=%s, payment=%s",
+                        callback_amount_str, api_amount_str,
+                        transaction_id,
+                    )
+                    return False, None
+        
         return True, api_data
 
     if api_status != normalized_status:
