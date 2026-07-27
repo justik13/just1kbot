@@ -44,30 +44,17 @@ def normalize_api_url(url: str) -> str:
     scheme = parts.scheme.lower()
     netloc = parts.netloc.lower()
     path = parts.path.rstrip("/")
-    return urlunsplit(
-        (
-            scheme,
-            netloc,
-            path,
-            parts.query,
-            parts.fragment,
-        )
-    )
+    return urlunsplit((scheme, netloc, path, parts.query, parts.fragment))
 
 
 async def _build_servers_list_text_and_kb(
-    servers,
-    page: int,
-    total_pages: int,
-    total: int,
+    servers, page: int, total_pages: int, total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
         f"🛠 Админка › 🌍 <b>Серверы</b>\n"
         f"(стр. {page}/{total_pages}) · Всего: {total}\n"
     )
-
     builder = InlineKeyboardBuilder()
-
     if not servers:
         rendered += "<i>Серверов пока нет</i>\n"
     else:
@@ -81,7 +68,6 @@ async def _build_servers_list_text_and_kb(
                 text=button_text,
                 callback_data=f"admin_server_card:{server.id}",
             )
-
     if page > 1:
         builder.button(
             text="⬅️",
@@ -92,69 +78,38 @@ async def _build_servers_list_text_and_kb(
             text="➡️",
             callback_data=f"admin_servers_page:{page + 1}",
         )
-
-    builder.button(
-        text="➕ Добавить сервер",
-        callback_data="admin_server_add",
-    )
-    builder.button(
-        text="← В админку",
-        callback_data="admin_menu",
-    )
+    builder.button(text="➕ Добавить сервер", callback_data="admin_server_add")
+    builder.button(text="← В админку", callback_data="admin_menu")
     builder.adjust(1)
-
     return rendered, builder
 
 
 async def _show_servers_list(
-    callback: CallbackQuery,
-    session: AsyncSession,
-    page: int = 1,
+    callback: CallbackQuery, session: AsyncSession, page: int = 1,
 ):
     total_servers = await get_server_count(session)
-    total_pages = max(
-        1,
-        math.ceil(total_servers / SERVERS_PER_PAGE),
-    )
-
+    total_pages = max(1, math.ceil(total_servers / SERVERS_PER_PAGE))
     if page > total_pages:
         page = total_pages
-
     servers = await get_servers_paginated(
-        session,
-        page=page,
-        per_page=SERVERS_PER_PAGE,
+        session, page=page, per_page=SERVERS_PER_PAGE,
     )
-
     rendered, kb = await _build_servers_list_text_and_kb(
-        servers,
-        page,
-        total_pages,
-        total_servers,
+        servers, page, total_pages, total_servers,
     )
-
     try:
         await callback.message.edit_text(
-            rendered,
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML",
+            rendered, reply_markup=kb.as_markup(), parse_mode="HTML",
         )
     except TelegramBadRequest as e:
         logger.debug(f"_show_servers_list edit_text failed: {e}")
 
 
 async def _show_server_card(
-    callback: CallbackQuery,
-    session: AsyncSession,
-    server,
+    callback: CallbackQuery, session: AsyncSession, server,
 ):
     flag = server.country_flag or "🌍"
-    status = (
-        "🟢 Активен"
-        if server.is_active
-        else "🔴 Отключен"
-    )
-
+    status = "🟢 Активен" if server.is_active else "🔴 Отключен"
     rendered = texts.ADMIN_SERVER_CARD.format(
         flag=flag,
         name=safe(server.name),
@@ -164,13 +119,11 @@ async def _show_server_card(
         api_url=safe(server.api_url),
         max_clients=server.max_clients,
     )
-
     try:
         await callback.message.edit_text(
             rendered,
             reply_markup=get_admin_server_card_keyboard(
-                server.id,
-                server.is_active,
+                server.id, server.is_active,
             ),
             parse_mode="HTML",
         )
@@ -178,6 +131,10 @@ async def _show_server_card(
         logger.debug(f"_show_server_card edit_text failed: {e}")
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: ведём completed_peer_ids.
+# При timeout незавершённые пиры → failed, а не successful.
+# ──────────────────────────────────────────────────────────────
 async def _bulk_delete_peers_from_api(
     profiles_data,
     api_url: str,
@@ -190,6 +147,7 @@ async def _bulk_delete_peers_from_api(
     sem = asyncio.Semaphore(20)
     fail = 0
     failed_peers: list[tuple[int, str]] = []
+    completed_peer_ids: set[str] = set()
     lock = asyncio.Lock()
 
     async def _delete_limited(profile_id: int, peer_id: str):
@@ -197,7 +155,9 @@ async def _bulk_delete_peers_from_api(
         async with sem:
             ok = await client.delete_user(client_id=peer_id)
             async with lock:
-                if not ok:
+                if ok:
+                    completed_peer_ids.add(peer_id)
+                else:
                     fail += 1
                     failed_peers.append((profile_id, peer_id))
 
@@ -217,6 +177,12 @@ async def _bulk_delete_peers_from_api(
             f"_bulk_delete_peers_from_api: timeout after 300s "
             f"for {len(profiles_data)} peers"
         )
+        # Всё, что не завершилось успешно → failed
+        for profile_id, peer_id in profiles_data:
+            if peer_id not in completed_peer_ids:
+                if (profile_id, peer_id) not in failed_peers:
+                    fail += 1
+                    failed_peers.append((profile_id, peer_id))
 
     return fail, failed_peers
 
@@ -232,11 +198,8 @@ async def _delete_server_background(
 ):
     if profiles_data:
         api_fail, failed_peers = await _bulk_delete_peers_from_api(
-            profiles_data,
-            api_url,
-            api_key,
+            profiles_data, api_url, api_key,
         )
-
         failed_peer_ids = {peer_id for _, peer_id in failed_peers}
         success_peer_ids = [
             peer_id

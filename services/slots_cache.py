@@ -20,10 +20,16 @@ def get_cached_peer_count(server_id: int) -> int | None:
     return _slots_cache.get(server_id)
 
 
+# ──────────────────────────────────────────────────────────────
+# ДОБАВЛЕНО: публичная функция для записи из traffic worker.
+# ──────────────────────────────────────────────────────────────
+def update_cached_peer_count(server_id: int, count: int) -> None:
+    _slots_cache[server_id] = count
+
+
 async def get_real_peer_count(server: Server, force_refresh: bool = False) -> int:
     global _last_cleanup_time
     now = time.monotonic()
-
     if now - _last_cleanup_time > _CLEANUP_INTERVAL:
         _cleanup_old_locks(now)
         _last_cleanup_time = now
@@ -38,7 +44,6 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         _locks[server.id] = (lock, now)
 
     lock = _locks[server.id][0]
-
     async with lock:
         if not force_refresh and server.id in _slots_cache:
             return _slots_cache[server.id]
@@ -47,12 +52,16 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         try:
             clients = await client.get_all_clients()
         except Exception as e:
-            logger.error("Failed to get real peer count for server %s (%s): %s", server.id, server.name, e)
+            logger.error(
+                "Failed to get real peer count for server %s (%s): %s",
+                server.id, server.name, e,
+            )
             return -1
 
         if clients is None:
             logger.warning(
-                "API returned no data for server %s (%s). Peer count is unknown, returning -1.",
+                "API returned no data for server %s (%s). "
+                "Peer count is unknown, returning -1.",
                 server.id, server.name,
             )
             return -1
@@ -74,4 +83,8 @@ def _cleanup_old_locks(now: float) -> None:
     for sid in old_servers:
         del _locks[sid]
     if old_servers:
-        logger.debug("Slots cache locks cleanup: removed %s old locks, %s remaining", len(old_servers), len(_locks))
+        logger.debug(
+            "Slots cache locks cleanup: removed %s old locks, "
+            "%s remaining",
+            len(old_servers), len(_locks),
+        )

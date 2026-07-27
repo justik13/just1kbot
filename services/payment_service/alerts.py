@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 
 from config.settings import get_settings
+
 from .common import (
     MANUAL_REVIEW_REASONS,
     _alerted_manual_review,
@@ -18,6 +19,11 @@ _notified_chargeback: TTLCache = TTLCache(
     maxsize=100000, ttl=86400,
 )
 
+# ── ДОБАВЛЕНО: кэш для уведомлений manual_review ──
+_notified_manual_review: TTLCache = TTLCache(
+    maxsize=100000, ttl=86400,
+)
+
 
 async def _send_alert_to_admins(
     message: str,
@@ -27,9 +33,7 @@ async def _send_alert_to_admins(
 
     bot = get_bot_ref()
     if bot is None:
-        logger.error(
-            "Admin alert SKIPPED: bot_ref is None."
-        )
+        logger.error("Admin alert SKIPPED: bot_ref is None.")
         return False
 
     settings = get_settings()
@@ -49,8 +53,7 @@ async def _send_alert_to_admins(
             sent = True
         except Exception as e:
             logger.error(
-                "Failed to send alert to %s: %s",
-                admin_id, e,
+                "Failed to send alert to %s: %s", admin_id, e
             )
     return sent
 
@@ -63,7 +66,6 @@ async def _send_manual_review_alert_now(
     payment_id = snapshot.get("payment_id")
     if payment_id is None:
         return
-
     if payment_id in _alerted_manual_review:
         return
 
@@ -107,13 +109,86 @@ async def _send_manual_review_alert_now(
         _alerted_manual_review[payment_id] = True
 
 
+# ──────────────────────────────────────────────────────────────
+# ДОБАВЛЕНО: уведомление пользователю при manual_review.
+# ──────────────────────────────────────────────────────────────
+async def _notify_client_manual_review_now(
+    snapshot: dict,
+) -> None:
+    payment_id = snapshot.get("payment_id")
+    user_telegram_id = snapshot.get("user_telegram_id")
+    if payment_id is None or user_telegram_id is None:
+        return
+    if payment_id in _notified_manual_review:
+        return
+
+    from aiogram.exceptions import TelegramForbiddenError
+    from database.connection import session_scope
+    from database.repositories.users_repo import mark_user_bot_blocked
+    from services.workers.heartbeat import get_bot_ref
+
+    bot = get_bot_ref()
+    if bot is None:
+        return
+
+    settings = get_settings()
+    support_username = settings.SUPPORT_USERNAME.lstrip("@")
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💬 Написать в поддержку",
+        url=f"https://t.me/{support_username}",
+    )
+    builder.button(
+        text="🏠 В главное меню",
+        callback_data="back_to_main_menu",
+    )
+    builder.button(
+        text="✅ Прочитано (убрать)",
+        callback_data="dismiss_notification",
+    )
+    builder.adjust(1, 1, 1)
+    keyboard = builder.as_markup()
+
+    message = (
+        f"💳 <b>Оплата получена</b>\n"
+        f"{'━' * 20}\n"
+        f"Мы проверяем платёж.\n"
+        f"Если доступ не активировался в течение "
+        f"нескольких минут, напишите в поддержку.\n"
+        f"{'━' * 20}\n"
+        f"<i>Обычно проверка занимает не более 5 минут.</i>"
+    )
+
+    try:
+        await bot.send_message(
+            user_telegram_id,
+            message,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+        )
+        _notified_manual_review[payment_id] = True
+    except TelegramForbiddenError:
+        _notified_manual_review[payment_id] = True
+        try:
+            async with session_scope() as session:
+                await mark_user_bot_blocked(
+                    session, user_telegram_id
+                )
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error(
+            "Failed to notify client about manual review: %s", e
+        )
+
+
 async def _send_paid_after_cancel_alert_now(
     snapshot: dict,
 ) -> None:
     payment_id = snapshot.get("payment_id")
     if payment_id is None:
         return
-
     if payment_id in _alerted_paid_after_cancel:
         return
 
@@ -160,10 +235,8 @@ async def _notify_client_paid_after_cancel_now(
 ) -> None:
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
-
     if payment_id is None or user_telegram_id is None:
         return
-
     if payment_id in _notified_paid_after_cancel:
         return
 
@@ -223,14 +296,12 @@ async def _notify_client_paid_after_cancel_now(
         try:
             async with session_scope() as session:
                 await mark_user_bot_blocked(
-                    session, user_telegram_id,
+                    session, user_telegram_id
                 )
         except Exception:
             pass
     except Exception as e:
-        logger.error(
-            "Failed to notify client: %s", e,
-        )
+        logger.error("Failed to notify client: %s", e)
 
 
 async def _notify_client_chargeback_now(
@@ -238,10 +309,8 @@ async def _notify_client_chargeback_now(
 ) -> None:
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
-
     if payment_id is None or user_telegram_id is None:
         return
-
     if payment_id in _notified_chargeback:
         return
 
@@ -289,13 +358,13 @@ async def _notify_client_chargeback_now(
         try:
             async with session_scope() as session:
                 await mark_user_bot_blocked(
-                    session, user_telegram_id,
+                    session, user_telegram_id
                 )
         except Exception:
             pass
     except Exception as e:
         logger.error(
-            "Failed to send chargeback notification: %s", e,
+            "Failed to send chargeback notification: %s", e
         )
 
 
@@ -306,7 +375,6 @@ async def _send_cancel_after_completed_alert_now(
     builder = InlineKeyboardBuilder()
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
-
     builder.button(
         text="👤 Профиль клиента",
         callback_data=(
@@ -344,7 +412,6 @@ async def _send_chargeback_alert_now(
     builder = InlineKeyboardBuilder()
     payment_id = snapshot.get("payment_id")
     user_telegram_id = snapshot.get("user_telegram_id")
-
     builder.button(
         text="👤 Профиль пользователя",
         callback_data=(
@@ -387,7 +454,6 @@ async def _send_payment_not_found_alert_now(
     alert_key = (
         f"{source}:{transaction_id}:{status}:{user_telegram_id}"
     )
-
     if alert_key in _alerted_payment_not_found:
         return
 

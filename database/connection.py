@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Awaitable, Callable
@@ -28,9 +29,7 @@ DEFAULT_TARIFFS = [
 
 async def init_db():
     global _engine, _sessionmaker
-
     settings = get_settings()
-
     _engine = create_async_engine(
         settings.DATABASE_URL,
         echo=False,
@@ -39,36 +38,30 @@ async def init_db():
         pool_timeout=30,
         pool_pre_ping=True,
     )
-
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-
         await _seed_default_tariffs(conn)
         await _seed_maintenance_mode(conn)
         await _apply_additional_indexes(conn)
 
     logging.info("PostgreSQL database initialized at %s", settings.DATABASE_URL)
-
     return _engine, _sessionmaker
 
 
 async def _seed_default_tariffs(conn):
     result = await conn.execute(select(func.count(Tariff.id)))
-
     if result.scalar_one() == 0:
         for tariff in DEFAULT_TARIFFS:
             await conn.execute(
                 Tariff.__table__.insert().values(**tariff, is_active=True)
             )
-
         logging.info("Default tariffs seeded successfully.")
 
 
 async def _seed_maintenance_mode(conn):
     result = await conn.execute(select(func.count(MaintenanceMode.id)))
-
     if result.scalar_one() == 0:
         await conn.execute(
             MaintenanceMode.__table__.insert().values(
@@ -81,7 +74,6 @@ async def _seed_maintenance_mode(conn):
                 ),
             )
         )
-
         logging.info("Maintenance mode singleton seeded.")
 
 
@@ -92,40 +84,33 @@ async def _apply_additional_indexes(conn):
         ON payments (external_id)
         WHERE status = 'completed' AND external_id IS NOT NULL
         """,
-
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_external_id_not_null
         ON payments (external_id)
         WHERE external_id IS NOT NULL
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_payments_status_created_at
         ON payments (status, created_at)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_payments_tariff_status
         ON payments (tariff_id, status)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_payment_events_payment_created
         ON payment_events (payment_id, created_at)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_users_active_subscription
         ON users (subscription_end)
         WHERE is_deleted = false AND subscription_end IS NOT NULL
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_users_banned
         ON users (telegram_id)
         WHERE is_banned = true AND is_deleted = false
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_users_expiring_subscription
         ON users (subscription_end, telegram_id)
@@ -135,7 +120,6 @@ async def _apply_additional_indexes(conn):
           AND subscription_end IS NOT NULL
           AND (notified_3d = false OR notified_1d = false OR notified_2h = false)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_users_expired_grace_notify
         ON users (subscription_end, telegram_id)
@@ -144,72 +128,74 @@ async def _apply_additional_indexes(conn):
           AND subscription_end IS NOT NULL
           AND (notified_expired = false OR notified_grace_12h = false)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_broadcast_in_progress
         ON broadcast_progress (status, created_at)
         WHERE status = 'in_progress'
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_pending_api_deletions_attempts
         ON pending_api_deletions (attempts, created_at)
         WHERE attempts < 10
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_users_paginated
         ON users (created_at DESC, id DESC)
         WHERE is_deleted = false
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_hub_messages_chat_id
         ON hub_messages (chat_id)
         """,
-
         """
         CREATE INDEX IF NOT EXISTS ix_audit_logs_created_at
         ON audit_logs (created_at DESC)
         """,
-
         """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_vpn_profiles_user_server_device_name
         ON vpn_profiles (user_id, server_id, lower(device_name))
         """,
     ]
-
     for sql in indexes_sql:
         try:
             await conn.execute(text(sql))
         except Exception as e:
             logging.warning("Index creation warning: %s", e)
-
     logging.info("Additional indexes applied successfully.")
 
 
 async def get_session() -> AsyncSession:
     global _sessionmaker
-
     if _sessionmaker is None:
         await init_db()
-
     return _sessionmaker()
+
+
+_POST_COMMIT_TIMEOUT = 30.0
+
+
+async def _safe_run_post_commit(
+    task: Callable[[], Awaitable[None]],
+) -> None:
+    try:
+        await asyncio.wait_for(task(), timeout=_POST_COMMIT_TIMEOUT)
+    except asyncio.TimeoutError:
+        logging.error(
+            "Post-commit task timed out after %.0fs",
+            _POST_COMMIT_TIMEOUT,
+        )
+    except Exception as e:
+        logging.error("Post-commit task failed: %s", e, exc_info=True)
 
 
 async def _run_post_commit_tasks(session: AsyncSession) -> None:
     tasks: list[Callable[[], Awaitable[None]]] = session.info.pop(
         "post_commit_tasks", []
     )
-
     if not tasks:
         return
-
     for task in tasks:
-        try:
-            await task()
-        except Exception as e:
-            logging.error("Post-commit task failed: %s", e, exc_info=True)
+        asyncio.create_task(_safe_run_post_commit(task))
 
 
 def queue_post_commit_task(
@@ -218,14 +204,12 @@ def queue_post_commit_task(
 ) -> None:
     if "post_commit_tasks" not in session.info:
         session.info["post_commit_tasks"] = []
-
     session.info["post_commit_tasks"].append(task)
 
 
 @asynccontextmanager
 async def session_scope():
     session = await get_session()
-
     try:
         yield session
         await session.commit()
@@ -240,6 +224,5 @@ async def session_scope():
 
 async def close_db():
     global _engine
-
     if _engine:
         await _engine.dispose()

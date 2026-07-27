@@ -434,7 +434,7 @@ setup_redis() {
         echo "# === just1kbot Bot Config ===" >> "$redis_conf"
         echo "bind 127.0.0.1" >> "$redis_conf"
         echo "maxmemory 256mb" >> "$redis_conf"
-        echo "maxmemory-policy allkeys-lru" >> "$redis_conf"
+        echo "maxmemory-policy noeviction" >> "$redis_conf"
         echo 'save ""' >> "$redis_conf"
         echo "appendonly no" >> "$redis_conf"
         echo "requirepass $REDIS_PASSWORD" >> "$redis_conf"
@@ -775,6 +775,8 @@ EnvironmentFile=$PROJECT_DIR/.env
 ExecStart=$VENV_DIR/bin/python -m bot.main
 Restart=always
 RestartSec=10
+MemoryMax=512M
+LimitNOFILE=65536
 ProtectSystem=strict
 PrivateTmp=true
 ProtectHome=true

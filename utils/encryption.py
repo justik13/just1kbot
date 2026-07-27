@@ -17,9 +17,7 @@ def _get_fernet(key: str) -> Fernet:
             oldest_key = next(iter(_fernet_cache))
             del _fernet_cache[oldest_key]
             logger.debug("Fernet cache full, evicted oldest key")
-
         _fernet_cache[key] = Fernet(key.encode("utf-8"))
-
     return _fernet_cache[key]
 
 
@@ -34,17 +32,14 @@ class EncryptedString(TypeDecorator):
     def process_bind_param(self, value, dialect):
         if value is None:
             return None
-
         settings = get_settings()
         key = settings.DB_ENCRYPTION_KEY
-
         if not key:
             raise RuntimeError(
                 "CRITICAL: DB_ENCRYPTION_KEY is empty! "
                 "Cannot write sensitive data in plaintext. "
                 "Fix .env immediately."
             )
-
         try:
             f = _get_fernet(key)
             encrypted = f.encrypt(value.encode("utf-8"))
@@ -56,36 +51,44 @@ class EncryptedString(TypeDecorator):
     def process_result_value(self, value, dialect):
         if value is None:
             return None
-
         settings = get_settings()
         key = settings.DB_ENCRYPTION_KEY
-
         if not key:
             if self.critical:
-                logger.critical(
-                    "DB_ENCRYPTION_KEY is empty during decryption of a critical field. "
-                    "Returning None — treat as a security incident."
+                # ── ИСПРАВЛЕНО: raise вместо return None ──
+                raise RuntimeError(
+                    "CRITICAL: DB_ENCRYPTION_KEY is empty during "
+                    "decryption of a critical field. "
+                    "This is a security incident. Fix .env immediately."
                 )
             else:
                 logger.error(
-                    "DB_ENCRYPTION_KEY is empty during decryption. Returning None."
+                    "DB_ENCRYPTION_KEY is empty during decryption. "
+                    "Returning None."
                 )
             return None
-
         try:
             f = _get_fernet(key)
             decrypted = f.decrypt(value.encode("utf-8"))
             return decrypted.decode("utf-8")
         except InvalidToken:
             if self.critical:
+                # ── ИСПРАВЛЕНО: raise вместо return None ──
                 logger.critical(
-                    "Critical encrypted field decryption failed: invalid token. "
-                    "Possible causes: DB_ENCRYPTION_KEY changed, data corrupted, "
-                    "or value stored in plaintext. Returning None."
+                    "Critical encrypted field decryption failed: "
+                    "invalid token. Possible causes: "
+                    "DB_ENCRYPTION_KEY changed, data corrupted, "
+                    "or value stored in plaintext."
+                )
+                raise RuntimeError(
+                    "CRITICAL: Failed to decrypt critical field. "
+                    "DB_ENCRYPTION_KEY may have changed or data "
+                    "is corrupted. Server cannot operate safely."
                 )
             else:
                 logger.warning(
-                    "Encrypted field decryption failed: invalid token. Returning None."
+                    "Encrypted field decryption failed: invalid token. "
+                    "Returning None."
                 )
             return None
         except Exception as e:
@@ -93,6 +96,9 @@ class EncryptedString(TypeDecorator):
                 logger.critical(
                     "Critical encrypted field decryption failed: %s",
                     type(e).__name__,
+                )
+                raise RuntimeError(
+                    f"CRITICAL: Decryption error: {type(e).__name__}"
                 )
             else:
                 logger.error(

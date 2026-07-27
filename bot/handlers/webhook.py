@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from aiohttp import web
+from sqlalchemy import text
 
 from bot.middlewares.correlation import set_request_id
 from database.connection import session_scope
@@ -40,36 +41,28 @@ REFUND_EVENTS = {
 def _is_yookassa_ip(ip: str) -> bool:
     try:
         client_ip = ipaddress.ip_address(ip)
-
         for cidr in YOOKASSA_IP_RANGES:
             if client_ip in ipaddress.ip_network(cidr):
                 return True
-
         return False
-
     except ValueError:
         return False
 
 
 def _get_real_ip(request: web.Request) -> str:
     remote = (request.remote or "").strip()
-
     trusted_proxy = remote in {"127.0.0.1", "::1"}
-
     if trusted_proxy:
         real_ip = request.headers.get("X-Real-IP", "").strip()
-
         if real_ip:
             return real_ip
-
-        forwarded = request.headers.get("X-Forwarded-For", "").strip()
-
+        forwarded = request.headers.get(
+            "X-Forwarded-For", ""
+        ).strip()
         if forwarded:
             first_ip = forwarded.split(",")[0].strip()
-
             if first_ip:
                 return first_ip
-
     return remote
 
 
@@ -79,49 +72,35 @@ def _is_recent_timestamp(
 ) -> bool:
     if not created_at or not isinstance(created_at, str):
         return False
-
     created_at = created_at.strip()
-
     if not created_at:
         return False
-
     try:
         ts = float(created_at)
-
         if ts > 1e12:
             ts = ts / 1000.0
-
         age = time.time() - ts
-
         return age <= max_age_seconds
-
     except (ValueError, TypeError, OverflowError):
         pass
-
     try:
         dt = datetime.fromisoformat(
             created_at.replace("Z", "+00:00")
         )
-
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-
         age = (
             datetime.now(timezone.utc) - dt
         ).total_seconds()
-
         return age <= max_age_seconds
-
     except (ValueError, TypeError, OverflowError):
         pass
-
     return False
 
 
 def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
     if value is None:
         return None
-
     try:
         return Decimal(value)
     except (InvalidOperation, ValueError, TypeError):
@@ -134,12 +113,10 @@ async def _verify_stale_webhook_via_api(
     transaction_id: str,
 ) -> tuple[bool, Optional[dict]]:
     api_data = await YooKassaService.get_payment(transaction_id)
-
     if not api_data:
         return False, None
 
     api_status_raw = api_data.get("status", "")
-
     api_status_map = {
         "succeeded": "CONFIRMED",
         "canceled": "CANCELED",
@@ -148,78 +125,62 @@ async def _verify_stale_webhook_via_api(
         "waiting_for_capture": "WAITING_FOR_CAPTURE",
         "refunded": "REFUNDED",
     }
-
     api_status = api_status_map.get(
-        api_status_raw,
-        api_status_raw.upper(),
+        api_status_raw, api_status_raw.upper(),
     )
 
     if normalized_status == "CHARGEBACKED":
-        if api_status not in {"REFUNDED", "CANCELED", "CHARGEBACKED"}:
+        if api_status not in {
+            "REFUNDED", "CANCELED", "CHARGEBACKED"
+        }:
             logger.warning(
                 "Stale webhook chargeback status mismatch: "
                 "callback=%s, api=%s, payment=%s",
-                normalized_status,
-                api_status,
-                transaction_id,
+                normalized_status, api_status, transaction_id,
             )
             return False, None
-
         return True, api_data
 
     if api_status != normalized_status:
         logger.warning(
             "Stale webhook status mismatch: "
             "callback=%s, api=%s, payment=%s",
-            normalized_status,
-            api_status,
-            transaction_id,
+            normalized_status, api_status, transaction_id,
         )
         return False, None
 
     callback_amount_str = None
-
     amount_obj = webhook_object.get("amount")
-
     if isinstance(amount_obj, dict):
         callback_amount_str = amount_obj.get("value")
-
     api_amount = api_data.get("amount", {})
-
     api_amount_str = (
         api_amount.get("value")
         if isinstance(api_amount, dict)
         else None
     )
-
     if callback_amount_str and api_amount_str:
         cb_decimal = _safe_decimal(callback_amount_str)
         api_decimal = _safe_decimal(api_amount_str)
-
         if cb_decimal is not None and api_decimal is not None:
             if cb_decimal != api_decimal:
                 logger.warning(
                     "Stale webhook amount mismatch: "
                     "callback=%s, api=%s, payment=%s",
-                    callback_amount_str,
-                    api_amount_str,
+                    callback_amount_str, api_amount_str,
                     transaction_id,
                 )
                 return False, None
 
     callback_metadata = webhook_object.get("metadata") or {}
     callback_payload = callback_metadata.get("payload", "")
-
     api_metadata = api_data.get("metadata") or {}
     api_payload = api_metadata.get("payload", "")
-
     if callback_payload != api_payload:
         logger.warning(
             "Stale webhook payload mismatch: "
             "callback=%s, api=%s, payment=%s",
-            callback_payload,
-            api_payload,
-            transaction_id,
+            callback_payload, api_payload, transaction_id,
         )
         return False, None
 
@@ -231,20 +192,16 @@ async def yookassa_webhook_handler(
 ) -> web.Response:
     request_id = uuid.uuid4().hex[:8]
     set_request_id(request_id)
-
     transaction_id = None
     status = None
 
     try:
         peer_ip = _get_real_ip(request)
-
         if not peer_ip or not _is_yookassa_ip(peer_ip):
             logger.warning(
                 "[%s] Webhook BLOCKED from unknown IP: %s",
-                request_id,
-                peer_ip,
+                request_id, peer_ip,
             )
-
             return web.Response(status=403, text="Forbidden")
 
         try:
@@ -252,14 +209,9 @@ async def yookassa_webhook_handler(
         except Exception as e:
             logger.error(
                 "[%s] Failed to parse webhook JSON: %s",
-                request_id,
-                e,
+                request_id, e,
             )
-
-            return web.Response(
-                status=400,
-                text="Invalid JSON",
-            )
+            return web.Response(status=400, text="Invalid JSON")
 
         event = raw_data.get("event", "")
         webhook_object = raw_data.get("object", {})
@@ -276,111 +228,78 @@ async def yookassa_webhook_handler(
 
         if not transaction_id:
             logger.warning(
-                "[%s] Webhook missing payment ID.",
-                request_id,
+                "[%s] Webhook missing payment ID.", request_id,
             )
-
             return web.Response(
-                status=400,
-                text="Missing payment ID",
+                status=400, text="Missing payment ID",
             )
 
         valid_statuses = {
-            "CONFIRMED",
-            "CANCELED",
-            "CHARGEBACKED",
+            "CONFIRMED", "CANCELED", "CHARGEBACKED",
             "WAITING_FOR_CAPTURE",
         }
-
         if status not in valid_statuses:
             logger.warning(
                 "[%s] Unknown webhook status: %s (payment=%s)",
-                request_id,
-                status,
-                transaction_id,
+                request_id, status, transaction_id,
             )
-
-            return web.Response(
-                status=400,
-                text="Invalid status",
-            )
+            return web.Response(status=400, text="Invalid status")
 
         created_at = webhook_object.get("created_at")
-
         if not created_at:
             logger.warning(
                 "[%s] Webhook missing created_at. payment=%s",
-                request_id,
-                transaction_id,
+                request_id, transaction_id,
             )
-
             return web.Response(
-                status=400,
-                text="Missing created_at",
+                status=400, text="Missing created_at",
             )
 
         if status == "WAITING_FOR_CAPTURE":
             logger.info(
                 "[%s] Webhook received: payment=%s, "
-                "status=WAITING_FOR_CAPTURE (authorized, "
-                "waiting for auto-capture). Returning 200 OK.",
-                request_id,
-                transaction_id,
+                "status=WAITING_FOR_CAPTURE. Returning 200 OK.",
+                request_id, transaction_id,
             )
-
             return web.Response(status=200, text="OK")
 
         callback_amount_str = None
         callback_currency = None
-
         amount_obj = webhook_object.get("amount")
-
         if isinstance(amount_obj, dict):
             callback_amount_str = amount_obj.get("value")
             callback_currency = amount_obj.get("currency")
-
         callback_amount = _safe_decimal(callback_amount_str)
 
         if not _is_recent_timestamp(created_at):
             logger.info(
-                "[%s] Stale webhook detected, verifying via API. payment=%s",
-                request_id,
-                transaction_id,
+                "[%s] Stale webhook detected, verifying via API. "
+                "payment=%s",
+                request_id, transaction_id,
             )
-
             stale_ok, stale_api_data = (
                 await _verify_stale_webhook_via_api(
-                    webhook_object,
-                    status,
-                    transaction_id,
+                    webhook_object, status, transaction_id,
                 )
             )
-
             if not stale_ok:
                 logger.warning(
                     "[%s] Stale webhook rejected: payment=%s",
-                    request_id,
-                    transaction_id,
+                    request_id, transaction_id,
                 )
-
                 return web.Response(
                     status=400,
                     text="Stale webhook unverified",
                 )
-
             if stale_api_data:
                 api_amount = stale_api_data.get("amount", {})
-
                 if isinstance(api_amount, dict):
                     if api_amount.get("value"):
                         callback_amount = _safe_decimal(
                             api_amount["value"]
                         )
-
                     if api_amount.get("currency"):
-                        callback_currency = api_amount[
-                            "currency"
-                        ]
+                        callback_currency = api_amount["currency"]
 
         metadata = webhook_object.get("metadata") or {}
         payload = metadata.get("payload", "")
@@ -388,11 +307,8 @@ async def yookassa_webhook_handler(
         logger.info(
             "[%s] Webhook received: payment=%s, status=%s, "
             "amount=%s, currency=%s",
-            request_id,
-            transaction_id,
-            status,
-            callback_amount,
-            callback_currency,
+            request_id, transaction_id, status,
+            callback_amount, callback_currency,
         )
 
         async with session_scope() as session:
@@ -413,8 +329,7 @@ async def yookassa_webhook_handler(
             except Exception as e:
                 logger.error(
                     "[%s] Failed to log audit: %s",
-                    request_id,
-                    e,
+                    request_id, e,
                 )
 
             success, result_code = (
@@ -431,10 +346,8 @@ async def yookassa_webhook_handler(
                 if result_code == "not_found":
                     logger.warning(
                         "[%s] Payment not found: %s",
-                        request_id,
-                        transaction_id,
+                        request_id, transaction_id,
                     )
-
                     try:
                         await _send_payment_not_found_alert_now(
                             {
@@ -445,14 +358,10 @@ async def yookassa_webhook_handler(
                         )
                     except Exception:
                         pass
-
                     return web.Response(
-                        status=404,
-                        text="Payment not found",
+                        status=404, text="Payment not found",
                     )
-
                 return web.Response(status=200, text="OK")
-
             else:
                 if result_code == "not_found":
                     try:
@@ -465,12 +374,9 @@ async def yookassa_webhook_handler(
                         )
                     except Exception:
                         pass
-
                     return web.Response(
-                        status=404,
-                        text="Payment not found",
+                        status=404, text="Payment not found",
                     )
-
                 elif result_code in (
                     "amount_mismatch",
                     "payload_mismatch",
@@ -479,51 +385,66 @@ async def yookassa_webhook_handler(
                     "paid_after_cancel",
                 ):
                     return web.Response(status=200, text="OK")
-
                 elif result_code == "error":
                     return web.Response(
-                        status=500,
-                        text="Processing failed",
+                        status=500, text="Processing failed",
                     )
-
                 else:
                     return web.Response(
-                        status=500,
-                        text="Unknown error",
+                        status=500, text="Unknown error",
                     )
 
     except Exception as e:
         logger.error(
             "[%s] Webhook error: %s",
-            request_id,
-            e,
-            exc_info=True,
+            request_id, e, exc_info=True,
         )
-
         return web.Response(
-            status=500,
-            text="Internal server error",
+            status=500, text="Internal server error",
         )
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: healthcheck проверяет DB и Redis.
+# ──────────────────────────────────────────────────────────────
 async def healthcheck_handler(
     request: web.Request,
 ) -> web.Response:
+    # Проверка DB
+    try:
+        async with session_scope() as session:
+            await session.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.warning("Healthcheck DB failed: %s", e)
+        return web.Response(status=503, text="DB unavailable")
+
+    # Проверка Redis
+    try:
+        import redis.asyncio as aioredis
+        from config.settings import get_settings
+
+        settings = get_settings()
+        r = aioredis.from_url(
+            settings.REDIS_URL, socket_timeout=2.0,
+        )
+        await r.ping()
+        await r.aclose()
+    except Exception as e:
+        logger.warning("Healthcheck Redis failed: %s", e)
+        return web.Response(
+            status=503, text="Redis unavailable"
+        )
+
     return web.Response(status=200, text="OK")
 
 
 def setup_webhook_routes(app: web.Application):
     app.router.add_post(
-        "/webhook/yookassa",
-        yookassa_webhook_handler,
+        "/webhook/yookassa", yookassa_webhook_handler,
     )
-
     app.router.add_get("/health", healthcheck_handler)
-
     logger.info(
-        "YooKassa webhook route registered: POST /webhook/yookassa"
+        "YooKassa webhook route registered: "
+        "POST /webhook/yookassa"
     )
-
-    logger.info(
-        "Healthcheck endpoint registered: GET /health"
-    )
+    logger.info("Healthcheck endpoint registered: GET /health")
