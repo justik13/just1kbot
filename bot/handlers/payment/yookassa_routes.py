@@ -15,6 +15,7 @@ from bot.keyboards import (
     get_yookassa_payment_keyboard,
 )
 from config.settings import get_settings
+from database.connection import queue_post_commit_task
 from database.repositories.payments_repo import (
     get_payment_by_id,
     get_payment_by_id_simple,
@@ -50,6 +51,33 @@ def _is_yookassa_configured() -> bool:
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: отправка URL пользователю перенесена
+# в post-commit task. Если бот упадёт между созданием
+# платежа и commit — orphan payment не останется.
+# ──────────────────────────────────────────────────────────────
+async def _send_payment_url_to_user(
+    bot,
+    chat_id: int,
+    payment_url: str,
+    payment_id: int,
+    tariff_id: int,
+    tariff_price: int,
+    source: str,
+) -> None:
+    text = texts.PAYMENT_YOOKASSA_INSTRUCTIONS.format(
+        amount=tariff_price,
+        payment_url=safe(payment_url),
+    )
+    await render_hub(
+        bot, chat_id, text,
+        get_yookassa_payment_keyboard(
+            payment_url, payment_id, tariff_id, source
+        ),
+        parse_mode="HTML",
+    )
+
+
 async def _create_and_show_payment(
     target, session: AsyncSession, db_user, tariff, source: str,
     back_callback: str,
@@ -71,16 +99,21 @@ async def _create_and_show_payment(
             get_back_button(back_callback),
         )
         return
-    text = texts.PAYMENT_YOOKASSA_INSTRUCTIONS.format(
-        amount=tariff.price_rub,
-        payment_url=safe(payment.payment_url),
-    )
-    await render_hub(
-        target.bot, target.chat.id, text,
-        get_yookassa_payment_keyboard(
-            payment.payment_url, payment.id, tariff.id, source
+
+    # Отправка URL — после commit, а не до
+    queue_post_commit_task(
+        session,
+        lambda b=target.bot,
+        cid=target.chat.id,
+        purl=payment.payment_url,
+        pid=payment.id,
+        tid=tariff.id,
+        tp=tariff.price_rub,
+        s=source: (
+            _send_payment_url_to_user(
+                b, cid, purl, pid, tid, tp, s,
+            )
         ),
-        parse_mode="HTML",
     )
 
 
@@ -299,10 +332,6 @@ async def check_payment_status(
         )
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: после mark_payment_as_cancelled перечитываем
-# платёж и показываем реальный статус.
-# ──────────────────────────────────────────────────────────────
 @router.callback_query(F.data.startswith("cancel_invoice:"))
 async def cancel_invoice(
     callback: CallbackQuery,
@@ -374,7 +403,6 @@ async def cancel_invoice(
 
     await state.clear()
 
-    # ── ИСПРАВЛЕНО: показываем реальный статус ──
     if was_cancelled:
         await callback.answer(texts.PAYMENT_INVOICE_CANCELLED)
     else:

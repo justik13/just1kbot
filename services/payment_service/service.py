@@ -206,61 +206,6 @@ class PaymentService:
         )
 
     @staticmethod
-    async def _mark_paid_after_cancel(
-        session: AsyncSession,
-        payment: Payment,
-        source: str,
-    ) -> tuple:
-        if (
-            payment.status == "requires_manual_review"
-            and payment.manual_review_reason == "paid_after_cancel"
-        ):
-            return True, "paid_after_cancel"
-
-        snapshot = _build_payment_snapshot(payment)
-
-        await _log_event_safe(
-            session,
-            payment.id,
-            "paid_after_cancel",
-            source=source,
-        )
-
-        payment.status = "requires_manual_review"
-        payment.manual_review_reason = "paid_after_cancel"
-        if not payment.paid_at:
-            payment.paid_at = now_utc()
-        await session.flush()
-
-        await AuditService.log_action(
-            session,
-            admin_id=0,
-            action="PAID_AFTER_CANCEL",
-            target_type="Payment",
-            target_id=payment.id,
-            details=(
-                f"user={snapshot.get('user_telegram_id')}, "
-                f"amount={snapshot.get('amount')} "
-                f"{snapshot.get('currency')}, source={source}"
-            ),
-        )
-
-        queue_post_commit_task(
-            session,
-            lambda s=snapshot: (
-                _send_paid_after_cancel_alert_now(s)
-            ),
-        )
-        queue_post_commit_task(
-            session,
-            lambda s=snapshot: (
-                _notify_client_paid_after_cancel_now(s)
-            ),
-        )
-
-        return True, "paid_after_cancel"
-
-    @staticmethod
     async def handle_successful_payment(
         session: AsyncSession,
         payment_id: int,
@@ -330,6 +275,18 @@ class PaymentService:
 
                 user = payment.user
                 tariff = payment.tariff
+
+                # ── ДОБАВЛЕНО: FOR UPDATE fallback при Redis down ──
+                # Если Redis lock не был получен, блокируем строку
+                # User в БД, чтобы два одновременных платежа
+                # не дали дубль referral bonus.
+                if not acquired:
+                    from sqlalchemy import select as sa_select
+                    await session.execute(
+                        sa_select(User.id)
+                        .where(User.id == user.id)
+                        .with_for_update()
+                    )
 
                 manual_review_reason = None
                 duration_days = _get_payment_snapshot_duration(payment)
@@ -453,10 +410,10 @@ class PaymentService:
                     queue_post_commit_task(
                         session,
                         lambda tid=user.telegram_id,
-                        tn=tariff_display,
-                        vu=valid_until_str: (
-                            _notify_payment_success(tid, tn, vu)
-                        ),
+                              tn=tariff_display,
+                              vu=valid_until_str: (
+                                  _notify_payment_success(tid, tn, vu)
+                              ),
                     )
 
                 try:

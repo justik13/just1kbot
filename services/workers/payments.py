@@ -19,11 +19,6 @@ _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 
 PAYMENTS_START_DELAY = 60.0
 
-# Порог для очистки pending-платежей без external_id.
-# Если платёж создан локально, но YooKassa-платёж не был создан
-# (например, бот упал между create_payment и YooKassa API),
-# такой платёж никогда не будет обработан webhook'ом.
-# Через 1 час помечаем его как failed.
 ORPHAN_PENDING_THRESHOLD_HOURS = 1
 
 
@@ -89,13 +84,6 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
 
 
 async def _cleanup_orphan_pending_payments():
-    """
-    Очищает pending-платежи, у которых нет external_id.
-    Такие платежи были созданы локально, но YooKassa-платёж
-    не был создан (бот упал, timeout, и т.д.).
-    Они никогда не будут обработаны webhook'ом, поэтому
-    через ORPHAN_PENDING_THRESHOLD_HOURS помечаем как failed.
-    """
     current_time = now_utc()
     threshold = current_time - timedelta(hours=ORPHAN_PENDING_THRESHOLD_HOURS)
 
@@ -134,6 +122,10 @@ async def _cleanup_orphan_pending_payments():
         logger.warning("Failed to cleanup orphan pending payments: %s", e)
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: requires_manual_review с external_id теперь
+# тоже перепроверяется через YooKassa API.
+# ──────────────────────────────────────────────────────────────
 async def _process_stale_payments(bot: Bot, settings):
     current_time = now_utc()
     threshold = current_time - timedelta(hours=1)
@@ -153,7 +145,11 @@ async def _process_stale_payments(bot: Bot, settings):
         )
         result = await session.execute(stmt)
         for payment, telegram_id in result.all():
-            if payment.external_id and payment.status == "pending":
+            # ── ИСПРАВЛЕНО: было только "pending" ──
+            if payment.external_id and payment.status in (
+                "pending",
+                "requires_manual_review",
+            ):
                 yookassa_payment_ids.append(payment.id)
 
     for payment_id in yookassa_payment_ids:

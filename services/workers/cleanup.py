@@ -28,7 +28,6 @@ CLEANUP_LOOP_INTERVAL = 900.0
 GRACE_PERIOD_HOURS = 48
 OLD_RECORDS_INTERVAL = 86400.0
 
-# ── ИСПРАВЛЕНО: 180 дней вместо 30 ──
 AUDIT_LOG_RETENTION_DAYS = 180
 
 _last_old_cleanup: float = 0.0
@@ -36,6 +35,7 @@ _last_old_cleanup: float = 0.0
 
 async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
     global _last_old_cleanup
+
     try:
         await asyncio.wait_for(
             shutdown_event.wait(), timeout=CLEANUP_START_DELAY,
@@ -114,6 +114,7 @@ async def _cleanup_expired_profiles_grace():
                 )
                 user_result = await session.execute(user_stmt)
                 user = user_result.scalar_one_or_none()
+
                 if user is None:
                     continue
                 if user.is_deleted:
@@ -134,6 +135,7 @@ async def _cleanup_expired_profiles_grace():
                 profiles = list(
                     profiles_result.scalars().all()
                 )
+
                 if not profiles:
                     continue
 
@@ -145,6 +147,7 @@ async def _cleanup_expired_profiles_grace():
                         background=True,
                     )
                 )
+
                 if deleted > 0:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
@@ -153,6 +156,7 @@ async def _cleanup_expired_profiles_grace():
                         "for user_id=%s (subscription_end=%s)",
                         deleted, user_id, user.subscription_end,
                     )
+
         except Exception as e:
             logger.error(
                 "Grace cleanup failed for user_id=%s: %s",
@@ -182,6 +186,7 @@ async def _queue_zombie_deletion(
             server_info.get("name"),
         )
         return
+
     try:
         async with session_scope() as session:
             pending = PendingAPIDeletion(
@@ -199,12 +204,14 @@ async def _queue_zombie_deletion(
             )
             session.add(pending)
             await session.flush()
+
             logger.warning(
                 "Queued zombie peer for pending deletion: "
                 "server=%s, peer=%s..., "
                 "reason=zombie_peer_cleanup_failed",
                 server_info["name"], peer_id[:16],
             )
+
     except Exception as e:
         logger.error(
             "Failed to queue zombie peer deletion: "
@@ -221,12 +228,14 @@ async def _cleanup_dangling_peers():
     async with session_scope() as session:
         servers_result = await session.execute(select(Server))
         servers = servers_result.scalars().all()
+
         result = await session.execute(
             select(VPNProfile.peer_id)
         )
         db_peer_ids = {
             row[0] for row in result.all() if row[0]
         }
+
         servers_data = [
             {
                 "api_url": s.api_url,
@@ -265,6 +274,7 @@ async def _cleanup_dangling_peers():
     for result in results:
         if isinstance(result, Exception):
             continue
+
         server_info, api_clients_list = result
         if not api_clients_list:
             continue
@@ -274,8 +284,10 @@ async def _cleanup_dangling_peers():
             client_name = (
                 api_client.clientName or api_client.name
             )
+
             if not client_name.startswith("tg_"):
                 continue
+
             if client_id in db_peer_ids:
                 continue
 
@@ -327,6 +339,7 @@ async def _cleanup_dangling_peers():
 
             deleted = False
             error_text = None
+
             try:
                 client = AmneziaClient(
                     server_info["api_url"],
@@ -363,13 +376,20 @@ async def _cleanup_dangling_peers():
                 )
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: после MAX_PENDING_ATTEMPTS запись НЕ удаляется.
+# Ставится attempts = -1 (failed_permanent).
+# Запись остаётся в БД для ручной проверки.
+# ──────────────────────────────────────────────────────────────
 async def _process_pending_deletions():
     pending_deletions_data = []
 
     async with session_scope() as session:
         current_time = now_utc()
+
         stmt = (
             select(PendingAPIDeletion)
+            .where(PendingAPIDeletion.attempts >= 0)
             .order_by(
                 PendingAPIDeletion.attempts.asc(),
                 PendingAPIDeletion.created_at,
@@ -392,12 +412,14 @@ async def _process_pending_deletions():
                     }
                 )
                 continue
+
             if deletion.last_attempt_at:
                 time_since_last = (
                     current_time - deletion.last_attempt_at
                 ).total_seconds()
                 if time_since_last < PENDING_RETRY_INTERVAL:
                     continue
+
             pending_deletions_data.append(
                 {
                     "id": deletion.id,
@@ -449,8 +471,10 @@ async def _process_pending_deletions():
             deletion_data["api_url"],
             deletion_data["api_key"],
         )
+
         deleted = False
         error_text = None
+
         try:
             deleted = await client.delete_user(
                 client_id=peer_id
@@ -462,6 +486,7 @@ async def _process_pending_deletions():
 
         async with session_scope() as session:
             current_time = now_utc()
+
             if deleted:
                 await session.execute(
                     delete(PendingAPIDeletion).where(
@@ -492,18 +517,23 @@ async def _process_pending_deletions():
                 )
                 fail_count += 1
 
+    # ── ИСПРАВЛЕНО: не удаляем, а ставим attempts = -1 ──
     if expired_ids:
         async with session_scope() as session:
             await session.execute(
-                delete(PendingAPIDeletion).where(
-                    PendingAPIDeletion.id.in_(expired_ids)
+                update(PendingAPIDeletion)
+                .where(PendingAPIDeletion.id.in_(expired_ids))
+                .values(
+                    attempts=-1,
+                    last_attempt_at=now_utc(),
+                    last_error="failed_permanent: max attempts reached",
                 )
             )
 
     if success_count > 0 or fail_count > 0 or expired_count > 0:
         logger.info(
             "Pending deletions processed: %s success, "
-            "%s fail, %s expired",
+            "%s fail, %s expired (kept as failed_permanent)",
             success_count, fail_count, expired_count,
         )
 
@@ -515,16 +545,18 @@ async def _process_pending_deletions():
             bot = get_bot_ref()
             if bot:
                 settings = get_settings()
+
                 alert_msg = (
                     "🚨 <b>Не удалось удалить устройства "
                     "на сервере</b>\n"
                     "━━━━━━━━━━━━━━━━━━━━\n"
                     f"<b>{expired_count}</b> записей достигли "
                     f"лимита попыток.\n"
-                    "Они удалены из очереди, но могли "
-                    "остаться на сервере.\n"
+                    "Записи сохранены как failed_permanent.\n"
+                    "Пиры могли остаться на сервере.\n"
                     "<i>Требуется ручная проверка.</i>"
                 )
+
                 for admin_id in settings.ADMIN_IDS:
                     try:
                         await bot.send_message(
@@ -533,6 +565,7 @@ async def _process_pending_deletions():
                         )
                     except Exception:
                         pass
+
         except Exception as alert_error:
             logger.error(
                 "Failed to send pending deletion alert: %s",
@@ -562,7 +595,6 @@ async def _cleanup_old_records():
         )
         broadcasts_deleted = result_broadcasts.rowcount
 
-        # ── ИСПРАВЛЕНО: 180 дней вместо 30 ──
         deleted_logs = await clear_audit_logs(
             session,
             older_than_days=AUDIT_LOG_RETENTION_DAYS,

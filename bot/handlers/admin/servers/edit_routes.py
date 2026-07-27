@@ -3,13 +3,13 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from database.models import VPNProfile
+from database.models import PendingAPIDeletion, VPNProfile
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
@@ -340,6 +340,10 @@ async def start_edit_server_url(
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: при смене URL обновляются credentials
+# в PendingAPIDeletion для этого сервера.
+# ──────────────────────────────────────────────────────────────
 @router.message(AdminStates.editing_server_url)
 async def process_edit_server_url(
     message: Message,
@@ -490,6 +494,23 @@ async def process_edit_server_url(
 
     cleanup_server_circuit_breakers(old_url)
 
+    # ── ДОБАВЛЕНО: обновляем URL в pending deletions ──
+    try:
+        await session.execute(
+            update(PendingAPIDeletion)
+            .where(
+                PendingAPIDeletion.server_name == server.name,
+                PendingAPIDeletion.api_url == old_url,
+            )
+            .values(api_url=new_url)
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to update pending deletions URL "
+            "for server %s: %s",
+            server.name, e,
+        )
+
     await AuditService.log_action(
         session,
         message.from_user.id,
@@ -553,6 +574,10 @@ async def start_edit_server_key(
     )
 
 
+# ──────────────────────────────────────────────────────────────
+# ИСПРАВЛЕНО: при смене key обновляются credentials
+# в PendingAPIDeletion для этого сервера.
+# ──────────────────────────────────────────────────────────────
 @router.message(AdminStates.editing_server_key)
 async def process_edit_server_key(
     message: Message,
@@ -661,6 +686,22 @@ async def process_edit_server_key(
         return
 
     await update_server(session, server, api_key=new_key)
+
+    # ── ДОБАВЛЕНО: обновляем key в pending deletions ──
+    try:
+        await session.execute(
+            update(PendingAPIDeletion)
+            .where(
+                PendingAPIDeletion.server_name == server.name,
+            )
+            .values(api_key=new_key)
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to update pending deletions key "
+            "for server %s: %s",
+            server.name, e,
+        )
 
     await AuditService.log_action(
         session,
