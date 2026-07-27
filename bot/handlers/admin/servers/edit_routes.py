@@ -490,7 +490,6 @@ async def process_edit_server_url(
 
     cleanup_server_circuit_breakers(old_url)
 
-    # ── ДОБАВЛЕНО: обновляем URL в pending deletions ──
     try:
         await session.execute(
             update(PendingAPIDeletion)
@@ -679,7 +678,6 @@ async def process_edit_server_key(
 
     await update_server(session, server, api_key=new_key)
 
-    # ── ДОБАВЛЕНО: обновляем key в pending deletions ──
     try:
         await session.execute(
             update(PendingAPIDeletion)

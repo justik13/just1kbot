@@ -376,19 +376,12 @@ async def _cleanup_dangling_peers():
                 )
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: после MAX_PENDING_ATTEMPTS запись НЕ удаляется.
-# Ставится attempts = -1 (failed_permanent).
-# Запись остаётся в БД для ручной проверки.
-# Запрос выборки фильтрует attempts >= 0.
-# ──────────────────────────────────────────────────────────────
 async def _process_pending_deletions():
     pending_deletions_data = []
 
     async with session_scope() as session:
         current_time = now_utc()
 
-        # ── ИСПРАВЛЕНО: фильтр attempts >= 0 ──
         stmt = (
             select(PendingAPIDeletion)
             .where(PendingAPIDeletion.attempts >= 0)
@@ -519,7 +512,6 @@ async def _process_pending_deletions():
                 )
                 fail_count += 1
 
-    # ── ИСПРАВЛЕНО: не delete, а update attempts = -1 ──
     if expired_ids:
         async with session_scope() as session:
             await session.execute(

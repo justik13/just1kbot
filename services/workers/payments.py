@@ -141,7 +141,6 @@ async def _process_stale_payments(bot: Bot, settings):
         )
         result = await session.execute(stmt)
         for payment, telegram_id in result.all():
-            # ── ИСПРАВЛЕНО: было только "pending" ──
             if payment.external_id and payment.status in (
                 "pending",
                 "requires_manual_review",
