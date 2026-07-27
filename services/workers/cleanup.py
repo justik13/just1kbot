@@ -157,6 +157,22 @@ async def _cleanup_expired_profiles_grace():
                         deleted, user_id, user.subscription_end,
                     )
 
+                    # Уведомить пользователя об удалении устройств
+                    try:
+                        from services.workers.heartbeat import get_bot_ref
+                        bot = get_bot_ref()
+                        if bot:
+                            await bot.send_message(
+                                user.telegram_id,
+                                "⚠️ Ваши устройства были удалены из-за истечения подписки. "
+                                "Продлите доступ, чтобы создать новые.",
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to send grace cleanup notification to user %s: %s",
+                            user.telegram_id, e,
+                        )
+
         except Exception as e:
             logger.error(
                 "Grace cleanup failed for user_id=%s: %s",

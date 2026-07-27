@@ -544,6 +544,24 @@ class PaymentService:
                 if duration_days is None or device_limit is None:
                     return False, "Не найдены условия покупки"
 
+                # Проверка статуса в YooKassa для pending/failed платежей
+                if payment.status in {"pending", "failed"}:
+                    yookassa_data = await YooKassaService.get_payment(
+                        payment.transaction_id
+                    )
+                    if yookassa_data:
+                        yk_status = yookassa_data.get("status", "")
+                        if yk_status != "succeeded":
+                            return (
+                                False,
+                                f"⚠️ Деньги не подтверждены YooKassa (статус: {yk_status}). Точно выдать?",
+                            )
+                    else:
+                        return (
+                            False,
+                            "⚠️ Платёж не найден в YooKassa. Точно выдать?",
+                        )
+
                 payment.status = "completed"
                 if not payment.paid_at:
                     payment.paid_at = now_utc()
@@ -1336,6 +1354,24 @@ class PaymentService:
                                 e,
                                 exc_info=True,
                             )
+
+                    # Откат бонусных дней самого пользователя (referral_user_bonus_days)
+                    user_bonus = payment.referral_user_bonus_days or 0
+                    if user_bonus > 0 and user.subscription_end:
+                        old_user_subscription_end = user.subscription_end
+                        user.subscription_end = max(
+                            current_time,
+                            user.subscription_end
+                            - timedelta(days=user_bonus),
+                        )
+                        logger.info(
+                            "Chargeback: откат бонуса пользователя %s: "
+                            "%s дн. (%s → %s)",
+                            user.telegram_id,
+                            user_bonus,
+                            format_datetime(old_user_subscription_end),
+                            format_datetime(user.subscription_end),
+                        )
 
                     try:
                         await ProfileDeletionService.delete_profiles_for_user(

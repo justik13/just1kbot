@@ -39,8 +39,6 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    tos_accepted: Mapped[bool] = mapped_column(Boolean, default=True)
-
     subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
 
