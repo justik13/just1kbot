@@ -1,1 +1,4 @@
-Nothing needs to be added to the .gitignore file since the changes only include shell script files (.sh) which are source code files and should not be ignored.
+```
+__pycache__/
+*.pyc
+```

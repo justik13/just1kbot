@@ -49,7 +49,7 @@ async def hub_menu_payment(
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -82,7 +82,7 @@ async def show_tariff_showcase_callback(
     callback: CallbackQuery,
     session: AsyncSession,
 ) -> None:
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
@@ -122,7 +122,7 @@ async def select_tariff(
     }.get(source, "payment_showcase")
 
     if not db_user:
-        await callback.answer()
+        await callback.answer(show_alert=False)
 
         await render_hub(
             callback.bot,
@@ -135,7 +135,7 @@ async def select_tariff(
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
     ):
-        await callback.answer()
+        await callback.answer(show_alert=False)
         await _render_maintenance(callback, session, back_to=back_to)
         return
 
@@ -160,7 +160,7 @@ async def select_tariff(
             error_text,
             get_back_button(back_to),
         )
-        await callback.answer()
+        await callback.answer(show_alert=False)
         return
 
     tariff_name = get_tariff_display_name(device_limit)
@@ -180,7 +180,7 @@ async def select_tariff(
         ),
     )
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.in_(["payment_quick_renew", "payment_renew"]))
@@ -189,7 +189,7 @@ async def show_quick_renew(
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     if not db_user:
         await render_hub(
@@ -246,7 +246,7 @@ async def show_change_tariff(
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     if not db_user:
         await render_hub(
@@ -300,7 +300,7 @@ async def select_tariff_type(
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     parts = parse_callback_parts(callback.data, 2)
 

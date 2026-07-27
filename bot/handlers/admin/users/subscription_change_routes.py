@@ -55,7 +55,7 @@ async def admin_sub_change_tariff(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await _get_user_with_profiles(session, telegram_id)
 
@@ -139,7 +139,7 @@ async def admin_sub_select_group(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await _get_user_with_profiles(session, telegram_id)
 
@@ -273,7 +273,7 @@ async def admin_sub_apply_tariff(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         user = await _get_user_with_profiles(

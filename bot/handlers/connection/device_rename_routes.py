@@ -28,7 +28,7 @@ async def rename_device_start(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     profile_id = parse_callback_id(callback.data, 1)
 

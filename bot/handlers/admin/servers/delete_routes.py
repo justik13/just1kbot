@@ -51,7 +51,7 @@ async def request_delete_server(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     server = await get_server_by_id(session, server_id)
 
@@ -117,7 +117,7 @@ async def confirm_delete_server(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     server = await get_server_by_id(session, server_id)

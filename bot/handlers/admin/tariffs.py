@@ -154,7 +154,7 @@ async def show_tariffs_list(
 
     await state.clear()
     await _show_tariffs_list(callback, session, page=1)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("admin_tariffs_page:"))
@@ -180,7 +180,7 @@ async def tariffs_pagination(
 
     await state.clear()
     await _show_tariffs_list(callback, session, page=page)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 async def _show_tariff_card(
@@ -271,7 +271,7 @@ async def show_tariff_card(
         return
 
     await _show_tariff_card(callback, tariff)
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("admin_tariff_toggle:"))
@@ -348,7 +348,7 @@ async def toggle_tariff_confirm(
             f"toggle_tariff_confirm edit_text failed: {e}"
         )
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(
@@ -466,7 +466,7 @@ async def start_edit_tariff_rub(
             f"start_edit_tariff_rub edit_text failed: {e}"
         )
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
 
 @router.message(AdminStates.editing_tariff_rub)

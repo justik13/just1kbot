@@ -160,7 +160,7 @@ async def back_to_main_menu(
     db_user: User | None = None,
     session: AsyncSession = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:

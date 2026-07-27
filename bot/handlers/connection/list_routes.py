@@ -18,7 +18,7 @@ async def hub_menu_connections(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -42,7 +42,7 @@ async def back_to_connections(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:

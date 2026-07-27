@@ -45,7 +45,7 @@ async def show_server_card(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     server = await get_server_by_id(session, server_id)
@@ -82,7 +82,7 @@ async def toggle_server_confirm(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     server = await get_server_by_id(session, server_id)
@@ -144,7 +144,7 @@ async def toggle_server_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     server = await get_server_by_id(session, server_id)

@@ -44,7 +44,7 @@ async def show_users_list(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     total_users = await get_user_count(session)
@@ -99,7 +99,7 @@ async def users_pagination(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     total_users = await get_user_count(session)
@@ -147,7 +147,7 @@ async def start_search_user(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     try:
@@ -236,7 +236,7 @@ async def show_user_card(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     user = await _get_user_with_profiles(session, telegram_id)

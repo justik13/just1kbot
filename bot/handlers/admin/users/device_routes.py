@@ -48,7 +48,7 @@ async def admin_user_devices(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await _get_user_with_profiles(session, telegram_id)
     if not user:
@@ -121,7 +121,7 @@ async def admin_delete_device_confirm(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     profile = await get_profile_by_id(session, profile_id)
     if not profile:
@@ -192,7 +192,7 @@ async def admin_delete_device_apply(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         profile = await get_profile_by_id(session, profile_id)

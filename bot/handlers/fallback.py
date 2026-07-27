@@ -57,7 +57,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "dismiss_notification")
 async def dismiss_notification(callback: CallbackQuery):
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         await callback.message.delete()

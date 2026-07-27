@@ -25,7 +25,7 @@ async def show_servers_list(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await _show_servers_list(callback, session, page=1)
@@ -53,7 +53,7 @@ async def servers_pagination(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await _show_servers_list(callback, session, page=page)

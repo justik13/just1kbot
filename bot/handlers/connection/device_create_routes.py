@@ -104,7 +104,7 @@ async def start_add_device(
     user_id = callback.from_user.id
 
     if not await MaintenanceService.can_user_perform_action(session, user_id):
-        await callback.answer()
+        await callback.answer(show_alert=False)
         await _render_maintenance(callback.message, session, back_to="back_to_connections")
         return
 
@@ -121,10 +121,10 @@ async def start_add_device(
             texts.ERROR_NO_SUBSCRIPTION,
             _get_no_subscription_keyboard(),
         )
-        await callback.answer()
+        await callback.answer(show_alert=False)
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     servers = await get_available_servers(session)
@@ -170,7 +170,7 @@ async def select_server(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     if not await MaintenanceService.can_user_perform_action(session, callback.from_user.id):
         await _render_maintenance(callback.message, session, back_to="back_to_connections")

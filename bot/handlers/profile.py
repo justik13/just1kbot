@@ -129,7 +129,7 @@ async def hub_menu_profile(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -153,7 +153,7 @@ async def back_to_profile(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -177,7 +177,7 @@ async def show_history(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -227,7 +227,7 @@ async def show_referral(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -269,7 +269,7 @@ async def show_referrals_list(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:

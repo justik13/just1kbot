@@ -55,7 +55,7 @@ async def admin_sub_reduce_start(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     user = await get_user_by_telegram_id(session, telegram_id)
 
@@ -192,7 +192,7 @@ async def admin_sub_apply_reduce(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
 
     try:
         user = await get_user_by_telegram_id(

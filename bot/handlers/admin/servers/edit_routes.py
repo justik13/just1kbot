@@ -52,7 +52,7 @@ async def start_edit_server_name(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await state.update_data(
@@ -184,7 +184,7 @@ async def start_edit_server_flag(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     server = await get_server_by_id(session, server_id)
@@ -326,7 +326,7 @@ async def start_edit_server_url(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await state.update_data(server_id=server_id)
@@ -555,7 +555,7 @@ async def start_edit_server_key(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await state.update_data(server_id=server_id)
@@ -740,7 +740,7 @@ async def start_edit_server_max_clients(
         )
         return
 
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     await state.update_data(server_id=server_id)

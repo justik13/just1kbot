@@ -33,7 +33,7 @@ async def request_delete_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer()
+    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -77,7 +77,7 @@ async def cancel_delete_device(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    await callback.answer(texts.DEVICE_DELETE_CANCELLED)
+    await callback.answer(texts.DEVICE_DELETE_CANCELLED, show_alert=False)
 
     await render_hub(
         callback.bot,
@@ -113,7 +113,7 @@ async def confirm_delete_device(
     _deleting_devices[profile_id] = True
 
     try:
-        await callback.answer(texts.DEVICE_DELETING_PROGRESS)
+        await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
         await state.clear()
 
         if not await DeviceService.delete_device(
