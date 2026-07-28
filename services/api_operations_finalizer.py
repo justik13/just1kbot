@@ -4,13 +4,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy import func
 
 from database.connection import session_scope
 from database.models import APIOperation, Server, VPNProfile
 from services.api_operations_queue import (
     APIOperationOwnershipError,
+    calculate_retry_delay,
     enqueue_api_operation,
 )
+
+
+class CreateCompensationRequired(Exception):
+    """The external CREATE succeeded but its local profile disappeared."""
 
 
 async def _locked(session, operation_id, worker_id, attempt):
@@ -41,8 +47,7 @@ async def finalize_create_success(operation_id: int, *, worker_id: str,
         profile = (await session.execute(select(VPNProfile).where(
             VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
         if profile is None:
-            _complete(operation, "cancelled", "profile_missing_after_create")
-            return
+            raise CreateCompensationRequired()
         if profile.provisioning_status == "deleting":
             raise RuntimeError("create_cancel_requested")
         if profile.provisioning_status not in {"pending_create", "active"}:
@@ -87,18 +92,90 @@ async def finalize_create_cancelled(operation_id: int, *, worker_id: str,
 
 async def finalize_update_success(operation_id: int, *, worker_id: str,
         expected_attempt_number: int, sent_version: int, sent_is_active: bool,
-        sent_expires_at: datetime | None, session_factory=None) -> None:
+        sent_expires_at: datetime | None, sent_clear_expires_at: bool = False,
+        session_factory=None) -> None:
     async with _scope(session_factory) as session:
         operation = await _locked(session, operation_id, worker_id, expected_attempt_number)
         profile = (await session.execute(select(VPNProfile).where(
             VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
         if profile:
             profile.actual_is_active = sent_is_active
-            profile.actual_expires_at = sent_expires_at
+            if sent_is_active or sent_clear_expires_at:
+                profile.actual_expires_at = sent_expires_at
             profile.last_synced_at = datetime.now(timezone.utc)
             profile.last_sync_error = None
-            profile.provisioning_status = "active" if profile.desired_version == sent_version else "pending_update"
+            if profile.provisioning_status not in {"deleting", "delete_failed"}:
+                profile.provisioning_status = "active" if profile.desired_version == sent_version else "pending_update"
         _complete(operation)
+
+
+async def finalize_operation_failure(operation_id: int, *, worker_id: str,
+        expected_attempt_number: int, retryable: bool, error_code: str,
+        error_message: str, session_factory=None) -> str:
+    """Atomically release/dead-letter a lease and synchronize profile state."""
+    async with _scope(session_factory) as session:
+        operation = await _locked(session, operation_id, worker_id, expected_attempt_number)
+        profile = None
+        if operation.profile_id:
+            profile = (await session.execute(select(VPNProfile).where(
+                VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
+        should_retry = retryable and operation.attempts < operation.max_attempts
+        operation.status = "retry" if should_retry else "dead"
+        operation.next_attempt_at = (func.now() + calculate_retry_delay(operation.attempts)
+                                     if should_retry else operation.next_attempt_at)
+        operation.completed_at = None if should_retry else func.now()
+        operation.updated_at = func.now()
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = (error_code or "unknown_error")[:100]
+        operation.last_error = error_message[:2000]
+        if profile:
+            profile.last_sync_error = error_message[:2000]
+            if not should_retry:
+                if operation.operation_type == "create_peer":
+                    cleanup = bool(operation.peer_id) or error_code in {
+                        "create_ambiguous_reconcile", "invalid_created_config_cleanup",
+                        "duplicate_exact_client_name", "create_compensation_required",
+                    }
+                    profile.provisioning_status = "create_cleanup_pending" if cleanup else "create_failed"
+                elif operation.operation_type == "update_peer" and profile.provisioning_status not in {"deleting", "delete_failed"}:
+                    profile.provisioning_status = "update_failed"
+                elif operation.operation_type == "delete_peer":
+                    profile.provisioning_status = "delete_failed"
+        return operation.status
+
+
+async def prepare_create_cleanup(operation_id: int, *, worker_id: str,
+        expected_attempt_number: int, peer_id: str, error_code: str,
+        retryable: bool, session_factory=None) -> str:
+    """Persist the exact peer to clean before releasing the CREATE lease."""
+    async with _scope(session_factory) as session:
+        operation = await _locked(session, operation_id, worker_id, expected_attempt_number)
+        operation.peer_id = peer_id
+        profile = (await session.execute(select(VPNProfile).where(
+            VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
+        if profile:
+            profile.provisioning_status = "create_cleanup_pending"
+            profile.last_sync_error = error_code
+        should_retry = retryable and operation.attempts < operation.max_attempts
+        operation.status = "retry" if should_retry else "dead"
+        operation.next_attempt_at = func.now() + calculate_retry_delay(operation.attempts)
+        operation.completed_at = None if should_retry else func.now()
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = error_code
+        return operation.status
+
+
+async def finalize_create_cleanup(operation_id: int, *, worker_id: str,
+        expected_attempt_number: int, reason: str,
+        session_factory=None) -> None:
+    async with _scope(session_factory) as session:
+        operation = await _locked(session, operation_id, worker_id, expected_attempt_number)
+        profile = (await session.execute(select(VPNProfile).where(
+            VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
+        if profile:
+            profile.provisioning_status = "create_failed"
+            profile.last_sync_error = reason
+        _complete(operation, "cancelled", reason)
 
 
 async def finalize_delete_success(operation_id: int, *, worker_id: str,

@@ -1,5 +1,6 @@
 import logging
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,12 +9,13 @@ from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import APIOperation, Server, User, VPNProfile
 from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
 from services.audit_service import AuditService
-from services.slots_cache import get_real_peer_count
+from database.connection import session_scope
+from services.amnezia_client import AmneziaClient
 from utils.admin import is_admin
 from utils.datetime_helpers import is_expired, now_msk
 
 logger = logging.getLogger(__name__)
-RESERVING_STATUSES = ("pending_create", "active", "pending_update", "deleting", "delete_failed")
+RESERVING_STATUSES = ("pending_create", "active", "pending_update", "deleting", "delete_failed", "create_cleanup_pending")
 
 class DeviceCreationError(Exception): pass
 class NoActiveSubscription(DeviceCreationError): pass
@@ -22,6 +24,25 @@ class DeviceLimitExceeded(DeviceCreationError): pass
 class ServerUnavailable(DeviceCreationError): pass
 class InvalidConfig(DeviceCreationError): pass
 class DeviceStillCreating(DeviceCreationError): pass
+
+@dataclass(frozen=True)
+class ServerPeerSnapshot:
+    server_id: int
+    peer_ids: frozenset[str]
+    captured_at: datetime
+
+async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
+    """Perform capacity HTTP without using or locking the caller's session."""
+    async with session_scope() as read_session:
+        server = await read_session.get(Server, server_id)
+        if not server:
+            raise ServerUnavailable("Invalid server")
+        endpoint = (server.api_url, server.api_key)
+    clients = await AmneziaClient(*endpoint).get_all_clients()
+    if clients is None:
+        raise ServerUnavailable("Cannot verify server slots")
+    return ServerPeerSnapshot(server_id, frozenset(item.id for item in clients),
+                              datetime.now(timezone.utc))
 
 async def close_redis() -> None:
     return None
@@ -33,12 +54,9 @@ class DeviceService:
     @staticmethod
     async def create_device(session: AsyncSession, user: User, server_id: int,
                             device_name: str) -> VPNProfile:
-        endpoint = await session.get(Server, server_id)
-        if not endpoint:
-            raise ServerUnavailable("Invalid server")
-        real_total = await get_real_peer_count(endpoint, force_refresh=True)
-        if real_total < 0:
-            raise ServerUnavailable("Cannot verify server slots")
+        snapshot = await capture_server_peer_snapshot(server_id)
+        if snapshot.server_id != server_id or datetime.now(timezone.utc) - snapshot.captured_at > timedelta(minutes=5):
+            raise ServerUnavailable("Server capacity snapshot is stale")
         user = (await session.execute(select(User).where(User.id == user.id).with_for_update())).scalar_one()
         server = (await session.execute(select(Server).where(Server.id == server_id).with_for_update())).scalar_one_or_none()
         if not server or server.protocol != AMNEZIA_PROTOCOL or not server.is_active:
@@ -57,10 +75,10 @@ class DeviceService:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (await session.execute(select(func.count(VPNProfile.id)).where(
             VPNProfile.server_id == server.id, VPNProfile.provisioning_status.in_(RESERVING_STATUSES)))).scalar_one()
-        externalized = (await session.execute(select(func.count(VPNProfile.id)).where(
-            VPNProfile.server_id == server.id, VPNProfile.peer_id.is_not(None)))).scalar_one()
-        manual_estimate = max(0, real_total - externalized)
-        if manual_estimate + server_count >= server.max_clients:
+        bot_peer_ids = frozenset((await session.execute(select(VPNProfile.peer_id).where(
+            VPNProfile.server_id == server.id, VPNProfile.peer_id.is_not(None)))).scalars().all())
+        manual_peer_ids = snapshot.peer_ids - bot_peer_ids
+        if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
         profile = VPNProfile(user_id=user.id, server_id=server.id, device_name=device_name,
             peer_id=None, raw_config=None, provisioning_status="pending_create",

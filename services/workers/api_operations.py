@@ -5,9 +5,9 @@ from datetime import timedelta
 
 from services.api_operations_executor import execute_claimed_api_operation
 from services.api_operations_queue import (
-    claim_api_operations, mark_api_operation_failed,
-    recover_stale_api_operations,
+    claim_api_operations, recover_stale_api_operations,
 )
+from services.api_operations_finalizer import finalize_operation_failure
 
 logger = logging.getLogger(__name__)
 PROCESS_ID = uuid.uuid4()
@@ -26,7 +26,7 @@ async def api_operations_loop(shutdown_event: asyncio.Event) -> None:
             logger.exception("operation failed operation_id=%s type=%s error=%s",
                              operation.id, operation.operation_type, type(error).__name__)
             try:
-                await mark_api_operation_failed(operation.id,
+                await finalize_operation_failure(operation.id,
                     worker_id=operation.locked_by,
                     expected_attempt_number=operation.attempt_number,
                     retryable=True, error_code="executor_exception",

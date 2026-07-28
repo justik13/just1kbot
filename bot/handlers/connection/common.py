@@ -170,6 +170,7 @@ async def _build_connections_screen(
             labels = {
                 "pending_create": "создаётся", "pending_update": "обновляется",
                 "deleting": "удаляется", "create_failed": "ошибка создания",
+                "create_cleanup_pending": "очистка после ошибки создания",
                 "update_failed": "ошибка обновления", "delete_failed": "ошибка удаления",
             }
             if profile.provisioning_status in labels:

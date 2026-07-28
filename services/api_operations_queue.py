@@ -257,21 +257,17 @@ async def claim_api_operations(
         from sqlalchemy import func
 
         now = func.now()
-        await session.execute(
-            update(APIOperation)
-            .where(
-                APIOperation.status.in_(("pending", "retry")),
-                APIOperation.attempts >= APIOperation.max_attempts,
-            )
-            .values(
-                status="dead",
-                completed_at=now,
-                updated_at=now,
-                last_error_code="max_attempts_exhausted",
-                locked_at=None,
-                locked_by=None,
-            )
-        )
+        exhausted = (await session.execute(select(APIOperation).where(
+            APIOperation.status.in_(("pending", "retry")),
+            APIOperation.attempts >= APIOperation.max_attempts,
+        ).with_for_update(skip_locked=True))).scalars().all()
+        for operation in exhausted:
+            operation.status = "dead"
+            operation.completed_at = now
+            operation.updated_at = now
+            operation.last_error_code = "max_attempts_exhausted"
+            operation.locked_at = operation.locked_by = None
+            await _sync_terminal_profile(session, operation)
         operations = (
             await session.execute(
                 select(APIOperation)
@@ -471,5 +467,27 @@ async def recover_stale_api_operations(
                 operation.status = "dead"
                 operation.completed_at = func.now()
                 operation.last_error_code = "stale_lease_max_attempts"
+                await _sync_terminal_profile(session, operation)
                 dead += 1
     return retried, dead
+
+
+async def _sync_terminal_profile(session: AsyncSession, operation: APIOperation) -> None:
+    if not operation.profile_id:
+        return
+    profile = (await session.execute(select(VPNProfile).where(
+        VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
+    if not profile:
+        return
+    if operation.operation_type == "create_peer":
+        profile.provisioning_status = (
+            "create_cleanup_pending" if operation.peer_id or operation.last_error_code in {
+                "create_ambiguous_reconcile", "invalid_created_config_cleanup",
+                "create_compensation_required", "duplicate_exact_client_name",
+            } else "create_failed"
+        )
+    elif operation.operation_type == "update_peer" and profile.provisioning_status not in {"deleting", "delete_failed"}:
+        profile.provisioning_status = "update_failed"
+    elif operation.operation_type == "delete_peer":
+        profile.provisioning_status = "delete_failed"
+    profile.last_sync_error = operation.last_error_code

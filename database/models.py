@@ -161,7 +161,8 @@ class VPNProfile(Base):
     __table_args__ = (
         CheckConstraint(
             "provisioning_status IN ('pending_create', 'active', 'pending_update', "
-            "'deleting', 'create_failed', 'update_failed', 'delete_failed')",
+            "'deleting', 'create_failed', 'create_cleanup_pending', "
+            "'update_failed', 'delete_failed')",
             name="ck_vpn_profiles_provisioning_status",
         ),
         CheckConstraint("desired_version > 0", name="ck_vpn_profiles_desired_version_positive"),

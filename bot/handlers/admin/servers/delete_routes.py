@@ -53,8 +53,7 @@ async def request_delete_server(
 
     await callback.answer(show_alert=False)
 
-    server = (await session.execute(select(Server).where(
-        Server.id == server_id).with_for_update())).scalar_one_or_none()
+    server = await get_server_by_id(session, server_id)
 
     if not server:
         await callback.answer(
@@ -121,7 +120,10 @@ async def confirm_delete_server(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    server = await get_server_by_id(session, server_id)
+    # First database action in the destructive confirmation transaction: this
+    # serializes against DeviceService.create_device's identical server lock.
+    server = (await session.execute(select(Server).where(
+        Server.id == server_id).with_for_update())).scalar_one_or_none()
 
     if not server:
         await callback.answer(

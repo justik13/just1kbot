@@ -11,12 +11,13 @@ from database.models import Server, VPNProfile
 from services.amnezia_client import AmneziaClient
 from services.api_operations_queue import (
     ClaimedAPIOperation, mark_api_operation_cancelled,
-    mark_api_operation_failed, mark_api_operation_succeeded,
 )
 from services.api_operations_finalizer import (
+    CreateCompensationRequired,
     finalize_create_cancelled, finalize_create_success,
+    finalize_create_cleanup, finalize_operation_failure,
     finalize_delete_success, finalize_existing_create_success,
-    finalize_update_success,
+    finalize_update_success, prepare_create_cleanup,
 )
 from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
@@ -28,7 +29,7 @@ def _error_code(result) -> str:
 
 
 async def _fail(op, *, retryable: bool, code: str, message: str = ""):
-    await mark_api_operation_failed(op.id, worker_id=op.locked_by,
+    await finalize_operation_failure(op.id, worker_id=op.locked_by,
         expected_attempt_number=op.attempt_number, retryable=retryable,
         error_code=code, error_message=message or code)
 
@@ -41,21 +42,11 @@ async def _client(op):
     return AmneziaClient(url, key) if url and key else None
 
 
-async def _set_profile_failure(op, status: str, error: str):
-    if not op.profile_id:
-        return
-    async with session_scope() as session:
-        profile = await session.get(VPNProfile, op.profile_id, with_for_update=True)
-        if profile:
-            profile.provisioning_status = status
-            profile.last_sync_error = error[:2000]
-
-
 async def _execute_create(op, client):
-    if not op.profile_id or not op.client_name:
+    if not op.client_name:
         return await _fail(op, retryable=False, code="configuration")
     async with session_scope() as session:
-        profile = await session.get(VPNProfile, op.profile_id)
+        profile = await session.get(VPNProfile, op.profile_id) if op.profile_id else None
         if profile is None:
             profile_state = "missing"
         else:
@@ -65,9 +56,14 @@ async def _execute_create(op, client):
             sent_expires = profile.desired_expires_at
             existing_peer_id = profile.peer_id
             has_config = bool(profile.raw_config)
+    needs_reconciliation = (
+        profile_state in {"missing", "deleting", "create_cleanup_pending"}
+        or op.attempt_number > 1 or bool(op.peer_id)
+        or op.last_error_code in {"create_ambiguous_reconcile", "invalid_created_config_cleanup"}
+    )
     # Every repeat is reconciled.  This also covers a crash after HTTP success
     # but before the database finalization commit.
-    if op.attempt_number > 1 or op.last_error_code == "create_ambiguous_reconcile":
+    if needs_reconciliation:
         clients = await client.get_all_clients()
         if clients is None:
             return await _fail(op, retryable=True, code="create_reconciliation_unavailable")
@@ -75,6 +71,15 @@ async def _execute_create(op, client):
         if len(exact) > 1:
             logger.critical("duplicate exact client name for operation_id=%s", op.id)
             return await _fail(op, retryable=False, code="duplicate_exact_client_name")
+        if profile_state == "create_cleanup_pending":
+            if exact:
+                deleted = await client.delete_user_result(exact[0].id)
+                if not deleted.ok:
+                    return await _fail(op, retryable=deleted.retryable,
+                        code="invalid_created_config_cleanup")
+            return await finalize_create_cleanup(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number,
+                reason="invalid_created_config_cleaned")
         if profile_state == "active" and exact and exact[0].id == existing_peer_id and has_config:
             return await finalize_existing_create_success(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number)
@@ -98,6 +103,10 @@ async def _execute_create(op, client):
         return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number, reason=f"profile_{profile_state}",
             delete_profile=True)
+    if not sent_active:
+        return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
+            expected_attempt_number=op.attempt_number,
+            reason="desired_access_inactive", delete_profile=True)
     if profile_state != "pending_create":
         return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
@@ -112,23 +121,32 @@ async def _execute_create(op, client):
                  and build_conf_file(created.config))
     if not valid:
         cleanup = await client.delete_user_result(created.id) if created and created.id else None
-        await _set_profile_failure(op, "create_failed", "invalid configuration from API")
-        return await _fail(op, retryable=bool(cleanup and not cleanup.ok and cleanup.retryable),
-                           code="invalid_created_config")
+        if cleanup and cleanup.ok:
+            return await finalize_create_cleanup(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number,
+                reason="invalid_created_config_cleaned")
+        if created and created.id:
+            return await prepare_create_cleanup(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number, peer_id=created.id,
+                error_code="invalid_created_config_cleanup", retryable=True)
+        return await _fail(op, retryable=False, code="invalid_created_config")
     try:
         await finalize_create_success(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number, peer_id=created.id,
             raw_config=created.config, sent_desired_version=sent_version,
-            sent_is_active=sent_active, sent_expires_at=expires)
-    except RuntimeError as error:
-        if str(error) != "create_cancel_requested":
+            sent_is_active=True, sent_expires_at=expires)
+    except (RuntimeError, CreateCompensationRequired) as error:
+        compensation = isinstance(error, CreateCompensationRequired)
+        if not compensation and str(error) != "create_cancel_requested":
             raise
         cleanup = await client.delete_user_result(created.id)
         if not cleanup.ok:
-            return await _fail(op, retryable=cleanup.retryable, code=_error_code(cleanup))
+            return await prepare_create_cleanup(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number, peer_id=created.id,
+                error_code="create_compensation_required", retryable=True)
         await finalize_create_cancelled(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number,
-            reason="create_cancelled_after_post", delete_profile=True)
+            reason="create_compensated_after_post", delete_profile=True)
 
 
 async def _execute_update(op, client):
@@ -137,7 +155,7 @@ async def _execute_update(op, client):
         if not profile or op.payload.get("desired_version") != profile.desired_version:
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="stale_desired_version")
-        if profile.provisioning_status in {"pending_create", "deleting", "create_failed", "delete_failed"}:
+        if profile.provisioning_status in {"pending_create", "create_failed", "create_cleanup_pending"}:
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="profile_not_updatable")
     sent_version = op.payload.get("desired_version")
@@ -147,14 +165,13 @@ async def _execute_update(op, client):
     result = await client.update_client_result(op.peer_id, status=sent_status,
         expires_at=sent_expires, clear_expires_at=sent_clear)
     if not result.ok:
-        if not result.retryable:
-            await _set_profile_failure(op, "update_failed", _error_code(result))
         return await _fail(op, retryable=result.retryable, code=_error_code(result))
     sent_expires_dt = (datetime.fromtimestamp(sent_expires, timezone.utc)
                        if sent_expires is not None else None)
     await finalize_update_success(op.id, worker_id=op.locked_by,
         expected_attempt_number=op.attempt_number, sent_version=sent_version,
-        sent_is_active=sent_status != "disabled", sent_expires_at=sent_expires_dt)
+        sent_is_active=sent_status != "disabled", sent_expires_at=sent_expires_dt,
+        sent_clear_expires_at=sent_clear)
 
 
 async def _execute_delete(op, client):
@@ -162,7 +179,6 @@ async def _execute_delete(op, client):
         return await _fail(op, retryable=False, code="unmanaged_delete_forbidden")
     result = await client.delete_user_result(op.peer_id)
     if not result.ok:
-        await _set_profile_failure(op, "delete_failed", _error_code(result))
         return await _fail(op, retryable=result.retryable, code=_error_code(result))
     await finalize_delete_success(op.id, worker_id=op.locked_by,
                                   expected_attempt_number=op.attempt_number)

@@ -12,11 +12,27 @@ class ProfileDeletionService:
         return await ProfileDeletionService._delete_profiles(session, profiles, reason=reason, background=background)
     @staticmethod
     async def delete_profiles_list(session: AsyncSession, profiles: list, *, reason: str, background: bool=True) -> int:
-        return await ProfileDeletionService._delete_profiles(session, profiles, reason=reason, background=background)
+        profile_ids = [profile.id for profile in profiles if getattr(profile, "id", None)]
+        if not profile_ids:
+            return 0
+        current = list((await session.execute(select(VPNProfile).where(
+            VPNProfile.id.in_(profile_ids)).with_for_update())).scalars().all())
+        return await ProfileDeletionService._delete_profiles(session, current, reason=reason, background=background)
     @staticmethod
     async def _delete_profiles(session, profiles, *, reason, background):
         count = 0
         for profile in profiles:
+            if profile.provisioning_status == "create_cleanup_pending":
+                create = (await session.execute(select(APIOperation).where(
+                    APIOperation.profile_id == profile.id,
+                    APIOperation.operation_type == "create_peer").with_for_update())).scalar_one_or_none()
+                if create and create.status in {"dead", "cancelled"}:
+                    create.status = "retry"
+                    create.attempts = 0
+                    create.completed_at = None
+                    create.last_error_code = "cleanup_requeued_by_deletion"
+                count += 1
+                continue
             if profile.provisioning_status == "pending_create":
                 profile.desired_is_active = False
                 profile.is_active = False
@@ -29,6 +45,8 @@ class ProfileDeletionService:
                     create.completed_at = __import__("utils.datetime_helpers", fromlist=["now_utc"]).now_utc()
                     create.locked_at = create.locked_by = None
                     create.last_error_code = "create_cancelled_by_deletion"
+                    await session.delete(profile)
+                elif create and create.status in {"dead", "cancelled"} and not create.peer_id:
                     await session.delete(profile)
                 # A processing CREATE observes `deleting` before/after POST and
                 # owns the exact-peer cleanup and local profile removal.

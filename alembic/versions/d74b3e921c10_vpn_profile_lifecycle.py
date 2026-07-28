@@ -11,7 +11,7 @@ down_revision = "6f8c2d31a9b4"
 branch_labels = None
 depends_on = None
 
-STATUSES = "'pending_create','active','pending_update','deleting','create_failed','update_failed','delete_failed'"
+STATUSES = "'pending_create','active','pending_update','deleting','create_failed','create_cleanup_pending','update_failed','delete_failed'"
 ALLOWLIST = "'device_delete_api_failed','create_device_rollback_failed','ban_delete','chargeback_delete','grace_delete','server_delete'"
 
 
