@@ -167,6 +167,13 @@ async def _build_connections_screen(
                 server_name,
                 last_connected_text,
             )
+            labels = {
+                "pending_create": "создаётся", "pending_update": "обновляется",
+                "deleting": "удаляется", "create_failed": "ошибка создания",
+                "update_failed": "ошибка обновления", "delete_failed": "ошибка удаления",
+            }
+            if profile.provisioning_status in labels:
+                rendered += f"\n⏳ Статус: {labels[profile.provisioning_status]}\n"
 
     if not read_only and profiles_count < device_limit:
         builder.button(

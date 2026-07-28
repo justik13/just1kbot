@@ -159,7 +159,16 @@ class VPNProfile(Base):
     __tablename__ = "vpn_profiles"
 
     __table_args__ = (
-        Index("uq_vpn_profiles_peer_id", "peer_id", unique=True),
+        CheckConstraint(
+            "provisioning_status IN ('pending_create', 'active', 'pending_update', "
+            "'deleting', 'create_failed', 'update_failed', 'delete_failed')",
+            name="ck_vpn_profiles_provisioning_status",
+        ),
+        CheckConstraint("desired_version > 0", name="ck_vpn_profiles_desired_version_positive"),
+        Index(
+            "uq_vpn_profiles_server_peer_id_not_null", "server_id", "peer_id",
+            unique=True, postgresql_where=text("peer_id IS NOT NULL"),
+        ),
         Index(
             "uq_vpn_profiles_user_server_device_name",
             "user_id",
@@ -186,15 +195,30 @@ class VPNProfile(Base):
     )
 
     device_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    peer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    peer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    raw_config: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
+    raw_config: Mapped[str | None] = mapped_column(EncryptedString(critical=True), nullable=True)
 
     traffic_down: Mapped[int] = mapped_column(BigInteger, default=0)
     traffic_up: Mapped[int] = mapped_column(BigInteger, default=0)
 
     last_connected: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    provisioning_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="active", server_default=text("'active'")
+    )
+    desired_is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    actual_is_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    desired_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    actual_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    desired_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 

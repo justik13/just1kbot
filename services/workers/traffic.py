@@ -388,41 +388,7 @@ async def _send_quota_alert(
 
 
 async def _self_heal_peers(healing_tasks: list):
-    if not healing_tasks:
-        return
-    if len(healing_tasks) > SELF_HEALING_MAX_PER_CYCLE:
-        healing_tasks = healing_tasks[:SELF_HEALING_MAX_PER_CYCLE]
-
-    sem = asyncio.Semaphore(10)
-    success_count = 0
-    fail_count = 0
-
-    async def _patch_peer(task):
-        nonlocal success_count, fail_count
-        async with sem:
-            client = AmneziaClient(task["api_url"], task["api_key"])
-            try:
-                result = await client.update_client(
-                    client_id=task["peer_id"],
-                    status=task["target_status"],
-                    expires_at=task.get("expires_at"),
-                    clear_expires_at=task.get("clear_expires_at", False),
-                )
-                if result:
-                    success_count += 1
-                else:
-                    fail_count += 1
-            except Exception as e:
-                fail_count += 1
-                logger.error("Self-healing error: %s", e)
-
-    await asyncio.gather(
-        *[_patch_peer(t) for t in healing_tasks],
-        return_exceptions=True,
-    )
-    if success_count > 0 or fail_count > 0:
-        logger.info(
-            "Self-healing completed: %s success, %s fail",
-            success_count,
-            fail_count,
-        )
+    # Desired-state writes are produced by SubscriptionService.  Traffic is
+    # deliberately read-only and must never patch peers.
+    if healing_tasks:
+        logger.warning("Skipped %s legacy traffic self-heal writes", len(healing_tasks))

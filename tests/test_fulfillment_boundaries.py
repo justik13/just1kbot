@@ -1,0 +1,37 @@
+import ast
+import unittest
+from pathlib import Path
+from database.models import VPNProfile
+
+ROOT = Path(__file__).parents[1]
+PRODUCTION = (
+    "services/device_service.py", "services/subscription.py",
+    "services/profile_deletion_service.py", "services/workers/cleanup.py",
+)
+WRITES = {"create_user", "create_user_result", "update_client", "update_client_result", "delete_user", "delete_user_result"}
+
+class FulfillmentBoundaryTests(unittest.TestCase):
+    def test_business_services_do_not_call_amnezia_writes(self):
+        for relative in PRODUCTION:
+            tree = ast.parse((ROOT / relative).read_text())
+            calls = {node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
+            self.assertFalse(calls & WRITES, relative)
+
+    def test_executor_is_the_only_service_write_boundary(self):
+        found = set()
+        for path in (ROOT / "services").rglob("*.py"):
+            if path.name == "amnezia_client.py":
+                continue
+            tree = ast.parse(path.read_text())
+            if any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in WRITES for node in ast.walk(tree)):
+                found.add(str(path.relative_to(ROOT)))
+        # Traffic remains read/usage code and is deliberately not part of the
+        # user lifecycle boundary; it will be migrated independently.
+        self.assertIn("services/api_operations_executor.py", found)
+        self.assertNotIn("services/device_service.py", found)
+        self.assertNotIn("services/subscription.py", found)
+
+    def test_profile_lifecycle_constraints(self):
+        constraints = {item.name for item in VPNProfile.__table__.constraints}
+        self.assertIn("ck_vpn_profiles_provisioning_status", constraints)
+        self.assertIn("ck_vpn_profiles_desired_version_positive", constraints)

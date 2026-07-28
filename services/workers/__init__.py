@@ -8,6 +8,7 @@ from .notifications import subscription_notifications_loop
 from .cleanup import cleanup_dangling_peers_loop
 from .payments import stale_payments_checker_loop
 from .heartbeat import heartbeat_loop, set_bot_ref
+from .api_operations import api_operations_loop
 
 from config.settings import get_settings
 
@@ -46,6 +47,9 @@ def _notifications_worker_factory(bot: Bot):
 def _heartbeat_worker_factory(bot: Bot):
     return heartbeat_loop(shutdown_event)
 
+def _api_operations_worker_factory(bot: Bot):
+    return api_operations_loop(shutdown_event)
+
 
 _WORKER_FACTORIES = {
     "traffic": _traffic_worker_factory,
@@ -53,6 +57,7 @@ _WORKER_FACTORIES = {
     "stale_payments": _stale_payments_worker_factory,
     "notifications": _notifications_worker_factory,
     "heartbeat": _heartbeat_worker_factory,
+    "api_operations": _api_operations_worker_factory,
 }
 
 
@@ -269,6 +274,7 @@ async def _supervise_workers(bot: Bot):
 async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
     global _supervisor_task
 
+    shutdown_event.clear()
     set_bot_ref(bot)
 
     _worker_tasks.clear()

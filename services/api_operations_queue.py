@@ -48,6 +48,8 @@ class ClaimedAPIOperation:
     attempt_number: int
     max_attempts: int
     locked_by: str
+    last_error_code: str | None
+    last_error: str | None
 
 
 SessionFactory = Callable[[], AsyncSession]
@@ -204,6 +206,8 @@ def _dto(operation: APIOperation) -> ClaimedAPIOperation:
         attempt_number=operation.attempts,
         max_attempts=operation.max_attempts,
         locked_by=operation.locked_by,
+        last_error_code=operation.last_error_code,
+        last_error=operation.last_error,
     )
 
 
@@ -297,6 +301,47 @@ async def mark_api_operation_succeeded(
         )
         if result.rowcount != 1:
             raise APIOperationOwnershipError("operation is not leased by this worker")
+
+
+async def mark_api_operation_cancelled(
+    operation_id: int, *, worker_id: str, expected_attempt_number: int,
+    reason: str, session_factory: SessionFactory | None = None,
+) -> None:
+    from sqlalchemy import func
+    _validate_expected_attempt_number(expected_attempt_number)
+    async with _transaction(session_factory) as session:
+        result = await session.execute(update(APIOperation).where(
+            APIOperation.id == operation_id, APIOperation.status == "processing",
+            APIOperation.locked_by == worker_id,
+            APIOperation.attempts == expected_attempt_number,
+        ).values(status="cancelled", completed_at=func.now(), updated_at=func.now(),
+                 locked_at=None, locked_by=None, last_error_code=reason[:100]))
+        if result.rowcount != 1:
+            raise APIOperationOwnershipError("operation is not leased by this worker")
+
+
+async def retry_dead_api_operation(
+    operation_id: int, *, reason: str, reset_attempts: bool,
+    session_factory: SessionFactory | None = None,
+) -> None:
+    """Administrative repair primitive; the reason is retained for audit."""
+    from sqlalchemy import func
+    if not reason.strip():
+        raise APIOperationValidationError("audit reason must not be empty")
+    async with _transaction(session_factory) as session:
+        operation = (await session.execute(select(APIOperation).where(
+            APIOperation.id == operation_id, APIOperation.status == "dead"
+        ).with_for_update())).scalar_one_or_none()
+        if operation is None:
+            raise APIOperationValidationError("only dead operations can be retried")
+        operation.status = "retry"
+        operation.next_attempt_at = func.now()
+        operation.completed_at = None
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = "manual_retry"
+        operation.last_error = reason[:2000]
+        if reset_attempts:
+            operation.attempts = 0
 
 
 async def mark_api_operation_failed(

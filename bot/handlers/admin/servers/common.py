@@ -135,56 +135,9 @@ async def _show_server_card(
 # ИСПРАВЛЕНО: ведём completed_peer_ids.
 # При timeout незавершённые пиры → failed, а не successful.
 # ──────────────────────────────────────────────────────────────
-async def _bulk_delete_peers_from_api(
-    profiles_data,
-    api_url: str,
-    api_key: str,
-) -> tuple[int, list[tuple[int, str]]]:
-    if not profiles_data:
-        return 0, []
-
-    client = AmneziaClient(api_url, api_key)
-    sem = asyncio.Semaphore(20)
-    fail = 0
-    failed_peers: list[tuple[int, str]] = []
-    completed_peer_ids: set[str] = set()
-    lock = asyncio.Lock()
-
-    async def _delete_limited(profile_id: int, peer_id: str):
-        nonlocal fail
-        async with sem:
-            ok = await client.delete_user(client_id=peer_id)
-            async with lock:
-                if ok:
-                    completed_peer_ids.add(peer_id)
-                else:
-                    fail += 1
-                    failed_peers.append((profile_id, peer_id))
-
-    try:
-        await asyncio.wait_for(
-            asyncio.gather(
-                *[
-                    _delete_limited(pid, peer)
-                    for pid, peer in profiles_data
-                ],
-                return_exceptions=True,
-            ),
-            timeout=300.0,
-        )
-    except asyncio.TimeoutError:
-        logger.error(
-            f"_bulk_delete_peers_from_api: timeout after 300s "
-            f"for {len(profiles_data)} peers"
-        )
-        # Всё, что не завершилось успешно → failed
-        for profile_id, peer_id in profiles_data:
-            if peer_id not in completed_peer_ids:
-                if (profile_id, peer_id) not in failed_peers:
-                    fail += 1
-                    failed_peers.append((profile_id, peer_id))
-
-    return fail, failed_peers
+async def _bulk_delete_peers_from_api(profiles_data, api_url: str, api_key: str):
+    """Compatibility shim: server deletion is now fulfilled by api_operations."""
+    return len(profiles_data), list(profiles_data)
 
 
 async def _delete_server_background(

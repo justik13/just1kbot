@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from database.connection import queue_post_commit_task
-from database.models import PendingAPIDeletion, VPNProfile
+from database.models import VPNProfile
+from services.api_operations_queue import enqueue_api_operation
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -165,24 +165,17 @@ async def confirm_delete_server(
         f"{server_name}: {deleted_profiles} profiles deleted",
     )
 
-    if profiles_data:
-        current_time = now_utc()
-
-        for profile_id, peer_id in profiles_data:
-            pending = PendingAPIDeletion(
-                server_name=server_name,
-                api_url=api_url,
-                api_key=api_key,
-                peer_id=peer_id,
-                client_name=f"tg_*_{profile_id}",
-                reason="server_delete",
-                attempts=0,
-                created_at=current_time,
-            )
-
-            session.add(pending)
-
-        await session.flush()
+    for profile_id, peer_id in profiles_data:
+        if not peer_id:
+            continue
+        await enqueue_api_operation(
+            session, operation_type="delete_peer",
+            idempotency_key=f"delete-peer:{profile_id}:{peer_id}",
+            server_name_snapshot=server_name, api_url_snapshot=api_url,
+            api_key_snapshot=api_key, peer_id=peer_id,
+            client_name=None,
+            payload={"managed_workflow": True, "reason": "server_delete"},
+        )
 
     await callback.answer(
         f"✅ Сервер {server_name} удалён ({deleted_profiles} устр.)",
@@ -196,24 +189,3 @@ async def confirm_delete_server(
 
     await _show_servers_list(callback, session, page=1)
 
-    if profiles_data:
-        queue_post_commit_task(
-            session,
-            lambda bot=callback.bot,
-            admin_id=callback.from_user.id,
-            srv_name=server_name,
-            data=profiles_data,
-            url=api_url,
-            key=api_key,
-            deleted=deleted_profiles: (
-                _delete_server_background(
-                    bot,
-                    admin_id,
-                    srv_name,
-                    data,
-                    url,
-                    key,
-                    deleted,
-                )
-            ),
-        )

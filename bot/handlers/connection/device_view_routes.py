@@ -77,7 +77,11 @@ async def manage_device(
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
 
     if has_access:
-        keyboard = get_device_keyboard(profile.id)
+        keyboard = get_device_keyboard(
+            profile.id,
+            config_ready=(profile.provisioning_status == "active"
+                          and bool(profile.peer_id) and bool(profile.raw_config)),
+        )
     else:
         rendered += (
             "\n⚠️ <b>Доступ неактивен</b>\n"
@@ -121,7 +125,7 @@ async def show_config(
         return
 
     raw_config = profile.raw_config or ""
-    if not raw_config:
+    if profile.provisioning_status != "active" or not profile.peer_id or not raw_config:
         await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
         return
 
@@ -189,7 +193,7 @@ async def download_conf(
     ).strip() or "client"
 
     raw_config = profile.raw_config or ""
-    if not raw_config:
+    if profile.provisioning_status != "active" or not profile.peer_id or not raw_config:
         await render_hub(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),

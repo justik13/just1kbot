@@ -408,19 +408,11 @@ async def enter_device_name(
             await state.clear()
             return
 
-        server = await get_server_by_id(session, profile.server_id)
-
-        success_text = texts.DEVICE_ADDED_SUCCESS.format(
-            device_name=safe(device_name),
-            flag=server.country_flag if server else "🌍",
-            server_name=safe(server.name) if server else "—",
-        )
-
         await render_hub(
             message.bot,
             message.chat.id,
-            success_text,
-            get_device_keyboard(profile.id),
+            "⏳ Устройство создаётся.\nОбновите список через несколько секунд.",
+            get_back_button("back_to_connections"),
         )
 
         await state.clear()
