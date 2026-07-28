@@ -314,6 +314,7 @@ class AmneziaClient:
             ambiguous = semantics is not RequestSemantics.READ
         if (
             semantics is RequestSemantics.CREATE
+            and ambiguous
             and kind in {
                 AmneziaErrorKind.SERVER_ERROR,
                 AmneziaErrorKind.NETWORK_ERROR,
@@ -388,7 +389,24 @@ class AmneziaClient:
             else API_RETRY_COUNT + 1
         )
         for attempt in range(max_attempts):
-            if not await limiter.acquire(timeout=30.0):
+            try:
+                limiter_acquired = await limiter.acquire(timeout=30.0)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.error(
+                    "Rate limiter error for %s%s: %s",
+                    self._log_target,
+                    path,
+                    type(error).__name__,
+                )
+                return self._failure(
+                    AmneziaErrorKind.UNKNOWN,
+                    semantics,
+                    retryable=True,
+                    ambiguous=False,
+                )
+            if not limiter_acquired:
                 logger.warning(
                     "Rate limit timeout for %s%s "
                     "(attempt %s/%s)",
@@ -404,8 +422,10 @@ class AmneziaClient:
                     ambiguous=False,
                 )
 
-            session = await get_http_session()
+            request_started = False
             try:
+                session = await get_http_session()
+                request_started = True
                 async with session.request(
                     method,
                     url,
@@ -417,15 +437,7 @@ class AmneziaClient:
                         await cb.record_success()
                         return self._success(status_code=204)
                     elif 200 <= response.status < 300:
-                        try:
-                            value = await response.json()
-                        except Exception:
-                            return self._failure(
-                                AmneziaErrorKind.INVALID_RESPONSE,
-                                semantics,
-                                status_code=response.status,
-                                retryable=True,
-                            )
+                        value = await response.json()
                         await cb.record_success()
                         return self._success(value, response.status)
                     elif 300 <= response.status < 400:
@@ -472,6 +484,7 @@ class AmneziaClient:
                             not_found_as_success
                             and response.status == 404
                         ):
+                            await cb.record_success()
                             return self._success(status_code=404)
                         if response.status in (401, 403):
                             kind = AmneziaErrorKind.AUTH_FAILED
@@ -526,6 +539,8 @@ class AmneziaClient:
                             ambiguous=False,
                         )
 
+            except asyncio.CancelledError:
+                raise
             except asyncio.TimeoutError as error:
                 kind = AmneziaErrorKind.TIMEOUT
                 if attempt + 1 < max_attempts:
@@ -552,7 +567,18 @@ class AmneziaClient:
                         kind,
                         semantics,
                         retryable=True,
+                        ambiguous=(
+                            semantics is not RequestSemantics.READ
+                            if request_started
+                            else False
+                        ),
                     )
+            except aiohttp.ContentTypeError:
+                return self._failure(
+                    AmneziaErrorKind.INVALID_RESPONSE,
+                    semantics,
+                    retryable=True,
+                )
             except aiohttp.ClientError as error:
                 kind = AmneziaErrorKind.NETWORK_ERROR
                 if attempt + 1 < max_attempts:
@@ -575,7 +601,22 @@ class AmneziaClient:
                     path,
                     type(error).__name__,
                 )
-                return self._failure(kind, semantics, retryable=True)
+                return self._failure(
+                    kind,
+                    semantics,
+                    retryable=True,
+                    ambiguous=(
+                        semantics is not RequestSemantics.READ
+                        if request_started
+                        else False
+                    ),
+                )
+            except (ValueError, TypeError):
+                return self._failure(
+                    AmneziaErrorKind.INVALID_RESPONSE,
+                    semantics,
+                    retryable=True,
+                )
             except Exception as error:
                 logger.error(
                     "Unexpected error for %s%s: %s",
@@ -586,6 +627,12 @@ class AmneziaClient:
                 return self._failure(
                     AmneziaErrorKind.UNKNOWN,
                     semantics,
+                    retryable=not request_started,
+                    ambiguous=(
+                        semantics is not RequestSemantics.READ
+                        if request_started
+                        else False
+                    ),
                 )
 
         return self._failure(AmneziaErrorKind.UNKNOWN, semantics)
@@ -606,7 +653,9 @@ class AmneziaClient:
             not_found_as_success=not_found_as_success,
             **kwargs,
         )
-        return result.value if result.ok else None
+        if not result.ok:
+            return None
+        return result.value if result.value is not None else {}
 
     async def create_user_result(
         self,

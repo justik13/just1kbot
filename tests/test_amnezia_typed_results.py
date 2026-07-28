@@ -204,6 +204,151 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
             await client.create_user_result("alice")
         self.assertNotIn(secret, "\n".join(captured.output))
 
+    async def test_request_204_preserves_compatibility_marker(self):
+        self.use_session(FakeResponse(204))
+        result = await self.client._request("GET", "/healthz")
+        self.assertEqual(result, {})
+        self.assertIsNotNone(result)
+
+    async def test_healthcheck_204_is_true(self):
+        self.use_session(FakeResponse(204))
+        self.assertTrue(await self.client.healthcheck())
+
+    async def test_request_failure_remains_none(self):
+        self.use_session(FakeResponse(400))
+        self.assertIsNone(await self.client._request("GET", "/server"))
+
+    async def test_session_creation_client_error_is_typed_and_safe_for_create(self):
+        error = aiohttp.ClientConnectionError("session unavailable")
+        with patch.object(
+            module,
+            "get_http_session",
+            new=AsyncMock(side_effect=error),
+        ) as get_session:
+            result = await self.client.create_user_result("alice")
+        get_session.assert_awaited_once()
+        self.assertIsInstance(result, AmneziaAPIResult)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.NETWORK_ERROR)
+        self.assertFalse(result.ambiguous)
+        self.assertTrue(result.retryable)
+
+    async def test_limiter_false_is_typed_timeout_without_http(self):
+        limiter = MagicMock()
+        limiter.acquire = AsyncMock(return_value=False)
+        session = self.use_session(FakeResponse(200, {}))
+        with patch.object(module, "_get_rate_limiter", return_value=limiter):
+            result = await self.client._request_result(
+                "GET", "/server", semantics=RequestSemantics.READ
+            )
+        self.assertEqual(result.error_kind, AmneziaErrorKind.RATE_LIMIT_TIMEOUT)
+        self.assertTrue(result.retryable)
+        self.assertFalse(result.ambiguous)
+        self.assertEqual(session.request.call_count, 0)
+
+    async def test_limiter_exception_is_typed_and_does_not_log_key(self):
+        secret = "SUPER_SECRET_TEST_KEY"
+        client = AmneziaClient("https://vpn.example", secret)
+        limiter = MagicMock()
+        limiter.acquire = AsyncMock(side_effect=RuntimeError(secret))
+        session = self.use_session(FakeResponse(200, {}))
+        with patch.object(module, "_get_rate_limiter", return_value=limiter):
+            with self.assertLogs(module.logger, level=logging.ERROR) as captured:
+                result = await client.create_user_result("alice")
+        self.assertEqual(result.error_kind, AmneziaErrorKind.UNKNOWN)
+        self.assertTrue(result.retryable)
+        self.assertFalse(result.ambiguous)
+        self.assertEqual(session.request.call_count, 0)
+        self.assertNotIn(secret, "\n".join(captured.output))
+
+    async def test_limiter_cancelled_error_propagates(self):
+        limiter = MagicMock()
+        limiter.acquire = AsyncMock(side_effect=asyncio.CancelledError())
+        with patch.object(module, "_get_rate_limiter", return_value=limiter):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.client.create_user_result("alice")
+
+    async def test_read_body_timeout_retries(self):
+        session = self.use_session(
+            FakeResponse(200, json_error=asyncio.TimeoutError()),
+            FakeResponse(200, {"name": "server"}),
+        )
+        result = await self.client._request_result(
+            "GET", "/server", semantics=RequestSemantics.READ
+        )
+        self.assertEqual(session.request.call_count, 2)
+        self.assertTrue(result.ok)
+
+    async def test_create_body_timeout_is_ambiguous_and_not_retried(self):
+        session = self.use_session(
+            FakeResponse(200, json_error=asyncio.TimeoutError())
+        )
+        result = await self.client.create_user_result("alice")
+        self.assertEqual(session.request.call_count, 1)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.TIMEOUT)
+        self.assertTrue(result.ambiguous)
+        self.assertFalse(result.retryable)
+
+    async def test_read_content_type_error_is_invalid_response(self):
+        content_error = aiohttp.ContentTypeError(
+            MagicMock(), (), message="unexpected content type"
+        )
+        self.use_session(FakeResponse(200, json_error=content_error))
+        result = await self.client._request_result(
+            "GET", "/server", semantics=RequestSemantics.READ
+        )
+        self.assertEqual(result.error_kind, AmneziaErrorKind.INVALID_RESPONSE)
+        self.assertFalse(result.ambiguous)
+
+    async def test_idempotent_write_body_client_error_retries(self):
+        attempts = module.API_RETRY_COUNT + 1
+        session = self.use_session(*(
+            FakeResponse(
+                200,
+                json_error=aiohttp.ClientPayloadError("truncated"),
+            )
+            for _ in range(attempts)
+        ))
+        result = await self.client.update_client_result("peer-1", status="active")
+        self.assertEqual(session.request.call_count, attempts)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.NETWORK_ERROR)
+        self.assertTrue(result.ambiguous)
+        self.assertTrue(result.retryable)
+
+    async def test_delete_404_resets_breaker(self):
+        breaker = module._get_circuit_breaker(self.client.api_url)
+        breaker.failure_count = 4
+        breaker.state = "CLOSED"
+        self.use_session(FakeResponse(404))
+        result = await self.client.delete_user_result("missing")
+        self.assertTrue(result.ok)
+        self.assertEqual(breaker.failure_count, 0)
+        self.assertEqual(breaker.state, "CLOSED")
+
+    async def test_read_404_neither_increments_nor_resets_breaker(self):
+        breaker = module._get_circuit_breaker(self.client.api_url)
+        breaker.failure_count = 4
+        self.use_session(FakeResponse(404))
+        result = await self.client._request_result(
+            "GET", "/clients", semantics=RequestSemantics.READ
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_kind, AmneziaErrorKind.NOT_FOUND)
+        self.assertEqual(breaker.failure_count, 4)
+
+    async def test_result_factories_preserve_invariants(self):
+        success = self.client._success({"value": True}, 200)
+        self.assertTrue(success.ok)
+        self.assertIsNone(success.error_kind)
+        self.assertFalse(success.retryable)
+        self.assertFalse(success.ambiguous)
+
+        failure = self.client._failure(
+            AmneziaErrorKind.AUTH_FAILED,
+            RequestSemantics.READ,
+        )
+        self.assertFalse(failure.ok)
+        self.assertIsNotNone(failure.error_kind)
+
 
 if __name__ == "__main__":
     unittest.main()
