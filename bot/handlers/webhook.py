@@ -21,6 +21,7 @@ from services.yookassa_service import YooKassaService
 logger = logging.getLogger(__name__)
 
 WEBHOOK_MAX_AGE_SECONDS = 300
+WEBHOOK_MAX_FUTURE_SKEW_SECONDS = 30
 
 YOOKASSA_IP_RANGES = [
     "185.71.76.0/27",
@@ -80,7 +81,7 @@ def _is_recent_timestamp(
         if ts > 1e12:
             ts = ts / 1000.0
         age = time.time() - ts
-        return age <= max_age_seconds
+        return -WEBHOOK_MAX_FUTURE_SKEW_SECONDS <= age <= max_age_seconds
     except (ValueError, TypeError, OverflowError):
         pass
     try:
@@ -92,7 +93,7 @@ def _is_recent_timestamp(
         age = (
             datetime.now(timezone.utc) - dt
         ).total_seconds()
-        return age <= max_age_seconds
+        return -WEBHOOK_MAX_FUTURE_SKEW_SECONDS <= age <= max_age_seconds
     except (ValueError, TypeError, OverflowError):
         pass
     return False

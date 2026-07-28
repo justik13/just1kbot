@@ -13,11 +13,8 @@ from sqlalchemy.ext.asyncio import (
 
 from alembic.config import Config
 from alembic.command import upgrade
-from alembic.script import ScriptDirectory
-from alembic.runtime.migration import MigrationContext
-
 from config.settings import get_settings
-from database.models import Base, MaintenanceMode, Tariff
+from database.models import MaintenanceMode, Tariff
 
 _engine = None
 _sessionmaker = None
@@ -58,40 +55,18 @@ async def init_db():
 async def _run_alembic_migrations(database_url: str) -> None:
     """Run Alembic migrations on the database and seed default data."""
     try:
-        # Create Alembic config with absolute path
         alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
         alembic_cfg.set_main_option("sqlalchemy.url", database_url)
-        
-        # Get the script directory and current revision
-        script = ScriptDirectory.from_config(alembic_cfg)
-        
-        # Create a sync engine for Alembic (it doesn't support async directly)
-        from sqlalchemy import create_engine as sync_create_engine
-        from sqlalchemy.pool import NullPool
-        
-        # Convert asyncpg URL to psycopg2 if needed (Alembic can work with asyncpg in async mode)
-        sync_url = database_url.replace("asyncpg", "psycopg2") if "asyncpg" in database_url else database_url
-        
-        sync_engine = sync_create_engine(sync_url, poolclass=NullPool)
-        
-        with sync_engine.connect() as conn:
-            context = MigrationContext.configure(conn)
-            current_rev = context.get_current_revision()
-            
-            if current_rev is None:
-                logging.info("No Alembic version found. Running initial migration...")
-            else:
-                logging.info("Current Alembic revision: %s", current_rev)
-            
-            # Run upgrade to head
-            upgrade(alembic_cfg, "head")
-            logging.info("Alembic migrations completed successfully.")
-        
-        sync_engine.dispose()
-        
-        # Seed default data after migrations
+
+        # env.py uses asyncio.run(). Running Alembic in a worker thread avoids
+        # nesting that event loop inside the bot's already-running loop. It also
+        # keeps migrations on the configured asyncpg driver, so startup does not
+        # require an undeclared psycopg2 dependency.
+        await asyncio.to_thread(upgrade, alembic_cfg, "head")
+        logging.info("Alembic migrations completed successfully.")
+
         await _seed_default_data()
-        
+
     except Exception as e:
         logging.error("Failed to run Alembic migrations: %s", e, exc_info=True)
         raise

@@ -288,7 +288,9 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
 
 
 async def start_webhook_server(port: int):
-    app = web.Application()
+    # YooKassa payloads are small. Reject unexpectedly large request bodies
+    # before JSON parsing to limit memory use on the public endpoint.
+    app = web.Application(client_max_size=64 * 1024)
     setup_webhook_routes(app)
 
     runner = web.AppRunner(app)

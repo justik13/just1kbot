@@ -19,6 +19,7 @@ LOG_FILE="/var/log/just1kbot-deploy.log"
 ROLLBACK_LOG="/var/log/just1kbot-rollback.log"
 BACKUP_DIR="/root/backups/just1kbot"
 PYTHON_MIN_VERSION="3.11"
+SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
 # --- Цвета ---
 RED='\033[0;31m'
@@ -114,8 +115,8 @@ write_env_var() {
     local key="$1"
     local value="$2"
     # Экранирование одинарных кавычек для single-quoted контекста
-    value="${value//'/'\''}"
-    echo "${key}='${value}'" >> "$ENV_FILE"
+    value=${value//\'/\\\'}
+    printf "%s='%s'\n" "$key" "$value" >> "$ENV_FILE"
     chown "$BOT_USER:$BOT_USER" "$ENV_FILE" 2>/dev/null || true
     chmod 600 "$ENV_FILE"
 }
@@ -242,6 +243,7 @@ collect_input() {
         AMNEZIA_API_KEY="${AMNEZIA_API_KEY:-}"
         YOOKASSA_SHOP_ID="${YOOKASSA_SHOP_ID:-}"
         YOOKASSA_SECRET_KEY="${YOOKASSA_SECRET_KEY:-}"
+        DB_ENCRYPTION_KEY="${DB_ENCRYPTION_KEY:-}"
         log "Неинтерактивный режим: данные взяты из переменных окружения"
         return
     fi
@@ -252,7 +254,7 @@ collect_input() {
     read_db_password "Пароль PostgreSQL (мин. 8 символов): " DB_PASSWORD
     [[ "$DB_PASSWORD" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
 
-    read_required_secret "Пароль Redis: " REDIS_PASSWORD
+    read_db_password "Пароль Redis (мин. 8 символов): " REDIS_PASSWORD
     [[ "$REDIS_PASSWORD" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
 
     read_admin_ids "Admin IDs (через запятую): " ADMIN_IDS
@@ -290,6 +292,20 @@ preflight_checks() {
     fi
 
     log "Python $py_version — OK"
+
+    if [[ ! "$DB_PASSWORD" =~ ^[a-zA-Z0-9_@%*+=-]{8,}$ ]]; then
+        error "Пароль PostgreSQL должен содержать минимум 8 безопасных символов"
+        exit 1
+    fi
+    if [[ ! "$REDIS_PASSWORD" =~ ^[a-zA-Z0-9_@%*+=-]{8,}$ ]]; then
+        error "Пароль Redis должен содержать минимум 8 безопасных символов"
+        exit 1
+    fi
+    if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] || \
+       [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
+        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY должны задаваться вместе"
+        exit 1
+    fi
 }
 
 # --- Проверка доступности портов ---
@@ -313,7 +329,7 @@ install_dependencies() {
         postgresql postgresql-contrib \
         redis-server \
         nginx certbot python3-certbot-nginx \
-        ufw curl git \
+        ufw curl git rsync \
         build-essential libpq-dev \
         logrotate \
         > /dev/null 2>&1
@@ -415,6 +431,20 @@ setup_user_and_dirs() {
     chown -R "$BOT_USER:$BOT_USER" "/var/log/just1kbot"
 
     log "Пользователь и директории готовы"
+}
+
+sync_project_files() {
+    log "Копирование проекта из $SOURCE_DIR..."
+    if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
+        rsync -a --delete \
+            --exclude '.git/' \
+            --exclude '.env' \
+            --exclude 'venv/' \
+            --exclude '__pycache__/' \
+            "$SOURCE_DIR/" "$PROJECT_DIR/"
+    fi
+    chown -R "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
+    log "Файлы проекта синхронизированы"
 }
 
 # --- Виртуальное окружение ---
@@ -728,10 +758,15 @@ HC_EOF
 setup_firewall() {
     log "Настройка UFW..."
 
-    ufw --force reset > /dev/null 2>&1
+    # Не сбрасываем существующие правила: сервер может обслуживать другие
+    # приложения или использовать нестандартный SSH-порт.
+    local ssh_port="22"
+    if [[ -n "${SSH_CONNECTION:-}" ]]; then
+        ssh_port=$(awk '{print $4}' <<< "$SSH_CONNECTION")
+    fi
     ufw default deny incoming > /dev/null 2>&1
     ufw default allow outgoing > /dev/null 2>&1
-    ufw allow ssh > /dev/null 2>&1
+    ufw allow "${ssh_port}/tcp" > /dev/null 2>&1
     ufw allow 80/tcp > /dev/null 2>&1
     ufw allow 443/tcp > /dev/null 2>&1
     ufw deny 8080/tcp > /dev/null 2>&1
@@ -846,6 +881,7 @@ main() {
     preflight_checks
     install_dependencies
     setup_user_and_dirs
+    sync_project_files
     setup_postgresql
     setup_redis
 
@@ -855,9 +891,17 @@ main() {
 # Just1kBot Configuration
 # Generated: $(date -Iseconds)
 EOF
+    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
+        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
+    fi
+    local db_password_encoded redis_password_encoded
+    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
+    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
     write_env_var "BOT_TOKEN" "$BOT_TOKEN"
-    write_env_var "DATABASE_URL" "postgresql+asyncpg://just1kbot:${DB_PASSWORD}@localhost:5432/just1kbot_bot"
-    write_env_var "REDIS_URL" "redis://:${REDIS_PASSWORD}@localhost:6379/0"
+    write_env_var "DATABASE_URL" "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
+    write_env_var "DB_ENCRYPTION_KEY" "$DB_ENCRYPTION_KEY"
+    write_env_var "REDIS_URL" "redis://:${redis_password_encoded}@localhost:6379/0"
+    write_env_var "REDIS_PASSWORD" "$REDIS_PASSWORD"
     write_env_var "ADMIN_IDS" "$ADMIN_IDS"
     write_env_var "AMNEZIA_API_URL" "$AMNEZIA_API_URL"
     write_env_var "AMNEZIA_API_KEY" "$AMNEZIA_API_KEY"
