@@ -10,7 +10,7 @@ from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
-from services.payment_provider_operations import ensure_operation
+from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.workers.webhook_inbox import ensure_fulfillment
 from utils.datetime_helpers import now_utc
 
@@ -90,14 +90,14 @@ async def _cleanup_orphan_pending_payments():
         rows=(await session.scalars(select(Payment).where(Payment.provider_status.in_(("creating","unknown")),Payment.provider_idempotency_key.is_not(None)).limit(100))).all()
         # create commands are created atomically with new payments; missing legacy rows require review, not failure.
         for payment in rows:
-            if payment.external_id: await ensure_operation(session,payment,"reconcile_payment")
+            if payment.external_id: await ensure_reconcile_payment_operation(session,payment,reason="stale_worker")
 
 
 async def _process_stale_payments(bot: Bot, settings):
     async with session_scope() as session:
         rows=(await session.scalars(select(Payment).where(Payment.created_at < now_utc()-timedelta(hours=1)).limit(100))).all()
         for payment in rows:
-            if payment.external_id and payment.provider_status in {"pending","unknown"}: await ensure_operation(session,payment,"reconcile_payment")
+            if payment.external_id and payment.provider_status in {"pending","unknown"}: await ensure_reconcile_payment_operation(session,payment,reason="stale_worker")
             if payment.provider_status=="succeeded" and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
             if payment.provider_status=="refunded" and payment.fulfillment_status!="reversed": await ensure_fulfillment(session,payment,"reverse_payment")
     await _alert_new_stale_payments(bot,settings)

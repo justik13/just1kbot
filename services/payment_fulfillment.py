@@ -2,8 +2,11 @@
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
-from sqlalchemy import select
-from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, User
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, ReferralReward, Tariff, User
+from database.connection import queue_post_commit_task
+from services.audit_service import AuditService
 from services.payment_lifecycle import project_legacy_status
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
@@ -26,16 +29,29 @@ async def grant(session,op):
     manual=bool(op.payload.get("manual_without_provider_confirmation"))
     if (payment.provider_status!="succeeded" and not manual) or not user or user.is_deleted or user.is_banned:
         payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; project_legacy_status(payment); return
-    existing=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==user.id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_grant"))
+    grant_entry_type="manual_grant" if manual else "payment_grant"
+    existing=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==user.id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type==grant_entry_type))
+    refunded=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
+    if (not manual and payment.reconciliation_status in {"mismatch","manual_review"}) or refunded:
+        payment.fulfillment_status="manual_review"; op.status="cancelled"; op.completed_at=now_utc(); return
     if not existing:
         days=payment.snapshot_duration_days
         if not days or not payment.snapshot_device_limit: payment.fulfillment_status="manual_review"; op.status="dead"; return
         await SubscriptionService.extend_subscription(session,user.telegram_id,days,payment.snapshot_device_limit,payment.tariff_id)
-        await _entry(session,payment,user.id,"manual_grant" if manual else "payment_grant",days,limit=payment.snapshot_device_limit,tariff=payment.tariff_id)
+        await _entry(session,payment,user.id,grant_entry_type,days,limit=payment.snapshot_device_limit,tariff=payment.tariff_id)
     payment.fulfillment_status="succeeded"; payment.fulfilled_at=payment.fulfilled_at or now_utc(); op.status="succeeded"; op.completed_at=now_utc(); project_legacy_status(payment)
     # Referral is isolated: failure can never roll back this grant on a later job.
+    user.last_payment_at=now_utc()
+    await AuditService.log_action(session,admin_id=0,action="PAYMENT_FULFILLED",target_type="Payment",target_id=payment.id,details="durable fulfillment succeeded")
+    tariff=await session.get(Tariff,payment.tariff_id)
+    async def post_commit_success():
+        from bot.middlewares.user_context import invalidate_user_cache
+        from services.payment_service.service import _notify_payment_success
+        invalidate_user_cache(user.telegram_id)
+        await _notify_payment_success(user.telegram_id,tariff.name if tariff else "—",str(user.subscription_end))
+    queue_post_commit_task(session,post_commit_success)
     if user.referred_by:
-        session.add(PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()))
+        await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
 async def referral(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     reversal=await session.scalar(select(EntitlementEntry.id).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
@@ -43,16 +59,18 @@ async def referral(session,op):
         op.status="cancelled"; op.completed_at=now_utc(); return
     ref=await session.scalar(select(User).where(User.telegram_id==user.referred_by).with_for_update())
     if not ref: op.status="dead"; op.last_error_code="referrer_missing"; return
-    # Current product grants seven days to both parties on the first paid order.
-    previous=await session.scalar(select(Payment.id).where(Payment.user_id==user.id,Payment.provider_status=="succeeded",Payment.id< payment.id).limit(1))
-    if previous: op.status="succeeded"; return
+    # Unique marker serializes concurrent/out-of-order first-payment rewards.
+    marker=await session.scalar(select(ReferralReward).where(ReferralReward.referred_user_id==user.id).with_for_update())
+    if marker and marker.source_payment_id!=payment.id: op.status="cancelled"; op.completed_at=now_utc(); return
+    if not marker:
+        marker=ReferralReward(referred_user_id=user.id,source_payment_id=payment.id,referrer_user_id=ref.id); session.add(marker); await session.flush()
     _,a=await _entry(session,payment,user.id,"referral_user_bonus",7); _,b=await _entry(session,payment,ref.id,"referral_referrer_bonus",7)
     if a: await SubscriptionService.extend_subscription(session,user.telegram_id,7)
     if b: await SubscriptionService.extend_subscription(session,ref.telegram_id,7)
     payment.referral_user_bonus_days=7; payment.referral_referrer_bonus_days=7; op.status="succeeded"; op.completed_at=now_utc()
 async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
-    grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_grant"))
+    grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("payment_grant","manual_grant"))))
     reversal=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
     if grant_entry and not reversal:
         days=payment.snapshot_duration_days or 0; now=now_utc(); user.subscription_end=max(now,user.subscription_end-timedelta(days=days)) if user.subscription_end else now
@@ -60,6 +78,8 @@ async def reverse(session,op):
         await SubscriptionService.sync_access_state(session,user)
     referrals=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_referral",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for referral_op in referrals: referral_op.status="cancelled"; referral_op.completed_at=now_utc()
+    reward=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())
+    if reward: reward.reversed_at=reward.reversed_at or now_utc()
     bonus_entries=(await session.scalars(select(EntitlementEntry).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("referral_user_bonus","referral_referrer_bonus"))))).all()
     for bonus in bonus_entries:
         _,created=await _entry(session,payment,bonus.beneficiary_user_id,"referral_reversal",-bonus.days_delta,reversed=bonus.id,metadata={"reversed_entry_type":bonus.entry_type})
@@ -72,14 +92,27 @@ async def reverse(session,op):
 async def execute(session,claim):
     op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.id==claim.operation_id).with_for_update())
     if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentFulfillmentOperationOwnershipError(claim.operation_id)
-    try:
-        if op.operation_type=="grant_subscription": await grant(session,op)
-        elif op.operation_type=="grant_referral": await referral(session,op)
-        elif op.operation_type=="reverse_payment": await reverse(session,op)
-        op.locked_at=op.locked_by=None; await session.flush()
-    except Exception as exc:
-        op.status="dead" if op.attempts>=op.max_attempts else "retry"; op.last_error_code=type(exc).__name__; op.last_error=str(exc)[:2000]; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8))); op.locked_at=op.locked_by=None; raise
+    if op.operation_type=="grant_subscription": await grant(session,op)
+    elif op.operation_type=="grant_referral": await referral(session,op)
+    elif op.operation_type=="reverse_payment": await reverse(session,op)
+    op.locked_at=op.locked_by=None; await session.flush()
+async def finalize_fulfillment_failure(session,claim,*,error_code,retryable=True):
+    op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.id==claim.operation_id).with_for_update())
+    if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentFulfillmentOperationOwnershipError(claim.operation_id)
+    payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); dead=(not retryable) or op.attempts>=op.max_attempts
+    op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8))); op.last_error_code=str(error_code)[:100]; op.last_error=None; op.locked_at=op.locked_by=None
+    if dead: payment.fulfillment_status="failed"; payment.reconciliation_status="manual_review"; project_legacy_status(payment)
+async def retry_dead_fulfillment_operation(session,operation_id,*,reset_attempts,reason):
+    op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.id==operation_id).with_for_update())
+    if not op or op.status!="dead": raise ValueError("operation is not dead")
+    if not reset_attempts and op.attempts>=op.max_attempts: raise ValueError("reset_attempts required")
+    op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc(); op.payload={**op.payload,"admin_retry_reason":str(reason)[:100]}
+    if reset_attempts:op.attempts=0
+    return op
 async def recover_stale(session,lease_seconds=120):
     rows=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.status=="processing",PaymentFulfillmentOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
-    for op in rows: op.status="retry"; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
+    for op in rows:
+        dead=op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
+        if dead:
+            payment=await session.get(Payment,op.payment_id); payment.fulfillment_status="failed"; payment.reconciliation_status="manual_review"; project_legacy_status(payment)
     return len(rows)

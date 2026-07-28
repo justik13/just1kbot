@@ -19,7 +19,6 @@ from database.repositories.payments_repo import (
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.audit_service import AuditService
 from services.yookassa_service import YooKassaService
-from services.profile_deletion_service import ProfileDeletionService
 from services.referral_service import ReferralService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
@@ -280,6 +279,7 @@ class PaymentService:
         """Audit and enqueue an idempotent grant; never mutate entitlement here."""
         from database.models import PaymentFulfillmentOperation
         from services.payment_lifecycle import project_legacy_status
+        from services.payment_fulfillment import retry_dead_fulfillment_operation
         payment = await get_payment_by_id_for_update(session, payment_id)
         if not payment: return False, "Платёж не найден"
         if payment.provider_status != "succeeded" and not force_without_provider_confirmation:
@@ -289,7 +289,8 @@ class PaymentService:
             await _log_event_safe(session,payment.id,"manual_grant_without_provider_confirmation",source="force_grant_payment",details=f"admin_id={admin_id}")
         payment.fulfillment_status="pending"; project_legacy_status(payment)
         existing=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}"))
-        if existing and existing.status in {"dead","cancelled"}: existing.status="retry"; existing.next_attempt_at=now_utc()
+        if existing and existing.status=="dead": await retry_dead_fulfillment_operation(session,existing.id,reset_attempts=True,reason=f"manual grant by {admin_id}")
+        elif existing and existing.status=="cancelled": existing.status="retry"; existing.attempts=0; existing.completed_at=None; existing.next_attempt_at=now_utc()
         elif not existing: session.add(PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={"manual_without_provider_confirmation":force_without_provider_confirmation,"admin_id":admin_id},next_attempt_at=now_utc()))
         await AuditService.log_action(session,admin_id=admin_id,action="MANUAL_GRANT_QUEUED",target_type="Payment",target_id=payment.id,details="force_without_provider_confirmation="+str(force_without_provider_confirmation))
         await session.flush(); return True, "Выдача поставлена в очередь"
@@ -321,20 +322,29 @@ class PaymentService:
 
     @staticmethod
     async def check_yookassa_payment(session: AsyncSession, payment_id: int, notify_user: bool = True) -> tuple:
-        from services.payment_provider_operations import ensure_operation
+        from services.payment_provider_operations import ensure_reconcile_payment_operation
         from services.workers.webhook_inbox import ensure_fulfillment
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,{"error":"not_found"}
-        if payment.external_id and payment.provider_status not in {"refunded","canceled"}: await ensure_operation(session,payment,"reconcile_payment")
+        if payment.external_id and payment.provider_status not in {"refunded","canceled"}: await ensure_reconcile_payment_operation(session,payment,reason="user_refresh")
         if payment.provider_status=="succeeded" and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
         return True,{"provider_status":payment.provider_status,"fulfillment_status":payment.fulfillment_status,"reconciliation_status":payment.reconciliation_status}
 
     @staticmethod
     async def cancel_payment_via_api(session: AsyncSession, payment_id: int) -> bool:
-        from services.payment_provider_operations import ensure_cancel_payment_operation
+        from services.payment_provider_operations import ensure_cancel_payment_operation, ensure_reconcile_payment_operation
+        from database.models import PaymentProviderOperation
         payment=await get_payment_by_id_for_update(session,payment_id)
-        if not payment or not payment.external_id or payment.provider_status=="succeeded":return False
-        return await ensure_cancel_payment_operation(session,payment) is not None
+        if not payment or payment.provider_status in {"succeeded","refunded","canceled"}:return False
+        payment.checkout_status="abandoned"; payment.user_cancel_requested_at=now_utc(); payment.payment_url=None
+        create_op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="create_payment").with_for_update())
+        if not payment.external_id:
+            if create_op and create_op.status=="pending" and create_op.attempts==0: create_op.status="cancelled"; create_op.completed_at=now_utc()
+            elif create_op and create_op.attempts>0: payment.reconciliation_status="required"
+            return True
+        if payment.provider_status=="waiting_for_capture": await ensure_cancel_payment_operation(session,payment)
+        else: await ensure_reconcile_payment_operation(session,payment,reason="checkout_abandoned")
+        return True
 
     @staticmethod
     async def _set_manual_review(
@@ -408,196 +418,3 @@ class PaymentService:
         )
 
         return True, "manual_review"
-
-    @staticmethod
-    async def _process_chargeback(
-        session: AsyncSession,
-        payment_id: int,
-        transaction_id: str,
-    ) -> tuple:
-        try:
-            async with session.begin_nested():
-                payment = await get_payment_by_id_for_update(
-                    session,
-                    payment_id,
-                )
-                if not payment:
-                    return False, "not_found"
-
-                if payment.status == "refunded":
-                    return True, "already_processed"
-
-                was_completed = payment.status == "completed"
-
-                payment.status = "refunded"
-                payment.manual_review_reason = None
-                await session.flush()
-
-                await _log_event_safe(
-                    session,
-                    payment.id,
-                    "chargeback",
-                    provider_status="CHARGEBACKED",
-                    source="payment_service",
-                    details=(
-                        f"transaction_id={transaction_id}"
-                    ),
-                )
-
-                user = payment.user
-                if user and was_completed:
-                    current_time = now_utc()
-
-                    snapshot_days = (
-                        payment.snapshot_duration_days
-                    )
-                    if (
-                        snapshot_days
-                        and user.subscription_end
-                        and user.subscription_end.year < 2100
-                    ):
-                        new_end = (
-                            user.subscription_end
-                            - timedelta(days=snapshot_days)
-                        )
-                        if new_end < current_time:
-                            new_end = current_time
-                        user.subscription_end = new_end
-
-                        if new_end <= current_time:
-                            user.current_tariff_id = None
-                            user.device_limit = 0
-                    else:
-                        user.subscription_end = current_time
-                        user.current_tariff_id = None
-                        user.device_limit = 0
-
-                    await session.flush()
-
-                    referrer_bonus = (
-                        payment.referral_referrer_bonus_days or 0
-                    )
-                    if referrer_bonus > 0 and user.referred_by:
-                        try:
-                            referrer_stmt = (
-                                select(User)
-                                .where(
-                                    User.telegram_id
-                                    == user.referred_by,
-                                    User.is_deleted == False,
-                                )
-                                .with_for_update()
-                            )
-                            referrer = await session.scalar(
-                                referrer_stmt
-                            )
-                            if referrer:
-                                old_referral_days = (
-                                    referrer.referral_days or 0
-                                )
-                                referrer.referral_days = max(
-                                    0,
-                                    old_referral_days
-                                    - referrer_bonus,
-                                )
-                                if (
-                                    referrer.subscription_end
-                                    and referrer.subscription_end
-                                    > current_time
-                                    and referrer.subscription_end.year
-                                    < 2100
-                                ):
-                                    referrer.subscription_end = (
-                                        referrer.subscription_end
-                                        - timedelta(
-                                            days=referrer_bonus
-                                        )
-                                    )
-                        except Exception as e:
-                            logger.error(
-                                "Chargeback referral rollback "
-                                "failed: %s",
-                                e,
-                                exc_info=True,
-                            )
-
-                    # Откат бонусных дней самого пользователя (referral_user_bonus_days)
-                    user_bonus = payment.referral_user_bonus_days or 0
-                    if user_bonus > 0 and user.subscription_end:
-                        old_user_subscription_end = user.subscription_end
-                        user.subscription_end = max(
-                            current_time,
-                            user.subscription_end
-                            - timedelta(days=user_bonus),
-                        )
-                        logger.info(
-                            "Chargeback: откат бонуса пользователя %s: "
-                            "%s дн. (%s → %s)",
-                            user.telegram_id,
-                            user_bonus,
-                            format_datetime(old_user_subscription_end),
-                            format_datetime(user.subscription_end),
-                        )
-
-                    try:
-                        await ProfileDeletionService.delete_profiles_for_user(
-                            session,
-                            user.id,
-                            reason="chargeback_delete",
-                            background=True,
-                        )
-                    except Exception as e:
-                        logger.error(
-                            "Chargeback profile delete failed: %s",
-                            e,
-                            exc_info=True,
-                        )
-
-                    telegram_id_for_cache = user.telegram_id
-                    queue_post_commit_task(
-                        session,
-                        lambda tid=telegram_id_for_cache: (
-                            _invalidate_cache_task(tid)
-                        ),
-                    )
-
-                snapshot = _build_payment_snapshot(payment)
-
-                try:
-                    await AuditService.log_action(
-                        session,
-                        admin_id=0,
-                        action="PAYMENT_CHARGEBACK",
-                        target_type="Payment",
-                        target_id=payment.id,
-                        details=(
-                            f"YooKassa chargeback: "
-                            f"transaction={transaction_id}, "
-                            f"was_completed={was_completed}"
-                        ),
-                    )
-                except Exception:
-                    pass
-
-                queue_post_commit_task(
-                    session,
-                    lambda s=snapshot, tid=transaction_id: (
-                        _send_chargeback_alert_now(s, tid)
-                    ),
-                )
-                queue_post_commit_task(
-                    session,
-                    lambda s=snapshot: (
-                        _notify_client_chargeback_now(s)
-                    ),
-                )
-
-                return True, "success"
-
-        except Exception as e:
-            logger.error(
-                "Chargeback processing failed: %s",
-                e,
-                exc_info=True,
-            )
-            return False, "error"

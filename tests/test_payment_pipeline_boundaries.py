@@ -30,6 +30,17 @@ class PaymentBoundaries(unittest.TestCase):
    body=path.read_text()
    for forbidden in ('SubscriptionService.extend_subscription','ReferralService.process_bonus','PaymentService.handle_successful_payment('): self.assertNotIn(forbidden,body,str(path))
 
+ def test_no_payment_side_effects_outside_fulfillment(self):
+  for path in [ROOT/'services/payment_service/service.py',ROOT/'services/workers/webhook_inbox.py',ROOT/'services/workers/payments.py']:
+   body=path.read_text()
+   for forbidden in ('subscription_end =','referral_days =','ProfileDeletionService','extend_subscription('): self.assertNotIn(forbidden,body,str(path))
+ def test_repeatable_reconcile_and_atomic_grant_are_present(self):
+  provider=(ROOT/'services/payment_provider_operations.py').read_text()
+  self.assertIn('ensure_reconcile_payment_operation',provider)
+  self.assertIn('uuid.uuid4().hex',provider)
+  self.assertIn('payment-grant:',provider)
+  self.assertIn('on_conflict_do_nothing',provider)
+
  def test_create_calls_require_idempotency_key(self):
   for path in (ROOT/'services').rglob('*.py'):
    tree=ast.parse(path.read_text())

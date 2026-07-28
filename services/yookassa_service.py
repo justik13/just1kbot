@@ -37,8 +37,18 @@ class YooKassaService:
             async with aiohttp.ClientSession(timeout=timeout,auth=aiohttp.BasicAuth(str(shop),str(secret))) as client:
                 async with client.request(method,cls.API+path,json=payload,headers=headers) as response:
                     code=response.status
-                    try: data=await response.json(content_type=None)
-                    except Exception: return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=code>=500,ambiguous=ambiguous_on_failure and code<300 or code>=500)
+                    try:
+                        data=await response.json(content_type=None)
+                    except asyncio.CancelledError:
+                        raise
+                    except asyncio.TimeoutError:
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.TIMEOUT,status_code=code,retryable=True,ambiguous=ambiguous_on_failure)
+                    except aiohttp.ClientError:
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.NETWORK_ERROR,status_code=code,retryable=True,ambiguous=ambiguous_on_failure)
+                    except (ValueError,TypeError):
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=code>=500,ambiguous=ambiguous_on_failure)
+                    except Exception:
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.UNKNOWN,status_code=code,retryable=False,ambiguous=ambiguous_on_failure)
                     if 200<=code<300 and isinstance(data,dict): return YooKassaResult(True,value=data,status_code=code)
                     kind=YooKassaErrorKind.UNKNOWN
                     if code in (401,403): kind=YooKassaErrorKind.AUTH_FAILED
@@ -47,8 +57,10 @@ class YooKassaService:
                     elif code>=500: kind=YooKassaErrorKind.SERVER_ERROR
                     elif code<500: kind=YooKassaErrorKind.VALIDATION_FAILED
                     return YooKassaResult(False,error_kind=kind,status_code=code,retryable=code==429 or code>=500,ambiguous=ambiguous_on_failure and code>=500)
+        except asyncio.CancelledError: raise
         except asyncio.TimeoutError: return YooKassaResult(False,error_kind=YooKassaErrorKind.TIMEOUT,retryable=True,ambiguous=ambiguous_on_failure)
         except aiohttp.ClientError: return YooKassaResult(False,error_kind=YooKassaErrorKind.NETWORK_ERROR,retryable=True,ambiguous=ambiguous_on_failure)
+        except Exception: return YooKassaResult(False,error_kind=YooKassaErrorKind.UNKNOWN,retryable=False,ambiguous=False)
     @classmethod
     async def create_payment_result(cls,payload:dict,*,idempotency_key:str): return await cls._request("POST","/payments",payload=payload,idempotency_key=idempotency_key,ambiguous_on_failure=True)
     @classmethod

@@ -12,15 +12,22 @@ async def _claim(module,worker_id):
 async def _run_claim(module,claim):
  try:
   if module is provider:
-   result=await provider.perform_http(claim) # no session and no row lock
+   result=await provider.perform_http(claim)
    async with session_scope() as session: await provider.finalize(session,claim,result)
   elif module is webhook_inbox:
-   result=await webhook_inbox.fetch_provider(claim) # no session and no row lock
+   result=await webhook_inbox.fetch_provider(claim)
    async with session_scope() as session: await webhook_inbox.finalize(session,claim,result)
   else:
    async with session_scope() as session: await fulfillment.execute(session,claim)
  except asyncio.CancelledError: raise
- except Exception: logger.exception("Payment operation failed queue=%s id=%s",module.__name__,getattr(claim,"operation_id",getattr(claim,"inbox_id",None)))
+ except Exception as exc:
+  logger.error("Payment operation failed queue=%s id=%s error=%s",module.__name__,getattr(claim,"operation_id",getattr(claim,"inbox_id",None)),type(exc).__name__)
+  try:
+   async with session_scope() as session:
+    if module is provider: await provider.finalize_provider_failure(session,claim,error_code=type(exc).__name__,retryable=True)
+    elif module is webhook_inbox: await webhook_inbox.finalize_webhook_failure(session,claim,error_code=type(exc).__name__,retryable=True)
+    else: await fulfillment.finalize_fulfillment_failure(session,claim,error_code=type(exc).__name__,retryable=True)
+  except Exception: logger.error("Payment failure finalizer rejected stale ownership queue=%s",module.__name__)
 async def payment_pipeline_loop(bot,shutdown_event:asyncio.Event)->None:
  worker_id=uuid.uuid4().hex; active:set[asyncio.Task]=set(); queues=(provider,webhook_inbox,fulfillment); cursor=0
  logger.info("Payment pipeline worker started worker=%s",worker_id[:8])

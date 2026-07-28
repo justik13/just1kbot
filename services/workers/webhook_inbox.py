@@ -45,9 +45,16 @@ async def finalize(session,claim,result):
   else:
    await session.execute(insert(PaymentRefund).values(payment_id=payment.id,provider_refund_id=str(refund_id),amount=amount,currency=currency,provider_status="succeeded",event_key=claim.event_key,processed_at=now_utc()).on_conflict_do_nothing(index_elements=["provider_refund_id"]))
    await session.flush(); total=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
-   if total==payment.amount: payment.provider_status="refunded"; payment.fulfillment_status="reversal_pending"; await ensure_fulfillment(session,payment,"reverse_payment")
-   elif total<payment.amount: payment.reconciliation_status="manual_review"
-   else: payment.reconciliation_status="manual_review"
+   if total==payment.amount:
+    payment.provider_status="refunded"; payment.fulfillment_status="reversal_pending"
+    pending=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
+    for queued in pending: queued.status="cancelled"; queued.completed_at=now_utc()
+    await ensure_fulfillment(session,payment,"reverse_payment")
+   elif total<payment.amount:
+    payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+    grants=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_subscription",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
+    for grant_op in grants: grant_op.status="cancelled"; grant_op.completed_at=now_utc()
+   else: payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
  elif not result or not result.ok:
   row.status="retry"; row.last_error_code=result.error_kind.value if result and result.error_kind else "provider_error"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None; return
  else:
@@ -65,5 +72,16 @@ async def finalize(session,claim,result):
  project_legacy_status(payment); row.status="succeeded"; row.processed_at=now_utc(); row.locked_at=row.locked_by=None; await session.flush()
 async def recover_stale(session,lease_seconds=120):
  rows=(await session.scalars(select(WebhookInbox).where(WebhookInbox.status=="processing",WebhookInbox.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
- for row in rows: row.status="dead" if row.attempts>=row.max_attempts else "retry"; row.locked_at=row.locked_by=None; row.next_attempt_at=now_utc()
+ for row in rows:
+  dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.locked_at=row.locked_by=None; row.next_attempt_at=now_utc()
+  if dead:
+   payment=await session.scalar(select(Payment).where(Payment.external_id==row.payment_external_id).with_for_update())
+   if payment: payment.reconciliation_status="required"; project_legacy_status(payment)
  return len(rows)
+async def finalize_webhook_failure(session,claim,*,error_code,retryable=True):
+ row=await session.scalar(select(WebhookInbox).where(WebhookInbox.id==claim.inbox_id).with_for_update())
+ if not row or row.status!="processing" or row.locked_by!=claim.worker_id or row.attempts!=claim.attempt_number: raise WebhookInboxOwnershipError(claim.inbox_id)
+ dead=(not retryable) or row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(row.attempts,8))); row.last_error_code=str(error_code)[:100]; row.last_error=None; row.locked_at=row.locked_by=None
+ if dead:
+  payment=await session.scalar(select(Payment).where(Payment.external_id==row.payment_external_id).with_for_update())
+  if payment: payment.reconciliation_status="required"; project_legacy_status(payment)

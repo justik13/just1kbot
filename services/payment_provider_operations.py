@@ -1,10 +1,10 @@
 """Fenced PostgreSQL queue for YooKassa provider commands."""
 from dataclasses import dataclass
+import uuid
 from datetime import timedelta
-from types import MappingProxyType
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import Payment, PaymentProviderOperation
+from database.models import Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation
 from services.payment_lifecycle import project_legacy_status
 from services.yookassa_service import YooKassaService, YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
@@ -19,18 +19,25 @@ def create_payload(payment,description,return_url):
 async def enqueue_create(session,payment,description,return_url):
     op=PaymentProviderOperation(payment_id=payment.id,operation_type="create_payment",status="pending",idempotency_key=payment.provider_idempotency_key,payload=create_payload(payment,description,return_url),next_attempt_at=now_utc()); session.add(op); await session.flush(); return op
 async def ensure_operation(session,payment,operation_type):
-    if operation_type=="cancel_payment": key=f"payment-cancel:{payment.id}:v1"; payload={"provider_payment_id":payment.external_id}
-    elif operation_type=="reconcile_payment": key=f"payment-reconcile:{payment.id}:v1"; payload={"provider_payment_id":payment.external_id}
-    else: raise ValueError(operation_type)
+    if operation_type!="cancel_payment": raise ValueError(operation_type)
+    key=f"payment-cancel:{payment.id}:v1"; payload={"provider_payment_id":payment.external_id}
     stmt=insert(PaymentProviderOperation).values(payment_id=payment.id,operation_type=operation_type,status="pending",idempotency_key=key,payload=payload,next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]).returning(PaymentProviderOperation.id)
     op_id=await session.scalar(stmt)
-    if op_id is None:
-        op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.idempotency_key==key).with_for_update())
-        if op.status in {"dead","cancelled"}: op.status="retry"; op.next_attempt_at=now_utc(); op.completed_at=None
-        return op
-    return await session.get(PaymentProviderOperation,op_id)
+    return await session.get(PaymentProviderOperation,op_id) if op_id else await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.idempotency_key==key))
+async def ensure_reconcile_payment_operation(session,payment,*,reason):
+    active=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="reconcile_payment",PaymentProviderOperation.status.in_(("pending","retry","processing"))).order_by(PaymentProviderOperation.id.desc()).with_for_update())
+    if active:return active
+    op=PaymentProviderOperation(payment_id=payment.id,operation_type="reconcile_payment",status="pending",idempotency_key=f"payment-reconcile:{payment.id}:{uuid.uuid4().hex}",payload={"provider_payment_id":payment.external_id,"reason":str(reason)[:100]},next_attempt_at=now_utc())
+    session.add(op); await session.flush(); return op
+async def retry_dead_provider_operation(session,operation_id,*,reset_attempts,reason):
+    op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.id==operation_id).with_for_update())
+    if not op or op.status!="dead": raise ValueError("operation is not dead")
+    op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc(); op.payload={**op.payload,"admin_retry_reason":str(reason)[:100]}
+    if reset_attempts:op.attempts=0
+    elif op.attempts>=op.max_attempts:raise ValueError("reset_attempts required for exhausted operation")
+    return op
 async def ensure_cancel_payment_operation(session,payment):
-    if payment.provider_status=="succeeded": return None
+    if payment.provider_status!="waiting_for_capture": return None
     return await ensure_operation(session,payment,"cancel_payment")
 async def claim(session,worker_id):
     op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.status.in_(("pending","retry")),PaymentProviderOperation.next_attempt_at<=now_utc(),PaymentProviderOperation.attempts<PaymentProviderOperation.max_attempts).order_by(PaymentProviderOperation.id).with_for_update(skip_locked=True).limit(1))
@@ -63,11 +70,16 @@ async def finalize(session,claim,result,transport=YooKassaService):
             if not data.get("id") or not url: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=True)
             else: payment.external_id=str(data["id"]); payment.payment_url=url; payment.payment_method="yookassa"
         if result.ok and status=="succeeded":
-            if payment.provider_status=="canceled": payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
             payment.provider_status="succeeded"; payment.paid_at=payment.paid_at or now_utc(); payment.provider_confirmed_at=payment.provider_confirmed_at or now_utc()
+            if claim.operation_type=="cancel_payment" or payment.checkout_status=="abandoned":
+                payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
+                session.add(PaymentEvent(payment_id=payment.id,event_type="paid_after_cancel",provider_status="succeeded",reason="provider_succeeded_during_cancel",source="provider_finalizer"))
+            else:
+                if payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: payment.fulfillment_status="pending"
+                await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
         elif result.ok and status=="canceled": payment.provider_status="canceled"
-        elif result.ok: payment.provider_status=status if status=="pending" else payment.provider_status
-        if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status!="mismatch" else "mismatch"
+        elif result.ok: payment.provider_status=status if status in {"pending","waiting_for_capture"} else payment.provider_status
+        if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status not in {"mismatch","manual_review"} else payment.reconciliation_status
     if not result.ok:
         op.last_error_code=result.error_kind.value if result.error_kind else "unknown"; op.last_error=None
         exhausted=op.attempts>=op.max_attempts; op.status="dead" if exhausted or not result.retryable else "retry"; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8)))
@@ -76,5 +88,17 @@ async def finalize(session,claim,result,transport=YooKassaService):
     op.locked_at=op.locked_by=None; project_legacy_status(payment); await session.flush()
 async def recover_stale(session,lease_seconds=120):
     rows=(await session.scalars(select(PaymentProviderOperation).where(PaymentProviderOperation.status=="processing",PaymentProviderOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
-    for op in rows: op.status="dead" if op.attempts>=op.max_attempts else "retry"; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
+    for op in rows:
+        dead=op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
+        if dead:
+            payment=await session.get(Payment,op.payment_id); payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"; project_legacy_status(payment)
     return len(rows)
+
+async def finalize_provider_failure(session,claim,*,error_code,retryable):
+    op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.id==claim.operation_id).with_for_update())
+    if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentProviderOperationOwnershipError(claim.operation_id)
+    payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update())
+    dead=(not retryable) or op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8))); op.last_error_code=str(error_code)[:100]; op.last_error=None; op.locked_at=op.locked_by=None
+    if dead: payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"
+    else: payment.reconciliation_status="required"
+    project_legacy_status(payment); return op

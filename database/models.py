@@ -292,9 +292,10 @@ class Payment(Base):
         Index("ix_payments_tariff_status", "tariff_id", "status"),
         Index("uq_payments_public_order_id_not_null", "public_order_id", unique=True, postgresql_where=text("public_order_id IS NOT NULL")),
         Index("uq_payments_provider_idempotency_key_not_null", "provider_idempotency_key", unique=True, postgresql_where=text("provider_idempotency_key IS NOT NULL")),
-        CheckConstraint("provider_status IN ('not_created','creating','pending','succeeded','canceled','refunded','unknown','manual_review')", name="ck_payments_provider_status"),
+        CheckConstraint("provider_status IN ('not_created','creating','pending','waiting_for_capture','succeeded','canceled','refunded','unknown','manual_review')", name="ck_payments_provider_status"),
         CheckConstraint("fulfillment_status IN ('not_ready','pending','processing','succeeded','failed','reversal_pending','reversed','manual_review')", name="ck_payments_fulfillment_status"),
         CheckConstraint("reconciliation_status IN ('ok','required','mismatch','manual_review')", name="ck_payments_reconciliation_status"),
+        CheckConstraint("checkout_status IN ('active','abandoned')", name="ck_payments_checkout_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -321,6 +322,8 @@ class Payment(Base):
     provider_status: Mapped[str] = mapped_column(String(30), default="not_created", server_default=text("'not_created'"))
     fulfillment_status: Mapped[str] = mapped_column(String(30), default="not_ready", server_default=text("'not_ready'"))
     reconciliation_status: Mapped[str] = mapped_column(String(30), default="ok", server_default=text("'ok'"))
+    checkout_status: Mapped[str] = mapped_column(String(20), default="active", server_default=text("'active'"))
+    user_cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     manual_review_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     snapshot_duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -473,6 +476,16 @@ class PaymentRefund(Base):
     event_key: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReferralReward(Base):
+    __tablename__ = "referral_rewards"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    source_payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PaymentEvent(Base):
