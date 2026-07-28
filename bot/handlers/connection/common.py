@@ -22,6 +22,7 @@ from utils.formatters import (
     format_traffic,
 )
 from utils.telegram import render_hub, safe
+from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +31,6 @@ DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z0-9\s_-]+$")
 _PROTOCOL_DISPLAY = {
     "amneziawg2": "AWG 2.0",
 }
-
-GRACE_PERIOD_HOURS = 48
 
 
 def _format_protocol(raw_protocol: str | None) -> str:

@@ -547,7 +547,7 @@ class PaymentService:
                 # Проверка статуса в YooKassa для pending/failed платежей
                 if payment.status in {"pending", "failed"}:
                     yookassa_data = await YooKassaService.get_payment(
-                        payment.transaction_id
+                        payment.external_id
                     )
                     if yookassa_data:
                         yk_status = yookassa_data.get("status", "")

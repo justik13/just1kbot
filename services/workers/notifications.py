@@ -9,7 +9,7 @@ from cachetools import TTLCache
 from sqlalchemy import or_, select
 
 from bot import texts
-from bot.constants import NOTIFICATION_INTERVAL, WORKER_ERROR_SLEEP_INTERVAL
+from bot.constants import GRACE_PERIOD_HOURS, NOTIFICATION_INTERVAL, WORKER_ERROR_SLEEP_INTERVAL
 from database.connection import session_scope
 from database.models import User
 from utils.datetime_helpers import now_utc
@@ -21,7 +21,6 @@ MAX_RETRY_COUNT = 4
 BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
-GRACE_PERIOD_HOURS = 48
 
 _last_notification_type: TTLCache[int, str] = TTLCache(
     maxsize=10000,

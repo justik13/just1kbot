@@ -18,6 +18,7 @@ from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
+from bot.constants import GRACE_PERIOD_HOURS, SELF_HEALING_MAX_PER_CYCLE
 
 logger = logging.getLogger("BackgroundWorker")
 
@@ -25,7 +26,6 @@ MAX_PENDING_ATTEMPTS = 10
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
-GRACE_PERIOD_HOURS = 48
 OLD_RECORDS_INTERVAL = 86400.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
