@@ -32,6 +32,13 @@ AUDIT_LOG_RETENTION_DAYS = 180
 
 _last_old_cleanup: float = 0.0
 
+QUARANTINE_ERROR_PREFIX = "QUARANTINED_NON_DELETE_OPERATION"
+
+
+def _is_non_delete_sync_operation(reason: str | None) -> bool:
+    """Return True only for known access-sync operations, never deletions."""
+    return isinstance(reason, str) and reason.startswith("sync_expires_")
+
 
 async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
     global _last_old_cleanup
@@ -411,6 +418,23 @@ async def _process_pending_deletions():
         pending_deletions = result.scalars().all()
 
         for deletion in pending_deletions:
+            if _is_non_delete_sync_operation(deletion.reason):
+                previous_error = deletion.last_error or "no previous error"
+                deletion.attempts = -1
+                deletion.last_attempt_at = current_time
+                deletion.last_error = (
+                    f"{QUARANTINE_ERROR_PREFIX}: {previous_error}"
+                )
+                logger.critical(
+                    "Quarantined non-delete pending API operation: id=%s, "
+                    "server=%s, peer=%s..., reason=%s",
+                    deletion.id,
+                    deletion.server_name,
+                    deletion.peer_id[:16],
+                    deletion.reason,
+                )
+                continue
+
             if deletion.attempts >= MAX_PENDING_ATTEMPTS:
                 pending_deletions_data.append(
                     {
