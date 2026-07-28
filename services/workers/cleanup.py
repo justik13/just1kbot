@@ -32,12 +32,32 @@ AUDIT_LOG_RETENTION_DAYS = 180
 
 _last_old_cleanup: float = 0.0
 
-QUARANTINE_ERROR_PREFIX = "QUARANTINED_NON_DELETE_OPERATION"
+QUARANTINE_ERROR_PREFIX = "QUARANTINED_UNSAFE_DELETE_REASON"
+
+EXECUTABLE_DELETE_REASONS = frozenset(
+    {
+        "create_device_rollback_failed",
+        "device_delete_api_failed",
+        "ban_delete",
+        "chargeback_delete",
+        "grace_delete",
+        "server_delete",
+    }
+)
 
 
-def _is_non_delete_sync_operation(reason: str | None) -> bool:
-    """Return True only for known access-sync operations, never deletions."""
-    return isinstance(reason, str) and reason.startswith("sync_expires_")
+def _is_executable_pending_deletion(reason: str | None) -> bool:
+    """Allow only deletion reasons produced by confirmed bot workflows."""
+    return reason in EXECUTABLE_DELETE_REASONS
+
+
+def _safe_log_value(value, limit=64):
+    text = str(value or "unknown")
+    sanitized = "".join(
+        character if character.isprintable() else "?"
+        for character in text
+    )
+    return sanitized[:limit]
 
 
 async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
@@ -247,14 +267,6 @@ async def _cleanup_dangling_peers():
 
     unmanaged_count = 0
 
-    def _safe_log_value(value, limit=64):
-        text = str(value or "unknown")
-        sanitized = "".join(
-            character if character.isprintable() else "?"
-            for character in text
-        )
-        return sanitized[:limit]
-
     for result in results:
         if isinstance(result, Exception):
             continue
@@ -291,9 +303,10 @@ async def _cleanup_dangling_peers():
             except Exception as e:
                 logger.error(
                     "Double-check failed for server_id=%s, "
-                    "peer=%s...: %s",
+                    "peer=%s..., error_kind=%s",
                     server_info["id"],
-                    _safe_log_value(client_id, 16), e,
+                    _safe_log_value(client_id, 16),
+                    type(e).__name__,
                 )
                 continue
 
@@ -338,7 +351,7 @@ async def _process_pending_deletions():
         pending_deletions = result.scalars().all()
 
         for deletion in pending_deletions:
-            if _is_non_delete_sync_operation(deletion.reason):
+            if not _is_executable_pending_deletion(deletion.reason):
                 previous_error = deletion.last_error or "no previous error"
                 deletion.attempts = -1
                 deletion.last_attempt_at = current_time
@@ -346,12 +359,16 @@ async def _process_pending_deletions():
                     f"{QUARANTINE_ERROR_PREFIX}: {previous_error}"
                 )
                 logger.critical(
-                    "Quarantined non-delete pending API operation: id=%s, "
-                    "server=%s, peer=%s..., reason=%s",
+                    "Quarantined pending API operation not in deletion "
+                    "allowlist: id=%s, reason=%s, peer=%s..., server=%s",
                     deletion.id,
-                    deletion.server_name,
-                    deletion.peer_id[:16],
-                    deletion.reason,
+                    (
+                        _safe_log_value(deletion.reason, 50)
+                        if deletion.reason
+                        else "<missing>"
+                    ),
+                    _safe_log_value(deletion.peer_id, 16),
+                    _safe_log_value(deletion.server_name),
                 )
                 continue
 

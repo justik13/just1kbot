@@ -171,6 +171,17 @@ class DanglingPeerReportOnlyTests(unittest.IsolatedAsyncioTestCase):
             session.add.assert_not_called()
         self.assertNotIn("Unmanaged VPN peer", logs)
 
+    async def test_manual_tg_named_peer_is_report_only(self):
+        client, sessions, logs = await self._run_cleanup(
+            client_name="tg_manually_created"
+        )
+
+        client.delete_user.assert_not_awaited()
+        for session in sessions:
+            session.add.assert_not_called()
+        self.assertIn("Unmanaged VPN peer detected", logs)
+        self.assertIn("automatic deletion disabled", logs)
+
     async def test_api_unavailable_fails_safe(self):
         for api_result, api_error in (
             (None, None),
