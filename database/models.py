@@ -481,9 +481,10 @@ class PaymentRefund(Base):
 class ReferralReward(Base):
     __tablename__ = "referral_rewards"
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     source_payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, unique=True)
     referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    is_first: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

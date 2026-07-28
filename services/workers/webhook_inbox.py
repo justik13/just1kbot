@@ -6,6 +6,8 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from database.models import Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
 from services.payment_lifecycle import project_legacy_status
+from services.payment_provider_validation import record_mismatch, validate_provider_payment
+from database.models import PaymentEvent
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 class WebhookInboxOwnershipError(RuntimeError): pass
@@ -56,16 +58,23 @@ async def finalize(session,claim,result):
     for grant_op in grants: grant_op.status="cancelled"; grant_op.completed_at=now_utc()
    else: payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
  elif not result or not result.ok:
-  row.status="retry"; row.last_error_code=result.error_kind.value if result and result.error_kind else "provider_error"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None; return
+  dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code=result.error_kind.value if result and result.error_kind else "provider_error"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None
+  if dead: payment.reconciliation_status="required"; project_legacy_status(payment)
+  return
  else:
   data=result.value or {}; amount=data.get("amount") or {}; metadata=data.get("metadata") or {}; status=data.get("status")
   money=status=="succeeded"
   if money and not payment.paid_at: payment.paid_at=payment.provider_confirmed_at=now_utc()
-  mismatch=(str(data.get("id"))!=str(payment.external_id) or Decimal(str(amount.get("value","-1")))!=payment.amount or amount.get("currency")!=payment.currency or metadata.get("order_id")!=payment.public_order_id)
-  if mismatch: payment.reconciliation_status="mismatch"; payment.provider_status=payment.fulfillment_status="manual_review"
+  mismatch=validate_provider_payment(payment,data)
+  if mismatch: record_mismatch(session,payment,mismatch); payment.provider_status="manual_review"
   elif claim.event_type=="payment.succeeded" and status=="succeeded":
-   if payment.provider_status=="canceled": payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
-   else: payment.provider_status="succeeded"; payment.fulfillment_status="pending" if payment.fulfillment_status=="not_ready" else payment.fulfillment_status; await ensure_fulfillment(session,payment,"grant_subscription")
+   prior_status=payment.provider_status; payment.provider_status="succeeded"
+   if payment.checkout_status=="abandoned" or prior_status=="canceled":
+    payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
+    session.add(PaymentEvent(payment_id=payment.id,event_type="paid_after_cancel",provider_status="succeeded",reason="webhook_after_abandoned_checkout",source="webhook_inbox"))
+    queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
+    for operation in queued: operation.status="cancelled"; operation.completed_at=now_utc()
+   else: payment.fulfillment_status="pending" if payment.fulfillment_status=="not_ready" else payment.fulfillment_status; await ensure_fulfillment(session,payment,"grant_subscription")
   elif claim.event_type=="payment.canceled" and status=="canceled":
    if payment.paid_at: payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
    else: payment.provider_status="canceled"
@@ -85,3 +94,11 @@ async def finalize_webhook_failure(session,claim,*,error_code,retryable=True):
  if dead:
   payment=await session.scalar(select(Payment).where(Payment.external_id==row.payment_external_id).with_for_update())
   if payment: payment.reconciliation_status="required"; project_legacy_status(payment)
+
+async def retry_dead_webhook_operation(session,inbox_id,*,reset_attempts,reason):
+ row=await session.scalar(select(WebhookInbox).where(WebhookInbox.id==inbox_id).with_for_update())
+ if not row or row.status!="dead": raise ValueError("webhook operation is not dead")
+ if not reset_attempts and row.attempts>=row.max_attempts: raise ValueError("reset_attempts required")
+ if reset_attempts: row.attempts=0
+ row.status="retry"; row.next_attempt_at=now_utc(); row.locked_at=row.locked_by=None; row.processed_at=None; row.last_error_code=None; row.last_error="manual_retry:"+str(reason)[:200]
+ return row

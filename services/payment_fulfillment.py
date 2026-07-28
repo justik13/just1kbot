@@ -28,7 +28,7 @@ async def grant(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     manual=bool(op.payload.get("manual_without_provider_confirmation"))
     if (payment.provider_status!="succeeded" and not manual) or not user or user.is_deleted or user.is_banned:
-        payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; project_legacy_status(payment); return
+        payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
     grant_entry_type="manual_grant" if manual else "payment_grant"
     existing=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==user.id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type==grant_entry_type))
     refunded=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
@@ -36,7 +36,7 @@ async def grant(session,op):
         payment.fulfillment_status="manual_review"; op.status="cancelled"; op.completed_at=now_utc(); return
     if not existing:
         days=payment.snapshot_duration_days
-        if not days or not payment.snapshot_device_limit: payment.fulfillment_status="manual_review"; op.status="dead"; return
+        if not days or not payment.snapshot_device_limit: payment.fulfillment_status="manual_review"; op.status="dead"; op.completed_at=now_utc(); return
         await SubscriptionService.extend_subscription(session,user.telegram_id,days,payment.snapshot_device_limit,payment.tariff_id)
         await _entry(session,payment,user.id,grant_entry_type,days,limit=payment.snapshot_device_limit,tariff=payment.tariff_id)
     payment.fulfillment_status="succeeded"; payment.fulfilled_at=payment.fulfilled_at or now_utc(); op.status="succeeded"; op.completed_at=now_utc(); project_legacy_status(payment)
@@ -58,16 +58,21 @@ async def referral(session,op):
     if not user or not user.referred_by or payment.provider_status!="succeeded" or payment.fulfillment_status!="succeeded" or reversal:
         op.status="cancelled"; op.completed_at=now_utc(); return
     ref=await session.scalar(select(User).where(User.telegram_id==user.referred_by).with_for_update())
-    if not ref: op.status="dead"; op.last_error_code="referrer_missing"; return
-    # Unique marker serializes concurrent/out-of-order first-payment rewards.
-    marker=await session.scalar(select(ReferralReward).where(ReferralReward.referred_user_id==user.id).with_for_update())
-    if marker and marker.source_payment_id!=payment.id: op.status="cancelled"; op.completed_at=now_utc(); return
+    if not ref: op.status="dead"; op.completed_at=now_utc(); op.last_error_code="referrer_missing"; return
+    if (payment.snapshot_duration_days or 0)<30: op.status="cancelled"; op.completed_at=now_utc(); return
+    marker=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())
+    if marker and marker.reversed_at: op.status="cancelled"; op.completed_at=now_utc(); return
     if not marker:
-        marker=ReferralReward(referred_user_id=user.id,source_payment_id=payment.id,referrer_user_id=ref.id); session.add(marker); await session.flush()
-    _,a=await _entry(session,payment,user.id,"referral_user_bonus",7); _,b=await _entry(session,payment,ref.id,"referral_referrer_bonus",7)
-    if a: await SubscriptionService.extend_subscription(session,user.telegram_id,7)
-    if b: await SubscriptionService.extend_subscription(session,ref.telegram_id,7)
-    payment.referral_user_bonus_days=7; payment.referral_referrer_bonus_days=7; op.status="succeeded"; op.completed_at=now_utc()
+        previous_first=await session.scalar(select(ReferralReward.id).where(ReferralReward.referred_user_id==user.id,ReferralReward.is_first.is_(True)).limit(1))
+        first=previous_first is None
+        marker=ReferralReward(referred_user_id=user.id,source_payment_id=payment.id,referrer_user_id=ref.id,is_first=first); session.add(marker); await session.flush()
+    user_days=5 if marker.is_first else 0; ref_days=3 if marker.is_first else 1
+    a=False
+    if user_days: _,a=await _entry(session,payment,user.id,"referral_user_bonus",user_days)
+    _,b=await _entry(session,payment,ref.id,"referral_referrer_bonus",ref_days)
+    if a: await SubscriptionService.extend_subscription(session,user.telegram_id,user_days)
+    if b: await SubscriptionService.extend_subscription(session,ref.telegram_id,ref_days)
+    payment.referral_user_bonus_days=user_days; payment.referral_referrer_bonus_days=ref_days; op.status="succeeded"; op.completed_at=now_utc()
 async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("payment_grant","manual_grant"))))

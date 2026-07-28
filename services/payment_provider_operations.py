@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from database.models import Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation
 from services.payment_lifecycle import project_legacy_status
+from services.payment_provider_validation import record_mismatch, validate_provider_payment
 from services.yookassa_service import YooKassaService, YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
 
@@ -25,6 +26,7 @@ async def ensure_operation(session,payment,operation_type):
     op_id=await session.scalar(stmt)
     return await session.get(PaymentProviderOperation,op_id) if op_id else await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.idempotency_key==key))
 async def ensure_reconcile_payment_operation(session,payment,*,reason):
+    payment=await session.scalar(select(Payment).where(Payment.id==payment.id).with_for_update())
     active=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="reconcile_payment",PaymentProviderOperation.status.in_(("pending","retry","processing"))).order_by(PaymentProviderOperation.id.desc()).with_for_update())
     if active:return active
     op=PaymentProviderOperation(payment_id=payment.id,operation_type="reconcile_payment",status="pending",idempotency_key=f"payment-reconcile:{payment.id}:{uuid.uuid4().hex}",payload={"provider_payment_id":payment.external_id,"reason":str(reason)[:100]},next_attempt_at=now_utc())
@@ -70,15 +72,22 @@ async def finalize(session,claim,result,transport=YooKassaService):
             if not data.get("id") or not url: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=True)
             else: payment.external_id=str(data["id"]); payment.payment_url=url; payment.payment_method="yookassa"
         if result.ok and status=="succeeded":
+            mismatch=validate_provider_payment(payment,data)
+            if mismatch:
+                record_mismatch(session,payment,mismatch); op.status="succeeded"; op.completed_at=now_utc(); op.locked_at=op.locked_by=None; project_legacy_status(payment); await session.flush(); return
             payment.provider_status="succeeded"; payment.paid_at=payment.paid_at or now_utc(); payment.provider_confirmed_at=payment.provider_confirmed_at or now_utc()
             if claim.operation_type=="cancel_payment" or payment.checkout_status=="abandoned":
                 payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
                 session.add(PaymentEvent(payment_id=payment.id,event_type="paid_after_cancel",provider_status="succeeded",reason="provider_succeeded_during_cancel",source="provider_finalizer"))
+                queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
+                for queued_op in queued: queued_op.status="cancelled"; queued_op.completed_at=now_utc()
             else:
                 if payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: payment.fulfillment_status="pending"
                 await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
-        elif result.ok and status=="canceled": payment.provider_status="canceled"
-        elif result.ok: payment.provider_status=status if status in {"pending","waiting_for_capture"} else payment.provider_status
+        elif result.ok and status=="canceled":
+            if payment.provider_status=="succeeded": payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="late_provider_conflict",provider_status="canceled",reason="canceled_after_succeeded",source="provider_finalizer"))
+            else: payment.provider_status="canceled"
+        elif result.ok and payment.provider_status!="succeeded": payment.provider_status=status if status in {"pending","waiting_for_capture"} else payment.provider_status
         if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status not in {"mismatch","manual_review"} else payment.reconciliation_status
     if not result.ok:
         op.last_error_code=result.error_kind.value if result.error_kind else "unknown"; op.last_error=None
