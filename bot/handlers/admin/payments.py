@@ -11,16 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from bot import texts
-from bot.keyboards import get_back_button
 from database.models import Payment
 from database.repositories.payments_repo import (
     get_payment_by_id,
 )
-from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.telegram import render_hub, safe
+from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
 router = Router()

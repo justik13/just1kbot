@@ -18,6 +18,7 @@ from database.models import MaintenanceMode, Tariff
 
 _engine = None
 _sessionmaker = None
+_post_commit_background_tasks: set[asyncio.Task[None]] = set()
 
 DEFAULT_TARIFFS = [
     {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35,  "sort_order": 10},
@@ -217,7 +218,6 @@ async def _apply_additional_indexes(conn):
 
 
 async def get_session() -> AsyncSession:
-    global _sessionmaker
     if _sessionmaker is None:
         await init_db()
     return _sessionmaker()
@@ -247,7 +247,9 @@ async def _run_post_commit_tasks(session: AsyncSession) -> None:
     if not tasks:
         return
     for task in tasks:
-        asyncio.create_task(_safe_run_post_commit(task))
+        background_task = asyncio.create_task(_safe_run_post_commit(task))
+        _post_commit_background_tasks.add(background_task)
+        background_task.add_done_callback(_post_commit_background_tasks.discard)
 
 
 def queue_post_commit_task(
@@ -274,7 +276,15 @@ async def session_scope():
         await session.close()
 
 
+async def cancel_post_commit_tasks() -> None:
+    tasks = list(_post_commit_background_tasks)
+    for task in tasks:
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 async def close_db():
-    global _engine
+    await cancel_post_commit_tasks()
     if _engine:
         await _engine.dispose()

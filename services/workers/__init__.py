@@ -20,6 +20,7 @@ shutdown_event = asyncio.Event()
 
 _worker_tasks: dict[str, asyncio.Task] = {}
 _supervisor_task: asyncio.Task | None = None
+_alert_tasks: set[asyncio.Task] = set()
 
 
 _SUPERVISOR_CHECK_INTERVAL = 15.0
@@ -302,12 +303,14 @@ async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
                 type(exc).__name__,
             )
 
-            asyncio.create_task(
+            alert_task = asyncio.create_task(
                 _send_supervisor_crash_alert(
                     bot,
                     type(exc).__name__,
                 )
             )
+            _alert_tasks.add(alert_task)
+            alert_task.add_done_callback(_alert_tasks.discard)
 
     _supervisor_task.add_done_callback(_supervisor_done_callback)
 
@@ -337,6 +340,12 @@ async def stop_background_workers():
             logger.error("Error while stopping supervisor: %s", e)
 
         _supervisor_task = None
+
+    alert_tasks = list(_alert_tasks)
+    for task in alert_tasks:
+        task.cancel()
+    if alert_tasks:
+        await asyncio.gather(*alert_tasks, return_exceptions=True)
 
     tasks = list(_worker_tasks.values())
 

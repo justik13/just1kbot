@@ -440,11 +440,8 @@ class DeviceService:
                     raise
 
                 except (
-                    DailyLimitExceeded,
-                    DeviceLimitExceeded,
                     InvalidConfig,
                     ServerUnavailable,
-                    NoActiveSubscription,
                 ):
                     raise
 

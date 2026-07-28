@@ -24,7 +24,6 @@ from database.repositories.users_repo import (
 from services.subscription import SubscriptionService
 from utils.formatters import (
     format_datetime,
-    format_days_left,
     format_traffic,
 )
 from utils.tariff_names import get_tariff_display_name
@@ -237,7 +236,7 @@ async def show_referral(
         )
         return
 
-    user_with_refs, referrals = await get_user_with_referrals(
+    _, referrals = await get_user_with_referrals(
         session,
         db_user.telegram_id,
     )
@@ -279,7 +278,7 @@ async def show_referrals_list(
         )
         return
 
-    user_with_refs, referrals = await get_user_with_referrals(
+    _, referrals = await get_user_with_referrals(
         session,
         db_user.telegram_id,
     )

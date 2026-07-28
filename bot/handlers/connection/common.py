@@ -19,7 +19,6 @@ from utils.datetime_helpers import now_utc
 from utils.formatters import (
     format_connection_device_card,
     format_datetime,
-    format_traffic,
 )
 from utils.telegram import render_hub, safe
 from bot.constants import GRACE_PERIOD_HOURS

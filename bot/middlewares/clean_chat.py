@@ -13,7 +13,6 @@ _DELETE_BATCH_SIZE = 5
 
 
 async def _delete_worker():
-    global _delete_queue
     while True:
         try:
             batch = []

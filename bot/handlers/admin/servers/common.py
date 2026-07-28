@@ -11,7 +11,7 @@ from sqlalchemy import delete as sql_delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_admin_server_card_keyboard, get_back_button
+from bot.keyboards import get_admin_server_card_keyboard
 from database.connection import session_scope
 from database.models import PendingAPIDeletion
 from database.repositories.servers_repo import (
@@ -227,7 +227,7 @@ async def _delete_server_background(
             try:
                 async with session_scope() as session:
                     current_time = now_utc()
-                    for profile_id, peer_id in failed_peers:
+                    for _profile_id, peer_id in failed_peers:
                         await session.execute(
                             update(PendingAPIDeletion)
                             .where(
