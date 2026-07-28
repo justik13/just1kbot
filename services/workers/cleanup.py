@@ -18,7 +18,7 @@ from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
-from bot.constants import GRACE_PERIOD_HOURS, SELF_HEALING_MAX_PER_CYCLE
+from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger("BackgroundWorker")
 
