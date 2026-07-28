@@ -461,6 +461,20 @@ class EntitlementEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class PaymentRefund(Base):
+    __tablename__ = "payment_refunds"
+    __table_args__ = (CheckConstraint("provider_status IN ('pending','succeeded','canceled')", name="ck_payment_refunds_provider_status"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, index=True)
+    provider_refund_id: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(20), nullable=False)
+    provider_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class PaymentEvent(Base):
     __tablename__ = "payment_events"
 

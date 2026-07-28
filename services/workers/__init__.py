@@ -9,6 +9,7 @@ from .cleanup import cleanup_dangling_peers_loop
 from .payments import stale_payments_checker_loop
 from .heartbeat import heartbeat_loop, set_bot_ref
 from .api_operations import api_operations_loop
+from .payment_pipeline import payment_pipeline_loop
 
 from config.settings import get_settings
 
@@ -50,6 +51,9 @@ def _heartbeat_worker_factory(bot: Bot):
 def _api_operations_worker_factory(bot: Bot):
     return api_operations_loop(shutdown_event)
 
+def _payment_pipeline_worker_factory(bot: Bot):
+    return payment_pipeline_loop(bot, shutdown_event)
+
 
 _WORKER_FACTORIES = {
     "traffic": _traffic_worker_factory,
@@ -58,6 +62,7 @@ _WORKER_FACTORIES = {
     "notifications": _notifications_worker_factory,
     "heartbeat": _heartbeat_worker_factory,
     "api_operations": _api_operations_worker_factory,
+    "payment_pipeline": _payment_pipeline_worker_factory,
 }
 
 

@@ -4,13 +4,14 @@ from datetime import timedelta
 
 from aiogram import Bot
 from cachetools import TTLCache
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
-from services.payment_service import PaymentService
+from services.payment_provider_operations import ensure_operation
+from services.workers.webhook_inbox import ensure_fulfillment
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
@@ -84,77 +85,22 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
 
 
 async def _cleanup_orphan_pending_payments():
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=ORPHAN_PENDING_THRESHOLD_HOURS)
-
-    try:
-        async with session_scope() as session:
-            stmt = (
-                select(Payment.id)
-                .where(
-                    Payment.status == "pending",
-                    Payment.external_id == None,
-                    Payment.created_at < threshold,
-                )
-                .limit(100)
-            )
-            result = await session.execute(stmt)
-            orphan_ids = [row[0] for row in result.all()]
-
-            if not orphan_ids:
-                return
-
-            await session.execute(
-                update(Payment)
-                .where(Payment.id.in_(orphan_ids))
-                .values(
-                    status="failed",
-                    manual_review_reason="payment_create_error",
-                )
-            )
-
-            logger.info(
-                "Cleaned up %s orphan pending payments (no external_id, older than %sh)",
-                len(orphan_ids),
-                ORPHAN_PENDING_THRESHOLD_HOURS,
-            )
-    except Exception as e:
-        logger.warning("Failed to cleanup orphan pending payments: %s", e)
+    """Ensure durable creation commands; never infer provider failure locally."""
+    async with session_scope() as session:
+        rows=(await session.scalars(select(Payment).where(Payment.provider_status.in_(("creating","unknown")),Payment.provider_idempotency_key.is_not(None)).limit(100))).all()
+        # create commands are created atomically with new payments; missing legacy rows require review, not failure.
+        for payment in rows:
+            if payment.external_id: await ensure_operation(session,payment,"reconcile_payment")
 
 
 async def _process_stale_payments(bot: Bot, settings):
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=1)
-
-    yookassa_payment_ids = []
-
     async with session_scope() as session:
-        stmt = (
-            select(Payment, User.telegram_id)
-            .join(User, Payment.user_id == User.id)
-            .where(
-                Payment.status.in_(["pending", "requires_manual_review"]),
-                Payment.created_at < threshold,
-            )
-            .order_by(Payment.created_at.desc())
-            .limit(50)
-        )
-        result = await session.execute(stmt)
-        for payment, _telegram_id in result.all():
-            if payment.external_id and payment.status in (
-                "pending",
-                "requires_manual_review",
-            ):
-                yookassa_payment_ids.append(payment.id)
-
-    for payment_id in yookassa_payment_ids:
-        try:
-            async with session_scope() as session:
-                await PaymentService.check_yookassa_payment(session, payment_id)
-        except Exception as e:
-            logger.warning("Failed to check external payment %s: %s", payment_id, e)
-
-    await _alert_new_stale_payments(bot, settings)
+        rows=(await session.scalars(select(Payment).where(Payment.created_at < now_utc()-timedelta(hours=1)).limit(100))).all()
+        for payment in rows:
+            if payment.external_id and payment.provider_status in {"pending","unknown"}: await ensure_operation(session,payment,"reconcile_payment")
+            if payment.provider_status=="succeeded" and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
+            if payment.provider_status=="refunded" and payment.fulfillment_status!="reversed": await ensure_fulfillment(session,payment,"reverse_payment")
+    await _alert_new_stale_payments(bot,settings)
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):
