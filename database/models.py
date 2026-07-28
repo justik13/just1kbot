@@ -33,6 +33,53 @@ class Base(DeclarativeBase):
 class User(Base):
     __tablename__ = "users"
 
+    __table_args__ = (
+        Index(
+            "ix_users_active_subscription",
+            "subscription_end",
+            postgresql_where=text("is_deleted = false AND subscription_end IS NOT NULL"),
+        ),
+        Index(
+            "ix_users_banned",
+            "telegram_id",
+            postgresql_where=text("is_banned = true AND is_deleted = false"),
+        ),
+        Index(
+            "ix_users_expiring_subscription",
+            "subscription_end",
+            "telegram_id",
+            postgresql_where=text(
+                """
+                is_deleted = false
+                AND is_bot_blocked = false
+                AND is_banned = false
+                AND subscription_end IS NOT NULL
+                AND (notified_3d = false OR notified_1d = false OR notified_2h = false)
+                """
+            ),
+        ),
+        Index(
+            "ix_users_expired_grace_notify",
+            "subscription_end",
+            "telegram_id",
+            postgresql_where=text(
+                """
+                is_deleted = false
+                AND is_bot_blocked = false
+                AND subscription_end IS NOT NULL
+                AND (notified_expired = false OR notified_grace_12h = false)
+                """
+            ),
+        ),
+        Index(
+            "ix_users_paginated",
+            "created_at",
+            "id",
+            postgresql_where=text("is_deleted = false"),
+            postgresql_ops={"created_at": "DESC", "id": "DESC"},
+        ),
+    )
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
 
@@ -95,6 +142,13 @@ class VPNProfile(Base):
 
     __table_args__ = (
         Index("uq_vpn_profiles_peer_id", "peer_id", unique=True),
+        Index(
+            "uq_vpn_profiles_user_server_device_name",
+            "user_id",
+            "server_id",
+            text("lower(device_name)"),
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -182,12 +236,6 @@ class Payment(Base):
     __tablename__ = "payments"
 
     __table_args__ = (
-        Index(
-            "ix_payment_external_completed",
-            "external_id",
-            unique=True,
-            postgresql_where=text("status = 'completed' AND external_id IS NOT NULL"),
-        ),
         Index(
             "uq_payments_external_id_not_null",
             "external_id",
@@ -282,6 +330,7 @@ class AuditLog(Base):
 
     __table_args__ = (
         Index("ix_audit_logs_created_at", "created_at"),
+        Index("ix_audit_logs_created_at_desc", "created_at", postgresql_ops={"created_at": "DESC"}),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -299,6 +348,10 @@ class AuditLog(Base):
 
 class BroadcastProgress(Base):
     __tablename__ = "broadcast_progress"
+
+    __table_args__ = (
+        Index("ix_broadcast_in_progress", "status", "created_at", postgresql_where=text("status = 'in_progress'")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
@@ -328,6 +381,15 @@ class BroadcastProgress(Base):
 
 class PendingAPIDeletion(Base):
     __tablename__ = "pending_api_deletions"
+
+    __table_args__ = (
+        Index(
+            "ix_pending_api_deletions_attempts",
+            "attempts",
+            "created_at",
+            postgresql_where=text("attempts < 10"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
@@ -364,6 +426,10 @@ class MaintenanceMode(Base):
 
 class HubMessage(Base):
     __tablename__ = "hub_messages"
+
+    __table_args__ = (
+        Index("ix_hub_messages_chat_id", "chat_id"),
+    )
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
