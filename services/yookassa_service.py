@@ -1,161 +1,64 @@
-import logging
-from decimal import Decimal
-from typing import Optional
+"""Typed, idempotent YooKassa HTTP transport.
 
-from aioyookassa import YooKassa
-from aioyookassa.types.payment import PaymentAmount, Confirmation
-from aioyookassa.types.enum import ConfirmationType
-from aioyookassa.types.params import CreatePaymentParams
-
+Provider commands receive their key and immutable body from PostgreSQL; this module
+never invents idempotency keys or logs credentials/payloads.
+"""
+import asyncio
+from dataclasses import dataclass
+from enum import Enum
+from typing import Generic, TypeVar
+import aiohttp
 from config.settings import get_settings
 
-logger = logging.getLogger(__name__)
-
-_client: Optional[YooKassa] = None
-
-
-def _get_client() -> YooKassa:
-    global _client
-    if _client is None:
-        settings = get_settings()
-        _client = YooKassa(
-            api_key=settings.YOOKASSA_SECRET_KEY,
-            shop_id=settings.YOOKASSA_SHOP_ID,
-        )
-        logger.info("[YooKassa] aioyookassa client initialized")
-    return _client
-
-
-async def close_yookassa_client() -> None:
-    global _client
-    if _client is not None:
-        try:
-            await _client.close()
-        except Exception as e:
-            logger.warning("[YooKassa] Error closing client: %s", e)
-        finally:
-            _client = None
-            logger.info("[YooKassa] Client closed")
-
-
-def _payment_to_dict(payment) -> Optional[dict]:
-    if payment is None:
-        return None
-
-    try:
-        data = payment.model_dump(mode="json", by_alias=True)
-    except AttributeError:
-        try:
-            data = payment.dict(by_alias=True)
-        except Exception:
-            return None
-    except Exception:
-        return None
-
-    if not isinstance(data, dict):
-        return None
-
-    confirmation = data.get("confirmation")
-    if isinstance(confirmation, dict):
-        url = confirmation.get("confirmation_url") or confirmation.get("url")
-        if url:
-            confirmation["confirmation_url"] = url
-
-    amount = data.get("amount")
-    if isinstance(amount, dict) and "value" in amount:
-        amount["value"] = str(amount["value"])
-
-    status = data.get("status")
-    if status is not None:
-        data["status"] = str(status).lower()
-
-    return data
-
+T = TypeVar("T")
+class YooKassaErrorKind(str, Enum):
+    CONFIGURATION="configuration"; AUTH_FAILED="auth_failed"; VALIDATION_FAILED="validation_failed"; NOT_FOUND="not_found"; RATE_LIMITED="rate_limited"; SERVER_ERROR="server_error"; NETWORK_ERROR="network_error"; TIMEOUT="timeout"; INVALID_RESPONSE="invalid_response"; UNKNOWN="unknown"
+@dataclass(frozen=True)
+class YooKassaResult(Generic[T]):
+    ok: bool
+    value: T | None = None
+    error_kind: YooKassaErrorKind | None = None
+    status_code: int | None = None
+    retryable: bool = False
+    ambiguous: bool = False
 
 class YooKassaService:
-    @staticmethod
-    async def create_payment(
-        amount: Decimal,
-        currency: str = "RUB",
-        description: str = "",
-        return_url: str = "",
-        metadata: Optional[dict] = None,
-    ) -> Optional[dict]:
-        client = _get_client()
+    API="https://api.yookassa.ru/v3"
+    @classmethod
+    async def _request(cls, method:str, path:str, *, payload:dict|None=None, idempotency_key:str|None=None, ambiguous_on_failure=False)->YooKassaResult[dict]:
+        s=get_settings(); shop=getattr(s,"YOOKASSA_SHOP_ID",None); secret=getattr(s,"YOOKASSA_SECRET_KEY",None)
+        if not shop or not secret: return YooKassaResult(False,error_kind=YooKassaErrorKind.CONFIGURATION)
+        headers={"Accept":"application/json"}
+        if idempotency_key:
+            if len(idempotency_key)>64: return YooKassaResult(False,error_kind=YooKassaErrorKind.VALIDATION_FAILED)
+            headers["Idempotence-Key"]=idempotency_key
         try:
-            params_kwargs = dict(
-                amount=PaymentAmount(value=str(amount), currency=currency),
-                confirmation=Confirmation(
-                    type=ConfirmationType.REDIRECT,
-                    return_url=return_url,
-                ),
-                description=description,
-                metadata=metadata,
-                capture=True,
-            )
-
-            params = CreatePaymentParams(**params_kwargs)
-            payment = await client.payments.create_payment(params)
-
-            data = _payment_to_dict(payment)
-            if data:
-                logger.info(
-                    "YooKassa payment created: id=%s, status=%s",
-                    data.get("id"),
-                    data.get("status"),
-                )
-                return data
-
-        except Exception as e:
-            logger.error(
-                "YooKassa create_payment exception: %s",
-                e,
-                exc_info=True,
-            )
-
-        return None
-
+            timeout=aiohttp.ClientTimeout(total=15)
+            async with aiohttp.ClientSession(timeout=timeout,auth=aiohttp.BasicAuth(str(shop),str(secret))) as client:
+                async with client.request(method,cls.API+path,json=payload,headers=headers) as response:
+                    code=response.status
+                    try: data=await response.json(content_type=None)
+                    except Exception: return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=code>=500,ambiguous=ambiguous_on_failure and code<300 or code>=500)
+                    if 200<=code<300 and isinstance(data,dict): return YooKassaResult(True,value=data,status_code=code)
+                    kind=YooKassaErrorKind.UNKNOWN
+                    if code in (401,403): kind=YooKassaErrorKind.AUTH_FAILED
+                    elif code==404: kind=YooKassaErrorKind.NOT_FOUND
+                    elif code==429: kind=YooKassaErrorKind.RATE_LIMITED
+                    elif code>=500: kind=YooKassaErrorKind.SERVER_ERROR
+                    elif code<500: kind=YooKassaErrorKind.VALIDATION_FAILED
+                    return YooKassaResult(False,error_kind=kind,status_code=code,retryable=code==429 or code>=500,ambiguous=ambiguous_on_failure and code>=500)
+        except asyncio.TimeoutError: return YooKassaResult(False,error_kind=YooKassaErrorKind.TIMEOUT,retryable=True,ambiguous=ambiguous_on_failure)
+        except aiohttp.ClientError: return YooKassaResult(False,error_kind=YooKassaErrorKind.NETWORK_ERROR,retryable=True,ambiguous=ambiguous_on_failure)
+    @classmethod
+    async def create_payment_result(cls,payload:dict,*,idempotency_key:str): return await cls._request("POST","/payments",payload=payload,idempotency_key=idempotency_key,ambiguous_on_failure=True)
+    @classmethod
+    async def get_payment_result(cls,payment_id:str): return await cls._request("GET",f"/payments/{payment_id}")
+    @classmethod
+    async def cancel_payment_result(cls,payment_id:str,*,idempotency_key:str): return await cls._request("POST",f"/payments/{payment_id}/cancel",payload={},idempotency_key=idempotency_key,ambiguous_on_failure=True)
+    @classmethod
+    async def get_payment(cls,payment_id):
+        result=await cls.get_payment_result(payment_id); return result.value if result.ok else None
     @staticmethod
-    async def get_payment(payment_id: str) -> Optional[dict]:
-        client = _get_client()
-        try:
-            payment = await client.payments.get_payment(payment_id)
-            return _payment_to_dict(payment)
-        except Exception as e:
-            logger.error(
-                "YooKassa get_payment exception: %s",
-                e,
-                exc_info=True,
-            )
-            return None
-
-    @staticmethod
-    async def cancel_payment(
-        payment_id: str,
-        reason: str = "",
-    ) -> Optional[dict]:
-        client = _get_client()
-        try:
-            payment = await client.payments.cancel_payment(payment_id)
-            data = _payment_to_dict(payment)
-            if data:
-                logger.info("YooKassa payment cancelled: id=%s", payment_id)
-                return data
-        except Exception as e:
-            logger.error(
-                "YooKassa cancel_payment exception: %s",
-                e,
-                exc_info=True,
-            )
-        return None
-
-    @staticmethod
-    def normalize_webhook_event(event: str) -> str:
-        mapping = {
-            "payment.succeeded": "CONFIRMED",
-            "payment.canceled": "CANCELED",
-            "payment.refunded": "CHARGEBACKED",
-            "refund.succeeded": "CHARGEBACKED",
-            "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
-        }
-        return mapping.get(event, event.upper())
+    def normalize_webhook_event(event:str)->str:
+        return {"payment.succeeded":"CONFIRMED","payment.canceled":"CANCELED","payment.refunded":"CHARGEBACKED","refund.succeeded":"CHARGEBACKED","payment.waiting_for_capture":"WAITING_FOR_CAPTURE"}.get(event,event.upper())
+async def close_yookassa_client(): pass

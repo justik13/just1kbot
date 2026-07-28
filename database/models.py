@@ -42,6 +42,10 @@ API_OPERATION_STATUSES = (
     "dead",
     "cancelled",
 )
+PAYMENT_PROVIDER_STATUSES = ("not_created", "creating", "pending", "succeeded", "canceled", "refunded", "unknown", "manual_review")
+PAYMENT_FULFILLMENT_STATUSES = ("not_ready", "pending", "processing", "succeeded", "failed", "reversal_pending", "reversed", "manual_review")
+PAYMENT_RECONCILIATION_STATUSES = ("ok", "required", "mismatch", "manual_review")
+PAYMENT_QUEUE_STATUSES = ("pending", "processing", "retry", "succeeded", "dead", "cancelled")
 
 
 class Base(DeclarativeBase):
@@ -146,7 +150,6 @@ class User(Base):
     payments = relationship(
         "Payment",
         back_populates="user",
-        cascade="all, delete-orphan",
     )
 
     current_tariff = relationship(
@@ -287,13 +290,18 @@ class Payment(Base):
         ),
         Index("ix_payments_status_created_at", "status", "created_at"),
         Index("ix_payments_tariff_status", "tariff_id", "status"),
+        Index("uq_payments_public_order_id_not_null", "public_order_id", unique=True, postgresql_where=text("public_order_id IS NOT NULL")),
+        Index("uq_payments_provider_idempotency_key_not_null", "provider_idempotency_key", unique=True, postgresql_where=text("provider_idempotency_key IS NOT NULL")),
+        CheckConstraint("provider_status IN ('not_created','creating','pending','succeeded','canceled','refunded','unknown','manual_review')", name="ck_payments_provider_status"),
+        CheckConstraint("fulfillment_status IN ('not_ready','pending','processing','succeeded','failed','reversal_pending','reversed','manual_review')", name="ck_payments_fulfillment_status"),
+        CheckConstraint("reconciliation_status IN ('ok','required','mismatch','manual_review')", name="ck_payments_reconciliation_status"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     user_id: Mapped[int] = mapped_column(
         Integer,
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -308,6 +316,11 @@ class Payment(Base):
     currency: Mapped[str] = mapped_column(String(20), nullable=False)
 
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
+    public_order_id: Mapped[str | None] = mapped_column(String(64))
+    provider_idempotency_key: Mapped[str | None] = mapped_column(String(64))
+    provider_status: Mapped[str] = mapped_column(String(30), default="not_created", server_default=text("'not_created'"))
+    fulfillment_status: Mapped[str] = mapped_column(String(30), default="not_ready", server_default=text("'not_ready'"))
+    reconciliation_status: Mapped[str] = mapped_column(String(30), default="ok", server_default=text("'ok'"))
     manual_review_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     snapshot_duration_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -326,6 +339,14 @@ class Payment(Base):
     )
 
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    provider_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    provider_last_error_code: Mapped[str | None] = mapped_column(String(100))
+    provider_last_error: Mapped[str | None] = mapped_column(Text)
+    fulfillment_last_error_code: Mapped[str | None] = mapped_column(String(100))
+    fulfillment_last_error: Mapped[str | None] = mapped_column(Text)
 
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     payment_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
@@ -339,6 +360,105 @@ class Payment(Base):
         back_populates="payment",
         cascade="all, delete-orphan",
     )
+
+
+class PaymentProviderOperation(Base):
+    __tablename__ = "payment_provider_operations"
+    __table_args__ = (
+        CheckConstraint("operation_type IN ('create_payment','cancel_payment','reconcile_payment')", name="ck_payment_provider_operations_type"),
+        CheckConstraint("status IN ('pending','processing','retry','succeeded','dead','cancelled')", name="ck_payment_provider_operations_status"),
+        Index("ix_payment_provider_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
+        Index("ix_payment_provider_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)
+    operation_type: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default=text("'pending'"))
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, default=12, server_default=text("12"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(100))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PaymentFulfillmentOperation(Base):
+    __tablename__ = "payment_fulfillment_operations"
+    __table_args__ = (
+        CheckConstraint("operation_type IN ('grant_subscription','grant_referral','reverse_payment')", name="ck_payment_fulfillment_operations_type"),
+        CheckConstraint("status IN ('pending','processing','retry','succeeded','dead','cancelled')", name="ck_payment_fulfillment_operations_status"),
+        Index("ix_payment_fulfillment_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
+        Index("ix_payment_fulfillment_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)
+    operation_type: Mapped[str] = mapped_column(String(30))
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default=text("'pending'"))
+    idempotency_key: Mapped[str] = mapped_column(String(100), unique=True)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, default=12, server_default=text("12"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(100))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WebhookInbox(Base):
+    __tablename__ = "webhook_inbox"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_key", name="uq_webhook_inbox_provider_event_key"),
+        CheckConstraint("status IN ('pending','processing','retry','succeeded','dead')", name="ck_webhook_inbox_status"),
+        Index("ix_webhook_inbox_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
+        Index("ix_webhook_inbox_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30))
+    event_key: Mapped[str] = mapped_column(String(64))
+    event_type: Mapped[str] = mapped_column(String(100))
+    provider_object_id: Mapped[str] = mapped_column(String(255))
+    payment_external_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    public_order_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(20), default="pending", server_default=text("'pending'"))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, default=30, server_default=text("30"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(100))
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EntitlementEntry(Base):
+    __tablename__ = "entitlement_entries"
+    __table_args__ = (
+        UniqueConstraint("beneficiary_user_id", "source_type", "source_id", "entry_type", name="uq_entitlement_entries_source"),
+        CheckConstraint("entry_type IN ('payment_grant','referral_user_bonus','referral_referrer_bonus','payment_reversal','referral_reversal','manual_grant')", name="ck_entitlement_entries_type"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    beneficiary_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    source_type: Mapped[str] = mapped_column(String(30))
+    source_id: Mapped[str] = mapped_column(String(100))
+    entry_type: Mapped[str] = mapped_column(String(40))
+    days_delta: Mapped[int] = mapped_column(Integer)
+    device_limit_snapshot: Mapped[int | None] = mapped_column(Integer)
+    tariff_id_snapshot: Mapped[int | None] = mapped_column(Integer)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    reversed_entry_id: Mapped[int | None] = mapped_column(ForeignKey("entitlement_entries.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class PaymentEvent(Base):

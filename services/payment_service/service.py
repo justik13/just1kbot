@@ -168,7 +168,7 @@ class PaymentService:
     ) -> None:
         payment.status = "requires_manual_review"
         payment.manual_review_reason = reason
-        payment.paid_at = None
+        payment.fulfillment_status = "manual_review"
         await session.flush()
 
         await _log_event_safe(
@@ -508,283 +508,47 @@ class PaymentService:
                     pass
 
     @staticmethod
-    async def force_grant_payment(
-        session: AsyncSession,
-        payment_id: int,
-        admin_id: int,
-    ) -> tuple:
-        allowed_statuses = MANUAL_GRANT_ALLOWED_STATUSES
-        try:
-            async with session.begin_nested():
-                payment = await get_payment_by_id_for_update(
-                    session,
-                    payment_id,
-                )
-                if not payment:
-                    return False, "Платёж не найден"
-                if payment.status == "completed":
-                    return False, "Платёж уже выдан"
-                if payment.status == "refunded":
-                    return False, "Платёж возвращён"
-                if payment.status not in allowed_statuses:
-                    return False, "Недопустимый статус"
-
-                user = payment.user
-                if not user:
-                    return False, "Пользователь не найден"
-                if user.is_deleted:
-                    return False, "Пользователь удалён"
-                if user.is_banned:
-                    return False, "Пользователь заблокирован"
-
-                duration_days = _get_payment_snapshot_duration(payment)
-                device_limit = _get_payment_snapshot_device_limit(
-                    payment
-                )
-                if duration_days is None or device_limit is None:
-                    return False, "Не найдены условия покупки"
-
-                # Проверка статуса в YooKassa для pending/failed платежей
-                if payment.status in {"pending", "failed"}:
-                    yookassa_data = await YooKassaService.get_payment(
-                        payment.external_id
-                    )
-                    if yookassa_data:
-                        yk_status = yookassa_data.get("status", "")
-                        if yk_status != "succeeded":
-                            return (
-                                False,
-                                f"⚠️ Деньги не подтверждены YooKassa (статус: {yk_status}). Точно выдать?",
-                            )
-                    else:
-                        return (
-                            False,
-                            "⚠️ Платёж не найден в YooKassa. Точно выдать?",
-                        )
-
-                payment.status = "completed"
-                if not payment.paid_at:
-                    payment.paid_at = now_utc()
-                await session.flush()
-
-                await _log_event_safe(
-                    session,
-                    payment.id,
-                    "manual_grant",
-                    source="force_grant_payment",
-                    details=f"admin_id={admin_id}",
-                )
-
-                try:
-                    await SubscriptionService.extend_subscription(
-                        session,
-                        user.telegram_id,
-                        duration_days,
-                        new_device_limit=device_limit,
-                        new_tariff_id=(
-                            payment.tariff.id
-                            if payment.tariff
-                            else None
-                        ),
-                    )
-                except ValueError:
-                    await PaymentService._mark_manual_review_direct(
-                        session,
-                        payment,
-                        "device_limit_exceeded",
-                        "force_grant_payment",
-                    )
-                    return False, "Превышен лимит устройств"
-                except Exception as e:
-                    await PaymentService._mark_manual_review_direct(
-                        session,
-                        payment,
-                        "status_failed",
-                        "force_grant_payment",
-                    )
-                    return False, f"Ошибка продления: {e}"
-
-                payments = await get_user_payments(session, user.id)
-                successful_payments = [
-                    p for p in payments if p.status == "completed"
-                ]
-                is_first_payment = len(successful_payments) == 1
-
-                user_bonus_days = 0
-                referrer_bonus_days = 0
-                if user.referred_by:
-                    try:
-                        user_bonus_days, referrer_bonus_days = (
-                            await ReferralService.process_bonus(
-                                session,
-                                user.telegram_id,
-                                user.referred_by,
-                                is_first_payment=is_first_payment,
-                                duration_days=duration_days,
-                            )
-                        )
-                    except Exception as e:
-                        logger.warning(
-                            "Referral bonus failed: %s", e
-                        )
-
-                payment.referral_user_bonus_days = user_bonus_days
-                payment.referral_referrer_bonus_days = (
-                    referrer_bonus_days
-                )
-                user.last_payment_at = now_utc()
-                await session.flush()
-
-                telegram_id_for_cache = user.telegram_id
-                queue_post_commit_task(
-                    session,
-                    lambda tid=telegram_id_for_cache: (
-                        _invalidate_cache_task(tid)
-                    ),
-                )
-
-                try:
-                    await AuditService.log_action(
-                        session,
-                        admin_id=admin_id,
-                        action="MANUAL_GRANT",
-                        target_type="Payment",
-                        target_id=payment_id,
-                        details=(
-                            f"Admin {admin_id} granted "
-                            f"payment {payment_id}"
-                        ),
-                    )
-                except Exception:
-                    pass
-
-                return True, "ok"
-
-        except Exception as e:
-            logger.error(
-                "force_grant_payment failed: %s",
-                e,
-                exc_info=True,
-            )
-            return False, f"Ошибка БД: {e}"
+    async def force_grant_payment(session: AsyncSession, payment_id: int, admin_id: int, *, force_without_provider_confirmation: bool = False) -> tuple:
+        """Audit and enqueue an idempotent grant; never mutate entitlement here."""
+        from database.models import PaymentFulfillmentOperation
+        from services.payment_lifecycle import project_legacy_status
+        payment = await get_payment_by_id_for_update(session, payment_id)
+        if not payment: return False, "Платёж не найден"
+        if payment.provider_status != "succeeded" and not force_without_provider_confirmation:
+            return False, "Требуется явное force_without_provider_confirmation=True"
+        if force_without_provider_confirmation:
+            payment.provider_status="succeeded"; payment.reconciliation_status="manual_review"
+            await _log_event_safe(session,payment.id,"manual_grant_without_provider_confirmation",source="force_grant_payment",details=f"admin_id={admin_id}")
+        payment.fulfillment_status="pending"; project_legacy_status(payment)
+        existing=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}"))
+        if existing and existing.status in {"dead","cancelled"}: existing.status="retry"; existing.next_attempt_at=now_utc()
+        elif not existing: session.add(PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={"manual":True,"admin_id":admin_id},next_attempt_at=now_utc()))
+        await AuditService.log_action(session,admin_id=admin_id,action="MANUAL_GRANT_QUEUED",target_type="Payment",target_id=payment.id,details="force_without_provider_confirmation="+str(force_without_provider_confirmation))
+        await session.flush(); return True, "Выдача поставлена в очередь"
 
     @staticmethod
-    async def create_yookassa_payment(
-        session: AsyncSession,
-        user_id: int,
-        tariff_id: int,
-        amount: Decimal,
-        telegram_id: int,
-        bot_username: str,
-    ) -> tuple:
+    async def create_yookassa_payment(session: AsyncSession,user_id:int,tariff_id:int,amount:Decimal,telegram_id:int,bot_username:str)->tuple:
+        """Commit local order and immutable command before any provider HTTP."""
+        import uuid
         from config.settings import get_settings
-
-        settings = get_settings()
-        decimal_amount = _to_decimal(amount)
-        if decimal_amount is None:
-            logger.error(
-                "create_yookassa_payment: invalid amount %s",
-                amount,
-            )
-            return None, None
-
-        tariff = await get_tariff_by_id(session, tariff_id)
-        if not tariff:
-            return None, None
-
-        payment = await create_payment(
-            session=session,
-            user_id=user_id,
-            tariff_id=tariff_id,
-            amount=decimal_amount,
-            currency="RUB",
-        )
-        await PaymentService._apply_payment_snapshot(
-            session, payment, tariff
-        )
-        await _log_event_safe(
-            session,
-            payment.id,
-            "payment_created",
-            source="yookassa",
-        )
-
-        description = (
-            f"Предоставление доступа к вычислительному серверу "
-            f"({tariff.name}, {tariff.duration_days} дн.)"
-        )
-        clean_username = bot_username.lstrip("@")
-        return_url = settings.YOOKASSA_RETURN_URL.format(
-            bot_username=clean_username
-        )
-        payload = f"payment_{payment.id}"
-
-        yk_payment = await YooKassaService.create_payment(
-            amount=decimal_amount,
-            currency="RUB",
-            description=description,
-            return_url=return_url,
-            metadata={"payload": payload},
-        )
-
-        if not yk_payment:
-            payment.status = "failed"
-            payment.manual_review_reason = "payment_create_error"
-            try:
-                await session.flush()
-            except Exception:
-                pass
-            await _log_event_safe(
-                session,
-                payment.id,
-                "payment_failed",
-                reason="provider_create_failed",
-                source="yookassa",
-            )
-            try:
-                await AuditService.log_action(
-                    session,
-                    admin_id=0,
-                    action="PAYMENT_FAILED",
-                    target_type="Payment",
-                    target_id=payment.id,
-                    details=(
-                        f"user={user_id}, "
-                        f"amount={decimal_amount} RUB, "
-                        f"YooKassa create failed"
-                    ),
-                )
-            except Exception:
-                pass
-            return None, None
-
-        external_id = yk_payment.get("id")
-        confirmation = yk_payment.get("confirmation", {})
-        payment_url = confirmation.get("confirmation_url")
-
-        if external_id:
-            payment.external_id = str(external_id)
-
-        if not external_id or not payment_url:
-            payment.status = "failed"
-            payment.manual_review_reason = "payment_create_error"
-            try:
-                await session.flush()
-            except Exception:
-                pass
-            await _log_event_safe(
-                session,
-                payment.id,
-                "payment_failed",
-                reason="missing_id_or_url",
-                source="yookassa",
-            )
-            return None, None
-
-        payment.payment_url = str(payment_url)
-        payment.payment_method = "yookassa"
-        await session.flush()
-        return payment, None
+        from services.payment_provider_operations import enqueue_create, execute
+        decimal_amount=_to_decimal(amount); tariff=await get_tariff_by_id(session,tariff_id)
+        if decimal_amount is None or not tariff: return None,None
+        payment=await create_payment(session,user_id,tariff_id,decimal_amount,"RUB")
+        payment.public_order_id="pay_"+uuid.uuid4().hex; payment.provider_idempotency_key=uuid.uuid4().hex
+        payment.provider_status="creating"; payment.fulfillment_status="not_ready"; payment.reconciliation_status="ok"
+        await PaymentService._apply_payment_snapshot(session,payment,tariff)
+        settings=get_settings(); description=f"Предоставление доступа к вычислительному серверу ({tariff.name}, {tariff.duration_days} дн.)"
+        return_url=settings.YOOKASSA_RETURN_URL.format(bot_username=bot_username.lstrip("@"))
+        operation=await enqueue_create(session,payment,description,return_url)
+        await _log_event_safe(session,payment.id,"payment_created",source="yookassa")
+        await session.commit()  # explicit durability boundary before executor HTTP
+        try:
+            operation=await session.get(type(operation),operation.id)
+            await execute(session,operation); await session.commit(); await session.refresh(payment)
+        except Exception:
+            logger.exception("Immediate provider execution failed; durable worker will retry payment=%s",payment.id)
+        return payment,payment.payment_url
 
     @staticmethod
     async def handle_yookassa_callback(
