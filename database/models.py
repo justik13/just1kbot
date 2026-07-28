@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -15,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -24,6 +26,22 @@ from sqlalchemy.orm import (
 
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
+
+
+API_OPERATION_TYPES = (
+    "create_peer",
+    "update_peer",
+    "delete_peer",
+)
+
+API_OPERATION_STATUSES = (
+    "pending",
+    "processing",
+    "retry",
+    "succeeded",
+    "dead",
+    "cancelled",
+)
 
 
 class Base(DeclarativeBase):
@@ -406,6 +424,107 @@ class PendingAPIDeletion(Base):
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class APIOperation(Base):
+    """Durable command record for future Amnezia API workers.
+
+    ``payload`` must contain only non-secret operation parameters. API credentials
+    are kept separately in the encrypted snapshot column.
+    """
+
+    __tablename__ = "api_operations"
+
+    __table_args__ = (
+        CheckConstraint(
+            "operation_type IN ('create_peer', 'update_peer', 'delete_peer')",
+            name="ck_api_operations_operation_type",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'processing', 'retry', 'succeeded', "
+            "'dead', 'cancelled')",
+            name="ck_api_operations_status",
+        ),
+        CheckConstraint(
+            "attempts >= 0",
+            name="ck_api_operations_attempts_nonnegative",
+        ),
+        CheckConstraint(
+            "max_attempts > 0",
+            name="ck_api_operations_max_attempts_positive",
+        ),
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_api_operations_idempotency_key",
+        ),
+        Index(
+            "ix_api_operations_claim",
+            "status",
+            "next_attempt_at",
+            "created_at",
+            postgresql_where=text("status IN ('pending', 'retry')"),
+        ),
+        Index(
+            "ix_api_operations_processing_lock",
+            "locked_at",
+            postgresql_where=text("status = 'processing'"),
+        ),
+        Index("ix_api_operations_server_id", "server_id"),
+        Index("ix_api_operations_profile_id", "profile_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    operation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    server_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("servers.id", ondelete="SET NULL"), nullable=True
+    )
+    profile_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("vpn_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+
+    server_name_snapshot: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    api_url_snapshot: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    api_key_snapshot: Mapped[str | None] = mapped_column(
+        EncryptedString(critical=True), nullable=True
+    )
+
+    peer_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    client_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    payload: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default=text("10")
+    )
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    locked_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=now_utc,
+        onupdate=now_utc,
+        server_default=text("now()"),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class MaintenanceMode(Base):
