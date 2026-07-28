@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from datetime import timedelta
 from typing import Optional
@@ -12,8 +11,8 @@ from bot.constants import (
     PERMANENT_END_DATE,
 )
 from bot.middlewares.user_context import invalidate_user_cache
-from database.connection import queue_post_commit_task
 from database.models import User, VPNProfile
+from services.api_operations_queue import enqueue_api_operation
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -24,7 +23,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import is_expired, now_utc
 
 logger = logging.getLogger(__name__)
@@ -291,161 +289,32 @@ class SubscriptionService:
 
     @staticmethod
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
-        target_active = bool(
-            user.subscription_end
-            and not is_expired(user.subscription_end)
-            and not user.is_banned
-        )
-
+        target_active = bool(user.subscription_end and not is_expired(user.subscription_end) and not user.is_banned)
         profiles = await get_user_profiles(session, user.id)
-
-        if not profiles:
-            return
-
-        profile_ids = [profile.id for profile in profiles]
-
-        await session.execute(
-            update(VPNProfile)
-            .where(VPNProfile.id.in_(profile_ids))
-            .values(is_active=target_active)
-        )
-
+        for profile in profiles:
+            if profile.provisioning_status in {"deleting", "create_failed", "delete_failed"}:
+                continue
+            was_pending_create = profile.provisioning_status == "pending_create"
+            profile.desired_version += 1
+            profile.desired_is_active = target_active
+            profile.desired_expires_at = user.subscription_end if target_active else None
+            profile.is_active = target_active
+            profile.provisioning_status = "pending_create" if was_pending_create else "pending_update"
+            if was_pending_create:
+                continue
+            permanent = bool(target_active and user.subscription_end and user.subscription_end.year >= 2100)
+            expires_at = int(user.subscription_end.timestamp()) if target_active and user.subscription_end and not permanent else None
+            server = profile.server
+            await enqueue_api_operation(session, operation_type="update_peer",
+                idempotency_key=f"update-peer:{profile.id}:v{profile.desired_version}",
+                server_id=profile.server_id, profile_id=profile.id, peer_id=profile.peer_id,
+                server_name_snapshot=server.name if server else None,
+                api_url_snapshot=server.api_url if server else None,
+                api_key_snapshot=server.api_key if server else None,
+                client_name=profile.client_name, payload={
+                    "desired_version": profile.desired_version,
+                    "status": "active" if target_active else "disabled",
+                    "expires_at": expires_at,
+                    "clear_expires_at": target_active and expires_at is None,
+                })
         await session.flush()
-
-        expires_ts = (
-            await SubscriptionService.get_expires_timestamp(user)
-            if target_active
-            else None
-        )
-
-        target_status = "active" if target_active else "disabled"
-
-        queue_post_commit_task(
-            session,
-            lambda uid=user.id, ts=expires_ts, st=target_status: (
-                SubscriptionService._sync_expires_to_servers(uid, ts, st)
-            ),
-        )
-
-    @staticmethod
-    async def _sync_expires_to_servers(
-        user_id: int,
-        expires_ts: Optional[int],
-        target_status: str = "active",
-    ):
-        from database.connection import session_scope
-
-        try:
-            async with session_scope() as session:
-                profiles = await get_user_profiles(session, user_id)
-
-                if not profiles:
-                    return
-
-                server_ids = {p.server_id for p in profiles}
-                servers_map = {}
-
-                for sid in server_ids:
-                    server = await get_server_by_id(session, sid)
-
-                    if server and server.api_url and server.api_key:
-                        servers_map[sid] = server
-
-                jobs = []
-
-                for profile in profiles:
-                    server = servers_map.get(profile.server_id)
-
-                    if not server:
-                        logger.warning(
-                            "Access state sync skipped profile: profile_id=%s, "
-                            "server_id=%s, server missing or invalid",
-                            profile.id,
-                            profile.server_id,
-                        )
-                        continue
-
-                    client = AmneziaClient(server.api_url, server.api_key)
-
-                    clear_expires_at = (
-                        target_status == "active" and expires_ts is None
-                    )
-
-                    jobs.append(
-                        {
-                            "profile": profile,
-                            "server": server,
-                            "coroutine": client.update_client(
-                                client_id=profile.peer_id,
-                                expires_at=(
-                                    expires_ts
-                                    if target_status == "active"
-                                    else None
-                                ),
-                                status=target_status,
-                                clear_expires_at=clear_expires_at,
-                            ),
-                        }
-                    )
-
-                if jobs:
-                    results = await asyncio.gather(
-                        *(job["coroutine"] for job in jobs),
-                        return_exceptions=True,
-                    )
-                    success = sum(1 for r in results if r is True)
-
-                    logger.info(
-                        "Access state sync: %s/%s servers updated for "
-                        "user_id=%s, status=%s",
-                        success,
-                        len(jobs),
-                        user_id,
-                        target_status,
-                    )
-
-                    for job, result in zip(jobs, results):
-                        if result is True:
-                            continue
-
-                        profile = job["profile"]
-                        server = job["server"]
-                        error_kind = (
-                            type(result).__name__
-                            if isinstance(result, Exception)
-                            else f"unexpected_result_{result!r}"
-                        )
-                        logger.error(
-                            "Access state sync update failed: user_id=%s, "
-                            "profile_id=%s, server_id=%s, peer_id=%s..., "
-                            "target_status=%s, error_kind=%s, error=%s",
-                            user_id,
-                            profile.id,
-                            server.id,
-                            (profile.peer_id or "")[:16],
-                            target_status,
-                            error_kind,
-                            str(result)[:200],
-                        )
-
-        except Exception as e:
-            logger.error(
-                "Access state sync failed for user_id=%s: %s",
-                user_id,
-                e,
-                exc_info=True,
-            )
-
-    @staticmethod
-    async def get_expires_timestamp(user: User) -> Optional[int]:
-        if not user.subscription_end or user.subscription_end.year >= 2100:
-            logger.info(
-                "get_expires_timestamp: user %s has permanent subscription, "
-                "sending expiresAt=null to API",
-                user.telegram_id,
-            )
-            return None
-
-        expires_ts = int(user.subscription_end.timestamp())
-
-        return expires_ts

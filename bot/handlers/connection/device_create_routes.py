@@ -12,7 +12,6 @@ from bot import texts
 from bot.keyboards import get_back_button, get_device_keyboard
 from bot.states import DeviceCreationStates
 from database.models import User
-from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
@@ -28,6 +27,7 @@ from services.device_service import (
 )
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
+from services.slots_cache import capture_server_peer_snapshot
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
 
@@ -240,15 +240,15 @@ async def enter_device_name(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    user_id = message.from_user.id
+    telegram_user_id = message.from_user.id
 
-    if not await MaintenanceService.can_user_perform_action(session, user_id):
+    if not await MaintenanceService.can_user_perform_action(session, telegram_user_id):
         await _render_maintenance(message, session, back_to="back_to_connections")
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
-    user = db_user or await get_user_by_telegram_id(session, user_id)
+    user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
 
     if not user or not await SubscriptionService.check_access(session, user.telegram_id):
         await render_hub(
@@ -257,11 +257,11 @@ async def enter_device_name(
             texts.ERROR_NO_SUBSCRIPTION,
             _get_no_subscription_keyboard(),
         )
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
-    if user_id in _creating_devices:
+    if telegram_user_id in _creating_devices:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -270,7 +270,7 @@ async def enter_device_name(
         )
         return
 
-    _creating_devices[user_id] = True
+    _creating_devices[telegram_user_id] = True
 
     try:
         if not message.text or message.text.startswith("/"):
@@ -310,18 +310,6 @@ async def enter_device_name(
             await state.clear()
             return
 
-        existing_profiles = await get_user_profiles(session, user.id)
-
-        for p in existing_profiles:
-            if p.server_id == server_id and p.device_name.lower() == device_name.lower():
-                await render_hub(
-                    message.bot,
-                    message.chat.id,
-                    texts.DEVICE_NAME_DUPLICATE.format(device_name=safe(device_name)),
-                    get_back_button("add_device"),
-                )
-                return
-
         await render_hub(
             message.bot,
             message.chat.id,
@@ -331,11 +319,12 @@ async def enter_device_name(
         )
 
         try:
+            db_user_id = user.id
+            await session.commit()
+            snapshot = await capture_server_peer_snapshot(server_id)
             profile = await DeviceService.create_device(
-                session,
-                user,
-                server_id,
-                device_name,
+                session, user_id=db_user_id, server_id=server_id,
+                device_name=device_name, snapshot=snapshot,
             )
         except NoActiveSubscription:
             await render_hub(
@@ -408,22 +397,14 @@ async def enter_device_name(
             await state.clear()
             return
 
-        server = await get_server_by_id(session, profile.server_id)
-
-        success_text = texts.DEVICE_ADDED_SUCCESS.format(
-            device_name=safe(device_name),
-            flag=server.country_flag if server else "🌍",
-            server_name=safe(server.name) if server else "—",
-        )
-
         await render_hub(
             message.bot,
             message.chat.id,
-            success_text,
-            get_device_keyboard(profile.id),
+            "⏳ Устройство создаётся.\nОбновите список через несколько секунд.",
+            get_back_button("back_to_connections"),
         )
 
         await state.clear()
 
     finally:
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)

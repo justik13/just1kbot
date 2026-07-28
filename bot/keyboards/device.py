@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def get_device_keyboard(profile_id: int) -> InlineKeyboardMarkup:
+def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
@@ -10,15 +10,9 @@ def get_device_keyboard(profile_id: int) -> InlineKeyboardMarkup:
         callback_data=f"rename_device:{profile_id}",
     )
 
-    builder.button(
-        text="🔑 Показать ключ",
-        callback_data=f"show_config:{profile_id}",
-    )
-
-    builder.button(
-        text="📥 Скачать .conf",
-        callback_data=f"download_conf:{profile_id}",
-    )
+    if config_ready:
+        builder.button(text="🔑 Показать ключ", callback_data=f"show_config:{profile_id}")
+        builder.button(text="📥 Скачать .conf", callback_data=f"download_conf:{profile_id}")
 
     builder.button(
         text="🗑 Удалить устройство",

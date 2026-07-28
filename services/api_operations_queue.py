@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import AsyncIterator, Callable
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import API_OPERATION_TYPES, APIOperation
+from database.models import API_OPERATION_TYPES, APIOperation, VPNProfile
 
 
 class APIOperationValidationError(Exception):
@@ -30,6 +30,29 @@ class APIOperationIdempotencyConflict(Exception):
 
 class APIOperationOwnershipError(Exception):
     pass
+
+
+CREATE_CLEANUP_ERROR_CODES = frozenset({
+    "invalid_created_config_cleanup", "create_compensation_required",
+    "cleanup_peer_identity_mismatch",
+})
+CREATE_SIDE_EFFECT_ERROR_CODES = frozenset({
+    "create_ambiguous_reconcile", "executor_exception", "stale_lease_max_attempts",
+    "network_error", "timeout", "server_error", "invalid_response", "unknown_error",
+})
+
+
+def classify_create_side_effect_risk(operation: APIOperation) -> str:
+    """Classify whether cancelling a CREATE can safely remain DB-only."""
+    if operation.peer_id or operation.last_error_code in CREATE_CLEANUP_ERROR_CODES:
+        return "cleanup_required"
+    if (operation.status == "pending" and operation.attempts == 0
+            and operation.peer_id is None and operation.last_error_code is None):
+        return "never_started"
+    if (operation.status in {"processing", "retry"} or operation.attempts > 0
+            or operation.last_error_code in CREATE_SIDE_EFFECT_ERROR_CODES):
+        return "may_have_created_peer"
+    return "may_have_created_peer"
 
 
 @dataclass(frozen=True)
@@ -48,6 +71,8 @@ class ClaimedAPIOperation:
     attempt_number: int
     max_attempts: int
     locked_by: str
+    last_error_code: str | None
+    last_error: str | None
 
 
 SessionFactory = Callable[[], AsyncSession]
@@ -175,6 +200,37 @@ async def enqueue_api_operation(
     return await session.get(APIOperation, operation_id)
 
 
+async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str,
+        server_id: int | None, profile_id: int | None,
+        server_name_snapshot: str | None, api_url_snapshot: str | None,
+        api_key_snapshot: str | None, peer_id: str, client_name: str | None = None,
+        audit_reason: str | None = None) -> APIOperation:
+    """Ensure a stable delete command; audit reason is deliberately not identity."""
+    operation = (await session.execute(select(APIOperation).where(
+        APIOperation.idempotency_key == idempotency_key).with_for_update())).scalar_one_or_none()
+    if operation is None:
+        return await enqueue_api_operation(session, operation_type="delete_peer",
+            idempotency_key=idempotency_key, server_id=server_id, profile_id=profile_id,
+            server_name_snapshot=server_name_snapshot, api_url_snapshot=api_url_snapshot,
+            api_key_snapshot=api_key_snapshot, peer_id=peer_id, client_name=client_name,
+            payload={"managed_workflow": True})
+    if operation.status in {"dead", "cancelled"}:
+        operation.status = "retry"
+        operation.attempts = 0
+        operation.next_attempt_at = func.now()
+        operation.completed_at = None
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = "delete_requeued"
+        operation.last_error = (audit_reason or "repeat delete")[:2000]
+    elif operation.status == "succeeded" and profile_id and await session.get(VPNProfile, profile_id):
+        operation.status = "retry"
+        operation.attempts = 0
+        operation.completed_at = None
+        operation.next_attempt_at = func.now()
+        operation.last_error_code = "delete_profile_discrepancy"
+    return operation
+
+
 @asynccontextmanager
 async def _transaction(session_factory: SessionFactory | None) -> AsyncIterator[AsyncSession]:
     if session_factory is None:
@@ -204,6 +260,8 @@ def _dto(operation: APIOperation) -> ClaimedAPIOperation:
         attempt_number=operation.attempts,
         max_attempts=operation.max_attempts,
         locked_by=operation.locked_by,
+        last_error_code=operation.last_error_code,
+        last_error=operation.last_error,
     )
 
 
@@ -222,21 +280,21 @@ async def claim_api_operations(
         from sqlalchemy import func
 
         now = func.now()
-        await session.execute(
-            update(APIOperation)
-            .where(
-                APIOperation.status.in_(("pending", "retry")),
-                APIOperation.attempts >= APIOperation.max_attempts,
-            )
-            .values(
-                status="dead",
-                completed_at=now,
-                updated_at=now,
-                last_error_code="max_attempts_exhausted",
-                locked_at=None,
-                locked_by=None,
-            )
-        )
+        exhausted = (await session.execute(select(APIOperation).where(
+            APIOperation.status.in_(("pending", "retry")),
+            APIOperation.attempts >= APIOperation.max_attempts,
+        ).with_for_update(skip_locked=True))).scalars().all()
+        for operation in exhausted:
+            previous_error_code = operation.last_error_code
+            previous_status = operation.status
+            await _sync_terminal_profile(session, operation,
+                previous_error_code=previous_error_code,
+                previous_status=previous_status)
+            operation.status = "dead"
+            operation.completed_at = now
+            operation.updated_at = now
+            operation.last_error_code = "max_attempts_exhausted"
+            operation.locked_at = operation.locked_by = None
         operations = (
             await session.execute(
                 select(APIOperation)
@@ -297,6 +355,47 @@ async def mark_api_operation_succeeded(
         )
         if result.rowcount != 1:
             raise APIOperationOwnershipError("operation is not leased by this worker")
+
+
+async def mark_api_operation_cancelled(
+    operation_id: int, *, worker_id: str, expected_attempt_number: int,
+    reason: str, session_factory: SessionFactory | None = None,
+) -> None:
+    from sqlalchemy import func
+    _validate_expected_attempt_number(expected_attempt_number)
+    async with _transaction(session_factory) as session:
+        result = await session.execute(update(APIOperation).where(
+            APIOperation.id == operation_id, APIOperation.status == "processing",
+            APIOperation.locked_by == worker_id,
+            APIOperation.attempts == expected_attempt_number,
+        ).values(status="cancelled", completed_at=func.now(), updated_at=func.now(),
+                 locked_at=None, locked_by=None, last_error_code=reason[:100]))
+        if result.rowcount != 1:
+            raise APIOperationOwnershipError("operation is not leased by this worker")
+
+
+async def retry_dead_api_operation(
+    operation_id: int, *, reason: str, reset_attempts: bool,
+    session_factory: SessionFactory | None = None,
+) -> None:
+    """Administrative repair primitive; the reason is retained for audit."""
+    from sqlalchemy import func
+    if not reason.strip():
+        raise APIOperationValidationError("audit reason must not be empty")
+    async with _transaction(session_factory) as session:
+        operation = (await session.execute(select(APIOperation).where(
+            APIOperation.id == operation_id, APIOperation.status == "dead"
+        ).with_for_update())).scalar_one_or_none()
+        if operation is None:
+            raise APIOperationValidationError("only dead operations can be retried")
+        operation.status = "retry"
+        operation.next_attempt_at = func.now()
+        operation.completed_at = None
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = "manual_retry"
+        operation.last_error = reason[:2000]
+        if reset_attempts:
+            operation.attempts = 0
 
 
 async def mark_api_operation_failed(
@@ -390,10 +489,39 @@ async def recover_stale_api_operations(
                 operation.status = "retry"
                 operation.next_attempt_at = func.now()
                 operation.completed_at = None
+                if operation.operation_type == "create_peer":
+                    operation.last_error_code = "stale_create_lease"
                 retried += 1
             else:
+                previous_error_code = operation.last_error_code
+                await _sync_terminal_profile(session, operation,
+                    previous_error_code=previous_error_code,
+                    previous_status="processing")
                 operation.status = "dead"
                 operation.completed_at = func.now()
                 operation.last_error_code = "stale_lease_max_attempts"
                 dead += 1
     return retried, dead
+
+
+async def _sync_terminal_profile(session: AsyncSession, operation: APIOperation, *,
+        previous_error_code: str | None = None,
+        previous_status: str | None = None) -> None:
+    if not operation.profile_id:
+        return
+    profile = (await session.execute(select(VPNProfile).where(
+        VPNProfile.id == operation.profile_id).with_for_update())).scalar_one_or_none()
+    if not profile:
+        return
+    if operation.operation_type == "create_peer":
+        unsafe = (bool(operation.peer_id)
+            or previous_status in {"processing", "retry"}
+            or operation.attempts > 0
+            or previous_error_code in CREATE_SIDE_EFFECT_ERROR_CODES
+            or previous_error_code in CREATE_CLEANUP_ERROR_CODES)
+        profile.provisioning_status = "create_cleanup_pending" if unsafe else "create_failed"
+    elif operation.operation_type == "update_peer" and profile.provisioning_status not in {"deleting", "delete_failed"}:
+        profile.provisioning_status = "update_failed"
+    elif operation.operation_type == "delete_peer":
+        profile.provisioning_status = "delete_failed"
+    profile.last_sync_error = previous_error_code or operation.last_error_code

@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from cachetools import TTLCache
 
@@ -8,6 +10,25 @@ from database.models import Server
 from services.amnezia_client import AmneziaClient
 
 logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class ServerPeerSnapshot:
+    server_id: int
+    peer_ids: frozenset[str]
+    captured_at: datetime
+
+async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
+    from database.connection import session_scope
+    async with session_scope() as session:
+        server = await session.get(Server, server_id)
+        if not server:
+            raise LookupError("server not found")
+        endpoint = (server.api_url, server.api_key)
+    clients = await AmneziaClient(*endpoint).get_all_clients()
+    if clients is None:
+        raise RuntimeError("server peer snapshot unavailable")
+    return ServerPeerSnapshot(server_id, frozenset(item.id for item in clients),
+                              datetime.now(timezone.utc))
 
 _slots_cache = TTLCache(maxsize=100, ttl=300)
 _locks: dict[int, tuple[asyncio.Lock, float]] = {}
