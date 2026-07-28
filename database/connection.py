@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from sqlalchemy import select, func, text
@@ -9,6 +10,11 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+from alembic.config import Config
+from alembic.command import upgrade
+from alembic.script import ScriptDirectory
+from alembic.runtime.migration import MigrationContext
 
 from config.settings import get_settings
 from database.models import Base, MaintenanceMode, Tariff
@@ -42,14 +48,83 @@ async def init_db():
     )
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
-    async with _engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await _seed_default_tariffs(conn)
-        await _seed_maintenance_mode(conn)
-        await _apply_additional_indexes(conn)
+    # Run Alembic migrations instead of create_all
+    await _run_alembic_migrations(settings.DATABASE_URL)
 
     logging.info("PostgreSQL database initialized at %s", settings.DATABASE_URL)
     return _engine, _sessionmaker
+
+
+async def _run_alembic_migrations(database_url: str) -> None:
+    """Run Alembic migrations on the database and seed default data."""
+    try:
+        # Create Alembic config with absolute path
+        alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
+        alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+        
+        # Get the script directory and current revision
+        script = ScriptDirectory.from_config(alembic_cfg)
+        
+        # Create a sync engine for Alembic (it doesn't support async directly)
+        from sqlalchemy import create_engine as sync_create_engine
+        from sqlalchemy.pool import NullPool
+        
+        # Convert asyncpg URL to psycopg2 if needed (Alembic can work with asyncpg in async mode)
+        sync_url = database_url.replace("asyncpg", "psycopg2") if "asyncpg" in database_url else database_url
+        
+        sync_engine = sync_create_engine(sync_url, poolclass=NullPool)
+        
+        with sync_engine.connect() as conn:
+            context = MigrationContext.configure(conn)
+            current_rev = context.get_current_revision()
+            
+            if current_rev is None:
+                logging.info("No Alembic version found. Running initial migration...")
+            else:
+                logging.info("Current Alembic revision: %s", current_rev)
+            
+            # Run upgrade to head
+            upgrade(alembic_cfg, "head")
+            logging.info("Alembic migrations completed successfully.")
+        
+        sync_engine.dispose()
+        
+        # Seed default data after migrations
+        await _seed_default_data()
+        
+    except Exception as e:
+        logging.error("Failed to run Alembic migrations: %s", e, exc_info=True)
+        raise
+
+
+async def _seed_default_data() -> None:
+    """Seed default tariffs and maintenance mode after migrations."""
+    async with session_scope() as session:
+        # Seed tariffs
+        result = await session.execute(select(func.count(Tariff.id)))
+        if result.scalar_one() == 0:
+            for tariff in DEFAULT_TARIFFS:
+                session.add(Tariff(**tariff, is_active=True))
+            await session.commit()
+            logging.info("Default tariffs seeded successfully.")
+        
+        # Seed maintenance mode
+        from database.models import MaintenanceMode
+        result = await session.execute(select(func.count(MaintenanceMode.id)))
+        if result.scalar_one() == 0:
+            session.add(
+                MaintenanceMode(
+                    id=1,
+                    is_enabled=False,
+                    message=(
+                        "⚠️ Ведутся технические работы. "
+                        "Некоторые действия временно недоступны. "
+                        "Попробуйте позже."
+                    ),
+                )
+            )
+            await session.commit()
+            logging.info("Maintenance mode singleton seeded.")
 
 
 async def _seed_default_tariffs(conn):

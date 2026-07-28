@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from utils.encryption import EncryptedString
 
 
 # revision identifiers, used by Alembic.
@@ -29,7 +30,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=255), nullable=False),
         sa.Column('country_flag', sa.String(length=10), nullable=True),
         sa.Column('api_url', sa.String(length=500), nullable=False),
-        sa.Column('api_key', sa.String(), nullable=False),
+        sa.Column('api_key', EncryptedString(critical=True), nullable=False),
         sa.Column('protocol', sa.String(length=50), nullable=False),
         sa.Column('max_clients', sa.Integer(), nullable=False),
         sa.Column('is_active', sa.Boolean(), nullable=False),
@@ -135,11 +136,8 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_payments_user_id'), 'payments', ['user_id'], unique=False)
     op.create_index(op.f('ix_payments_status'), 'payments', ['status'], unique=False)
-    op.create_index(op.f('ix_payments_external_id'), 'payments', ['external_id'], unique=False)
     op.create_index(op.f('ix_payments_status_created_at'), 'payments', ['status', 'created_at'], unique=False)
     op.create_index(op.f('ix_payments_tariff_status'), 'payments', ['tariff_id', 'status'], unique=False)
-    op.create_index('ix_payment_external_completed', 'payments', ['external_id'], unique=True,
-                    postgresql_where=sa.text("status = 'completed' AND external_id IS NOT NULL"))
     op.create_index('uq_payments_external_id_not_null', 'payments', ['external_id'], unique=True,
                     postgresql_where=sa.text("external_id IS NOT NULL"))
     
@@ -198,7 +196,7 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('server_name', sa.String(length=255), nullable=False),
         sa.Column('api_url', sa.String(length=500), nullable=False),
-        sa.Column('api_key', sa.String(), nullable=False),
+        sa.Column('api_key', EncryptedString(critical=True), nullable=False),
         sa.Column('peer_id', sa.String(length=255), nullable=False),
         sa.Column('client_name', sa.String(length=255), nullable=True),
         sa.Column('reason', sa.String(length=50), nullable=True),

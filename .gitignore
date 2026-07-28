@@ -20,30 +20,28 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Virtual environments
+# Environment
+.venv/
 venv/
 env/
 ENV/
-.venv/
-.env/
 
-# IDE and editor files
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
-*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log
 
-# Environment variables
-.env
-.env.local
-*.env.*
-
-# Coverage reports
+# Coverage
 .coverage
 coverage/
 htmlcov/
@@ -51,13 +49,13 @@ htmlcov/
 # Alembic
 alembic/versions/*.py
 
-# Dependencies
-.mypy_cache/
-.pytest_cache/
-.tox/
-.hypothesis/
+# Database
+*.db
+*.db-journal
 
-# OS generated files
-.DS_Store
-Thumbs.db
+# Local config
+.env
+.env.local
+*.env.*
+config/local.*
 ```
