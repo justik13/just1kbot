@@ -13,7 +13,7 @@ from bot.constants import (
 )
 from bot.middlewares.user_context import invalidate_user_cache
 from database.connection import queue_post_commit_task
-from database.models import User, VPNProfile
+from database.models import PendingAPIDeletion, User, VPNProfile
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -390,6 +390,42 @@ class SubscriptionService:
                         target_status,
                     )
 
+                    # P0 #3: Retry mechanism - if any server failed, queue for retry via PendingAPIDeletion
+                    failures = [
+                        (i, r) for i, r in enumerate(results)
+                        if isinstance(r, Exception) or r is False
+                    ]
+                    if failures:
+                        logger.warning(
+                            "Access state sync: %s/%s servers failed for user_id=%s, queuing for retry",
+                            len(failures),
+                            len(tasks),
+                            user_id,
+                        )
+                        # Queue failed servers for retry using PendingAPIDeletion mechanism
+                        async with session_scope() as retry_session:
+                            for idx, (task_idx, error) in enumerate(failures):
+                                profile = profiles[task_idx]
+                                server = servers_map.get(profile.server_id)
+                                if server:
+                                    pending = PendingAPIDeletion(
+                                        server_name=server.name,
+                                        api_url=server.api_url,
+                                        api_key=server.api_key,
+                                        peer_id=profile.peer_id,
+                                        client_name=profile.device_name,
+                                        reason="sync_expires_failed",
+                                        attempts=0,
+                                        last_error=str(error) if isinstance(error, Exception) else f"Sync failed: {error}",
+                                    )
+                                    retry_session.add(pending)
+                                    logger.debug(
+                                        "Queued retry for server=%s, peer_id=%s: %s",
+                                        server.name,
+                                        profile.peer_id,
+                                        pending.last_error,
+                                    )
+
         except Exception as e:
             logger.error(
                 "Access state sync failed for user_id=%s: %s",
@@ -397,6 +433,31 @@ class SubscriptionService:
                 e,
                 exc_info=True,
             )
+            # P0 #3: Critical failure - all servers need retry, queue them
+            try:
+                async with session_scope() as retry_session:
+                    profiles = await get_user_profiles(retry_session, user_id)
+                    for profile in profiles:
+                        server = await get_server_by_id(retry_session, profile.server_id)
+                        if server:
+                            pending = PendingAPIDeletion(
+                                server_name=server.name,
+                                api_url=server.api_url,
+                                api_key=server.api_key,
+                                peer_id=profile.peer_id,
+                                client_name=profile.device_name,
+                                reason="sync_expires_critical_failure",
+                                attempts=0,
+                                last_error=f"Critical sync failure: {e}",
+                            )
+                            retry_session.add(pending)
+            except Exception as retry_err:
+                logger.error(
+                    "Failed to queue retry tasks for user_id=%s: %s",
+                    user_id,
+                    retry_err,
+                    exc_info=True,
+                )
 
     @staticmethod
     async def get_expires_timestamp(user: User) -> Optional[int]:
