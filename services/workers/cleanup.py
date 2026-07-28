@@ -193,70 +193,21 @@ async def _cleanup_expired_profiles_grace():
         )
 
 
-async def _queue_zombie_deletion(
-    server_info: dict,
-    peer_id: str,
-    client_name: str | None,
-    error_text: str,
-) -> None:
-    if (
-        not server_info.get("api_url")
-        or not server_info.get("api_key")
-    ):
-        logger.error(
-            "Cannot queue zombie deletion: missing API URL or key "
-            "for server %s",
-            server_info.get("name"),
-        )
-        return
-
-    try:
-        async with session_scope() as session:
-            pending = PendingAPIDeletion(
-                server_name=server_info["name"],
-                api_url=server_info["api_url"],
-                api_key=server_info["api_key"],
-                peer_id=peer_id,
-                client_name=(
-                    client_name or f"zombie_{peer_id[:16]}"
-                ),
-                reason="zombie_peer_cleanup_failed",
-                attempts=1,
-                last_attempt_at=now_utc(),
-                last_error=error_text,
-            )
-            session.add(pending)
-            await session.flush()
-
-            logger.warning(
-                "Queued zombie peer for pending deletion: "
-                "server=%s, peer=%s..., "
-                "reason=zombie_peer_cleanup_failed",
-                server_info["name"], peer_id[:16],
-            )
-
-    except Exception as e:
-        logger.error(
-            "Failed to queue zombie peer deletion: "
-            "server=%s, peer=%s..., error=%s",
-            server_info["name"], peer_id[:16], e,
-            exc_info=True,
-        )
-
-
 async def _cleanup_dangling_peers():
     servers_data = []
-    db_peer_ids = set()
+    db_server_peers = set()
 
     async with session_scope() as session:
         servers_result = await session.execute(select(Server))
         servers = servers_result.scalars().all()
 
         result = await session.execute(
-            select(VPNProfile.peer_id)
+            select(VPNProfile.server_id, VPNProfile.peer_id)
         )
-        db_peer_ids = {
-            row[0] for row in result.all() if row[0]
+        db_server_peers = {
+            (row[0], row[1])
+            for row in result.all()
+            if row[0] is not None and row[1]
         }
 
         servers_data = [
@@ -294,6 +245,16 @@ async def _cleanup_dangling_peers():
         *tasks, return_exceptions=True
     )
 
+    unmanaged_count = 0
+
+    def _safe_log_value(value, limit=64):
+        text = str(value or "unknown")
+        sanitized = "".join(
+            character if character.isprintable() else "?"
+            for character in text
+        )
+        return sanitized[:limit]
+
     for result in results:
         if isinstance(result, Exception):
             continue
@@ -308,10 +269,10 @@ async def _cleanup_dangling_peers():
                 api_client.clientName or api_client.name
             )
 
-            if not client_name.startswith("tg_"):
+            if not client_name or not client_name.startswith("tg_"):
                 continue
 
-            if client_id in db_peer_ids:
+            if (server_info["id"], client_id) in db_server_peers:
                 continue
 
             peer_exists_in_db = False
@@ -319,7 +280,9 @@ async def _cleanup_dangling_peers():
                 async with session_scope() as session:
                     fresh_result = await session.execute(
                         select(VPNProfile.id).where(
-                            VPNProfile.peer_id == client_id
+                            VPNProfile.server_id
+                            == server_info["id"],
+                            VPNProfile.peer_id == client_id,
                         )
                     )
                     peer_exists_in_db = (
@@ -327,76 +290,33 @@ async def _cleanup_dangling_peers():
                     )
             except Exception as e:
                 logger.error(
-                    "Double-check failed for peer %s...: %s",
-                    client_id[:16], e,
+                    "Double-check failed for server_id=%s, "
+                    "peer=%s...: %s",
+                    server_info["id"],
+                    _safe_log_value(client_id, 16), e,
                 )
                 continue
 
             if peer_exists_in_db:
                 continue
 
-            try:
-                async with session_scope() as session:
-                    existing_pending = await session.scalar(
-                        select(PendingAPIDeletion.id)
-                        .where(
-                            PendingAPIDeletion.peer_id
-                            == client_id
-                        )
-                        .limit(1)
-                    )
-                    if existing_pending:
-                        continue
-            except Exception as e:
-                logger.error(
-                    "Failed to check existing pending deletion "
-                    "for zombie peer %s...: %s",
-                    client_id[:16], e,
-                )
-                continue
-
             logger.warning(
-                "Удаляю 'призрака' %s на %s",
-                client_name, server_info["name"],
+                "Unmanaged VPN peer detected: server_id=%s, "
+                "server=%s, peer=%s..., client=%s; "
+                "automatic deletion disabled",
+                server_info["id"],
+                _safe_log_value(server_info["name"]),
+                _safe_log_value(client_id, 16),
+                _safe_log_value(client_name),
             )
+            unmanaged_count += 1
 
-            deleted = False
-            error_text = None
-
-            try:
-                client = AmneziaClient(
-                    server_info["api_url"],
-                    server_info["api_key"],
-                )
-                deleted = await client.delete_user(
-                    client_id=client_id
-                )
-            except Exception as e:
-                error_text = (
-                    f"{type(e).__name__}: {str(e)[:200]}"
-                )
-
-            if deleted:
-                logger.info(
-                    "Зомби-пир удалён: server=%s, peer=%s...",
-                    server_info["name"], client_id[:16],
-                )
-            else:
-                logger.warning(
-                    "Не удалось удалить зомби-пира: "
-                    "server=%s, peer=%s..., "
-                    "ставлю в pending queue",
-                    server_info["name"], client_id[:16],
-                )
-                await _queue_zombie_deletion(
-                    server_info=server_info,
-                    peer_id=client_id,
-                    client_name=client_name,
-                    error_text=(
-                        error_text
-                        or "API delete_user returned False"
-                    ),
-                )
+    if unmanaged_count:
+        logger.warning(
+            "Unmanaged VPN peers detected: %s; "
+            "automatic deletion disabled",
+            unmanaged_count,
+        )
 
 
 async def _process_pending_deletions():
