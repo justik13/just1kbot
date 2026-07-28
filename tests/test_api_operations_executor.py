@@ -167,3 +167,19 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertEqual((await db.get(APIOperation,oid)).status,"dead")
             self.assertEqual((await db.get(VPNProfile,pid)).provisioning_status,"create_cleanup_pending")
+    async def test_profile_missing_cleanup_does_not_delete_different_id(self):
+        async with self.sessions.begin() as db:
+            op=APIOperation(operation_type="create_peer",status="retry",idempotency_key="missing-identity",server_id=self.server_id,profile_id=None,server_name_snapshot="fake",api_url_snapshot="https://fake",api_key_snapshot="key",peer_id="old-peer",client_name="exact",payload={},attempts=1,next_attempt_at=datetime.now(timezone.utc),last_error_code="create_compensation_required")
+            db.add(op); await db.flush(); oid=op.id
+        fake=SimpleNamespace(get_all_clients=unittest.mock.AsyncMock(return_value=[SimpleNamespace(id="manual-peer",clientName="exact")]),delete_user_result=unittest.mock.AsyncMock())
+        with patch("services.api_operations_executor._client",return_value=fake): await execute_claimed_api_operation(await self.claim_one())
+        fake.delete_user_result.assert_not_awaited()
+        async with self.sessions() as db:
+            op=await db.get(APIOperation,oid); self.assertEqual(op.status,"dead"); self.assertEqual(op.last_error_code,"cleanup_peer_identity_mismatch")
+    async def test_saved_id_name_mismatch_requires_manual_review(self):
+        async with self.sessions.begin() as db:
+            p=VPNProfile(user_id=self.user_id,server_id=self.server_id,device_name="mismatch",client_name="expected",provisioning_status="create_cleanup_pending",desired_is_active=False,desired_version=1,is_active=False); db.add(p); await db.flush()
+            op=APIOperation(operation_type="create_peer",status="retry",idempotency_key="saved-mismatch",server_id=self.server_id,profile_id=p.id,server_name_snapshot="fake",api_url_snapshot="https://fake",api_key_snapshot="key",peer_id="saved",client_name="expected",payload={},attempts=1,next_attempt_at=datetime.now(timezone.utc),last_error_code="invalid_created_config_cleanup"); db.add(op)
+        fake=SimpleNamespace(get_all_clients=unittest.mock.AsyncMock(return_value=[SimpleNamespace(id="saved",clientName="other")]),delete_user_result=unittest.mock.AsyncMock())
+        with patch("services.api_operations_executor._client",return_value=fake): await execute_claimed_api_operation(await self.claim_one())
+        fake.delete_user_result.assert_not_awaited()

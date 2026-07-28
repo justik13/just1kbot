@@ -3,7 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -29,6 +29,23 @@ from .common import _delete_server_background, _show_servers_list
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+def _has_unfinished_create_cleanup(profiles, operations) -> bool:
+    cleanup_profile_ids = {
+        profile.id for profile in profiles
+        if profile.provisioning_status == "create_cleanup_pending"
+    }
+    unsafe_create = any(
+        op.operation_type == "create_peer" and op.status != "succeeded"
+        and (op.profile_id in cleanup_profile_ids or op.peer_id is not None
+             or classify_create_side_effect_risk(op) in {"may_have_created_peer", "cleanup_required"})
+        and not (op.status == "cancelled" and op.profile_id is None
+                 and op.peer_id is None and op.last_error_code not in {
+                    "create_ambiguous_reconcile", "invalid_created_config_cleanup",
+                    "create_compensation_required", "cleanup_peer_identity_mismatch"})
+        for op in operations
+    )
+    return bool(cleanup_profile_ids) or unsafe_create
 
 
 @router.callback_query(F.data.startswith("admin_server_delete:"))
@@ -145,18 +162,16 @@ async def confirm_delete_server(
         VPNProfile.server_id == server.id).with_for_update())).scalars().all())
     operations = list((await session.execute(select(APIOperation).where(
         APIOperation.server_id == server.id,
-        APIOperation.status.in_(("pending", "retry", "processing")),
+        or_(
+            APIOperation.operation_type == "create_peer",
+            APIOperation.status.in_(("pending", "retry", "processing")),
+        ),
     ).with_for_update())).scalars().all())
-    unsafe_create = any(
-        op.operation_type == "create_peer"
-        and classify_create_side_effect_risk(op) != "never_started"
-        for op in operations
-    )
     processing_update = any(
         op.status == "processing" and op.operation_type == "update_peer"
         for op in operations
     )
-    if unsafe_create or processing_update:
+    if _has_unfinished_create_cleanup(profiles, operations) or processing_update:
         await session.rollback()
         await callback.answer(
             "На сервере есть незавершённое создание VPN-клиента. "

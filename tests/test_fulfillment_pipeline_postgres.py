@@ -71,3 +71,11 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    await ProfileDeletionService.delete_profiles_list(s,[p],reason="ban_delete")
   async with self.sessions() as s:
    self.assertEqual((await s.get(VPNProfile,pid)).provisioning_status,"deleting"); self.assertEqual((await s.get(APIOperation,oid)).status,"retry")
+ async def test_dead_create_cleanup_blocks_server_delete(self):
+  from bot.handlers.admin.servers.delete_routes import _has_unfinished_create_cleanup
+  async with self.sessions.begin() as s:
+   p=VPNProfile(user_id=self.uid,server_id=self.sid,device_name="cleanup-block",client_name="exact",provisioning_status="create_cleanup_pending",desired_version=1,desired_is_active=False,is_active=False); s.add(p); await s.flush()
+   op=APIOperation(operation_type="create_peer",status="dead",idempotency_key="dead-cleanup",server_id=self.sid,profile_id=p.id,peer_id="orphan",client_name="exact",payload={},attempts=10,last_error_code="max_attempts_exhausted"); s.add(op); await s.flush()
+   self.assertTrue(_has_unfinished_create_cleanup([p],[op]))
+  async with self.sessions() as s:
+   self.assertIsNotNone(await s.get(Server,self.sid)); self.assertIsNotNone(await s.get(VPNProfile,p.id)); self.assertIsNotNone(await s.get(APIOperation,op.id))

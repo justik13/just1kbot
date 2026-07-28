@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -22,6 +24,28 @@ from services.api_operations_finalizer import (
 from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
 logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class CleanupDecision:
+    outcome: str
+    peer_id: str | None = None
+
+def _select_create_cleanup_target(*, clients, saved_peer_id: str | None,
+        expected_client_name: str,
+        allow_name_only_reconciliation: bool) -> CleanupDecision:
+    exact = [item for item in clients if item.clientName == expected_client_name]
+    if saved_peer_id:
+        saved = next((item for item in clients if item.id == saved_peer_id), None)
+        if saved:
+            if saved.clientName != expected_client_name:
+                return CleanupDecision("identity_mismatch")
+            return CleanupDecision("delete", saved.id)
+        return CleanupDecision("identity_mismatch" if exact else "clean")
+    if not allow_name_only_reconciliation:
+        return CleanupDecision("identity_mismatch" if exact else "clean")
+    if len(exact) > 1:
+        return CleanupDecision("multiple_exact")
+    return CleanupDecision("delete", exact[0].id) if exact else CleanupDecision("clean")
 
 
 def _error_code(result) -> str:
@@ -72,20 +96,14 @@ async def _execute_create(op, client):
             logger.critical("duplicate exact client name for operation_id=%s", op.id)
             return await _fail(op, retryable=False, code="duplicate_exact_client_name")
         if profile_state == "create_cleanup_pending":
-            cleanup_target = None
-            if op.peer_id:
-                by_id = [item for item in clients if item.id == op.peer_id]
-                if by_id and by_id[0].clientName == op.client_name:
-                    cleanup_target = by_id[0]
-                elif exact:
-                    return await _fail(op, retryable=False,
-                        code="cleanup_peer_identity_mismatch")
-                # A missing saved ID with no exact peer means cleanup already
-                # converged; never substitute a different peer by name.
-            elif exact:
-                cleanup_target = exact[0]
-            if cleanup_target:
-                deleted = await client.delete_user_result(cleanup_target.id)
+            decision = _select_create_cleanup_target(clients=clients,
+                saved_peer_id=op.peer_id, expected_client_name=op.client_name,
+                allow_name_only_reconciliation=not op.peer_id)
+            if decision.outcome in {"identity_mismatch", "multiple_exact"}:
+                return await _fail(op, retryable=False,
+                    code="cleanup_peer_identity_mismatch")
+            if decision.outcome == "delete":
+                deleted = await client.delete_user_result(decision.peer_id)
                 if not deleted.ok:
                     return await _fail(op, retryable=deleted.retryable or deleted.ambiguous,
                         code="invalid_created_config_cleanup")
@@ -96,8 +114,14 @@ async def _execute_create(op, client):
             return await finalize_existing_create_success(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number)
         if profile_state in {"missing", "deleting"}:
-            if exact:
-                deleted = await client.delete_user_result(exact[0].id)
+            decision = _select_create_cleanup_target(clients=clients,
+                saved_peer_id=op.peer_id, expected_client_name=op.client_name,
+                allow_name_only_reconciliation=(op.attempt_number > 1 or bool(op.last_error_code)))
+            if decision.outcome in {"identity_mismatch", "multiple_exact"}:
+                return await _fail(op, retryable=False,
+                    code="cleanup_peer_identity_mismatch")
+            if decision.outcome == "delete":
+                deleted = await client.delete_user_result(decision.peer_id)
                 if not deleted.ok:
                     return await _fail(op, retryable=deleted.retryable, code=_error_code(deleted))
             return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
@@ -107,7 +131,13 @@ async def _execute_create(op, client):
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
         if exact:
-            deleted = await client.delete_user_result(exact[0].id)
+            decision = _select_create_cleanup_target(clients=clients,
+                saved_peer_id=op.peer_id, expected_client_name=op.client_name,
+                allow_name_only_reconciliation=True)
+            if decision.outcome != "delete":
+                return await _fail(op, retryable=False,
+                    code="cleanup_peer_identity_mismatch")
+            deleted = await client.delete_user_result(decision.peer_id)
             if not deleted.ok:
                 return await _fail(op, retryable=deleted.retryable,
                     code=_error_code(deleted), message="exact orphan cleanup failed")
@@ -132,7 +162,14 @@ async def _execute_create(op, client):
     valid = bool(created and created.id and is_valid_vpn_uri(created.config)
                  and build_conf_file(created.config))
     if not valid:
-        cleanup = await client.delete_user_result(created.id) if created and created.id else None
+        cleanup = None
+        if created and created.id:
+            decision = _select_create_cleanup_target(
+                clients=[SimpleNamespace(id=created.id, clientName=op.client_name)],
+                saved_peer_id=created.id, expected_client_name=op.client_name,
+                allow_name_only_reconciliation=False,
+            )
+            cleanup = await client.delete_user_result(decision.peer_id)
         if cleanup and cleanup.ok:
             return await finalize_create_cleanup(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number,
@@ -152,7 +189,12 @@ async def _execute_create(op, client):
         compensation = isinstance(error, CreateCompensationRequired)
         if not compensation and str(error) != "create_cancel_requested":
             raise
-        cleanup = await client.delete_user_result(created.id)
+        decision = _select_create_cleanup_target(
+            clients=[SimpleNamespace(id=created.id, clientName=op.client_name)],
+            saved_peer_id=created.id, expected_client_name=op.client_name,
+            allow_name_only_reconciliation=False,
+        )
+        cleanup = await client.delete_user_result(decision.peer_id)
         if not cleanup.ok:
             return await prepare_create_cleanup(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, peer_id=created.id,

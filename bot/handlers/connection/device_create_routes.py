@@ -240,15 +240,15 @@ async def enter_device_name(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    user_id = message.from_user.id
+    telegram_user_id = message.from_user.id
 
-    if not await MaintenanceService.can_user_perform_action(session, user_id):
+    if not await MaintenanceService.can_user_perform_action(session, telegram_user_id):
         await _render_maintenance(message, session, back_to="back_to_connections")
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
-    user = db_user or await get_user_by_telegram_id(session, user_id)
+    user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
 
     if not user or not await SubscriptionService.check_access(session, user.telegram_id):
         await render_hub(
@@ -257,11 +257,11 @@ async def enter_device_name(
             texts.ERROR_NO_SUBSCRIPTION,
             _get_no_subscription_keyboard(),
         )
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
-    if user_id in _creating_devices:
+    if telegram_user_id in _creating_devices:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -270,7 +270,7 @@ async def enter_device_name(
         )
         return
 
-    _creating_devices[user_id] = True
+    _creating_devices[telegram_user_id] = True
 
     try:
         if not message.text or message.text.startswith("/"):
@@ -319,11 +319,11 @@ async def enter_device_name(
         )
 
         try:
-            user_id = user.id
+            db_user_id = user.id
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
             profile = await DeviceService.create_device(
-                session, user_id=user_id, server_id=server_id,
+                session, user_id=db_user_id, server_id=server_id,
                 device_name=device_name, snapshot=snapshot,
             )
         except NoActiveSubscription:
@@ -407,4 +407,4 @@ async def enter_device_name(
         await state.clear()
 
     finally:
-        _creating_devices.pop(user_id, None)
+        _creating_devices.pop(telegram_user_id, None)
