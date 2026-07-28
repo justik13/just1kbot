@@ -1,49 +1,36 @@
 ```gitignore
-# Python cache files
+# Python compiled files
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Compiled Python files
-*.cpython-*.pyc
-*.pyc
-*.pyo
-
-# Virtual environments
-venv/
-.venv/
-env/
-.ENV/
-
-# Dependencies
-node_modules/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
+# Logs and temp files
 *.log
-*.pot
-*.pyc
-*.pyo
-*.pyd
-.MF
-.wafpickle-*
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
+*.tmp
 
-# Logs
-*.log
-
-# Environment variables
+# Environment files
 .env
 .env.local
-.env.*
-!env.example
+*.env.*
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+
+# Testing
+.pytest_cache/
+.mypy_cache/
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
 ```
