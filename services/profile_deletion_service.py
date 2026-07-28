@@ -1,8 +1,8 @@
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.models import Server, VPNProfile
-from services.api_operations_queue import enqueue_api_operation
+from database.models import APIOperation, Server, VPNProfile
+from services.api_operations_queue import ensure_delete_operation
 logger = logging.getLogger(__name__)
 
 class ProfileDeletionService:
@@ -18,7 +18,21 @@ class ProfileDeletionService:
         count = 0
         for profile in profiles:
             if profile.provisioning_status == "pending_create":
-                logger.warning("pending profile retained during bulk deletion profile_id=%s", profile.id)
+                profile.desired_is_active = False
+                profile.is_active = False
+                profile.provisioning_status = "deleting"
+                create = (await session.execute(select(APIOperation).where(
+                    APIOperation.profile_id == profile.id,
+                    APIOperation.operation_type == "create_peer").with_for_update())).scalar_one_or_none()
+                if create and create.status in {"pending", "retry"}:
+                    create.status = "cancelled"
+                    create.completed_at = __import__("utils.datetime_helpers", fromlist=["now_utc"]).now_utc()
+                    create.locked_at = create.locked_by = None
+                    create.last_error_code = "create_cancelled_by_deletion"
+                    await session.delete(profile)
+                # A processing CREATE observes `deleting` before/after POST and
+                # owns the exact-peer cleanup and local profile removal.
+                count += 1
                 continue
             if profile.provisioning_status == "create_failed" and not profile.peer_id:
                 await session.delete(profile); count += 1; continue
@@ -26,14 +40,14 @@ class ProfileDeletionService:
                 continue
             server = await session.get(Server, profile.server_id)
             profile.provisioning_status = "deleting"
-            await enqueue_api_operation(session, operation_type="delete_peer",
+            await ensure_delete_operation(session,
                 idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
                 server_id=server.id if server else None, profile_id=profile.id,
                 server_name_snapshot=server.name if server else None,
                 api_url_snapshot=server.api_url if server else None,
                 api_key_snapshot=server.api_key if server else None,
                 peer_id=profile.peer_id, client_name=profile.client_name,
-                payload={"managed_workflow": True, "reason": reason})
+                audit_reason=reason)
             count += 1
         await session.flush()
         return count

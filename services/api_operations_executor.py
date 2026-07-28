@@ -13,6 +13,11 @@ from services.api_operations_queue import (
     ClaimedAPIOperation, mark_api_operation_cancelled,
     mark_api_operation_failed, mark_api_operation_succeeded,
 )
+from services.api_operations_finalizer import (
+    finalize_create_cancelled, finalize_create_success,
+    finalize_delete_success, finalize_existing_create_success,
+    finalize_update_success,
+)
 from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
 logger = logging.getLogger(__name__)
@@ -49,6 +54,17 @@ async def _set_profile_failure(op, status: str, error: str):
 async def _execute_create(op, client):
     if not op.profile_id or not op.client_name:
         return await _fail(op, retryable=False, code="configuration")
+    async with session_scope() as session:
+        profile = await session.get(VPNProfile, op.profile_id)
+        if profile is None:
+            profile_state = "missing"
+        else:
+            profile_state = profile.provisioning_status
+            sent_version = profile.desired_version
+            sent_active = profile.desired_is_active
+            sent_expires = profile.desired_expires_at
+            existing_peer_id = profile.peer_id
+            has_config = bool(profile.raw_config)
     # Every repeat is reconciled.  This also covers a crash after HTTP success
     # but before the database finalization commit.
     if op.attempt_number > 1 or op.last_error_code == "create_ambiguous_reconcile":
@@ -59,17 +75,33 @@ async def _execute_create(op, client):
         if len(exact) > 1:
             logger.critical("duplicate exact client name for operation_id=%s", op.id)
             return await _fail(op, retryable=False, code="duplicate_exact_client_name")
+        if profile_state == "active" and exact and exact[0].id == existing_peer_id and has_config:
+            return await finalize_existing_create_success(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number)
+        if profile_state in {"missing", "deleting"}:
+            if exact:
+                deleted = await client.delete_user_result(exact[0].id)
+                if not deleted.ok:
+                    return await _fail(op, retryable=deleted.retryable, code=_error_code(deleted))
+            return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number,
+                reason=f"profile_{profile_state}", delete_profile=True)
+        if profile_state != "pending_create":
+            return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
+                expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
         if exact:
             deleted = await client.delete_user_result(exact[0].id)
             if not deleted.ok:
                 return await _fail(op, retryable=deleted.retryable,
                     code=_error_code(deleted), message="exact orphan cleanup failed")
-    async with session_scope() as session:
-        profile = await session.get(VPNProfile, op.profile_id)
-        if not profile or profile.provisioning_status != "pending_create":
-            return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
-                expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
-        expires = profile.desired_expires_at
+    if profile_state in {"missing", "deleting"}:
+        return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
+            expected_attempt_number=op.attempt_number, reason=f"profile_{profile_state}",
+            delete_profile=True)
+    if profile_state != "pending_create":
+        return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
+            expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
+    expires = None if sent_expires and sent_expires.year >= 2100 else sent_expires
     result = await client.create_user_result(op.client_name,
         int(expires.timestamp()) if expires else None)
     if not result.ok:
@@ -83,19 +115,20 @@ async def _execute_create(op, client):
         await _set_profile_failure(op, "create_failed", "invalid configuration from API")
         return await _fail(op, retryable=bool(cleanup and not cleanup.ok and cleanup.retryable),
                            code="invalid_created_config")
-    async with session_scope() as session:
-        profile = (await session.execute(select(VPNProfile).where(
-            VPNProfile.id == op.profile_id).with_for_update())).scalar_one_or_none()
-        if not profile or profile.provisioning_status != "pending_create":
-            raise RuntimeError("profile changed during create finalization")
-        profile.peer_id, profile.raw_config = created.id, created.config
-        profile.provisioning_status = "active"
-        profile.actual_is_active = profile.desired_is_active
-        profile.actual_expires_at = profile.desired_expires_at
-        profile.last_synced_at = datetime.now(timezone.utc)
-        profile.last_sync_error = None
-    await mark_api_operation_succeeded(op.id, worker_id=op.locked_by,
-                                       expected_attempt_number=op.attempt_number)
+    try:
+        await finalize_create_success(op.id, worker_id=op.locked_by,
+            expected_attempt_number=op.attempt_number, peer_id=created.id,
+            raw_config=created.config, sent_desired_version=sent_version,
+            sent_is_active=sent_active, sent_expires_at=expires)
+    except RuntimeError as error:
+        if str(error) != "create_cancel_requested":
+            raise
+        cleanup = await client.delete_user_result(created.id)
+        if not cleanup.ok:
+            return await _fail(op, retryable=cleanup.retryable, code=_error_code(cleanup))
+        await finalize_create_cancelled(op.id, worker_id=op.locked_by,
+            expected_attempt_number=op.attempt_number,
+            reason="create_cancelled_after_post", delete_profile=True)
 
 
 async def _execute_update(op, client):
@@ -107,23 +140,21 @@ async def _execute_update(op, client):
         if profile.provisioning_status in {"pending_create", "deleting", "create_failed", "delete_failed"}:
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="profile_not_updatable")
-    result = await client.update_client_result(op.peer_id, status=op.payload.get("status"),
-        expires_at=op.payload.get("expires_at"),
-        clear_expires_at=bool(op.payload.get("clear_expires_at")))
+    sent_version = op.payload.get("desired_version")
+    sent_status = op.payload.get("status")
+    sent_expires = op.payload.get("expires_at")
+    sent_clear = bool(op.payload.get("clear_expires_at"))
+    result = await client.update_client_result(op.peer_id, status=sent_status,
+        expires_at=sent_expires, clear_expires_at=sent_clear)
     if not result.ok:
         if not result.retryable:
             await _set_profile_failure(op, "update_failed", _error_code(result))
         return await _fail(op, retryable=result.retryable, code=_error_code(result))
-    async with session_scope() as session:
-        profile = await session.get(VPNProfile, op.profile_id, with_for_update=True)
-        if profile:
-            profile.actual_is_active = profile.desired_is_active
-            profile.actual_expires_at = profile.desired_expires_at
-            profile.provisioning_status = "active"
-            profile.last_synced_at = datetime.now(timezone.utc)
-            profile.last_sync_error = None
-    await mark_api_operation_succeeded(op.id, worker_id=op.locked_by,
-                                       expected_attempt_number=op.attempt_number)
+    sent_expires_dt = (datetime.fromtimestamp(sent_expires, timezone.utc)
+                       if sent_expires is not None else None)
+    await finalize_update_success(op.id, worker_id=op.locked_by,
+        expected_attempt_number=op.attempt_number, sent_version=sent_version,
+        sent_is_active=sent_status != "disabled", sent_expires_at=sent_expires_dt)
 
 
 async def _execute_delete(op, client):
@@ -133,13 +164,8 @@ async def _execute_delete(op, client):
     if not result.ok:
         await _set_profile_failure(op, "delete_failed", _error_code(result))
         return await _fail(op, retryable=result.retryable, code=_error_code(result))
-    if op.profile_id:
-        async with session_scope() as session:
-            profile = await session.get(VPNProfile, op.profile_id, with_for_update=True)
-            if profile:
-                await session.delete(profile)
-    await mark_api_operation_succeeded(op.id, worker_id=op.locked_by,
-                                       expected_attempt_number=op.attempt_number)
+    await finalize_delete_success(op.id, worker_id=op.locked_by,
+                                  expected_attempt_number=op.attempt_number)
 
 
 async def execute_claimed_api_operation(operation: ClaimedAPIOperation) -> None:

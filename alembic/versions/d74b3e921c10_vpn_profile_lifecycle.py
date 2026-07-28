@@ -47,7 +47,14 @@ def upgrade():
 def downgrade():
     op.execute("DELETE FROM api_operations WHERE idempotency_key LIKE 'legacy-delete:%'")
     op.drop_index("uq_vpn_profiles_server_peer_id_not_null", table_name="vpn_profiles")
-    op.execute("DELETE FROM vpn_profiles WHERE peer_id IS NULL OR raw_config IS NULL")
+    pending = op.get_bind().execute(sa.text(
+        "SELECT count(*) FROM vpn_profiles WHERE peer_id IS NULL OR raw_config IS NULL"
+    )).scalar_one()
+    if pending:
+        raise RuntimeError(
+            "Cannot downgrade VPN lifecycle while pending profiles contain NULL peer/config; "
+            "fulfil or remove them explicitly first"
+        )
     op.alter_column("vpn_profiles", "raw_config", nullable=False)
     op.alter_column("vpn_profiles", "peer_id", nullable=False)
     op.create_index("uq_vpn_profiles_peer_id", "vpn_profiles", ["peer_id"], unique=True)

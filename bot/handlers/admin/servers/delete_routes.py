@@ -9,8 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
-from database.models import VPNProfile
-from services.api_operations_queue import enqueue_api_operation
+from database.models import APIOperation, Server, VPNProfile
+from services.api_operations_queue import ensure_delete_operation
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -53,7 +53,8 @@ async def request_delete_server(
 
     await callback.answer(show_alert=False)
 
-    server = await get_server_by_id(session, server_id)
+    server = (await session.execute(select(Server).where(
+        Server.id == server_id).with_for_update())).scalar_one_or_none()
 
     if not server:
         await callback.answer(
@@ -136,16 +137,34 @@ async def confirm_delete_server(
     api_url = server.api_url
     api_key = server.api_key
 
-    result = await session.execute(
-        select(
-            VPNProfile.id,
-            VPNProfile.peer_id,
-        ).where(
-            VPNProfile.server_id == server.id
-        ),
-    )
-
-    profiles_data = [(row[0], row[1]) for row in result.all()]
+    profiles = list((await session.execute(select(VPNProfile).where(
+        VPNProfile.server_id == server.id).with_for_update())).scalars().all())
+    operations = list((await session.execute(select(APIOperation).where(
+        APIOperation.server_id == server.id,
+        APIOperation.status.in_(("pending", "retry", "processing")),
+    ).with_for_update())).scalars().all())
+    if any(op.status == "processing" and op.operation_type in {"create_peer", "update_peer"}
+           for op in operations):
+        await session.rollback()
+        await callback.answer(
+            "На сервере выполняются операции. Повторите удаление позже.",
+            show_alert=True,
+        )
+        return
+    for operation in operations:
+        if operation.operation_type in {"create_peer", "update_peer"}:
+            operation.status = "cancelled"
+            operation.completed_at = now_utc()
+            operation.locked_at = operation.locked_by = None
+            operation.last_error_code = "server_deleting"
+    for profile in profiles:
+        if profile.peer_id:
+            await ensure_delete_operation(session,
+                idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                server_id=server.id, profile_id=None,
+                server_name_snapshot=server_name, api_url_snapshot=api_url,
+                api_key_snapshot=api_key, peer_id=profile.peer_id,
+                client_name=profile.client_name, audit_reason="server_delete")
 
     deleted_profiles = await delete_profiles_by_server_id(
         session,
@@ -165,18 +184,6 @@ async def confirm_delete_server(
         f"{server_name}: {deleted_profiles} profiles deleted",
     )
 
-    for profile_id, peer_id in profiles_data:
-        if not peer_id:
-            continue
-        await enqueue_api_operation(
-            session, operation_type="delete_peer",
-            idempotency_key=f"delete-peer:{profile_id}:{peer_id}",
-            server_name_snapshot=server_name, api_url_snapshot=api_url,
-            api_key_snapshot=api_key, peer_id=peer_id,
-            client_name=None,
-            payload={"managed_workflow": True, "reason": "server_delete"},
-        )
-
     await callback.answer(
         f"✅ Сервер {server_name} удалён ({deleted_profiles} устр.)",
         show_alert=True,
@@ -188,4 +195,3 @@ async def confirm_delete_server(
     )
 
     await _show_servers_list(callback, session, page=1)
-

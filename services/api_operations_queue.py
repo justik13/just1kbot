@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import AsyncIterator, Callable
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import API_OPERATION_TYPES, APIOperation
+from database.models import API_OPERATION_TYPES, APIOperation, VPNProfile
 
 
 class APIOperationValidationError(Exception):
@@ -175,6 +175,37 @@ async def enqueue_api_operation(
             )
         return existing
     return await session.get(APIOperation, operation_id)
+
+
+async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str,
+        server_id: int | None, profile_id: int | None,
+        server_name_snapshot: str | None, api_url_snapshot: str | None,
+        api_key_snapshot: str | None, peer_id: str, client_name: str | None = None,
+        audit_reason: str | None = None) -> APIOperation:
+    """Ensure a stable delete command; audit reason is deliberately not identity."""
+    operation = (await session.execute(select(APIOperation).where(
+        APIOperation.idempotency_key == idempotency_key).with_for_update())).scalar_one_or_none()
+    if operation is None:
+        return await enqueue_api_operation(session, operation_type="delete_peer",
+            idempotency_key=idempotency_key, server_id=server_id, profile_id=profile_id,
+            server_name_snapshot=server_name_snapshot, api_url_snapshot=api_url_snapshot,
+            api_key_snapshot=api_key_snapshot, peer_id=peer_id, client_name=client_name,
+            payload={"managed_workflow": True})
+    if operation.status in {"dead", "cancelled"}:
+        operation.status = "retry"
+        operation.attempts = 0
+        operation.next_attempt_at = func.now()
+        operation.completed_at = None
+        operation.locked_at = operation.locked_by = None
+        operation.last_error_code = "delete_requeued"
+        operation.last_error = (audit_reason or "repeat delete")[:2000]
+    elif operation.status == "succeeded" and profile_id and await session.get(VPNProfile, profile_id):
+        operation.status = "retry"
+        operation.attempts = 0
+        operation.completed_at = None
+        operation.next_attempt_at = func.now()
+        operation.last_error_code = "delete_profile_discrepancy"
+    return operation
 
 
 @asynccontextmanager
