@@ -96,14 +96,17 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --domain)
+                [[ $# -ge 2 ]] || error "Для --domain требуется значение"
                 DOMAIN="$2"
                 shift 2
                 ;;
             --email)
+                [[ $# -ge 2 ]] || error "Для --email требуется значение"
                 EMAIL="$2"
                 shift 2
                 ;;
             --port)
+                [[ $# -ge 2 ]] || error "Для --port требуется значение"
                 PUBLIC_PORT="$2"
                 shift 2
                 ;;
@@ -185,8 +188,11 @@ check_prerequisites() {
     fi
 
     # Валидация домена
-    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+    if [[ ! "$DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]; then
         error "Некорректный домен: $DOMAIN"
+    fi
+    if [[ ! "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+        error "Некорректный email: $EMAIL"
     fi
 
     # Валидация порта
@@ -354,9 +360,6 @@ setup_https_config() {
 # Domain: $DOMAIN
 # Port: $PUBLIC_PORT -> 127.0.0.1:$AMNEZIA_PORT
 # Generated: $(date -Iseconds)
-
-# Rate limiting
-limit_req_zone \$binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;
 
 # HTTP -> HTTPS redirect
 server {

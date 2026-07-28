@@ -46,7 +46,7 @@ done
 TEMP_FILES=()
 cleanup() {
     for f in "${TEMP_FILES[@]:-}"; do
-        rm -f "$f" 2>/dev/null || true
+        [[ -n "$f" && "$f" == /tmp/* ]] && rm -rf -- "$f" 2>/dev/null || true
     done
 }
 trap cleanup EXIT INT TERM
@@ -98,9 +98,11 @@ fi
 # --- Защита от удаления системных директорий ---
 if [[ "$PROJECT_DIR" == "/" || "$PROJECT_DIR" == "/etc" || "$PROJECT_DIR" == "/usr" || "$PROJECT_DIR" == "/var" || "$PROJECT_DIR" == "/home" ]]; then
     error "Отказ: PROJECT_DIR='$PROJECT_DIR' является системной директорией."
+    exit 1
 fi
 if [[ "$PROJECT_DIR" != *"just1kbot"* ]]; then
     error "Отказ: PROJECT_DIR='$PROJECT_DIR' не содержит 'just1kbot'. Проверьте конфигурацию."
+    exit 1
 fi
 
 # =============================================================================
@@ -164,6 +166,8 @@ remove_nginx() {
         if [[ -f "$conf" ]]; then
             local name
             name=$(basename "$conf")
+            # Amnezia-конфиги обрабатываются ниже вместе с сертификатами.
+            [[ "$name" == just1kbot-amnezia-* ]] && continue
             rm -f "/etc/nginx/sites-enabled/$name"
             rm -f "$conf"
             log "Удалён: $name"
@@ -191,9 +195,8 @@ remove_nginx() {
 remove_ufw_rules() {
     log "Удаление UFW правил..."
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        ufw delete allow 80/tcp > /dev/null 2>&1 || true
-        ufw delete allow 443/tcp > /dev/null 2>&1 || true
-        ufw delete allow 8443/tcp > /dev/null 2>&1 || true
+        # Не удаляем общие HTTP/HTTPS/SSH правила: ими могут пользоваться
+        # другие приложения на сервере.
         ufw delete deny 8080/tcp > /dev/null 2>&1 || true
         ufw delete deny 6379/tcp > /dev/null 2>&1 || true
         ufw delete deny 5432/tcp > /dev/null 2>&1 || true
