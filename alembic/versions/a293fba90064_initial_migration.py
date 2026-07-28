@@ -20,7 +20,40 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Create all tables for just1kbot."""
-    # Users table
+    # Order matters! Create tables without FK dependencies first.
+    # servers and tariffs must exist before users (FK to tariffs.id)
+    
+    # Servers table (no FK dependencies)
+    op.create_table('servers',
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('name', sa.String(length=255), nullable=False),
+        sa.Column('country_flag', sa.String(length=10), nullable=True),
+        sa.Column('api_url', sa.String(length=500), nullable=False),
+        sa.Column('api_key', sa.String(), nullable=False),
+        sa.Column('protocol', sa.String(length=50), nullable=False),
+        sa.Column('max_clients', sa.Integer(), nullable=False),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('api_url', name='uq_servers_api_url')
+    )
+    
+    # Tariffs table (no FK dependencies)
+    op.create_table('tariffs',
+        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+        sa.Column('name', sa.String(length=100), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('duration_days', sa.Integer(), nullable=False),
+        sa.Column('device_limit', sa.Integer(), nullable=False),
+        sa.Column('price_rub', sa.Integer(), nullable=False),
+        sa.Column('is_active', sa.Boolean(), nullable=False),
+        sa.Column('sort_order', sa.Integer(), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint('id'),
+        sa.UniqueConstraint('device_limit', 'duration_days', name='uq_tariffs_device_limit_duration_days')
+    )
+    
+    # Users table (FK to tariffs.id - now exists)
     op.create_table('users',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('telegram_id', sa.BigInteger(), nullable=False),
@@ -54,37 +87,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_users_is_bot_blocked'), 'users', ['is_bot_blocked'], unique=False)
     op.create_index(op.f('ix_users_is_deleted'), 'users', ['is_deleted'], unique=False)
     
-    # Servers table
-    op.create_table('servers',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('name', sa.String(length=255), nullable=False),
-        sa.Column('country_flag', sa.String(length=10), nullable=True),
-        sa.Column('api_url', sa.String(length=500), nullable=False),
-        sa.Column('api_key', sa.String(), nullable=False),
-        sa.Column('protocol', sa.String(length=50), nullable=False),
-        sa.Column('max_clients', sa.Integer(), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('api_url', name='uq_servers_api_url')
-    )
-    
-    # Tariffs table
-    op.create_table('tariffs',
-        sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('duration_days', sa.Integer(), nullable=False),
-        sa.Column('device_limit', sa.Integer(), nullable=False),
-        sa.Column('price_rub', sa.Integer(), nullable=False),
-        sa.Column('is_active', sa.Boolean(), nullable=False),
-        sa.Column('sort_order', sa.Integer(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint('id'),
-        sa.UniqueConstraint('device_limit', 'duration_days', name='uq_tariffs_device_limit_duration_days')
-    )
-    
-    # VPN Profiles table
+    # VPN Profiles table (FK to users.id and servers.id - both exist)
     op.create_table('vpn_profiles',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
@@ -105,7 +108,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_vpn_profiles_server_id'), 'vpn_profiles', ['server_id'], unique=False)
     op.create_index('uq_vpn_profiles_peer_id', 'vpn_profiles', ['peer_id'], unique=True)
     
-    # Payments table
+    # Payments table (FK to users.id and tariffs.id - both exist)
     op.create_table('payments',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
@@ -140,7 +143,7 @@ def upgrade() -> None:
     op.create_index('uq_payments_external_id_not_null', 'payments', ['external_id'], unique=True,
                     postgresql_where=sa.text("external_id IS NOT NULL"))
     
-    # Payment Events table
+    # Payment Events table (FK to payments.id - exists)
     op.create_table('payment_events',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('payment_id', sa.Integer(), nullable=False),
@@ -156,7 +159,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_payment_events_payment_id'), 'payment_events', ['payment_id'], unique=False)
     op.create_index('ix_payment_events_payment_created', 'payment_events', ['payment_id', 'created_at'], unique=False)
     
-    # Audit Logs table
+    # Audit Logs table (no FK dependencies)
     op.create_table('audit_logs',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('admin_id', sa.BigInteger(), nullable=False),
@@ -169,7 +172,7 @@ def upgrade() -> None:
     )
     op.create_index('ix_audit_logs_created_at', 'audit_logs', ['created_at'], unique=False)
     
-    # Broadcast Progress table
+    # Broadcast Progress table (no FK dependencies)
     op.create_table('broadcast_progress',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('admin_id', sa.BigInteger(), nullable=False),
@@ -190,7 +193,7 @@ def upgrade() -> None:
     op.create_index(op.f('ix_broadcast_progress_admin_id'), 'broadcast_progress', ['admin_id'], unique=False)
     op.create_index(op.f('ix_broadcast_progress_status'), 'broadcast_progress', ['status'], unique=False)
     
-    # Pending API Deletions table
+    # Pending API Deletions table (no FK dependencies)
     op.create_table('pending_api_deletions',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('server_name', sa.String(length=255), nullable=False),
@@ -206,7 +209,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
     )
     
-    # Maintenance Mode table
+    # Maintenance Mode table (no FK dependencies)
     op.create_table('maintenance_mode',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('is_enabled', sa.Boolean(), nullable=False),
@@ -216,17 +219,82 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
     )
     
-    # Hub Messages table
+    # Hub Messages table (no FK dependencies)
     op.create_table('hub_messages',
         sa.Column('chat_id', sa.BigInteger(), nullable=False),
         sa.Column('message_id', sa.BigInteger(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('chat_id', 'message_id')
     )
+    
+    # Additional indexes from _apply_additional_indexes (moved to migration)
+    # Index for active subscriptions
+    op.create_index('ix_users_active_subscription', 'users', ['subscription_end'],
+                    postgresql_where=sa.text("is_deleted = false AND subscription_end IS NOT NULL"))
+    
+    # Index for banned users
+    op.create_index('ix_users_banned', 'users', ['telegram_id'],
+                    postgresql_where=sa.text("is_banned = true AND is_deleted = false"))
+    
+    # Index for expiring subscriptions (notifications)
+    op.create_index('ix_users_expiring_subscription', 'users', ['subscription_end', 'telegram_id'],
+                    postgresql_where=sa.text("""
+                        is_deleted = false
+                        AND is_bot_blocked = false
+                        AND is_banned = false
+                        AND subscription_end IS NOT NULL
+                        AND (notified_3d = false OR notified_1d = false OR notified_2h = false)
+                    """))
+    
+    # Index for expired grace notifications
+    op.create_index('ix_users_expired_grace_notify', 'users', ['subscription_end', 'telegram_id'],
+                    postgresql_where=sa.text("""
+                        is_deleted = false
+                        AND is_bot_blocked = false
+                        AND subscription_end IS NOT NULL
+                        AND (notified_expired = false OR notified_grace_12h = false)
+                    """))
+    
+    # Index for broadcast in progress
+    op.create_index('ix_broadcast_in_progress', 'broadcast_progress', ['status', 'created_at'],
+                    postgresql_where=sa.text("status = 'in_progress'"))
+    
+    # Index for pending API deletions retry
+    op.create_index('ix_pending_api_deletions_attempts', 'pending_api_deletions', ['attempts', 'created_at'],
+                    postgresql_where=sa.text("attempts < 10"))
+    
+    # Index for paginated user listing
+    op.create_index('ix_users_paginated', 'users', ['created_at', 'id'],
+                    postgresql_where=sa.text("is_deleted = false"),
+                    postgresql_ops={'created_at': 'DESC', 'id': 'DESC'})
+    
+    # Index for hub messages chat lookup
+    op.create_index('ix_hub_messages_chat_id', 'hub_messages', ['chat_id'])
+    
+    # Index for audit logs (descending)
+    op.create_index('ix_audit_logs_created_at_desc', 'audit_logs', ['created_at'],
+                    postgresql_ops={'created_at': 'DESC'})
+    
+    # Unique index for VPN profiles (user, server, device_name case-insensitive)
+    op.create_index('uq_vpn_profiles_user_server_device_name', 'vpn_profiles',
+                    ['user_id', 'server_id', sa.func.lower('device_name')], unique=True)
 
 
 def downgrade() -> None:
-    """Drop all tables."""
+    """Drop all tables in reverse order."""
+    # Drop indexes first (they depend on tables)
+    op.drop_index('uq_vpn_profiles_user_server_device_name', table_name='vpn_profiles')
+    op.drop_index('ix_audit_logs_created_at_desc', table_name='audit_logs')
+    op.drop_index('ix_hub_messages_chat_id', table_name='hub_messages')
+    op.drop_index('ix_users_paginated', table_name='users')
+    op.drop_index('ix_pending_api_deletions_attempts', table_name='pending_api_deletions')
+    op.drop_index('ix_broadcast_in_progress', table_name='broadcast_progress')
+    op.drop_index('ix_users_expired_grace_notify', table_name='users')
+    op.drop_index('ix_users_expiring_subscription', table_name='users')
+    op.drop_index('ix_users_banned', table_name='users')
+    op.drop_index('ix_users_active_subscription', table_name='users')
+    
+    # Drop tables in reverse dependency order
     op.drop_table('hub_messages')
     op.drop_table('maintenance_mode')
     op.drop_table('pending_api_deletions')
@@ -235,6 +303,6 @@ def downgrade() -> None:
     op.drop_table('payment_events')
     op.drop_table('payments')
     op.drop_table('vpn_profiles')
+    op.drop_table('users')
     op.drop_table('tariffs')
     op.drop_table('servers')
-    op.drop_table('users')

@@ -4,7 +4,7 @@ import os
 from logging import getLogger
 from dotenv import load_dotenv
 
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
@@ -35,7 +35,10 @@ if database_url:
     # Convert asyncpg URL to sync psycopg2 for Alembic if needed
     # Alembic can work with asyncpg directly in async mode
     config.set_main_option("sqlalchemy.url", database_url)
-    logger.info(f"Using DATABASE_URL from environment: {database_url[:30]}...")
+    # Log only the host and database name, not credentials
+    from urllib.parse import urlparse
+    parsed = urlparse(database_url)
+    logger.info(f"Using database: {parsed.hostname}:{parsed.port or 5432}/{parsed.path.lstrip('/')}")
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -51,7 +54,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,
+        # Enable detection of type changes and server default changes
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -70,7 +75,9 @@ async def run_migrations_async() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True,
+            # Enable detection of type changes and server default changes
+            compare_type=True,
+            compare_server_default=True,
         )
 
         async with connection.begin_transaction():
@@ -81,29 +88,9 @@ async def run_migrations_async() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    # Only run online migrations if we can actually connect to the database
-    # For revision generation without DB, use offline mode
-    import socket
-    
-    url = config.get_main_option("sqlalchemy.url")
-    # Check if we can parse the URL and potentially connect
-    try:
-        from urllib.parse import urlparse
-        parsed = urlparse(url)
-        if parsed.hostname:
-            # Try to connect to the host
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
-            result = sock.connect_ex((parsed.hostname, parsed.port or 5432))
-            sock.close()
-            if result != 0:
-                logger.warning(f"Cannot connect to database at {parsed.hostname}:{parsed.port or 5432}")
-                logger.warning("Skipping online migrations. Use 'alembic revision --autogenerate -m \"msg\"' in offline mode or start your DB.")
-                return
-    except Exception as e:
-        logger.warning(f"Could not check database connectivity: {e}")
-        return
-    
+    # Let the database driver handle connection errors naturally.
+    # If DB is unavailable, Alembic will fail with a clear error and non-zero exit code.
+    # This prevents silent failures where migrations are skipped but deploy appears successful.
     asyncio.run(run_migrations_async())
 
 
