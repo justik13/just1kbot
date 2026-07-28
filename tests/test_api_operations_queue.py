@@ -81,7 +81,10 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_enqueue_validation(self):
         invalid = (
+            self.command(None),
+            self.command(123),
             self.command(" "),
+            self.command("x" * 256),
             self.command("type", operation_type="unknown"),
             self.command("update", operation_type="update_peer", peer_id=None),
             self.command("delete", operation_type="delete_peer", peer_id=None),
@@ -90,7 +93,7 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.command("secret", payload={"api_key": "no"}),
         )
         for command in invalid:
-            with self.subTest(command=command["idempotency_key"]):
+            with self.subTest(command=repr(command["idempotency_key"])):
                 async with self.sessions.begin() as session:
                     with self.assertRaises(APIOperationValidationError):
                         await enqueue_api_operation(session, **command)
@@ -147,10 +150,36 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
         operation = await self.enqueue("ownership")
         claimed = (await claim_api_operations(worker_id="owner", session_factory=self.sessions))[0]
         with self.assertRaises(APIOperationOwnershipError):
-            await mark_api_operation_succeeded(claimed.id, worker_id="other", session_factory=self.sessions)
+            await mark_api_operation_succeeded(claimed.id, worker_id="other", expected_attempt_number=claimed.attempt_number, session_factory=self.sessions)
         with self.assertRaises(APIOperationOwnershipError):
-            await mark_api_operation_failed(claimed.id, worker_id="other", retryable=True, error_code="x", error_message="x", session_factory=self.sessions)
-        result = await mark_api_operation_failed(claimed.id, worker_id="owner", retryable=True, error_code="e" * 101, error_message="m" * 2001, session_factory=self.sessions)
+            await mark_api_operation_failed(claimed.id, worker_id="other", expected_attempt_number=claimed.attempt_number, retryable=True, error_code="x", error_message="x", session_factory=self.sessions)
+        with self.assertRaises(APIOperationOwnershipError):
+            await mark_api_operation_succeeded(
+                claimed.id,
+                worker_id="owner",
+                expected_attempt_number=claimed.attempt_number + 1,
+                session_factory=self.sessions,
+            )
+        with self.assertRaises(APIOperationValidationError):
+            await mark_api_operation_succeeded(
+                claimed.id,
+                worker_id="owner",
+                expected_attempt_number=0,
+                session_factory=self.sessions,
+            )
+        for error_code, error_message in ((object(), "safe"), ("safe", object())):
+            with self.subTest(error_code=type(error_code), error_message=type(error_message)):
+                with self.assertRaises(APIOperationValidationError):
+                    await mark_api_operation_failed(
+                        claimed.id,
+                        worker_id="owner",
+                        expected_attempt_number=claimed.attempt_number,
+                        retryable=True,
+                        error_code=error_code,
+                        error_message=error_message,
+                        session_factory=self.sessions,
+                    )
+        result = await mark_api_operation_failed(claimed.id, worker_id="owner", expected_attempt_number=claimed.attempt_number, retryable=True, error_code="e" * 101, error_message="m" * 2001, session_factory=self.sessions)
         self.assertEqual(result, "retry")
         stored = await self.get(operation.id)
         self.assertEqual(stored.status, "retry")
@@ -164,20 +193,75 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
             row = await session.get(APIOperation, stored.id)
             row.next_attempt_at = stored.next_attempt_at
         final = (await claim_api_operations(worker_id="owner", session_factory=self.sessions))[0]
-        self.assertEqual(await mark_api_operation_failed(final.id, worker_id="owner", retryable=False, error_code="fatal", error_message="safe", session_factory=self.sessions), "dead")
+        self.assertEqual(await mark_api_operation_failed(final.id, worker_id="owner", expected_attempt_number=final.attempt_number, retryable=False, error_code="fatal", error_message="safe", session_factory=self.sessions), "dead")
         self.assertEqual((await self.get(final.id)).status, "dead")
 
         last = await self.enqueue("last-attempt", max_attempts=1)
         last_claim = (await claim_api_operations(worker_id="owner", session_factory=self.sessions))[0]
-        self.assertEqual(await mark_api_operation_failed(last_claim.id, worker_id="owner", retryable=True, error_code="x", error_message="x", session_factory=self.sessions), "dead")
+        self.assertEqual(await mark_api_operation_failed(last_claim.id, worker_id="owner", expected_attempt_number=last_claim.attempt_number, retryable=True, error_code="x", error_message="x", session_factory=self.sessions), "dead")
+
+    async def test_attempt_number_fences_stale_same_worker_lease(self):
+        operation = await self.enqueue("aba-fencing")
+        first = (
+            await claim_api_operations(
+                worker_id="same-worker", session_factory=self.sessions
+            )
+        )[0]
+        self.assertEqual(first.attempt_number, 1)
+
+        async with self.sessions.begin() as session:
+            row = await session.get(APIOperation, operation.id)
+            row.locked_at = datetime.now(timezone.utc) - timedelta(hours=2)
+        self.assertEqual(
+            await recover_stale_api_operations(
+                lease_timeout=timedelta(hours=1), session_factory=self.sessions
+            ),
+            (1, 0),
+        )
+        second = (
+            await claim_api_operations(
+                worker_id="same-worker", session_factory=self.sessions
+            )
+        )[0]
+        self.assertEqual(second.attempt_number, 2)
+
+        with self.assertRaises(APIOperationOwnershipError):
+            await mark_api_operation_succeeded(
+                first.id,
+                worker_id="same-worker",
+                expected_attempt_number=first.attempt_number,
+                session_factory=self.sessions,
+            )
+        with self.assertRaises(APIOperationOwnershipError):
+            await mark_api_operation_failed(
+                first.id,
+                worker_id="same-worker",
+                expected_attempt_number=first.attempt_number,
+                retryable=False,
+                error_code="stale",
+                error_message="stale lease",
+                session_factory=self.sessions,
+            )
+        active = await self.get(operation.id)
+        self.assertEqual(
+            (active.status, active.locked_by, active.attempts),
+            ("processing", "same-worker", 2),
+        )
+        await mark_api_operation_succeeded(
+            second.id,
+            worker_id="same-worker",
+            expected_attempt_number=second.attempt_number,
+            session_factory=self.sessions,
+        )
+        self.assertEqual((await self.get(operation.id)).status, "succeeded")
 
     async def test_success_and_repeated_success_errors(self):
         operation = await self.enqueue("success")
         claimed = (await claim_api_operations(worker_id="owner", session_factory=self.sessions))[0]
-        await mark_api_operation_succeeded(claimed.id, worker_id="owner", session_factory=self.sessions)
+        await mark_api_operation_succeeded(claimed.id, worker_id="owner", expected_attempt_number=claimed.attempt_number, session_factory=self.sessions)
         self.assertEqual((await self.get(operation.id)).status, "succeeded")
         with self.assertRaises(APIOperationOwnershipError):
-            await mark_api_operation_succeeded(claimed.id, worker_id="owner", session_factory=self.sessions)
+            await mark_api_operation_succeeded(claimed.id, worker_id="owner", expected_attempt_number=claimed.attempt_number, session_factory=self.sessions)
 
     async def test_recovery(self):
         now = datetime.now(timezone.utc)

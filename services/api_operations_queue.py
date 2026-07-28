@@ -126,11 +126,20 @@ async def enqueue_api_operation(
     max_attempts: int = 10,
 ) -> APIOperation:
     """Atomically enqueue a command without committing the caller's transaction."""
+    if not isinstance(idempotency_key, str):
+        raise APIOperationValidationError("idempotency_key must be a string")
+    normalized_idempotency_key = idempotency_key.strip()
+    if not normalized_idempotency_key:
+        raise APIOperationValidationError("idempotency_key must not be empty")
+    if len(normalized_idempotency_key) > 255:
+        raise APIOperationValidationError(
+            "idempotency_key must not exceed 255 characters"
+        )
     if payload is not None and not isinstance(payload, dict):
         raise APIOperationValidationError("payload must be a dict")
     values = {
         "operation_type": operation_type,
-        "idempotency_key": idempotency_key.strip(),
+        "idempotency_key": normalized_idempotency_key,
         "server_id": server_id,
         "profile_id": profile_id,
         "server_name_snapshot": server_name_snapshot,
@@ -260,11 +269,13 @@ async def mark_api_operation_succeeded(
     operation_id: int,
     *,
     worker_id: str,
+    expected_attempt_number: int,
     session_factory: SessionFactory | None = None,
 ) -> None:
     """Finish an owned lease; repeated completion is an ownership error."""
     from sqlalchemy import func
 
+    _validate_expected_attempt_number(expected_attempt_number)
     async with _transaction(session_factory) as session:
         result = await session.execute(
             update(APIOperation)
@@ -272,6 +283,7 @@ async def mark_api_operation_succeeded(
                 APIOperation.id == operation_id,
                 APIOperation.status == "processing",
                 APIOperation.locked_by == worker_id,
+                APIOperation.attempts == expected_attempt_number,
             )
             .values(
                 status="succeeded",
@@ -291,12 +303,22 @@ async def mark_api_operation_failed(
     operation_id: int,
     *,
     worker_id: str,
+    expected_attempt_number: int,
     retryable: bool,
     error_code: str,
     error_message: str,
     session_factory: SessionFactory | None = None,
 ) -> str:
+    """Fail an owned fenced lease; error inputs must already be safe strings."""
     from sqlalchemy import func
+
+    _validate_expected_attempt_number(expected_attempt_number)
+    if not isinstance(error_code, str):
+        raise APIOperationValidationError("error_code must be a string")
+    if not isinstance(error_message, str):
+        raise APIOperationValidationError("error_message must be a string")
+    safe_error_code = (error_code.strip() or "unknown_error")[:100]
+    safe_error_message = error_message[:2000]
 
     async with _transaction(session_factory) as session:
         operation = (
@@ -306,6 +328,7 @@ async def mark_api_operation_failed(
                     APIOperation.id == operation_id,
                     APIOperation.status == "processing",
                     APIOperation.locked_by == worker_id,
+                    APIOperation.attempts == expected_attempt_number,
                 )
                 .with_for_update()
             )
@@ -321,9 +344,18 @@ async def mark_api_operation_failed(
         operation.updated_at = func.now()
         operation.locked_at = None
         operation.locked_by = None
-        operation.last_error_code = (error_code or "unknown_error")[:100]
-        operation.last_error = (error_message or "")[:2000]
+        operation.last_error_code = safe_error_code
+        operation.last_error = safe_error_message
         return operation.status
+
+
+def _validate_expected_attempt_number(expected_attempt_number: int) -> None:
+    if not isinstance(expected_attempt_number, int) or isinstance(
+        expected_attempt_number, bool
+    ) or expected_attempt_number <= 0:
+        raise APIOperationValidationError(
+            "expected_attempt_number must be a positive integer"
+        )
 
 
 async def recover_stale_api_operations(
