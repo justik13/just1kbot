@@ -1,7 +1,10 @@
 import asyncio
 import logging
 import time
-from typing import Optional, List
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Generic, List, Optional, TypeVar
+from urllib.parse import urlsplit
 
 import aiohttp
 from pydantic import BaseModel, Field
@@ -17,6 +20,54 @@ from utils.security import SafeResolver, allow_local_networks
 logger = logging.getLogger(__name__)
 
 _http_session: Optional[aiohttp.ClientSession] = None
+
+
+def _safe_api_target(api_url: str) -> str:
+    """Return a log-safe endpoint without credentials or query data."""
+    parsed = urlsplit(api_url)
+    host = parsed.hostname or "<invalid-host>"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    if port:
+        host = f"{host}:{port}"
+    return host
+
+
+T = TypeVar("T")
+
+
+class AmneziaErrorKind(str, Enum):
+    CONFIGURATION = "configuration"
+    CIRCUIT_OPEN = "circuit_open"
+    RATE_LIMIT_TIMEOUT = "rate_limit_timeout"
+    RATE_LIMITED = "rate_limited"
+    AUTH_FAILED = "auth_failed"
+    NOT_FOUND = "not_found"
+    VALIDATION_FAILED = "validation_failed"
+    REDIRECT = "redirect"
+    SERVER_ERROR = "server_error"
+    NETWORK_ERROR = "network_error"
+    TIMEOUT = "timeout"
+    INVALID_RESPONSE = "invalid_response"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class AmneziaAPIResult(Generic[T]):
+    ok: bool
+    value: Optional[T]
+    error_kind: Optional[AmneziaErrorKind]
+    status_code: Optional[int]
+    retryable: bool
+    ambiguous: bool
+
+
+class RequestSemantics(str, Enum):
+    READ = "read"
+    IDEMPOTENT_WRITE = "idempotent_write"
+    CREATE = "create"
 
 
 class CircuitBreaker:
@@ -97,10 +148,16 @@ def cleanup_server_circuit_breakers(api_url: str) -> None:
     api_url = (api_url or "").rstrip("/")
     if api_url in _circuit_breakers:
         del _circuit_breakers[api_url]
-        logger.debug("Circuit breaker cleaned for %s", api_url)
+        logger.debug(
+            "Circuit breaker cleaned for %s",
+            _safe_api_target(api_url),
+        )
     if api_url in _rate_limiters:
         del _rate_limiters[api_url]
-        logger.debug("Rate limiter cleaned for %s", api_url)
+        logger.debug(
+            "Rate limiter cleaned for %s",
+            _safe_api_target(api_url),
+        )
 
 
 class TokenBucketRateLimiter:
@@ -223,23 +280,73 @@ class AmneziaClient:
     def __init__(self, api_url: str, api_key: str):
         self.api_url = (api_url or "").rstrip("/")
         self.api_key = api_key or ""
+        self._log_target = _safe_api_target(self.api_url)
         self._headers = {
             "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
         self._key_error_logged = False
 
-    async def _request(
+    @staticmethod
+    def _success(
+        value: Any = None,
+        status_code: Optional[int] = None,
+    ) -> AmneziaAPIResult[Any]:
+        return AmneziaAPIResult(
+            ok=True,
+            value=value,
+            error_kind=None,
+            status_code=status_code,
+            retryable=False,
+            ambiguous=False,
+        )
+
+    @staticmethod
+    def _failure(
+        kind: AmneziaErrorKind,
+        semantics: RequestSemantics,
+        *,
+        status_code: Optional[int] = None,
+        retryable: bool = False,
+        ambiguous: Optional[bool] = None,
+    ) -> AmneziaAPIResult[Any]:
+        if ambiguous is None:
+            ambiguous = semantics is not RequestSemantics.READ
+        if (
+            semantics is RequestSemantics.CREATE
+            and kind in {
+                AmneziaErrorKind.SERVER_ERROR,
+                AmneziaErrorKind.NETWORK_ERROR,
+                AmneziaErrorKind.TIMEOUT,
+                AmneziaErrorKind.INVALID_RESPONSE,
+            }
+        ):
+            retryable = False
+        return AmneziaAPIResult(
+            ok=False,
+            value=None,
+            error_kind=kind,
+            status_code=status_code,
+            retryable=retryable,
+            ambiguous=ambiguous,
+        )
+
+    async def _request_result(
         self,
         method: str,
         path: str,
         *,
+        semantics: RequestSemantics,
         not_found_as_success: bool = False,
         **kwargs,
-    ) -> Optional[dict]:
+    ) -> AmneziaAPIResult[Any]:
         if not self.api_url:
             logger.error("AmneziaClient: empty API URL")
-            return None
+            return self._failure(
+                AmneziaErrorKind.CONFIGURATION,
+                semantics,
+                ambiguous=False,
+            )
 
         if not self.api_key:
             if not self._key_error_logged:
@@ -247,11 +354,15 @@ class AmneziaClient:
                     "AmneziaClient: empty API key for %s%s. "
                     "This usually means DB_ENCRYPTION_KEY issue "
                     "or corrupted encrypted server key.",
-                    self.api_url,
+                    self._log_target,
                     path,
                 )
                 self._key_error_logged = True
-            return None
+            return self._failure(
+                AmneziaErrorKind.CONFIGURATION,
+                semantics,
+                ambiguous=False,
+            )
 
         url = f"{self.api_url}{path}"
         cb = _get_circuit_breaker(self.api_url)
@@ -259,24 +370,39 @@ class AmneziaClient:
         if not await cb.is_available():
             logger.debug(
                 "Circuit breaker OPEN for %s%s, skipping request",
-                self.api_url,
+                self._log_target,
                 path,
             )
-            return None
+            return self._failure(
+                AmneziaErrorKind.CIRCUIT_OPEN,
+                semantics,
+                retryable=True,
+                ambiguous=False,
+            )
 
         limiter = _get_rate_limiter(self.api_url)
 
-        for attempt in range(API_RETRY_COUNT + 1):
+        max_attempts = (
+            1
+            if semantics is RequestSemantics.CREATE
+            else API_RETRY_COUNT + 1
+        )
+        for attempt in range(max_attempts):
             if not await limiter.acquire(timeout=30.0):
                 logger.warning(
                     "Rate limit timeout for %s%s "
                     "(attempt %s/%s)",
-                    self.api_url,
+                    self._log_target,
                     path,
                     attempt + 1,
-                    API_RETRY_COUNT + 1,
+                    max_attempts,
                 )
-                return None
+                return self._failure(
+                    AmneziaErrorKind.RATE_LIMIT_TIMEOUT,
+                    semantics,
+                    retryable=True,
+                    ambiguous=False,
+                )
 
             session = await get_http_session()
             try:
@@ -289,30 +415,40 @@ class AmneziaClient:
                 ) as response:
                     if response.status == 204:
                         await cb.record_success()
-                        return {}
+                        return self._success(status_code=204)
                     elif 200 <= response.status < 300:
-                        await cb.record_success()
                         try:
-                            return await response.json()
-                        except aiohttp.ContentTypeError:
-                            return None
+                            value = await response.json()
+                        except Exception:
+                            return self._failure(
+                                AmneziaErrorKind.INVALID_RESPONSE,
+                                semantics,
+                                status_code=response.status,
+                                retryable=True,
+                            )
+                        await cb.record_success()
+                        return self._success(value, response.status)
                     elif 300 <= response.status < 400:
-                        await cb.record_failure()
                         logger.warning(
                             "API %s%s returned redirect %s. "
                             "Redirects are disabled.",
-                            self.api_url,
+                            self._log_target,
                             path,
                             response.status,
                         )
-                        return None
+                        return self._failure(
+                            AmneziaErrorKind.REDIRECT,
+                            semantics,
+                            status_code=response.status,
+                            ambiguous=False,
+                        )
                     elif response.status == 429:
-                        if attempt < API_RETRY_COUNT:
+                        if attempt + 1 < max_attempts:
                             backoff = 2 ** (attempt + 1)
                             logger.warning(
                                 "API %s%s returned 429, "
                                 "retrying in %ss",
-                                self.api_url,
+                                self._log_target,
                                 path,
                                 backoff,
                             )
@@ -321,41 +457,53 @@ class AmneziaClient:
                         logger.warning(
                             "API %s%s returned 429 after all retries "
                             "(rate limited, NOT a server failure)",
-                            self.api_url,
+                            self._log_target,
                             path,
                         )
-                        return None
+                        return self._failure(
+                            AmneziaErrorKind.RATE_LIMITED,
+                            semantics,
+                            status_code=429,
+                            retryable=True,
+                            ambiguous=False,
+                        )
                     elif 400 <= response.status < 500:
                         if (
                             not_found_as_success
                             and response.status == 404
                         ):
-                            await cb.record_success()
-                            return {}
-                        await cb.record_failure()
-                        try:
-                            error_text = await response.text()
-                            logger.warning(
-                                "API %s%s returned %s "
-                                "(client error): %s",
-                                self.api_url,
-                                path,
-                                response.status,
-                                error_text[:100],
-                            )
-                        except Exception:
-                            pass
-                        return None
+                            return self._success(status_code=404)
+                        if response.status in (401, 403):
+                            kind = AmneziaErrorKind.AUTH_FAILED
+                        elif response.status == 404:
+                            kind = AmneziaErrorKind.NOT_FOUND
+                        elif response.status in (400, 409, 422):
+                            kind = AmneziaErrorKind.VALIDATION_FAILED
+                        else:
+                            kind = AmneziaErrorKind.UNKNOWN
+                        logger.warning(
+                            "API %s%s returned %s (%s)",
+                            self._log_target,
+                            path,
+                            response.status,
+                            kind.value,
+                        )
+                        return self._failure(
+                            kind,
+                            semantics,
+                            status_code=response.status,
+                            ambiguous=False,
+                        )
                     else:
                         if (
-                            attempt < API_RETRY_COUNT
+                            attempt + 1 < max_attempts
                             and response.status >= 500
                         ):
                             backoff = 2 ** attempt
                             logger.warning(
                                 "API %s%s returned %s, "
                                 "retrying in %ss (attempt %s)",
-                                self.api_url,
+                                self._log_target,
                                 path,
                                 response.status,
                                 backoff,
@@ -363,21 +511,31 @@ class AmneziaClient:
                             )
                             await asyncio.sleep(backoff)
                             continue
-                        await cb.record_failure()
-                        return None
+                        if response.status >= 500:
+                            await cb.record_failure()
+                            return self._failure(
+                                AmneziaErrorKind.SERVER_ERROR,
+                                semantics,
+                                status_code=response.status,
+                                retryable=True,
+                            )
+                        return self._failure(
+                            AmneziaErrorKind.UNKNOWN,
+                            semantics,
+                            status_code=response.status,
+                            ambiguous=False,
+                        )
 
-            except (
-                aiohttp.ClientError,
-                asyncio.TimeoutError,
-            ) as e:
-                if attempt < API_RETRY_COUNT:
+            except asyncio.TimeoutError as error:
+                kind = AmneziaErrorKind.TIMEOUT
+                if attempt + 1 < max_attempts:
                     backoff = 2 ** attempt
                     logger.warning(
                         "Network error for %s%s: %s, "
                         "retrying in %ss (attempt %s)",
-                        self.api_url,
+                        self._log_target,
                         path,
-                        type(e).__name__,
+                        type(error).__name__,
                         backoff,
                         attempt + 1,
                     )
@@ -386,29 +544,75 @@ class AmneziaClient:
                     await cb.record_failure()
                     logger.error(
                         "All retries exhausted for %s%s: %s",
-                        self.api_url,
+                        self._log_target,
                         path,
-                        type(e).__name__,
+                        type(error).__name__,
                     )
-                    return None
-            except Exception as e:
+                    return self._failure(
+                        kind,
+                        semantics,
+                        retryable=True,
+                    )
+            except aiohttp.ClientError as error:
+                kind = AmneziaErrorKind.NETWORK_ERROR
+                if attempt + 1 < max_attempts:
+                    backoff = 2 ** attempt
+                    logger.warning(
+                        "Network error for %s%s: %s, "
+                        "retrying in %ss (attempt %s)",
+                        self._log_target,
+                        path,
+                        type(error).__name__,
+                        backoff,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
                 await cb.record_failure()
                 logger.error(
-                    "Unexpected error for %s%s: %s: %s",
-                    self.api_url,
+                    "All retries exhausted for %s%s: %s",
+                    self._log_target,
                     path,
-                    type(e).__name__,
-                    e,
+                    type(error).__name__,
                 )
-                return None
+                return self._failure(kind, semantics, retryable=True)
+            except Exception as error:
+                logger.error(
+                    "Unexpected error for %s%s: %s",
+                    self._log_target,
+                    path,
+                    type(error).__name__,
+                )
+                return self._failure(
+                    AmneziaErrorKind.UNKNOWN,
+                    semantics,
+                )
 
-        return None
+        return self._failure(AmneziaErrorKind.UNKNOWN, semantics)
 
-    async def create_user(
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        semantics: RequestSemantics = RequestSemantics.READ,
+        not_found_as_success: bool = False,
+        **kwargs,
+    ) -> Optional[Any]:
+        result = await self._request_result(
+            method,
+            path,
+            semantics=semantics,
+            not_found_as_success=not_found_as_success,
+            **kwargs,
+        )
+        return result.value if result.ok else None
+
+    async def create_user_result(
         self,
         client_name: str,
         expires_at: Optional[int] = None,
-    ) -> Optional[AmneziaClientCreateResponse]:
+    ) -> AmneziaAPIResult[AmneziaClientCreateResponse]:
         # Проверка емкости сервера удалена - она должна выполняться на уровне бизнес-логики (DeviceService)
         # чтобы избежать лишних HTTP-запросов и TOCTOU race conditions
         
@@ -417,44 +621,70 @@ class AmneziaClient:
             "protocol": AMNEZIA_PROTOCOL,
             "expiresAt": expires_at,
         }
-        result = await self._request(
+        result = await self._request_result(
             "POST",
             "/clients",
+            semantics=RequestSemantics.CREATE,
             json=data,
         )
-        if result and "client" in result:
+        if not result.ok:
+            return result
+        if isinstance(result.value, dict) and "client" in result.value:
             try:
-                return AmneziaClientCreateResponse(
-                    **result["client"]
+                client = AmneziaClientCreateResponse(
+                    **result.value["client"]
                 )
-            except Exception as e:
+                return self._success(client, result.status_code)
+            except Exception as error:
                 logger.error(
                     "Failed to parse create_user response: %s",
-                    e,
+                    type(error).__name__,
                 )
-                return None
-        return None
+        return self._failure(
+            AmneziaErrorKind.INVALID_RESPONSE,
+            RequestSemantics.CREATE,
+            status_code=result.status_code,
+            retryable=False,
+            ambiguous=True,
+        )
 
-    async def delete_user(self, client_id: str) -> bool:
+    async def create_user(
+        self,
+        client_name: str,
+        expires_at: Optional[int] = None,
+    ) -> Optional[AmneziaClientCreateResponse]:
+        result = await self.create_user_result(client_name, expires_at)
+        return result.value if result.ok else None
+
+    async def delete_user_result(
+        self,
+        client_id: str,
+    ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
             "protocol": AMNEZIA_PROTOCOL,
         }
-        result = await self._request(
+        result = await self._request_result(
             "DELETE",
             "/clients",
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
             json=data,
             not_found_as_success=True,
         )
-        return result is not None
+        if result.ok:
+            return self._success(status_code=result.status_code)
+        return result
 
-    async def update_client(
+    async def delete_user(self, client_id: str) -> bool:
+        return (await self.delete_user_result(client_id)).ok
+
+    async def update_client_result(
         self,
         client_id: str,
         status: Optional[str] = None,
         expires_at: Optional[int] = None,
         clear_expires_at: bool = False,
-    ) -> bool:
+    ) -> AmneziaAPIResult[None]:
         data = {
             "clientId": client_id,
             "protocol": AMNEZIA_PROTOCOL,
@@ -468,17 +698,39 @@ class AmneziaClient:
         elif expires_at is not None:
             data["expiresAt"] = expires_at
 
-        result = await self._request(
+        result = await self._request_result(
             "PATCH",
             "/clients",
+            semantics=RequestSemantics.IDEMPOTENT_WRITE,
             json=data,
         )
-        return result is not None
+        if result.ok:
+            return self._success(status_code=result.status_code)
+        return result
+
+    async def update_client(
+        self,
+        client_id: str,
+        status: Optional[str] = None,
+        expires_at: Optional[int] = None,
+        clear_expires_at: bool = False,
+    ) -> bool:
+        result = await self.update_client_result(
+            client_id,
+            status,
+            expires_at,
+            clear_expires_at,
+        )
+        return result.ok
 
     async def get_server_info(
         self,
     ) -> Optional[AmneziaServerInfo]:
-        result = await self._request("GET", "/server")
+        result = await self._request(
+            "GET",
+            "/server",
+            semantics=RequestSemantics.READ,
+        )
         if result:
             try:
                 return AmneziaServerInfo(**result)
@@ -492,7 +744,11 @@ class AmneziaClient:
 
     async def healthcheck(self) -> bool:
         return (
-            await self._request("GET", "/healthz")
+            await self._request(
+                "GET",
+                "/healthz",
+                semantics=RequestSemantics.READ,
+            )
         ) is not None
 
     async def get_all_clients(
@@ -529,6 +785,7 @@ class AmneziaClient:
             result = await self._request(
                 "GET",
                 "/clients",
+                semantics=RequestSemantics.READ,
                 params={
                     "skip": page_count * page_size,
                     "limit": page_size,
