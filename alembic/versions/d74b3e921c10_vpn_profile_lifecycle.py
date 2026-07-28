@@ -16,6 +16,24 @@ ALLOWLIST = "'device_delete_api_failed','create_device_rollback_failed','ban_del
 
 
 def upgrade():
+    duplicates = op.get_bind().execute(sa.text("""
+        SELECT count(*) FROM (
+          SELECT user_id, server_id, lower(device_name)
+          FROM vpn_profiles
+          GROUP BY user_id, server_id, lower(device_name)
+          HAVING count(*) > 1
+        ) AS duplicate_names
+    """)).scalar_one()
+    if duplicates:
+        raise RuntimeError(
+            "Cannot repair device-name index: case-insensitive duplicate "
+            "VPN profile names exist; resolve them explicitly without deleting data"
+        )
+    op.execute("DROP INDEX IF EXISTS uq_vpn_profiles_user_server_device_name")
+    op.execute("""
+        CREATE UNIQUE INDEX uq_vpn_profiles_user_server_device_name
+        ON vpn_profiles (user_id, server_id, lower(device_name))
+    """)
     op.add_column("vpn_profiles", sa.Column("client_name", sa.String(255)))
     op.add_column("vpn_profiles", sa.Column("provisioning_status", sa.String(30), nullable=False, server_default="active"))
     op.add_column("vpn_profiles", sa.Column("desired_is_active", sa.Boolean(), nullable=False, server_default=sa.true()))

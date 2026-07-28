@@ -72,10 +72,22 @@ async def _execute_create(op, client):
             logger.critical("duplicate exact client name for operation_id=%s", op.id)
             return await _fail(op, retryable=False, code="duplicate_exact_client_name")
         if profile_state == "create_cleanup_pending":
-            if exact:
-                deleted = await client.delete_user_result(exact[0].id)
+            cleanup_target = None
+            if op.peer_id:
+                by_id = [item for item in clients if item.id == op.peer_id]
+                if by_id and by_id[0].clientName == op.client_name:
+                    cleanup_target = by_id[0]
+                elif exact:
+                    return await _fail(op, retryable=False,
+                        code="cleanup_peer_identity_mismatch")
+                # A missing saved ID with no exact peer means cleanup already
+                # converged; never substitute a different peer by name.
+            elif exact:
+                cleanup_target = exact[0]
+            if cleanup_target:
+                deleted = await client.delete_user_result(cleanup_target.id)
                 if not deleted.ok:
-                    return await _fail(op, retryable=deleted.retryable,
+                    return await _fail(op, retryable=deleted.retryable or deleted.ambiguous,
                         code="invalid_created_config_cleanup")
             return await finalize_create_cleanup(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number,
@@ -128,7 +140,8 @@ async def _execute_create(op, client):
         if created and created.id:
             return await prepare_create_cleanup(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, peer_id=created.id,
-                error_code="invalid_created_config_cleanup", retryable=True)
+                error_code="invalid_created_config_cleanup",
+                retryable=bool(cleanup and (cleanup.retryable or cleanup.ambiguous)))
         return await _fail(op, retryable=False, code="invalid_created_config")
     try:
         await finalize_create_success(op.id, worker_id=op.locked_by,
@@ -143,7 +156,8 @@ async def _execute_create(op, client):
         if not cleanup.ok:
             return await prepare_create_cleanup(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, peer_id=created.id,
-                error_code="create_compensation_required", retryable=True)
+                error_code="create_compensation_required",
+                retryable=cleanup.retryable or cleanup.ambiguous)
         await finalize_create_cancelled(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number,
             reason="create_compensated_after_post", delete_profile=True)

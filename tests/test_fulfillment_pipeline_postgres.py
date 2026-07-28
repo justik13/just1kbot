@@ -7,7 +7,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.api_operations_queue import ensure_delete_operation
 from services.profile_deletion_service import ProfileDeletionService
-from services.device_service import DeviceService, ServerPeerSnapshot, ServerUnavailable
+from services.device_service import DeviceService, ServerUnavailable
+from services.slots_cache import ServerPeerSnapshot
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
@@ -49,9 +50,9 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    for i in range(8): s.add(VPNProfile(user_id=self.uid,server_id=self.sid,device_name=f"d{i}",peer_id=f"b{i}",raw_config="vpn://x",client_name=f"c{i}",provisioning_status="active",desired_version=1,desired_is_active=True,is_active=True))
   snap=ServerPeerSnapshot(self.sid,frozenset({*(f"b{i}" for i in range(8)),"manual-1","manual-2"}),datetime.now(timezone.utc))
   async with self.sessions.begin() as s:
-   user=await s.get(User,self.uid)
-   with patch("services.device_service.capture_server_peer_snapshot",return_value=snap):
-    with self.assertRaises(ServerUnavailable): await DeviceService.create_device(s,user,self.sid,"new")
+   with self.assertRaises(ServerUnavailable):
+    await DeviceService.create_device(s,user_id=self.uid,server_id=self.sid,
+                                      device_name="new",snapshot=snap)
  async def test_server_delete_serializes_with_create(self):
   import asyncio
   locked=asyncio.Event(); release=asyncio.Event()
@@ -63,3 +64,10 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    async with self.sessions.begin() as s:
     return (await s.execute(__import__("sqlalchemy").select(Server).where(Server.id==self.sid).with_for_update())).scalar_one_or_none()
   first=asyncio.create_task(deleting()); second=asyncio.create_task(creating_side()); await locked.wait(); await asyncio.sleep(.02); self.assertFalse(second.done()); release.set(); await first; self.assertIsNone(await second)
+ async def test_retry_ambiguous_create_is_not_cancelled_by_ban(self):
+  async with self.sessions.begin() as s:
+   p=VPNProfile(user_id=self.uid,server_id=self.sid,device_name="ambiguous",client_name="exact",provisioning_status="pending_create",desired_version=1,desired_is_active=True,is_active=True); s.add(p); await s.flush()
+   op=APIOperation(operation_type="create_peer",idempotency_key=f"ambiguous-{p.id}",server_id=self.sid,profile_id=p.id,client_name="exact",payload={},status="retry",attempts=1,last_error_code="create_ambiguous_reconcile",next_attempt_at=datetime.now(timezone.utc)); s.add(op); await s.flush(); pid=p.id; oid=op.id
+   await ProfileDeletionService.delete_profiles_list(s,[p],reason="ban_delete")
+  async with self.sessions() as s:
+   self.assertEqual((await s.get(VPNProfile,pid)).provisioning_status,"deleting"); self.assertEqual((await s.get(APIOperation,oid)).status,"retry")

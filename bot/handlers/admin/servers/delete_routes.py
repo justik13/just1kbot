@@ -10,7 +10,9 @@ from bot import texts
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
 from database.models import APIOperation, Server, VPNProfile
-from services.api_operations_queue import ensure_delete_operation
+from services.api_operations_queue import (
+    classify_create_side_effect_risk, ensure_delete_operation,
+)
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -145,11 +147,20 @@ async def confirm_delete_server(
         APIOperation.server_id == server.id,
         APIOperation.status.in_(("pending", "retry", "processing")),
     ).with_for_update())).scalars().all())
-    if any(op.status == "processing" and op.operation_type in {"create_peer", "update_peer"}
-           for op in operations):
+    unsafe_create = any(
+        op.operation_type == "create_peer"
+        and classify_create_side_effect_risk(op) != "never_started"
+        for op in operations
+    )
+    processing_update = any(
+        op.status == "processing" and op.operation_type == "update_peer"
+        for op in operations
+    )
+    if unsafe_create or processing_update:
         await session.rollback()
         await callback.answer(
-            "На сервере выполняются операции. Повторите удаление позже.",
+            "На сервере есть незавершённое создание VPN-клиента. "
+            "Дождитесь reconciliation и повторите удаление.",
             show_alert=True,
         )
         return

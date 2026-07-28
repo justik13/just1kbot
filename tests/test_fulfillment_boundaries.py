@@ -35,3 +35,14 @@ class FulfillmentBoundaryTests(unittest.TestCase):
         constraints = {item.name for item in VPNProfile.__table__.constraints}
         self.assertIn("ck_vpn_profiles_provisioning_status", constraints)
         self.assertIn("ck_vpn_profiles_desired_version_positive", constraints)
+
+class CapacityBoundaryTests(unittest.TestCase):
+    def test_capacity_preflight_runs_outside_handler_transaction(self):
+        source=(ROOT/"bot/handlers/connection/device_create_routes.py").read_text()
+        commit=source.index("await session.commit()")
+        capture=source.index("await capture_server_peer_snapshot",commit)
+        create=source.index("await DeviceService.create_device",capture)
+        self.assertLess(commit,capture); self.assertLess(capture,create)
+    def test_device_service_has_no_amnezia_client(self):
+        source=(ROOT/"services/device_service.py").read_text()
+        self.assertNotIn("AmneziaClient",source)

@@ -135,6 +135,9 @@ async def finalize_operation_failure(operation_id: int, *, worker_id: str,
                     cleanup = bool(operation.peer_id) or error_code in {
                         "create_ambiguous_reconcile", "invalid_created_config_cleanup",
                         "duplicate_exact_client_name", "create_compensation_required",
+                        "executor_exception", "stale_create_lease",
+                        "stale_lease_max_attempts", "unknown_error",
+                        "cleanup_peer_identity_mismatch",
                     }
                     profile.provisioning_status = "create_cleanup_pending" if cleanup else "create_failed"
                 elif operation.operation_type == "update_peer" and profile.provisioning_status not in {"deleting", "delete_failed"}:

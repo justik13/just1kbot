@@ -8,8 +8,9 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.amnezia_client import AmneziaAPIResult, AmneziaClientCreateResponse, AmneziaErrorKind
-from services.api_operations_queue import claim_api_operations
+from services.api_operations_queue import claim_api_operations, recover_stale_api_operations
 from services.api_operations_executor import execute_claimed_api_operation
+from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 import database.connection as connection
 from services.api_operations_finalizer import finalize_create_success, finalize_update_success, finalize_delete_success, finalize_operation_failure
 
@@ -56,8 +57,12 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await s.get(VPNProfile,pid)); self.assertEqual((await s.get(APIOperation,oid)).status,"succeeded")
 
     def valid_config(self):
-        content=json.dumps({"containers":[{"container":"amnezia-awg","awg":{"client_priv_key":"k","hostName":"vpn.test","port":51820}}]}).encode()
-        return "vpn://"+base64.urlsafe_b64encode(struct.pack(">I",len(content))+zlib.compress(content)).decode().rstrip("=")
+        conf = "[Interface]\nPrivateKey = private\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = public\nAllowedIPs = 0.0.0.0/0\nEndpoint = vpn.test:51820\n"
+        content=json.dumps({"containers":[{"awg":{"last_config":json.dumps({"config":conf})}}]}).encode()
+        uri="vpn://"+base64.urlsafe_b64encode(struct.pack(">I",len(content))+zlib.compress(content)).decode().rstrip("=")
+        self.assertTrue(is_valid_vpn_uri(uri))
+        self.assertTrue(build_conf_file(uri))
+        return uri
     async def queued_create(self, *, active=True):
         async with self.sessions.begin() as s:
             p=VPNProfile(user_id=self.user_id,server_id=self.server_id,device_name="e2e",client_name="exact",provisioning_status="pending_create",desired_is_active=active,desired_version=1,is_active=active)
@@ -81,9 +86,17 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
             async def delete_user_result(inner,peer): inner.deletes+=1; inner.peers.pop(peer,None); return AmneziaAPIResult(True,None,None,204,False,False)
         fake=Fake()
         with patch("services.api_operations_executor._client",return_value=fake):
-            await execute_claimed_api_operation(await self.claim_one()); await self.ready_retry(oid)
             await execute_claimed_api_operation(await self.claim_one())
-        self.assertEqual(fake.posts,2); self.assertEqual(list(fake.peers.values()),["exact"])
+            async with self.sessions() as db:
+                self.assertEqual((await db.get(APIOperation,oid)).status,"retry")
+            await self.ready_retry(oid)
+            await execute_claimed_api_operation(await self.claim_one())
+        async with self.sessions() as db:
+            profile=await db.get(VPNProfile,pid); operation=await db.get(APIOperation,oid)
+            self.assertEqual(profile.provisioning_status,"active")
+            self.assertEqual(operation.status,"succeeded")
+        self.assertEqual(fake.posts,2); self.assertEqual(fake.deletes,1)
+        self.assertEqual(list(fake.peers.values()),["exact"])
     async def test_invalid_config_cleanup_retry(self):
         pid,oid=await self.queued_create()
         class Fake:
@@ -134,3 +147,23 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
         pid,oid=await self.create_claimed("update_peer",status="deleting")
         await finalize_update_success(oid,worker_id="worker",expected_attempt_number=1,sent_version=1,sent_is_active=True,sent_expires_at=None,session_factory=self.sessions)
         async with self.sessions() as db: self.assertEqual((await db.get(VPNProfile,pid)).provisioning_status,"deleting")
+    async def test_cleanup_does_not_delete_different_peer_with_same_name(self):
+        async with self.sessions.begin() as db:
+            p=VPNProfile(user_id=self.user_id,server_id=self.server_id,device_name="cleanup",client_name="exact",provisioning_status="create_cleanup_pending",desired_is_active=False,desired_version=1,is_active=False)
+            db.add(p); await db.flush()
+            op=APIOperation(operation_type="create_peer",status="retry",idempotency_key=f"cleanup-{p.id}",server_id=self.server_id,profile_id=p.id,server_name_snapshot="fake",api_url_snapshot="https://fake",api_key_snapshot="key",peer_id="saved-missing",client_name="exact",payload={},attempts=1,next_attempt_at=datetime.now(timezone.utc),last_error_code="invalid_created_config_cleanup")
+            db.add(op); await db.flush(); oid=op.id
+        fake=SimpleNamespace(get_all_clients=unittest.mock.AsyncMock(return_value=[SimpleNamespace(id="manual",clientName="exact")]),delete_user_result=unittest.mock.AsyncMock())
+        with patch("services.api_operations_executor._client",return_value=fake): await execute_claimed_api_operation(await self.claim_one())
+        fake.delete_user_result.assert_not_awaited()
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(APIOperation,oid)).last_error_code,"cleanup_peer_identity_mismatch")
+
+    async def test_stale_create_becomes_cleanup_pending(self):
+        pid,oid=await self.create_claimed("create_peer")
+        async with self.sessions.begin() as db:
+            op=await db.get(APIOperation,oid); op.max_attempts=1; op.locked_at=datetime.now(timezone.utc)-timedelta(hours=1)
+        await recover_stale_api_operations(lease_timeout=timedelta(minutes=5),session_factory=self.sessions)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(APIOperation,oid)).status,"dead")
+            self.assertEqual((await db.get(VPNProfile,pid)).provisioning_status,"create_cleanup_pending")
