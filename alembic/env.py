@@ -65,19 +65,24 @@ async def run_migrations_async() -> None:
         poolclass=pool.NullPool,
     )
 
-    async with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-            # Enable detection of type changes and server default changes
-            compare_type=True,
-            compare_server_default=True,
-        )
+    try:
+        async with connectable.connect() as connection:
+            await connection.run_sync(do_run_migrations)
+    finally:
+        await connectable.dispose()
 
-        async with connection.begin_transaction():
-            await connection.run_sync(context.run_migrations)
 
-    await connectable.dispose()
+def do_run_migrations(connection) -> None:
+    """Configure and execute migrations on a synchronous connection proxy."""
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
 
 
 def run_migrations_online() -> None:
