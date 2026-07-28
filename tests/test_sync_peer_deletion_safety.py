@@ -56,49 +56,80 @@ class PendingDeletionSafetyTests(unittest.IsolatedAsyncioTestCase):
 
         delete_user = AsyncMock(return_value=delete_result)
         client = MagicMock(delete_user=delete_user)
+        client_factory = MagicMock(return_value=client)
         with (
             patch.object(cleanup, "session_scope", fake_scope),
-            patch.object(cleanup, "AmneziaClient", return_value=client),
+            patch.object(cleanup, "AmneziaClient", client_factory),
         ):
             await cleanup._process_pending_deletions()
 
-        return delete_user, statements
+        return delete_user, statements, client_factory
 
-    async def test_sync_expires_failed_is_quarantined(self):
-        pending = self._pending("sync_expires_failed")
-        delete_user, _ = await self._run_cleanup(pending)
+    async def _assert_reason_is_quarantined(self, reason):
+        pending = self._pending(reason)
+        delete_user, statements, client_factory = await self._run_cleanup(
+            pending
+        )
 
         delete_user.assert_not_awaited()
+        client_factory.assert_not_called()
         self.assertEqual(pending.attempts, -1)
         self.assertTrue(
             pending.last_error.startswith(cleanup.QUARANTINE_ERROR_PREFIX)
         )
+        self.assertEqual(len(statements), 1)
 
         # The production query requires attempts >= 0, so it cannot select it again.
-        delete_user, _ = await self._run_cleanup(pending)
+        delete_user, statements, client_factory = await self._run_cleanup(
+            pending
+        )
         delete_user.assert_not_awaited()
+        client_factory.assert_not_called()
+        self.assertEqual(len(statements), 1)
+
+    async def test_legacy_zombie_reason_is_quarantined(self):
+        await self._assert_reason_is_quarantined(
+            "zombie_peer_cleanup_failed"
+        )
+
+    async def test_missing_reason_is_quarantined(self):
+        await self._assert_reason_is_quarantined(None)
+
+    async def test_unknown_reason_is_quarantined(self):
+        await self._assert_reason_is_quarantined("typo_delete")
+
+    async def test_sync_expires_failed_is_quarantined(self):
+        await self._assert_reason_is_quarantined("sync_expires_failed")
 
     async def test_sync_expires_critical_failure_is_quarantined(self):
-        pending = self._pending("sync_expires_critical_failure")
-        delete_user, _ = await self._run_cleanup(pending)
-
-        delete_user.assert_not_awaited()
-        self.assertEqual(pending.attempts, -1)
+        await self._assert_reason_is_quarantined(
+            "sync_expires_critical_failure"
+        )
 
     async def test_unknown_sync_expires_reason_is_quarantined(self):
-        pending = self._pending("sync_expires_future_failure")
-        delete_user, _ = await self._run_cleanup(pending)
+        await self._assert_reason_is_quarantined(
+            "sync_expires_future_failure"
+        )
 
-        delete_user.assert_not_awaited()
-        self.assertEqual(pending.attempts, -1)
+    async def test_all_allowlisted_deletions_call_api_and_remove_pending(self):
+        for reason in cleanup.EXECUTABLE_DELETE_REASONS:
+            with self.subTest(reason=reason):
+                pending = self._pending(reason)
+                delete_user, statements, client_factory = (
+                    await self._run_cleanup(pending)
+                )
 
-    async def test_real_deletion_still_calls_api_and_removes_pending(self):
-        pending = self._pending("device_delete_api_failed")
-        delete_user, statements = await self._run_cleanup(pending)
-
-        delete_user.assert_awaited_once_with(client_id=pending.peer_id)
-        self.assertEqual(len(statements), 2)
-        self.assertIn("DELETE FROM pending_api_deletions", str(statements[1]))
+                client_factory.assert_called_once_with(
+                    pending.api_url, pending.api_key
+                )
+                delete_user.assert_awaited_once_with(
+                    client_id=pending.peer_id
+                )
+                self.assertEqual(len(statements), 2)
+                self.assertIn(
+                    "DELETE FROM pending_api_deletions",
+                    str(statements[1]),
+                )
 
 
 class SubscriptionSyncSafetyTests(unittest.IsolatedAsyncioTestCase):
