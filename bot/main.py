@@ -344,6 +344,12 @@ async def main():
             )
             return
 
+        if not settings.ADMIN_IDS:
+            logger.warning(
+                "⚠️ ADMIN_IDS пуст! Алерты и уведомления "
+                "не будут отправляться администраторам."
+            )
+
         logger.info("Инициализация БД...")
         await init_db()
 
