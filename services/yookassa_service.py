@@ -82,8 +82,6 @@ class YooKassaService:
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
         client = _get_client()
-        settings = get_settings()
-
         try:
             params_kwargs = dict(
                 amount=PaymentAmount(value=str(amount), currency=currency),
@@ -149,7 +147,7 @@ class YooKassaService:
                 e,
                 exc_info=True,
             )
-            return None
+        return None
 
     @staticmethod
     def normalize_webhook_event(event: str) -> str:

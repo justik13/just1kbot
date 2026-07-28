@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 

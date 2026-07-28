@@ -140,7 +140,7 @@ async def _process_stale_payments(bot: Bot, settings):
             .limit(50)
         )
         result = await session.execute(stmt)
-        for payment, telegram_id in result.all():
+        for payment, _telegram_id in result.all():
             if payment.external_id and payment.status in (
                 "pending",
                 "requires_manual_review",

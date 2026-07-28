@@ -25,7 +25,7 @@ logger = getLogger("alembic.env")
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from database.models import Base
+from database.models import Base  # noqa: E402
 
 target_metadata = Base.metadata
 
@@ -39,12 +39,6 @@ if database_url:
     from urllib.parse import urlparse
     parsed = urlparse(database_url)
     logger.info(f"Using database: {parsed.hostname}:{parsed.port or 5432}/{parsed.path.lstrip('/')}")
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
-
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""

@@ -22,12 +22,6 @@ from utils.formatters import format_datetime
 from utils.telegram import safe
 from utils.text_limits import truncate_details
 
-from bot.keyboards.admin.dashboard import (  # noqa: F401
-    get_admin_menu as get_admin_menu_keyboard,
-    get_audit_keyboard as get_audit_keyboard_keyboard,
-    get_maintenance_confirm_keyboard as get_maintenance_confirm_keyboard_keyboard,
-)
-
 router = Router()
 logger = logging.getLogger(__name__)
 

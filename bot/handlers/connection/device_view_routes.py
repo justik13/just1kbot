@@ -222,9 +222,6 @@ async def download_conf(
 
     old_hub_ids = await get_hub_ids(callback.message.chat.id)
 
-    vpn_sent = False
-    conf_sent = False
-
     try:
         await append_hub_document(
             callback.bot, callback.message.chat.id,
@@ -232,7 +229,6 @@ async def download_conf(
             caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
             parse_mode="HTML",
         )
-        vpn_sent = True
     except Exception as e:
         logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
 
@@ -243,7 +239,6 @@ async def download_conf(
             caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
             parse_mode="HTML",
         )
-        conf_sent = True
     except Exception as e:
         logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
 

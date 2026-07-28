@@ -97,7 +97,7 @@ async def _resolved_ips_are_safe(hostname: str, *, allow_local: bool = False) ->
     if not addr_info:
         return False
 
-    for family, type_, proto, canonname, sockaddr in addr_info:
+    for *_metadata, sockaddr in addr_info:
         ip_str = sockaddr[0]
         try:
             ip = ipaddress.ip_address(ip_str)

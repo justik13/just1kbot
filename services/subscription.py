@@ -404,7 +404,7 @@ class SubscriptionService:
                         )
                         # Queue failed servers for retry using PendingAPIDeletion mechanism
                         async with session_scope() as retry_session:
-                            for idx, (task_idx, error) in enumerate(failures):
+                            for task_idx, error in failures:
                                 profile = profiles[task_idx]
                                 server = servers_map.get(profile.server_id)
                                 if server:

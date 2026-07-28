@@ -1,8 +1,8 @@
 import base64
 import json
 import zlib
-import struct
 import logging
+import struct
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -23,13 +23,17 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
 def _decompress_amnezia_format(data: bytes) -> Optional[str]:
     if len(data) < 4:
         return None
-    try:
-        original_length = struct.unpack(">I", data[:4])[0]
-    except struct.error:
-        return None
+    expected_length = struct.unpack(">I", data[:4])[0]
     compressed = data[4:]
     try:
         decompressed = zlib.decompress(compressed)
+        if len(decompressed) != expected_length:
+            logger.error(
+                "_decompress_amnezia_format length mismatch: expected %s, got %s",
+                expected_length,
+                len(decompressed),
+            )
+            return None
         return decompressed.decode("utf-8")
     except Exception as e:
         logger.warning(f"_decompress_amnezia_format zlib failed: {e}")

@@ -414,6 +414,10 @@ async def main():
                         type(exc).__name__,
                     )
 
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+
     except Exception as e:
         logger.critical("Fatal error in main: %s", e, exc_info=True)
 

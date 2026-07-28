@@ -1,4 +1,6 @@
 import logging
+
+from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 from cachetools import TTLCache
 from bot import texts
@@ -8,8 +10,6 @@ logger = logging.getLogger(__name__)
 _MAX_CACHE_SIZE = 5000
 _DEFAULT_TTL = 2.0
 _GLOBAL_THROTTLE_TTL = 0.3
-
-from aiogram import BaseMiddleware
 
 
 class ThrottlingMiddleware(BaseMiddleware):
