@@ -1,49 +1,51 @@
 ```gitignore
-# Python cache files
+# Python compiled files
+*.pyc
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Compiled Python files
-*.cpython-*.pyc
-*.pyc
-*.pyo
-
-# Virtual environments
-venv/
-.venv/
-env/
-.ENV/
 
 # Dependencies
-node_modules/
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.log
-*.pot
-*.pyc
-*.pyo
-*.pyd
-.MF
-.wafpickle-*
-.pytest_cache/
-.mypy_cache/
-.hypothesis/
-
-# Logs
-*.log
-
-# Environment variables
+.venv/
+venv/
+env/
 .env
 .env.local
 .env.*
-!env.example
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+.coverage
+htmlcov/
+coverage/
+
+# Build and distribution artifacts
+dist/
+build/
+*.egg-info/
+
+# Alembic migrations (if not intended to be versioned)
+alembic/versions/*.py
+
+# Database
+*.db
+*.db-journal
+
+# Cache directories
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
 ```
