@@ -53,13 +53,16 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         with self.assertRaises(ValueError):
             await confirm_manual_retry(session, admin_id=1, queue="invalid",
-                                       operation_id=1, reason="valid reason")
+                                       operation_id=1, reason="valid reason",
+                                       expected_version="a" * 64)
         with self.assertRaises(ValueError):
             await confirm_manual_retry(session, admin_id=1, queue="provider",
-                                       operation_id=0, reason="valid reason")
+                                       operation_id=0, reason="valid reason",
+                                       expected_version="a" * 64)
         with self.assertRaises(ValueError):
             await confirm_manual_retry(session, admin_id=1, queue="provider",
-                                       operation_id=1, reason="x")
+                                       operation_id=1, reason="x",
+                                       expected_version="a" * 64)
         session.scalar.assert_not_awaited()
 
     async def test_dispatcher_only_calls_existing_retry_primitive(self):
@@ -68,13 +71,32 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         session.scalar.return_value = row
         with patch("services.payment_queue_admin.retry_dead_fulfillment_operation",
                    AsyncMock(return_value=row)) as retry, patch(
-                   "services.payment_queue_admin._audit", AsyncMock()) as audit:
+                   "services.payment_queue_admin._audit", AsyncMock()) as audit, patch(
+                   "services.payment_queue_admin._orm_confirmation_version",
+                   return_value="a" * 64):
             result = await confirm_manual_retry(session, admin_id=1,
-                queue="fulfillment", operation_id=2, reason="operator approved")
+                queue="fulfillment", operation_id=2, reason="operator approved",
+                expected_version="a" * 64)
         self.assertEqual(result.outcome, "retry_scheduled")
         retry.assert_awaited_once_with(session, 2, reset_attempts=True,
                                        reason="operator approved")
         audit.assert_awaited_once()
+
+    async def test_version_mismatch_is_already_changed_without_retry(self):
+        now = datetime.now(timezone.utc)
+        row = SimpleNamespace(id=42, status="dead", attempts=5, max_attempts=5,
+                              payment_id=7, completed_at=now, updated_at=now,
+                              last_error_code="new_episode")
+        session = AsyncMock(); session.scalar.return_value = row
+        with patch("services.payment_queue_admin.retry_dead_provider_operation",
+                   AsyncMock()) as retry, patch(
+                   "services.payment_queue_admin._audit", AsyncMock()) as audit:
+            result = await confirm_manual_retry(
+                session, admin_id=1, queue="provider", operation_id=42,
+                reason="stale confirmation", expected_version="0" * 64)
+        self.assertEqual(result.outcome, "already_changed")
+        retry.assert_not_awaited()
+        self.assertEqual(audit.await_args.kwargs["outcome"], "already_changed")
 
     async def test_audit_is_unambiguous_json(self):
         session = SimpleNamespace(add=unittest.mock.Mock(), flush=AsyncMock())
@@ -126,7 +148,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         callback.answer.side_effect = lambda *a, **k: events.append("callback_answer")
         state = self.state({"admin_id": 1001, "queue": "provider",
                             "operation_id": 42, "action": "manual_retry",
-                            "reason": "operator approved"}, events)
+                            "reason": "operator approved",
+                            "confirmation_version": "a" * 64}, events)
         session = SimpleNamespace(
             commit=AsyncMock(side_effect=lambda: events.append("commit")),
             rollback=AsyncMock(),
@@ -145,10 +168,78 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
                                   "show_card", "callback_answer"])
         self.assertNotIn("успешно исполнена", callback.answer.await_args.args[0])
 
+    async def test_reason_handler_saves_confirmation_version(self):
+        message = SimpleNamespace(text="operator approved", from_user=SimpleNamespace(id=1001),
+                                  answer=AsyncMock())
+        state = self.state({"admin_id": 1001, "queue": "provider",
+                            "operation_id": 42, "action": "manual_retry"})
+        row = self.row()
+        with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
+             "bot.handlers.admin.payment_queues.get_operation_card", AsyncMock(return_value=row)):
+            await receive_retry_reason(message, state, AsyncMock())
+        state.update_data.assert_awaited_once_with(
+            reason="operator approved", confirmation_version=row.confirmation_version)
+        self.assertEqual(len(row.confirmation_version), 64)
+
+    async def test_apply_passes_exact_confirmation_version(self):
+        callback = self.callback(); version = "b" * 64
+        state = self.state({"admin_id": 1001, "queue": "provider",
+                            "operation_id": 42, "action": "manual_retry",
+                            "reason": " operator approved ",
+                            "confirmation_version": version})
+        session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
+             "bot.handlers.admin.payment_queues.confirm_manual_retry",
+             AsyncMock(return_value=ManualRetryResult("already_changed", "provider", 42))) as service, patch(
+             "bot.handlers.admin.payment_queues._show_card", AsyncMock(return_value=True)):
+            await apply_retry(callback, state, session)
+        self.assertEqual(service.await_args.kwargs["expected_version"], version)
+        self.assertEqual(service.await_args.kwargs["reason"], "operator approved")
+
+    async def test_incomplete_confirmation_never_calls_service(self):
+        invalid = (
+            {"reason": "valid reason"},
+            {"reason": "valid reason", "confirmation_version": 123},
+            {"reason": None, "confirmation_version": "a" * 64},
+            {"reason": "x", "confirmation_version": "a" * 64},
+            {"reason": "x" * 201, "confirmation_version": "a" * 64},
+        )
+        for extra in invalid:
+            callback = self.callback()
+            data = {"admin_id": 1001, "queue": "provider", "operation_id": 42,
+                    "action": "manual_retry", **extra}
+            state = self.state(data)
+            with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
+                 "bot.handlers.admin.payment_queues.confirm_manual_retry", AsyncMock()) as service:
+                await apply_retry(callback, state, AsyncMock())
+            service.assert_not_awaited(); state.clear.assert_awaited_once()
+            self.assertEqual(callback.answer.await_count, 1)
+            self.assertEqual(callback.answer.await_args.args[0], "Подтверждение устарело")
+
+    async def test_already_changed_commits_before_edit_and_single_answer(self):
+        events = []; callback = self.callback()
+        callback.answer.side_effect = lambda *a, **k: events.append("answer")
+        state = self.state({"admin_id": 1001, "queue": "provider",
+                            "operation_id": 42, "action": "manual_retry",
+                            "reason": "stale confirmation",
+                            "confirmation_version": "a" * 64})
+        session = SimpleNamespace(commit=AsyncMock(side_effect=lambda: events.append("commit")),
+                                  rollback=AsyncMock())
+        async def card(*args, **kwargs): events.append("edit"); return True
+        with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
+             "bot.handlers.admin.payment_queues.confirm_manual_retry",
+             AsyncMock(return_value=ManualRetryResult("already_changed", "provider", 42))), patch(
+             "bot.handlers.admin.payment_queues._show_card", side_effect=card):
+            await apply_retry(callback, state, session)
+        self.assertEqual(events, ["commit", "edit", "answer"])
+        self.assertEqual(callback.answer.await_count, 1)
+        self.assertEqual(callback.answer.await_args.args[0], "Состояние уже изменилось")
+
     async def test_commit_failure_rolls_back_clears_and_never_reports_success(self):
         callback = self.callback(); state = self.state({
             "admin_id": 1001, "queue": "provider", "operation_id": 42,
-            "action": "manual_retry", "reason": "operator approved"})
+            "action": "manual_retry", "reason": "operator approved",
+            "confirmation_version": "a" * 64})
         session = SimpleNamespace(commit=AsyncMock(side_effect=SQLAlchemyError("secret")),
                                   rollback=AsyncMock())
         with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
@@ -164,7 +255,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_audit_flush_failure_rolls_back_handler_transaction(self):
         callback = self.callback(); state = self.state({
             "admin_id": 1001, "queue": "provider", "operation_id": 42,
-            "action": "manual_retry", "reason": "operator approved"})
+            "action": "manual_retry", "reason": "operator approved",
+            "confirmation_version": "a" * 64})
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
              "bot.handlers.admin.payment_queues.confirm_manual_retry",
@@ -184,7 +276,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_not_found_answers_exactly_once(self):
         callback = self.callback(); state = self.state({
             "admin_id": 1001, "queue": "provider", "operation_id": 42,
-            "action": "manual_retry", "reason": "operator approved"})
+            "action": "manual_retry", "reason": "operator approved",
+            "confirmation_version": "a" * 64})
         session = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
         with patch("bot.handlers.admin.payment_queues.is_admin", return_value=True), patch(
              "bot.handlers.admin.payment_queues.confirm_manual_retry",

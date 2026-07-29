@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (AuditLog, EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
-from services.payment_queue_admin import confirm_manual_retry
+from services.payment_queue_admin import confirm_manual_retry, get_operation_card
 from services.payment_queue_health import get_payment_queue_health_snapshot
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, perform_http, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
@@ -32,9 +32,10 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    p=await self.payment(s)
    op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="dead",idempotency_key="stable-"+uuid.uuid4().hex,payload=payload,attempts=4,max_attempts=4,next_attempt_at=now_utc(),completed_at=now_utc())
    s.add(op); await s.flush(); operation_id=op.id; original_key=op.idempotency_key
+  async with self.sessions.begin() as s: version=(await get_operation_card(s,"provider",operation_id)).confirmation_version
   async def apply(admin):
    async with self.sessions.begin() as s:
-    return await confirm_manual_retry(s,admin_id=admin,queue="provider",operation_id=operation_id,reason="approved concurrency test")
+    return await confirm_manual_retry(s,admin_id=admin,queue="provider",operation_id=operation_id,reason="approved concurrency test",expected_version=version)
   results=await asyncio.gather(apply(7001),apply(7002))
   self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
   async with self.sessions.begin() as s:
@@ -43,10 +44,10 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    audits=(await s.scalars(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.action=="PAYMENT_QUEUE_MANUAL_RETRY"))).all()
    self.assertEqual([json.loads(a.details)["outcome"] for a in audits].count("retry_scheduled"),1)
 
- async def _concurrent_admin_retry(self,queue,operation_id):
+ async def _concurrent_admin_retry(self,queue,operation_id,version):
   async def apply(admin):
    async with self.sessions.begin() as s:
-    return await confirm_manual_retry(s,admin_id=admin,queue=queue,operation_id=operation_id,reason="approved concurrency test")
+    return await confirm_manual_retry(s,admin_id=admin,queue=queue,operation_id=operation_id,reason="approved concurrency test",expected_version=version)
   return await asyncio.gather(apply(7101),apply(7102))
 
  async def test_admin_retry_concurrent_fulfillment_is_serialized(self):
@@ -54,7 +55,8 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    p=await self.payment(s)
    op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",status="dead",idempotency_key=uuid.uuid4().hex,payload={},attempts=6,max_attempts=6,next_attempt_at=now_utc(),completed_at=now_utc())
    s.add(op); await s.flush(); operation_id=op.id
-  results=await self._concurrent_admin_retry("fulfillment",operation_id)
+  async with self.sessions.begin() as s: version=(await get_operation_card(s,"fulfillment",operation_id)).confirmation_version
+  results=await self._concurrent_admin_retry("fulfillment",operation_id,version)
   self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
   async with self.sessions.begin() as s:
    op=await s.get(PaymentFulfillmentOperation,operation_id); self.assertEqual((op.status,op.attempts),("retry",0))
@@ -66,7 +68,8 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    p=await self.payment(s)
    op=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=uuid.uuid4().hex,payment_external_id=p.external_id,payload={},status="dead",attempts=8,max_attempts=8,next_attempt_at=now_utc(),processed_at=now_utc())
    s.add(op); await s.flush(); operation_id=op.id
-  results=await self._concurrent_admin_retry("webhook",operation_id)
+  async with self.sessions.begin() as s: version=(await get_operation_card(s,"webhook",operation_id)).confirmation_version
+  results=await self._concurrent_admin_retry("webhook",operation_id,version)
   self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
   async with self.sessions.begin() as s:
    op=await s.get(WebhookInbox,operation_id); self.assertEqual((op.status,op.attempts),("retry",0))
@@ -80,7 +83,8 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    s.add(op); await s.flush(); operation_id=op.id; payment_id=p.id
   with patch("services.yookassa_service.YooKassaService.create_payment_result",AsyncMock()) as http:
    async with self.sessions.begin() as s:
-    result=await confirm_manual_retry(s,admin_id=7201,queue="provider",operation_id=operation_id,reason="review expired operation")
+    version=(await get_operation_card(s,"provider",operation_id)).confirmation_version
+    result=await confirm_manual_retry(s,admin_id=7201,queue="provider",operation_id=operation_id,reason="review expired operation",expected_version=version)
    http.assert_not_awaited()
   self.assertEqual((result.outcome,result.rejection_code),("rejected","create_idempotency_window_expired"))
   async with self.sessions.begin() as s:
@@ -97,12 +101,65 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    s.add(op); await s.flush(); operation_id=op.id; key=op.idempotency_key
   with self.assertRaises(Exception):
    async with self.sessions.begin() as s:
+    version=(await get_operation_card(s,"provider",operation_id)).confirmation_version
     with patch("services.payment_queue_admin._audit",AsyncMock(side_effect=RuntimeError("forced audit failure"))):
-     await confirm_manual_retry(s,admin_id=7301,queue="provider",operation_id=operation_id,reason="approved rollback test")
+     await confirm_manual_retry(s,admin_id=7301,queue="provider",operation_id=operation_id,reason="approved rollback test",expected_version=version)
   async with self.sessions.begin() as s:
    op=await s.get(PaymentProviderOperation,operation_id)
    self.assertEqual((op.status,op.attempts,op.payload,op.idempotency_key),("dead",4,payload,key))
    self.assertIsNone(await s.scalar(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type=="provider")))
+
+ async def _retry_audit_outcomes(self,s,queue,operation_id):
+  rows=(await s.scalars(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type==queue).order_by(AuditLog.id))).all()
+  return [json.loads(row.details)["outcome"] for row in rows]
+
+ async def test_admin_stale_provider_confirmation_rejects_new_dead_episode(self):
+  payload={"command":"immutable"}
+  async with self.sessions.begin() as s:
+   p=await self.payment(s); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="dead",idempotency_key=uuid.uuid4().hex,payload=payload,attempts=4,max_attempts=4,next_attempt_at=now_utc(),completed_at=now_utc(),last_error_code="episode_a")
+   s.add(op); await s.flush(); oid=op.id; key=op.idempotency_key; version_a=(await get_operation_card(s,"provider",oid)).confirmation_version
+  async with self.sessions.begin() as s:
+   first=await confirm_manual_retry(s,admin_id=7401,queue="provider",operation_id=oid,reason="retry episode a",expected_version=version_a)
+  self.assertEqual(first.outcome,"retry_scheduled")
+  completed_b=now_utc()+timedelta(seconds=2)
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,oid); op.status="dead"; op.attempts=3; op.completed_at=completed_b; op.last_error_code="episode_b"
+  async with self.sessions.begin() as s:
+   stale=await confirm_manual_retry(s,admin_id=7402,queue="provider",operation_id=oid,reason="stale retry episode a",expected_version=version_a)
+  self.assertEqual(stale.outcome,"already_changed")
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,oid); self.assertEqual((op.status,op.attempts,op.payload,op.idempotency_key),("dead",3,payload,key))
+   self.assertEqual((await self._retry_audit_outcomes(s,"provider",oid)).count("retry_scheduled"),1)
+
+ async def test_admin_stale_fulfillment_confirmation_rejects_new_dead_episode(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",status="dead",idempotency_key=uuid.uuid4().hex,payload={},attempts=5,max_attempts=5,next_attempt_at=now_utc(),completed_at=now_utc(),last_error_code="episode_a")
+   s.add(op); await s.flush(); oid=op.id; version_a=(await get_operation_card(s,"fulfillment",oid)).confirmation_version
+  async with self.sessions.begin() as s: await confirm_manual_retry(s,admin_id=7501,queue="fulfillment",operation_id=oid,reason="retry episode a",expected_version=version_a)
+  completed_b=now_utc()+timedelta(seconds=2)
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentFulfillmentOperation,oid); op.status="dead"; op.attempts=4; op.completed_at=completed_b; op.last_error_code="episode_b"
+  with patch("services.payment_queue_admin.retry_dead_fulfillment_operation",AsyncMock()) as primitive:
+   async with self.sessions.begin() as s: stale=await confirm_manual_retry(s,admin_id=7502,queue="fulfillment",operation_id=oid,reason="stale retry episode a",expected_version=version_a)
+   primitive.assert_not_awaited()
+  self.assertEqual(stale.outcome,"already_changed")
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentFulfillmentOperation,oid); self.assertEqual((op.status,op.attempts,op.completed_at),("dead",4,completed_b))
+   self.assertEqual((await self._retry_audit_outcomes(s,"fulfillment",oid)).count("retry_scheduled"),1)
+
+ async def test_admin_stale_webhook_confirmation_rejects_new_dead_episode(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s); op=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=uuid.uuid4().hex,payment_external_id=p.external_id,payload={},status="dead",attempts=7,max_attempts=7,next_attempt_at=now_utc(),processed_at=now_utc(),last_error_code="episode_a")
+   s.add(op); await s.flush(); oid=op.id; version_a=(await get_operation_card(s,"webhook",oid)).confirmation_version
+  async with self.sessions.begin() as s: await confirm_manual_retry(s,admin_id=7601,queue="webhook",operation_id=oid,reason="retry episode a",expected_version=version_a)
+  processed_b=now_utc()+timedelta(seconds=2)
+  async with self.sessions.begin() as s:
+   op=await s.get(WebhookInbox,oid); op.status="dead"; op.attempts=6; op.processed_at=processed_b; op.last_error_code="episode_b"
+  async with self.sessions.begin() as s: stale=await confirm_manual_retry(s,admin_id=7602,queue="webhook",operation_id=oid,reason="stale retry episode a",expected_version=version_a)
+  self.assertEqual(stale.outcome,"already_changed")
+  async with self.sessions.begin() as s:
+   op=await s.get(WebhookInbox,oid); self.assertEqual((op.status,op.attempts,op.processed_at),("dead",6,processed_b))
+   self.assertEqual((await self._retry_audit_outcomes(s,"webhook",oid)).count("retry_scheduled"),1)
  def snapshot(self,p,status="succeeded",**kw):
   data={"id":p.external_id,"status":status,"amount":{"value":"90.00","currency":"RUB"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)}}; data.update(kw); return data
  async def cancel_claim(self,s,p,*,attempts=1,max_attempts=3,key=None):

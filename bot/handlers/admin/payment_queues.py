@@ -215,7 +215,8 @@ async def receive_retry_reason(message: Message, state: FSMContext, session: Asy
     row = await get_operation_card(session, data["queue"], data["operation_id"])
     if not row or not row.retry_allowed:
         await state.clear(); return await message.answer("Состояние уже изменилось")
-    await state.update_data(reason=reason); await state.set_state(QueueRetry.confirmation)
+    await state.update_data(reason=reason, confirmation_version=row.confirmation_version)
+    await state.set_state(QueueRetry.confirmation)
     b = InlineKeyboardBuilder()
     b.button(text="Подтвердить retry", callback_data=f"aq:x:{QUEUE_CODES[row.queue]}:{row.operation_id}")
     b.button(text="Отмена", callback_data="aq:no"); b.adjust(1)
@@ -227,15 +228,20 @@ async def receive_retry_reason(message: Message, state: FSMContext, session: Asy
 async def apply_retry(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     if not _authorized(callback): await state.clear(); return await _deny(callback)
     parsed = _parse(callback.data, "x"); data = await state.get_data()
+    reason = data.get("reason")
+    version = data.get("confirmation_version")
     try: operation_id = int(parsed[1][3]) if parsed and len(parsed[1]) == 4 else 0
     except (TypeError, ValueError): operation_id = 0
     if (operation_id < 1 or data.get("admin_id") != callback.from_user.id
             or data.get("queue") != (parsed[0] if parsed else None)
-            or data.get("operation_id") != operation_id or data.get("action") != "manual_retry"):
+            or data.get("operation_id") != operation_id or data.get("action") != "manual_retry"
+            or not isinstance(reason, str) or not 3 <= len(reason.strip()) <= 200
+            or not isinstance(version, str) or len(version) != 64):
         await state.clear(); return await callback.answer("Подтверждение устарело", show_alert=True)
     try:
         result = await confirm_manual_retry(session, admin_id=callback.from_user.id,
-            queue=parsed[0], operation_id=operation_id, reason=data.get("reason", ""))
+            queue=parsed[0], operation_id=operation_id, reason=reason.strip(),
+            expected_version=version)
         # The mutation and mandatory audit become durable, and the row lock is
         # released, before any FSM/Redis or Telegram network operation.
         await session.commit()

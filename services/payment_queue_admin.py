@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from typing import Callable
 
@@ -51,6 +52,15 @@ class QueueRow:
     @property
     def retry_allowed(self) -> bool:
         return self.status == "dead"
+
+    @property
+    def confirmation_version(self) -> str:
+        return _confirmation_version(
+            queue=self.queue, operation_id=self.operation_id, status=self.status,
+            attempts=self.attempts, max_attempts=self.max_attempts,
+            terminal_at=self.terminal_at, updated_at=self.updated_at,
+            last_error_code=self.last_error_code,
+        )
 
 
 @dataclass(frozen=True)
@@ -113,6 +123,43 @@ def _age(now: datetime, value: datetime | None) -> int:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return max(0, int((now - value.astimezone(timezone.utc)).total_seconds()))
+
+
+def _canonical_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
+def _confirmation_version(*, queue: str, operation_id: int, status: str,
+                          attempts: int, max_attempts: int,
+                          terminal_at: datetime | None,
+                          updated_at: datetime | None,
+                          last_error_code: str | None) -> str:
+    canonical = json.dumps({
+        "attempts": attempts,
+        "last_error_code": sanitize_short(last_error_code, 100)[:100] or None,
+        "max_attempts": max_attempts,
+        "operation_id": operation_id,
+        "queue": queue,
+        "status": status,
+        "terminal_at": _canonical_timestamp(terminal_at),
+        "updated_at": _canonical_timestamp(updated_at),
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _orm_confirmation_version(queue: str, row) -> str:
+    terminal_at = row.processed_at if queue == "webhook" else row.completed_at
+    updated_at = None if queue == "webhook" else row.updated_at
+    return _confirmation_version(
+        queue=queue, operation_id=row.id, status=row.status,
+        attempts=row.attempts, max_attempts=row.max_attempts,
+        terminal_at=terminal_at, updated_at=updated_at,
+        last_error_code=row.last_error_code,
+    )
 
 
 async def list_problem_operations(session, queue: str, page: int, *,
@@ -197,12 +244,15 @@ async def _audit(session, *, admin_id: int, queue: str, operation_id: int,
 
 
 async def confirm_manual_retry(session, *, admin_id: int, queue: str,
-                               operation_id: int, reason: str) -> ManualRetryResult:
+                               operation_id: int, reason: str,
+                               expected_version: str) -> ManualRetryResult:
     """Lock current state, call the existing retry primitive, and audit atomically."""
     if queue not in QUEUE_TYPES:
         raise ValueError("invalid queue type")
     if operation_id < 1:
         raise ValueError("invalid operation id")
+    if not isinstance(expected_version, str) or len(expected_version) != 64:
+        raise ValueError("invalid confirmation version")
     reason = reason.strip()
     if not 3 <= len(reason) <= 200:
         raise ValueError("invalid reason")
@@ -216,7 +266,7 @@ async def confirm_manual_retry(session, *, admin_id: int, queue: str,
     payment_id = row.payment_id if queue != "webhook" else await session.scalar(
         select(Payment.id).where(Payment.external_id == row.payment_external_id))
     status, attempts = row.status, row.attempts
-    if status != "dead":
+    if status != "dead" or _orm_confirmation_version(queue, row) != expected_version:
         await _audit(session, admin_id=admin_id, queue=queue, operation_id=operation_id,
                      payment_id=payment_id, original_status=status, attempts=attempts,
                      outcome="already_changed", reason=reason)
