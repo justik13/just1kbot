@@ -83,7 +83,7 @@ class BackupOperationsContractTests(unittest.TestCase):
         self.assertNotIn("just1kbot_bot", self.rehearsal)
 
     def test_rehearsal_database_removed_after_success(self):
-        self.assertIn('dropdb --force --if-exists "$test_db"', self.rehearsal)
+        self.assertIn('dropdb --force --if-exists --maintenance-db="$MAINTENANCE_DATABASE" "$test_db"', self.rehearsal)
 
     def test_rehearsal_database_removed_after_error(self):
         self.assertIn("trap finish EXIT INT TERM", self.rehearsal)
@@ -123,6 +123,7 @@ class BackupFailurePathTests(unittest.TestCase):
         self._shim("pg_dump", '''echo pg_dump >>"$CALL_LOG"; if [[ ${1:-} == --version ]]; then echo 'pg_dump (PostgreSQL) 16.4'; exit; fi; for a in "$@"; do [[ $a == --file=* ]] && printf dump >"${a#--file=}"; done''')
         self._shim("pg_restore", '''echo pg_restore >>"$CALL_LOG"; exit ${PG_RESTORE_FAIL:-0}''')
         self._shim("psql", '''echo psql >>"$CALL_LOG"; n=$(cat "${REVISION_INDEX:-/dev/null}" 2>/dev/null || echo 1); mapfile -t r <"$REVISION_FILE"; echo "${r[$((n-1))]:-rev_one}"; echo $((n+1)) >"${REVISION_INDEX:-/dev/null}"''')
+        self._shim("find",'''echo retention >>"$CALL_LOG"; exec /usr/bin/find "$@"''')
 
     def tearDown(self): self.temp.cleanup()
 
@@ -164,14 +165,22 @@ class BackupFailurePathTests(unittest.TestCase):
         result=self.run_backup(BACKUP_OFFSITE_DIR=bad,BACKUP_REQUIRE_OFFSITE="true")
         self.assertNotEqual(result.returncode,0); self.assertEqual(self.visible(),[]); self.assertNotIn("tail",self.log.read_text())
 
-    def test_offsite_artifact_rename_failure_leaves_no_visible_artifact(self):
-        offsite=self.root/"offsite"
-        self._shim("mv",'''if [[ $1 == -- && $2 == "$OFFSITE_FAIL_SOURCE" ]]; then exit 9; fi; exec /bin/mv "$@"''')
-        # The timestamp is unknown, so the shim identifies the off-site artifact partial by directory/name shape.
-        self._shim("mv",'''if [[ $1 == -- && $2 == "$BACKUP_OFFSITE_DIR"/.just1kbot-pg-v1-*.tar.age.partial && $3 == "$BACKUP_OFFSITE_DIR"/just1kbot-pg-v1-*.tar.age ]]; then exit 9; fi; exec /bin/mv "$@"''')
-        result=self.run_backup(BACKUP_OFFSITE_DIR=offsite,BACKUP_REQUIRE_OFFSITE="false")
-        self.assertEqual(result.returncode,0,result.stderr); self.assertEqual(self.visible(offsite),[])
-        self.assertEqual(list(offsite.glob("*.sha256")),[]); self.assertEqual(list(offsite.glob(".*partial")),[])
+    def test_all_offsite_publication_failures_follow_required_policy(self):
+        for stage in ("chmod","sidecar_rename","artifact_rename"):
+            for required in ("true","false"):
+                with self.subTest(stage=stage,required=required):
+                    offsite=self.root/f"offsite-{stage}-{required}"; self.log.unlink(missing_ok=True)
+                    self._shim("chmod",'''if [[ ${FAIL_STAGE:-} == chmod && "$*" == *"$BACKUP_OFFSITE_DIR"* ]]; then exit 9; fi; exec /bin/chmod "$@"''')
+                    self._shim("mv",'''src=${2:-}; if [[ ${FAIL_STAGE:-} == sidecar_rename && $src == "$BACKUP_OFFSITE_DIR"/*.sha256.partial ]]; then exit 9; fi; if [[ ${FAIL_STAGE:-} == artifact_rename && $src == "$BACKUP_OFFSITE_DIR"/*.tar.age.partial ]]; then exit 9; fi; exec /bin/mv "$@"''')
+                    result=self.run_backup(BACKUP_OFFSITE_DIR=offsite,BACKUP_REQUIRE_OFFSITE=required,FAIL_STAGE=stage)
+                    self.assertEqual(result.returncode==0,required=="false",result.stderr)
+                    self.assertEqual(len(self.visible()),1 if required=="false" else 0)
+                    self.assertEqual(len(list(self.backups.glob("*.sha256"))),1 if required=="false" else 0)
+                    self.assertEqual(self.visible(offsite),[]); self.assertEqual(list(offsite.glob("*.sha256")),[])
+                    self.assertEqual(list(offsite.glob(".*partial")),[])
+                    calls=self.log.read_text() if self.log.exists() else ""
+                    self.assertEqual("retention" in calls,required=="false")
+                    shutil.rmtree(self.backups,ignore_errors=True); (self.root/"revision-index").unlink(missing_ok=True)
 
     def _archive(self, member_kind="safe"):
         bundle=self.root/"bundle.tar"; data=b"x"
@@ -188,6 +197,50 @@ class BackupFailurePathTests(unittest.TestCase):
         (self.root/"bad.tar.age.sha256").write_text(f"{__import__('hashlib').sha256(artifact.read_bytes()).hexdigest()}  bad.tar.age\n")
         identity=self.root/"identity"; identity.write_text("id")
         return artifact, os.environ|{"PATH":f"{self.bin}:{os.environ['PATH']}","AGE_IDENTITY_FILE":str(identity)}
+
+    def _valid_archive(self, internal_lines=None, external_text=None):
+        import hashlib, json
+        payload=self.root/"payload"; shutil.rmtree(payload,ignore_errors=True); payload.mkdir()
+        (payload/"dump.custom").write_bytes(b"custom-dump")
+        (payload/"config.env").write_text("DATABASE_URL=x\nDB_ENCRYPTION_KEY=x\nREDIS_URL=x\nBOT_TOKEN=x\n")
+        (payload/"manifest.json").write_text(json.dumps({"format_version":1,"created_at_utc":"20260729T000000Z","database_name":"db","postgresql_version":"16","alembic_revision":"rev_one","git_commit_sha":"abc","files":["dump.custom","config.env"]}))
+        correct=[f"{hashlib.sha256((payload/name).read_bytes()).hexdigest()}  {name}" for name in ("dump.custom","config.env")]
+        (payload/"checksums.sha256").write_text("\n".join(correct if internal_lines is None else internal_lines)+"\n")
+        bundle=self.root/"valid-bundle.tar"
+        with tarfile.open(bundle,"w") as tf:
+            for name in ("manifest.json","checksums.sha256","dump.custom","config.env"): tf.add(payload/name,arcname=name)
+        artifact=self.root/"valid.tar.age"; shutil.copy(bundle,artifact); artifact.chmod(0o600)
+        digest=hashlib.sha256(artifact.read_bytes()).hexdigest()
+        (self.root/"valid.tar.age.sha256").write_text(external_text if external_text is not None else f"{digest}  valid.tar.age\n")
+        identity=self.root/"valid-identity"; identity.write_text("id")
+        env=os.environ|{"PATH":f"{self.bin}:{os.environ['PATH']}","AGE_IDENTITY_FILE":str(identity),"CALL_LOG":str(self.log)}
+        return artifact,env,correct
+
+    def test_strict_external_checksum_schema(self):
+        import hashlib
+        cases=("0"*64+"  other.tar.age\n","0"*64+"  valid.tar.age\nextra\n","0"*64+"  /valid.tar.age\n")
+        for text in cases:
+            with self.subTest(text=text):
+                artifact,env,_=self._valid_archive(external_text=text)
+                self.assertNotEqual(subprocess.run([OPS/"verify_backup.sh",artifact],env=env,capture_output=True).returncode,0)
+
+    def test_strict_internal_checksum_schema_and_hashes(self):
+        artifact,env,correct=self._valid_archive()
+        bad="0"*64
+        cases=(
+            [correct[1]], [correct[0]], correct+[f"{bad}  extra"],
+            [correct[0],correct[0]], [correct[0],f"{bad}  ../config.env"],
+            [f"{bad}  dump.custom",correct[1]],
+        )
+        for lines in cases:
+            with self.subTest(lines=lines):
+                artifact,env,_=self._valid_archive(internal_lines=lines)
+                self.assertNotEqual(subprocess.run([OPS/"verify_backup.sh",artifact],env=env,capture_output=True).returncode,0)
+
+    def test_correct_checksum_bundle_passes_verification(self):
+        artifact,env,_=self._valid_archive()
+        result=subprocess.run([OPS/"verify_backup.sh",artifact],env=env,text=True,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
 
     def test_actual_absolute_and_parent_archives_are_rejected(self):
         for kind in ("absolute","parent"):
@@ -212,7 +265,7 @@ class BackupFailurePathTests(unittest.TestCase):
         self._shim("createdb",'''echo "$1" >"$DB_STATE"''')
         self._shim("dropdb",'''[[ ${DROP_FAIL:-0} != 1 ]] || exit 9; rm -f "$DB_STATE"''')
         self._shim("pg_restore","exit 0")
-        self._shim("psql",f'''args="$*"; if [[ $args == *pg_database* ]]; then [[ -e "$DB_STATE" ]] && echo 1 || echo 0; elif [[ $args == *information_schema* ]]; then echo 1; elif [[ $args == *"count(*) FROM alembic_version"* ]]; then echo 1; elif [[ $args == *"version_num FROM alembic_version"* ]]; then echo {revision}; else echo 1; fi''')
+        self._shim("psql",f'''input=$(cat); args="$* $input"; if [[ $args == *pg_database* ]]; then [[ -e "$DB_STATE" ]] && echo 1 || echo 0; elif [[ $args == *information_schema* ]]; then echo 1; elif [[ $args == *"count(*) FROM alembic_version"* ]]; then echo 1; elif [[ $args == *"version_num FROM alembic_version"* ]]; then echo {revision}; else echo 1; fi''')
         env=os.environ|{"PATH":f"{self.bin}:{os.environ['PATH']}","VERIFY_BACKUP":str(verifier),"DB_STATE":str(self.root/"database"),"DROP_FAIL":"1" if drop_fail else "0","REHEARSAL_CRITICAL_TABLES":"payments"}
         return subprocess.run([OPS/"restore_rehearsal.sh",artifact],env=env,text=True,capture_output=True), self.root/"database"
 
@@ -276,6 +329,11 @@ class RealBackupRehearsalIntegrationTest(unittest.TestCase):
             finally:
                 if kept_db: subprocess.run(["dropdb","--force","--if-exists",kept_db],env=env,check=True)
             self.assertEqual(subprocess.check_output(["psql",url,"-Atc","SELECT value FROM backup_rehearsal_data"],text=True).strip(),preserved)
+            cleanup_probe=f"just1kbot_rehearsal_cleanup_probe_{os.getpid()}"
+            subprocess.run(["createdb",cleanup_probe],env=env,check=True)
+            self.assertEqual(subprocess.check_output(["psql","-XAt","-d","postgres","-v",f"target_db={cleanup_probe}"],env=env,input="SELECT count(*) FROM pg_database WHERE datname = :'target_db';\n",text=True).strip(),"1")
+            subprocess.run(["dropdb","--force","--if-exists","--maintenance-db=postgres",cleanup_probe],env=env,check=True)
+            self.assertEqual(subprocess.check_output(["psql","-XAt","-d","postgres","-v",f"target_db={cleanup_probe}"],env=env,input="SELECT count(*) FROM pg_database WHERE datname = :'target_db';\n",text=True).strip(),"0")
             rehearsal = subprocess.run([OPS / "restore_rehearsal.sh", artifact], env=env, text=True, capture_output=True, check=True)
             self.assertIn("cleanup=success",rehearsal.stdout)
             dbname=rehearsal.stdout.split("rehearsal_database=",1)[1].split()[0]

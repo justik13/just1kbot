@@ -99,19 +99,29 @@ mv -- "$sidecar_partial" "$final_sidecar"       # preparation
 mv -- "$local_partial" "$final"                 # commit marker, always last
 local_committed=true
 
-if [[ -n "$OFFSITE_DIR" ]]; then
-    offsite_status=failure; mkdir -p -- "$OFFSITE_DIR" || { [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4; }
+publish_offsite() {
+    mkdir -p -- "$OFFSITE_DIR" || return 10
     offsite_final="$OFFSITE_DIR/$name"; offsite_sidecar="$offsite_final.sha256"
     offsite_partial="$OFFSITE_DIR/.${name}.partial"; offsite_sidecar_partial="$OFFSITE_DIR/.${name}.sha256.partial"
-    if cp -- "$final" "$offsite_partial" && cp -- "$final_sidecar" "$offsite_sidecar_partial" && \
-       [[ $(sha256sum "$offsite_partial" | awk '{print $1}') == "$checksum" ]] && \
-       [[ $(cat "$offsite_sidecar_partial") == "$checksum  $name" ]]; then
-        chmod 600 "$offsite_partial" "$offsite_sidecar_partial"
-        mv -- "$offsite_sidecar_partial" "$offsite_sidecar"
-        if mv -- "$offsite_partial" "$offsite_final"; then offsite_committed=true; offsite_status=success
-        else rm -f -- "$offsite_sidecar"; [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4; fi
+    cp -- "$final" "$offsite_partial" || return 11
+    cp -- "$final_sidecar" "$offsite_sidecar_partial" || return 12
+    [[ $(sha256sum "$offsite_partial" | awk '{print $1}') == "$checksum" ]] || return 13
+    [[ $(cat "$offsite_sidecar_partial") == "$checksum  $name" ]] || return 14
+    chmod 600 "$offsite_partial" "$offsite_sidecar_partial" || return 15
+    mv -- "$offsite_sidecar_partial" "$offsite_sidecar" || return 16
+    mv -- "$offsite_partial" "$offsite_final" || return 17
+    offsite_committed=true; offsite_status=success
+}
+
+if [[ -n "$OFFSITE_DIR" ]]; then
+    offsite_status=failure
+    if publish_offsite; then
+        :
     else
-        rm -f -- "$offsite_partial" "$offsite_sidecar_partial" "$offsite_sidecar" 2>/dev/null || true
+        offsite_rc=$?
+        rm -f -- ${offsite_partial:+"$offsite_partial"} ${offsite_sidecar_partial:+"$offsite_sidecar_partial"} \
+            ${offsite_sidecar:+"$offsite_sidecar"} 2>/dev/null || true
+        printf 'backup offsite stage=publication exit_code=%s\n' "$offsite_rc" >&2
         [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4
     fi
 elif [[ "$REQUIRE_OFFSITE" == true ]]; then offsite_status=failure; fail 'off-site publication is required but BACKUP_OFFSITE_DIR is unset' 4

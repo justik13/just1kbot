@@ -23,3 +23,10 @@ off-site. Traps remove partial files and orphan sidecars. Rehearsal success is o
 reported after default cleanup is confirmed from a maintenance connection; a failed
 drop is reported as `cleanup=failed` with a nonzero exit status. Backup publication
 also requires one stable Alembic revision before and after the dump.
+
+Verification treats checksum files as strict schemas: the external sidecar contains
+exactly one hash for the artifact basename, while the internal manifest contains
+exactly one hash each for `dump.custom` and `config.env`. Off-site publication uses
+one controlled failure path for directory creation, copies, validation, permissions,
+and both commit-marker renames; optional failures preserve the local pair, whereas
+required failures remove it and suppress retention.

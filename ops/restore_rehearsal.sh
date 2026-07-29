@@ -11,17 +11,35 @@ test_db=""; work_result=failure; cleanup_status=not-needed
 
 finish() {
     original_rc=$?; final_rc=$original_rc
+    set +e
     rm -rf -- "$tmpdir"
     if [[ -n "$test_db" ]]; then
         if [[ "$keep" == true ]]; then
             cleanup_status=kept
         elif [[ "$test_db" == just1kbot_rehearsal_* ]]; then
             cleanup_status=failed
-            if dropdb --force --if-exists "$test_db" >/dev/null 2>&1 && \
-               [[ $(psql -XAt -v ON_ERROR_STOP=1 -d "$MAINTENANCE_DATABASE" -c "SELECT count(*) FROM pg_database WHERE datname = :'dbname'" --set="dbname=$test_db" 2>/dev/null) == 0 ]]; then
-                cleanup_status=success
-            else
+            dropdb --force --if-exists --maintenance-db="$MAINTENANCE_DATABASE" "$test_db" >/dev/null 2>&1
+            drop_rc=$?
+            if (( drop_rc != 0 )); then
+                printf 'rehearsal cleanup stage=dropdb exit_code=%s\n' "$drop_rc" >&2
                 final_rc=8
+            else
+                database_count=$(psql -XAt -v ON_ERROR_STOP=1 -v "target_db=$test_db" -d "$MAINTENANCE_DATABASE" 2>/dev/null <<'SQL'
+SELECT count(*)
+FROM pg_database
+WHERE datname = :'target_db';
+SQL
+                )
+                query_rc=$?
+                if (( query_rc != 0 )); then
+                    printf 'rehearsal cleanup stage=verification exit_code=%s\n' "$query_rc" >&2
+                    final_rc=8
+                elif [[ "$database_count" != 0 ]]; then
+                    printf 'rehearsal cleanup stage=verification exit_code=0 database_absent=false\n' >&2
+                    final_rc=8
+                else
+                    cleanup_status=success
+                fi
             fi
         else
             cleanup_status=failed; final_rc=8

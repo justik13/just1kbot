@@ -15,7 +15,24 @@ mode=$(stat -c '%a' "$artifact")
 [[ "$mode" == 600 ]] || fail 'artifact permissions must be 0600'
 sidecar="$artifact.sha256"
 [[ -f "$sidecar" && ! -L "$sidecar" ]] || fail 'external checksum is missing or unsafe'
-(cd "$(dirname -- "$artifact")" && sha256sum -c -- "$(basename -- "$sidecar")" >/dev/null) || fail 'external checksum mismatch'
+ARTIFACT="$artifact" SIDECAR="$sidecar" python3 - <<'PY' || exit $?
+import hashlib, os, pathlib, re, sys
+artifact = pathlib.Path(os.environ['ARTIFACT'])
+try:
+    text = pathlib.Path(os.environ['SIDECAR']).read_text(encoding='ascii')
+    match = re.fullmatch(r'([0-9A-Fa-f]{64})  ([^\r\n]+)\n?', text)
+    if not match or match.group(2) != artifact.name:
+        raise ValueError('invalid external checksum schema')
+    name = pathlib.PurePosixPath(match.group(2))
+    if name.is_absolute() or '..' in name.parts or len(name.parts) != 1:
+        raise ValueError('unsafe external checksum filename')
+    actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    if actual.lower() != match.group(1).lower():
+        raise ValueError('external checksum mismatch')
+except Exception as exc:
+    print(f'verification error: {exc}', file=sys.stderr)
+    sys.exit(4)
+PY
 [[ -n ${AGE_IDENTITY_FILE:-} && -f $AGE_IDENTITY_FILE && ! -L $AGE_IDENTITY_FILE ]] || fail 'AGE_IDENTITY_FILE is missing or unsafe'
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/just1kbot-verify.XXXXXX")
 age -d -i "$AGE_IDENTITY_FILE" -o "$tmpdir/bundle.tar" "$artifact" || fail 'decryption failed' 5
@@ -42,7 +59,7 @@ PY
 mkdir "$tmpdir/extracted"
 tar -xf "$tmpdir/bundle.tar" -C "$tmpdir/extracted" --no-same-owner --no-same-permissions
 ROOT="$tmpdir/extracted" python3 - <<'PY' || exit $?
-import json, os, pathlib, re, sys
+import hashlib, json, os, pathlib, re, sys
 root = pathlib.Path(os.environ['ROOT'])
 try:
     manifest = json.loads((root/'manifest.json').read_text())
@@ -65,11 +82,29 @@ try:
     missing = {'DATABASE_URL', 'DB_ENCRYPTION_KEY', 'REDIS_URL', 'BOT_TOKEN'} - keys
     if missing:
         raise ValueError('configuration is missing required keys')
+    checksum_lines = (root/'checksums.sha256').read_text(encoding='ascii').splitlines()
+    if len(checksum_lines) != 2 or any(not line for line in checksum_lines):
+        raise ValueError('invalid internal checksum entry count')
+    entries = {}
+    for line in checksum_lines:
+        match = re.fullmatch(r'([0-9A-Fa-f]{64})  ([^\r\n]+)', line)
+        if not match:
+            raise ValueError('invalid internal checksum schema')
+        name = pathlib.PurePosixPath(match.group(2))
+        if name.is_absolute() or '..' in name.parts or len(name.parts) != 1:
+            raise ValueError('unsafe internal checksum filename')
+        if match.group(2) in entries:
+            raise ValueError('duplicate internal checksum entry')
+        entries[match.group(2)] = match.group(1).lower()
+    if set(entries) != {'dump.custom', 'config.env'}:
+        raise ValueError('internal checksum names do not match allowlist')
+    for name, expected in entries.items():
+        if hashlib.sha256((root/name).read_bytes()).hexdigest() != expected:
+            raise ValueError('internal checksum mismatch')
 except Exception as exc:
     print(f'verification error: {exc}', file=sys.stderr)
     sys.exit(7)
 PY
-(cd "$tmpdir/extracted" && sha256sum -c checksums.sha256 >/dev/null) || fail 'internal checksum mismatch'
 pg_restore --list "$tmpdir/extracted/dump.custom" >/dev/null || fail 'PostgreSQL dump is unreadable'
 if [[ -n "$extract_dir" ]]; then
     [[ ! -e "$extract_dir" ]] || fail 'extraction destination already exists'
