@@ -5,10 +5,14 @@ import unittest
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from database.models import (EntitlementEntry, PaidValueLedgerEntry, Payment,
+    PaymentFulfillmentOperation, Tariff, TariffQuote, TariffVersion, User)
+from services.payment_fulfillment import grant, reverse
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from utils.datetime_helpers import now_utc
 
@@ -44,14 +48,46 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await s.execute(text("UPDATE users SET subscription_end=subscription_end+interval '5 days' WHERE id=:u"),{"u":user})
         return user, now, tariff
 
+    async def real_grant(self, session, *, price=Decimal("90"), number=10):
+        tariff=Tariff(name=f"real-{number}",duration_days=30,device_limit=2,price_rub=int(price),is_active=True)
+        user=User(telegram_id=600000+uuid.uuid4().int%99999); session.add_all((tariff,user)); await session.flush()
+        version=TariffVersion(tariff_id=tariff.id,version_number=1,name_snapshot=tariff.name,duration_hours=720,device_limit=2,price_rub=price,currency="RUB"); session.add(version); await session.flush()
+        now=now_utc(); quote=TariffQuote(public_id=uuid.uuid4(),user_id=user.id,operation_type="purchase",target_tariff_version_id=version.id,current_paid_hours=0,current_paid_value_rub=0,bonus_hours=0,confirmed_payment_required_rub=price,resulting_paid_hours=720,resulting_paid_value_rub=price,resulting_bonus_hours=0,rounding_loss_hours=0,rounding_loss_value_rub=0,currency="RUB",status="active",created_at=now,expires_at=now+timedelta(minutes=15)); session.add(quote); await session.flush()
+        payment=Payment(user_id=user.id,tariff_id=tariff.id,tariff_quote_id=quote.id,tariff_version_id=version.id,amount=price,currency="RUB",status="completed",provider_status="succeeded",fulfillment_status="pending",reconciliation_status="ok",checkout_status="active",snapshot_duration_days=30,snapshot_device_limit=2,snapshot_amount=price,snapshot_currency="RUB",provider_confirmed_at=now); session.add(payment); await session.flush(); quote.payment_id=payment.id
+        operation=PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",status="processing",idempotency_key=f"real-grant:{payment.id}",payload={},attempts=1,max_attempts=3,next_attempt_at=now,locked_by="test",locked_at=now); session.add(operation); await session.flush()
+        with patch("services.payment_fulfillment.queue_post_commit_task"): await grant(session,operation)
+        return user,payment,operation
+
+    async def test_application_grant_and_duplicate_project_once(self):
+        async with self.sessions.begin() as session:
+            user,payment,operation=await self.real_grant(session)
+            with patch("services.payment_fulfillment.queue_post_commit_task"): await grant(session,operation)
+            start=await session.scalar(select(func.min(EntitlementEntry.created_at)).where(EntitlementEntry.beneficiary_user_id==user.id))
+            snapshot=await get_subscription_balance_snapshot(session,user_id=user.id,as_of=start)
+            self.assertEqual((snapshot.tracked,len(snapshot.paid_lots)),(True,1))
+
+    async def test_application_reverse_latest_removes_value(self):
+        async with self.sessions.begin() as session:
+            user,payment,_=await self.real_grant(session,number=11)
+            operation=PaymentFulfillmentOperation(payment_id=payment.id,operation_type="reverse_payment",status="processing",idempotency_key=f"real-reverse:{payment.id}",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="test",locked_at=now_utc()); session.add(operation); await session.flush(); await reverse(session,operation)
+            snapshot=await get_subscription_balance_snapshot(session,user_id=user.id,as_of=now_utc())
+            self.assertEqual((snapshot.tracked,snapshot.remaining_paid_value_rub),(True,Decimal(0)))
+
+    async def test_application_fulfillment_rollback_is_atomic(self):
+        async with self.sessions() as session:
+            transaction=await session.begin(); user,_,_=await self.real_grant(session,number=12); uid=user.id; await transaction.rollback()
+        async with self.sessions() as session:
+            self.assertIsNone(await session.get(User,uid))
+            self.assertEqual(await session.scalar(select(func.count(PaidValueLedgerEntry.id))),0)
+
     async def test_entitlement_update_is_rejected(self):
         u,_,_=await self.seed()
-        async with self.assertRaises(Exception):
+        with self.assertRaises(Exception):
             async with self.sessions.begin() as s: await s.execute(text("UPDATE entitlement_entries SET days_delta=1 WHERE beneficiary_user_id=:u"),{"u":u})
 
     async def test_entitlement_delete_is_rejected(self):
         u,_,_=await self.seed()
-        async with self.assertRaises(Exception):
+        with self.assertRaises(Exception):
             async with self.sessions.begin() as s: await s.execute(text("DELETE FROM entitlement_entries WHERE beneficiary_user_id=:u"),{"u":u})
 
     async def test_entitlement_insert_still_works(self):
@@ -115,3 +151,13 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
         u,n,_=await self.seed()
         async with self.sessions() as s: await get_subscription_balance_snapshot(s,user_id=u,as_of=n,for_update=True); await s.rollback()
         async with self.sessions() as s: self.assertEqual(await s.scalar(text("SELECT count(*) FROM paid_value_ledger WHERE user_id=:u"),{"u":u}),1)
+
+    async def test_inactive_user_with_future_history_fails_closed(self):
+        u,n,_=await self.seed()
+        async with self.sessions.begin() as s: await s.execute(text("UPDATE users SET subscription_end=:past WHERE id=:u"),{"past":n-timedelta(seconds=1),"u":u})
+        async with self.sessions() as s: self.assertEqual((await get_subscription_balance_snapshot(s,user_id=u,as_of=n)).failure_code,"subscription_end_projection_mismatch")
+
+    async def test_null_subscription_end_with_future_history_fails_closed(self):
+        u,n,_=await self.seed()
+        async with self.sessions.begin() as s: await s.execute(text("UPDATE users SET subscription_end=NULL WHERE id=:u"),{"u":u})
+        async with self.sessions() as s: self.assertEqual((await get_subscription_balance_snapshot(s,user_id=u,as_of=n)).failure_code,"subscription_end_projection_mismatch")

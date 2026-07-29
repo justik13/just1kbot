@@ -69,24 +69,24 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
         b=EntitlementEvent(2,1,"manual","x","manual_grant",3,T0+timedelta(hours=30))
         s=self.paid(extra_events=(b,),end=T0+timedelta(hours=33)); self.assertEqual(s.bonus_lots[0].segment_start,T0+timedelta(hours=30))
 
-    def test_payment_reversal_trims_end(self):
+    def test_partial_payment_reversal_is_rejected(self):
         reversal=EntitlementEvent(2,1,"payment","10","payment_reversal",-4,T0+timedelta(hours=1),1)
         lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal("-24"),"RUB",100,10,11)
-        s=self.paid(extra_events=(reversal,),extra_ledger=(lr,),end=T0+timedelta(hours=20)); self.assertEqual(s.remaining_paid_hours,20)
+        s=self.paid(extra_events=(reversal,),extra_ledger=(lr,),end=T0+timedelta(hours=20)); self.assertEqual(s.failure_code,"reversal_amount_mismatch")
 
-    def test_referral_reversal_trims_bonus(self):
+    def test_partial_referral_reversal_is_rejected(self):
         b=EntitlementEvent(2,1,"payment","10","referral_user_bonus",5,T0)
         r=EntitlementEvent(3,1,"payment","10","referral_reversal",-3,T0+timedelta(hours=1),2)
-        s=self.paid(extra_events=(b,r),end=T0+timedelta(hours=26)); self.assertEqual(s.remaining_bonus_hours,2)
+        s=self.paid(extra_events=(b,r),end=T0+timedelta(hours=26)); self.assertEqual(s.failure_code,"reversal_amount_mismatch")
 
-    def test_reversal_spans_latest_segments(self):
+    def test_partial_reversal_does_not_span_segments(self):
         b=EntitlementEvent(2,1,"manual","x","manual_grant",5,T0)
         r=EntitlementEvent(3,1,"payment","10","payment_reversal",-7,T0+timedelta(hours=1),1)
         lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal("-24"),"RUB",100,10,11)
-        s=self.paid(extra_events=(b,r),extra_ledger=(lr,),end=T0+timedelta(hours=22)); self.assertEqual((s.remaining_paid_hours,s.remaining_bonus_hours),(22,0))
+        s=self.paid(extra_events=(b,r),extra_ledger=(lr,),end=T0+timedelta(hours=22)); self.assertEqual(s.failure_code,"reversal_amount_mismatch")
 
     def test_reversal_exceeds_balance_fails(self):
-        r=EntitlementEvent(2,1,"payment","10","payment_reversal",-30,T0+timedelta(hours=1),1)
+        r=EntitlementEvent(2,1,"payment","10","payment_reversal",-24,T0+timedelta(hours=25),1)
         lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11)
         s=self.paid(extra_events=(r,),extra_ledger=(lr,)); self.assertEqual((s.tracked,s.failure_code),(False,"reversal_exceeds_balance"))
 
@@ -125,6 +125,46 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             for used in range(hours+1):
                 value=self.paid(hours=hours,value="100.01",as_of=T0+timedelta(hours=used)).remaining_paid_value_rub
                 self.assertLessEqual(value,prior); prior=value
+
+    def test_latest_full_reversal_removes_value(self):
+        r=EntitlementEvent(2,1,"payment","10","payment_reversal",-24,T0,1); lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11)
+        s=self.paid(extra_events=(r,),extra_ledger=(lr,),end=T0); self.assertEqual((s.tracked,s.remaining_paid_value_rub),(True,Decimal(0)))
+
+    def test_own_referral_reversal_batch(self):
+        b=EntitlementEvent(2,1,"payment","10","referral_user_bonus",5,T0); r1=EntitlementEvent(3,1,"payment","10","payment_reversal",-24,T0,1); r2=EntitlementEvent(4,1,"payment","10","referral_reversal",-5,T0,2); lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11)
+        s=self.paid(extra_events=(b,r1,r2),extra_ledger=(lr,),end=T0); self.assertEqual((s.tracked,s.remaining_paid_value_rub,s.remaining_bonus_hours),(True,Decimal(0),0))
+
+    def test_reversal_crosses_unrelated_bonus(self):
+        b=EntitlementEvent(2,1,"manual","x","manual_grant",5,T0); r=EntitlementEvent(3,1,"payment","10","payment_reversal",-24,T0,1); lr=LedgerEntry(12,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11)
+        self.assertEqual(self.paid(extra_events=(b,r),extra_ledger=(lr,)).failure_code,"reversal_crosses_unrelated_segments")
+
+    def test_old_payment_reversal_crosses_newer_payment(self):
+        events=(EntitlementEvent(1,1,"payment","10","payment_grant",24,T0),EntitlementEvent(2,1,"payment","20","payment_grant",24,T0),EntitlementEvent(3,1,"payment","10","payment_reversal",-24,T0,1))
+        ledger=(LedgerEntry(11,1,"confirmed_payment",24,Decimal(24),"RUB",100,10),LedgerEntry(12,1,"confirmed_payment",24,Decimal(48),"RUB",200,20),LedgerEntry(13,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11))
+        payments={10:PaymentSnapshot(10,1,100,100,Decimal(24),"RUB",24,Decimal(24),"RUB"),20:PaymentSnapshot(20,1,200,200,Decimal(48),"RUB",24,Decimal(48),"RUB")}
+        versions={100:TariffVersionSnapshot(100,100,24,Decimal(24),"RUB"),200:TariffVersionSnapshot(200,200,24,Decimal(48),"RUB")}
+        s=project_subscription_balance(as_of=T0,subscription_end=T0+timedelta(hours=24),entitlement_events=events,ledger_entries=ledger,tariff_versions=versions,payments=payments)
+        self.assertEqual((s.failure_code,s.remaining_paid_value_rub),("reversal_crosses_unrelated_segments",None))
+
+    def test_orphan_confirmed_ledger(self):
+        orphan=LedgerEntry(99,1,"confirmed_payment",1,Decimal(1),"RUB",100,99)
+        self.assertEqual(self.paid(extra_ledger=(orphan,)).failure_code,"confirmed_payment_without_entitlement_grant")
+
+    def test_duplicate_grant_for_confirmed_ledger(self):
+        duplicate=EntitlementEvent(2,1,"payment","10","payment_grant",24,T0)
+        self.assertEqual(self.paid(extra_events=(duplicate,),end=T0+timedelta(hours=48)).failure_code,"confirmed_payment_without_entitlement_grant")
+
+    def test_unsupported_economic_entry(self):
+        item=LedgerEntry(99,1,"manual_adjustment",1,Decimal(1),"RUB",100,None)
+        self.assertEqual(self.paid(extra_ledger=(item,)).failure_code,"unsupported_paid_value_entry")
+
+    def test_inactive_and_null_with_remaining_time(self):
+        self.assertEqual(self.paid(end=T0-timedelta(seconds=1)).failure_code,"subscription_end_projection_mismatch")
+        e=EntitlementEvent(1,1,"payment","10","payment_grant",24,T0); l=LedgerEntry(11,1,"confirmed_payment",24,Decimal(24),"RUB",100,10); p=PaymentSnapshot(10,1,100,100,Decimal(24),"RUB",24,Decimal(24),"RUB"); v=TariffVersionSnapshot(100,100,24,Decimal(24),"RUB")
+        s=project_subscription_balance(as_of=T0,subscription_end=None,entitlement_events=(e,),ledger_entries=(l,),tariff_versions={100:v},payments={10:p}); self.assertEqual(s.failure_code,"subscription_end_projection_mismatch")
+
+    def test_rounding_uses_exact_microseconds(self):
+        s=self.paid(as_of=T0+timedelta(microseconds=1)); self.assertEqual(s.rounding_loss_hours,Decimal(3_599_999_999)/Decimal(3_600_000_000))
 
 
 if __name__ == "__main__": unittest.main()

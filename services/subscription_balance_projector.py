@@ -103,6 +103,7 @@ class _Segment:
     start: datetime
     end: datetime
     ledger: LedgerEntry | None
+    is_paid: bool
 
 
 def _failed(as_of: datetime, code: str, events: Sequence[EntitlementEvent], ledger: Sequence[LedgerEntry], coverage_end=None):
@@ -113,116 +114,106 @@ def _failed(as_of: datetime, code: str, events: Sequence[EntitlementEvent], ledg
 def project_subscription_balance(*, as_of: datetime, subscription_end: datetime | None,
         entitlement_events: Sequence[EntitlementEvent], ledger_entries: Sequence[LedgerEntry],
         tariff_versions: Mapping[int, TariffVersionSnapshot], payments: Mapping[int, PaymentSnapshot]) -> SubscriptionBalanceSnapshot:
-    """Replay append-only history. Inputs are values only; no infrastructure is used."""
-    events = tuple(sorted(entitlement_events, key=lambda x: (x.created_at, x.id)))
-    ledger = tuple(ledger_entries)
-    active = subscription_end is not None and subscription_end > as_of
-    def expired_legacy_zero():
-        return SubscriptionBalanceSnapshot(as_of, True, None, subscription_end, 0, Decimal(0), 0,
-            Decimal(0), (), (), tuple(x.id for x in ledger), tuple(x.id for x in events))
-
-    segments: list[_Segment] = []
-    by_event = {e.id: e for e in events}
-    used_reversals: set[int] = set()
-    coverage: datetime | None = None
-    confirmed = [x for x in ledger if x.entry_type == "confirmed_payment"]
-    ledger_reversals = [x for x in ledger if x.entry_type == "payment_reversal"]
-
+    """Replay source-attributed append-only history without infrastructure dependencies."""
+    events=tuple(sorted(entitlement_events,key=lambda e:(e.created_at,e.id))); ledger=tuple(ledger_entries)
+    fail=lambda code,end=None:_failed(as_of,code,events,ledger,end)
+    active=subscription_end is not None and subscription_end>as_of
+    confirmed=[x for x in ledger if x.entry_type=="confirmed_payment"]
+    ledger_reversals=[x for x in ledger if x.entry_type=="payment_reversal"]
+    if any(x.entry_type not in {"confirmed_payment","payment_reversal"} and (x.paid_hours_delta or x.paid_value_rub_delta) for x in ledger):
+        return fail("unsupported_paid_value_entry")
+    grants=[e for e in events if e.entry_type=="payment_grant" and e.hours_delta>0]
+    for item in confirmed:
+        matches=[e for e in grants if e.source_type=="payment" and e.source_id==str(item.payment_id)]
+        if len(matches)!=1:return fail("confirmed_payment_without_entitlement_grant")
+    by_id={e.id:e for e in events}; segments=[]; coverage=None; used_confirmed=set(); legacy_failure=None
+    groups={}
+    for e in events:
+        if e.entry_type in {"payment_reversal","referral_reversal"}:groups.setdefault((e.source_type,e.source_id),[]).append(e)
+    processed=set(); reversed_confirmed=set(); used_ledger_reversals=set()
     for event in events:
-        if event.hours_delta > 0:
-            if event.entry_type not in {"payment_grant", "referral_user_bonus", "referral_referrer_bonus", "manual_grant"}:
-                continue
-            match = None
-            if event.entry_type == "payment_grant":
-                candidates = [x for x in confirmed if x.payment_id is not None and str(x.payment_id) == event.source_id]
-                if len(candidates) != 1:
-                    if not active:
-                        return expired_legacy_zero()
-                    return _failed(as_of, "paid_grant_without_value_ledger", events, ledger, coverage)
-                match = candidates[0]
-                payment = payments.get(match.payment_id) if match.payment_id is not None else None
-                version = tariff_versions.get(match.tariff_version_id)
-                compatible = (match.user_id == event.user_id and match.paid_hours_delta == event.hours_delta
-                    and match.paid_value_rub_delta > 0 and match.currency == "RUB" and payment is not None
-                    and payment.id == match.payment_id and payment.user_id == event.user_id
-                    and payment.tariff_version_id == match.tariff_version_id and version is not None
-                    and payment.tariff_id == version.tariff_id and payment.currency == "RUB"
-                    and payment.snapshot_currency == "RUB" and payment.snapshot_duration_hours == event.hours_delta
-                    and payment.amount == match.paid_value_rub_delta
-                    and payment.snapshot_amount == match.paid_value_rub_delta
-                    and version.price_rub == match.paid_value_rub_delta
-                    and version.duration_hours == event.hours_delta and version.currency == "RUB")
-                if not compatible:
-                    if not active:
-                        return expired_legacy_zero()
-                    return _failed(as_of, "paid_grant_without_value_ledger", events, ledger, coverage)
-            start = max(event.created_at, coverage) if coverage else event.created_at
-            end = start + timedelta(hours=event.hours_delta)
-            segments.append(_Segment(event, start, end, match)); coverage = end
-            continue
-
-        if event.entry_type not in {"payment_reversal", "referral_reversal"}:
-            continue
-        original = by_event.get(event.reversed_entry_id) if event.reversed_entry_id else None
-        if original is None:
-            return _failed(as_of, "reversal_source_missing", events, ledger, coverage)
-        related = [x for x in events if x.reversed_entry_id == original.id and x.entry_type == event.entry_type]
-        if len(related) != 1 or original.user_id != event.user_id:
-            return _failed(as_of, "reversal_source_ambiguous", events, ledger, coverage)
-        if event.entry_type == "referral_reversal" and original.entry_type not in {"referral_user_bonus", "referral_referrer_bonus"}:
-            return _failed(as_of, "reversal_source_ambiguous", events, ledger, coverage)
-        if event.entry_type == "payment_reversal":
-            source_segments = [s for s in segments if s.event.id == original.id and s.ledger]
-            if len(source_segments) != 1:
-                return _failed(as_of, "reversal_source_ambiguous", events, ledger, coverage)
-            reversals = [x for x in ledger_reversals if x.reversal_of_id == source_segments[0].ledger.id]
-            reversal = reversals[0] if len(reversals) == 1 else None
-            if (reversal is None or reversal.user_id != event.user_id
-                    or reversal.payment_id != source_segments[0].ledger.payment_id
-                    or reversal.paid_hours_delta != -source_segments[0].ledger.paid_hours_delta
-                    or reversal.paid_value_rub_delta != -source_segments[0].ledger.paid_value_rub_delta):
-                return _failed(as_of, "paid_reversal_without_ledger_reversal", events, ledger, coverage)
-            used_reversals.add(reversal.id)
-        remove = abs(event.hours_delta)
-        available = sum(max(0, int((s.end - max(s.start, event.created_at)).total_seconds() // 3600)) for s in segments)
-        if remove > available:
-            return _failed(as_of, "reversal_exceeds_balance", events, ledger, coverage)
+        if event.hours_delta>0:
+            if event.entry_type not in {"payment_grant","referral_user_bonus","referral_referrer_bonus","manual_grant"}:continue
+            match=None
+            if event.entry_type=="payment_grant":
+                matches=[x for x in confirmed if event.source_type=="payment" and str(x.payment_id)==event.source_id]
+                if len(matches)!=1:legacy_failure="paid_grant_without_value_ledger"
+                else:
+                    match=matches[0]
+                    if match.id in used_confirmed:return fail("confirmed_payment_without_entitlement_grant",coverage)
+                    used_confirmed.add(match.id); payment=payments.get(match.payment_id); version=tariff_versions.get(match.tariff_version_id)
+                    ok=(match.user_id==event.user_id and match.paid_hours_delta==event.hours_delta and match.paid_value_rub_delta>0
+                        and match.currency=="RUB" and payment is not None and payment.user_id==event.user_id
+                        and payment.tariff_version_id==match.tariff_version_id and version is not None
+                        and payment.tariff_id==version.tariff_id and payment.currency==payment.snapshot_currency==version.currency==match.currency
+                        and payment.snapshot_duration_hours==version.duration_hours==event.hours_delta
+                        and payment.amount==payment.snapshot_amount==version.price_rub==match.paid_value_rub_delta)
+                    if not ok:legacy_failure="paid_grant_without_value_ledger"
+            start=max(event.created_at,coverage) if coverage else event.created_at; end=start+timedelta(hours=event.hours_delta)
+            segments.append(_Segment(event,start,end,match,event.entry_type=="payment_grant")); coverage=end; continue
+        if event.entry_type not in {"payment_reversal","referral_reversal"}:continue
+        key=(event.source_type,event.source_id)
+        if key in processed:continue
+        processed.add(key); batch=sorted(groups[key],key=lambda e:(e.created_at,e.id)); batch_time=batch[0].created_at; originals=[]
+        for rev in batch:
+            original=by_id.get(rev.reversed_entry_id) if rev.reversed_entry_id else None
+            if original is None:return fail("reversal_source_missing",coverage)
+            if len([x for x in batch if x.reversed_entry_id==original.id])!=1:return fail("reversal_source_ambiguous",coverage)
+            if rev.user_id!=original.user_id or (rev.source_type,rev.source_id)!=(original.source_type,original.source_id):return fail("reversal_source_mismatch",coverage)
+            if rev.hours_delta!=-original.hours_delta:return fail("reversal_amount_mismatch",coverage)
+            originals.append(original)
+            if rev.entry_type=="payment_reversal":
+                if rev.source_type!="payment" or original.entry_type!="payment_grant":return fail("reversal_source_mismatch",coverage)
+                source=[s for s in segments if s.event.id==original.id]
+                if len(source)!=1 or source[0].ledger is None:return fail("reversal_source_ambiguous",coverage)
+                positive=source[0].ledger; matches=[x for x in ledger_reversals if x.reversal_of_id==positive.id]
+                if len(matches)!=1:return fail("paid_reversal_without_ledger_reversal",coverage)
+                lr=matches[0]
+                if not (lr.payment_id==positive.payment_id and lr.user_id==positive.user_id
+                    and lr.paid_hours_delta==-positive.paid_hours_delta and lr.paid_value_rub_delta==-positive.paid_value_rub_delta
+                    and lr.currency==positive.currency and lr.tariff_version_id==positive.tariff_version_id):return fail("reversal_amount_mismatch",coverage)
+                reversed_confirmed.add(positive.id); used_ledger_reversals.add(lr.id)
+            elif rev.entry_type!="referral_reversal" or original.entry_type not in {"referral_user_bonus","referral_referrer_bonus"}:
+                return fail("reversal_source_mismatch",coverage)
+        allowed={o.id for o in originals}; remove=sum(abs(x.hours_delta) for x in batch)
+        available=sum(_whole(max(s.start,batch_time),s.end,batch_time,s.start) for s in segments)
+        if remove>available:return fail("reversal_exceeds_balance",coverage)
         while remove:
-            s = segments[-1]
-            removable = max(0, int((s.end - max(s.start, event.created_at)).total_seconds() // 3600))
-            cut = min(remove, removable)
-            if cut:
-                s.end -= timedelta(hours=cut); remove -= cut
-            if s.end <= s.start:
-                segments.pop()
-            elif not cut:
-                return _failed(as_of, "reversal_exceeds_balance", events, ledger, coverage)
-        coverage = segments[-1].end if segments else event.created_at
-
-    if any(x.id not in used_reversals for x in ledger_reversals):
-        return _failed(as_of, "ledger_reversal_without_entitlement_reversal", events, ledger, coverage)
-    if active and (coverage is None or abs((coverage - subscription_end).total_seconds()) > 1):
-        return _failed(as_of, "subscription_end_projection_mismatch", events, ledger, coverage)
-
-    paid_lots=[]; bonus_lots=[]; loss=Decimal(0)
+            s=segments[-1]; removable=_whole(max(s.start,batch_time),s.end,batch_time,s.start); cut=min(remove,removable)
+            if not cut:return fail("reversal_exceeds_balance",coverage)
+            if s.event.id not in allowed:return fail("reversal_crosses_unrelated_segments",coverage)
+            s.end-=timedelta(hours=cut); remove-=cut
+            if s.end<=s.start:segments.pop()
+        if any(s.event.id in allowed for s in segments):
+            if any(s.ledger and s.ledger.id in reversed_confirmed for s in segments):return fail("reversed_paid_lot_still_remaining",coverage)
+            return fail("unrelated_paid_lot_trimmed",coverage)
+        coverage=segments[-1].end if segments else batch_time
+    if any(x.id not in used_ledger_reversals for x in ledger_reversals):return fail("ledger_reversal_without_entitlement_reversal",coverage)
+    paid=[]; bonus=[]; loss=Decimal(0); untracked=0
     for s in segments:
-        seconds = max(0.0, (s.end - max(as_of, s.start)).total_seconds())
-        whole = int(seconds // 3600)
-        loss += Decimal(str((seconds / 3600) - whole))
-        if s.ledger:
-            with localcontext() as ctx:
-                ctx.prec = 38
-                value = s.ledger.paid_value_rub_delta * Decimal(whole) / Decimal(s.ledger.paid_hours_delta)
-            paid_lots.append(ProjectedPaidLot(s.event.id, s.ledger.id, s.ledger.payment_id,
-                s.ledger.tariff_version_id, s.ledger.paid_hours_delta, s.ledger.paid_value_rub_delta,
-                whole, value, s.start, s.end))
-        else:
-            bonus_lots.append(ProjectedBonusLot(s.event.id, s.event.source_type, s.event.source_id,
-                s.event.entry_type, s.event.hours_delta, whole, s.start, s.end))
-    # Only the currently-running segment can lose a fractional hour.
-    if loss >= 1:
-        loss = loss % 1
-    total_value=sum((x.remaining_paid_value_rub for x in paid_lots), Decimal(0))
-    return SubscriptionBalanceSnapshot(as_of, True, None, coverage, sum(x.remaining_whole_hours for x in paid_lots),
-        total_value, sum(x.remaining_whole_hours for x in bonus_lots), loss, tuple(paid_lots), tuple(bonus_lots),
-        tuple(x.id for x in ledger), tuple(x.id for x in events))
+        whole,part=_remaining(s.start,s.end,as_of); loss+=part
+        if s.is_paid:
+            if s.ledger is None:untracked+=whole; continue
+            with localcontext() as ctx:ctx.prec=38; value=s.ledger.paid_value_rub_delta*Decimal(whole)/Decimal(s.ledger.paid_hours_delta)
+            paid.append(ProjectedPaidLot(s.event.id,s.ledger.id,s.ledger.payment_id,s.ledger.tariff_version_id,s.ledger.paid_hours_delta,s.ledger.paid_value_rub_delta,whole,value,s.start,s.end))
+        else:bonus.append(ProjectedBonusLot(s.event.id,s.event.source_type,s.event.source_id,s.event.entry_type,s.event.hours_delta,whole,s.start,s.end))
+    ph=sum(x.remaining_whole_hours for x in paid); bh=sum(x.remaining_whole_hours for x in bonus)
+    if legacy_failure:
+        if active:return fail(legacy_failure,coverage)
+        if untracked or ph or bh:return fail("subscription_end_projection_mismatch",coverage)
+        return SubscriptionBalanceSnapshot(as_of,True,None,subscription_end,0,Decimal(0),0,Decimal(0),(),(),tuple(x.id for x in ledger),tuple(x.id for x in events))
+    if not 0<=loss<1:return fail("rounding_invariant_violation",coverage)
+    if active and (coverage is None or abs(_micros(coverage-subscription_end))>1_000_000):return fail("subscription_end_projection_mismatch",coverage)
+    if not active and (ph or bh):return fail("subscription_end_projection_mismatch",coverage)
+    value=sum((x.remaining_paid_value_rub for x in paid),Decimal(0)); ceiling=sum((x.paid_value_rub_delta for x in confirmed if x.id not in reversed_confirmed),Decimal(0))
+    if not 0<=value<=ceiling:return fail("reversed_paid_lot_still_remaining",coverage)
+    return SubscriptionBalanceSnapshot(as_of,True,None,coverage,ph,value,bh,loss,tuple(paid),tuple(bonus),tuple(x.id for x in ledger),tuple(x.id for x in events))
+
+_HOUR_US=3_600_000_000
+def _micros(delta:timedelta)->int:return ((delta.days*86400+delta.seconds)*1_000_000)+delta.microseconds
+def _whole(start,end,batch=None,segment_start=None):
+    if batch is not None and segment_start is not None and 0<=_micros(batch-segment_start)<=1_000_000:start=segment_start
+    return max(0,_micros(end-start)//_HOUR_US)
+def _remaining(start,end,as_of):
+    whole,remainder=divmod(max(0,_micros(end-max(as_of,start))),_HOUR_US)
+    return whole,Decimal(remainder)/Decimal(_HOUR_US)
