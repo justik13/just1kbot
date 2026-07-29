@@ -53,10 +53,11 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.bot = AsyncMock()
         self.now = 0.0
+        self.admin_ids = [1]
         self.settings = patch("services.workers.queue_health.get_settings",
-                              return_value=type("S", (), {"ADMIN_IDS": [1]})())
+                              side_effect=lambda: type("S", (), {"ADMIN_IDS": self.admin_ids})())
         self.settings.start()
-        self.monitor = QueueHealthMonitor(self.bot, cooldown=60,
+        self.monitor = QueueHealthMonitor(self.bot, cooldown=60, retry_cooldown=5,
                                           clock=lambda: self.now, alert_timeout=.05)
 
     async def asyncTearDown(self):
@@ -65,13 +66,46 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
 
     async def flush(self):
         await asyncio.sleep(0)
+        tasks = list(self.monitor.alert_tasks)
+        if tasks:
+            await asyncio.gather(*tasks)
         await asyncio.sleep(0)
 
-    async def test_episode_dedup_reminder_recovery_and_new_episode(self):
+    async def test_partial_admin_success_sets_success_cooldown(self):
+        self.admin_ids = [1, 2]
+        async def send(admin_id, *args, **kwargs):
+            if admin_id == 1:
+                raise RuntimeError("SECRET_CANARY")
+        self.bot.send_message.side_effect = send
+        self.monitor.observe(snapshot(queue(dead=1))); await self.flush()
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.assertEqual(0, episode.last_success_at)
+        self.assertTrue(episode.last_attempt_succeeded)
+
+    async def test_all_fail_does_not_start_success_cooldown_and_retries(self):
+        self.admin_ids = [1, 2]
+        self.bot.send_message.side_effect = RuntimeError("SECRET_CANARY")
         bad = snapshot(queue(dead=1))
-        good = snapshot(queue())
         self.monitor.observe(bad); await self.flush()
-        self.assertEqual(1, self.bot.send_message.await_count)
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertIsNone(episode.last_success_at)
+        self.assertFalse(episode.last_attempt_succeeded)
+        self.now = 4; self.monitor.observe(bad); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.now = 5; self.monitor.observe(bad); await self.flush()
+        self.assertEqual(4, self.bot.send_message.await_count)
+
+    async def test_no_admin_is_not_false_success(self):
+        self.admin_ids = []
+        self.monitor.observe(snapshot(queue(dead=1))); await self.flush()
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertIsNone(episode.last_success_at)
+        self.assertFalse(episode.last_attempt_succeeded)
+
+    async def test_episode_reminder_recovery_and_new_episode(self):
+        bad = snapshot(queue(dead=1)); good = snapshot(queue())
+        self.monitor.observe(bad); await self.flush()
         self.now = 59; self.monitor.observe(bad); await self.flush()
         self.assertEqual(1, self.bot.send_message.await_count)
         self.now = 60; self.monitor.observe(bad); await self.flush()
@@ -83,9 +117,25 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.monitor.observe(bad); await self.flush()
         self.assertEqual(4, self.bot.send_message.await_count)
 
+    async def test_escalation_fingerprint_ignores_age_and_backlog_count(self):
+        overdue = snapshot(queue(pending=1, due=1, overdue=1))
+        self.monitor.observe(overdue); await self.flush()
+        changed_age_count = snapshot(QueueSnapshot("provider_operations", 9, 0, 9, 9,
+            0, 0, 0, 999, None, None, ()))
+        self.monitor.observe(changed_age_count); await self.flush()
+        self.assertEqual(1, self.bot.send_message.await_count)
+        self.monitor.observe(snapshot(queue(overdue=1, dead=1))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.monitor.observe(snapshot(queue(overdue=1, dead=1))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.monitor.observe(snapshot(queue(overdue=1, dead=2))); await self.flush()
+        self.assertEqual(3, self.bot.send_message.await_count)
+        self.monitor.observe(snapshot(queue())); await self.flush()
+        self.monitor.observe(overdue); await self.flush()
+        self.assertEqual(5, self.bot.send_message.await_count)
+
     async def test_existing_dead_row_alerts_on_first_observation(self):
-        self.monitor.observe(snapshot(queue(dead=10)))
-        await self.flush()
+        self.monitor.observe(snapshot(queue(dead=10))); await self.flush()
         self.assertEqual(1, self.bot.send_message.await_count)
 
     async def test_alert_contains_only_safe_bounded_example_fields(self):
@@ -96,23 +146,24 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("id=1", message); self.assertIn("code=safe_code", message)
         self.assertNotIn("payload", message); self.assertNotIn("last_error=", message)
 
-    async def test_hung_alert_does_not_block_checks_or_shutdown(self):
+    async def test_hung_delivery_has_one_task_per_queue_and_shutdown_cleans_it(self):
         blocker = asyncio.Event()
         async def hung(*args, **kwargs):
             await blocker.wait()
         self.bot.send_message.side_effect = hung
-        self.monitor.observe(snapshot(queue(dead=1)))
-        await asyncio.sleep(0)
-        self.now = 60
-        self.monitor.observe(snapshot(queue(dead=1)))
-        self.assertEqual(2, len(self.monitor.alert_tasks))
+        bad = snapshot(queue(dead=1))
+        self.monitor.observe(bad); await asyncio.sleep(0)
+        self.now = 100; self.monitor.observe(bad)
+        self.assertEqual(1, len(self.monitor.alert_tasks))
         await self.monitor.close()
         self.assertEqual(set(), self.monitor.alert_tasks)
-        pending = [t for t in asyncio.all_tasks() if t.get_name() == "queue_health_alert" and not t.done()]
+        pending = [t for t in asyncio.all_tasks()
+                   if t.get_name().startswith("queue_health_alert_") and not t.done()]
         self.assertEqual([], pending)
 
     async def test_loop_shutdown_leaves_no_alert_tasks(self):
         shutdown = asyncio.Event(); shutdown.set()
         await queue_health_loop(self.bot, shutdown, interval=0)
-        pending = [t for t in asyncio.all_tasks() if t.get_name() == "queue_health_alert" and not t.done()]
+        pending = [t for t in asyncio.all_tasks()
+                   if t.get_name().startswith("queue_health_alert_") and not t.done()]
         self.assertEqual([], pending)

@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
+from services.payment_queue_health import get_payment_queue_health_snapshot
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, perform_http, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
 from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, reverse, retry_dead_fulfillment_operation
@@ -46,6 +47,52 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
     self.assertTrue(all(example.last_error_code=="safe_code" for example in q.examples))
    rendered=repr(health)
    self.assertNotIn("SECRET_CANARY",rendered); self.assertNotIn("payload",rendered); self.assertNotIn("last_error=",rendered)
+
+ async def _assert_processing_lease_health(self,queue_name,rows,now):
+  async with self.sessions.begin() as s:
+   s.add_all(rows); await s.flush()
+   health=await get_payment_queue_health_snapshot(s,clock=lambda:now)
+   queue=next(item for item in health.queues if item.name==queue_name)
+   self.assertEqual((queue.processing,queue.stale_processing),(4,3))
+   self.assertFalse(queue.healthy)
+   self.assertEqual(3,len(queue.examples))
+   self.assertTrue(all(item.status=="processing" for item in queue.examples))
+
+ async def test_provider_processing_lease_shapes(self):
+  from services.payment_queue_health import get_payment_queue_health_snapshot
+  now=now_utc()
+  async with self.sessions.begin() as s: p=await self.payment(s); payment_id=p.id
+  def row(locked_at,locked_by):
+   return PaymentProviderOperation(payment_id=payment_id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},next_attempt_at=now,locked_at=locked_at,locked_by=locked_by)
+  await self._assert_processing_lease_health("provider_operations",[row(None,None),row(now,None),row(now,"worker"),row(now-timedelta(minutes=3),"worker")],now)
+
+ async def test_fulfillment_processing_lease_shapes(self):
+  from services.payment_queue_health import get_payment_queue_health_snapshot
+  now=now_utc()
+  async with self.sessions.begin() as s: p=await self.payment(s); payment_id=p.id
+  def row(locked_at,locked_by):
+   return PaymentFulfillmentOperation(payment_id=payment_id,operation_type="grant_subscription",status="processing",idempotency_key=uuid.uuid4().hex,payload={},next_attempt_at=now,locked_at=locked_at,locked_by=locked_by)
+  await self._assert_processing_lease_health("fulfillment_operations",[row(None,None),row(now,None),row(now,"worker"),row(now-timedelta(minutes=3),"worker")],now)
+
+ async def test_webhook_processing_lease_shapes(self):
+  from services.payment_queue_health import get_payment_queue_health_snapshot
+  now=now_utc()
+  def row(locked_at,locked_by):
+   return WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=uuid.uuid4().hex,payload={},status="processing",next_attempt_at=now,locked_at=locked_at,locked_by=locked_by)
+  await self._assert_processing_lease_health("webhook_inbox",[row(None,None),row(now,None),row(now,"worker"),row(now-timedelta(minutes=3),"worker")],now)
+
+ async def test_dead_age_uses_recent_terminal_timestamp(self):
+  from services.payment_queue_health import get_payment_queue_health_snapshot
+  now=now_utc(); old=now-timedelta(days=10); terminal=now-timedelta(seconds=20)
+  async with self.sessions.begin() as s:
+   p=await self.payment(s)
+   s.add(PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="dead",idempotency_key=uuid.uuid4().hex,payload={},next_attempt_at=old,created_at=old,updated_at=old,completed_at=terminal))
+   s.add(PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",status="dead",idempotency_key=uuid.uuid4().hex,payload={},next_attempt_at=old,created_at=old,updated_at=old,completed_at=terminal))
+   s.add(WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=uuid.uuid4().hex,payload={},status="dead",next_attempt_at=old,received_at=old,processed_at=terminal))
+   await s.flush(); health=await get_payment_queue_health_snapshot(s,clock=lambda:now)
+   for queue in health.queues:
+    self.assertEqual(20,queue.oldest_dead_age_seconds)
+    self.assertEqual(20,queue.examples[0].age_seconds)
 
  async def test_cancel_waiting_for_capture_is_not_final_success(self):
   async with self.sessions.begin() as s:

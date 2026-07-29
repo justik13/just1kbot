@@ -67,14 +67,21 @@ def _age(now: datetime, value: datetime | None) -> int | None:
     return max(0, int((now - value.astimezone(timezone.utc)).total_seconds()))
 
 
-async def _snapshot_queue(session, *, name, model, created_column, type_column,
-                          payment_column, lease_seconds, now):
+async def _snapshot_queue(session, *, name, model, created_column, updated_column,
+                          terminal_column, type_column, payment_column, lease_seconds, now):
     due = model.status.in_(("pending", "retry")) & (model.next_attempt_at <= now)
     overdue_cutoff = now - timedelta(seconds=BACKLOG_GRACE_SECONDS)
     overdue = due & (model.next_attempt_at < overdue_cutoff)
     stale_cutoff = now - timedelta(seconds=lease_seconds + HEALTH_LEASE_GRACE_SECONDS)
-    stale = (model.status == "processing") & (model.locked_at < stale_cutoff)
+    malformed_lease = or_(
+        model.locked_at.is_(None), model.locked_by.is_(None), model.locked_by == "",
+    )
+    stale = (model.status == "processing") & or_(
+        malformed_lease, model.locked_at < stale_cutoff,
+    )
     dead = model.status == "dead"
+    processing_age_source = func.coalesce(model.locked_at, updated_column, created_column)
+    dead_age_source = func.coalesce(terminal_column, updated_column, created_column)
     stmt = select(
         func.count().filter(model.status == "pending"),
         func.count().filter(model.status == "retry"),
@@ -84,15 +91,15 @@ async def _snapshot_queue(session, *, name, model, created_column, type_column,
         func.count().filter(stale),
         func.count().filter(dead),
         func.min(model.next_attempt_at).filter(due),
-        func.min(model.locked_at).filter(stale),
-        func.min(created_column).filter(dead),
+        func.min(processing_age_source).filter(stale),
+        func.min(dead_age_source).filter(dead),
     )
     values = (await session.execute(stmt)).one()
     problem = or_(overdue, stale, dead)
     age_source = case(
         (overdue, model.next_attempt_at),
-        (stale, model.locked_at),
-        else_=created_column,
+        (stale, processing_age_source),
+        else_=dead_age_source,
     )
     sample_stmt = select(
         model.id, payment_column, type_column, model.status, model.attempts,
@@ -118,16 +125,19 @@ async def get_payment_queue_health_snapshot(
     queues = (
         await _snapshot_queue(session, name="provider_operations",
             model=PaymentProviderOperation, created_column=PaymentProviderOperation.created_at,
-            type_column=PaymentProviderOperation.operation_type,
+            updated_column=PaymentProviderOperation.updated_at,
+            terminal_column=PaymentProviderOperation.completed_at, type_column=PaymentProviderOperation.operation_type,
             payment_column=PaymentProviderOperation.payment_id,
             lease_seconds=PROVIDER_LEASE_SECONDS, now=now),
         await _snapshot_queue(session, name="fulfillment_operations",
             model=PaymentFulfillmentOperation, created_column=PaymentFulfillmentOperation.created_at,
-            type_column=PaymentFulfillmentOperation.operation_type,
+            updated_column=PaymentFulfillmentOperation.updated_at,
+            terminal_column=PaymentFulfillmentOperation.completed_at, type_column=PaymentFulfillmentOperation.operation_type,
             payment_column=PaymentFulfillmentOperation.payment_id,
             lease_seconds=FULFILLMENT_LEASE_SECONDS, now=now),
         await _snapshot_queue(session, name="webhook_inbox", model=WebhookInbox,
-            created_column=WebhookInbox.received_at, type_column=WebhookInbox.event_type,
+            created_column=WebhookInbox.received_at, updated_column=WebhookInbox.received_at,
+            terminal_column=WebhookInbox.processed_at, type_column=WebhookInbox.event_type,
             payment_column=func.cast(None, PaymentProviderOperation.payment_id.type),
             lease_seconds=WEBHOOK_LEASE_SECONDS, now=now),
     )
