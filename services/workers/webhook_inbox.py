@@ -4,7 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
+from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
 from services.payment_lifecycle import project_legacy_status
 from services.payment_provider_state import apply_provider_transition
 from database.models import PaymentEvent
@@ -50,11 +50,23 @@ async def finalize(session,claim,result):
    await session.execute(insert(PaymentRefund).values(payment_id=payment.id,provider_refund_id=str(refund_id),amount=amount,currency=currency,provider_status="succeeded",event_key=claim.event_key,processed_at=now_utc()).on_conflict_do_nothing(index_elements=["provider_refund_id"]))
    await session.flush(); total=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
    if total==payment.amount:
-    payment.provider_status="refunded"; payment.fulfillment_status="reversal_pending"
-    if payment.manual_review_reason=="partial_refund": payment.reconciliation_status="ok"; payment.manual_review_reason=None
+    payment.provider_status="refunded"
+    reverse_key=f"payment-reverse:{payment.id}"
+    reverse_op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==reverse_key).with_for_update())
+    reversal_entry=await session.scalar(select(EntitlementEntry.id).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
+    reversal_done=payment.fulfillment_status=="reversed" or (reverse_op is not None and reverse_op.status=="succeeded") or reversal_entry is not None
+    if reversal_done:
+     payment.fulfillment_status="reversed"
+    elif reverse_op is not None and reverse_op.status in {"pending","retry","processing"}:
+     payment.fulfillment_status="reversal_pending"
+    elif reverse_op is not None and reverse_op.status in {"dead","cancelled"}:
+     payment.fulfillment_status="manual_review"; payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="reverse_operation_not_runnable"
+    else:
+     payment.fulfillment_status="reversal_pending"
+     await ensure_fulfillment(session,payment,"reverse_payment")
+    if payment.manual_review_reason=="partial_refund" and payment.fulfillment_status!="manual_review": payment.reconciliation_status="ok"; payment.manual_review_reason=None
     pending=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for queued in pending: queued.status="cancelled"; queued.completed_at=now_utc()
-    await ensure_fulfillment(session,payment,"reverse_payment")
    elif total<payment.amount:
     if payment.reconciliation_status not in {"mismatch","manual_review"} or payment.manual_review_reason in {None,"partial_refund"}: payment.reconciliation_status="manual_review"; payment.manual_review_reason="partial_refund"
     payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="partial_refund_recorded",provider_status=payment.provider_status,reason="partial_refund",source="webhook_inbox"))

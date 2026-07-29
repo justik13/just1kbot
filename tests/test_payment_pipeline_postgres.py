@@ -1,12 +1,12 @@
 import os, unittest, uuid
 from datetime import timedelta
 from decimal import Decimal
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
-from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, retry_dead_fulfillment_operation
+from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, reverse, retry_dead_fulfillment_operation
 from services.yookassa_service import YooKassaResult
 from services.payment_service import PaymentService
 from utils.datetime_helpers import now_utc
@@ -97,6 +97,24 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   from services.workers.webhook_inbox import finalize as finalize_inbox
   async with self.sessions.begin() as s:
    p=await self.payment(s); row=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=p.external_id,payment_external_id=p.external_id,payload={},status="processing",attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(row); await s.flush(); await finalize_inbox(s,InboxClaim(row.id,"w",1,row.event_type,row.payment_external_id,None,row.payload,row.event_key),YooKassaResult(True,value=self.snapshot(p,status="pending"))); self.assertEqual(row.status,"retry"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+
+ async def _finalize_duplicate_refund(self,s,p,refund_id="refund-1"):
+  from services.workers.webhook_inbox import finalize as finalize_inbox
+  payload={"object":{"id":refund_id,"payment_id":p.external_id,"amount":{"value":"90.00","currency":"RUB"}}}
+  row=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="refund.succeeded",provider_object_id=refund_id,payment_external_id=p.external_id,payload=payload,status="processing",attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(row); await s.flush()
+  await finalize_inbox(s,InboxClaim(row.id,"w",1,row.event_type,row.payment_external_id,None,row.payload,row.event_key),None); return row
+ async def test_duplicate_full_refund_after_successful_reversal_is_noop(self):
+  async with self.sessions.begin() as s:
+   user=await s.get(User,self.user_id); user.subscription_end=now_utc()+timedelta(days=30); p=await self.payment(s,provider_status="refunded",fulfillment_status="reversal_pending",fulfilled_at=now_utc()); grant=EntitlementEntry(beneficiary_user_id=user.id,source_type="payment",source_id=str(p.id),entry_type="payment_grant",days_delta=30,device_limit_snapshot=2,tariff_id_snapshot=p.tariff_id,metadata_={}); s.add(grant); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="reverse_payment",idempotency_key=f"payment-reverse:{p.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); s.add(PaymentRefund(payment_id=p.id,provider_refund_id="refund-1",amount=p.amount,currency=p.currency,provider_status="succeeded",event_key=uuid.uuid4().hex,processed_at=now_utc())); await s.flush(); await reverse(s,op); original_end=user.subscription_end; reversed_at=p.reversed_at; await self._finalize_duplicate_refund(s,p); self.assertEqual((p.provider_status,p.fulfillment_status,op.status),("refunded","reversed","succeeded")); self.assertEqual(p.reversed_at,reversed_at); self.assertEqual(user.subscription_end,original_end); self.assertEqual(await s.scalar(select(func.count(EntitlementEntry.id)).where(EntitlementEntry.source_id==str(p.id),EntitlementEntry.entry_type=="payment_reversal")),1)
+ async def test_duplicate_full_refund_while_reversal_pending_preserves_operation(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="refunded",fulfillment_status="reversal_pending"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="reverse_payment",idempotency_key=f"payment-reverse:{p.id}",status="pending",payload={"original":True},attempts=2,max_attempts=5,next_attempt_at=now_utc()); s.add_all([op,PaymentRefund(payment_id=p.id,provider_refund_id="refund-1",amount=p.amount,currency=p.currency,provider_status="succeeded",event_key=uuid.uuid4().hex,processed_at=now_utc())]); await s.flush(); await self._finalize_duplicate_refund(s,p); self.assertEqual(p.fulfillment_status,"reversal_pending"); self.assertEqual((op.status,op.attempts,op.payload),("pending",2,{"original":True})); self.assertEqual(await s.scalar(select(func.count(PaymentFulfillmentOperation.id)).where(PaymentFulfillmentOperation.payment_id==p.id,PaymentFulfillmentOperation.operation_type=="reverse_payment")),1)
+ async def test_duplicate_full_refund_with_dead_reversal_requires_review(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="refunded",fulfillment_status="reversal_pending"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="reverse_payment",idempotency_key=f"payment-reverse:{p.id}",status="dead",payload={},attempts=5,max_attempts=5,next_attempt_at=now_utc(),completed_at=now_utc()); s.add_all([op,PaymentRefund(payment_id=p.id,provider_refund_id="refund-1",amount=p.amount,currency=p.currency,provider_status="succeeded",event_key=uuid.uuid4().hex,processed_at=now_utc())]); await s.flush(); await self._finalize_duplicate_refund(s,p); self.assertEqual((op.status,op.attempts),("dead",5)); self.assertEqual((p.fulfillment_status,p.reconciliation_status,p.fulfillment_last_error_code),("manual_review","manual_review","reverse_operation_not_runnable"))
+ async def test_duplicate_refund_inbox_delivery_deduplicates_ledger_and_reversal(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); first=await self._finalize_duplicate_refund(s,p); second=await self._finalize_duplicate_refund(s,p); self.assertEqual((first.status,second.status),("succeeded","succeeded")); self.assertEqual(await s.scalar(select(func.count(PaymentRefund.id)).where(PaymentRefund.payment_id==p.id)),1); self.assertEqual(await s.scalar(select(func.sum(PaymentRefund.amount)).where(PaymentRefund.payment_id==p.id)),p.amount); self.assertEqual(await s.scalar(select(func.count(PaymentFulfillmentOperation.id)).where(PaymentFulfillmentOperation.payment_id==p.id,PaymentFulfillmentOperation.operation_type=="reverse_payment")),1)
 
 @unittest.skipUnless(DB,"TEST_DATABASE_URL is not set")
 class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
