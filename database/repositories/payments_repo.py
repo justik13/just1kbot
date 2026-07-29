@@ -1,4 +1,5 @@
 from decimal import Decimal
+import uuid
 from typing import Optional, List
 
 from sqlalchemy import func, select, update
@@ -25,6 +26,11 @@ async def create_payment(
         tariff_id=tariff_id,
         amount=amount,
         currency=currency,
+        public_order_id="pay_" + uuid.uuid4().hex,
+        provider_idempotency_key=uuid.uuid4().hex,
+        provider_status="creating",
+        fulfillment_status="not_ready",
+        reconciliation_status="ok",
         snapshot_duration_days=snapshot_duration_days,
         snapshot_device_limit=snapshot_device_limit,
         snapshot_amount=(

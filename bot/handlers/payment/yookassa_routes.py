@@ -19,7 +19,6 @@ from database.connection import queue_post_commit_task
 from database.repositories.payments_repo import (
     get_payment_by_id,
     get_payment_by_id_simple,
-    mark_payment_as_cancelled,
 )
 from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.tariffs_repo import get_tariff_by_id
@@ -87,12 +86,15 @@ async def _create_and_show_payment(
         telegram_id=db_user.telegram_id,
         bot_username=bot_info.username,
     )
-    if not payment or not payment.payment_url:
-        await render_hub(
-            target.bot, target.chat.id,
-            texts.ERROR_PAYMENT_SERVICE,
-            get_back_button(back_callback),
-        )
+    if not payment:
+        await render_hub(target.bot,target.chat.id,texts.ERROR_PAYMENT_SERVICE,get_back_button(back_callback))
+        return
+    if not payment.payment_url:
+        builder=InlineKeyboardBuilder()
+        builder.button(text="Обновить",callback_data=f"check_payment:{payment.id}")
+        builder.button(text="Назад",callback_data=back_callback)
+        builder.adjust(1)
+        await render_hub(target.bot,target.chat.id,"⏳ Создаём ссылку на оплату.\nНажмите «Обновить», чтобы проверить готовность.",builder.as_markup())
         return
 
     queue_post_commit_task(
@@ -236,6 +238,19 @@ async def check_payment_status(
         )
     )
 
+    if success and isinstance(result_code,dict):
+        provider=result_code["provider_status"]; fulfillment=result_code["fulfillment_status"]
+        if fulfillment=="succeeded": message="✅ Доступ активирован."
+        elif provider=="succeeded": message="✅ Оплата подтверждена.\n⏳ Обновляем подписку и доступ."
+        elif payment_simple.payment_url and payment_simple.checkout_status=="active" and provider not in {"canceled","refunded"}:
+            message=texts.PAYMENT_YOOKASSA_INSTRUCTIONS.format(amount=payment_simple.amount,payment_url=safe(payment_simple.payment_url))
+            keyboard=get_yookassa_payment_keyboard(payment_simple.payment_url,payment_simple.id,payment_simple.tariff_id,"refresh")
+            await render_hub(callback.bot,callback.message.chat.id,message,keyboard,parse_mode="HTML")
+            return
+        elif payment_simple.checkout_status=="abandoned" or provider in {"canceled","refunded"}: message="Этот платёж больше не доступен для оплаты."
+        else: message="⏳ Создаём ссылку на оплату.\nНажмите «Обновить», чтобы проверить готовность."
+        await render_hub(callback.bot,callback.message.chat.id,message,get_back_button("back_to_main_menu"))
+        return
     if success and result_code in ("success", "already_processed"):
         payment = await get_payment_by_id(session, payment_id)
         user = await get_user_by_telegram_id(
@@ -377,50 +392,12 @@ async def cancel_invoice(
         return
 
     try:
-        api_cancelled = await PaymentService.cancel_payment_via_api(
-            session, payment_id,
-        )
-        if not api_cancelled:
-            logger.warning(
-                "cancel_invoice: API cancel returned False "
-                "for payment %s.",
-                payment_id,
-            )
-        was_cancelled = await mark_payment_as_cancelled(
-            session, payment_id,
-        )
+        queued = await PaymentService.cancel_payment_via_api(session,payment_id)
     except Exception as e:
-        logger.warning(
-            f"Failed to cancel payment {payment_id}: {e}"
-        )
-        was_cancelled = False
-
+        logger.warning("Failed to queue cancellation %s: %s",payment_id,e)
+        queued = False
     await state.clear()
-
-    if was_cancelled:
-        await callback.answer(texts.PAYMENT_INVOICE_CANCELLED, show_alert=False)
-    else:
-        refreshed = await get_payment_by_id_simple(
-            session, payment_id,
-        )
-        if refreshed and refreshed.status == "completed":
-            await callback.answer(
-                texts.PAYMENT_ALREADY_PROCESSED,
-                show_alert=True,
-            )
-        elif (
-            refreshed
-            and refreshed.status == "requires_manual_review"
-        ):
-            await callback.answer(
-                "Платёж на проверке. Обратитесь в поддержку.",
-                show_alert=True,
-            )
-        else:
-            await callback.answer(
-                texts.PAYMENT_INVOICE_CANCELLED,
-                show_alert=False,
-            )
+    await callback.answer("Запрос на отмену поставлен в очередь" if queued else texts.PAYMENT_ALREADY_PROCESSED,show_alert=not queued)
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if tariff and tariff.is_active:

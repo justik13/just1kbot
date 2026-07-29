@@ -33,10 +33,9 @@ YOOKASSA_IP_RANGES = [
     "2a02:5180::/32",
 ]
 
-REFUND_EVENTS = {
-    "refund.succeeded",
-    "payment.refunded",
-}
+OFFICIAL_YOOKASSA_EVENTS = {"payment.waiting_for_capture","payment.succeeded","payment.canceled","refund.succeeded"}
+LEGACY_UNSUPPORTED_EVENTS = {"payment.refunded"}
+REFUND_EVENTS = {"refund.succeeded","payment.refunded"}
 
 
 def _is_yookassa_ip(ip: str) -> bool:
@@ -226,231 +225,44 @@ async def _verify_stale_webhook_via_api(
     return True, api_data
 
 
-async def yookassa_webhook_handler(
-    request: web.Request,
-) -> web.Response:
+async def yookassa_webhook_handler(request: web.Request) -> web.Response:
+    """Authenticate, validate and durably persist only; workers own all effects."""
+    import hashlib, json
+    from sqlalchemy.dialects.postgresql import insert
+    from database.models import WebhookInbox
     request_id = uuid.uuid4().hex[:8]
     set_request_id(request_id)
-    transaction_id = None
-    status = None
-
+    peer_ip = _get_real_ip(request)
+    if not peer_ip or not _is_yookassa_ip(peer_ip):
+        return web.Response(status=403, text="Forbidden")
+    if request.content_length is not None and request.content_length > 262144:
+        return web.Response(status=413, text="Payload too large")
     try:
-        peer_ip = _get_real_ip(request)
-        if not peer_ip or not _is_yookassa_ip(peer_ip):
-            logger.warning(
-                "[%s] Webhook BLOCKED from unknown IP: %s",
-                request_id, peer_ip,
-            )
-            return web.Response(status=403, text="Forbidden")
-
-        try:
-            raw_data = await request.json()
-        except Exception as e:
-            logger.error(
-                "[%s] Failed to parse webhook JSON: %s",
-                request_id, e,
-            )
-            return web.Response(status=400, text="Invalid JSON")
-
-        event = raw_data.get("event", "")
-        webhook_object = raw_data.get("object", {})
-
+        payload = await request.json()
+        event = payload.get("event")
+        if event not in OFFICIAL_YOOKASSA_EVENTS|LEGACY_UNSUPPORTED_EVENTS: raise ValueError("unsupported_event")
+        obj = payload.get("object")
+        if not isinstance(event, str) or not isinstance(obj, dict): raise ValueError("structure")
         if event in REFUND_EVENTS:
-            transaction_id = (
-                webhook_object.get("payment_id")
-                or webhook_object.get("id")
-            )
+            provider_object_id = obj.get("id")
+            payment_external_id = obj.get("payment_id") or obj.get("payment", {}).get("id")
         else:
-            transaction_id = webhook_object.get("id")
-
-        status = YooKassaService.normalize_webhook_event(event)
-
-        if not transaction_id:
-            logger.warning(
-                "[%s] Webhook missing payment ID.", request_id,
-            )
-            return web.Response(
-                status=400, text="Missing payment ID",
-            )
-
-        valid_statuses = {
-            "CONFIRMED", "CANCELED", "CHARGEBACKED",
-            "WAITING_FOR_CAPTURE",
-        }
-        if status not in valid_statuses:
-            logger.warning(
-                "[%s] Unknown webhook status: %s (payment=%s)",
-                request_id, status, transaction_id,
-            )
-            return web.Response(status=400, text="Invalid status")
-
-        created_at = webhook_object.get("created_at")
-        if not created_at:
-            logger.warning(
-                "[%s] Webhook missing created_at. payment=%s",
-                request_id, transaction_id,
-            )
-            return web.Response(
-                status=400, text="Missing created_at",
-            )
-
-        if status == "WAITING_FOR_CAPTURE":
-            logger.info(
-                "[%s] Webhook received: payment=%s, "
-                "status=WAITING_FOR_CAPTURE. Returning 200 OK.",
-                request_id, transaction_id,
-            )
-            return web.Response(status=200, text="OK")
-
-        callback_amount_str = None
-        callback_currency = None
-        amount_obj = webhook_object.get("amount")
-        if isinstance(amount_obj, dict):
-            callback_amount_str = amount_obj.get("value")
-            callback_currency = amount_obj.get("currency")
-        callback_amount = _safe_decimal(callback_amount_str)
-
-        if not _is_recent_timestamp(created_at):
-            logger.info(
-                "[%s] Stale webhook detected, verifying via API. "
-                "payment=%s",
-                request_id, transaction_id,
-            )
-            stale_ok, stale_api_data = (
-                await _verify_stale_webhook_via_api(
-                    webhook_object, status, transaction_id,
-                )
-            )
-            if not stale_ok:
-                logger.warning(
-                    "[%s] Stale webhook rejected: payment=%s",
-                    request_id, transaction_id,
-                )
-                return web.Response(
-                    status=400,
-                    text="Stale webhook unverified",
-                )
-            if stale_api_data:
-                api_amount = stale_api_data.get("amount", {})
-                if isinstance(api_amount, dict):
-                    if api_amount.get("value"):
-                        callback_amount = _safe_decimal(
-                            api_amount["value"]
-                        )
-                    if api_amount.get("currency"):
-                        callback_currency = api_amount["currency"]
-
-        metadata = webhook_object.get("metadata") or {}
-        payload = metadata.get("payload", "")
-
-        logger.info(
-            "[%s] Webhook received: payment=%s, status=%s, "
-            "amount=%s, currency=%s",
-            request_id, transaction_id, status,
-            callback_amount, callback_currency,
-        )
-
-        try:
-            async with session_scope() as session:
-                try:
-                    await AuditService.log_action(
-                        session,
-                        admin_id=0,
-                        action="YOOKASSA_CALLBACK",
-                        target_type="Payment",
-                        target_id=None,
-                        details=(
-                            f"[{request_id}] "
-                            f"payment={transaction_id}, "
-                            f"status={status}, "
-                            f"amount={callback_amount}"
-                        ),
-                    )
-                except Exception as e:
-                    logger.error(
-                        "[%s] Failed to log audit: %s",
-                        request_id, e,
-                    )
-
-                success, result_code = (
-                    await PaymentService.handle_yookassa_callback(
-                        transaction_id=transaction_id,
-                        status=status,
-                        payload=payload,
-                        callback_amount=callback_amount,
-                        callback_currency=callback_currency,
-                    )
-                )
-
-            if success:
-                if result_code == "not_found":
-                    logger.warning(
-                        "[%s] Payment not found: %s",
-                        request_id, transaction_id,
-                    )
-                    try:
-                        await _send_payment_not_found_alert_now(
-                            {
-                                "transaction_id": transaction_id,
-                                "status": status,
-                                "source": "yookassa_webhook",
-                            }
-                        )
-                    except Exception:
-                        pass
-                    return web.Response(
-                        status=404, text="Payment not found",
-                    )
-                return web.Response(status=200, text="OK")
-            else:
-                if result_code == "not_found":
-                    try:
-                        await _send_payment_not_found_alert_now(
-                            {
-                                "transaction_id": transaction_id,
-                                "status": status,
-                                "source": "yookassa_webhook",
-                            }
-                        )
-                    except Exception:
-                        pass
-                    return web.Response(
-                        status=404, text="Payment not found",
-                    )
-                elif result_code in (
-                    "amount_mismatch",
-                    "payload_mismatch",
-                    "manual_review",
-                    "refunded",
-                    "paid_after_cancel",
-                ):
-                    return web.Response(status=200, text="OK")
-                elif result_code == "error":
-                    return web.Response(
-                        status=500, text="Processing failed",
-                    )
-                else:
-                    return web.Response(
-                        status=500, text="Unknown error",
-                    )
-
-        except Exception as e:
-            logger.error(
-                "[%s] Webhook DB error: %s",
-                request_id, e, exc_info=True,
-            )
-            return web.Response(
-                status=500, text="Internal server error",
-            )
-
-    except Exception as e:
-        logger.error(
-            "[%s] Webhook error: %s",
-            request_id, e, exc_info=True,
-        )
-        return web.Response(
-            status=500, text="Internal server error",
-        )
+            provider_object_id = payment_external_id = obj.get("id")
+        if not provider_object_id or not payment_external_id or not obj.get("created_at"): raise ValueError("identity")
+        metadata = obj.get("metadata") or {}
+        public_order_id = metadata.get("order_id")
+        canonical=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False)
+        event_key=hashlib.sha256(canonical.encode()).hexdigest()
+    except Exception:
+        return web.Response(status=400,text="Invalid webhook")
+    try:
+        async with session_scope() as session:
+            await session.execute(insert(WebhookInbox).values(provider="yookassa",event_key=event_key,event_type=event,provider_object_id=str(provider_object_id),payment_external_id=str(payment_external_id),public_order_id=public_order_id,payload=payload).on_conflict_do_nothing(constraint="uq_webhook_inbox_provider_event_key"))
+            await session.commit()
+    except Exception:
+        logger.exception("[%s] webhook inbox commit failed",request_id)
+        return web.Response(status=500,text="Database unavailable")
+    return web.Response(status=200,text="OK")
 
 
 # ──────────────────────────────────────────────────────────────
