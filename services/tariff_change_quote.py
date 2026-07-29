@@ -12,7 +12,8 @@ from sqlalchemy import func, select
 
 from database.models import Tariff, TariffQuote, TariffVersion, VPNProfile
 from database.repositories.tariff_quotes_repo import (
-    QUOTE_LIFETIME, expire_quotes, get_or_create_current_version, lock_checkout_user,
+    QUOTE_LIFETIME, get_active_financial_quotes_for_update,
+    get_or_create_current_version, lock_checkout_user,
 )
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_value_calculator import (
@@ -27,18 +28,27 @@ class TariffChangeQuoteResult:
     failure_code: str | None = None
 
 
+class SnapshotCanonicalizationError(ValueError):
+    """A snapshot contains a value without a safe canonical representation."""
+
+
 def _decimal(value: Decimal) -> str:
     value = Decimal(value)
+    if not value.is_finite():
+        raise SnapshotCanonicalizationError("Decimal must be finite")
     if value == 0:
         return "0"
-    return format(value, "f")
+    fixed = format(value, "f")
+    if "." in fixed:
+        fixed = fixed.rstrip("0").rstrip(".")
+    return fixed
 
 
 def _timestamp(value: datetime | None) -> str | None:
     if value is None:
         return None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        raise SnapshotCanonicalizationError("timestamp must be timezone-aware")
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
@@ -58,7 +68,8 @@ def balance_snapshot_fingerprint(*, user_id: int, subscription_end: datetime, sn
         "segment_start": _timestamp(x.segment_start), "segment_end": _timestamp(x.segment_end),
     } for x in snapshot.bonus_lots]
     body = {
-        "user_id": user_id, "subscription_end": _timestamp(subscription_end),
+        "user_id": user_id, "balance_as_of": _timestamp(snapshot.as_of),
+        "subscription_end": _timestamp(subscription_end),
         "remaining_paid_hours": snapshot.remaining_paid_hours,
         "remaining_paid_value": _decimal(snapshot.remaining_paid_value_rub),
         "remaining_bonus_hours": snapshot.remaining_bonus_hours,
@@ -86,50 +97,71 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     if user.current_tariff_id is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
 
-    await expire_quotes(session, user_id, as_of)
-    active = (await session.scalars(select(TariffQuote).where(
-        TariffQuote.user_id == user_id, TariffQuote.status == "active"
-    ).with_for_update())).all()
+    active = await get_active_financial_quotes_for_update(
+        session, user_id=user_id, as_of=as_of)
     if any(q.operation_type in {"purchase", "renew"} for q in active):
         return TariffChangeQuoteResult(failure_code="active_checkout_exists")
 
-    target = await session.get(Tariff, target_tariff_id)
+    tariffs = (await session.scalars(select(Tariff).where(
+        Tariff.id.in_({user.current_tariff_id, target_tariff_id})
+    ).order_by(Tariff.id).with_for_update())).all()
+    by_id = {x.id: x for x in tariffs}
+    source = by_id.get(user.current_tariff_id)
+    target = by_id.get(target_tariff_id)
+    if source is None:
+        return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
     if target is None:
         return TariffChangeQuoteResult(failure_code="target_tariff_not_found")
     if not target.is_active:
         return TariffChangeQuoteResult(failure_code="target_tariff_inactive")
     if target.id == user.current_tariff_id:
         return TariffChangeQuoteResult(failure_code="same_tariff_requires_renew")
+    if source.duration_days <= 0 or source.price_rub <= 0 or source.device_limit <= 0 \
+            or target.duration_days <= 0 or target.price_rub <= 0 or target.device_limit <= 0:
+        return TariffChangeQuoteResult(failure_code="target_tariff_inactive")
     profiles = await session.scalar(select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id))
     if profiles > target.device_limit:
         return TariffChangeQuoteResult(failure_code="target_device_limit_too_small")
 
     snapshot = await get_subscription_balance_snapshot(
         session, user_id=user_id, as_of=as_of, locked_user=user)
-    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
-        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
-
     version_ids = {lot.tariff_version_id for lot in snapshot.paid_lots}
     lot_versions = (await session.scalars(select(TariffVersion).where(TariffVersion.id.in_(version_ids)))).all() if version_ids else []
     if len(lot_versions) != len(version_ids) or any(v.tariff_id != user.current_tariff_id for v in lot_versions):
         return TariffChangeQuoteResult(failure_code="mixed_source_tariffs")
-
-    tariffs = (await session.scalars(select(Tariff).where(
-        Tariff.id.in_({user.current_tariff_id, target.id})
-    ).order_by(Tariff.id).with_for_update())).all()
-    by_id = {x.id: x for x in tariffs}
-    source = by_id.get(user.current_tariff_id)
-    target = by_id.get(target.id)
-    if source is None or target is None:
-        return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
     source_version = await get_or_create_current_version(session, source)
     target_version = await get_or_create_current_version(session, target)
 
     existing_change = next((q for q in active if q.operation_type == "change"), None)
     if existing_change:
-        if existing_change.target_tariff_version_id == target_version.id:
+        source_version_tariff_id = await session.scalar(select(TariffVersion.tariff_id).where(
+            TariffVersion.id == existing_change.source_tariff_version_id))
+        same_history = (
+            existing_change.source_subscription_end == user.subscription_end
+            and sorted(existing_change.source_entitlement_entry_ids or [])
+                == sorted(snapshot.source_entitlement_entry_ids)
+            and sorted(existing_change.source_ledger_entry_ids or [])
+                == sorted(snapshot.source_ledger_entry_ids)
+            and source_version_tariff_id == user.current_tariff_id
+        )
+        if existing_change.target_tariff_version_id == target_version.id and same_history:
             return TariffChangeQuoteResult(existing_change, False, None)
-        return TariffChangeQuoteResult(failure_code="active_change_quote_exists")
+        if existing_change.target_tariff_version_id == target_version.id and not same_history:
+            if existing_change.payment_id is not None:
+                existing_change.status = "manual_review"
+                existing_change.manual_review_at = as_of
+                existing_change.diagnostic_reason = "source_balance_changed"
+                await session.flush()
+                return TariffChangeQuoteResult(failure_code="active_change_quote_stale")
+            existing_change.status = "cancelled"
+            existing_change.diagnostic_reason = "source_balance_changed"
+            await session.flush()
+            existing_change = None
+        if existing_change is not None:
+            return TariffChangeQuoteResult(failure_code="active_change_quote_exists")
+
+    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
+        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
 
     required = max(Decimal(0), target_version.price_rub - snapshot.remaining_paid_value_rub).quantize(
         Decimal("1"), rounding=ROUND_CEILING)

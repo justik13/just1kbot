@@ -57,19 +57,29 @@ async def expire_quotes(session: AsyncSession, user_id: int, as_of=None) -> None
         quote.status = "expired"
 
 
+async def get_active_financial_quotes_for_update(
+    session: AsyncSession, *, user_id: int, as_of=None,
+) -> list[TariffQuote]:
+    """Expire then lock financial quotes; caller already owns the user lock."""
+    await expire_quotes(session, user_id, as_of)
+    return list((await session.scalars(select(TariffQuote).where(
+        TariffQuote.user_id == user_id,
+        TariffQuote.status == "active",
+        TariffQuote.operation_type.in_(("purchase", "renew", "change")),
+    ).order_by(TariffQuote.id).with_for_update())).all())
+
+
 async def get_or_create_checkout_quote(
     session: AsyncSession, *, user_id: int, tariff: Tariff, operation_type: str,
 ) -> tuple[TariffQuote, TariffVersion]:
     if operation_type not in {"purchase", "renew"}:
         raise ValueError("checkout quote must be purchase or renew")
-    await expire_quotes(session, user_id)
+    active = await get_active_financial_quotes_for_update(session, user_id=user_id)
+    if any(row.operation_type == "change" for row in active):
+        raise CheckoutQuoteConflictError("active_tariff_change_quote_exists")
     version = await get_or_create_current_version(session, tariff)
-    existing = await session.scalar(select(TariffQuote).where(
-        TariffQuote.user_id == user_id,
-        TariffQuote.target_tariff_version_id == version.id,
-        TariffQuote.operation_type.in_(("purchase","renew")),
-        TariffQuote.status == "active",
-    ))
+    existing = next((row for row in active if row.operation_type in {"purchase", "renew"}
+                     and row.target_tariff_version_id == version.id), None)
     if existing:
         if (existing.operation_type != operation_type or
             existing.confirmed_payment_required_rub != version.price_rub or
