@@ -12,11 +12,21 @@ from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
 
-_PROJECT_DIR = os.environ.get(
-    "just1kbot_DIR",
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-)
-HEARTBEAT_FILE = Path(_PROJECT_DIR) / ".heartbeat"
+PRODUCTION_HEARTBEAT_FILE = Path("/opt/just1kbot/.heartbeat")
+
+
+def get_heartbeat_file() -> Path:
+    """Return the production path unless explicitly overridden for local use."""
+    explicit_file = os.environ.get("JUST1KBOT_HEARTBEAT_FILE")
+    if explicit_file:
+        return Path(explicit_file)
+    project_dir = os.environ.get("just1kbot_DIR")
+    if project_dir:
+        return Path(project_dir) / ".heartbeat"
+    return PRODUCTION_HEARTBEAT_FILE
+
+
+HEARTBEAT_FILE = get_heartbeat_file()
 HEARTBEAT_INTERVAL = 60.0
 
 # ИСПРАВЛЕНО: TTLCache вместо бесконечного dict.
@@ -26,18 +36,26 @@ _API_ALERT_COOLDOWN = 1800.0
 _bot_ref = None
 
 
-async def heartbeat_loop(shutdown_event: asyncio.Event):
+async def heartbeat_loop(
+    shutdown_event: asyncio.Event,
+    health_check=lambda: True,
+    *,
+    interval: float | None = None,
+):
+    heartbeat_interval = HEARTBEAT_INTERVAL if interval is None else interval
     logger.info(f"Heartbeat worker started, file={HEARTBEAT_FILE}")
-    _write_heartbeat()
+    if health_check():
+        _write_heartbeat()
 
     while not shutdown_event.is_set():
         try:
             try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=HEARTBEAT_INTERVAL)
+                await asyncio.wait_for(shutdown_event.wait(), timeout=heartbeat_interval)
                 break
             except asyncio.TimeoutError:
                 pass
-            _write_heartbeat()
+            if health_check():
+                _write_heartbeat()
             await _check_circuit_breakers()
         except asyncio.CancelledError:
             logger.info("Heartbeat worker cancelled")
@@ -46,9 +64,10 @@ async def heartbeat_loop(shutdown_event: asyncio.Event):
             logger.error(f"Heartbeat worker error: {e}", exc_info=True)
             if shutdown_event.is_set():
                 break
-            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            await asyncio.sleep(heartbeat_interval)
 
-    _write_heartbeat(final=True)
+    if health_check():
+        _write_heartbeat(final=True)
     logger.info("Heartbeat worker stopped gracefully")
 
 
