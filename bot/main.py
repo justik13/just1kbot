@@ -1,7 +1,6 @@
 import asyncio
 import html
 import logging
-import re
 import signal
 import traceback
 
@@ -41,6 +40,11 @@ from services.workers import (
     shutdown_event,
 )
 from services.workers.heartbeat import set_bot_ref
+from utils.logging_security import (
+    install_sensitive_data_filter,
+    sanitize_short,
+    sanitize_text,
+)
 from bot.handlers.webhook import setup_webhook_routes
 from bot.handlers.admin.broadcast import (
     resume_pending_broadcasts,
@@ -58,6 +62,7 @@ logging.basicConfig(
 )
 
 root_logger = logging.getLogger()
+install_sensitive_data_filter(root_logger)
 root_logger.addFilter(CorrelationFilter())
 for handler in root_logger.handlers:
     handler.addFilter(CorrelationFilter())
@@ -67,58 +72,6 @@ logger = logging.getLogger(__name__)
 _error_alert_cache: TTLCache[str, bool] = TTLCache(
     maxsize=10000, ttl=300.0
 )
-
-_SECRET_PATTERNS = [
-    (
-        re.compile(
-            r"(?i)(api[_-]?key|x-api-key|access[_-]?token|"
-            r"bot[_-]?token|secret|password|passwd|"
-            r"authorization|bearer)\s*[:=]\s*\S+"
-        ),
-        r"\1=[REDACTED]",
-    ),
-    (
-        re.compile(r"[a-z]+://[^:]+:[^@]+@"),
-        "[DB_URL_REDACTED]",
-    ),
-    (
-        re.compile(r"(?i)Fernet\([^\)]*\)"),
-        "Fernet([REDACTED])",
-    ),
-    (
-        re.compile(
-            r"eyJ[A-Za-z0-9_\-]{10,}\."
-            r"[A-Za-z0-9_\-]{10,}\."
-            r"[A-Za-z0-9_\-]{10,}"
-        ),
-        "[JWT_REDACTED]",
-    ),
-    (
-        re.compile(r"[A-Za-z0-9+/]{40,}={0,2}"),
-        "[LONG_TOKEN_REDACTED]",
-    ),
-    (
-        re.compile(r"vpn://[A-Za-z0-9_-]{20,}"),
-        "[VPN_URI_REDACTED]",
-    ),
-]
-
-
-def _sanitize_text(text: str) -> str:
-    if not text:
-        return ""
-    sanitized = text
-    for pattern, replacement in _SECRET_PATTERNS:
-        sanitized = pattern.sub(replacement, sanitized)
-    return sanitized
-
-
-def _sanitize_short(text: str, limit: int = 200) -> str:
-    sanitized = _sanitize_text(text)
-    if len(sanitized) <= limit:
-        return sanitized
-    return sanitized[:limit] + "..."
-
 
 async def global_error_handler(
     event: ErrorEvent, **kwargs
@@ -134,7 +87,7 @@ async def global_error_handler(
             type(exception), exception, exception.__traceback__
         )
         tb_text = "".join(tb_lines)
-        tb_sanitized = _sanitize_text(tb_text)
+        tb_sanitized = sanitize_text(tb_text)
 
         if len(tb_sanitized) > 4000:
             tb_sanitized = tb_sanitized[:4000] + "\n...[truncated]"
@@ -161,7 +114,7 @@ async def global_error_handler(
         settings = get_settings()
         error_type_safe = html.escape(error_type)
         error_short = html.escape(
-            _sanitize_short(str(exception), 200)
+            sanitize_short(str(exception), 200)
         )
 
         error_msg = texts.ALERT_CRITICAL_BOT_ERROR.format(

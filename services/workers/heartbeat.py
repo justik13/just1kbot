@@ -8,6 +8,7 @@ from cachetools import TTLCache
 
 from services.amnezia_client import _circuit_breakers
 from config.settings import get_settings
+from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
 
@@ -65,7 +66,8 @@ async def _check_circuit_breakers():
         if now - last_alert < _API_ALERT_COOLDOWN:
             continue
 
-        server_name = api_url
+        safe_target = safe_url_target(api_url)
+        server_name = safe_target
         try:
             async with session_scope() as session:
                 server = await get_server_by_api_url(session, api_url)
@@ -77,7 +79,7 @@ async def _check_circuit_breakers():
         alert_msg = (
             f"⚠️ <b>Сервер Amnezia недоступен!</b>\n"
             f"🌍 <b>{server_name}</b>\n"
-            f"🔗 <code>{api_url}</code>\n"
+            f"🔗 <code>{safe_target}</code>\n"
             f"❌ CircuitBreaker перешёл в OPEN\n"
             f"🔄 Попытки восстановления каждые {cb.recovery_timeout:.0f}с\n"
             f"💡 Проверьте сервер вручную"
@@ -90,7 +92,11 @@ async def _check_circuit_breakers():
                 except Exception as e:
                     logger.warning("Failed to send CB alert to admin %s: %s", admin_id, e)
         else:
-            logger.warning("CircuitBreaker OPEN for server '%s' (%s). bot_ref is None.", server_name, api_url)
+            logger.warning(
+                "CircuitBreaker OPEN for server '%s' (%s). bot_ref is None.",
+                server_name,
+                safe_target,
+            )
 
         _api_alert_sent[api_url] = now
 
