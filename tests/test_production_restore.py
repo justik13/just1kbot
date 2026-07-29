@@ -27,6 +27,16 @@ class ProductionRestoreContractTests(unittest.TestCase):
         self.assertIn("sys.stdin.buffer.read", self.lock_helper)
         self.assertIn("pg_advisory_unlock", self.lock_helper)
         self.assertIn("start_advisory_lock", self.text); self.assertIn("stop_advisory_lock", self.text)
+        self.assertIn("RESTORE_ADVISORY_STOP_SECONDS", self.text)
+        self.assertIn("kill -TERM", self.text); self.assertIn("kill -KILL", self.text)
+        self.assertIn("advisory_lock_held", self.text)
+
+    def test_psql_value_parameters_are_sent_over_stdin(self):
+        for helper in ("db_exists(){", "database_size(){", "database_owner(){", "database_attributes(){", "terminate_db(){"):
+            self.assertIn(helper, self.text)
+        self.assertIn("WHERE datname = :'target_db';", self.text)
+        self.assertNotIn('-v target="$1" -c', self.text)
+        self.assertNotIn('-v target="$PRODUCTION_DB" -c', self.text)
 
     def test_artifact_is_rechecked_and_private_copy_is_made(self):
         self.assertGreaterEqual(self.text.count('fingerprint "$canonical"'), 3)
@@ -47,11 +57,17 @@ class ProductionRestoreContractTests(unittest.TestCase):
         self.assertIn("requires_manual_recovery", self.text)
         self.assertIn("CRITICAL_RECOVERY_EXIT=43", self.text)
         self.assertNotIn("service_stopped=false", self.text)
+        automatic = self.text[self.text.index("stage=automatic_rollback"):]
+        self.assertIn("if ! stop_service", automatic)
+        self.assertNotIn("service stop>/dev/null||true", automatic)
 
     def test_strict_manifest_states_and_schema(self):
         for state in ("in_progress", "failed_safe", "success", "rolled_back", "requires_manual_recovery", "rollback_failed", "finalized"):
             self.assertIn(state, self.text)
         self.assertIn("set(d)!=required", self.text); self.assertIn("operation_database_state_mismatch", self.text)
+        self.assertIn("production!=os.environ['EXPECTED_PRODUCTION_DB']", self.text)
+        for stage in ("emergency_created", "emergency_verified", "emergency_rehearsed"):
+            self.assertIn(stage, self.text)
 
     def test_exact_backup_result_and_persistent_pin(self):
         self.assertIn("BACKUP_RESULT_FILE", self.backup); self.assertIn("BACKUP_ARTIFACT_PIN", self.backup)

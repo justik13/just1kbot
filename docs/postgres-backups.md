@@ -113,3 +113,12 @@ outside the configured backup directory, missing sidecars/pins, and checksum
 changes. Finalization strictly verifies and fully rehearses both the original
 emergency artifact and a new pinned production backup before rechecking health and
 deleting the exact manifest-recorded previous database.
+
+The maintenance SQL helpers pass database values to `psql` variables only while SQL
+is read from stdin; they never rely on variable expansion inside `psql -c`. Every
+operation manifest is bound to the configured production database, and a mismatch
+makes inspection report an invalid operation while rollback/finalize stop before any
+service or database action. Emergency creation is recorded before validation, with
+separate `emergency_created`, `emergency_verified`, and `emergency_rehearsed` stages.
+The advisory helper release is bounded: cleanup closes its pipe, then escalates from
+a timed wait to TERM and KILL, recording the safe cleanup status in the manifest.

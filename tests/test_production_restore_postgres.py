@@ -24,7 +24,7 @@ class RestoreProductionScriptIntegration(unittest.TestCase):
         self._drop(self.prod); self._createdb(self.prod); self._migrate(self.prod); self._sql(self.prod,"CREATE TABLE restore_probe(value text NOT NULL); INSERT INTO restore_probe VALUES ('SOURCE')")
         self.state=self.root/"service.state"; self.state.write_text("active")
         self.adapter=self.bin/"service-adapter"; self.adapter.write_text(f'''#!/bin/bash
-case "$1" in stop) echo inactive >"{self.state}";; start) [[ ! -f "{self.root/'start-fail'}" ]] || exit 9; echo active >"{self.state}";; is-active) [[ $(cat "{self.state}") == active ]];; *) exit 2;; esac
+case "$1" in stop) if [[ -f "{self.root/'reject-rollback-stop'}" ]] && [[ $(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/null) == TARGET ]]; then exit 9; fi; echo inactive >"{self.state}";; start) [[ ! -f "{self.root/'start-fail'}" ]] || exit 9; echo active >"{self.state}";; is-active) [[ $(cat "{self.state}") == active ]];; *) exit 2;; esac
 '''); self.adapter.chmod(0o755)
         self.health=self.bin/"health"; self.health.write_text(f'''#!/bin/bash
 value=$(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/null) || exit 1
@@ -80,11 +80,26 @@ value=$(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/n
         self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE")
         m=self._manifest(); self.assertEqual(m["result"],"rolled_back"); self.assertEqual(self._sql(m["failed_candidate_name"],"SELECT value FROM restore_probe"),"TARGET"); self.assertTrue(pathlib.Path(m["emergency_backup_path"]+".pin").exists())
 
+    def test_postgresql_helpers_use_safe_stdin_parameters(self):
+        sleeper=subprocess.Popen(["psql","-XAt","-d",self.prod,"-c","SELECT pg_sleep(60)"],env=self.pg,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        deadline=time.time()+10
+        while time.time()<deadline and self._sql("postgres",f"SELECT count(*) FROM pg_stat_activity WHERE datname='{self.prod}'") == "0": time.sleep(.1)
+        r=subprocess.run([OPS/"restore_production.sh","--test-pg-helpers"],env=self._restore_env()|{"RESTORE_TEST_HELPER_DATABASE":self.prod},text=True,capture_output=True,timeout=30)
+        self.assertEqual(r.returncode,0,r.stderr); self.assertIn("exists=true",r.stdout); self.assertIn("size=positive",r.stdout); self.assertIn(f"owner={self.pg['PGUSER']}",r.stdout); self.assertIn("attributes=present",r.stdout); self.assertIn("terminate=success",r.stdout)
+        sleeper.wait(timeout=10); self.assertNotEqual(sleeper.returncode,0)
+        bad=subprocess.run([OPS/"restore_production.sh","--test-pg-helpers"],env=self._restore_env()|{"RESTORE_TEST_HELPER_DATABASE":"bad';DROP_DATABASE"},capture_output=True); self.assertNotEqual(bad.returncode,0)
+
     def test_rollback_failure_is_nonterminal_and_blocks_next_restore(self):
         (self.root/"fail-target").touch(); r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":"4"}); self.assertEqual(r.returncode,42,r.stderr)
         self.assertEqual(self._manifest()["result"],"rollback_failed")
         again=self._run(); self.assertNotEqual(again.returncode,0); self.assertIn("incomplete_operation_exists",again.stderr)
         before={p.name:p.read_bytes() for p in self.opsdir.iterdir()}; inspect=subprocess.run([OPS/"restore_production.sh","--inspect-incomplete"],env=self._restore_env(),text=True,capture_output=True); self.assertEqual(inspect.returncode,0,inspect.stderr); self.assertEqual(before,{p.name:p.read_bytes() for p in self.opsdir.iterdir()})
+
+    def test_rollback_stop_failure_performs_no_rollback_rename(self):
+        (self.root/"fail-target").touch(); (self.root/"reject-rollback-stop").touch(); r=self._run(); self.assertEqual(r.returncode,42,r.stderr)
+        m=self._manifest(); self.assertEqual(m["result"],"rollback_failed"); self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"TARGET")
+        self.assertEqual(self._sql(m["previous_database_quarantine_name"],"SELECT value FROM restore_probe"),"SOURCE"); self.assertFalse(m["failed_candidate_name"] and self._sql("postgres",f"SELECT count(*) FROM pg_database WHERE datname='{m['failed_candidate_name']}'")!="0")
+        again=self._run(); self.assertNotEqual(again.returncode,0)
 
     def test_first_and_second_rename_failures_recover_old_service(self):
         for number in ("1","2"):
@@ -92,6 +107,11 @@ value=$(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/n
                 r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":number}); self.assertNotEqual(r.returncode,0); self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE"); self.assertEqual(self._manifest()["result"],"failed_safe")
             if number=="1":
                 shutil.rmtree(self.opsdir); self.opsdir.mkdir(mode=0o700)
+
+    def test_advisory_helper_death_prevents_rename(self):
+        r=self._run({"RESTORE_TEST_ADVISORY_EXIT_AFTER_ACQUIRE":"true"}); self.assertNotEqual(r.returncode,0)
+        self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE")
+        self.assertEqual(self._manifest()["result"],"failed_safe")
 
     def test_old_service_health_failure_requires_manual_recovery(self):
         # Arm the old-health failure only after pre-stop health and lock acquisition.
@@ -103,5 +123,26 @@ value=$(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/n
         r=self._run({"BACKUP_COMMAND":str(failing)}); self.assertNotEqual(r.returncode,0); self.assertEqual(self._manifest()["result"],"failed_safe"); self.assertEqual(self.state.read_text().strip(),"active")
         shutil.rmtree(self.opsdir); self.opsdir.mkdir(mode=0o700); self.state.write_text("active"); (self.root/"start-fail").touch()
         r=self._run({"BACKUP_COMMAND":str(failing)}); self.assertEqual(r.returncode,43,r.stderr); self.assertEqual(self._manifest()["result"],"requires_manual_recovery")
+
+    def test_emergency_verifier_and_rehearsal_failures_record_artifact(self):
+        for kind in ("verify","rehearsal"):
+            with self.subTest(kind=kind):
+                counter=self.root/f"{kind}.count"; wrapper=self.bin/f"fail-{kind}"
+                real=OPS/("verify_backup.sh" if kind=="verify" else "restore_rehearsal.sh")
+                wrapper.write_text(f'''#!/bin/bash
+n=$(cat "{counter}" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" >"{counter}"
+[[ "{kind}" != verify || "$n" -lt 2 ]] || exit 9
+[[ "{kind}" != rehearsal || "$n" -lt 1 ]] || exit 9
+exec "{real}" "$@"
+'''); wrapper.chmod(0o755)
+                key="VERIFY_BACKUP" if kind=="verify" else "REHEARSAL_COMMAND"; r=self._run({key:str(wrapper)}); self.assertNotEqual(r.returncode,0); m=self._manifest(); self.assertEqual(m["result"],"failed_safe"); self.assertTrue(m["emergency_backup_path"]); self.assertTrue(pathlib.Path(m["emergency_backup_path"]+".pin").exists()); self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE")
+            if kind=="verify": shutil.rmtree(self.opsdir); self.opsdir.mkdir(mode=0o700); self.state.write_text("active")
+
+    def test_manifest_production_binding_blocks_commands_before_actions(self):
+        (self.root/"fail-target").touch(); r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":"4"}); self.assertEqual(r.returncode,42,r.stderr)
+        path=next(self.opsdir.glob("*.json")); data=json.loads(path.read_text()); data["original_production_database"]="prod_other"; path.write_text(json.dumps(data)); path.chmod(0o600); before=path.read_bytes(); state=self.state.read_text()
+        inspect=subprocess.run([OPS/"restore_production.sh","--inspect-incomplete"],env=self._restore_env(),capture_output=True); self.assertNotEqual(inspect.returncode,0); self.assertEqual(path.read_bytes(),before); self.assertEqual(self.state.read_text(),state)
+        rollback=subprocess.run([OPS/"restore_production.sh","--rollback-operation",data["operation_id"],"--confirm-production-rollback"],env=self._restore_env(),capture_output=True); self.assertNotEqual(rollback.returncode,0); self.assertEqual(self.state.read_text(),state)
+        finalize=subprocess.run([OPS/"restore_production.sh","--finalize-operation",data["operation_id"],"--confirm-delete-previous"],env=self._restore_env()|{"RESTORE_FINALIZE_SAFETY_SECONDS":"0"},capture_output=True); self.assertNotEqual(finalize.returncode,0); self.assertEqual(path.read_bytes(),before)
 
 if __name__ == "__main__": unittest.main()

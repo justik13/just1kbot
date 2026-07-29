@@ -22,7 +22,10 @@ async def main() -> None:
     )
     try:
         await connection.execute("SELECT pg_advisory_lock($1)", LOCK_KEY)
-        print("advisory_lock=acquired", flush=True)
+        backend_pid = await connection.fetchval("SELECT pg_backend_pid()")
+        print(f"advisory_lock=acquired backend_pid={backend_pid}", flush=True)
+        if os.environ.get("RESTORE_TEST_ADVISORY_EXIT_AFTER_ACQUIRE") == "true":
+            return
         await asyncio.to_thread(sys.stdin.buffer.read)
         await connection.execute("SELECT pg_advisory_unlock($1)", LOCK_KEY)
     finally:
