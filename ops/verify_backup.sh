@@ -1,0 +1,78 @@
+#!/bin/bash
+set -Eeuo pipefail
+umask 077
+tmpdir=""
+cleanup() { rc=$?; [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"; exit "$rc"; }
+trap cleanup EXIT INT TERM
+fail() { printf 'verification error: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+extract_dir=""
+if [[ ${1:-} == --extract-dir ]]; then extract_dir=${2:?missing extraction directory}; shift 2; fi
+artifact=${1:?usage: verify_backup.sh [--extract-dir DIR] ARTIFACT}
+for command in age pg_restore sha256sum tar python3 stat; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
+[[ -f "$artifact" && ! -L "$artifact" ]] || fail 'artifact is missing or is a symlink'
+mode=$(stat -c '%a' "$artifact")
+[[ "$mode" == 600 ]] || fail 'artifact permissions must be 0600'
+sidecar="$artifact.sha256"
+[[ -f "$sidecar" && ! -L "$sidecar" ]] || fail 'external checksum is missing or unsafe'
+(cd "$(dirname -- "$artifact")" && sha256sum -c -- "$(basename -- "$sidecar")" >/dev/null) || fail 'external checksum mismatch'
+[[ -n ${AGE_IDENTITY_FILE:-} && -f $AGE_IDENTITY_FILE && ! -L $AGE_IDENTITY_FILE ]] || fail 'AGE_IDENTITY_FILE is missing or unsafe'
+tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/just1kbot-verify.XXXXXX")
+age -d -i "$AGE_IDENTITY_FILE" -o "$tmpdir/bundle.tar" "$artifact" || fail 'decryption failed' 5
+
+# Inspect metadata before extraction. No links, devices, extra names, absolute or
+# parent paths are accepted, even if a tar implementation would sanitize them.
+BUNDLE="$tmpdir/bundle.tar" python3 - <<'PY' || exit $?
+import os, pathlib, sys, tarfile
+allowed = {'manifest.json', 'checksums.sha256', 'dump.custom', 'config.env'}
+try:
+    with tarfile.open(os.environ['BUNDLE'], 'r:') as archive:
+        members = archive.getmembers()
+        names = [m.name for m in members]
+        if set(names) != allowed or len(names) != len(allowed):
+            raise ValueError('archive members do not match the allowlist')
+        for member in members:
+            p = pathlib.PurePosixPath(member.name)
+            if p.is_absolute() or '..' in p.parts or not member.isfile():
+                raise ValueError('unsafe archive member')
+except Exception as exc:
+    print(f'verification error: {exc}', file=sys.stderr)
+    sys.exit(6)
+PY
+mkdir "$tmpdir/extracted"
+tar -xf "$tmpdir/bundle.tar" -C "$tmpdir/extracted" --no-same-owner --no-same-permissions
+ROOT="$tmpdir/extracted" python3 - <<'PY' || exit $?
+import json, os, pathlib, re, sys
+root = pathlib.Path(os.environ['ROOT'])
+try:
+    manifest = json.loads((root/'manifest.json').read_text())
+    required = {'format_version', 'created_at_utc', 'database_name', 'postgresql_version',
+                'alembic_revision', 'git_commit_sha', 'files'}
+    if set(manifest) != required or manifest['format_version'] != 1:
+        raise ValueError('unsupported or invalid manifest schema')
+    if manifest['files'] != ['dump.custom', 'config.env']:
+        raise ValueError('invalid manifest file list')
+    config = root/'config.env'
+    if config.is_symlink() or config.stat().st_size > 1024 * 1024:
+        raise ValueError('unsafe configuration component')
+    keys = set()
+    for line in config.read_text().splitlines():
+        if '=' in line and not line.lstrip().startswith('#'):
+            keys.add(line.split('=', 1)[0].strip())
+    missing = {'DATABASE_URL', 'DB_ENCRYPTION_KEY', 'REDIS_URL', 'BOT_TOKEN'} - keys
+    if missing:
+        raise ValueError('configuration is missing required keys')
+except Exception as exc:
+    print(f'verification error: {exc}', file=sys.stderr)
+    sys.exit(7)
+PY
+(cd "$tmpdir/extracted" && sha256sum -c checksums.sha256 >/dev/null) || fail 'internal checksum mismatch'
+pg_restore --list "$tmpdir/extracted/dump.custom" >/dev/null || fail 'PostgreSQL dump is unreadable'
+if [[ -n "$extract_dir" ]]; then
+    [[ ! -e "$extract_dir" ]] || fail 'extraction destination already exists'
+    mkdir -m 700 "$extract_dir"
+    install -m 600 "$tmpdir/extracted/manifest.json" "$extract_dir/manifest.json"
+    install -m 600 "$tmpdir/extracted/dump.custom" "$extract_dir/dump.custom"
+fi
+printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=not-checked\n' \
+    "$(date -u +%FT%TZ)" "$(basename -- "$artifact")" "$(stat -c %s "$artifact")" "$(sha256sum "$artifact" | awk '{print $1}')"

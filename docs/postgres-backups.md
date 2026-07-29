@@ -1,0 +1,18 @@
+# Encrypted PostgreSQL backups
+
+Backups use format version **1**: a PostgreSQL custom dump, a required configuration
+component, a JSON manifest, and internal SHA-256 checksums are placed in an explicit
+tar allowlist and encrypted with `age`. Only the resulting `*.tar.age` artifact and
+its external checksum are published.
+
+Provision an age identity offline. Put only its public recipient in
+`/etc/just1kbot-backup.conf` as `BACKUP_AGE_RECIPIENT=age1...`. Never place the
+private identity in the backup directory or on the backup server unless an operator
+temporarily supplies it for verification/rehearsal via `AGE_IDENTITY_FILE`.
+
+`BACKUP_OFFSITE_DIR` may point at a separately mounted filesystem.
+`BACKUP_REQUIRE_OFFSITE=true` makes a verified, atomically renamed off-site copy
+mandatory. Retention defaults to 14 artifacts (minimum 2) and runs only after all
+required publication succeeds. A rehearsal verifies the archive and restores only
+to a uniquely named `just1kbot_rehearsal_*` database; it never cuts over production
+or restores `.env`.
