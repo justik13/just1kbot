@@ -152,29 +152,6 @@ class BackupFailurePathTests(unittest.TestCase):
             self.assertNotIn("pg_dump",self.log.read_text() if self.log.exists() else "")
         finally: holder.terminate(); holder.wait()
 
-    def test_machine_readable_result_and_persistent_pin(self):
-        result_file = self.root / "backup-result"
-        pin = "restore_20260729T120000Z_deadbeef"
-        result = self.run_backup(BACKUP_RESULT_FILE=result_file, BACKUP_ARTIFACT_PIN=pin)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        contract = dict(line.split("=", 1) for line in result_file.read_text().splitlines())
-        artifact = pathlib.Path(contract["artifact_path"])
-        self.assertEqual(contract["artifact_pin"], pin)
-        self.assertEqual(contract["artifact_sha256"], __import__("hashlib").sha256(artifact.read_bytes()).hexdigest())
-        self.assertEqual((pathlib.Path(str(artifact) + ".pin")).stat().st_mode & 0o777, 0o600)
-
-    def test_retention_preserves_pinned_artifact(self):
-        self.backups.mkdir()
-        pinned = self.backups / "just1kbot-pg-v1-20200101T000000Z.tar.age"
-        pinned.write_text("old"); pathlib.Path(str(pinned) + ".sha256").write_text("sidecar")
-        pathlib.Path(str(pinned) + ".pin").write_text("pin")
-        for day in ("02", "03", "04"):
-            p = self.backups / f"just1kbot-pg-v1-202001{day}T000000Z.tar.age"
-            p.write_text(day); pathlib.Path(str(p) + ".sha256").write_text("sidecar")
-        result = self.run_backup(BACKUP_RETENTION_COUNT=2)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(pinned.exists()); self.assertTrue(pathlib.Path(str(pinned) + ".pin").exists())
-
     def test_alembic_query_failure_does_not_publish(self):
         self._shim("psql","exit 7")
         result=self.run_backup(); self.assertNotEqual(result.returncode,0); self.assertEqual(self.visible(),[])

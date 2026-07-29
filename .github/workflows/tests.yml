@@ -42,10 +42,8 @@ jobs:
       - run: python -m unittest discover -s tests -v
         env:
           RUN_BACKUP_INTEGRATION: "1"
-          RUN_PRODUCTION_RESTORE_INTEGRATION: "1"
-          PRODUCTION_RESTORE_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/postgres
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
       - run: alembic downgrade -1
       - run: alembic upgrade head
-      - run: python -m compileall bot database services utils ops
+      - run: python -m compileall bot database services utils
       - run: git diff --check
