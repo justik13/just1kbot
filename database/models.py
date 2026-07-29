@@ -543,6 +543,7 @@ class EntitlementEntry(Base):
     __table_args__ = (
         UniqueConstraint("beneficiary_user_id", "source_type", "source_id", "entry_type", name="uq_entitlement_entries_source"),
         CheckConstraint("entry_type IN ('payment_grant','referral_user_bonus','referral_referrer_bonus','payment_reversal','referral_reversal','manual_grant')", name="ck_entitlement_entries_type"),
+        Index("ix_entitlement_entries_user_history", "beneficiary_user_id", "created_at", "id"),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     beneficiary_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
