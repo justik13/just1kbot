@@ -52,6 +52,9 @@ try:
         raise ValueError('unsupported or invalid manifest schema')
     if manifest['files'] != ['dump.custom', 'config.env']:
         raise ValueError('invalid manifest file list')
+    revision = manifest['alembic_revision']
+    if not isinstance(revision, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}', revision):
+        raise ValueError('invalid Alembic revision')
     config = root/'config.env'
     if config.is_symlink() or config.stat().st_size > 1024 * 1024:
         raise ValueError('unsafe configuration component')

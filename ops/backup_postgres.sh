@@ -9,124 +9,114 @@ RETENTION_COUNT=${BACKUP_RETENTION_COUNT:-14}
 OFFSITE_DIR=${BACKUP_OFFSITE_DIR:-}
 REQUIRE_OFFSITE=${BACKUP_REQUIRE_OFFSITE:-false}
 FORMAT_VERSION=1
-tmpdir=""
-published=""
-offsite_status=not-configured
+tmpdir=""; local_partial=""; sidecar_partial=""; final=""; final_sidecar=""
+offsite_partial=""; offsite_sidecar_partial=""; offsite_final=""; offsite_sidecar=""
+local_committed=false; offsite_committed=false; offsite_status=not-configured
 
 finish() {
     rc=$?
     [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"
+    rm -f -- ${local_partial:+"$local_partial"} ${sidecar_partial:+"$sidecar_partial"} \
+        ${offsite_partial:+"$offsite_partial"} ${offsite_sidecar_partial:+"$offsite_sidecar_partial"} 2>/dev/null || true
+    # A sidecar is preparation, not a commit: never leave it visible alone.
+    [[ -z "$final_sidecar" || -e "$final" ]] || rm -f -- "$final_sidecar"
+    [[ -z "$offsite_sidecar" || -e "$offsite_final" ]] || rm -f -- "$offsite_sidecar"
+    if (( rc != 0 )) && [[ "$REQUIRE_OFFSITE" == true && "$offsite_committed" != true ]]; then
+        rm -f -- ${final:+"$final"} ${final_sidecar:+"$final_sidecar"} 2>/dev/null || true
+    fi
     if (( rc != 0 )); then
-        # A required off-site failure must not leave a newly published local artifact.
-        [[ -z "$published" ]] || rm -f -- "$published" "$published.sha256"
         printf 'timestamp=%s artifact=%s size=0 result=failure checksum=unavailable offsite=%s\n' \
-            "$(date -u +%FT%TZ)" "${published##*/}" "$offsite_status" >&2
+            "$(date -u +%FT%TZ)" "${final##*/}" "$offsite_status" >&2
     fi
     exit "$rc"
 }
 trap finish EXIT INT TERM
-
 fail() { printf 'backup error: %s\n' "$1" >&2; exit "${2:-1}"; }
-for command in age pg_dump pg_restore psql flock sha256sum tar python3; do
-    command -v "$command" >/dev/null || fail "required command is unavailable: $command"
-done
+for command in age pg_dump pg_restore psql flock sha256sum tar python3; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
 [[ ${BACKUP_AGE_RECIPIENT:-} == age1* ]] || fail 'BACKUP_AGE_RECIPIENT is missing or invalid' 2
 [[ "$REQUIRE_OFFSITE" == true || "$REQUIRE_OFFSITE" == false ]] || fail 'BACKUP_REQUIRE_OFFSITE must be true or false'
 [[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]] && (( RETENTION_COUNT >= 2 )) || fail 'BACKUP_RETENTION_COUNT must be at least 2'
 [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || fail 'configuration file is missing or unsafe'
-
-mkdir -p -- "$BACKUP_DIR" "$(dirname -- "$LOCK_FILE")"
-chmod 700 "$BACKUP_DIR"
-exec 9>"$LOCK_FILE"
-flock -n 9 || fail 'another backup is already running' 3
+mkdir -p -- "$BACKUP_DIR" "$(dirname -- "$LOCK_FILE")"; chmod 700 "$BACKUP_DIR"
+exec 9>"$LOCK_FILE"; flock -n 9 || fail 'another backup is already running' 3
 tmpdir=$(mktemp -d "$BACKUP_DIR/.backup-work.XXXXXX")
-# Validate the recipient before touching PostgreSQL.
 printf '' | age -r "$BACKUP_AGE_RECIPIENT" -o "$tmpdir/recipient-check.age" || fail 'BACKUP_AGE_RECIPIENT is invalid' 2
 rm -f "$tmpdir/recipient-check.age"
 
-# Parse, but never source, the secret configuration file. Values travel through
-# inherited environment variables rather than command-line arguments.
 mapfile -d '' -t dbparts < <(ENV_FILE="$ENV_FILE" python3 - <<'PY'
 import os, pathlib, urllib.parse
-values = {}
+values={}
 for line in pathlib.Path(os.environ['ENV_FILE']).read_text().splitlines():
-    if not line or line.lstrip().startswith('#') or '=' not in line:
-        continue
-    key, value = line.split('=', 1)
-    value = value.strip()
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-        value = value[1:-1]
-    values[key.strip()] = value
-for key in ('DATABASE_URL', 'DB_ENCRYPTION_KEY', 'REDIS_URL', 'BOT_TOKEN'):
-    if not values.get(key):
-        raise SystemExit(f'missing required configuration key: {key}')
-url = values['DATABASE_URL'].replace('postgresql+asyncpg://', 'postgresql://', 1)
-p = urllib.parse.urlsplit(url)
-if p.scheme not in ('postgresql', 'postgres') or not p.hostname or not p.path[1:]:
-    raise SystemExit('invalid DATABASE_URL')
-for value in (p.hostname, str(p.port or 5432), urllib.parse.unquote(p.username or ''),
-              urllib.parse.unquote(p.password or ''), p.path[1:]):
-    print(value, end='\0')
+    if line and not line.lstrip().startswith('#') and '=' in line:
+        k,v=line.split('=',1); v=v.strip()
+        if len(v)>=2 and v[0]==v[-1] and v[0] in "'\"": v=v[1:-1]
+        values[k.strip()]=v
+for key in ('DATABASE_URL','DB_ENCRYPTION_KEY','REDIS_URL','BOT_TOKEN'):
+    if not values.get(key): raise SystemExit(f'missing required configuration key: {key}')
+p=urllib.parse.urlsplit(values['DATABASE_URL'].replace('postgresql+asyncpg://','postgresql://',1))
+if p.scheme not in ('postgresql','postgres') or not p.hostname or not p.path[1:]: raise SystemExit('invalid DATABASE_URL')
+for value in (p.hostname,str(p.port or 5432),urllib.parse.unquote(p.username or ''),urllib.parse.unquote(p.password or ''),p.path[1:]): print(value,end='\0')
 PY
 )
 (( ${#dbparts[@]} == 5 )) || fail 'could not parse database configuration'
 export PGHOST=${dbparts[0]} PGPORT=${dbparts[1]} PGUSER=${dbparts[2]} PGPASSWORD=${dbparts[3]} PGDATABASE=${dbparts[4]}
 
-timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-name="just1kbot-pg-v${FORMAT_VERSION}-${timestamp}.tar.age"
-final="$BACKUP_DIR/$name"
-[[ ! -e "$final" ]] || fail 'an artifact with this timestamp already exists'
+read_revision() {
+    local output count revision
+    output=$(psql -XAt -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM alembic_version' 2>/dev/null) || fail 'could not read Alembic revision'
+    count=$(printf '%s\n' "$output" | awk 'NF {n++} END {print n+0}')
+    [[ "$count" == 1 ]] || fail 'Alembic revision must contain exactly one row'
+    revision=$(printf '%s\n' "$output" | awk 'NF {print; exit}')
+    [[ "$revision" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$ ]] || fail 'Alembic revision has an invalid format'
+    printf '%s' "$revision"
+}
+revision_before=$(read_revision)
+timestamp=$(date -u +%Y%m%dT%H%M%SZ); name="just1kbot-pg-v${FORMAT_VERSION}-${timestamp}.tar.age"
+final="$BACKUP_DIR/$name"; final_sidecar="$final.sha256"
+local_partial="$BACKUP_DIR/.${name}.partial"; sidecar_partial="$BACKUP_DIR/.${name}.sha256.partial"
+[[ ! -e "$final" && ! -e "$final_sidecar" ]] || fail 'an artifact with this timestamp already exists'
 pg_dump --format=custom --no-owner --no-acl --file="$tmpdir/dump.custom"
-pg_restore --list "$tmpdir/dump.custom" >/dev/null
+revision_after=$(read_revision)
+[[ "$revision_before" == "$revision_after" ]] || fail 'concurrent schema change detected during backup'
+pg_restore --list "$tmpdir/dump.custom" >/dev/null || fail 'PostgreSQL dump is unreadable'
 install -m 600 "$ENV_FILE" "$tmpdir/config.env"
-alembic_revision=$(psql -Atqc 'SELECT version_num FROM alembic_version LIMIT 1' 2>/dev/null || printf unknown)
 postgres_version=$(pg_dump --version | sed 's/[^0-9.]*\([0-9][0-9.]*\).*/\1/')
 git_sha=$(git -C "${PROJECT_DIR:-/opt/just1kbot}" rev-parse HEAD 2>/dev/null || printf unavailable)
 (cd "$tmpdir" && sha256sum dump.custom config.env > checksums.sha256)
-TIMESTAMP="$timestamp" DATABASE_NAME="$PGDATABASE" POSTGRES_VERSION="$postgres_version" \
-ALEMBIC_REVISION="$alembic_revision" GIT_SHA="$git_sha" python3 - <<'PY' >"$tmpdir/manifest.json"
-import json, os, sys
-json.dump({'format_version': 1, 'created_at_utc': os.environ['TIMESTAMP'],
-           'database_name': os.environ['DATABASE_NAME'],
-           'postgresql_version': os.environ['POSTGRES_VERSION'],
-           'alembic_revision': os.environ['ALEMBIC_REVISION'],
-           'git_commit_sha': os.environ['GIT_SHA'],
-           'files': ['dump.custom', 'config.env']}, sys.stdout,
-          sort_keys=True)
-print()
+TIMESTAMP="$timestamp" DATABASE_NAME="$PGDATABASE" POSTGRES_VERSION="$postgres_version" ALEMBIC_REVISION="$revision_before" GIT_SHA="$git_sha" python3 - <<'PY' >"$tmpdir/manifest.json"
+import json,os,sys
+json.dump({'format_version':1,'created_at_utc':os.environ['TIMESTAMP'],'database_name':os.environ['DATABASE_NAME'],'postgresql_version':os.environ['POSTGRES_VERSION'],'alembic_revision':os.environ['ALEMBIC_REVISION'],'git_commit_sha':os.environ['GIT_SHA'],'files':['dump.custom','config.env']},sys.stdout,sort_keys=True); print()
 PY
 (cd "$tmpdir" && tar --format=ustar -cf bundle.tar manifest.json checksums.sha256 dump.custom config.env)
-age -r "$BACKUP_AGE_RECIPIENT" -o "$BACKUP_DIR/.${name}.partial" "$tmpdir/bundle.tar"
-[[ -s "$BACKUP_DIR/.${name}.partial" ]] || fail 'encryption produced an empty artifact'
-chmod 600 "$BACKUP_DIR/.${name}.partial"
-mv -- "$BACKUP_DIR/.${name}.partial" "$final"
-published=$final
-checksum=$(sha256sum "$final" | awk '{print $1}')
-printf '%s  %s\n' "$checksum" "$name" >"$BACKUP_DIR/.${name}.sha256.partial"
-mv -- "$BACKUP_DIR/.${name}.sha256.partial" "$final.sha256"
+age -r "$BACKUP_AGE_RECIPIENT" -o "$local_partial" "$tmpdir/bundle.tar"
+[[ -s "$local_partial" ]] || fail 'encryption produced an empty artifact'
+checksum=$(sha256sum "$local_partial" | awk '{print $1}')
+printf '%s  %s\n' "$checksum" "$name" >"$sidecar_partial"
+[[ $(sha256sum "$local_partial" | awk '{print $1}') == "$checksum" ]] || fail 'local artifact checksum verification failed'
+[[ $(cat "$sidecar_partial") == "$checksum  $name" ]] || fail 'local checksum sidecar is invalid'
+chmod 600 "$local_partial" "$sidecar_partial"
+mv -- "$sidecar_partial" "$final_sidecar"       # preparation
+mv -- "$local_partial" "$final"                 # commit marker, always last
+local_committed=true
 
 if [[ -n "$OFFSITE_DIR" ]]; then
-    offsite_status=failure
-    if mkdir -p -- "$OFFSITE_DIR" && cp -- "$final" "$OFFSITE_DIR/.${name}.partial" && \
-       cp -- "$final.sha256" "$OFFSITE_DIR/.${name}.sha256.partial" && \
-       [[ $(sha256sum "$OFFSITE_DIR/.${name}.partial" | awk '{print $1}') == "$checksum" ]]; then
-        chmod 600 "$OFFSITE_DIR/.${name}.partial" "$OFFSITE_DIR/.${name}.sha256.partial"
-        mv -- "$OFFSITE_DIR/.${name}.partial" "$OFFSITE_DIR/$name"
-        mv -- "$OFFSITE_DIR/.${name}.sha256.partial" "$OFFSITE_DIR/$name.sha256"
-        offsite_status=success
+    offsite_status=failure; mkdir -p -- "$OFFSITE_DIR" || { [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4; }
+    offsite_final="$OFFSITE_DIR/$name"; offsite_sidecar="$offsite_final.sha256"
+    offsite_partial="$OFFSITE_DIR/.${name}.partial"; offsite_sidecar_partial="$OFFSITE_DIR/.${name}.sha256.partial"
+    if cp -- "$final" "$offsite_partial" && cp -- "$final_sidecar" "$offsite_sidecar_partial" && \
+       [[ $(sha256sum "$offsite_partial" | awk '{print $1}') == "$checksum" ]] && \
+       [[ $(cat "$offsite_sidecar_partial") == "$checksum  $name" ]]; then
+        chmod 600 "$offsite_partial" "$offsite_sidecar_partial"
+        mv -- "$offsite_sidecar_partial" "$offsite_sidecar"
+        if mv -- "$offsite_partial" "$offsite_final"; then offsite_committed=true; offsite_status=success
+        else rm -f -- "$offsite_sidecar"; [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4; fi
     else
-        rm -f -- "$OFFSITE_DIR/.${name}.partial" "$OFFSITE_DIR/.${name}.sha256.partial" 2>/dev/null || true
+        rm -f -- "$offsite_partial" "$offsite_sidecar_partial" "$offsite_sidecar" 2>/dev/null || true
         [[ "$REQUIRE_OFFSITE" == false ]] || fail 'required off-site publication failed' 4
     fi
-elif [[ "$REQUIRE_OFFSITE" == true ]]; then
-    offsite_status=failure
-    fail 'off-site publication is required but BACKUP_OFFSITE_DIR is unset' 4
+elif [[ "$REQUIRE_OFFSITE" == true ]]; then offsite_status=failure; fail 'off-site publication is required but BACKUP_OFFSITE_DIR is unset' 4
 fi
 
-# Only exact artifacts from this format participate; always retain newest two.
-mapfile -t expired < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' | sort -rn | tail -n +$((RETENTION_COUNT + 1)) | cut -d' ' -f2-)
+mapfile -t expired < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' | sort -rn | tail -n +$((RETENTION_COUNT+1)) | cut -d' ' -f2-)
 for old in "${expired[@]:-}"; do [[ -z "$old" ]] || rm -f -- "$old" "$old.sha256"; done
-size=$(stat -c %s "$final")
-printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=%s\n' \
-    "$(date -u +%FT%TZ)" "$name" "$size" "$checksum" "$offsite_status"
-published=""
+printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=%s\n' "$(date -u +%FT%TZ)" "$name" "$(stat -c %s "$final")" "$checksum" "$offsite_status"

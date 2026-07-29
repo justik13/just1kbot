@@ -16,3 +16,10 @@ mandatory. Retention defaults to 14 artifacts (minimum 2) and runs only after al
 required publication succeeds. A rehearsal verifies the archive and restores only
 to a uniquely named `just1kbot_rehearsal_*` database; it never cuts over production
 or restores `.env`.
+
+The visible `*.tar.age` file is the publication commit marker: its verified checksum
+sidecar is renamed first, and the encrypted artifact is renamed last, locally and
+off-site. Traps remove partial files and orphan sidecars. Rehearsal success is only
+reported after default cleanup is confirmed from a maintenance connection; a failed
+drop is reported as `cleanup=failed` with a nonzero exit status. Backup publication
+also requires one stable Alembic revision before and after the dump.

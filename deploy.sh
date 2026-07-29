@@ -641,6 +641,21 @@ EOF
         printf '%s\n' '# Set BACKUP_AGE_RECIPIENT=age1... before enabling the timer.' > /etc/just1kbot-backup.conf
     fi
     systemctl daemon-reload
+    # Migrate only the legacy backup command; preserve healthcheck and every
+    # unrelated root cron line byte-for-byte.
+    local cron_current cron_filtered
+    cron_current=$(mktemp)
+    cron_filtered=$(mktemp)
+    TEMP_FILES+=("$cron_current" "$cron_filtered")
+    crontab -l >"$cron_current" 2>/dev/null || :
+    awk '!(NF == 6 && $6 == "/usr/local/bin/just1kbot-backup.sh")' "$cron_current" >"$cron_filtered"
+    if ! cmp -s "$cron_current" "$cron_filtered"; then
+        crontab "$cron_filtered"
+        log "Legacy backup cron удалён; остальные cron-задачи сохранены"
+    fi
+    if compgen -G "$BACKUP_DIR/backup_*.tar.gz" >/dev/null; then
+        warn "Обнаружены legacy plaintext backup_*.tar.gz; перенесите или удалите их вручную только после проверки нового encrypted backup"
+    fi
     # Fail closed until the operator provisions the public recipient.
     if grep -q '^BACKUP_AGE_RECIPIENT=age1' /etc/just1kbot-backup.conf; then
         systemctl enable --now just1kbot-backup.timer
