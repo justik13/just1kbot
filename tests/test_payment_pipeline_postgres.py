@@ -1,6 +1,7 @@
-import asyncio, os, unittest, uuid
+import asyncio, json, os, unittest, uuid
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (AuditLog, EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
@@ -39,8 +40,69 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   async with self.sessions.begin() as s:
    op=await s.get(PaymentProviderOperation,operation_id)
    self.assertEqual((op.status,op.attempts,op.payload,op.idempotency_key),("retry",0,payload,original_key))
-   successes=await s.scalar(select(func.count(AuditLog.id)).where(AuditLog.target_id==operation_id,AuditLog.action=="PAYMENT_QUEUE_MANUAL_RETRY",AuditLog.details.contains("result=retry_scheduled")))
-   self.assertEqual(successes,1)
+   audits=(await s.scalars(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.action=="PAYMENT_QUEUE_MANUAL_RETRY"))).all()
+   self.assertEqual([json.loads(a.details)["outcome"] for a in audits].count("retry_scheduled"),1)
+
+ async def _concurrent_admin_retry(self,queue,operation_id):
+  async def apply(admin):
+   async with self.sessions.begin() as s:
+    return await confirm_manual_retry(s,admin_id=admin,queue=queue,operation_id=operation_id,reason="approved concurrency test")
+  return await asyncio.gather(apply(7101),apply(7102))
+
+ async def test_admin_retry_concurrent_fulfillment_is_serialized(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s)
+   op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",status="dead",idempotency_key=uuid.uuid4().hex,payload={},attempts=6,max_attempts=6,next_attempt_at=now_utc(),completed_at=now_utc())
+   s.add(op); await s.flush(); operation_id=op.id
+  results=await self._concurrent_admin_retry("fulfillment",operation_id)
+  self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentFulfillmentOperation,operation_id); self.assertEqual((op.status,op.attempts),("retry",0))
+   audits=(await s.scalars(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type=="fulfillment"))).all()
+   self.assertEqual([json.loads(a.details)["outcome"] for a in audits].count("retry_scheduled"),1)
+
+ async def test_admin_retry_concurrent_webhook_is_serialized(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s)
+   op=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=uuid.uuid4().hex,payment_external_id=p.external_id,payload={},status="dead",attempts=8,max_attempts=8,next_attempt_at=now_utc(),processed_at=now_utc())
+   s.add(op); await s.flush(); operation_id=op.id
+  results=await self._concurrent_admin_retry("webhook",operation_id)
+  self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
+  async with self.sessions.begin() as s:
+   op=await s.get(WebhookInbox,operation_id); self.assertEqual((op.status,op.attempts),("retry",0))
+   audits=(await s.scalars(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type=="webhook"))).all()
+   self.assertEqual([json.loads(a.details)["outcome"] for a in audits].count("retry_scheduled"),1)
+
+ async def test_admin_provider_expired_create_is_rejected_and_audited(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,external_id=None)
+   op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="dead",idempotency_key=uuid.uuid4().hex,payload={"capture":True},attempts=5,max_attempts=5,next_attempt_at=now_utc(),created_at=now_utc()-timedelta(hours=25),completed_at=now_utc())
+   s.add(op); await s.flush(); operation_id=op.id; payment_id=p.id
+  with patch("services.yookassa_service.YooKassaService.create_payment_result",AsyncMock()) as http:
+   async with self.sessions.begin() as s:
+    result=await confirm_manual_retry(s,admin_id=7201,queue="provider",operation_id=operation_id,reason="review expired operation")
+   http.assert_not_awaited()
+  self.assertEqual((result.outcome,result.rejection_code),("rejected","create_idempotency_window_expired"))
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,operation_id); p=await s.get(Payment,payment_id)
+   self.assertEqual((op.status,op.attempts),("dead",5)); self.assertEqual((p.reconciliation_status,p.fulfillment_status),("manual_review","manual_review"))
+   audit=await s.scalar(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type=="provider"))
+   details=json.loads(audit.details); self.assertEqual((details["outcome"],details["rejection_code"]),("rejected","create_idempotency_window_expired"))
+
+ async def test_admin_audit_failure_rolls_back_provider_retry(self):
+  payload={"SECRET_CANARY":"immutable"}
+  async with self.sessions.begin() as s:
+   p=await self.payment(s)
+   op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="dead",idempotency_key=uuid.uuid4().hex,payload=payload,attempts=4,max_attempts=4,next_attempt_at=now_utc(),completed_at=now_utc())
+   s.add(op); await s.flush(); operation_id=op.id; key=op.idempotency_key
+  with self.assertRaises(Exception):
+   async with self.sessions.begin() as s:
+    with patch("services.payment_queue_admin._audit",AsyncMock(side_effect=RuntimeError("forced audit failure"))):
+     await confirm_manual_retry(s,admin_id=7301,queue="provider",operation_id=operation_id,reason="approved rollback test")
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,operation_id)
+   self.assertEqual((op.status,op.attempts,op.payload,op.idempotency_key),("dead",4,payload,key))
+   self.assertIsNone(await s.scalar(select(AuditLog).where(AuditLog.target_id==operation_id,AuditLog.target_type=="provider")))
  def snapshot(self,p,status="succeeded",**kw):
   data={"id":p.external_id,"status":status,"amount":{"value":"90.00","currency":"RUB"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)}}; data.update(kw); return data
  async def cancel_claim(self,s,p,*,attempts=1,max_attempts=3,key=None):

@@ -85,9 +85,12 @@ async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
     names = {"provider_operations": "Provider", "fulfillment_operations": "Fulfillment",
              "webhook_inbox": "Webhook"}
     for q in snapshot.queues:
-        oldest = max((v for v in (q.oldest_due_age_seconds,
-                                  q.oldest_stale_age_seconds,
-                                  q.oldest_dead_age_seconds) if v is not None), default=None)
+        active_ages = (
+            q.oldest_due_age_seconds if q.overdue else None,
+            q.oldest_stale_age_seconds if q.stale_processing else None,
+            q.oldest_dead_age_seconds if q.dead else None,
+        )
+        oldest = max((v for v in active_ages if v is not None), default=None)
         lines.extend((f"<b>{names[q.name]}</b>",
             f"pending={q.pending} · retry={q.retry} · due={q.due} · overdue={q.overdue}",
             f"processing={q.processing} · stale={q.stale_processing} · dead={q.dead}",
@@ -136,17 +139,18 @@ def _card_text(row) -> str:
         f"Ручной retry: {'доступен' if row.retry_allowed else 'недоступен'}"))
 
 
-async def _show_card(callback: CallbackQuery, session: AsyncSession, queue: str, operation_id: int):
+async def _show_card(callback: CallbackQuery, session: AsyncSession, queue: str,
+                     operation_id: int) -> bool:
     row = await get_operation_card(session, queue, operation_id)
     if row is None:
-        await callback.answer("Операция не найдена", show_alert=True)
-        return
+        return False
     b = InlineKeyboardBuilder()
     if row.retry_allowed:
         b.button(text="Подготовить retry", callback_data=f"aq:r:{QUEUE_CODES[queue]}:{operation_id}")
     b.button(text="← К очереди", callback_data=f"aq:l:{QUEUE_CODES[queue]}:1")
     b.adjust(1)
     await _edit(callback, _card_text(row), b.as_markup())
+    return True
 
 
 @router.callback_query(F.data == "aq:home")
@@ -177,7 +181,9 @@ async def queue_card(callback: CallbackQuery, state: FSMContext, session: AsyncS
     try: operation_id = int(parsed[1][3]) if parsed and len(parsed[1]) == 4 else 0
     except (TypeError, ValueError): operation_id = 0
     if operation_id < 1: return await callback.answer("Некорректный ID", show_alert=True)
-    await state.clear(); await _show_card(callback, session, parsed[0], operation_id); await callback.answer()
+    await state.clear()
+    found = await _show_card(callback, session, parsed[0], operation_id)
+    await callback.answer("" if found else "Операция не найдена", show_alert=not found)
 
 
 @router.callback_query(F.data.startswith("aq:r:"))
@@ -230,26 +236,30 @@ async def apply_retry(callback: CallbackQuery, state: FSMContext, session: Async
     try:
         result = await confirm_manual_retry(session, admin_id=callback.from_user.id,
             queue=parsed[0], operation_id=operation_id, reason=data.get("reason", ""))
+        # The mutation and mandatory audit become durable, and the row lock is
+        # released, before any FSM/Redis or Telegram network operation.
+        await session.commit()
     except SQLAlchemyError as exc:
         await session.rollback(); await state.clear()
         logger.error("manual retry database failure type=%s operation_id=%s", type(exc).__name__, operation_id)
         return await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
     await state.clear()
-    if result.outcome == "retry_scheduled":
-        await callback.answer("Операция поставлена в retry. Исполнение выполнит фоновый worker.", show_alert=True)
-    elif result.outcome == "rejected":
-        await callback.answer(f"Retry отклонён: {result.rejection_code or 'safety_policy'}", show_alert=True)
-    elif result.outcome == "not_found":
-        await callback.answer("Операция не найдена", show_alert=True)
-    else:
-        await callback.answer("Состояние уже изменилось", show_alert=True)
+    messages = {
+        "retry_scheduled": "Операция поставлена в retry. Исполнение выполнит фоновый worker.",
+        "rejected": f"Retry отклонён: {result.rejection_code or 'safety_policy'}",
+        "not_found": "Операция не найдена",
+        "already_changed": "Состояние уже изменилось",
+    }
     await _show_card(callback, session, parsed[0], operation_id)
+    await callback.answer(messages.get(result.outcome, "Состояние уже изменилось"), show_alert=True)
 
 
 @router.callback_query(F.data == "aq:no")
 async def cancel_retry(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
     if not _authorized(callback): await state.clear(); return await _deny(callback)
-    data = await state.get_data(); await state.clear(); await callback.answer("Отменено")
+    data = await state.get_data(); await state.clear()
     queue, operation_id = data.get("queue"), data.get("operation_id")
+    found = False
     if queue in QUEUE_TYPES and isinstance(operation_id, int):
-        await _show_card(callback, session, queue, operation_id)
+        found = await _show_card(callback, session, queue, operation_id)
+    await callback.answer("Отменено" if found else "Операция не найдена", show_alert=not found)

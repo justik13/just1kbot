@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Callable
 
 from sqlalchemy import case, func, or_, select
@@ -177,11 +178,19 @@ async def get_operation_card(session, queue: str, operation_id: int) -> QueueRow
 
 async def _audit(session, *, admin_id: int, queue: str, operation_id: int,
                  payment_id: int | None, original_status: str | None,
-                 attempts: int | None, outcome: str, reason: str) -> None:
+                 attempts: int | None, outcome: str, reason: str,
+                 rejection_code: str | None = None) -> None:
     # Flush is intentional: audit is mandatory and shares the caller transaction.
-    details = (f"queue={queue}; payment_id={payment_id or '-'}; "
-               f"original_status={original_status or '-'}; attempts={attempts if attempts is not None else '-'}; "
-               f"result={outcome}; reason={sanitize_short(reason, 200)}")
+    sanitized_reason = sanitize_short(reason, 200)[:200]
+    details = json.dumps({
+        "attempts": attempts,
+        "original_status": original_status,
+        "outcome": outcome,
+        "payment_id": payment_id,
+        "queue": queue,
+        "reason": sanitized_reason,
+        "rejection_code": sanitize_short(rejection_code, 100)[:100] or None,
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     session.add(AuditLog(admin_id=admin_id, action="PAYMENT_QUEUE_MANUAL_RETRY",
                          target_type=queue, target_id=operation_id, details=details))
     await session.flush()
@@ -228,5 +237,5 @@ async def confirm_manual_retry(session, *, admin_id: int, queue: str,
         outcome = "retry_scheduled"
     await _audit(session, admin_id=admin_id, queue=queue, operation_id=operation_id,
                  payment_id=payment_id, original_status=status, attempts=attempts,
-                 outcome=outcome, reason=reason)
+                 outcome=outcome, reason=reason, rejection_code=rejection)
     return ManualRetryResult(outcome, queue, operation_id, payment_id, rejection)
