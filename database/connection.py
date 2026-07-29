@@ -49,7 +49,7 @@ async def init_db():
     # Run Alembic migrations instead of create_all
     await _run_alembic_migrations(settings.DATABASE_URL)
 
-    logging.info("PostgreSQL database initialized at %s", settings.DATABASE_URL)
+    logging.info("PostgreSQL database initialized successfully")
     return _engine, _sessionmaker
 
 
