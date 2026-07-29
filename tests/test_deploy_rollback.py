@@ -1,4 +1,6 @@
 import os
+import pwd
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -124,8 +126,11 @@ class DeployRollbackTests(unittest.TestCase):
     def test_initial_install_without_active_service(self):
         shutil.rmtree(self.active); r=self.run_deploy("initial"); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertEqual((self.active/"app.txt").read_text(),"new\n")
     def run_deploy_function(self, script, env=None):
-        values=os.environ.copy(); values.update({"DEPLOY_FUNCTIONS_ONLY":"1","DEPLOY_TEST_MODE":"1","TEST_REDIS_CONF":str(self.tmp/"redis.conf"),"LOG_FILE":str(self.tmp/"deploy.log")}); values.update(env or {})
-        return subprocess.run(["bash","-c",f"source {ROOT/'deploy.sh'}; {script}"],env=values,text=True,capture_output=True)
+        values=os.environ.copy(); values.update({"DEPLOY_FUNCTIONS_ONLY":"1","DEPLOY_TEST_MODE":"1","TEST_REDIS_CONF":str(self.tmp/"redis.conf")}); values.update(env or {})
+        source = shlex.quote(str(ROOT / "deploy.sh"))
+        test_log = shlex.quote(str(self.tmp / "deploy.log"))
+        command = f'source {source}; LOG_FILE={test_log}; BOT_USER="$(id -un)"; {script}'
+        return subprocess.run(["bash","-c",command],env=values,text=True,capture_output=True)
     def run_unprivileged(self, command, env=None):
         values = os.environ.copy(); values.update(env or {})
         if os.geteuid() != 0:
@@ -161,8 +166,14 @@ class DeployRollbackTests(unittest.TestCase):
         self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertEqual((self.active/".env").read_bytes(),before); self.assertIn("EXISTING_VALUE",conf.read_text()); self.assertNotIn("UNRELATED_VALUE",conf.read_text()+r.stdout+r.stderr)
     def test_initial_install_env_is_mode_0600(self):
         envfile=self.tmp/"initial.env"
-        command=f'BOT_USER=root; ENV_FILE="{envfile}"; BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; AMNEZIA_API_URL=x; AMNEZIA_API_KEY=; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
-        r=self.run_deploy_function(command); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertEqual(envfile.stat().st_mode & 0o777,0o600); self.assertEqual(envfile.stat().st_uid,0)
+        command=f'ENV_FILE="{envfile}"; BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; AMNEZIA_API_URL=x; AMNEZIA_API_KEY=; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
+        r=self.run_deploy_function(command)
+        self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+        stat_result = envfile.stat()
+        self.assertEqual(stat_result.st_mode & 0o777,0o600)
+        self.assertEqual(pwd.getpwuid(stat_result.st_uid).pw_name, pwd.getpwuid(os.geteuid()).pw_name)
+        self.assertEqual(stat_result.st_mode & 0o077, 0)
+        self.assertTrue(envfile.read_text())
     def test_unsafe_existing_env_fails_closed(self):
         os.chmod(self.active/".env",0o644); r=self.run_deploy_function('ENV_FILE="'+str(self.active/'.env')+'"; determine_install_kind'); self.assertNotEqual(r.returncode,0)
     def test_secret_canaries_are_redacted(self): r=self.run_deploy("crash"); self.assertNotIn("CANARY_SECRET",r.stdout+r.stderr)
