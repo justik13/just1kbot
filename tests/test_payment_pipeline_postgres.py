@@ -3,8 +3,8 @@ from datetime import timedelta
 from decimal import Decimal
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from database.models import (EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
-from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, recover_stale, retry_dead_provider_operation)
+from database.models import (EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
+from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, perform_http, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
 from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, reverse, retry_dead_fulfillment_operation
 from services.yookassa_service import YooKassaResult
@@ -24,6 +24,51 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   values.update(kw); p=Payment(**values); s.add(p); await s.flush(); return p
  def snapshot(self,p,status="succeeded",**kw):
   data={"id":p.external_id,"status":status,"amount":{"value":"90.00","currency":"RUB"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)}}; data.update(kw); return data
+ async def cancel_claim(self,s,p,*,attempts=1,max_attempts=3,key=None):
+  op=PaymentProviderOperation(payment_id=p.id,operation_type="cancel_payment",status="processing",idempotency_key=key or uuid.uuid4().hex,payload={"provider_payment_id":p.external_id},attempts=attempts,max_attempts=max_attempts,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush()
+  return op,ProviderOperationClaim(op.id,p.id,op.operation_type,dict(op.payload),op.idempotency_key,"w",attempts,p.external_id,op.created_at)
+
+ async def test_cancel_waiting_for_capture_is_not_final_success(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="waiting_for_capture"); op,c=await self.cancel_claim(s,p); await finalize(s,c,YooKassaResult(True,value=self.snapshot(p,status="waiting_for_capture")))
+   self.assertEqual((op.status,op.last_error_code,p.provider_status),("retry","cancel_not_confirmed","waiting_for_capture")); self.assertIsNone(op.completed_at)
+
+ async def test_cancel_retry_uses_same_key(self):
+  from unittest.mock import AsyncMock
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="waiting_for_capture"); op,c=await self.cancel_claim(s,p,key="stable-cancel-key"); await finalize(s,c,YooKassaResult(True,value=self.snapshot(p,status="waiting_for_capture"))); op.next_attempt_at=now_utc(); c2=await claim(s,"w2")
+   transport=type("Transport",(),{"cancel_payment_result":AsyncMock(return_value=YooKassaResult(True,value=self.snapshot(p,status="canceled")))})
+   result=await perform_http(c2,transport); await finalize(s,c2,result)
+   self.assertEqual(transport.cancel_payment_result.await_args.kwargs["idempotency_key"],"stable-cancel-key"); self.assertEqual((op.status,p.provider_status),("succeeded","canceled"))
+
+ async def test_cancel_late_succeeded_records_paid_manual_review(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="waiting_for_capture"); op,c=await self.cancel_claim(s,p); await finalize(s,c,YooKassaResult(True,value=self.snapshot(p)))
+   self.assertEqual((op.status,p.provider_status,p.reconciliation_status,p.fulfillment_status),("succeeded","succeeded","mismatch","manual_review")); self.assertIsNotNone(p.paid_at); self.assertIsNotNone(p.provider_confirmed_at); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+
+ async def test_provider_mismatch_preserves_paid_at(self):
+  for field in ("amount","currency","order_id","local_payment_id","external_id"):
+   async with self.sessions.begin() as s:
+    p=await self.payment(s); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); data=self.snapshot(p)
+    if field=="amount": data["amount"]["value"]="91.00"
+    elif field=="currency": data["amount"]["currency"]="USD"
+    elif field in {"order_id","local_payment_id"}: data["metadata"][field]="wrong"
+    else: data["id"]="wrong"
+    await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,{},op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value=data))
+    self.assertEqual((p.provider_status,p.reconciliation_status,p.fulfillment_status),("succeeded","mismatch","manual_review")); self.assertIsNotNone(p.paid_at); self.assertIsNotNone(p.provider_confirmed_at); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+
+ async def test_refunded_terminal_state_is_monotonic(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="refunded",fulfillment_status="reversed"); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); data=self.snapshot(p); data["amount"]["value"]="1.00"; await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,{},op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value=data)); self.assertEqual((p.provider_status,p.fulfillment_status),("refunded","reversed")); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+
+ async def test_dead_create_retry_keeps_immutable_payload(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s); payload={"amount":{"value":"90.00","currency":"RUB"},"description":"x","confirmation":{"type":"redirect"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)},"capture":True}; op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="dead",idempotency_key="stable-create-key",payload=payload,attempts=3,max_attempts=3,next_attempt_at=now_utc(),completed_at=now_utc()); s.add(op); await s.flush(); before=dict(op.payload); await retry_dead_provider_operation(s,op.id,reset_attempts=True,reason="operator approved"); self.assertEqual(op.payload,before); self.assertEqual(op.idempotency_key,"stable-create-key"); self.assertIsNotNone(await s.scalar(select(PaymentEvent).where(PaymentEvent.payment_id==p.id,PaymentEvent.reason=="operator approved")))
+
+ async def test_create_invalid_2xx_retries_same_command(self):
+  from unittest.mock import AsyncMock
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,external_id=None,provider_status="not_created"); payload={"amount":{"value":"90.00","currency":"RUB"},"description":"x","confirmation":{"type":"redirect","return_url":"https://example.test"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)},"capture":True}; op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="processing",idempotency_key="stable-create-key-2",payload=payload,attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); c=ProviderOperationClaim(op.id,p.id,op.operation_type,dict(payload),op.idempotency_key,"w",1,None,op.created_at); await finalize(s,c,YooKassaResult(False,error_kind=__import__('services.yookassa_service',fromlist=['YooKassaErrorKind']).YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=True)); op.next_attempt_at=now_utc(); c2=await claim(s,"w2"); transport=type("Transport",(),{"create_payment_result":AsyncMock(return_value=YooKassaResult(True,value={"id":"only-provider-payment","status":"pending","confirmation":{"confirmation_url":"https://pay.test"}}))}); result=await perform_http(c2,transport); await finalize(s,c2,result); args=transport.create_payment_result.await_args; self.assertEqual(args.args[0],payload); self.assertEqual(args.kwargs["idempotency_key"],"stable-create-key-2"); self.assertEqual(p.external_id,"only-provider-payment")
  async def test_reconcile_can_run_more_than_once(self):
   async with self.sessions.begin() as s: p=await self.payment(s); first=await ensure_reconcile_payment_operation(s,p,reason="one"); first.status="succeeded"; first.completed_at=now_utc(); second=await ensure_reconcile_payment_operation(s,p,reason="two"); self.assertNotEqual(first.id,second.id)
  async def test_concurrent_reconcile_has_one_active_operation(self):

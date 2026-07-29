@@ -5,7 +5,8 @@ then User/entitlement rows. Callers that initially claim a queue row must releas
 that claim transaction before entering this transition/finalization transaction.
 """
 from dataclasses import dataclass
-from database.models import PaymentEvent
+from sqlalchemy import select
+from database.models import PaymentEvent, PaymentFulfillmentOperation
 from services.payment_provider_validation import validate_provider_payment
 from utils.datetime_helpers import now_utc
 
@@ -22,18 +23,26 @@ async def apply_provider_transition(session,payment,data,*,source,event_type=Non
     if observed not in {"pending","waiting_for_capture","succeeded","canceled"}:
         return ProviderTransition("retry",observed,reason="unknown_provider_status")
     if observed=="succeeded":
+        # A successful provider snapshot is authoritative financial evidence.  Record
+        # it before identity validation so a bad command correlation cannot erase the
+        # fact that money was received.
+        payment.paid_at=payment.paid_at or now_utc(); payment.provider_confirmed_at=payment.provider_confirmed_at or now_utc()
+        terminal_reversal=current=="refunded" or payment.fulfillment_status=="reversed"
+        if not terminal_reversal: payment.provider_status="succeeded"
         mismatch=validate_provider_payment(payment,data)
         if mismatch:
-            payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
+            payment.reconciliation_status="mismatch"
+            if not terminal_reversal: payment.fulfillment_status="manual_review"
+            queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
+            for operation in queued:
+                operation.status="cancelled"; operation.completed_at=now_utc()
             session.add(PaymentEvent(payment_id=payment.id,event_type="provider_snapshot_mismatch",provider_status=observed,reason=mismatch,source=source))
             return ProviderTransition("conflict",observed,reason=mismatch)
-        payment.paid_at=payment.paid_at or now_utc(); payment.provider_confirmed_at=payment.provider_confirmed_at or now_utc()
-        if current=="refunded" or payment.fulfillment_status=="reversed":
+        if terminal_reversal:
             payment.reconciliation_status="mismatch"
             session.add(PaymentEvent(payment_id=payment.id,event_type="provider_transition_conflict",provider_status=observed,reason=f"{current}_to_succeeded",source=source))
             return ProviderTransition("conflict",observed,reason="succeeded_after_refund")
-        payment.provider_status="succeeded"
-        if current=="canceled" or payment.checkout_status=="abandoned":
+        if current=="canceled" or payment.checkout_status=="abandoned" or source=="provider_cancel_payment":
             payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
             session.add(PaymentEvent(payment_id=payment.id,event_type="paid_after_cancel",provider_status=observed,reason=f"{current}_to_succeeded",source=source))
             return ProviderTransition("conflict",observed,reason="paid_after_cancel")

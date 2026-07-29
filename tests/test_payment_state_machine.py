@@ -6,6 +6,24 @@ from services.payment_provider_operations import ProviderOperationClaim, perform
 from utils.datetime_helpers import now_utc
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult
 class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
+ async def test_malformed_2xx_has_command_specific_ambiguity(self):
+  from unittest.mock import patch
+  from services.yookassa_service import YooKassaService
+  class Response:
+   status=200
+   async def __aenter__(self): return self
+   async def __aexit__(self,*args): pass
+   async def json(self,**kwargs): raise ValueError("broken json")
+  class Client:
+   def __init__(self,*args,**kwargs): pass
+   async def __aenter__(self): return self
+   async def __aexit__(self,*args): pass
+   def request(self,*args,**kwargs): return Response()
+  settings=SimpleNamespace(YOOKASSA_SHOP_ID="shop",YOOKASSA_SECRET_KEY="secret")
+  with patch("services.yookassa_service.get_settings",return_value=settings),patch("services.yookassa_service.aiohttp.ClientSession",Client):
+   create=await YooKassaService.create_payment_result({},idempotency_key="key"); get=await YooKassaService.get_payment_result("p"); cancel=await YooKassaService.cancel_payment_result("p",idempotency_key="key")
+  self.assertEqual(create.error_kind,YooKassaErrorKind.INVALID_RESPONSE); self.assertTrue(create.retryable); self.assertTrue(create.ambiguous)
+  self.assertTrue(get.retryable); self.assertFalse(get.ambiguous); self.assertTrue(cancel.retryable); self.assertTrue(cancel.ambiguous)
  async def test_cancel_timeout_reconciles_with_get(self):
   transport=SimpleNamespace(cancel_payment_result=AsyncMock(return_value=YooKassaResult(False,error_kind=YooKassaErrorKind.TIMEOUT,retryable=True,ambiguous=True)),get_payment_result=AsyncMock(return_value=YooKassaResult(True,value={"status":"canceled"})))
   claim=ProviderOperationClaim(1,1,"cancel_payment",{"provider_payment_id":"p"},"key","w",1,"p",now_utc())

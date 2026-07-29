@@ -34,8 +34,15 @@ async def ensure_reconcile_payment_operation(session,payment,*,reason):
 async def retry_dead_provider_operation(session,operation_id,*,reset_attempts,reason):
     op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.id==operation_id).with_for_update())
     if not op or op.status!="dead": raise ValueError("operation is not dead")
-    if op.operation_type=="create_payment" and now_utc()-op.created_at>=timedelta(hours=23): raise ValueError("create_idempotency_window_expired")
-    op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc(); op.payload={**op.payload,"admin_retry_reason":str(reason)[:100]}
+    payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update())
+    if op.operation_type=="create_payment" and not payment.external_id and now_utc()-op.created_at>=timedelta(hours=24):
+        payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+        session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_admin_retry_rejected",provider_status=payment.provider_status,reason="create_idempotency_window_expired",source="admin_retry"))
+        raise ValueError("create_idempotency_window_expired")
+    # payload is the immutable provider command; audit metadata must never be mixed
+    # into a request which may be replayed byte-for-byte.
+    session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_admin_retry",provider_status=payment.provider_status,reason=str(reason)[:255],source="admin_retry"))
+    op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc()
     if reset_attempts:op.attempts=0
     elif op.attempts>=op.max_attempts:raise ValueError("reset_attempts required for exhausted operation")
     return op
@@ -52,7 +59,7 @@ async def claim(session,worker_id):
 async def perform_http(claim,transport=YooKassaService):
     if claim.operation_type=="create_payment":
         if claim.external_id:return await transport.get_payment_result(claim.external_id)
-        if now_utc()-claim.created_at>=timedelta(hours=23):return YooKassaResult(False,error_kind=YooKassaErrorKind.IDEMPOTENCY_WINDOW_EXPIRED,retryable=False,ambiguous=True)
+        if now_utc()-claim.created_at>=timedelta(hours=24):return YooKassaResult(False,error_kind=YooKassaErrorKind.IDEMPOTENCY_WINDOW_EXPIRED,retryable=False,ambiguous=True)
         return await transport.create_payment_result(claim.payload,idempotency_key=claim.idempotency_key)
     provider_id=claim.payload.get("provider_payment_id") or claim.external_id
     if not provider_id:return YooKassaResult(False,error_kind=YooKassaErrorKind.VALIDATION_FAILED)
@@ -71,6 +78,13 @@ async def finalize(session,claim,result,transport=YooKassaService):
     if result.ok:
         data=result.value or {}; status=data.get("status")
         if status not in {"pending","waiting_for_capture","succeeded","canceled"}: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=False,ambiguous=False)
+        # A cancel is only confirmed by the provider's terminal cancellation state.
+        # `succeeded` is terminal too, but represents money received after cancel and
+        # must flow through the financial-truth/manual-review transition below.
+        if result.ok and claim.operation_type=="cancel_payment" and status in {"pending","waiting_for_capture"}:
+            result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
+            cancel_not_confirmed=True
+        else: cancel_not_confirmed=False
         if result.ok and claim.operation_type=="create_payment":
             confirmation=data.get("confirmation") or {}; url=confirmation.get("confirmation_url") or confirmation.get("url")
             primary=claim.external_id is None
@@ -89,7 +103,7 @@ async def finalize(session,claim,result,transport=YooKassaService):
                 for queued_op in queued: queued_op.status="cancelled"; queued_op.completed_at=now_utc()
         if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status not in {"mismatch","manual_review"} else payment.reconciliation_status
     if not result.ok:
-        op.last_error_code=result.error_kind.value if result.error_kind else "unknown"; op.last_error=None
+        op.last_error_code="cancel_not_confirmed" if locals().get("cancel_not_confirmed",False) else (result.error_kind.value if result.error_kind else "unknown"); op.last_error=None
         exhausted=op.attempts>=op.max_attempts; op.status="dead" if exhausted or not result.retryable else "retry"; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8)))
         if payment.provider_status in {"succeeded","refunded","canceled"}:
             payment.reconciliation_status="manual_review" if op.status=="dead" else "required"

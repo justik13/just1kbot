@@ -41,3 +41,4 @@ jobs:
       - run: alembic downgrade -1
       - run: alembic upgrade head
       - run: python -m compileall bot database services utils
+      - run: git diff --check
