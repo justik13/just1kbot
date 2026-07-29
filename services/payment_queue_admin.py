@@ -138,7 +138,23 @@ def _confirmation_version(*, queue: str, operation_id: int, status: str,
                           terminal_at: datetime | None,
                           updated_at: datetime | None,
                           last_error_code: str | None) -> str:
-    canonical = json.dumps({
+    canonical = json.dumps(_confirmation_parts_from_values(
+        queue=queue, operation_id=operation_id, status=status,
+        attempts=attempts, max_attempts=max_attempts,
+        terminal_at=terminal_at, updated_at=updated_at,
+        last_error_code=last_error_code,
+    ), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _confirmation_parts_from_values(*, queue: str, operation_id: int,
+                                    status: str, attempts: int,
+                                    max_attempts: int,
+                                    terminal_at: datetime | None,
+                                    updated_at: datetime | None,
+                                    last_error_code: str | None) -> dict:
+    """Return the single canonical fingerprint contract for cards and ORM rows."""
+    return {
         "attempts": attempts,
         "last_error_code": sanitize_short(last_error_code, 100)[:100] or None,
         "max_attempts": max_attempts,
@@ -146,18 +162,17 @@ def _confirmation_version(*, queue: str, operation_id: int, status: str,
         "queue": queue,
         "status": status,
         "terminal_at": _canonical_timestamp(terminal_at),
-        "updated_at": _canonical_timestamp(updated_at),
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        # WebhookInbox has received_at for presentation, but no real updated_at.
+        "updated_at": _canonical_timestamp(None if queue == "webhook" else updated_at),
+    }
 
 
 def _orm_confirmation_version(queue: str, row) -> str:
     terminal_at = row.processed_at if queue == "webhook" else row.completed_at
-    updated_at = None if queue == "webhook" else row.updated_at
     return _confirmation_version(
         queue=queue, operation_id=row.id, status=row.status,
         attempts=row.attempts, max_attempts=row.max_attempts,
-        terminal_at=terminal_at, updated_at=updated_at,
+        terminal_at=terminal_at, updated_at=getattr(row, "updated_at", None),
         last_error_code=row.last_error_code,
     )
 

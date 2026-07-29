@@ -20,6 +20,7 @@ from services.payment_queue_admin import (
     ManualRetryResult,
     QueueRow,
     _audit,
+    _orm_confirmation_version,
     _spec,
     confirm_manual_retry,
 )
@@ -39,6 +40,40 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(forbidden, rendered)
         self.assertTrue(self.row().retry_allowed)
         self.assertFalse(self.row("retry").retry_allowed)
+
+    def test_card_and_orm_confirmation_versions_match_for_every_queue(self):
+        now = datetime.now(timezone.utc)
+        for queue in ("provider", "fulfillment"):
+            card = QueueRow(queue, 42, 7, "operation", "dead", 4, 5,
+                            "safe_code", now, now, now, None,
+                            "not_locked", 30)
+            orm = SimpleNamespace(id=42, status="dead", attempts=4,
+                                  max_attempts=5, completed_at=now,
+                                  updated_at=now, last_error_code="safe_code")
+            self.assertEqual(card.confirmation_version,
+                             _orm_confirmation_version(queue, orm))
+
+        webhook_card = QueueRow("webhook", 42, 7, "payment.succeeded",
+                                "dead", 4, 5, "safe_code", now, now,
+                                now, None, "not_locked", 30)
+        webhook_orm = SimpleNamespace(
+            id=42, status="dead", attempts=4, max_attempts=5,
+            received_at=now, processed_at=now, last_error_code="safe_code")
+        version = _orm_confirmation_version("webhook", webhook_orm)
+        self.assertIsNotNone(webhook_orm.received_at)
+        self.assertIsNotNone(webhook_orm.processed_at)
+        self.assertFalse(hasattr(webhook_orm, "updated_at"))
+        self.assertEqual(webhook_card.confirmation_version, version)
+        self.assertEqual(version, _orm_confirmation_version("webhook", webhook_orm))
+
+        changed_processed = SimpleNamespace(**vars(webhook_orm))
+        changed_processed.processed_at = now.replace(microsecond=(now.microsecond + 1) % 1000000)
+        self.assertNotEqual(version,
+                            _orm_confirmation_version("webhook", changed_processed))
+        changed_attempts = SimpleNamespace(**vars(webhook_orm))
+        changed_attempts.attempts += 1
+        self.assertNotEqual(version,
+                            _orm_confirmation_version("webhook", changed_attempts))
 
     def test_callback_data_is_bounded_and_contains_no_reason(self):
         markup = diagnostics_keyboard()

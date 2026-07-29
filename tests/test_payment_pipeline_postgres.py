@@ -154,7 +154,9 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   async with self.sessions.begin() as s: await confirm_manual_retry(s,admin_id=7601,queue="webhook",operation_id=oid,reason="retry episode a",expected_version=version_a)
   processed_b=now_utc()+timedelta(seconds=2)
   async with self.sessions.begin() as s:
-   op=await s.get(WebhookInbox,oid); op.status="dead"; op.attempts=6; op.processed_at=processed_b; op.last_error_code="episode_b"
+   op=await s.get(WebhookInbox,oid); op.status="dead"; op.attempts=6; op.processed_at=processed_b; op.last_error_code="episode_b"; await s.flush()
+   version_b=(await get_operation_card(s,"webhook",oid)).confirmation_version
+   self.assertNotEqual(version_a,version_b)
   async with self.sessions.begin() as s: stale=await confirm_manual_retry(s,admin_id=7602,queue="webhook",operation_id=oid,reason="stale retry episode a",expected_version=version_a)
   self.assertEqual(stale.outcome,"already_changed")
   async with self.sessions.begin() as s:
