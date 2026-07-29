@@ -242,7 +242,12 @@ async def check_payment_status(
         provider=result_code["provider_status"]; fulfillment=result_code["fulfillment_status"]
         if fulfillment=="succeeded": message="✅ Доступ активирован."
         elif provider=="succeeded": message="✅ Оплата подтверждена.\n⏳ Обновляем подписку и доступ."
-        elif payment_simple.payment_url: message="Платёж ожидает подтверждения."
+        elif payment_simple.payment_url and payment_simple.checkout_status=="active" and provider not in {"canceled","refunded"}:
+            message=texts.PAYMENT_YOOKASSA_INSTRUCTIONS.format(amount=payment_simple.amount,payment_url=safe(payment_simple.payment_url))
+            keyboard=get_yookassa_payment_keyboard(payment_simple.payment_url,payment_simple.id,payment_simple.tariff_id,"refresh")
+            await render_hub(callback.bot,callback.message.chat.id,message,keyboard,parse_mode="HTML")
+            return
+        elif payment_simple.checkout_status=="abandoned" or provider in {"canceled","refunded"}: message="Этот платёж больше не доступен для оплаты."
         else: message="⏳ Создаём ссылку на оплату.\nНажмите «Обновить», чтобы проверить готовность."
         await render_hub(callback.bot,callback.message.chat.id,message,get_back_button("back_to_main_menu"))
         return

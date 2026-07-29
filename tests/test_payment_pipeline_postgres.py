@@ -33,7 +33,7 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   ids=await __import__('asyncio').gather(enqueue(),enqueue()); self.assertEqual(ids[0],ids[1])
  async def test_provider_success_atomically_enqueues_grant(self):
   async with self.sessions.begin() as s:
-   p=await self.payment(s); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={"provider_payment_id":p.external_id},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); claim=ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id); await finalize(s,claim,YooKassaResult(True,value=self.snapshot(p)))
+   p=await self.payment(s); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={"provider_payment_id":p.external_id},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); claim=ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id,op.created_at); await finalize(s,claim,YooKassaResult(True,value=self.snapshot(p)))
   async with self.sessions() as s: self.assertEqual((await s.get(Payment,p.id)).provider_status,"succeeded"); self.assertIsNotNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{p.id}")))
  async def test_provider_snapshot_mismatches_never_grant(self):
   for field in ("amount","currency","order","external"):
@@ -43,7 +43,7 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
     if field=="currency":data["amount"]["currency"]="USD"
     if field=="order":data["metadata"]["order_id"]="wrong"
     if field=="external":data["id"]="wrong"
-    await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id),YooKassaResult(True,value=data)); self.assertEqual(p.reconciliation_status,"mismatch"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+    await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value=data)); self.assertEqual(p.reconciliation_status,"mismatch"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
  async def test_provider_attempt_fencing_and_dead_restart(self):
   async with self.sessions.begin() as s:
    p=await self.payment(s); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="pending",idempotency_key=uuid.uuid4().hex,payload={},attempts=0,max_attempts=1,next_attempt_at=now_utc()); s.add(op); await s.flush(); c=await claim(s,"same"); oid=op.id
@@ -63,7 +63,7 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def test_terminal_provider_state_survives_late_failure_and_pending(self):
   for terminal in ("succeeded","refunded","canceled"):
    async with self.sessions.begin() as s:
-    p=await self.payment(s,provider_status=terminal,paid_at=now_utc() if terminal=="succeeded" else None); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); c=ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id); await finalize_provider_failure(s,c,error_code="timeout",retryable=True); self.assertEqual(p.provider_status,terminal)
+    p=await self.payment(s,provider_status=terminal,paid_at=now_utc() if terminal=="succeeded" else None); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); c=ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id,op.created_at); await finalize_provider_failure(s,c,error_code="timeout",retryable=True); self.assertEqual(p.provider_status,terminal)
  async def test_payment_not_visible_last_attempt_is_dead_with_timestamp(self):
   from services.workers.webhook_inbox import finalize as finalize_inbox
   async with self.sessions.begin() as s:
@@ -81,6 +81,11 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def test_referral_rejects_self_and_banned_referrer(self):
   async with self.sessions.begin() as s:
    invited=await s.get(User,self.user_id); invited.referred_by=invited.telegram_id; p=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{p.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await referral(s,op); self.assertEqual(op.status,"cancelled"); self.assertIsNone(await s.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==p.id)))
+
+ async def test_stale_recovery_preserves_each_terminal_provider_state(self):
+  for terminal in ("succeeded","refunded","canceled"):
+   async with self.sessions.begin() as s:
+    paid=now_utc() if terminal=="succeeded" else None; p=await self.payment(s,provider_status=terminal,paid_at=paid); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()-timedelta(hours=1)); s.add(op); await s.flush(); await recover_stale(s,0); self.assertEqual(p.provider_status,terminal); self.assertEqual(p.paid_at,paid); self.assertEqual(op.status,"dead")
 
 @unittest.skipUnless(DB,"TEST_DATABASE_URL is not set")
 class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):

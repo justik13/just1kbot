@@ -51,11 +51,12 @@ async def finalize(session,claim,result):
    await session.flush(); total=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
    if total==payment.amount:
     payment.provider_status="refunded"; payment.fulfillment_status="reversal_pending"
+    if payment.manual_review_reason=="partial_refund": payment.reconciliation_status="ok"; payment.manual_review_reason=None
     pending=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for queued in pending: queued.status="cancelled"; queued.completed_at=now_utc()
     await ensure_fulfillment(session,payment,"reverse_payment")
    elif total<payment.amount:
-    payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+    payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; payment.manual_review_reason="partial_refund"
     grants=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_subscription",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for grant_op in grants: grant_op.status="cancelled"; grant_op.completed_at=now_utc()
    else: payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
@@ -69,10 +70,10 @@ async def finalize(session,claim,result):
  else:
   data=result.value or {}; amount=data.get("amount") or {}; metadata=data.get("metadata") or {}; status=data.get("status")
   money=status=="succeeded"
-  if money and not payment.paid_at: payment.paid_at=payment.provider_confirmed_at=now_utc()
   mismatch=validate_provider_payment(payment,data)
   if mismatch: record_mismatch(session,payment,mismatch); payment.provider_status="manual_review"
   elif claim.event_type=="payment.succeeded" and status=="succeeded":
+   if not payment.paid_at: payment.paid_at=payment.provider_confirmed_at=now_utc()
    prior_status=payment.provider_status; payment.provider_status="succeeded"
    if payment.checkout_status=="abandoned" or prior_status=="canceled":
     payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"

@@ -30,10 +30,17 @@ def upgrade():
  op.execute("""UPDATE payments SET reconciliation_status='manual_review',fulfillment_status='manual_review',status='requires_manual_review',manual_review_reason='legacy_entitlement_snapshot_missing'
  WHERE status='completed' AND (snapshot_duration_days IS NULL OR snapshot_duration_days<=0 OR snapshot_device_limit IS NULL OR snapshot_device_limit<=0)""")
  # Legacy referral_days means first-payment eligibility is ambiguous: reserve it without awarding again.
+ op.execute("""UPDATE payments p SET reconciliation_status='manual_review',fulfillment_status='manual_review',status='requires_manual_review',manual_review_reason='legacy_referral_first_conflict'
+ WHERE p.status='completed' AND p.snapshot_duration_days>=30 AND (p.referral_user_bonus_days>0 OR p.referral_referrer_bonus_days>=3)
+ AND EXISTS (SELECT 1 FROM payments other WHERE other.user_id=p.user_id AND other.id<>p.id AND other.status='completed' AND other.snapshot_duration_days>=30 AND (other.referral_user_bonus_days>0 OR other.referral_referrer_bonus_days>=3))""")
  op.execute("""INSERT INTO referral_rewards(referred_user_id,source_payment_id,referrer_user_id,is_first,created_at)
  SELECT DISTINCT ON (p.user_id) p.user_id,p.id,ref.id,true,COALESCE(p.paid_at,p.created_at)
  FROM payments p JOIN users u ON u.id=p.user_id JOIN users ref ON ref.telegram_id=u.referred_by
- WHERE p.status='completed' ORDER BY p.user_id,p.paid_at NULLS LAST,p.id
+ WHERE p.status='completed' AND p.snapshot_duration_days>=30 AND (p.referral_user_bonus_days>0 OR p.referral_referrer_bonus_days>=3)
+ ORDER BY p.user_id,p.paid_at NULLS LAST,p.id ON CONFLICT DO NOTHING""")
+ op.execute("""INSERT INTO referral_rewards(referred_user_id,source_payment_id,referrer_user_id,is_first,created_at)
+ SELECT p.user_id,p.id,ref.id,false,COALESCE(p.paid_at,p.created_at) FROM payments p JOIN users u ON u.id=p.user_id JOIN users ref ON ref.telegram_id=u.referred_by
+ WHERE p.status='completed' AND p.snapshot_duration_days>=30 AND p.referral_user_bonus_days=0 AND p.referral_referrer_bonus_days=1
  ON CONFLICT DO NOTHING""")
 def downgrade():
  count=op.get_bind().execute(sa.text("SELECT count(*) FROM referral_rewards WHERE is_first=false")).scalar_one()

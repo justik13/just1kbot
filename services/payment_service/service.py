@@ -276,27 +276,29 @@ class PaymentService:
 
     @staticmethod
     async def force_grant_payment(session: AsyncSession, payment_id: int, admin_id: int, *, force_without_provider_confirmation: bool = False) -> tuple:
-        """Audit and enqueue an idempotent grant; never mutate entitlement here."""
         from database.models import PaymentFulfillmentOperation
-        from services.payment_lifecycle import project_legacy_status
         from services.payment_fulfillment import retry_dead_fulfillment_operation
-        payment = await get_payment_by_id_for_update(session, payment_id)
-        if not payment: return False, "Платёж не найден"
-        if payment.provider_status != "succeeded" and not force_without_provider_confirmation:
-            return False, "Требуется явное force_without_provider_confirmation=True"
+        from services.payment_lifecycle import project_legacy_status
+        payment=await get_payment_by_id_for_update(session,payment_id)
+        if not payment:return False,"Платёж не найден"
+        operation=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}").with_for_update())
+        if operation and operation.status=="processing":return False,"already_processing"
+        if operation and operation.status=="succeeded":return True,"already_succeeded"
+        if payment.provider_status!="succeeded" and not force_without_provider_confirmation:return False,"Требуется явное force_without_provider_confirmation=True"
+        payload={"manual_without_provider_confirmation":force_without_provider_confirmation,"admin_id":admin_id}
+        if operation and operation.status=="dead":
+            await retry_dead_fulfillment_operation(session,operation.id,reset_attempts=True,reason=f"manual grant by {admin_id}"); operation.payload=payload
+        elif operation and operation.status=="cancelled":
+            operation.status="retry"; operation.attempts=0; operation.completed_at=operation.locked_at=operation.locked_by=None; operation.last_error_code=operation.last_error=None; operation.next_attempt_at=now_utc(); operation.payload=payload
+        elif operation and operation.status in {"pending","retry"}: operation.payload=payload
+        elif not operation:
+            operation=PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload=payload,next_attempt_at=now_utc()); session.add(operation)
         if force_without_provider_confirmation:
             payment.reconciliation_status="manual_review"
             await _log_event_safe(session,payment.id,"manual_grant_without_provider_confirmation",source="force_grant_payment",details=f"admin_id={admin_id}")
         payment.fulfillment_status="pending"; project_legacy_status(payment)
-        existing=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}"))
-        desired_payload={"manual_without_provider_confirmation":force_without_provider_confirmation,"admin_id":admin_id}
-        if existing and existing.status=="dead": await retry_dead_fulfillment_operation(session,existing.id,reset_attempts=True,reason=f"manual grant by {admin_id}"); existing.payload=desired_payload
-        elif existing and existing.status=="cancelled": existing.status="retry"; existing.attempts=0; existing.completed_at=None; existing.next_attempt_at=now_utc(); existing.payload=desired_payload
-        elif existing and existing.status in {"pending","retry"}: existing.payload=desired_payload
-        elif existing and existing.status=="processing": return False,"already_processing"
-        elif not existing: session.add(PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={"manual_without_provider_confirmation":force_without_provider_confirmation,"admin_id":admin_id},next_attempt_at=now_utc()))
         await AuditService.log_action(session,admin_id=admin_id,action="MANUAL_GRANT_QUEUED",target_type="Payment",target_id=payment.id,details="force_without_provider_confirmation="+str(force_without_provider_confirmation))
-        await session.flush(); return True, "Выдача поставлена в очередь"
+        await session.flush(); return True,"Выдача поставлена в очередь"
 
     @staticmethod
     async def create_yookassa_payment(session: AsyncSession,user_id:int,tariff_id:int,amount:Decimal,telegram_id:int,bot_username:str)->tuple:

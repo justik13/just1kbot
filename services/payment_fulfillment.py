@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, ReferralReward, Tariff, User
+from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentEvent, PaymentRefund, ReferralReward, Tariff, User
 from database.connection import queue_post_commit_task
 from services.audit_service import AuditService
 from services.payment_lifecycle import project_legacy_status
@@ -79,10 +79,15 @@ async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("payment_grant","manual_grant"))))
     reversal=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
+    expected_grant=bool(payment.fulfilled_at or payment.status=="completed" or payment.manual_review_reason in {"legacy_entitlement_snapshot_missing","grant_ledger_missing"})
+    if not grant_entry and expected_grant:
+        payment.fulfillment_status="manual_review"; payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="grant_ledger_missing"; payment.manual_review_reason="grant_ledger_missing"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
     if grant_entry and not reversal:
-        days=payment.snapshot_duration_days or 0; now=now_utc(); user.subscription_end=max(now,user.subscription_end-timedelta(days=days)) if user.subscription_end else now
+        days=abs(grant_entry.days_delta); now=now_utc(); user.subscription_end=max(now,user.subscription_end-timedelta(days=days)) if user.subscription_end else now
         await _entry(session,payment,user.id,"payment_reversal",-days,reversed=grant_entry.id)
         await SubscriptionService.sync_access_state(session,user)
+    elif not grant_entry:
+        session.add(PaymentEvent(payment_id=payment.id,event_type="payment_reversal_no_grant",provider_status=payment.provider_status,reason="refund_before_fulfillment",source="fulfillment"))
     referrals=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_referral",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for referral_op in referrals: referral_op.status="cancelled"; referral_op.completed_at=now_utc()
     reward=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())

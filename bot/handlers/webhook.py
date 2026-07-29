@@ -33,10 +33,9 @@ YOOKASSA_IP_RANGES = [
     "2a02:5180::/32",
 ]
 
-REFUND_EVENTS = {
-    "refund.succeeded",
-    "payment.refunded",
-}
+OFFICIAL_YOOKASSA_EVENTS = {"payment.waiting_for_capture","payment.succeeded","payment.canceled","refund.succeeded"}
+LEGACY_UNSUPPORTED_EVENTS = {"payment.refunded"}
+REFUND_EVENTS = {"refund.succeeded","payment.refunded"}
 
 
 def _is_yookassa_ip(ip: str) -> bool:
@@ -241,6 +240,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     try:
         payload = await request.json()
         event = payload.get("event")
+        if event not in OFFICIAL_YOOKASSA_EVENTS|LEGACY_UNSUPPORTED_EVENTS: raise ValueError("unsupported_event")
         obj = payload.get("object")
         if not isinstance(event, str) or not isinstance(obj, dict): raise ValueError("structure")
         if event in REFUND_EVENTS:

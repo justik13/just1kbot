@@ -12,7 +12,7 @@ from config.settings import get_settings
 
 T = TypeVar("T")
 class YooKassaErrorKind(str, Enum):
-    CONFIGURATION="configuration"; AUTH_FAILED="auth_failed"; VALIDATION_FAILED="validation_failed"; NOT_FOUND="not_found"; RATE_LIMITED="rate_limited"; SERVER_ERROR="server_error"; NETWORK_ERROR="network_error"; TIMEOUT="timeout"; INVALID_RESPONSE="invalid_response"; UNKNOWN="unknown"
+    CONFIGURATION="configuration"; AUTH_FAILED="auth_failed"; VALIDATION_FAILED="validation_failed"; NOT_FOUND="not_found"; RATE_LIMITED="rate_limited"; SERVER_ERROR="server_error"; NETWORK_ERROR="network_error"; TIMEOUT="timeout"; INVALID_RESPONSE="invalid_response"; IDEMPOTENCY_WINDOW_EXPIRED="create_idempotency_window_expired"; UNKNOWN="unknown"
 @dataclass(frozen=True)
 class YooKassaResult(Generic[T]):
     ok: bool

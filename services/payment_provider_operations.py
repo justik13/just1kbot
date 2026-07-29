@@ -13,7 +13,7 @@ from utils.datetime_helpers import now_utc
 class PaymentProviderOperationOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
 class ProviderOperationClaim:
-    operation_id:int; payment_id:int; operation_type:str; payload:dict; idempotency_key:str; worker_id:str; attempt_number:int; external_id:str|None
+    operation_id:int; payment_id:int; operation_type:str; payload:dict; idempotency_key:str; worker_id:str; attempt_number:int; external_id:str|None; created_at:object
 
 def create_payload(payment,description,return_url):
     return {"amount":{"value":format(payment.amount,'.2f'),"currency":payment.currency},"description":description,"confirmation":{"type":"redirect","return_url":return_url},"metadata":{"order_id":payment.public_order_id,"local_payment_id":str(payment.id)},"capture":True}
@@ -34,6 +34,7 @@ async def ensure_reconcile_payment_operation(session,payment,*,reason):
 async def retry_dead_provider_operation(session,operation_id,*,reset_attempts,reason):
     op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.id==operation_id).with_for_update())
     if not op or op.status!="dead": raise ValueError("operation is not dead")
+    if op.operation_type=="create_payment" and now_utc()-op.created_at>=timedelta(hours=23): raise ValueError("create_idempotency_window_expired")
     op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc(); op.payload={**op.payload,"admin_retry_reason":str(reason)[:100]}
     if reset_attempts:op.attempts=0
     elif op.attempts>=op.max_attempts:raise ValueError("reset_attempts required for exhausted operation")
@@ -47,10 +48,12 @@ async def claim(session,worker_id):
     op.status="processing"; op.locked_by=worker_id; op.locked_at=now_utc(); op.attempts+=1
     payment=await session.get(Payment,op.payment_id)
     await session.flush()
-    return ProviderOperationClaim(op.id,op.payment_id,op.operation_type,dict(op.payload),op.idempotency_key,worker_id,op.attempts,payment.external_id if payment else None)
+    return ProviderOperationClaim(op.id,op.payment_id,op.operation_type,dict(op.payload),op.idempotency_key,worker_id,op.attempts,payment.external_id if payment else None,op.created_at)
 async def perform_http(claim,transport=YooKassaService):
     if claim.operation_type=="create_payment":
-        return await (transport.get_payment_result(claim.external_id) if claim.external_id else transport.create_payment_result(claim.payload,idempotency_key=claim.idempotency_key))
+        if claim.external_id:return await transport.get_payment_result(claim.external_id)
+        if now_utc()-claim.created_at>=timedelta(hours=23):return YooKassaResult(False,error_kind=YooKassaErrorKind.IDEMPOTENCY_WINDOW_EXPIRED,retryable=False,ambiguous=True)
+        return await transport.create_payment_result(claim.payload,idempotency_key=claim.idempotency_key)
     provider_id=claim.payload.get("provider_payment_id") or claim.external_id
     if not provider_id:return YooKassaResult(False,error_kind=YooKassaErrorKind.VALIDATION_FAILED)
     if claim.operation_type=="cancel_payment":
@@ -67,10 +70,14 @@ async def finalize(session,claim,result,transport=YooKassaService):
     payment=await session.scalar(select(Payment).where(Payment.id==claim.payment_id).with_for_update())
     if result.ok:
         data=result.value or {}; status=data.get("status")
-        if claim.operation_type=="create_payment":
+        if status not in {"pending","waiting_for_capture","succeeded","canceled"}: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=False,ambiguous=False)
+        if result.ok and claim.operation_type=="create_payment":
             confirmation=data.get("confirmation") or {}; url=confirmation.get("confirmation_url") or confirmation.get("url")
-            if not data.get("id") or not url: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=True)
-            else: payment.external_id=str(data["id"]); payment.payment_url=url; payment.payment_method="yookassa"
+            primary=claim.external_id is None
+            if not data.get("id") or (primary and not url): result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=primary)
+            else:
+                payment.external_id=str(data["id"]); payment.payment_url=url or payment.payment_url; payment.payment_method="yookassa"
+                if not primary and status in {"pending","waiting_for_capture"} and not payment.payment_url: payment.reconciliation_status="required"
         if result.ok and status=="succeeded":
             mismatch=validate_provider_payment(payment,data)
             if mismatch:
@@ -103,8 +110,12 @@ async def recover_stale(session,lease_seconds=120):
     rows=(await session.scalars(select(PaymentProviderOperation).where(PaymentProviderOperation.status=="processing",PaymentProviderOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
     for op in rows:
         dead=op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
-        if dead:
-            payment=await session.get(Payment,op.payment_id); payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"; project_legacy_status(payment)
+        payment=await session.get(Payment,op.payment_id)
+        if payment.provider_status in {"succeeded","refunded","canceled"}:
+            payment.reconciliation_status="manual_review" if dead else "required"; session.add(PaymentEvent(payment_id=payment.id,event_type="stale_provider_operation_after_terminal",provider_status=payment.provider_status,reason="lease_expired_at_attempt_limit" if dead else "lease_expired",source="provider_recovery"))
+        elif dead: payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"
+        else: payment.reconciliation_status="required"
+        project_legacy_status(payment)
     return len(rows)
 
 async def finalize_provider_failure(session,claim,*,error_code,retryable):
