@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
 from services.payment_lifecycle import project_legacy_status
+from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
 from database.models import PaymentEvent
 from services.yookassa_service import YooKassaService
@@ -100,7 +101,7 @@ async def finalize(session,claim,result):
     for operation in queued: operation.status="cancelled"; operation.completed_at=now_utc()
 
  project_legacy_status(payment); row.status="succeeded"; row.processed_at=now_utc(); row.locked_at=row.locked_by=None; await session.flush()
-async def recover_stale(session,lease_seconds=120):
+async def recover_stale(session,lease_seconds=WEBHOOK_LEASE_SECONDS):
  rows=(await session.scalars(select(WebhookInbox).where(WebhookInbox.status=="processing",WebhookInbox.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
  for row in rows:
   dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.locked_at=row.locked_by=None; row.next_attempt_at=now_utc()
