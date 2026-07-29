@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from database.models import Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation
 from services.payment_lifecycle import project_legacy_status
+from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
 from services.yookassa_service import YooKassaService, YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
@@ -137,7 +138,7 @@ async def finalize(session,claim,result,transport=YooKassaService):
             payment.provider_status=status; payment.reconciliation_status="manual_review"
             session.add(PaymentEvent(payment_id=payment.id,event_type="cancel_not_confirmed_at_attempt_limit",provider_status=status,reason="cancel_not_confirmed",source="provider_finalizer"))
     op.locked_at=op.locked_by=None; project_legacy_status(payment); await session.flush()
-async def recover_stale(session,lease_seconds=120):
+async def recover_stale(session,lease_seconds=PROVIDER_LEASE_SECONDS):
     rows=(await session.scalars(select(PaymentProviderOperation).where(PaymentProviderOperation.status=="processing",PaymentProviderOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
     for op in rows:
         dead=op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()

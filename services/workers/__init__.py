@@ -14,6 +14,7 @@ from .cleanup import cleanup_dangling_peers_loop
 from .heartbeat import heartbeat_loop, set_bot_ref
 from .notifications import subscription_notifications_loop
 from .payment_pipeline import payment_pipeline_loop
+from .queue_health import queue_health_loop
 from .payments import stale_payments_checker_loop
 from .traffic import traffic_sync_loop
 
@@ -64,6 +65,7 @@ def _notifications(bot): return subscription_notifications_loop(bot, shutdown_ev
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
 def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
+def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 
 
 # Queue fulfillment workers are critical. The remaining workers provide periodic
@@ -75,6 +77,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("stale_payments", _stale_payments, False),
     WorkerDefinition("notifications", _notifications, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
+    WorkerDefinition("queue_health", _queue_health, False),
     WorkerDefinition("api_operations", _api_operations, True),
     WorkerDefinition("payment_pipeline", _payment_pipeline, True),
 )

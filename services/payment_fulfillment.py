@@ -8,6 +8,7 @@ from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperati
 from database.connection import queue_post_commit_task
 from services.audit_service import AuditService
 from services.payment_lifecycle import project_legacy_status
+from services.payment_queue_timing import FULFILLMENT_LEASE_SECONDS
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 class PaymentFulfillmentOperationOwnershipError(RuntimeError): pass
@@ -137,7 +138,7 @@ async def retry_dead_fulfillment_operation(session,operation_id,*,reset_attempts
     op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc(); op.payload={**op.payload,"admin_retry_reason":str(reason)[:100]}
     if reset_attempts:op.attempts=0
     return op
-async def recover_stale(session,lease_seconds=120):
+async def recover_stale(session,lease_seconds=FULFILLMENT_LEASE_SECONDS):
     rows=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.status=="processing",PaymentFulfillmentOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
     for op in rows:
         dead=op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.locked_at=op.locked_by=None; op.next_attempt_at=now_utc()
