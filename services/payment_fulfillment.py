@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentEvent, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User
+from database.models import EntitlementEntry, PaidValueLedgerEntry, Payment, PaymentFulfillmentOperation, PaymentEvent, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, TariffQuote, TariffVersion, User
+from database.repositories.paid_value_repo import get_or_create_confirmed_payment_entry, get_or_create_payment_reversal_entry
 from database.connection import queue_post_commit_task
 from services.audit_service import AuditService
 from services.payment_lifecycle import project_legacy_status
@@ -35,11 +36,39 @@ async def grant(session,op):
     refunded=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
     if (not manual and payment.reconciliation_status in {"mismatch","manual_review"}) or refunded:
         payment.fulfillment_status="manual_review"; op.status="cancelled"; op.completed_at=now_utc(); return
+    quote = None
+    version = None
+    if not manual and (payment.tariff_quote_id or payment.tariff_version_id):
+        if not payment.tariff_quote_id or not payment.tariff_version_id:
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="incomplete_quote_snapshot"; op.status="dead"; op.completed_at=now_utc(); return
+        quote=await session.scalar(select(TariffQuote).where(TariffQuote.id==payment.tariff_quote_id).with_for_update())
+        version=await session.get(TariffVersion,payment.tariff_version_id)
+        if not quote or not version or quote.target_tariff_version_id != version.id:
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="quote_version_mismatch"; op.status="dead"; op.completed_at=now_utc(); return
+        if (payment.snapshot_amount != quote.confirmed_payment_required_rub or
+            payment.snapshot_currency != quote.currency or
+            (payment.snapshot_duration_days or 0) * 24 != version.duration_hours or
+            payment.snapshot_device_limit != version.device_limit):
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="quote_payment_snapshot_mismatch"; op.status="dead"; op.completed_at=now_utc(); return
+        if quote.status == "cancelled" or payment.checkout_status == "abandoned":
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="paid_after_checkout_cancel"; op.status="cancelled"; op.completed_at=now_utc(); return
+        if quote.status not in {"active","consumed","expired"}:
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="quote_not_fulfillable"; op.status="cancelled"; op.completed_at=now_utc(); return
+        if payment.provider_confirmed_at is None or payment.provider_confirmed_at > quote.expires_at:
+            quote.status="manual_review"; quote.manual_review_at=quote.manual_review_at or now_utc(); quote.diagnostic_reason="provider_confirmation_missing_or_after_expiry"
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="quote_expired_at_confirmation"; op.status="cancelled"; op.completed_at=now_utc(); project_legacy_status(payment); return
     if not existing:
         days=payment.snapshot_duration_days
         if not days or not payment.snapshot_device_limit: payment.fulfillment_status="manual_review"; op.status="dead"; op.completed_at=now_utc(); return
         await SubscriptionService.extend_subscription(session,user.telegram_id,days,payment.snapshot_device_limit,payment.tariff_id)
         await _entry(session,payment,user.id,grant_entry_type,days,limit=payment.snapshot_device_limit,tariff=payment.tariff_id)
+    if quote is not None:
+        await get_or_create_confirmed_payment_entry(session,user_id=user.id,
+            payment_id=payment.id,quote_id=quote.id,tariff_version_id=version.id,
+            paid_hours=version.duration_hours,
+            paid_value_rub=payment.snapshot_amount)
+        if quote.status in {"active","expired"}: quote.status="consumed"
+        quote.consumed_at=quote.consumed_at or now_utc()
     payment.fulfillment_status="succeeded"; payment.fulfilled_at=payment.fulfilled_at or now_utc(); op.status="succeeded"; op.completed_at=now_utc(); project_legacy_status(payment)
     # Referral is isolated: failure can never roll back this grant on a later job.
     user.last_payment_at=now_utc()
@@ -99,6 +128,11 @@ async def reverse(session,op):
         await SubscriptionService.sync_access_state(session,user)
     elif not grant_entry:
         session.add(PaymentEvent(payment_id=payment.id,event_type="payment_reversal_no_grant",provider_status=payment.provider_status,reason="refund_before_fulfillment",source="fulfillment"))
+    paid_entry=await session.scalar(select(PaidValueLedgerEntry).where(
+        PaidValueLedgerEntry.payment_id==payment.id,
+        PaidValueLedgerEntry.entry_type=="confirmed_payment").with_for_update())
+    if paid_entry is not None:
+        await get_or_create_payment_reversal_entry(session,original=paid_entry)
     referrals=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_referral",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for referral_op in referrals: referral_op.status="cancelled"; referral_op.completed_at=now_utc()
     reward=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())

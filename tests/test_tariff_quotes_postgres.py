@@ -81,6 +81,30 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(IntegrityError):
             await self.connection.execute(statement, values)
 
+    async def test_confirmed_payment_requires_payment(self):
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(text(
+                "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id,payment_id,quote_id) VALUES(:u,'payment','1','confirmed_payment',720,300,'RUB',:v,NULL,1)"
+            ), {"u": self.user_id, "v": self.version_id})
+
+    async def test_confirmed_payment_requires_quote(self):
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(text(
+                "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id,payment_id,quote_id) VALUES(:u,'payment','1','confirmed_payment',720,300,'RUB',:v,1,NULL)"
+            ), {"u": self.user_id, "v": self.version_id})
+
+    async def test_conversion_requires_quote(self):
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(text(
+                "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id) VALUES(:u,'quote','1','tariff_conversion',0,0,'RUB',:v)"
+            ), {"u": self.user_id, "v": self.version_id})
+
+    async def test_reversal_requires_original(self):
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(text(
+                "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id) VALUES(:u,'entry','1','payment_reversal',-1,-1,'RUB',:v)"
+            ), {"u": self.user_id, "v": self.version_id})
+
 
 if __name__ == "__main__":
     unittest.main()

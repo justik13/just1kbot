@@ -417,15 +417,23 @@ class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
   from alembic.command import downgrade, upgrade
   from alembic.config import Config
   cfg=Config("alembic.ini"); cfg.set_main_option("sqlalchemy.url",DB)
-  await asyncio.to_thread(downgrade,cfg,"-2")
-  engine=create_async_engine(DB); sessions=async_sessionmaker(engine,expire_on_commit=False)
-  async with sessions.begin() as s:
-   await s.execute(__import__('sqlalchemy').text("DELETE FROM referral_rewards"))
-   for model in (EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
-   t=Tariff(name="Legacy",duration_days=30,device_limit=2,price_rub=90,is_active=True); u=User(telegram_id=777001,subscription_end=now_utc()+timedelta(days=30),device_limit=2); s.add_all([t,u]); await s.flush(); original_end=u.subscription_end
-   p=Payment(user_id=u.id,tariff_id=t.id,amount=Decimal("90"),currency="RUB",status="completed",provider_status="succeeded",fulfillment_status="succeeded",reconciliation_status="ok",checkout_status="active",snapshot_duration_days=30,snapshot_device_limit=2,snapshot_amount=Decimal("90"),snapshot_currency="RUB",paid_at=now_utc()); s.add(p); await s.flush(); pid=p.id; uid=u.id
-  await engine.dispose(); await asyncio.to_thread(upgrade,cfg,"head")
-  engine=create_async_engine(DB); sessions=async_sessionmaker(engine,expire_on_commit=False)
-  async with sessions() as s:
-   entry=await s.scalar(select(EntitlementEntry).where(EntitlementEntry.source_id==str(pid),EntitlementEntry.entry_type=="payment_grant")); user=await s.get(User,uid); self.assertIsNotNone(entry); self.assertEqual(user.subscription_end,original_end)
-  await engine.dispose()
+  engine=None
+  try:
+   await asyncio.to_thread(downgrade,cfg,"ab17c4e92901")
+   engine=create_async_engine(DB)
+   async with engine.begin() as connection:
+    await connection.execute(__import__('sqlalchemy').text("TRUNCATE referral_rewards, entitlement_entries, payment_refunds, webhook_inbox, payment_fulfillment_operations, payment_provider_operations, payments, users, tariffs RESTART IDENTITY CASCADE"))
+    tariff_id=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) VALUES('Legacy',30,2,90,true,0,now()) RETURNING id"))).scalar_one()
+    original_end=now_utc()+timedelta(days=30)
+    uid=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO users(telegram_id,subscription_end,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,device_creations_today,created_at) VALUES(777001,:end,2,0,false,false,false,0,false,false,false,false,false,0,now()) RETURNING id"),{"end":original_end})).scalar_one()
+    pid=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO payments(user_id,tariff_id,amount,currency,status,provider_status,fulfillment_status,reconciliation_status,checkout_status,snapshot_duration_days,snapshot_device_limit,snapshot_amount,snapshot_currency,referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at,paid_at) VALUES(:uid,:tid,90,'RUB','completed','succeeded','succeeded','ok','active',30,2,90,'RUB',0,0,now(),now(),now()) RETURNING id"),{"uid":uid,"tid":tariff_id})).scalar_one()
+   await engine.dispose(); engine=None
+   await asyncio.to_thread(upgrade,cfg,"head")
+   engine=create_async_engine(DB)
+   async with engine.connect() as connection:
+    entry=(await connection.execute(__import__('sqlalchemy').text("SELECT id FROM entitlement_entries WHERE source_id=:pid AND entry_type='payment_grant'"),{"pid":str(pid)})).scalar_one_or_none()
+    current_end=(await connection.execute(__import__('sqlalchemy').text("SELECT subscription_end FROM users WHERE id=:uid"),{"uid":uid})).scalar_one()
+    self.assertIsNotNone(entry); self.assertEqual(current_end,original_end)
+  finally:
+   if engine is not None: await engine.dispose()
+   await asyncio.to_thread(upgrade,cfg,"head")

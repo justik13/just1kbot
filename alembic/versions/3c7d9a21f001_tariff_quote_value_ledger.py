@@ -85,7 +85,11 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("metadata", postgresql.JSONB(), nullable=False, server_default=sa.text("'{}'::jsonb")),
         sa.CheckConstraint("entry_type IN ('confirmed_payment','tariff_conversion','payment_reversal','manual_adjustment')", name="ck_paid_value_ledger_entry_type"),
-        sa.CheckConstraint("currency='RUB'", name="ck_paid_value_ledger_currency_rub"))
+        sa.CheckConstraint("currency='RUB'", name="ck_paid_value_ledger_currency_rub"),
+        sa.CheckConstraint("paid_value_rub_delta <> 'NaN'::numeric", name="ck_paid_value_ledger_finite_value"),
+        sa.CheckConstraint("entry_type <> 'confirmed_payment' OR (payment_id IS NOT NULL AND quote_id IS NOT NULL AND reversal_of_id IS NULL AND paid_hours_delta > 0 AND paid_value_rub_delta > 0)", name="ck_paid_value_confirmed_shape"),
+        sa.CheckConstraint("entry_type <> 'tariff_conversion' OR (quote_id IS NOT NULL AND reversal_of_id IS NULL)", name="ck_paid_value_conversion_shape"),
+        sa.CheckConstraint("entry_type <> 'payment_reversal' OR (reversal_of_id IS NOT NULL AND paid_hours_delta <= 0 AND paid_value_rub_delta <= 0 AND reversal_of_id <> id)", name="ck_paid_value_reversal_shape"))
     op.create_index("ix_paid_value_ledger_user_id", "paid_value_ledger", ["user_id"])
     op.create_index("uq_paid_value_confirmed_payment", "paid_value_ledger", ["payment_id"], unique=True, postgresql_where=sa.text("entry_type='confirmed_payment'"))
     op.create_index("uq_paid_value_conversion_quote", "paid_value_ledger", ["quote_id"], unique=True, postgresql_where=sa.text("entry_type='tariff_conversion'"))

@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from bot.middlewares.user_context import invalidate_user_cache
 from database.connection import queue_post_commit_task, session_scope
-from database.models import Payment, User
+from database.models import Payment, TariffQuote, User
 from database.repositories.payments_repo import (
     create_payment,
     get_payment_by_id,
@@ -311,7 +311,7 @@ class PaymentService:
         if decimal_amount is None or not tariff: return None,None
         user = await session.get(User, user_id)
         active = bool(user and user.subscription_end and user.subscription_end > now_utc())
-        if active and user.current_tariff_id and user.current_tariff_id != tariff_id:
+        if active and user.current_tariff_id != tariff_id:
             # Foundation only: a later PR will consume a confirmed change quote.
             return None, "active_tariff_change_temporarily_unavailable"
         operation_type = "renew" if active and user.current_tariff_id == tariff_id else "purchase"
@@ -366,6 +366,12 @@ class PaymentService:
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment or payment.provider_status in {"succeeded","refunded","canceled"}:return False
         payment.checkout_status="abandoned"; payment.user_cancel_requested_at=now_utc(); payment.payment_url=None
+        if payment.tariff_quote_id:
+            quote=await session.scalar(select(TariffQuote).where(
+                TariffQuote.id==payment.tariff_quote_id).with_for_update())
+            if quote and quote.status=="active":
+                quote.status="cancelled"
+                quote.diagnostic_reason="checkout_abandoned_by_user"
         create_op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="create_payment").with_for_update())
         if not payment.external_id:
             if create_op and create_op.status=="pending" and create_op.attempts==0: create_op.status="cancelled"; create_op.completed_at=now_utc()
