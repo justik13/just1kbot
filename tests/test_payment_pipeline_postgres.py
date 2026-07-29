@@ -4,10 +4,11 @@ from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralReward, Tariff, User, WebhookInbox)
-from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, recover_stale, retry_dead_provider_operation)
+from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
-from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, retry_dead_fulfillment_operation
+from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, retry_dead_fulfillment_operation
 from services.yookassa_service import YooKassaResult
+from services.payment_service import PaymentService
 from utils.datetime_helpers import now_utc
 DB=os.getenv("TEST_DATABASE_URL")
 @unittest.skipUnless(DB,"TEST_DATABASE_URL is not set")
@@ -52,6 +53,34 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def test_all_queue_failure_finalizers_dead_at_limit_and_restart(self):
   async with self.sessions.begin() as s:
    p=await self.payment(s); f=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",idempotency_key=uuid.uuid4().hex,status="processing",payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); w=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id="x",payment_external_id=p.external_id,payload={},status="processing",attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add_all([f,w]); await s.flush(); await finalize_fulfillment_failure(s,FulfillmentClaim(f.id,"w",1,f.operation_type),error_code="x"); await finalize_webhook_failure(s,InboxClaim(w.id,"w",1,w.event_type,w.payment_external_id,None,w.payload,w.event_key),error_code="x"); self.assertEqual((f.status,w.status),("dead","dead")); await retry_dead_fulfillment_operation(s,f.id,reset_attempts=True,reason="admin"); await retry_dead_webhook_operation(s,w.id,reset_attempts=True,reason="admin"); self.assertEqual((f.attempts,w.attempts),(0,0))
+
+ async def test_pending_auto_capture_cancel_orchestration_never_enqueues_provider_cancel(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="pending"); queued=await PaymentService.cancel_payment_via_api(s,p.id); self.assertTrue(queued); self.assertEqual(p.checkout_status,"abandoned"); self.assertIsNone(await s.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==p.id,PaymentProviderOperation.operation_type=="cancel_payment")))
+ async def test_waiting_for_capture_enqueues_cancel(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="waiting_for_capture"); await PaymentService.cancel_payment_via_api(s,p.id); self.assertIsNotNone(await s.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==p.id,PaymentProviderOperation.operation_type=="cancel_payment")))
+ async def test_terminal_provider_state_survives_late_failure_and_pending(self):
+  for terminal in ("succeeded","refunded","canceled"):
+   async with self.sessions.begin() as s:
+    p=await self.payment(s,provider_status=terminal,paid_at=now_utc() if terminal=="succeeded" else None); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); c=ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id); await finalize_provider_failure(s,c,error_code="timeout",retryable=True); self.assertEqual(p.provider_status,terminal)
+ async def test_payment_not_visible_last_attempt_is_dead_with_timestamp(self):
+  from services.workers.webhook_inbox import finalize as finalize_inbox
+  async with self.sessions.begin() as s:
+   row=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id="missing",payment_external_id="missing",payload={},status="processing",attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(row); await s.flush(); await finalize_inbox(s,InboxClaim(row.id,"w",1,row.event_type,row.payment_external_id,None,row.payload,row.event_key),YooKassaResult(True,value={})); self.assertEqual(row.status,"dead"); self.assertIsNotNone(row.processed_at); self.assertIsNone(row.locked_by)
+ async def test_force_manual_does_not_mutate_processing_payload(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="succeeded"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{p.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="worker",locked_at=now_utc()); s.add(op); await s.flush(); ok,code=await PaymentService.force_grant_payment(s,p.id,1,force_without_provider_confirmation=True); self.assertFalse(ok); self.assertEqual(code,"already_processing"); self.assertEqual(op.payload,{})
+
+ async def test_referral_business_rules_5_3_1_are_exactly_once(self):
+  async with self.sessions.begin() as s:
+   invited=await s.get(User,self.user_id); ref=User(telegram_id=888001,subscription_end=now_utc(),device_limit=2); s.add(ref); await s.flush(); invited.referred_by=ref.telegram_id; invited.subscription_end=now_utc()
+   first=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); op1=PaymentFulfillmentOperation(payment_id=first.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{first.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op1); await s.flush(); await referral(s,op1); self.assertEqual((first.referral_user_bonus_days,first.referral_referrer_bonus_days,ref.referral_days),(5,3,3))
+   second=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); op2=PaymentFulfillmentOperation(payment_id=second.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{second.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op2); await s.flush(); await referral(s,op2); self.assertEqual((second.referral_user_bonus_days,second.referral_referrer_bonus_days,ref.referral_days),(0,1,4))
+   await referral(s,op2); self.assertEqual(ref.referral_days,4)
+ async def test_referral_rejects_self_and_banned_referrer(self):
+  async with self.sessions.begin() as s:
+   invited=await s.get(User,self.user_id); invited.referred_by=invited.telegram_id; p=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{p.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await referral(s,op); self.assertEqual(op.status,"cancelled"); self.assertIsNone(await s.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==p.id)))
 
 @unittest.skipUnless(DB,"TEST_DATABASE_URL is not set")
 class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):

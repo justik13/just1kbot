@@ -55,10 +55,11 @@ async def grant(session,op):
 async def referral(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     reversal=await session.scalar(select(EntitlementEntry.id).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
-    if not user or not user.referred_by or payment.provider_status!="succeeded" or payment.fulfillment_status!="succeeded" or reversal:
+    if not user or user.is_deleted or user.is_banned or not user.referred_by or user.referred_by==user.telegram_id or payment.provider_status!="succeeded" or payment.fulfillment_status!="succeeded" or reversal:
         op.status="cancelled"; op.completed_at=now_utc(); return
     ref=await session.scalar(select(User).where(User.telegram_id==user.referred_by).with_for_update())
     if not ref: op.status="dead"; op.completed_at=now_utc(); op.last_error_code="referrer_missing"; return
+    if ref.is_deleted or ref.is_banned: op.status="cancelled"; op.completed_at=now_utc(); return
     if (payment.snapshot_duration_days or 0)<30: op.status="cancelled"; op.completed_at=now_utc(); return
     marker=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())
     if marker and marker.reversed_at: op.status="cancelled"; op.completed_at=now_utc(); return
@@ -71,7 +72,8 @@ async def referral(session,op):
     if user_days: _,a=await _entry(session,payment,user.id,"referral_user_bonus",user_days)
     _,b=await _entry(session,payment,ref.id,"referral_referrer_bonus",ref_days)
     if a: await SubscriptionService.extend_subscription(session,user.telegram_id,user_days)
-    if b: await SubscriptionService.extend_subscription(session,ref.telegram_id,ref_days)
+    if b:
+        await SubscriptionService.extend_subscription(session,ref.telegram_id,ref_days); ref.referral_days=(ref.referral_days or 0)+ref_days
     payment.referral_user_bonus_days=user_days; payment.referral_referrer_bonus_days=ref_days; op.status="succeeded"; op.completed_at=now_utc()
 async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
@@ -90,7 +92,10 @@ async def reverse(session,op):
         _,created=await _entry(session,payment,bonus.beneficiary_user_id,"referral_reversal",-bonus.days_delta,reversed=bonus.id,metadata={"reversed_entry_type":bonus.entry_type})
         if created:
             beneficiary=await session.scalar(select(User).where(User.id==bonus.beneficiary_user_id).with_for_update())
-            if beneficiary and beneficiary.subscription_end: beneficiary.subscription_end=max(now_utc(),beneficiary.subscription_end-timedelta(days=bonus.days_delta)); await SubscriptionService.sync_access_state(session,beneficiary)
+            if beneficiary and beneficiary.subscription_end:
+                beneficiary.subscription_end=max(now_utc(),beneficiary.subscription_end-timedelta(days=bonus.days_delta))
+                if bonus.entry_type=="referral_referrer_bonus": beneficiary.referral_days=max(0,(beneficiary.referral_days or 0)-bonus.days_delta)
+                await SubscriptionService.sync_access_state(session,beneficiary)
     latest=await session.scalar(select(Payment).where(Payment.user_id==payment.user_id,Payment.id!=payment.id,Payment.provider_status=="succeeded",Payment.fulfillment_status=="succeeded").order_by(Payment.fulfilled_at.desc()).limit(1))
     if latest: user.device_limit=latest.snapshot_device_limit or user.device_limit; user.current_tariff_id=latest.tariff_id
     payment.fulfillment_status="reversed"; payment.reversed_at=payment.reversed_at or now_utc(); op.status="succeeded"; op.completed_at=now_utc(); project_legacy_status(payment)

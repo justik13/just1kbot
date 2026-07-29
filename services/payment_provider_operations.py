@@ -85,14 +85,18 @@ async def finalize(session,claim,result,transport=YooKassaService):
                 if payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: payment.fulfillment_status="pending"
                 await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
         elif result.ok and status=="canceled":
-            if payment.provider_status=="succeeded": payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="late_provider_conflict",provider_status="canceled",reason="canceled_after_succeeded",source="provider_finalizer"))
+            if payment.provider_status in {"succeeded","refunded"}: payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="late_provider_conflict",provider_status="canceled",reason="canceled_after_terminal",source="provider_finalizer"))
             else: payment.provider_status="canceled"
-        elif result.ok and payment.provider_status!="succeeded": payment.provider_status=status if status in {"pending","waiting_for_capture"} else payment.provider_status
+        elif result.ok and payment.provider_status not in {"succeeded","refunded","canceled"}: payment.provider_status=status if status in {"pending","waiting_for_capture"} else payment.provider_status
         if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status not in {"mismatch","manual_review"} else payment.reconciliation_status
     if not result.ok:
         op.last_error_code=result.error_kind.value if result.error_kind else "unknown"; op.last_error=None
         exhausted=op.attempts>=op.max_attempts; op.status="dead" if exhausted or not result.retryable else "retry"; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8)))
-        payment.provider_status="unknown" if result.ambiguous else ("manual_review" if op.status=="dead" else payment.provider_status); payment.reconciliation_status="required" if op.status=="retry" else "manual_review"
+        if payment.provider_status in {"succeeded","refunded","canceled"}:
+            payment.reconciliation_status="manual_review" if op.status=="dead" else "required"
+            session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_error_after_terminal",provider_status=payment.provider_status,reason=op.last_error_code,source="provider_finalizer"))
+        else:
+            payment.provider_status="unknown" if result.ambiguous else ("manual_review" if op.status=="dead" else payment.provider_status); payment.reconciliation_status="required" if op.status=="retry" else "manual_review"
         if op.status=="dead": op.completed_at=now_utc()
     op.locked_at=op.locked_by=None; project_legacy_status(payment); await session.flush()
 async def recover_stale(session,lease_seconds=120):
@@ -108,6 +112,9 @@ async def finalize_provider_failure(session,claim,*,error_code,retryable):
     if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentProviderOperationOwnershipError(claim.operation_id)
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update())
     dead=(not retryable) or op.attempts>=op.max_attempts; op.status="dead" if dead else "retry"; op.completed_at=now_utc() if dead else None; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8))); op.last_error_code=str(error_code)[:100]; op.last_error=None; op.locked_at=op.locked_by=None
-    if dead: payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"
+    if payment.provider_status in {"succeeded","refunded","canceled"}:
+        payment.reconciliation_status="manual_review" if dead else "required"
+        session.add(PaymentEvent(payment_id=payment.id,event_type="provider_failure_after_terminal",provider_status=payment.provider_status,reason=str(error_code)[:100],source="provider_failure_finalizer"))
+    elif dead: payment.provider_status="manual_review"; payment.reconciliation_status="manual_review"
     else: payment.reconciliation_status="required"
     project_legacy_status(payment); return op

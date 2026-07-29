@@ -293,6 +293,7 @@ class PaymentService:
         if existing and existing.status=="dead": await retry_dead_fulfillment_operation(session,existing.id,reset_attempts=True,reason=f"manual grant by {admin_id}"); existing.payload=desired_payload
         elif existing and existing.status=="cancelled": existing.status="retry"; existing.attempts=0; existing.completed_at=None; existing.next_attempt_at=now_utc(); existing.payload=desired_payload
         elif existing and existing.status in {"pending","retry"}: existing.payload=desired_payload
+        elif existing and existing.status=="processing": return False,"already_processing"
         elif not existing: session.add(PaymentFulfillmentOperation(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={"manual_without_provider_confirmation":force_without_provider_confirmation,"admin_id":admin_id},next_attempt_at=now_utc()))
         await AuditService.log_action(session,admin_id=admin_id,action="MANUAL_GRANT_QUEUED",target_type="Payment",target_id=payment.id,details="force_without_provider_confirmation="+str(force_without_provider_confirmation))
         await session.flush(); return True, "Выдача поставлена в очередь"

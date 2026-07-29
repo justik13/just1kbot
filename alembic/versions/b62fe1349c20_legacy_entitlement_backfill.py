@@ -11,9 +11,22 @@ def upgrade():
  op.create_index("uq_referral_rewards_first_user","referral_rewards",["referred_user_id"],unique=True,postgresql_where=sa.text("is_first = true"))
  # Markers only: access was already granted by legacy code, so never extend here.
  op.execute("""INSERT INTO entitlement_entries(beneficiary_user_id,source_type,source_id,entry_type,days_delta,device_limit_snapshot,tariff_id_snapshot,metadata,created_at)
- SELECT user_id,'payment',id::text,'payment_grant',snapshot_duration_days,snapshot_device_limit,tariff_id,'{"legacy_backfill":true}'::jsonb,COALESCE(paid_at,created_at)
+ SELECT user_id,'payment',id::text,'payment_grant',snapshot_duration_days,snapshot_device_limit,tariff_id,jsonb_build_object('legacy_backfill', true),COALESCE(paid_at,created_at)
  FROM payments WHERE status='completed' AND fulfillment_status='succeeded' AND snapshot_duration_days>0 AND snapshot_device_limit>0
  ON CONFLICT ON CONSTRAINT uq_entitlement_entries_source DO NOTHING""")
+ # Backfill known invited-user bonuses without applying them again.
+ op.execute("""INSERT INTO entitlement_entries(beneficiary_user_id,source_type,source_id,entry_type,days_delta,device_limit_snapshot,tariff_id_snapshot,metadata,created_at)
+ SELECT p.user_id,'payment',p.id::text,'referral_user_bonus',p.referral_user_bonus_days,p.snapshot_device_limit,p.tariff_id,jsonb_build_object('legacy_backfill',true),COALESCE(p.paid_at,p.created_at)
+ FROM payments p WHERE p.status='completed' AND p.referral_user_bonus_days>0
+ ON CONFLICT ON CONSTRAINT uq_entitlement_entries_source DO NOTHING""")
+ # Referrer is unambiguous only when referred_by resolves to an extant user.
+ op.execute("""INSERT INTO entitlement_entries(beneficiary_user_id,source_type,source_id,entry_type,days_delta,device_limit_snapshot,tariff_id_snapshot,metadata,created_at)
+ SELECT ref.id,'payment',p.id::text,'referral_referrer_bonus',p.referral_referrer_bonus_days,NULL,p.tariff_id,jsonb_build_object('legacy_backfill',true),COALESCE(p.paid_at,p.created_at)
+ FROM payments p JOIN users invited ON invited.id=p.user_id JOIN users ref ON ref.telegram_id=invited.referred_by
+ WHERE p.status='completed' AND p.referral_referrer_bonus_days>0
+ ON CONFLICT ON CONSTRAINT uq_entitlement_entries_source DO NOTHING""")
+ op.execute("""UPDATE payments p SET reconciliation_status='manual_review',fulfillment_status='manual_review',status='requires_manual_review',manual_review_reason='legacy_referrer_unresolved'
+ WHERE p.status='completed' AND p.referral_referrer_bonus_days>0 AND NOT EXISTS (SELECT 1 FROM users invited JOIN users ref ON ref.telegram_id=invited.referred_by WHERE invited.id=p.user_id)""")
  op.execute("""UPDATE payments SET reconciliation_status='manual_review',fulfillment_status='manual_review',status='requires_manual_review',manual_review_reason='legacy_entitlement_snapshot_missing'
  WHERE status='completed' AND (snapshot_duration_days IS NULL OR snapshot_duration_days<=0 OR snapshot_device_limit IS NULL OR snapshot_device_limit<=0)""")
  # Legacy referral_days means first-payment eligibility is ambiguous: reserve it without awarding again.

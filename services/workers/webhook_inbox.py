@@ -39,11 +39,13 @@ async def finalize(session,claim,result):
  if not row or row.status!="processing" or row.locked_by!=claim.worker_id or row.attempts!=claim.attempt_number: raise WebhookInboxOwnershipError(claim.inbox_id)
  payment,error=await _find_payment(session,claim)
  if not payment:
-  row.status="retry" if row.attempts<row.max_attempts else "dead"; row.last_error_code=error or "payment_not_visible"; row.next_attempt_at=now_utc()+timedelta(seconds=min(60,2**min(row.attempts,6))); row.locked_at=row.locked_by=None; return
+  dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code=error or "payment_not_visible"; row.next_attempt_at=now_utc()+timedelta(seconds=min(60,2**min(row.attempts,6))); row.locked_at=row.locked_by=None; return
  if claim.event_type=="refund.succeeded":
   obj=claim.payload.get("object") or {}; amount_obj=obj.get("amount") or {}; refund_id=obj.get("id"); currency=amount_obj.get("currency"); amount=Decimal(str(amount_obj.get("value","-1")))
-  if not refund_id or (obj.get("payment_id") or obj.get("payment",{}).get("id"))!=payment.external_id: payment.reconciliation_status="manual_review"
-  elif currency!=payment.currency or amount<=0: payment.reconciliation_status="manual_review"
+  if not refund_id or (obj.get("payment_id") or obj.get("payment",{}).get("id"))!=payment.external_id:
+   payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="refund_manual_review",reason="refund_identity_invalid",source="webhook_inbox"))
+  elif currency!=payment.currency or amount<=0:
+   payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="refund_manual_review",reason="refund_amount_currency_invalid",source="webhook_inbox"))
   else:
    await session.execute(insert(PaymentRefund).values(payment_id=payment.id,provider_refund_id=str(refund_id),amount=amount,currency=currency,provider_status="succeeded",event_key=claim.event_key,processed_at=now_utc()).on_conflict_do_nothing(index_elements=["provider_refund_id"]))
    await session.flush(); total=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
@@ -61,6 +63,9 @@ async def finalize(session,claim,result):
   dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code=result.error_kind.value if result and result.error_kind else "provider_error"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None
   if dead: payment.reconciliation_status="required"; project_legacy_status(payment)
   return
+ elif claim.event_type=="payment.refunded":
+  payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+  session.add(PaymentEvent(payment_id=payment.id,event_type="refund_manual_review",provider_status=(result.value or {}).get("status"),reason="payment_refunded_without_refund_amount",source="webhook_inbox"))
  else:
   data=result.value or {}; amount=data.get("amount") or {}; metadata=data.get("metadata") or {}; status=data.get("status")
   money=status=="succeeded"
