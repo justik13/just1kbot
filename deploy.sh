@@ -42,46 +42,49 @@ cleanup_temp_files() {
 }
 trap cleanup_temp_files EXIT INT TERM
 
-# --- Проверка root ---
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}"
-    exit 1
-fi
-
-# --- Проверка ОС ---
-if [[ -f /etc/os-release ]]; then
-    . /etc/os-release
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        echo -e "${YELLOW}Внимание: скрипт оптимизирован для Ubuntu/Debian. Текущая ОС: $ID${NC}"
-        read -p "Продолжить? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Отменено."
-            exit 0
-        fi
-    fi
-fi
-
 # --- Флаги ---
 NON_INTERACTIVE=false
 DRY_RUN=false
 
-for arg in "$@"; do
-    case "$arg" in
-        --yes|-y|--force) NON_INTERACTIVE=true ;;
-        --dry-run) DRY_RUN=true ;;
-        --help|-h)
-            echo "Использование: sudo ./deploy.sh [--yes] [--dry-run]"
-            echo "  --yes, -y, --force  Неинтерактивный режим (значения из переменных окружения)"
-            echo "  --dry-run           Показать что будет сделано без выполнения"
-            exit 0
-            ;;
-    esac
-done
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}" >&2
+        return 1
+    fi
+}
 
-# --- Логирование ---
-mkdir -p "$(dirname "$LOG_FILE")"
-touch "$LOG_FILE"
+parse_args() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --yes|-y|--force) NON_INTERACTIVE=true ;;
+            --dry-run) DRY_RUN=true ;;
+            --help|-h)
+                echo "Использование: sudo ./deploy.sh [--yes] [--dry-run]"
+                echo "  --yes, -y, --force  Неинтерактивный режим (значения из переменных окружения)"
+                echo "  --dry-run           Показать что будет сделано без выполнения"
+                return 2
+                ;;
+        esac
+    done
+}
+
+check_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
+            echo -e "${YELLOW}Внимание: скрипт оптимизирован для Ubuntu/Debian. Текущая ОС: $ID${NC}"
+            read -p "Продолжить? (y/N): " -n 1 -r
+            echo
+            [[ $REPLY =~ ^[Yy]$ ]] || { echo "Отменено."; return 1; }
+        fi
+    fi
+}
+
+init_logging() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
+}
 
 log() {
     local timestamp
@@ -868,6 +871,16 @@ activate_release() { setup_systemd; }
 
 # --- Main ---
 main() {
+    # This must be the first runtime action. DEPLOY_FUNCTIONS_ONLY only sources
+    # definitions for unit tests and never calls main.
+    require_root || exit 1
+    local parse_status=0
+    parse_args "$@" || parse_status=$?
+    [[ $parse_status -ne 2 ]] || exit 0
+    [[ $parse_status -eq 0 ]] || exit "$parse_status"
+    check_os || exit $?
+    init_logging
+
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║     JUST1KBOT — Автоматический деплой   ║${NC}"

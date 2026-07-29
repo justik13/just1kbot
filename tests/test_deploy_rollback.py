@@ -126,6 +126,29 @@ class DeployRollbackTests(unittest.TestCase):
     def run_deploy_function(self, script, env=None):
         values=os.environ.copy(); values.update({"DEPLOY_FUNCTIONS_ONLY":"1","DEPLOY_TEST_MODE":"1","TEST_REDIS_CONF":str(self.tmp/"redis.conf"),"LOG_FILE":str(self.tmp/"deploy.log")}); values.update(env or {})
         return subprocess.run(["bash","-c",f"source {ROOT/'deploy.sh'}; {script}"],env=values,text=True,capture_output=True)
+    def run_unprivileged(self, command, env=None):
+        values = os.environ.copy(); values.update(env or {})
+        if os.geteuid() != 0:
+            return subprocess.run(command, env=values, text=True, capture_output=True)
+        if not shutil.which("runuser"):
+            self.skipTest("root environment has no runuser")
+        try:
+            import pwd
+            pwd.getpwnam("nobody")
+        except (ImportError, KeyError):
+            self.skipTest("root environment has no existing unprivileged user")
+        return subprocess.run(["runuser", "-u", "nobody", "--", *command], env=values, text=True, capture_output=True)
+    def test_nonroot_functions_only_source_loads_definitions(self):
+        result = self.run_unprivileged(
+            ["bash", "-c", f'source "{ROOT / "deploy.sh"}"; declare -F setup_redis >/dev/null'],
+            {"DEPLOY_FUNCTIONS_ONLY": "1", "DEPLOY_TEST_MODE": "1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    def test_nonroot_direct_execution_is_rejected(self):
+        result = self.run_unprivileged(["bash", str(ROOT / "deploy.sh"), "--dry-run"], {"DEPLOY_FUNCTIONS_ONLY": "0"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("root", result.stderr)
+        self.assertNotIn("DRY RUN", result.stdout + result.stderr)
     def test_update_preserves_redis_credential(self):
         conf=self.tmp/"redis.conf"; conf.write_text("bind 127.0.0.1\nrequirepass OLD_CANARY\n")
         ctl=self.bin/"systemctl"; ctl.write_text("#!/bin/sh\nexit 0\n"); ctl.chmod(0o755)
