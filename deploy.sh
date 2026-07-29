@@ -366,7 +366,9 @@ EOSQL
 setup_redis() {
     log "Настройка Redis..."
 
+    local configure_credentials="${1:-true}"
     local redis_conf="/etc/redis/redis.conf"
+    if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then redis_conf="${TEST_REDIS_CONF:?}"; fi
 
     # Сохраняем оригинал для rollback
     if [[ -f "$redis_conf" ]]; then
@@ -377,10 +379,14 @@ setup_redis() {
     if [[ -f "$redis_conf" ]]; then
         sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$redis_conf"
 
-        if grep -q "^requirepass" "$redis_conf"; then
-            sed -i "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$redis_conf"
+        if [[ "$configure_credentials" == true ]]; then
+            if grep -q "^requirepass" "$redis_conf"; then
+                sed -i "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$redis_conf"
+            else
+                echo "requirepass ${REDIS_PASSWORD}" >> "$redis_conf"
+            fi
         else
-            echo "requirepass ${REDIS_PASSWORD}" >> "$redis_conf"
+            log "Update deployment: существующий Redis credential сохранён без ротации"
         fi
 
         if grep -q "^maxmemory " "$redis_conf"; then
@@ -396,6 +402,7 @@ setup_redis() {
         fi
     else
         # Минимальный конфиг если файла нет
+        [[ "$configure_credentials" == true ]] || { error "Redis config отсутствует при update deployment"; return 1; }
         cat > "$redis_conf" <<EOF
 bind 127.0.0.1 ::1
 port 6379
@@ -413,6 +420,21 @@ EOF
     systemctl restart redis-server
 
     log "Redis настроен"
+}
+
+determine_install_kind() {
+    INITIAL_INSTALL=true
+    if [[ -L "$ENV_FILE" ]]; then error "Production .env не должен быть symlink"; return 1; fi
+    if [[ -e "$ENV_FILE" ]]; then
+        [[ -f "$ENV_FILE" ]] || { error "Production .env должен быть regular file"; return 1; }
+        local mode owner
+        mode=$(stat -c '%a' "$ENV_FILE") || return 1
+        owner=$(stat -c '%U' "$ENV_FILE") || return 1
+        (( (8#$mode & 8#077) == 0 )) || { error "Production .env имеет небезопасные permissions"; return 1; }
+        [[ "$owner" == root || "$owner" == "$BOT_USER" ]] || { error "Production .env имеет небезопасного owner"; return 1; }
+        INITIAL_INSTALL=false
+    fi
+    log "Deployment kind=$([[ "$INITIAL_INSTALL" == true ]] && echo initial || echo update)"
 }
 
 # --- Пользователь и директории ---
@@ -874,9 +896,10 @@ main() {
 
     collect_input
     preflight_checks
+    determine_install_kind
     install_dependencies
     setup_postgresql
-    setup_redis
+    setup_redis "$INITIAL_INSTALL"
     setup_nginx_ssl
     setup_logrotate
     create_backup_script
@@ -904,4 +927,4 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" != 1 ]]; then main "$@"; fi

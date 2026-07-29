@@ -29,6 +29,7 @@ service_call() {
             state) systemctl is-active "$SERVICE_NAME" 2>/dev/null || : ;;
             nrestarts) systemctl show "$SERVICE_NAME" -p NRestarts --value 2>/dev/null || printf '0\n' ;;
             mainpid) systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || printf '0\n' ;;
+            pid-exists) kill -0 "$2" 2>/dev/null ;;
             start|stop|enable) systemctl "$1" "$SERVICE_NAME" ;;
             daemon-reload) systemctl daemon-reload ;;
             status) systemctl status "$SERVICE_NAME" --no-pager --lines=20 2>&1 || : ;;
@@ -82,7 +83,7 @@ prepare_new_release() {
 heartbeat_mtime() { [[ -e "$HEARTBEAT_FILE" ]] && stat -c %Y "$HEARTBEAT_FILE" || printf '0\n'; }
 
 readiness_gate() {
-    local label=$1 started=$2 base_restarts=$3 old_heartbeat=$4
+    local label=$1 started=$2 base_restarts=$3 old_heartbeat=$4 forbidden_pid=${5:-0}
     local deadline now state restarts pid first_pid=0 fresh=0 advanced=0 mtime
     deadline=$(( $(date +%s) + READINESS_TIMEOUT ))
     while (( $(date +%s) <= deadline )); do
@@ -93,6 +94,7 @@ readiness_gate() {
         [[ "$state" == active ]] || { deploy_log "readiness=$label state=$state"; return 1; }
         [[ "$restarts" =~ ^[0-9]+$ && "$base_restarts" =~ ^[0-9]+$ && "$restarts" -le "$base_restarts" ]] || { deploy_log "readiness=$label restarts_changed=true"; return 1; }
         [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] || return 1
+        (( forbidden_pid == 0 || pid != forbidden_pid )) || { deploy_log "readiness=$label old_mainpid_reused=true"; return 1; }
         if (( first_pid == 0 )); then first_pid=$pid; elif (( pid != first_pid )); then deploy_log "readiness=$label mainpid_changed=true"; return 1; fi
         if (( mtime >= started && mtime > old_heartbeat )); then
             if (( fresh == 0 )); then fresh=$mtime; elif (( mtime > fresh )); then advanced=1; fi
@@ -122,8 +124,11 @@ restore_snapshot() {
 rollback_application() {
     local original_code=$1
     set_stage rollback_application
+    local failed_pid
+    failed_pid=$(service_call mainpid | tail -n1); failed_pid=${failed_pid:-0}
     service_call stop || :
     [[ "$(service_call state | tail -n1)" == inactive ]] || { deploy_log 'service_stop_confirmed=false'; return 2; }
+    if [[ "$failed_pid" =~ ^[0-9]+$ && "$failed_pid" -gt 0 ]] && service_call pid-exists "$failed_pid"; then deploy_log 'old_mainpid_gone=false'; return 2; fi
     capture_diagnostics "$original_code"
     deploy_log 'database_downgrade=not_performed'
     restore_snapshot || return 2
@@ -131,7 +136,7 @@ rollback_application() {
     local started base heartbeat
     started=$(date +%s); base=$(service_call nrestarts | tail -n1); heartbeat=$(heartbeat_mtime)
     service_call start || return 2
-    if readiness_gate previous "$started" "$base" "$heartbeat"; then
+    if readiness_gate previous "$started" "$base" "$heartbeat" "$failed_pid"; then
         deploy_log 'deployment result=rolled_back previous_release_healthy=true'
         return 1
     fi
@@ -152,6 +157,21 @@ run_application_transaction() {
     set_stage preflight
     command -v rsync >/dev/null && [[ "$READINESS_TIMEOUT" =~ ^[1-9][0-9]*$ ]] || return 64
     snapshot_previous_release || { deploy_log 'snapshot_failed=true activation=not_attempted'; return 65; }
+    local old_state old_pid old_restarts old_heartbeat
+    old_state=$(service_call state | tail -n1)
+    old_pid=$(service_call mainpid | tail -n1); old_pid=${old_pid:-0}
+    old_restarts=$(service_call nrestarts | tail -n1); old_restarts=${old_restarts:-0}
+    old_heartbeat=$(heartbeat_mtime)
+    deploy_log "previous_service_state=$old_state previous_mainpid=$old_pid"
+    if [[ "$old_state" == active ]]; then
+        set_stage stop_previous_release
+        service_call stop || { deploy_log 'previous_service_stop=false mutation=not_attempted'; return 65; }
+        [[ "$(service_call state | tail -n1)" == inactive ]] || { deploy_log 'previous_service_stop=false mutation=not_attempted'; return 65; }
+        if [[ "$old_pid" =~ ^[0-9]+$ && "$old_pid" -gt 0 ]] && service_call pid-exists "$old_pid"; then deploy_log 'previous_mainpid_gone=false mutation=not_attempted'; return 65; fi
+        deploy_log 'previous_service_stop=true previous_mainpid_gone=true'
+    elif [[ "$old_state" != inactive && "$old_state" != failed && "$old_state" != unknown ]]; then
+        deploy_log "previous_service_stop=false unexpected_state=$old_state mutation=not_attempted"; return 65
+    fi
     prepare_new_release || { rollback_application 66; return $?; }
     "${PREPARE_COMMAND[@]}" || { rollback_application 66; return $?; }
     # Callbacks are supplied by deploy.sh; tests use executable shims.
@@ -165,7 +185,7 @@ run_application_transaction() {
     started=$(date +%s); base=$(service_call nrestarts | tail -n1); heartbeat=$(heartbeat_mtime)
     service_call start || { rollback_application 69; return $?; }
     set_stage readiness_gate
-    if ! readiness_gate new "$started" "$base" "$heartbeat"; then rollback_application 70; return $?; fi
+    if ! readiness_gate new "$started" "$base" "$heartbeat" "$old_pid"; then rollback_application 70; return $?; fi
     set_stage success
     deploy_log 'deployment readiness=success'
     cleanup_snapshots || deploy_log 'warning=snapshot_cleanup_failed'
