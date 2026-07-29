@@ -326,7 +326,7 @@ install_dependencies() {
     apt-get update -qq
     apt-get install -y -qq \
         python3 python3-venv python3-pip python3-dev \
-        postgresql postgresql-contrib \
+        postgresql postgresql-contrib age util-linux \
         redis-server \
         nginx certbot python3-certbot-nginx \
         ufw curl git rsync \
@@ -603,107 +603,72 @@ EOF
     log "Logrotate настроен"
 }
 
-# --- Скрипт бэкапа ---
+# --- Version-controlled backup and rehearsal tooling ---
 create_backup_script() {
-    log "Создание скрипта бэкапа..."
-
-    cat > /usr/local/bin/just1kbot-backup.sh <<'BACKUP_EOF'
-#!/bin/bash
-set -euo pipefail
-
-BACKUP_DIR="/root/backups/just1kbot"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BACKUP_FILE="$BACKUP_DIR/backup_$TIMESTAMP.tar.gz"
-
-mkdir -p "$BACKUP_DIR"
-
-# Бэкап БД
-su - postgres -c "pg_dump just1kbot_bot" > "/tmp/just1kbot_db_$TIMESTAMP.sql"
-
-# Бэкап .env
-cp /opt/just1kbot/.env "/tmp/just1kbot_env_$TIMESTAMP"
-
-# Архив
-tar -czf "$BACKUP_FILE" \
-    -C /tmp \
-    "just1kbot_db_$TIMESTAMP.sql" \
-    "just1kbot_env_$TIMESTAMP"
-
-rm -f "/tmp/just1kbot_db_$TIMESTAMP.sql" "/tmp/just1kbot_env_$TIMESTAMP"
-
-chmod 600 "$BACKUP_FILE"
-
-# Очистка старых (хранить 7)
-ls -t "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | tail -n +8 | xargs -r rm -f
-
-echo "[$(date)] Backup created: $BACKUP_FILE" >> /var/log/just1kbot-backup.log
-BACKUP_EOF
-
-    chmod +x /usr/local/bin/just1kbot-backup.sh
-
-    # Cron: ежедневно в 3:00
-    (crontab -l 2>/dev/null | grep -v "just1kbot-backup"; echo "0 3 * * * /usr/local/bin/just1kbot-backup.sh") | crontab -
-
-    log "Скрипт бэкапа создан (cron: ежедневно 03:00)"
+    log "Установка инструментов зашифрованного бэкапа..."
+    for command in age pg_dump pg_restore flock sha256sum; do
+        command -v "$command" >/dev/null || { error "Не найдена обязательная команда: $command"; return 1; }
+    done
+    install -d -o root -g root -m 0700 "$BACKUP_DIR"
+    local source target temporary
+    for source in backup_postgres.sh verify_backup.sh restore_rehearsal.sh just1kbot-restore.sh; do
+        target="/usr/local/bin/${source}"
+        [[ "$source" != backup_postgres.sh ]] || target=/usr/local/bin/just1kbot-backup.sh
+        temporary="${target}.new.$$"
+        install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temporary"
+        mv -f "$temporary" "$target"
+    done
+    cat > /etc/systemd/system/just1kbot-backup.service <<'EOF'
+[Unit]
+Description=Just1kBot encrypted PostgreSQL backup
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/just1kbot-backup.conf
+ExecStart=/usr/local/bin/just1kbot-backup.sh
+EOF
+    cat > /etc/systemd/system/just1kbot-backup.timer <<'EOF'
+[Unit]
+Description=Daily Just1kBot encrypted PostgreSQL backup
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=20m
+[Install]
+WantedBy=timers.target
+EOF
+    if [[ ! -e /etc/just1kbot-backup.conf ]]; then
+        install -o root -g root -m 0600 /dev/null /etc/just1kbot-backup.conf
+        printf '%s\n' '# Set BACKUP_AGE_RECIPIENT=age1... before enabling the timer.' > /etc/just1kbot-backup.conf
+    fi
+    systemctl daemon-reload
+    # Migrate only the legacy backup command; preserve healthcheck and every
+    # unrelated root cron line byte-for-byte.
+    local cron_current cron_filtered
+    cron_current=$(mktemp)
+    cron_filtered=$(mktemp)
+    TEMP_FILES+=("$cron_current" "$cron_filtered")
+    crontab -l >"$cron_current" 2>/dev/null || :
+    awk '!(NF == 6 && $6 == "/usr/local/bin/just1kbot-backup.sh")' "$cron_current" >"$cron_filtered"
+    if ! cmp -s "$cron_current" "$cron_filtered"; then
+        crontab "$cron_filtered"
+        log "Legacy backup cron удалён; остальные cron-задачи сохранены"
+    fi
+    if compgen -G "$BACKUP_DIR/backup_*.tar.gz" >/dev/null; then
+        warn "Обнаружены legacy plaintext backup_*.tar.gz; перенесите или удалите их вручную только после проверки нового encrypted backup"
+    fi
+    # Fail closed until the operator provisions the public recipient.
+    if grep -q '^BACKUP_AGE_RECIPIENT=age1' /etc/just1kbot-backup.conf; then
+        systemctl enable --now just1kbot-backup.timer
+    else
+        systemctl disable --now just1kbot-backup.timer 2>/dev/null || true
+        warn "Backup timer не включён: задайте BACKUP_AGE_RECIPIENT в /etc/just1kbot-backup.conf"
+    fi
+    log "Инструменты бэкапа установлены (systemd timer, Persistent=true)"
 }
 
-# --- Скрипт восстановления ---
+# Kept as a separate deployment step for compatibility; it is now fail-safe.
 create_restore_script() {
-    cat > /usr/local/bin/just1kbot-restore.sh <<'RESTORE_EOF'
-#!/bin/bash
-set -euo pipefail
-
-BACKUP_DIR="/root/backups/just1kbot"
-
-if [[ $# -lt 1 ]]; then
-    echo "Использование: $0 <backup_file.tar.gz>"
-    echo "Доступные бэкапы:"
-    ls -lt "$BACKUP_DIR"/backup_*.tar.gz 2>/dev/null | head -10
-    exit 1
-fi
-
-BACKUP_FILE="$1"
-if [[ ! -f "$BACKUP_FILE" ]]; then
-    echo "Файл не найден: $BACKUP_FILE"
-    exit 1
-fi
-
-echo "Восстановление из: $BACKUP_FILE"
-read -p "Подтвердите (yes): " confirm
-if [[ "$confirm" != "yes" ]]; then
-    echo "Отменено."
-    exit 0
-fi
-
-TMPDIR=$(mktemp -d)
-tar -xzf "$BACKUP_FILE" -C "$TMPDIR"
-
-# Восстановление БД
-DB_FILE=$(find "$TMPDIR" -name "just1kbot_db_*.sql" | head -1)
-if [[ -n "$DB_FILE" ]]; then
-    systemctl stop just1kbot 2>/dev/null || true
-    su - postgres -c "dropdb --if-exists just1kbot_bot"
-    su - postgres -c "createdb -O just1kbot just1kbot_bot"
-    su - postgres -c "psql just1kbot_bot" < "$DB_FILE"
-    systemctl start just1kbot
-    echo "БД восстановлена"
-fi
-
-# Восстановление .env
-ENV_FILE=$(find "$TMPDIR" -name "just1kbot_env_*" | head -1)
-if [[ -n "$ENV_FILE" ]]; then
-    cp "$ENV_FILE" /opt/just1kbot/.env
-    chown just1kbot:just1kbot /opt/just1kbot/.env
-    chmod 600 /opt/just1kbot/.env
-    systemctl restart just1kbot 2>/dev/null || true
-    echo ".env восстановлен"
-fi
-
-rm -rf "$TMPDIR"
-echo "Восстановление завершено"
-RESTORE_EOF
-
-    chmod +x /usr/local/bin/just1kbot-restore.sh
+    [[ -x /usr/local/bin/just1kbot-restore.sh ]] || return 1
 }
 
 # --- Healthcheck ---
@@ -820,7 +785,7 @@ print_result() {
     echo "  Сервис:     systemctl status $SERVICE_NAME"
     echo "  Логи:       journalctl -u $SERVICE_NAME -f"
     echo "  Бэкап:      /usr/local/bin/just1kbot-backup.sh"
-    echo "  Restore:    /usr/local/bin/just1kbot-restore.sh <file>"
+    echo "  Rehearsal:  AGE_IDENTITY_FILE=... /usr/local/bin/restore_rehearsal.sh <file>"
     if [[ -n "$DOMAIN" ]]; then
         echo "  Домен:      https://$DOMAIN"
     fi
