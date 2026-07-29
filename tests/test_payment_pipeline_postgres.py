@@ -85,6 +85,34 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   for observed in ("waiting_for_capture","pending"):
    async with self.sessions.begin() as s:
     p=await self.payment(s,provider_status="waiting_for_capture"); op,c=await self.cancel_claim(s,p,attempts=3,max_attempts=3); await finalize(s,c,YooKassaResult(True,value=self.snapshot(p,status=observed))); self.assertEqual((op.status,p.provider_status,p.reconciliation_status),("dead",observed,"manual_review")); self.assertEqual(p.fulfillment_status,"not_ready"); self.assertIsNone(p.paid_at); self.assertIsNotNone(await s.scalar(select(PaymentEvent).where(PaymentEvent.payment_id==p.id,PaymentEvent.event_type=="cancel_not_confirmed_at_attempt_limit")))
+
+ async def _create_invalid_status_then_get(self,status_marker):
+  from unittest.mock import AsyncMock
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,external_id=None,provider_status="not_created"); payload={"amount":{"value":"90.00","currency":"RUB"},"capture":True}; op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload=payload,attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); data={"id":"saved-provider-id","confirmation":{"confirmation_url":"https://pay.example"}};
+   if status_marker is not None:data["status"]=status_marker
+   await finalize(s,ProviderOperationClaim(op.id,p.id,"create_payment",payload,op.idempotency_key,"w",1,None,op.created_at),YooKassaResult(True,value=data)); self.assertEqual((op.status,p.external_id,p.reconciliation_status),("retry","saved-provider-id","required")); op.next_attempt_at=now_utc(); c=await claim(s,"w2"); transport=type("Transport",(),{"create_payment_result":AsyncMock(),"get_payment_result":AsyncMock(return_value=YooKassaResult(True,value={"id":"saved-provider-id","status":"pending"}))}); await perform_http(c,transport); transport.get_payment_result.assert_awaited_once_with("saved-provider-id"); transport.create_payment_result.assert_not_awaited()
+ async def test_create_2xx_dict_missing_status_saves_id_and_retries_with_get(self): await self._create_invalid_status_then_get(None)
+ async def test_create_2xx_dict_unknown_status_saves_id_and_retries_with_get(self): await self._create_invalid_status_then_get("mystery")
+
+ async def test_create_2xx_dict_missing_status_without_id_retries_same_post(self):
+  from unittest.mock import AsyncMock
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,external_id=None); payload={"amount":{"value":"90.00","currency":"RUB"},"capture":True}; op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="processing",idempotency_key="same-key",payload=payload,attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await finalize(s,ProviderOperationClaim(op.id,p.id,"create_payment",payload,"same-key","w",1,None,op.created_at),YooKassaResult(True,value={"confirmation":{"confirmation_url":"https://pay.example"}})); self.assertEqual(op.status,"retry"); op.next_attempt_at=now_utc(); c=await claim(s,"w2"); transport=type("Transport",(),{"create_payment_result":AsyncMock(return_value=YooKassaResult(True,value={"id":"one","status":"pending","confirmation":{"confirmation_url":"https://pay.example"}}))}); await perform_http(c,transport); args=transport.create_payment_result.await_args; self.assertEqual(args.args[0],payload); self.assertEqual(args.kwargs["idempotency_key"],"same-key")
+
+ async def test_reconcile_2xx_dict_missing_status_is_retryable(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="pending"); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await finalize(s,ProviderOperationClaim(op.id,p.id,"reconcile_payment",{},op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value={"id":p.external_id})); self.assertEqual((op.status,p.provider_status,p.reconciliation_status),("retry","pending","required"))
+
+ async def test_cancel_get_dict_missing_status_is_not_success(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="waiting_for_capture"); op,c=await self.cancel_claim(s,p); await finalize(s,c,YooKassaResult(True,value={"id":p.external_id})); self.assertEqual((op.status,p.provider_status,p.reconciliation_status),("retry","waiting_for_capture","required"))
+
+ async def test_expired_create_retry_projects_legacy_manual_review(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,external_id=None); op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="dead",idempotency_key="legacy-expired",payload={"capture":True},attempts=4,max_attempts=4,next_attempt_at=now_utc(),completed_at=now_utc(),created_at=now_utc()-timedelta(hours=25)); s.add(op); await s.flush(); pid=p.id; await retry_dead_provider_operation(s,op.id,reset_attempts=True,reason="admin")
+  async with self.sessions() as s:
+   p=await s.get(Payment,pid); self.assertEqual((p.status,p.reconciliation_status,p.fulfillment_status,p.manual_review_reason),("requires_manual_review","manual_review","manual_review","create_idempotency_window_expired"))
  async def test_reconcile_can_run_more_than_once(self):
   async with self.sessions.begin() as s: p=await self.payment(s); first=await ensure_reconcile_payment_operation(s,p,reason="one"); first.status="succeeded"; first.completed_at=now_utc(); second=await ensure_reconcile_payment_operation(s,p,reason="two"); self.assertNotEqual(first.id,second.id)
  async def test_concurrent_reconcile_has_one_active_operation(self):

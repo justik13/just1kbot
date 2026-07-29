@@ -18,6 +18,15 @@ class ProviderOperationClaim:
 class ProviderRetryDecision:
     accepted:bool; reason:str; operation_id:int
 
+VALID_PROVIDER_STATUSES={"pending","waiting_for_capture","succeeded","canceled"}
+def classify_invalid_provider_snapshot(claim,data):
+    """Classify a decoded provider object whose status is absent or unknown."""
+    has_provider_id=bool(data.get("id"))
+    if claim.operation_type=="create_payment":
+        return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=not has_provider_id)
+    # GET/reconciliation returned a response, but not a usable provider state.
+    return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
+
 def create_payload(payment,description,return_url):
     return {"amount":{"value":format(payment.amount,'.2f'),"currency":payment.currency},"description":description,"confirmation":{"type":"redirect","return_url":return_url},"metadata":{"order_id":payment.public_order_id,"local_payment_id":str(payment.id)},"capture":True}
 async def enqueue_create(session,payment,description,return_url):
@@ -41,6 +50,7 @@ async def retry_dead_provider_operation(session,operation_id,*,reset_attempts,re
     if op.operation_type=="create_payment" and not payment.external_id and now_utc()-op.created_at>=timedelta(hours=24):
         payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; payment.manual_review_reason="create_idempotency_window_expired"
         session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_admin_retry_rejected",provider_status=payment.provider_status,reason="create_idempotency_window_expired",source="admin_retry"))
+        project_legacy_status(payment)
         return ProviderRetryDecision(False,"create_idempotency_window_expired",op.id)
     # payload is the immutable provider command; audit metadata must never be mixed
     # into a request which may be replayed byte-for-byte.
@@ -80,7 +90,14 @@ async def finalize(session,claim,result,transport=YooKassaService):
     if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentProviderOperationOwnershipError(claim.operation_id)
     if result.ok:
         data=result.value or {}; status=data.get("status")
-        if status not in {"pending","waiting_for_capture","succeeded","canceled"}: result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=False,ambiguous=False)
+        invalid_snapshot_code=None
+        if claim.operation_type=="create_payment":
+            confirmation=data.get("confirmation") or {}; url=confirmation.get("confirmation_url") or confirmation.get("url")
+            if data.get("id"):
+                payment.external_id=str(data["id"]); payment.payment_url=url or payment.payment_url; payment.payment_method="yookassa"
+        if status not in VALID_PROVIDER_STATUSES:
+            invalid_snapshot_code="provider_status_missing" if status is None else "provider_status_invalid"
+            result=classify_invalid_provider_snapshot(claim,data); payment.reconciliation_status="required"
         # A cancel is only confirmed by the provider's terminal cancellation state.
         # `succeeded` is terminal too, but represents money received after cancel and
         # must flow through the financial-truth/manual-review transition below.
@@ -96,7 +113,6 @@ async def finalize(session,claim,result,transport=YooKassaService):
             primary=claim.external_id is None
             if not data.get("id") or (primary and not url): result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=primary)
             else:
-                payment.external_id=str(data["id"]); payment.payment_url=url or payment.payment_url; payment.payment_method="yookassa"
                 if not primary and status in {"pending","waiting_for_capture"} and not payment.payment_url: payment.reconciliation_status="required"
         if result.ok:
             transition=await apply_provider_transition(session,payment,data,source=f"provider_{claim.operation_type}")
@@ -109,7 +125,7 @@ async def finalize(session,claim,result,transport=YooKassaService):
                 for queued_op in queued: queued_op.status="cancelled"; queued_op.completed_at=now_utc()
         if result.ok: op.status="succeeded"; op.completed_at=now_utc(); payment.reconciliation_status="ok" if payment.reconciliation_status not in {"mismatch","manual_review"} else payment.reconciliation_status
     if not result.ok:
-        op.last_error_code="cancel_not_confirmed" if locals().get("cancel_not_confirmed",False) else (result.error_kind.value if result.error_kind else "unknown"); op.last_error=None
+        op.last_error_code="cancel_not_confirmed" if locals().get("cancel_not_confirmed",False) else (locals().get("invalid_snapshot_code") or (result.error_kind.value if result.error_kind else "unknown")); op.last_error=None
         exhausted=op.attempts>=op.max_attempts; op.status="dead" if exhausted or not result.retryable else "retry"; op.next_attempt_at=now_utc()+timedelta(seconds=min(300,2**min(op.attempts,8)))
         if payment.provider_status in {"succeeded","refunded","canceled"}:
             payment.reconciliation_status="manual_review" if op.status=="dead" else "required"
