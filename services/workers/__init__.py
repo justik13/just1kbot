@@ -1,371 +1,279 @@
+"""Lifecycle supervision and in-memory health for background workers."""
+
 import asyncio
 import logging
+import time
+from dataclasses import asdict, dataclass
+from typing import Awaitable, Callable
 
 from aiogram import Bot
 
-from .traffic import traffic_sync_loop
-from .notifications import subscription_notifications_loop
-from .cleanup import cleanup_dangling_peers_loop
-from .payments import stale_payments_checker_loop
-from .heartbeat import heartbeat_loop, set_bot_ref
-from .api_operations import api_operations_loop
-from .payment_pipeline import payment_pipeline_loop
-
 from config.settings import get_settings
-
+from .api_operations import api_operations_loop
+from .cleanup import cleanup_dangling_peers_loop
+from .heartbeat import heartbeat_loop, set_bot_ref
+from .notifications import subscription_notifications_loop
+from .payment_pipeline import payment_pipeline_loop
+from .payments import stale_payments_checker_loop
+from .traffic import traffic_sync_loop
 
 logger = logging.getLogger(__name__)
-
-
 shutdown_event = asyncio.Event()
+
+WorkerFactory = Callable[[Bot], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class WorkerDefinition:
+    name: str
+    factory: WorkerFactory
+    critical: bool
+    max_consecutive_failures: int = 10
+    stability_window: float = 300.0
+
+
+@dataclass
+class WorkerHealth:
+    state: str
+    last_started_at: float | None
+    last_finished_at: float | None
+    consecutive_failures: int
+    last_error_type: str | None
+    critical: bool
 
 
 _worker_tasks: dict[str, asyncio.Task] = {}
+_worker_health: dict[str, WorkerHealth] = {}
 _supervisor_task: asyncio.Task | None = None
 _alert_tasks: set[asyncio.Task] = set()
-
+_alert_keys: set[str] = set()
+_fatal_shutdown = False
+_supervisor_healthy = False
+_started_at: float | None = None
 
 _SUPERVISOR_CHECK_INTERVAL = 15.0
-_MAX_WORKER_RESTARTS = 10
+_STARTUP_GRACE_PERIOD = 30.0
 
 
-def _traffic_worker_factory(bot: Bot):
-    return traffic_sync_loop(shutdown_event)
+def _traffic(bot): return traffic_sync_loop(shutdown_event)
+def _cleanup(bot): return cleanup_dangling_peers_loop(shutdown_event)
+def _stale_payments(bot): return stale_payments_checker_loop(bot, shutdown_event)
+def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
+def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
+def _api_operations(bot): return api_operations_loop(shutdown_event)
+def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 
 
-def _cleanup_worker_factory(bot: Bot):
-    return cleanup_dangling_peers_loop(shutdown_event)
+# Queue fulfillment workers are critical. The remaining workers provide periodic
+# maintenance/notifications/telemetry and may stop after exhausting their budget
+# without pretending that a durable customer operation is still being processed.
+WORKERS: tuple[WorkerDefinition, ...] = (
+    WorkerDefinition("traffic", _traffic, False),
+    WorkerDefinition("cleanup", _cleanup, False),
+    WorkerDefinition("stale_payments", _stale_payments, False),
+    WorkerDefinition("notifications", _notifications, False),
+    WorkerDefinition("heartbeat", _heartbeat, False),
+    WorkerDefinition("api_operations", _api_operations, True),
+    WorkerDefinition("payment_pipeline", _payment_pipeline, True),
+)
+_WORKERS_BY_NAME = {definition.name: definition for definition in WORKERS}
 
 
-def _stale_payments_worker_factory(bot: Bot):
-    return stale_payments_checker_loop(bot, shutdown_event)
+def get_worker_health_snapshot() -> dict[str, object]:
+    """Return a read-only, secret-free copy suitable for health checks/tests."""
+    return {
+        "supervisor_healthy": _supervisor_healthy,
+        "fatal_shutdown": _fatal_shutdown,
+        "workers": {name: asdict(health) for name, health in _worker_health.items()},
+    }
 
 
-def _notifications_worker_factory(bot: Bot):
-    return subscription_notifications_loop(bot, shutdown_event)
+def heartbeat_allowed(*, now: float | None = None) -> bool:
+    if _fatal_shutdown or not _supervisor_healthy or shutdown_event.is_set():
+        return False
+    current = time.monotonic() if now is None else now
+    in_grace = _started_at is not None and current - _started_at < _STARTUP_GRACE_PERIOD
+    for definition in WORKERS:
+        if not definition.critical:
+            continue
+        health = _worker_health.get(definition.name)
+        task = _worker_tasks.get(definition.name)
+        if health is None or health.state in {"failed", "stopped"}:
+            return False
+        if not in_grace and (health.state != "running" or task is None or task.done()):
+            return False
+    return True
 
 
-def _heartbeat_worker_factory(bot: Bot):
-    return heartbeat_loop(shutdown_event)
-
-def _api_operations_worker_factory(bot: Bot):
-    return api_operations_loop(shutdown_event)
-
-def _payment_pipeline_worker_factory(bot: Bot):
-    return payment_pipeline_loop(bot, shutdown_event)
-
-
-_WORKER_FACTORIES = {
-    "traffic": _traffic_worker_factory,
-    "cleanup": _cleanup_worker_factory,
-    "stale_payments": _stale_payments_worker_factory,
-    "notifications": _notifications_worker_factory,
-    "heartbeat": _heartbeat_worker_factory,
-    "api_operations": _api_operations_worker_factory,
-    "payment_pipeline": _payment_pipeline_worker_factory,
-}
-
-
-async def _send_worker_crash_alert(
-    bot: Bot,
-    worker_name: str,
-    error_text: str,
-):
+async def _send_alert(bot: Bot, key: str, title: str, worker: str,
+                      failure_count: int, error_type: str) -> None:
+    if key in _alert_keys:
+        return
+    _alert_keys.add(key)
+    message = (
+        f"🚨 <b>{title}</b>\n"
+        f"🧩 <b>Воркер:</b> <code>{worker}</code>\n"
+        f"🔁 <b>Падений:</b> {failure_count}\n"
+        f"⚠️ <b>Тип ошибки:</b> <code>{error_type}</code>"
+    )
     try:
-        settings = get_settings()
-        message = (
-            "🚨 <b>Фоновый воркер упал</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"🧩 <b>Воркер:</b> <code>{worker_name}</code>\n"
-            f"⚠️ <b>Ошибка:</b> <code>{error_text}</code>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "<i>Supervisor пытается перезапустить воркер.</i>"
-        )
-        for admin_id in settings.ADMIN_IDS:
+        for admin_id in get_settings().ADMIN_IDS:
             try:
-                await bot.send_message(
-                    admin_id,
-                    message,
-                    parse_mode="HTML",
-                )
+                await bot.send_message(admin_id, message, parse_mode="HTML")
             except Exception:
-                pass
-    except Exception as e:
-        logger.error("Failed to send worker crash alert: %s", e)
-
-async def _send_supervisor_crash_alert(
-    bot: Bot,
-    error_text: str,
-):
-    try:
-        settings = get_settings()
-        message = (
-            "🚨 <b>Supervisor фоновых воркеров упал</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚠️ <b>Ошибка:</b> <code>{error_text}</code>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "<i>Требуется ручное вмешательство. "
-            "Воркеры могут больше не перезапускаться.</i>"
-        )
-        for admin_id in settings.ADMIN_IDS:
-            try:
-                await bot.send_message(
-                    admin_id,
-                    message,
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-    except Exception as e:
-        logger.error("Failed to send supervisor crash alert: %s", e)
+                logger.exception("Failed to send worker alert to admin")
+    except Exception:
+        logger.exception("Failed to prepare worker alert")
 
 
-async def _supervise_workers(bot: Bot):
-    """
-    Supervisor фоновых воркеров.
+async def _fatal(bot: Bot, worker: str, count: int, error_type: str) -> None:
+    global _fatal_shutdown, _supervisor_healthy
+    if _fatal_shutdown:
+        return
+    _fatal_shutdown = True
+    _supervisor_healthy = False
+    logger.critical("Fatal background failure: worker=%s failures=%s type=%s",
+                    worker, count, error_type)
+    await _send_alert(bot, "fatal", "Критическая остановка фоновых задач",
+                      worker, count, error_type)
+    shutdown_event.set()
 
-    Если воркер падает:
 
-    1. Пишем critical log.
-    2. Отправляем алерт админам.
-    3. Перезапускаем воркер.
+def _spawn(definition: WorkerDefinition, bot: Bot, now: float) -> None:
+    health = _worker_health[definition.name]
+    health.state = "running"
+    health.last_started_at = now
+    _worker_tasks[definition.name] = asyncio.create_task(
+        definition.factory(bot), name=f"worker_{definition.name}"
+    )
 
-    Если воркер упал слишком много раз подряд:
 
-    - останавливаем перезапуски;
-    - отправляем критический алерт;
-    - убираем задачу из _worker_tasks, чтобы не спамить.
-    """
-
-    restart_counts: dict[str, int] = {}
-
+async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
+                             clock: Callable[[], float] = time.monotonic,
+                             backoff_delay: Callable[[int], float] | None = None) -> None:
+    global _supervisor_healthy
+    interval = _SUPERVISOR_CHECK_INTERVAL if check_interval is None else check_interval
+    _supervisor_healthy = True
     logger.info("Worker supervisor started")
-
     while not shutdown_event.is_set():
         try:
-            await asyncio.wait_for(
-                shutdown_event.wait(),
-                timeout=_SUPERVISOR_CHECK_INTERVAL,
-            )
-
+            await asyncio.wait_for(shutdown_event.wait(), timeout=interval)
             break
-
         except asyncio.TimeoutError:
             pass
 
-        for worker_name, task in list(_worker_tasks.items()):
+        for name, task in list(_worker_tasks.items()):
             if shutdown_event.is_set():
                 break
-
+            definition = _WORKERS_BY_NAME[name]
+            health = _worker_health[name]
+            now = clock()
             if not task.done():
+                if (health.consecutive_failures and health.last_started_at is not None
+                        and now - health.last_started_at >= definition.stability_window):
+                    health.consecutive_failures = 0
+                    health.last_error_type = None
                 continue
-
-            factory = _WORKER_FACTORIES.get(worker_name)
-
-            if factory is None:
-                _worker_tasks.pop(worker_name, None)
-                continue
-
             if task.cancelled():
-                logger.info(
-                    "Worker %s was cancelled, removing from supervisor",
-                    worker_name,
-                )
-
-                _worker_tasks.pop(worker_name, None)
-
-                continue
-
-            error_text = "unknown"
+                health.state = "stopped"
+                health.last_finished_at = now
+                if not shutdown_event.is_set():
+                    await _fatal(bot, name, health.consecutive_failures, "CancelledError")
+                break
 
             try:
                 exc = task.exception()
+            except Exception as error:
+                exc = error
+            error_type = type(exc).__name__ if exc is not None else "UnexpectedReturn"
+            ran_for = now - (health.last_started_at if health.last_started_at is not None else now)
+            if ran_for >= definition.stability_window:
+                health.consecutive_failures = 0
+            health.consecutive_failures += 1
+            health.last_finished_at = now
+            health.last_error_type = error_type
+            health.state = "backoff"
+            count = health.consecutive_failures
+            logger.critical("Worker %s died unexpectedly: %s (failure %s)",
+                            name, error_type, count)
+            await _send_alert(bot, f"crash:{name}", "Фоновый воркер упал",
+                              name, count, error_type)
 
-            except Exception as e:
-                exc = e
-
-            if exc:
-                error_text = type(exc).__name__
-
-            logger.critical(
-                "Worker %s died unexpectedly: %s",
-                worker_name,
-                error_text,
-            )
-
-            await _send_worker_crash_alert(
-                bot,
-                worker_name,
-                error_text,
-            )
-
-            restart_counts[worker_name] = (
-                restart_counts.get(worker_name, 0) + 1
-            )
-
-            count = restart_counts[worker_name]
-
-            if count > _MAX_WORKER_RESTARTS:
-                logger.critical(
-                    "Worker %s exceeded max restart count (%s). "
-                    "Not restarting anymore.",
-                    worker_name,
-                    _MAX_WORKER_RESTARTS,
-                    )
-                try:
-                    settings = get_settings()
-                    critical_message = (
-                        "🚨 <b>Фоновый воркер не удалось восстановить</b>\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🧩 <b>Воркер:</b> <code>{worker_name}</code>\n"
-                        f"🔁 <b>Попыток перезапуска:</b> {count}\n"
-                        "━━━━━━━━━━━━━━━━━━━━\n"
-                        "<i>Требуется ручное вмешательство.</i>"
-                        )
-                    for admin_id in settings.ADMIN_IDS:
-                        try:
-                            await bot.send_message(
-                                admin_id,
-                                critical_message,
-                                parse_mode="HTML",
-                                )
-                        except Exception:
-                            pass
-                except Exception as e:
-                    logger.error(
-                        "Failed to send critical worker alert: %s",
-                        e,
-                        )
-
-                # ВАЖНО:
-                # убираем задачу, чтобы supervisor не отправлял
-                # повторные алерты каждые 15 секунд.
-                _worker_tasks.pop(worker_name, None)
-                restart_counts.pop(worker_name, None)
-
+            if count > definition.max_consecutive_failures:
+                health.state = "failed"
+                if definition.critical:
+                    await _fatal(bot, name, count, error_type)
+                    break
+                logger.critical("Non-critical worker %s exhausted restart budget", name)
                 continue
 
-            backoff = min(30.0, 2.0 ** count)
-
-            logger.warning(
-                "Restarting worker %s in %.1f seconds (restart #%s)",
-                worker_name,
-                backoff,
-                count,
-            )
-
+            backoff = (backoff_delay(count) if backoff_delay is not None
+                       else min(30.0, 2.0 ** count))
             try:
-                await asyncio.wait_for(
-                    shutdown_event.wait(),
-                    timeout=backoff,
-                )
-
+                await asyncio.wait_for(shutdown_event.wait(), timeout=backoff)
                 break
-
             except asyncio.TimeoutError:
                 pass
-
-            if shutdown_event.is_set():
-                break
-
-            _worker_tasks[worker_name] = asyncio.create_task(
-                factory(bot),
-                name=f"worker_{worker_name}",
-            )
-
+            if not shutdown_event.is_set():
+                _spawn(definition, bot, clock())
+    _supervisor_healthy = False
     logger.info("Worker supervisor stopped")
 
 
-async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
-    global _supervisor_task
+def _supervisor_done(task: asyncio.Task, bot: Bot) -> None:
+    if task.cancelled() or shutdown_event.is_set():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    error_type = type(exc).__name__ if exc is not None else "UnexpectedReturn"
+    alert_task = asyncio.create_task(_fatal(bot, "supervisor", 1, error_type))
+    _alert_tasks.add(alert_task)
+    alert_task.add_done_callback(_alert_tasks.discard)
 
+
+async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
+    global _supervisor_task, _fatal_shutdown, _supervisor_healthy, _started_at
     shutdown_event.clear()
     set_bot_ref(bot)
-
     _worker_tasks.clear()
-
-    for worker_name, factory in _WORKER_FACTORIES.items():
-        _worker_tasks[worker_name] = asyncio.create_task(
-            factory(bot),
-            name=f"worker_{worker_name}",
+    _worker_health.clear()
+    _alert_keys.clear()
+    _fatal_shutdown = False
+    _supervisor_healthy = True
+    _started_at = time.monotonic()
+    for definition in WORKERS:
+        _worker_health[definition.name] = WorkerHealth(
+            "starting", None, None, 0, None, definition.critical
         )
-
-    _supervisor_task = asyncio.create_task(
-        _supervise_workers(bot),
-        name="worker_supervisor",
-    )
-
-    def _supervisor_done_callback(task: asyncio.Task):
-        if task.cancelled():
-            return
-
-        try:
-            exc = task.exception()
-
-        except asyncio.CancelledError:
-            return
-
-        except Exception as e:
-            exc = e
-
-        if exc:
-            logger.critical(
-                "Worker supervisor died unexpectedly: %s",
-                type(exc).__name__,
-            )
-
-            alert_task = asyncio.create_task(
-                _send_supervisor_crash_alert(
-                    bot,
-                    type(exc).__name__,
-                )
-            )
-            _alert_tasks.add(alert_task)
-            alert_task.add_done_callback(_alert_tasks.discard)
-
-    _supervisor_task.add_done_callback(_supervisor_done_callback)
-
-    logger.info(
-        "Started %s background workers + supervisor",
-        len(_worker_tasks),
-    )
-
-    return list(_worker_tasks.values()) + [_supervisor_task]
+        _spawn(definition, bot, _started_at)
+    _supervisor_task = asyncio.create_task(_supervise_workers(bot), name="worker_supervisor")
+    _supervisor_task.add_done_callback(lambda task: _supervisor_done(task, bot))
+    return [*_worker_tasks.values(), _supervisor_task]
 
 
-async def stop_background_workers():
-    global _supervisor_task
-
+async def stop_background_workers() -> None:
+    global _supervisor_task, _supervisor_healthy
     shutdown_event.set()
-
     if _supervisor_task is not None:
         _supervisor_task.cancel()
-
-        try:
-            await _supervisor_task
-
-        except asyncio.CancelledError:
-            pass
-
-        except Exception as e:
-            logger.error("Error while stopping supervisor: %s", e)
-
+        await asyncio.gather(_supervisor_task, return_exceptions=True)
         _supervisor_task = None
-
-    alert_tasks = list(_alert_tasks)
-    for task in alert_tasks:
-        task.cancel()
-    if alert_tasks:
-        await asyncio.gather(*alert_tasks, return_exceptions=True)
-
     tasks = list(_worker_tasks.values())
-
     for task in tasks:
         task.cancel()
-
     if tasks:
-        await asyncio.wait(tasks, timeout=10.0)
-
+        await asyncio.gather(*tasks, return_exceptions=True)
     _worker_tasks.clear()
-
+    for health in _worker_health.values():
+        if health.state != "failed":
+            health.state = "stopped"
+    alerts = list(_alert_tasks)
+    for task in alerts:
+        task.cancel()
+    if alerts:
+        await asyncio.gather(*alerts, return_exceptions=True)
+    _alert_tasks.clear()
+    _supervisor_healthy = False
     logger.info("Background workers stopped")

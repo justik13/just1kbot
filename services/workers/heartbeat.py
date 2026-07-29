@@ -26,18 +26,26 @@ _API_ALERT_COOLDOWN = 1800.0
 _bot_ref = None
 
 
-async def heartbeat_loop(shutdown_event: asyncio.Event):
+async def heartbeat_loop(
+    shutdown_event: asyncio.Event,
+    health_check=lambda: True,
+    *,
+    interval: float | None = None,
+):
+    heartbeat_interval = HEARTBEAT_INTERVAL if interval is None else interval
     logger.info(f"Heartbeat worker started, file={HEARTBEAT_FILE}")
-    _write_heartbeat()
+    if health_check():
+        _write_heartbeat()
 
     while not shutdown_event.is_set():
         try:
             try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=HEARTBEAT_INTERVAL)
+                await asyncio.wait_for(shutdown_event.wait(), timeout=heartbeat_interval)
                 break
             except asyncio.TimeoutError:
                 pass
-            _write_heartbeat()
+            if health_check():
+                _write_heartbeat()
             await _check_circuit_breakers()
         except asyncio.CancelledError:
             logger.info("Heartbeat worker cancelled")
@@ -46,9 +54,10 @@ async def heartbeat_loop(shutdown_event: asyncio.Event):
             logger.error(f"Heartbeat worker error: {e}", exc_info=True)
             if shutdown_event.is_set():
                 break
-            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            await asyncio.sleep(heartbeat_interval)
 
-    _write_heartbeat(final=True)
+    if health_check():
+        _write_heartbeat(final=True)
     logger.info("Heartbeat worker stopped gracefully")
 
 
