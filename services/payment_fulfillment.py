@@ -46,9 +46,10 @@ async def grant(session,op):
         if (not quote or not version or payment.user_id != quote.user_id or
             quote.payment_id != payment.id or payment.tariff_quote_id != quote.id or
             payment.tariff_version_id != quote.target_tariff_version_id or
-            quote.target_tariff_version_id != version.id):
-            if quote: quote.status="manual_review"; quote.manual_review_at=quote.manual_review_at or now_utc(); quote.diagnostic_reason="quote_version_mismatch"
-            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="quote_version_mismatch"; op.status="dead"; op.completed_at=now_utc(); return
+            quote.target_tariff_version_id != version.id or
+            payment.tariff_id != version.tariff_id):
+            if quote: quote.status="manual_review"; quote.manual_review_at=quote.manual_review_at or now_utc(); quote.diagnostic_reason="payment_tariff_version_mismatch"
+            payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="payment_tariff_version_mismatch"; op.status="dead"; op.completed_at=now_utc(); return
         if (payment.amount != payment.snapshot_amount or
             payment.amount != quote.confirmed_payment_required_rub or
             payment.currency != payment.snapshot_currency or

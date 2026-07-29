@@ -75,6 +75,13 @@ class ProviderValidationTests(unittest.TestCase):
   self.assertEqual(validate_provider_payment(payment,data),"local_payment_id_missing")
 
 class ProviderCapturedAtTests(unittest.TestCase):
+ def test_create_post_and_followup_get_have_distinct_sources(self):
+  from services.payment_provider_operations import ProviderOperationClaim,provider_transition_source
+  common=(1,1,"create_payment",{},"key","worker",1)
+  post=ProviderOperationClaim(*common,None,now_utc())
+  get=ProviderOperationClaim(*common,"provider-id",now_utc())
+  self.assertEqual(provider_transition_source(post),"provider_create_payment_post")
+  self.assertEqual(provider_transition_source(get),"provider_get_payment")
  def test_strict_timezone_aware_utc_parser(self):
   from services.payment_provider_state import parse_provider_captured_at
   parsed=parse_provider_captured_at("2026-07-29T12:34:56.123+03:00")

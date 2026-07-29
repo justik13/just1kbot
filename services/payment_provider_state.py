@@ -39,7 +39,7 @@ async def apply_provider_transition(session,payment,data,*,source,event_type=Non
         # A successful provider snapshot is authoritative financial evidence.  Record
         # it before identity validation so a bad command correlation cannot erase the
         # fact that money was received.
-        if payment.tariff_quote_id and source=="provider_create_payment":
+        if payment.tariff_quote_id and source=="provider_create_payment_post":
             return ProviderTransition("retry",observed,reason="captured_at_requires_verified_get")
         payment.paid_at=payment.paid_at or now_utc()
         if payment.tariff_quote_id:

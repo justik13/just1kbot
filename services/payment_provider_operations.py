@@ -20,6 +20,12 @@ class ProviderRetryDecision:
     accepted:bool; reason:str; operation_id:int
 
 VALID_PROVIDER_STATUSES={"pending","waiting_for_capture","succeeded","canceled"}
+def provider_transition_source(claim):
+    """Describe the HTTP evidence, independently of the durable command type."""
+    if claim.operation_type=="create_payment":
+        return "provider_get_payment" if claim.external_id else "provider_create_payment_post"
+    if claim.operation_type=="reconcile_payment": return "provider_reconcile_payment_get"
+    return f"provider_{claim.operation_type}"
 def classify_invalid_provider_snapshot(claim,data):
     """Classify a decoded provider object whose status is absent or unknown."""
     has_provider_id=bool(data.get("id"))
@@ -116,7 +122,7 @@ async def finalize(session,claim,result,transport=YooKassaService):
             else:
                 if not primary and status in {"pending","waiting_for_capture"} and not payment.payment_url: payment.reconciliation_status="required"
         if result.ok:
-            transition=await apply_provider_transition(session,payment,data,source=f"provider_{claim.operation_type}")
+            transition=await apply_provider_transition(session,payment,data,source=provider_transition_source(claim))
             if transition.outcome=="retry": result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
             elif transition.grant_allowed:
                 payment.fulfillment_status="pending"

@@ -4,13 +4,14 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Payment, TariffQuote
+from database.models import EntitlementEntry, PaidValueLedgerEntry, Payment, PaymentFulfillmentOperation, Tariff, TariffQuote, User
 from database.repositories.paid_value_repo import PaidValueLedgerConflictError, get_or_create_confirmed_payment_entry
+from services.payment_fulfillment import grant
 from utils.datetime_helpers import now_utc
 
 
@@ -136,6 +137,35 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await get_or_create_confirmed_payment_entry(session,user_id=self.user_id,
                     payment_id=payment.id,quote_id=quote_id,tariff_version_id=self.version_id,
                     paid_hours=self.duration_days*24,paid_value_rub=Decimal("301"))
+
+    async def test_payment_tariff_must_match_immutable_version(self):
+        quote_id=await self._quote(operation="purchase")
+        async with AsyncSession(bind=self.connection,expire_on_commit=False) as session:
+            other=Tariff(name=uuid.uuid4().hex,duration_days=self.duration_days+1,
+                device_limit=self.device_limit,price_rub=300,is_active=True)
+            session.add(other); await session.flush()
+            payment=Payment(user_id=self.user_id,tariff_id=other.id,
+                tariff_quote_id=quote_id,tariff_version_id=self.version_id,
+                amount=Decimal("300"),currency="RUB",status="pending",
+                provider_status="succeeded",fulfillment_status="pending",
+                reconciliation_status="ok",checkout_status="active",
+                snapshot_duration_days=self.duration_days,
+                snapshot_device_limit=self.device_limit,snapshot_amount=Decimal("300"),
+                snapshot_currency="RUB",provider_confirmed_at=now_utc())
+            session.add(payment); await session.flush()
+            quote=await session.get(TariffQuote,quote_id); quote.payment_id=payment.id
+            operation=PaymentFulfillmentOperation(payment_id=payment.id,
+                operation_type="grant_subscription",status="processing",
+                idempotency_key=uuid.uuid4().hex,payload={},attempts=1,
+                next_attempt_at=now_utc(),locked_by="worker",locked_at=now_utc())
+            session.add(operation); await session.flush()
+            before=(await session.get(User,self.user_id)).subscription_end
+            await grant(session,operation)
+            self.assertEqual(payment.fulfillment_status,"manual_review")
+            self.assertEqual(quote.status,"manual_review")
+            self.assertEqual((await session.get(User,self.user_id)).subscription_end,before)
+            self.assertIsNone(await session.scalar(select(EntitlementEntry).where(EntitlementEntry.source_id==str(payment.id))))
+            self.assertIsNone(await session.scalar(select(PaidValueLedgerEntry).where(PaidValueLedgerEntry.payment_id==payment.id)))
 
 
 if __name__ == "__main__":
