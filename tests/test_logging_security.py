@@ -163,7 +163,8 @@ class LoggingSecurityTests(unittest.TestCase):
         set_cookie = "SET_COOKIE_CANARY_407"
         output = self._capture(
             lambda logger: logger.info(
-                "Cookie: session=%s; csrftoken=%s status=401 payment_id=pay-cookie-safe\n"
+                "Cookie: session=%s; csrftoken=%s\n"
+                "status=401 payment_id=pay-cookie-safe\n"
                 "Set-Cookie: session=%s; HttpOnly; Path=/",
                 cookie_one,
                 cookie_two,
@@ -175,6 +176,85 @@ class LoggingSecurityTests(unittest.TestCase):
         self.assertNotIn(set_cookie, output)
         self.assertIn("status=401", output)
         self.assertIn("payment_id=pay-cookie-safe", output)
+
+    def test_raw_headers_redact_values_named_like_safe_log_fields(self):
+        cases = (
+            (
+                "Cookie: session=SAFE_FIRST_CANARY_101; "
+                "status=COOKIE_STATUS_CANARY_202; "
+                "csrftoken=COOKIE_SECOND_CANARY_303",
+                (
+                    "SAFE_FIRST_CANARY_101",
+                    "COOKIE_STATUS_CANARY_202",
+                    "COOKIE_SECOND_CANARY_303",
+                ),
+            ),
+            (
+                "Cookie: host=COOKIE_HOST_CANARY_404; "
+                "request_id=COOKIE_REQUEST_CANARY_505",
+                ("COOKIE_HOST_CANARY_404", "COOKIE_REQUEST_CANARY_505"),
+            ),
+            (
+                "Set-Cookie: status=SET_COOKIE_STATUS_CANARY_606; "
+                "HttpOnly; Path=/",
+                ("SET_COOKIE_STATUS_CANARY_606",),
+            ),
+            (
+                "Authorization: Digest username=admin, "
+                "host=AUTH_HOST_CANARY_707, response=AUTH_RESPONSE_CANARY_808",
+                ("AUTH_HOST_CANARY_707", "AUTH_RESPONSE_CANARY_808"),
+            ),
+            (
+                "Proxy-Authorization: Custom "
+                "request_id=PROXY_REQUEST_CANARY_909 "
+                "token=PROXY_TOKEN_CANARY_010",
+                ("PROXY_REQUEST_CANARY_909", "PROXY_TOKEN_CANARY_010"),
+            ),
+        )
+        for header, secrets in cases:
+            with self.subTest(header=header.split(":", 1)[0]):
+                output = self._capture(
+                    lambda logger, value=header: logger.warning(value)
+                )
+                for secret in secrets:
+                    self.assertNotIn(secret, output)
+
+    def test_raw_header_name_collisions_are_redacted_in_traceback(self):
+        cookie_secrets = (
+            "TRACE_COOKIE_SESSION_CANARY_121",
+            "TRACE_COOKIE_STATUS_CANARY_232",
+            "TRACE_COOKIE_SECOND_CANARY_343",
+        )
+        auth_secrets = (
+            "TRACE_AUTH_HOST_CANARY_454",
+            "TRACE_AUTH_RESPONSE_CANARY_565",
+        )
+        message = (
+            f"Cookie: session={cookie_secrets[0]}; "
+            f"status={cookie_secrets[1]}; csrftoken={cookie_secrets[2]}\n"
+            "safe_context_on_own_line=true\n"
+            "Authorization: Digest username=admin, "
+            f"host={auth_secrets[0]}, response={auth_secrets[1]}"
+        )
+
+        def log_failure(logger):
+            try:
+                raise RuntimeError(message)
+            except RuntimeError:
+                logger.exception(
+                    "request_id=req-collision-safe "
+                    "payment_id=pay-collision-safe "
+                    "operation_id=op-collision-safe"
+                )
+
+        output = self._capture(log_failure)
+        for secret in (*cookie_secrets, *auth_secrets):
+            self.assertNotIn(secret, output)
+        self.assertIn("RuntimeError", output)
+        self.assertIn("Traceback (most recent call last)", output)
+        self.assertIn("request_id=req-collision-safe", output)
+        self.assertIn("payment_id=pay-collision-safe", output)
+        self.assertIn("operation_id=op-collision-safe", output)
 
     def test_secret_query_parameters_are_redacted(self):
         parameters = (
@@ -279,7 +359,7 @@ class LoggingSecurityTests(unittest.TestCase):
 
             secret = "TOPOLOGY_BASIC_CANARY_dXNlcjpwYXNz=="
             child_logger.warning(
-                "Authorization: Basic %s status=403 request_id=req-topology-safe",
+                "status=403 request_id=req-topology-safe Authorization: Basic %s",
                 secret,
             )
             handler.flush()

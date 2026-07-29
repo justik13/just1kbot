@@ -32,12 +32,12 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         rf"\1\2{REDACTED}\2",
     ),
-    # Plain header values: stop at a new line or known safe structured context.
+    # A raw header is inherently ambiguous: cookie/auth parameter names can look
+    # exactly like structured log fields.  Redact unconditionally to newline.
     (
         re.compile(
             r"(?i)((?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)"
-            r"[\s\S]*?(?=\r?\n|\s+(?:request_id|status|payment_id|operation_id|"
-            r"profile_id|server_id|host)\s*=|$)"
+            r"[^\r\n]*"
         ),
         rf"\1{REDACTED}",
     ),
