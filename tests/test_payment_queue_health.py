@@ -114,8 +114,12 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(3, self.bot.send_message.await_count)
         self.monitor.observe(good); await self.flush()
         self.assertEqual(3, self.bot.send_message.await_count)
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertEqual((episode.current_revision, episode.delivered_revision), (0, 0))
+        self.assertIsNone(episode.last_observed_fingerprint)
         self.monitor.observe(bad); await self.flush()
         self.assertEqual(4, self.bot.send_message.await_count)
+        self.assertEqual((episode.current_revision, episode.delivered_revision), (1, 1))
 
     async def test_escalation_fingerprint_ignores_age_and_backlog_count(self):
         overdue = snapshot(queue(pending=1, due=1, overdue=1))
@@ -133,6 +137,53 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.monitor.observe(snapshot(queue())); await self.flush()
         self.monitor.observe(overdue); await self.flush()
         self.assertEqual(5, self.bot.send_message.await_count)
+
+    async def test_dead_growth_after_decrease_creates_new_revision(self):
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertEqual((episode.current_revision, episode.delivered_revision), (1, 1))
+        self.monitor.observe(snapshot(queue(dead=1))); await self.flush()
+        self.assertEqual(1, self.bot.send_message.await_count)
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.assertEqual((episode.current_revision, episode.delivered_revision), (2, 2))
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+
+    async def test_escalation_during_in_flight_delivery_is_not_lost(self):
+        started = asyncio.Event(); release = asyncio.Event()
+        async def delayed(*args, **kwargs):
+            started.set()
+            await release.wait()
+        self.bot.send_message.side_effect = delayed
+        self.monitor.observe(snapshot(queue(dead=1)))
+        await started.wait()
+        episode = self.monitor.episodes["provider_operations"]
+        self.monitor.observe(snapshot(queue(dead=2)))
+        self.assertEqual(1, len(self.monitor.alert_tasks))
+        self.assertEqual((episode.current_revision, episode.in_flight_revision), (2, 1))
+        release.set(); await self.flush()
+        self.assertEqual((episode.delivered_revision, episode.current_revision), (1, 2))
+        self.bot.send_message.side_effect = None
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.assertEqual((episode.delivered_revision, episode.current_revision), (2, 2))
+
+    async def test_failed_redelivery_of_new_revision_ignores_old_success_cooldown(self):
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.monitor.observe(snapshot(queue(dead=1))); await self.flush()
+        self.bot.send_message.side_effect = RuntimeError("SECRET_CANARY")
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        episode = self.monitor.episodes["provider_operations"]
+        self.assertEqual((episode.delivered_revision, episode.current_revision), (1, 2))
+        self.now = 4
+        self.bot.send_message.side_effect = None
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.assertEqual(2, self.bot.send_message.await_count)
+        self.now = 5
+        self.monitor.observe(snapshot(queue(dead=2))); await self.flush()
+        self.assertEqual(3, self.bot.send_message.await_count)
+        self.assertEqual((episode.delivered_revision, episode.current_revision), (2, 2))
 
     async def test_existing_dead_row_alerts_on_first_observation(self):
         self.monitor.observe(snapshot(queue(dead=10))); await self.flush()

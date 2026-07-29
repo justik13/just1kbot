@@ -31,11 +31,16 @@ class _Fingerprint:
 class _Episode:
     unhealthy: bool = False
     recovery_needed: bool = False
+    generation: int = 0
+    last_observed_fingerprint: _Fingerprint | None = None
+    current_revision: int = 0
+    delivered_revision: int = 0
+    pending_alert_message: str | None = None
     last_attempt_at: float | None = None
     last_success_at: float | None = None
     last_attempt_succeeded: bool | None = None
-    delivered_fingerprint: _Fingerprint | None = None
     in_flight: asyncio.Task | None = None
+    in_flight_revision: int | None = None
 
 
 class QueueHealthMonitor:
@@ -67,11 +72,18 @@ class QueueHealthMonitor:
         return _Fingerprint(frozenset(types), queue.dead)
 
     @staticmethod
-    def _escalated(current: _Fingerprint, delivered: _Fingerprint | None) -> bool:
-        if delivered is None:
+    def _escalated(current: _Fingerprint,
+                   previous: _Fingerprint | None) -> bool:
+        if previous is None:
             return True
-        return (current.dead_count > delivered.dead_count
-                or bool(current.problem_types - delivered.problem_types))
+        return (current.dead_count > previous.dead_count
+                or bool(current.problem_types - previous.problem_types))
+
+    @staticmethod
+    def _reset_delivery_state(episode: _Episode) -> None:
+        episode.last_attempt_at = None
+        episode.last_success_at = None
+        episode.last_attempt_succeeded = None
 
     def observe(self, snapshot) -> None:
         now = self.clock()
@@ -81,8 +93,12 @@ class QueueHealthMonitor:
                 if episode.unhealthy:
                     episode.unhealthy = False
                     episode.recovery_needed = True
-                    episode.delivered_fingerprint = None
-                    episode.last_success_at = None
+                    episode.generation += 1
+                    episode.last_observed_fingerprint = None
+                    episode.current_revision = 0
+                    episode.delivered_revision = 0
+                    episode.pending_alert_message = None
+                    self._reset_delivery_state(episode)
                 if episode.recovery_needed:
                     self._try_schedule(queue.name, episode,
                                        self._recovery_message(queue), None, now)
@@ -92,18 +108,36 @@ class QueueHealthMonitor:
             if not episode.unhealthy:
                 episode.unhealthy = True
                 episode.recovery_needed = False
-                episode.delivered_fingerprint = None
-                episode.last_success_at = None
+                episode.generation += 1
+                episode.last_observed_fingerprint = None
+                episode.current_revision = 0
+                episode.delivered_revision = 0
+                episode.pending_alert_message = None
+                self._reset_delivery_state(episode)
+
+            if self._escalated(fingerprint, episode.last_observed_fingerprint):
+                episode.current_revision += 1
+                episode.pending_alert_message = self._unhealthy_message(queue)
+            # Decreases are deliberately observed even though they do not create a
+            # revision, so a later increase is compared with the lower state.
+            episode.last_observed_fingerprint = fingerprint
+
+            if episode.delivered_revision < episode.current_revision:
+                self._try_schedule(
+                    queue.name, episode, episode.pending_alert_message or
+                    self._unhealthy_message(queue), episode.current_revision, now,
+                )
+                continue
 
             reminder_due = (episode.last_success_at is not None
                             and now - episode.last_success_at >= self.cooldown)
-            if (self._escalated(fingerprint, episode.delivered_fingerprint)
-                    or reminder_due):
+            if reminder_due:
                 self._try_schedule(queue.name, episode,
-                                   self._unhealthy_message(queue), fingerprint, now)
+                                   self._unhealthy_message(queue),
+                                   episode.current_revision, now)
 
     def _try_schedule(self, queue_name: str, episode: _Episode, message: str,
-                      fingerprint: _Fingerprint | None, now: float) -> None:
+                      revision: int | None, now: float) -> None:
         if episode.in_flight is not None and not episode.in_flight.done():
             return
         if (episode.last_attempt_at is not None
@@ -112,6 +146,8 @@ class QueueHealthMonitor:
             return
         episode.last_attempt_at = now
         episode.last_attempt_succeeded = None
+        episode.in_flight_revision = revision
+        generation = episode.generation
 
         async def deliver() -> None:
             success = False
@@ -127,13 +163,20 @@ class QueueHealthMonitor:
                 logger.error("Queue health alert delivery failed queue=%s type=%s",
                              queue_name, type(error).__name__)
             finally:
-                episode.last_attempt_succeeded = success
-                if success:
-                    episode.last_success_at = self.clock()
-                    if fingerprint is None:
-                        episode.recovery_needed = False
-                    else:
-                        episode.delivered_fingerprint = fingerprint
+                if episode.generation == generation:
+                    episode.last_attempt_succeeded = success
+                    if success:
+                        episode.last_success_at = self.clock()
+                        if revision is None:
+                            episode.recovery_needed = False
+                        else:
+                            episode.delivered_revision = max(
+                                episode.delivered_revision, revision,
+                            )
+                            if episode.delivered_revision >= episode.current_revision:
+                                episode.pending_alert_message = None
+                if episode.in_flight is asyncio.current_task():
+                    episode.in_flight_revision = None
 
         task = asyncio.create_task(deliver(), name=f"queue_health_alert_{queue_name}")
         episode.in_flight = task
