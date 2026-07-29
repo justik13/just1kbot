@@ -46,10 +46,12 @@ class YooKassaService:
                     except aiohttp.ClientError:
                         return YooKassaResult(False,error_kind=YooKassaErrorKind.NETWORK_ERROR,status_code=code,retryable=True,ambiguous=ambiguous_on_failure)
                     except (ValueError,TypeError):
-                        return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=code>=500,ambiguous=ambiguous_on_failure)
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=200<=code<300 or code>=500,ambiguous=ambiguous_on_failure)
                     except Exception:
                         return YooKassaResult(False,error_kind=YooKassaErrorKind.UNKNOWN,status_code=code,retryable=False,ambiguous=ambiguous_on_failure)
-                    if 200<=code<300 and isinstance(data,dict): return YooKassaResult(True,value=data,status_code=code)
+                    if 200<=code<300:
+                        if isinstance(data,dict): return YooKassaResult(True,value=data,status_code=code)
+                        return YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,status_code=code,retryable=True,ambiguous=ambiguous_on_failure)
                     kind=YooKassaErrorKind.UNKNOWN
                     if code in (401,403): kind=YooKassaErrorKind.AUTH_FAILED
                     elif code==404: kind=YooKassaErrorKind.NOT_FOUND
