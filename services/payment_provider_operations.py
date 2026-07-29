@@ -14,6 +14,9 @@ class PaymentProviderOperationOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
 class ProviderOperationClaim:
     operation_id:int; payment_id:int; operation_type:str; payload:dict; idempotency_key:str; worker_id:str; attempt_number:int; external_id:str|None; created_at:object
+@dataclass(frozen=True)
+class ProviderRetryDecision:
+    accepted:bool; reason:str; operation_id:int
 
 def create_payload(payment,description,return_url):
     return {"amount":{"value":format(payment.amount,'.2f'),"currency":payment.currency},"description":description,"confirmation":{"type":"redirect","return_url":return_url},"metadata":{"order_id":payment.public_order_id,"local_payment_id":str(payment.id)},"capture":True}
@@ -36,16 +39,16 @@ async def retry_dead_provider_operation(session,operation_id,*,reset_attempts,re
     if not op or op.status!="dead": raise ValueError("operation is not dead")
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update())
     if op.operation_type=="create_payment" and not payment.external_id and now_utc()-op.created_at>=timedelta(hours=24):
-        payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+        payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; payment.manual_review_reason="create_idempotency_window_expired"
         session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_admin_retry_rejected",provider_status=payment.provider_status,reason="create_idempotency_window_expired",source="admin_retry"))
-        raise ValueError("create_idempotency_window_expired")
+        return ProviderRetryDecision(False,"create_idempotency_window_expired",op.id)
     # payload is the immutable provider command; audit metadata must never be mixed
     # into a request which may be replayed byte-for-byte.
     session.add(PaymentEvent(payment_id=payment.id,event_type="provider_operation_admin_retry",provider_status=payment.provider_status,reason=str(reason)[:255],source="admin_retry"))
     op.status="retry"; op.completed_at=op.locked_at=op.locked_by=op.last_error_code=op.last_error=None; op.next_attempt_at=now_utc()
     if reset_attempts:op.attempts=0
     elif op.attempts>=op.max_attempts:raise ValueError("reset_attempts required for exhausted operation")
-    return op
+    return ProviderRetryDecision(True,"retry_scheduled",op.id)
 async def ensure_cancel_payment_operation(session,payment):
     if payment.provider_status!="waiting_for_capture": return None
     return await ensure_operation(session,payment,"cancel_payment")
@@ -82,6 +85,9 @@ async def finalize(session,claim,result,transport=YooKassaService):
         # `succeeded` is terminal too, but represents money received after cancel and
         # must flow through the financial-truth/manual-review transition below.
         if result.ok and claim.operation_type=="cancel_payment" and status in {"pending","waiting_for_capture"}:
+            # This is a trustworthy GET snapshot even though it does not confirm the
+            # cancellation.  Preserve the observed provider state at every attempt.
+            payment.provider_status=status
             result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
             cancel_not_confirmed=True
         else: cancel_not_confirmed=False
@@ -111,6 +117,9 @@ async def finalize(session,claim,result,transport=YooKassaService):
         else:
             payment.provider_status="unknown" if result.ambiguous else ("manual_review" if op.status=="dead" else payment.provider_status); payment.reconciliation_status="required" if op.status=="retry" else "manual_review"
         if op.status=="dead": op.completed_at=now_utc()
+        if locals().get("cancel_not_confirmed",False) and op.status=="dead":
+            payment.provider_status=status; payment.reconciliation_status="manual_review"
+            session.add(PaymentEvent(payment_id=payment.id,event_type="cancel_not_confirmed_at_attempt_limit",provider_status=status,reason="cancel_not_confirmed",source="provider_finalizer"))
     op.locked_at=op.locked_by=None; project_legacy_status(payment); await session.flush()
 async def recover_stale(session,lease_seconds=120):
     rows=(await session.scalars(select(PaymentProviderOperation).where(PaymentProviderOperation.status=="processing",PaymentProviderOperation.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()

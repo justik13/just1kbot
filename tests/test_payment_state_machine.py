@@ -5,7 +5,33 @@ from unittest.mock import AsyncMock
 from services.payment_provider_operations import ProviderOperationClaim, perform_http
 from utils.datetime_helpers import now_utc
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult
+class FakeJSONResponse:
+ def __init__(self,value): self.status=200; self.value=value
+ async def __aenter__(self): return self
+ async def __aexit__(self,*args): pass
+ async def json(self,**kwargs): return self.value
+class FakeJSONClient:
+ responses=[]
+ def __init__(self,*args,**kwargs): pass
+ async def __aenter__(self): return self
+ async def __aexit__(self,*args): pass
+ def request(self,*args,**kwargs): return FakeJSONResponse(self.responses.pop(0))
 class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
+ async def _transport_call(self,method,*values):
+  from unittest.mock import patch
+  from services.yookassa_service import YooKassaService
+  FakeJSONClient.responses=list(values); settings=SimpleNamespace(YOOKASSA_SHOP_ID="shop",YOOKASSA_SECRET_KEY="secret")
+  with patch("services.yookassa_service.get_settings",return_value=settings),patch("services.yookassa_service.aiohttp.ClientSession",FakeJSONClient):
+   return await method(YooKassaService)
+ async def test_create_2xx_json_list_is_ambiguous_retryable(self):
+  result=await self._transport_call(lambda service:service.create_payment_result({},idempotency_key="key"),[]); self.assertEqual(result.error_kind,YooKassaErrorKind.INVALID_RESPONSE); self.assertTrue(result.retryable); self.assertTrue(result.ambiguous)
+ async def test_create_2xx_json_null_is_ambiguous_retryable(self):
+  result=await self._transport_call(lambda service:service.create_payment_result({},idempotency_key="key"),None); self.assertEqual(result.error_kind,YooKassaErrorKind.INVALID_RESPONSE); self.assertTrue(result.retryable); self.assertTrue(result.ambiguous)
+ async def test_get_2xx_json_list_is_retryable_not_ambiguous(self):
+  result=await self._transport_call(lambda service:service.get_payment_result("p"),[]); self.assertEqual(result.error_kind,YooKassaErrorKind.INVALID_RESPONSE); self.assertTrue(result.retryable); self.assertFalse(result.ambiguous)
+ async def test_cancel_2xx_json_list_reconciles_with_get(self):
+  claim=ProviderOperationClaim(1,1,"cancel_payment",{"provider_payment_id":"p"},"key","w",1,"p",now_utc())
+  result=await self._transport_call(lambda service:perform_http(claim,service),[],{"id":"p","status":"waiting_for_capture"}); self.assertTrue(result.ok); self.assertEqual(result.value["status"],"waiting_for_capture"); self.assertEqual(FakeJSONClient.responses,[])
  async def test_malformed_2xx_has_command_specific_ambiguity(self):
   from unittest.mock import patch
   from services.yookassa_service import YooKassaService
