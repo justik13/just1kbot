@@ -3,7 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from database.models import (EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralReward, Tariff, User, WebhookInbox)
+from database.models import (EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
 from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, retry_dead_fulfillment_operation
@@ -16,7 +16,7 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def asyncSetUp(self):
   self.engine=create_async_engine(DB); self.sessions=async_sessionmaker(self.engine,expire_on_commit=False)
   async with self.sessions.begin() as s:
-   for model in (ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
+   for model in (ReferralEligibility,ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
    tariff=Tariff(name="T",duration_days=30,device_limit=2,price_rub=90,is_active=True); user=User(telegram_id=900000+uuid.uuid4().int%99999); s.add_all([tariff,user]); await s.flush(); self.tariff_id=tariff.id; self.user_id=user.id
  async def asyncTearDown(self): await self.engine.dispose()
  async def payment(self,s,**kw):
@@ -87,6 +87,17 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    async with self.sessions.begin() as s:
     paid=now_utc() if terminal=="succeeded" else None; p=await self.payment(s,provider_status=terminal,paid_at=paid); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=1,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()-timedelta(hours=1)); s.add(op); await s.flush(); await recover_stale(s,0); self.assertEqual(p.provider_status,terminal); self.assertEqual(p.paid_at,paid); self.assertEqual(op.status,"dead")
 
+ async def test_refunded_reconcile_succeeded_remains_refunded_without_grant(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="refunded",fulfillment_status="reversed"); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value=self.snapshot(p))); self.assertEqual(p.provider_status,"refunded"); self.assertEqual(p.fulfillment_status,"reversed"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+ async def test_succeeded_delayed_pending_is_mismatch_not_regression(self):
+  async with self.sessions.begin() as s:
+   p=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded",paid_at=now_utc()); op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="processing",idempotency_key=uuid.uuid4().hex,payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await finalize(s,ProviderOperationClaim(op.id,p.id,op.operation_type,op.payload,op.idempotency_key,"w",1,p.external_id,op.created_at),YooKassaResult(True,value=self.snapshot(p,status="pending"))); self.assertEqual(p.provider_status,"succeeded"); self.assertEqual(p.reconciliation_status,"mismatch")
+ async def test_webhook_succeeded_with_pending_provider_retries(self):
+  from services.workers.webhook_inbox import finalize as finalize_inbox
+  async with self.sessions.begin() as s:
+   p=await self.payment(s); row=WebhookInbox(provider="yookassa",event_key=uuid.uuid4().hex,event_type="payment.succeeded",provider_object_id=p.external_id,payment_external_id=p.external_id,payload={},status="processing",attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(row); await s.flush(); await finalize_inbox(s,InboxClaim(row.id,"w",1,row.event_type,row.payment_external_id,None,row.payload,row.event_key),YooKassaResult(True,value=self.snapshot(p,status="pending"))); self.assertEqual(row.status,"retry"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+
 @unittest.skipUnless(DB,"TEST_DATABASE_URL is not set")
 class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
  async def test_legacy_completed_payment_is_backfilled_without_extending(self):
@@ -94,7 +105,7 @@ class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
   from alembic.command import downgrade, upgrade
   from alembic.config import Config
   cfg=Config("alembic.ini"); cfg.set_main_option("sqlalchemy.url",DB)
-  await asyncio.to_thread(downgrade,cfg,"-1")
+  await asyncio.to_thread(downgrade,cfg,"-2")
   engine=create_async_engine(DB); sessions=async_sessionmaker(engine,expire_on_commit=False)
   async with sessions.begin() as s:
    await s.execute(__import__('sqlalchemy').text("DELETE FROM referral_rewards"))

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentEvent, PaymentRefund, ReferralReward, Tariff, User
+from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentEvent, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User
 from database.connection import queue_post_commit_task
 from services.audit_service import AuditService
 from services.payment_lifecycle import project_legacy_status
@@ -63,9 +63,12 @@ async def referral(session,op):
     if (payment.snapshot_duration_days or 0)<30: op.status="cancelled"; op.completed_at=now_utc(); return
     marker=await session.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==payment.id).with_for_update())
     if marker and marker.reversed_at: op.status="cancelled"; op.completed_at=now_utc(); return
+    eligibility=await session.scalar(select(ReferralEligibility).where(ReferralEligibility.referred_user_id==user.id).with_for_update())
+    if eligibility and eligibility.status=="blocked": op.status="cancelled"; op.completed_at=now_utc(); op.last_error_code="referral_eligibility_blocked"; return
     if not marker:
-        previous_first=await session.scalar(select(ReferralReward.id).where(ReferralReward.referred_user_id==user.id,ReferralReward.is_first.is_(True)).limit(1))
-        first=previous_first is None
+        first=eligibility is None
+        if first:
+            eligibility=ReferralEligibility(referred_user_id=user.id,status="claimed",source_payment_id=payment.id,reason="first_durable_reward"); session.add(eligibility)
         marker=ReferralReward(referred_user_id=user.id,source_payment_id=payment.id,referrer_user_id=ref.id,is_first=first); session.add(marker); await session.flush()
     user_days=5 if marker.is_first else 0; ref_days=3 if marker.is_first else 1
     a=False
@@ -79,6 +82,13 @@ async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
     grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("payment_grant","manual_grant"))))
     reversal=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
+    user_bonus=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="referral_user_bonus"))
+    ref_bonus=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="referral_referrer_bonus"))
+    if payment.referral_user_bonus_days>0 and not user_bonus:
+        payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="referral_user_ledger_missing"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
+    if payment.referral_referrer_bonus_days>0 and not ref_bonus:
+        reason="legacy_referrer_unresolved" if payment.manual_review_reason=="legacy_referrer_unresolved" else "referral_referrer_ledger_missing"
+        payment.fulfillment_status=payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code=reason; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
     expected_grant=bool(payment.fulfilled_at or payment.status=="completed" or payment.manual_review_reason in {"legacy_entitlement_snapshot_missing","grant_ledger_missing"})
     if not grant_entry and expected_grant:
         payment.fulfillment_status="manual_review"; payment.reconciliation_status="manual_review"; payment.fulfillment_last_error_code="grant_ledger_missing"; payment.manual_review_reason="grant_ledger_missing"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
@@ -105,6 +115,9 @@ async def reverse(session,op):
     if latest: user.device_limit=latest.snapshot_device_limit or user.device_limit; user.current_tariff_id=latest.tariff_id
     payment.fulfillment_status="reversed"; payment.reversed_at=payment.reversed_at or now_utc(); op.status="succeeded"; op.completed_at=now_utc(); project_legacy_status(payment)
 async def execute(session,claim):
+    snapshot=await session.get(PaymentFulfillmentOperation,claim.operation_id)
+    if not snapshot: raise PaymentFulfillmentOperationOwnershipError(claim.operation_id)
+    await session.scalar(select(Payment).where(Payment.id==snapshot.payment_id).with_for_update())
     op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.id==claim.operation_id).with_for_update())
     if not op or op.status!="processing" or op.locked_by!=claim.worker_id or op.attempts!=claim.attempt_number: raise PaymentFulfillmentOperationOwnershipError(claim.operation_id)
     if op.operation_type=="grant_subscription": await grant(session,op)

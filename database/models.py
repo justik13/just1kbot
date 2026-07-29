@@ -489,6 +489,16 @@ class ReferralReward(Base):
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ReferralEligibility(Base):
+    __tablename__ = "referral_eligibilities"
+    __table_args__ = (CheckConstraint("status IN ('claimed','blocked')",name="ck_referral_eligibilities_status"),)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id",ondelete="RESTRICT"),primary_key=True)
+    status: Mapped[str] = mapped_column(String(20),nullable=False)
+    source_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id",ondelete="RESTRICT"))
+    reason: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=now_utc)
+
+
 class PaymentEvent(Base):
     __tablename__ = "payment_events"
 

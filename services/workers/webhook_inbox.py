@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from database.models import Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
 from services.payment_lifecycle import project_legacy_status
-from services.payment_provider_validation import record_mismatch, validate_provider_payment
+from services.payment_provider_state import apply_provider_transition
 from database.models import PaymentEvent
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
@@ -56,10 +56,11 @@ async def finalize(session,claim,result):
     for queued in pending: queued.status="cancelled"; queued.completed_at=now_utc()
     await ensure_fulfillment(session,payment,"reverse_payment")
    elif total<payment.amount:
-    payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; payment.manual_review_reason="partial_refund"
+    if payment.reconciliation_status not in {"mismatch","manual_review"} or payment.manual_review_reason in {None,"partial_refund"}: payment.reconciliation_status="manual_review"; payment.manual_review_reason="partial_refund"
+    payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="partial_refund_recorded",provider_status=payment.provider_status,reason="partial_refund",source="webhook_inbox"))
     grants=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type=="grant_subscription",PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for grant_op in grants: grant_op.status="cancelled"; grant_op.completed_at=now_utc()
-   else: payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
+   else: payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; payment.manual_review_reason="over_refund"; session.add(PaymentEvent(payment_id=payment.id,event_type="refund_manual_review",reason="over_refund",source="webhook_inbox"))
  elif not result or not result.ok:
   dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code=result.error_kind.value if result and result.error_kind else "provider_error"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None
   if dead: payment.reconciliation_status="required"; project_legacy_status(payment)
@@ -68,22 +69,24 @@ async def finalize(session,claim,result):
   payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"
   session.add(PaymentEvent(payment_id=payment.id,event_type="refund_manual_review",provider_status=(result.value or {}).get("status"),reason="payment_refunded_without_refund_amount",source="webhook_inbox"))
  else:
-  data=result.value or {}; amount=data.get("amount") or {}; metadata=data.get("metadata") or {}; status=data.get("status")
-  money=status=="succeeded"
-  mismatch=validate_provider_payment(payment,data)
-  if mismatch: record_mismatch(session,payment,mismatch); payment.provider_status="manual_review"
-  elif claim.event_type=="payment.succeeded" and status=="succeeded":
-   if not payment.paid_at: payment.paid_at=payment.provider_confirmed_at=now_utc()
-   prior_status=payment.provider_status; payment.provider_status="succeeded"
-   if payment.checkout_status=="abandoned" or prior_status=="canceled":
-    payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
-    session.add(PaymentEvent(payment_id=payment.id,event_type="paid_after_cancel",provider_status="succeeded",reason="webhook_after_abandoned_checkout",source="webhook_inbox"))
+  data=result.value or {}; observed=str(data.get("status") or "unknown")
+  expected={"payment.waiting_for_capture":"waiting_for_capture","payment.succeeded":"succeeded","payment.canceled":"canceled"}.get(claim.event_type)
+  if expected is None:
+   payment.reconciliation_status="manual_review"; payment.fulfillment_status="manual_review"; session.add(PaymentEvent(payment_id=payment.id,event_type="unsupported_webhook_event",provider_status=observed,reason=claim.event_type,source="webhook_inbox"))
+  elif observed!=expected and observed in {"pending","waiting_for_capture"}:
+   dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code="webhook_provider_status_not_ready"; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None; return
+  else:
+   transition=await apply_provider_transition(session,payment,data,source="webhook_inbox",event_type=claim.event_type)
+   if transition.outcome=="retry":
+    dead=row.attempts>=row.max_attempts; row.status="dead" if dead else "retry"; row.processed_at=now_utc() if dead else None; row.last_error_code=transition.reason; row.next_attempt_at=now_utc()+timedelta(seconds=10); row.locked_at=row.locked_by=None; return
+   if observed!=expected:
+    payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review" if payment.fulfillment_status!="reversed" else payment.fulfillment_status; session.add(PaymentEvent(payment_id=payment.id,event_type="webhook_event_status_conflict",provider_status=observed,reason=f"{claim.event_type}_expected_{expected}",source="webhook_inbox"))
+   elif transition.grant_allowed:
+    payment.fulfillment_status="pending"; await ensure_fulfillment(session,payment,"grant_subscription")
+   elif transition.reason=="paid_after_cancel":
     queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for operation in queued: operation.status="cancelled"; operation.completed_at=now_utc()
-   else: payment.fulfillment_status="pending" if payment.fulfillment_status=="not_ready" else payment.fulfillment_status; await ensure_fulfillment(session,payment,"grant_subscription")
-  elif claim.event_type=="payment.canceled" and status=="canceled":
-   if payment.paid_at: payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review"
-   else: payment.provider_status="canceled"
+
  project_legacy_status(payment); row.status="succeeded"; row.processed_at=now_utc(); row.locked_at=row.locked_by=None; await session.flush()
 async def recover_stale(session,lease_seconds=120):
  rows=(await session.scalars(select(WebhookInbox).where(WebhookInbox.status=="processing",WebhookInbox.locked_at<now_utc()-timedelta(seconds=lease_seconds)).with_for_update(skip_locked=True))).all()
