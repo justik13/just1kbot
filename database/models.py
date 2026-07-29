@@ -334,6 +334,11 @@ class TariffQuote(Base):
     manual_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     diagnostic_reason: Mapped[str | None] = mapped_column(String(255))
     payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True)
+    balance_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_balance_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    source_entitlement_entry_ids: Mapped[list | None] = mapped_column(JSONB)
+    source_ledger_entry_ids: Mapped[list | None] = mapped_column(JSONB)
 
 
 class PaidValueLedgerEntry(Base):

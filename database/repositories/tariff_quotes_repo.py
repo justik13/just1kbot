@@ -47,8 +47,8 @@ async def get_or_create_current_version(session: AsyncSession, tariff: Tariff) -
     return version
 
 
-async def expire_quotes(session: AsyncSession, user_id: int) -> None:
-    now = now_utc()
+async def expire_quotes(session: AsyncSession, user_id: int, as_of=None) -> None:
+    now = as_of or now_utc()
     rows = (await session.scalars(select(TariffQuote).where(
         TariffQuote.user_id == user_id, TariffQuote.status == "active",
         TariffQuote.expires_at <= now,
