@@ -12,20 +12,42 @@ from urllib.parse import urlsplit
 REDACTED = "[REDACTED]"
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    # URLs with userinfo are credentials even when the scheme is unfamiliar.
+    # URLs with either token-only or username/password userinfo.
     (
-        re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@:]*:[^\s/@]+@"),
+        re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@]+@"),
         rf"\1{REDACTED}@",
     ),
-    (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"), f"Bearer {REDACTED}"),
-    # Authorization and secret-bearing header/config values, including repr(dict).
+    # Secret query parameters in otherwise safe URLs.
     (
         re.compile(
-            r"(?i)(['\"]?(?:authorization|proxy-authorization|cookie|set-cookie|"
-            r"x-api-key|api[_-]?key|access[_-]?token|"
-            r"bot[_-]?token|database_url|redis_url|db_encryption_key|"
-            r"yookassa_secret_key|password|passwd|privatekey|presharedkey|secret)"
-            r"['\"]?\s*[:=]\s*)(['\"]?)[^\s,;'\"}\]]+\2"
+            r"(?i)([?&](?:token|access_token|api_key|password|secret)=)[^&#\s]+"
+        ),
+        rf"\1{REDACTED}",
+    ),
+    # Header values in repr(dict) may contain spaces, commas and semicolons.
+    (
+        re.compile(
+            r"(?i)(['\"](?:authorization|proxy-authorization|cookie|set-cookie)"
+            r"['\"]\s*:\s*)(['\"])[\s\S]*?\2"
+        ),
+        rf"\1\2{REDACTED}\2",
+    ),
+    # Plain header values: stop at a new line or known safe structured context.
+    (
+        re.compile(
+            r"(?i)((?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)"
+            r"[\s\S]*?(?=\r?\n|\s+(?:request_id|status|payment_id|operation_id|"
+            r"profile_id|server_id|host)\s*=|$)"
+        ),
+        rf"\1{REDACTED}",
+    ),
+    # Other named secret fields have single-token values in logs/config reprs.
+    (
+        re.compile(
+            r"(?i)(['\"]?(?:x-api-key|api[_-]?key|access[_-]?token|bot[_-]?token|"
+            r"database_url|redis_url|db_encryption_key|yookassa_secret_key|password|"
+            r"passwd|privatekey|presharedkey|secret)['\"]?\s*[:=]\s*)"
+            r"(['\"]?)[^\s,;'\"}\]]+\2"
         ),
         rf"\1{REDACTED}",
     ),
@@ -47,7 +69,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     # Encoded private keys and raw/embedded VPN configuration payloads.
     (
-        re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}"),
+        re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{43,}={0,2}"),
         "[LONG_SECRET_REDACTED]",
     ),
 )
