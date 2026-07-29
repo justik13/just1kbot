@@ -19,8 +19,8 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def asyncSetUp(self):
   self.engine=create_async_engine(DB); self.sessions=async_sessionmaker(self.engine,expire_on_commit=False)
   async with self.sessions.begin() as s:
-   await s.execute(text("TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions CASCADE"))
-   for model in (AuditLog,ReferralEligibility,ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
+   await s.execute(text("TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions, entitlement_entries RESTART IDENTITY CASCADE"))
+   for model in (AuditLog,ReferralEligibility,ReferralReward,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
    tariff=Tariff(name="T",duration_days=30,device_limit=2,price_rub=90,is_active=True); user=User(telegram_id=900000+uuid.uuid4().int%99999); s.add_all([tariff,user]); await s.flush(); self.tariff_id=tariff.id; self.user_id=user.id
  async def asyncTearDown(self): await self.engine.dispose()
  async def payment(self,s,**kw):
