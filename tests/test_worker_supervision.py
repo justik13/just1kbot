@@ -110,9 +110,67 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("critical", workers._worker_tasks)
         self.assertTrue(workers._fatal_shutdown)
         self.assertTrue(workers.shutdown_event.is_set())
+        await self.wait_until(lambda: self.bot.send_message.await_count == 2)
         self.assertEqual(2, self.bot.send_message.await_count)
-        await workers._fatal(self.bot, "critical", 2, "ValueError")
+        workers._fatal(self.bot, "critical", 2, "ValueError")
+        await asyncio.sleep(0)
         self.assertEqual(2, self.bot.send_message.await_count)
+
+    async def test_hung_alert_does_not_block_noncritical_restart(self):
+        alert_started = asyncio.Event()
+        release_alert = asyncio.Event()
+        restarted = asyncio.Event()
+        calls = 0
+
+        async def hung_send(*_args, **_kwargs):
+            alert_started.set()
+            await release_alert.wait()
+
+        async def factory(_bot):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("private")
+            restarted.set()
+            await asyncio.Future()
+
+        self.bot.send_message.side_effect = hung_send
+        definition = workers.WorkerDefinition("hung_optional", factory, False, 2, 10)
+        self.install(definition, asyncio.create_task(factory(self.bot)))
+        supervisor = asyncio.create_task(workers._supervise_workers(
+            self.bot, check_interval=0, clock=lambda: 1, backoff_delay=lambda _: 0
+        ))
+        await alert_started.wait()
+        await restarted.wait()
+        self.assertFalse(supervisor.done())
+        self.assertFalse(workers.shutdown_event.is_set())
+        release_alert.set()
+        workers.shutdown_event.set()
+        await supervisor
+
+    async def test_hung_alert_does_not_block_critical_fatal_shutdown(self):
+        alert_started = asyncio.Event()
+        release_alert = asyncio.Event()
+
+        async def hung_send(*_args, **_kwargs):
+            alert_started.set()
+            await release_alert.wait()
+
+        async def failing(_bot):
+            raise RuntimeError("private")
+
+        self.bot.send_message.side_effect = hung_send
+        definition = workers.WorkerDefinition("hung_critical", failing, True, 0, 10)
+        self.install(definition, asyncio.create_task(failing(self.bot)))
+        await workers._supervise_workers(
+            self.bot, check_interval=0, clock=lambda: 1, backoff_delay=lambda _: 0
+        )
+        self.assertTrue(workers._fatal_shutdown)
+        self.assertTrue(workers.shutdown_event.is_set())
+        self.assertEqual("failed", workers._worker_health["hung_critical"].state)
+        await alert_started.wait()
+        self.assertTrue(any(not task.done() for task in workers._alert_tasks))
+        release_alert.set()
 
     async def test_noncritical_worker_stops_without_process_shutdown(self):
         async def failing(_bot):
@@ -250,6 +308,52 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         workers._supervisor_done(cancelled, self.bot)
         await asyncio.sleep(0)
         self.assertFalse(workers.shutdown_event.is_set())
+
+    async def test_supervisor_failure_shutdown_is_immediate_with_hung_alert(self):
+        alert_started = asyncio.Event()
+        release_alert = asyncio.Event()
+
+        async def hung_send(*_args, **_kwargs):
+            alert_started.set()
+            await release_alert.wait()
+
+        async def fail():
+            raise RuntimeError("supervisor private")
+
+        self.bot.send_message.side_effect = hung_send
+        failed = asyncio.create_task(fail())
+        await asyncio.gather(failed, return_exceptions=True)
+        workers._supervisor_done(failed, self.bot)
+        self.assertTrue(workers.shutdown_event.is_set())
+        self.assertFalse(workers._supervisor_healthy)
+        await alert_started.wait()
+        self.assertTrue(any(not task.done() for task in workers._alert_tasks))
+        release_alert.set()
+
+    async def test_stop_times_out_and_cleans_up_hung_alert(self):
+        alert_started = asyncio.Event()
+        release_alert = asyncio.Event()
+
+        async def hung_send(*_args, **_kwargs):
+            alert_started.set()
+            await release_alert.wait()
+
+        self.bot.send_message.side_effect = hung_send
+        workers._schedule_alert(
+            self.bot, "cleanup", "title", "worker", 1, "RuntimeError", timeout=100
+        )
+        await alert_started.wait()
+        alert_tasks = list(workers._alert_tasks)
+        await workers.stop_background_workers(alert_grace_timeout=0)
+        self.assertEqual(set(), workers._alert_tasks)
+        self.assertTrue(all(task.done() for task in alert_tasks))
+        active_alerts = [
+            task for task in asyncio.all_tasks()
+            if task is not asyncio.current_task()
+            and task.get_name().startswith("worker_alert_")
+            and not task.done()
+        ]
+        self.assertEqual([], active_alerts)
 
     def test_heartbeat_health_requires_live_critical_workers(self):
         critical = [item for item in workers.WORKERS if item.critical]
