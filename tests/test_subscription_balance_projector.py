@@ -166,5 +166,38 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
     def test_rounding_uses_exact_microseconds(self):
         s=self.paid(as_of=T0+timedelta(microseconds=1)); self.assertEqual(s.rounding_loss_hours,Decimal(3_599_999_999)/Decimal(3_600_000_000))
 
+    def assert_invalid_shape(self, event):
+        s=project_subscription_balance(as_of=T0,subscription_end=None,
+            entitlement_events=(event,),ledger_entries=(),tariff_versions={},payments={})
+        self.assertEqual((s.tracked,s.failure_code,s.remaining_paid_value_rub),
+                         (False,"invalid_entitlement_shape",None))
+
+    def test_positive_payment_reversal_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","payment_reversal",1,T0,2))
+
+    def test_positive_referral_reversal_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","referral_reversal",1,T0,2))
+
+    def test_negative_payment_grant_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","payment_grant",-1,T0))
+
+    def test_negative_referral_bonus_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","referral_user_bonus",-1,T0))
+
+    def test_zero_grant_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"manual","1","manual_grant",0,T0))
+
+    def test_reversal_without_original_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","payment_reversal",-1,T0))
+
+    def test_grant_with_reversed_entry_has_invalid_shape(self):
+        self.assert_invalid_shape(EntitlementEvent(1,1,"payment","1","payment_grant",1,T0,2))
+
+    def test_valid_shapes_continue_to_project(self):
+        self.assertTrue(self.paid().tracked)
+        reversal=EntitlementEvent(2,1,"payment","10","payment_reversal",-24,T0,1)
+        ledger_reversal=LedgerEntry(12,1,"payment_reversal",-24,Decimal(-24),"RUB",100,10,11)
+        self.assertTrue(self.paid(extra_events=(reversal,),extra_ledger=(ledger_reversal,),end=T0).tracked)
+
 
 if __name__ == "__main__": unittest.main()

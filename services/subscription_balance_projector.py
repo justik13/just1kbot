@@ -117,6 +117,12 @@ def project_subscription_balance(*, as_of: datetime, subscription_end: datetime 
     """Replay source-attributed append-only history without infrastructure dependencies."""
     events=tuple(sorted(entitlement_events,key=lambda e:(e.created_at,e.id))); ledger=tuple(ledger_entries)
     fail=lambda code,end=None:_failed(as_of,code,events,ledger,end)
+    grants_types={"payment_grant","referral_user_bonus","referral_referrer_bonus","manual_grant"}
+    reversal_types={"payment_reversal","referral_reversal"}
+    if any(not ((event.entry_type in grants_types and event.hours_delta>0 and event.reversed_entry_id is None)
+                or (event.entry_type in reversal_types and event.hours_delta<0 and event.reversed_entry_id is not None))
+           for event in events):
+        return fail("invalid_entitlement_shape")
     active=subscription_end is not None and subscription_end>as_of
     confirmed=[x for x in ledger if x.entry_type=="confirmed_payment"]
     ledger_reversals=[x for x in ledger if x.entry_type=="payment_reversal"]
