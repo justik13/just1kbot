@@ -715,7 +715,7 @@ create_healthcheck() {
 SERVICE="just1kbot"
 MAX_CRASHES=5
 CRASH_FILE="/tmp/just1kbot_crash_count"
-HEARTBEAT_FILE="/tmp/just1kbot_heartbeat"
+HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
 LOG="/var/log/just1kbot/healthcheck.log"
 
 # Проверяем heartbeat (бот должен писать этот файл каждые 60 сек)

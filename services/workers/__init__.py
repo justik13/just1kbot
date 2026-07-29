@@ -173,22 +173,20 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                         and now - health.last_started_at >= definition.stability_window):
                     health.consecutive_failures = 0
                     health.last_error_type = None
+                    _alert_keys.discard(f"crash:{name}")
                 continue
             if task.cancelled():
-                health.state = "stopped"
-                health.last_finished_at = now
-                if not shutdown_event.is_set():
-                    await _fatal(bot, name, health.consecutive_failures, "CancelledError")
-                break
-
-            try:
-                exc = task.exception()
-            except Exception as error:
-                exc = error
-            error_type = type(exc).__name__ if exc is not None else "UnexpectedReturn"
+                error_type = "CancelledError"
+            else:
+                try:
+                    exc = task.exception()
+                except Exception as error:
+                    exc = error
+                error_type = type(exc).__name__ if exc is not None else "UnexpectedReturn"
             ran_for = now - (health.last_started_at if health.last_started_at is not None else now)
             if ran_for >= definition.stability_window:
                 health.consecutive_failures = 0
+                _alert_keys.discard(f"crash:{name}")
             health.consecutive_failures += 1
             health.last_finished_at = now
             health.last_error_type = error_type
@@ -205,6 +203,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                     await _fatal(bot, name, count, error_type)
                     break
                 logger.critical("Non-critical worker %s exhausted restart budget", name)
+                _worker_tasks.pop(name, None)
                 continue
 
             backoff = (backoff_delay(count) if backoff_delay is not None

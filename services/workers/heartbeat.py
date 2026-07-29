@@ -12,11 +12,21 @@ from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
 
-_PROJECT_DIR = os.environ.get(
-    "just1kbot_DIR",
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-)
-HEARTBEAT_FILE = Path(_PROJECT_DIR) / ".heartbeat"
+PRODUCTION_HEARTBEAT_FILE = Path("/opt/just1kbot/.heartbeat")
+
+
+def get_heartbeat_file() -> Path:
+    """Return the production path unless explicitly overridden for local use."""
+    explicit_file = os.environ.get("JUST1KBOT_HEARTBEAT_FILE")
+    if explicit_file:
+        return Path(explicit_file)
+    project_dir = os.environ.get("just1kbot_DIR")
+    if project_dir:
+        return Path(project_dir) / ".heartbeat"
+    return PRODUCTION_HEARTBEAT_FILE
+
+
+HEARTBEAT_FILE = get_heartbeat_file()
 HEARTBEAT_INTERVAL = 60.0
 
 # ИСПРАВЛЕНО: TTLCache вместо бесконечного dict.

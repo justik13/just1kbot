@@ -125,6 +125,109 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             self.bot, check_interval=0, clock=lambda: 1
         ))
         await self.wait_until(lambda: workers._worker_health["optional"].state == "failed")
+        count = workers._worker_health["optional"].consecutive_failures
+        for _ in range(10):
+            await asyncio.sleep(0)
+        self.assertEqual(count, workers._worker_health["optional"].consecutive_failures)
+        self.assertNotIn("optional", workers._worker_tasks)
+        self.assertEqual(
+            "failed",
+            workers.get_worker_health_snapshot()["workers"]["optional"]["state"],
+        )
+        self.assertFalse(workers.shutdown_event.is_set())
+        supervisor.cancel()
+        await asyncio.gather(supervisor, return_exceptions=True)
+
+    async def test_crash_alert_episode_reopens_after_stability_window(self):
+        calls = 0
+        stable_release = asyncio.Event()
+        now = [0.0]
+
+        async def factory(_bot):
+            nonlocal calls
+            calls += 1
+            if calls <= 2:
+                raise RuntimeError("private")
+            if calls == 3:
+                await stable_release.wait()
+                raise RuntimeError("another private value")
+            await asyncio.Future()
+
+        definition = workers.WorkerDefinition("episode", factory, False, 5, 5)
+        self.install(definition, asyncio.create_task(factory(self.bot)))
+        supervisor = asyncio.create_task(workers._supervise_workers(
+            self.bot,
+            check_interval=0,
+            clock=lambda: now[0],
+            backoff_delay=lambda _: 0,
+        ))
+        await self.wait_until(
+            lambda: calls == 3 and not workers._worker_tasks["episode"].done()
+        )
+        self.assertEqual(1, self.bot.send_message.await_count)
+        now[0] = 6.0
+        await self.wait_until(
+            lambda: workers._worker_health["episode"].consecutive_failures == 0
+        )
+        stable_release.set()
+        await self.wait_until(lambda: self.bot.send_message.await_count == 2)
+        self.assertEqual(2, self.bot.send_message.await_count)
+        workers.shutdown_event.set()
+        await supervisor
+
+    async def test_unexpected_critical_cancellation_restarts_then_fails_fatal(self):
+        restarted = asyncio.Event()
+        cancel_restarted = asyncio.Event()
+
+        async def factory(_bot):
+            restarted.set()
+            await cancel_restarted.wait()
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
+
+        definition = workers.WorkerDefinition("critical_cancel", factory, True, 1, 10)
+        first = asyncio.create_task(asyncio.sleep(100))
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        self.install(definition, first)
+        supervisor = asyncio.create_task(workers._supervise_workers(
+            self.bot, check_interval=0, clock=lambda: 1, backoff_delay=lambda _: 0
+        ))
+        await restarted.wait()
+        self.assertEqual(1, workers._worker_health["critical_cancel"].consecutive_failures)
+        self.assertFalse(workers.shutdown_event.is_set())
+        cancel_restarted.set()
+        await self.wait_until(lambda: workers.shutdown_event.is_set())
+        self.assertEqual("failed", workers._worker_health["critical_cancel"].state)
+        self.assertEqual(2, workers._worker_health["critical_cancel"].consecutive_failures)
+        await supervisor
+
+    async def test_unexpected_noncritical_cancellation_restarts_then_stops(self):
+        restarted = asyncio.Event()
+        cancel_restarted = asyncio.Event()
+
+        async def factory(_bot):
+            restarted.set()
+            await cancel_restarted.wait()
+            asyncio.current_task().cancel()
+            await asyncio.sleep(0)
+
+        definition = workers.WorkerDefinition("optional_cancel", factory, False, 1, 10)
+        first = asyncio.create_task(asyncio.sleep(100))
+        first.cancel()
+        await asyncio.gather(first, return_exceptions=True)
+        self.install(definition, first)
+        supervisor = asyncio.create_task(workers._supervise_workers(
+            self.bot, check_interval=0, clock=lambda: 1, backoff_delay=lambda _: 0
+        ))
+        await restarted.wait()
+        self.assertEqual(1, workers._worker_health["optional_cancel"].consecutive_failures)
+        self.assertFalse(workers.shutdown_event.is_set())
+        cancel_restarted.set()
+        await self.wait_until(
+            lambda: workers._worker_health["optional_cancel"].state == "failed"
+        )
+        self.assertNotIn("optional_cancel", workers._worker_tasks)
         self.assertFalse(workers.shutdown_event.is_set())
         supervisor.cancel()
         await asyncio.gather(supervisor, return_exceptions=True)
@@ -182,9 +285,12 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
             "running", 0, None, 0, None, False
         )
         workers._supervisor_task = asyncio.create_task(asyncio.sleep(100))
+        initial_count = workers._worker_health["test"].consecutive_failures
         await workers.stop_background_workers()
         self.assertTrue(task.done())
         self.assertEqual({}, workers._worker_tasks)
+        self.assertEqual(initial_count, workers._worker_health["test"].consecutive_failures)
+        self.assertEqual(0, self.bot.send_message.await_count)
 
 
 class HeartbeatLoopTests(unittest.IsolatedAsyncioTestCase):
