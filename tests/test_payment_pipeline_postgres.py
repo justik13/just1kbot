@@ -1,9 +1,10 @@
-import os, unittest, uuid
+import asyncio, os, unittest, uuid
 from datetime import timedelta
 from decimal import Decimal
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from database.models import (EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
+from database.models import (AuditLog, EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
+from services.payment_queue_admin import confirm_manual_retry
 from services.payment_queue_health import get_payment_queue_health_snapshot
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, perform_http, recover_stale, retry_dead_provider_operation)
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
@@ -17,12 +18,29 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def asyncSetUp(self):
   self.engine=create_async_engine(DB); self.sessions=async_sessionmaker(self.engine,expire_on_commit=False)
   async with self.sessions.begin() as s:
-   for model in (ReferralEligibility,ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
+   for model in (AuditLog,ReferralEligibility,ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
    tariff=Tariff(name="T",duration_days=30,device_limit=2,price_rub=90,is_active=True); user=User(telegram_id=900000+uuid.uuid4().int%99999); s.add_all([tariff,user]); await s.flush(); self.tariff_id=tariff.id; self.user_id=user.id
  async def asyncTearDown(self): await self.engine.dispose()
  async def payment(self,s,**kw):
   values=dict(user_id=self.user_id,tariff_id=self.tariff_id,amount=Decimal("90"),currency="RUB",status="pending",public_order_id="pay_"+uuid.uuid4().hex,provider_idempotency_key=uuid.uuid4().hex,provider_status="pending",fulfillment_status="not_ready",reconciliation_status="ok",snapshot_amount=Decimal("90"),snapshot_currency="RUB",snapshot_duration_days=30,snapshot_device_limit=2,external_id="provider_"+uuid.uuid4().hex)
   values.update(kw); p=Payment(**values); s.add(p); await s.flush(); return p
+
+ async def test_admin_retry_concurrent_provider_is_serialized_and_immutable(self):
+  payload={"SECRET_CANARY":"immutable","capture":True}
+  async with self.sessions.begin() as s:
+   p=await self.payment(s)
+   op=PaymentProviderOperation(payment_id=p.id,operation_type="reconcile_payment",status="dead",idempotency_key="stable-"+uuid.uuid4().hex,payload=payload,attempts=4,max_attempts=4,next_attempt_at=now_utc(),completed_at=now_utc())
+   s.add(op); await s.flush(); operation_id=op.id; original_key=op.idempotency_key
+  async def apply(admin):
+   async with self.sessions.begin() as s:
+    return await confirm_manual_retry(s,admin_id=admin,queue="provider",operation_id=operation_id,reason="approved concurrency test")
+  results=await asyncio.gather(apply(7001),apply(7002))
+  self.assertEqual(sorted(r.outcome for r in results),["already_changed","retry_scheduled"])
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,operation_id)
+   self.assertEqual((op.status,op.attempts,op.payload,op.idempotency_key),("retry",0,payload,original_key))
+   successes=await s.scalar(select(func.count(AuditLog.id)).where(AuditLog.target_id==operation_id,AuditLog.action=="PAYMENT_QUEUE_MANUAL_RETRY",AuditLog.details.contains("result=retry_scheduled")))
+   self.assertEqual(successes,1)
  def snapshot(self,p,status="succeeded",**kw):
   data={"id":p.external_id,"status":status,"amount":{"value":"90.00","currency":"RUB"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)}}; data.update(kw); return data
  async def cancel_claim(self,s,p,*,attempts=1,max_attempts=3,key=None):
