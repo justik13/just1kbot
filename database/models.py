@@ -309,7 +309,7 @@ class TariffQuote(Base):
         CheckConstraint("rounding_loss_hours >= 0 AND rounding_loss_hours < 1", name="ck_tariff_quotes_rounding_loss"),
         CheckConstraint("resulting_paid_value_rub <= current_paid_value_rub + confirmed_payment_required_rub", name="ck_tariff_quotes_value_invariant"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
-        Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", "operation_type", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+        Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     public_id: Mapped[object] = mapped_column(UUID(as_uuid=True), unique=True)

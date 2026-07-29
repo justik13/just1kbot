@@ -17,7 +17,7 @@ from database.repositories.payments_repo import (
     get_user_payments,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
-from database.repositories.tariff_quotes_repo import get_or_create_checkout_quote
+from database.repositories.tariff_quotes_repo import CheckoutQuoteConflictError, get_or_create_checkout_quote, lock_checkout_user
 from services.audit_service import AuditService
 from services.yookassa_service import YooKassaService
 from services.referral_service import ReferralService
@@ -309,15 +309,19 @@ class PaymentService:
         from services.payment_provider_operations import enqueue_create
         decimal_amount=_to_decimal(amount); tariff=await get_tariff_by_id(session,tariff_id)
         if decimal_amount is None or not tariff: return None,None
-        user = await session.get(User, user_id)
+        user = await lock_checkout_user(session, user_id)
+        if user is None: return None,"checkout_user_missing"
         active = bool(user and user.subscription_end and user.subscription_end > now_utc())
         if active and user.current_tariff_id != tariff_id:
             # Foundation only: a later PR will consume a confirmed change quote.
             return None, "active_tariff_change_temporarily_unavailable"
         operation_type = "renew" if active and user.current_tariff_id == tariff_id else "purchase"
-        quote, version = await get_or_create_checkout_quote(
-            session, user_id=user_id, tariff=tariff, operation_type=operation_type,
-        )
+        try:
+            quote, version = await get_or_create_checkout_quote(
+                session, user_id=user_id, tariff=tariff, operation_type=operation_type,
+            )
+        except CheckoutQuoteConflictError:
+            return None,"active_checkout_quote_conflict"
         existing = await session.scalar(select(Payment).where(
             Payment.tariff_quote_id == quote.id,
             Payment.checkout_status == "active",

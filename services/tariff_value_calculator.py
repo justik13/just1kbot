@@ -82,6 +82,8 @@ def calculate_tariff_value(
         raise TariffCalculationError("source snapshot is required for paid balance")
     if source_tariff is not None:
         source_price = _money(source_tariff.price_rub, "source price")
+        if source_price <= 0:
+            raise TariffCalculationError("source price must be positive")
         max_source_value = Decimal(source_paid_hours) * source_price / source_tariff.duration_hours
         if source_value > max_source_value:
             raise TariffCalculationError("source hours and value snapshots are incompatible")

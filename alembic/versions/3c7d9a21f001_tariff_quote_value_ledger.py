@@ -63,7 +63,7 @@ def upgrade():
         sa.CheckConstraint("expires_at = created_at + interval '15 minutes'", name="ck_tariff_quotes_lifetime"))
     op.create_index("ix_tariff_quotes_user_id", "tariff_quotes", ["user_id"])
     op.create_index("uq_tariff_quotes_active_change_user", "tariff_quotes", ["user_id"], unique=True, postgresql_where=sa.text("operation_type='change' AND status='active'"))
-    op.create_index("uq_tariff_quotes_active_checkout", "tariff_quotes", ["user_id", "target_tariff_version_id", "operation_type"], unique=True, postgresql_where=sa.text("status='active' AND operation_type IN ('purchase','renew')"))
+    op.create_index("uq_tariff_quotes_active_checkout", "tariff_quotes", ["user_id", "target_tariff_version_id"], unique=True, postgresql_where=sa.text("status='active' AND operation_type IN ('purchase','renew')"))
     # Nullable first: existing payments remain valid legacy snapshot orders.
     op.add_column("payments", sa.Column("tariff_quote_id", sa.BigInteger(), nullable=True))
     op.add_column("payments", sa.Column("tariff_version_id", sa.BigInteger(), nullable=True))

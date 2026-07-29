@@ -47,6 +47,8 @@ class TariffValueCalculatorTests(unittest.TestCase):
             {"confirmed_additional_payment_rub": -1}, {"target_tariff": snap(hours=0)},
             {"target_tariff": snap(currency="USD")}, {"bonus_value_rub": 1},
             {"requested_duration_hours": 12}, {"confirmed_additional_payment_rub": 1.2},
+            {"operation_type": "renew", "source_tariff": snap(price="0"),
+             "source_paid_hours": 1, "source_paid_value_rub": 0},
         ):
             with self.subTest(replacement=replacement), self.assertRaises(TariffCalculationError):
                 calculate_tariff_value(**(base | replacement))

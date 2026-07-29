@@ -73,3 +73,13 @@ class ProviderValidationTests(unittest.TestCase):
   payment=SimpleNamespace(id=1,external_id="p",amount=__import__('decimal').Decimal("90"),snapshot_amount=None,currency="RUB",snapshot_currency=None,public_order_id="pay_x")
   data={"id":"p","amount":{"value":"90","currency":"RUB"},"metadata":{"order_id":"pay_x"}}
   self.assertEqual(validate_provider_payment(payment,data),"local_payment_id_missing")
+
+class ProviderCapturedAtTests(unittest.TestCase):
+ def test_strict_timezone_aware_utc_parser(self):
+  from services.payment_provider_state import parse_provider_captured_at
+  parsed=parse_provider_captured_at("2026-07-29T12:34:56.123+03:00")
+  self.assertEqual(parsed.isoformat(),"2026-07-29T09:34:56.123000+00:00")
+ def test_missing_malformed_and_naive_are_rejected(self):
+  from services.payment_provider_state import parse_provider_captured_at
+  for value in (None,"","not-a-date","2026-07-29T12:34:56"):
+   with self.subTest(value=value),self.assertRaises(ValueError): parse_provider_captured_at(value)

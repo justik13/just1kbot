@@ -7,7 +7,10 @@ from decimal import Decimal
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from database.models import Payment, TariffQuote
+from database.repositories.paid_value_repo import PaidValueLedgerConflictError, get_or_create_confirmed_payment_entry
 from utils.datetime_helpers import now_utc
 
 
@@ -20,21 +23,25 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.connection = await self.engine.connect()
         self.transaction = await self.connection.begin()
         marker = uuid.uuid4().hex
+        self.duration_days = 1000 + int(marker[:4], 16)
+        self.device_limit = 1000 + int(marker[4:8], 16)
         self.user_id = (await self.connection.execute(text(
             "INSERT INTO users(telegram_id,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,device_creations_today,created_at) "
             "VALUES(:telegram,0,0,false,false,false,0,false,false,false,false,false,0,now()) RETURNING id"
         ), {"telegram": int(marker[:12], 16)})).scalar_one()
         self.tariff_id = (await self.connection.execute(text(
-            "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) VALUES(:name,30,2,300,true,0,now()) RETURNING id"
-        ), {"name": marker})).scalar_one()
+            "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) VALUES(:name,:days,:limit,300,true,0,now()) RETURNING id"
+        ), {"name": marker,"days":self.duration_days,"limit":self.device_limit})).scalar_one()
         self.version_id = (await self.connection.execute(text(
-            "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,device_limit,price_rub,currency) VALUES(:tid,1,:name,720,2,300,'RUB') RETURNING id"
-        ), {"tid": self.tariff_id, "name": marker})).scalar_one()
+            "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,device_limit,price_rub,currency) VALUES(:tid,1,:name,:hours,:limit,300,'RUB') RETURNING id"
+        ), {"tid": self.tariff_id, "name": marker,"hours":self.duration_days*24,"limit":self.device_limit})).scalar_one()
 
     async def asyncTearDown(self):
-        await self.transaction.rollback()
-        await self.connection.close()
-        await self.engine.dispose()
+        try:
+            await self.transaction.rollback()
+        finally:
+            try: await self.connection.close()
+            finally: await self.engine.dispose()
 
     async def _quote(self, operation="change", minutes=15):
         now = now_utc()
@@ -104,6 +111,31 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
             await self.connection.execute(text(
                 "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id) VALUES(:u,'entry','1','payment_reversal',-1,-1,'RUB',:v)"
             ), {"u": self.user_id, "v": self.version_id})
+
+    async def test_confirmed_repository_is_idempotent_and_checks_economics(self):
+        quote_id=await self._quote(operation="purchase")
+        async with AsyncSession(bind=self.connection,expire_on_commit=False) as session:
+            payment=Payment(user_id=self.user_id,tariff_id=self.tariff_id,
+                tariff_quote_id=quote_id,tariff_version_id=self.version_id,
+                amount=Decimal("300"),currency="RUB",status="pending",
+                provider_status="succeeded",fulfillment_status="pending",
+                reconciliation_status="ok",checkout_status="active",
+                snapshot_duration_days=self.duration_days,
+                snapshot_device_limit=self.device_limit,snapshot_amount=Decimal("300"),
+                snapshot_currency="RUB",provider_confirmed_at=now_utc())
+            session.add(payment); await session.flush()
+            quote=await session.get(TariffQuote,quote_id); quote.payment_id=payment.id
+            first=await get_or_create_confirmed_payment_entry(session,user_id=self.user_id,
+                payment_id=payment.id,quote_id=quote_id,tariff_version_id=self.version_id,
+                paid_hours=self.duration_days*24,paid_value_rub=Decimal("300"))
+            second=await get_or_create_confirmed_payment_entry(session,user_id=self.user_id,
+                payment_id=payment.id,quote_id=quote_id,tariff_version_id=self.version_id,
+                paid_hours=self.duration_days*24,paid_value_rub=Decimal("300"))
+            self.assertEqual(first.id,second.id)
+            with self.assertRaises(PaidValueLedgerConflictError):
+                await get_or_create_confirmed_payment_entry(session,user_id=self.user_id,
+                    payment_id=payment.id,quote_id=quote_id,tariff_version_id=self.version_id,
+                    paid_hours=self.duration_days*24,paid_value_rub=Decimal("301"))
 
 
 if __name__ == "__main__":

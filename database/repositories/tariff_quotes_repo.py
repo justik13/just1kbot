@@ -6,10 +6,17 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Tariff, TariffQuote, TariffVersion
+from database.models import Tariff, TariffQuote, TariffVersion, User
 from utils.datetime_helpers import now_utc
 
 QUOTE_LIFETIME = timedelta(minutes=15)
+
+class CheckoutQuoteConflictError(RuntimeError): pass
+
+async def lock_checkout_user(session: AsyncSession, user_id: int) -> User | None:
+    """The sole per-user checkout lock; callers derive state only afterwards."""
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -user_id})
+    return await session.scalar(select(User).where(User.id==user_id).with_for_update())
 
 
 async def get_or_create_current_version(session: AsyncSession, tariff: Tariff) -> TariffVersion:
@@ -55,16 +62,21 @@ async def get_or_create_checkout_quote(
 ) -> tuple[TariffQuote, TariffVersion]:
     if operation_type not in {"purchase", "renew"}:
         raise ValueError("checkout quote must be purchase or renew")
-    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -user_id})
     await expire_quotes(session, user_id)
     version = await get_or_create_current_version(session, tariff)
     existing = await session.scalar(select(TariffQuote).where(
         TariffQuote.user_id == user_id,
         TariffQuote.target_tariff_version_id == version.id,
-        TariffQuote.operation_type == operation_type,
+        TariffQuote.operation_type.in_(("purchase","renew")),
         TariffQuote.status == "active",
     ))
     if existing:
+        if (existing.operation_type != operation_type or
+            existing.confirmed_payment_required_rub != version.price_rub or
+            existing.resulting_paid_hours != version.duration_hours or
+            existing.resulting_paid_value_rub != version.price_rub or
+            existing.currency != version.currency):
+            raise CheckoutQuoteConflictError("active_checkout_quote_conflict")
         return existing, version
     now = now_utc()
     quote = TariffQuote(

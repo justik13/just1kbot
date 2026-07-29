@@ -5,6 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import PaidValueLedgerEntry
 
+class PaidValueLedgerConflictError(RuntimeError): pass
+
+_ECONOMIC_FIELDS = (
+    "entry_type", "user_id", "payment_id", "quote_id", "tariff_version_id",
+    "paid_hours_delta", "paid_value_rub_delta", "currency", "reversal_of_id",
+)
+
+def _verify(entry: PaidValueLedgerEntry, values: dict) -> PaidValueLedgerEntry:
+    for field in _ECONOMIC_FIELDS:
+        expected=values.get(field)
+        if getattr(entry,field) != expected:
+            raise PaidValueLedgerConflictError(f"paid_value_ledger_conflict:{field}")
+    return entry
+
 
 async def _insert_or_get(session: AsyncSession, values: dict, conflict_column) -> PaidValueLedgerEntry:
     entry_id = await session.scalar(
@@ -14,11 +28,13 @@ async def _insert_or_get(session: AsyncSession, values: dict, conflict_column) -
         ).returning(PaidValueLedgerEntry.id)
     )
     if entry_id is not None:
-        return await session.get(PaidValueLedgerEntry, entry_id)
-    return await session.scalar(select(PaidValueLedgerEntry).where(
+        return _verify(await session.get(PaidValueLedgerEntry, entry_id),values)
+    existing=await session.scalar(select(PaidValueLedgerEntry).where(
         conflict_column == values[conflict_column.key],
         PaidValueLedgerEntry.entry_type == values["entry_type"],
     ))
+    if existing is None: raise PaidValueLedgerConflictError("paid_value_ledger_conflict:not_visible")
+    return _verify(existing,values)
 
 
 async def get_or_create_confirmed_payment_entry(
