@@ -1,0 +1,101 @@
+import os
+import shutil
+import subprocess
+import tempfile
+import textwrap
+import time
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+HELPER = ROOT / "ops/deploy_application.sh"
+
+
+class DeployRollbackTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.active = self.tmp / "active"
+        self.source = self.tmp / "source"
+        self.snapshots = self.tmp / "snapshots"
+        self.unit = self.tmp / "unit.service"
+        self.state = self.tmp / "adapter-state"
+        self.active.mkdir(); self.source.mkdir()
+        (self.active / "app.txt").write_text("previous\n")
+        (self.active / ".env").write_text("TOKEN=CANARY_SECRET\n")
+        (self.source / "app.txt").write_text("new\n")
+        self.unit.write_text("old unit\n")
+        self.backup = self.tmp / "encrypted-backups"
+        self.backup.mkdir(); (self.backup / "keep.age").write_text("backup")
+        self.adapter = self.tmp / "adapter.sh"
+        self.adapter.write_text(textwrap.dedent("""\
+            #!/bin/bash
+            set -u
+            state_dir="$ADAPTER_STATE"; mkdir -p "$state_dir"
+            gen=$(cat "$state_dir/gen" 2>/dev/null || echo 0)
+            calls=$(cat "$state_dir/calls" 2>/dev/null || echo 0)
+            case "$1" in
+              start) gen=$((gen+1)); echo "$gen" > "$state_dir/gen"; echo 0 > "$state_dir/calls"; rm -f "$state_dir/stopped" ;;
+              stop) echo inactive > "$state_dir/stopped" ;;
+              state)
+                if [[ -f "$state_dir/stopped" ]]; then echo inactive; exit; fi
+                calls=$((calls+1)); echo "$calls" > "$state_dir/calls"
+                mode="${ADAPTER_MODE:-success}"
+                [[ "$gen" -gt 1 ]] && mode="${ROLLBACK_MODE:-success}"
+                if [[ "$mode" == crash && "$calls" -gt 1 ]]; then echo failed
+                else
+                  if [[ "$mode" == success ]]; then touch -d "@$(( $(date +%s) + calls ))" "$HEARTBEAT_FILE"; fi
+                  echo active
+                fi ;;
+              nrestarts)
+                if [[ "${ADAPTER_MODE:-}" == restarts && "$gen" -eq 1 && "$calls" -gt 0 ]]; then echo 1; else echo 0; fi ;;
+              mainpid) echo $((1000+gen)) ;;
+              status) echo 'status TOKEN=CANARY_SECRET postgresql://user:pass@host/db' ;;
+              journal) echo 'journal BOT_TOKEN=CANARY_SECRET' ;;
+              daemon-reload|enable) : ;;
+            esac
+        """)); self.adapter.chmod(0o755)
+        self.ok = self.tmp / "ok.sh"; self.ok.write_text("#!/bin/sh\nexit 0\n"); self.ok.chmod(0o755)
+        self.migrate = self.tmp / "migrate.sh"; self.migrate.write_text("#!/bin/sh\necho migrate >> \"$EVENTS\"\nexit ${MIGRATE_EXIT:-0}\n"); self.migrate.chmod(0o755)
+        self.activate = self.tmp / "activate.sh"; self.activate.write_text("#!/bin/sh\necho activate >> \"$EVENTS\"\nexit 0\n"); self.activate.chmod(0o755)
+        self.events = self.tmp / "events"
+
+    def tearDown(self): shutil.rmtree(self.tmp)
+
+    def run_deploy(self, mode="success", rollback="success", migrate=0, extra=None):
+        env = os.environ.copy(); env.update({
+            "DEPLOY_TEST_MODE":"1", "PROJECT_DIR":str(self.active), "SOURCE_DIR":str(self.source),
+            "SNAPSHOT_DIR":str(self.snapshots), "UNIT_FILE":str(self.unit), "SERVICE_NAME":"test",
+            "HEARTBEAT_FILE":str(self.active/".heartbeat"), "READINESS_TIMEOUT":"3", "READINESS_POLL_INTERVAL":"0.05",
+            "HEALTHCHECK_COMMAND":str(self.ok), "SERVICE_ADAPTER":str(self.adapter), "ADAPTER_STATE":str(self.state),
+            "ADAPTER_MODE":mode, "ROLLBACK_MODE":rollback, "TEST_MIGRATION_COMMAND":str(self.migrate),
+            "TEST_ACTIVATION_COMMAND":str(self.activate), "EVENTS":str(self.events), "MIGRATE_EXIT":str(migrate),
+        }); env.update(extra or {})
+        return subprocess.run([str(HELPER)], env=env, text=True, capture_output=True, timeout=15)
+
+    def test_snapshot_precedes_active_change(self):
+        r=self.run_deploy(); snap=next(self.snapshots.glob("release-*")); self.assertEqual((snap/"application/app.txt").read_text(),"previous\n"); self.assertLess(r.stdout.index("stage=snapshot_previous_release"),r.stdout.index("stage=prepare_new_release"))
+    def test_snapshot_failure_stops_before_delete_sync(self):
+        fake=self.tmp/"bin"; fake.mkdir(); rs=fake/"rsync"; rs.write_text('#!/bin/sh\necho "$*" >> "$EVENTS"\nexit 1\n'); rs.chmod(0o755)
+        r=self.run_deploy(extra={"PATH":str(fake)+":"+os.environ["PATH"]}); self.assertEqual(r.returncode,65); self.assertEqual(self.active.joinpath("app.txt").read_text(),"previous\n"); self.assertNotIn("prepare_new_release",r.stdout)
+    def test_transient_active_then_crash_loop_fails(self): self.assertNotEqual(self.run_deploy("crash").returncode,0)
+    def test_nrestarts_growth_fails(self): self.assertNotEqual(self.run_deploy("restarts").returncode,0)
+    def test_old_heartbeat_rejected(self):
+        hb=self.active/".heartbeat"; hb.touch(); os.utime(hb,(1,1)); self.assertNotEqual(self.run_deploy("old").returncode,0)
+    def test_fresh_advancing_heartbeat_succeeds(self):
+        r=self.run_deploy(); self.assertEqual(r.returncode,0,r.stdout+r.stderr); self.assertIn("deployment readiness=success",r.stdout)
+    def test_failed_new_release_restores_previous(self): self.assertIn("result=rolled_back",self.run_deploy("crash").stdout)
+    def test_previous_application_content_returns(self): self.run_deploy("crash"); self.assertEqual((self.active/"app.txt").read_text(),"previous\n")
+    def test_env_is_unchanged_on_rollback(self): before=(self.active/".env").read_bytes(); self.run_deploy("crash"); self.assertEqual((self.active/".env").read_bytes(),before)
+    def test_backup_directory_is_unchanged(self): before=(self.backup/"keep.age").read_bytes(); self.run_deploy("crash"); self.assertEqual((self.backup/"keep.age").read_bytes(),before)
+    def test_healthy_previous_returns_nonzero(self): r=self.run_deploy("crash","success"); self.assertEqual(r.returncode,1); self.assertIn("previous_release_healthy=true",r.stdout)
+    def test_unhealthy_previous_is_critical(self): r=self.run_deploy("crash","crash"); self.assertEqual(r.returncode,2); self.assertIn("rollback_failed previous_release_healthy=false",r.stdout)
+    def test_migration_failure_never_activates_new(self): r=self.run_deploy(migrate=7); self.assertNotIn("activate",self.events.read_text() if self.events.exists() else ""); self.assertIn("activation=not_attempted",r.stdout)
+    def test_rollback_never_downgrades_database(self): r=self.run_deploy("crash"); self.assertNotIn("downgrade",self.events.read_text()); self.assertIn("database_downgrade=not_performed",r.stdout)
+    def test_success_does_not_report_rollback(self): self.assertNotIn("rolled_back",self.run_deploy().stdout)
+    def test_failure_does_not_report_success(self): self.assertNotIn("deployment readiness=success",self.run_deploy("crash").stdout)
+    def test_retention_keeps_latest_snapshot(self):
+        for i in range(4): d=self.snapshots/f"release-old-{i}"; d.mkdir(parents=True,exist_ok=True); os.utime(d,(i+1,i+1))
+        r=self.run_deploy(extra={"SNAPSHOT_RETENTION":"3"}); self.assertEqual(r.returncode,0); self.assertTrue(any(self.snapshots.glob("release-*"))); self.assertEqual((self.active/"app.txt").read_text(),"new\n")
+    def test_secret_canaries_are_redacted(self): r=self.run_deploy("crash"); self.assertNotIn("CANARY_SECRET",r.stdout+r.stderr)
+
+if __name__ == "__main__": unittest.main()

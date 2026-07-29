@@ -814,6 +814,36 @@ rollback() {
     error "Деплой отменён. Подробности: $ROLLBACK_LOG"
 }
 
+create_env_if_missing() {
+    if [[ -e "$ENV_FILE" ]]; then
+        log "Существующий production .env сохранён без изменений"
+        return 0
+    fi
+    log "Создание initial production .env..."
+    umask 077
+    printf '# Just1kBot Configuration\n# Generated: %s\n' "$(date -Iseconds)" > "$ENV_FILE"
+    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
+        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
+    fi
+    local db_password_encoded redis_password_encoded
+    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
+    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
+    write_env_var BOT_TOKEN "$BOT_TOKEN"
+    write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
+    write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
+    write_env_var REDIS_URL "redis://:${redis_password_encoded}@localhost:6379/0"
+    write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
+    write_env_var ADMIN_IDS "$ADMIN_IDS"
+    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
+    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
+    write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
+    write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
+    [[ -z "$DOMAIN" ]] || { write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook"; write_env_var DOMAIN "$DOMAIN"; }
+}
+
+prepare_release_runtime() { setup_user_and_dirs && create_env_if_missing && setup_venv; }
+activate_release() { setup_systemd; }
+
 # --- Main ---
 main() {
     echo ""
@@ -845,44 +875,8 @@ main() {
     collect_input
     preflight_checks
     install_dependencies
-    setup_user_and_dirs
-    sync_project_files
     setup_postgresql
     setup_redis
-
-    # Создание .env
-    log "Создание .env..."
-    cat > "$ENV_FILE" <<EOF
-# Just1kBot Configuration
-# Generated: $(date -Iseconds)
-EOF
-    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
-        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
-    fi
-    local db_password_encoded redis_password_encoded
-    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
-    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
-    write_env_var "BOT_TOKEN" "$BOT_TOKEN"
-    write_env_var "DATABASE_URL" "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
-    write_env_var "DB_ENCRYPTION_KEY" "$DB_ENCRYPTION_KEY"
-    write_env_var "REDIS_URL" "redis://:${redis_password_encoded}@localhost:6379/0"
-    write_env_var "REDIS_PASSWORD" "$REDIS_PASSWORD"
-    write_env_var "ADMIN_IDS" "$ADMIN_IDS"
-    write_env_var "AMNEZIA_API_URL" "$AMNEZIA_API_URL"
-    write_env_var "AMNEZIA_API_KEY" "$AMNEZIA_API_KEY"
-    write_env_var "YOOKASSA_SHOP_ID" "$YOOKASSA_SHOP_ID"
-    write_env_var "YOOKASSA_SECRET_KEY" "$YOOKASSA_SECRET_KEY"
-    if [[ -n "$DOMAIN" ]]; then
-        write_env_var "WEBHOOK_URL" "https://${DOMAIN}/webhook"
-        write_env_var "DOMAIN" "$DOMAIN"
-    fi
-    chown "$BOT_USER:$BOT_USER" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-    log ".env создан"
-
-    setup_venv
-    init_database
-    setup_systemd
     setup_nginx_ssl
     setup_logrotate
     create_backup_script
@@ -890,12 +884,23 @@ EOF
     create_healthcheck
     setup_firewall
 
-    if start_bot; then
+    SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
+    UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+    HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+    HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"
+    SERVICE_ADAPTER=""
+    # shellcheck source=ops/deploy_application.sh
+    source "$SOURCE_DIR/ops/deploy_application.sh"
+    PREPARE_COMMAND=(prepare_release_runtime)
+    MIGRATION_COMMAND=(init_database)
+    ACTIVATION_COMMAND=(activate_release)
+    if run_application_transaction; then
         show_status
         print_result
     else
-        rollback "Бот не запустился после деплоя"
-        exit 1
+        local transaction_code=$?
+        error "Application deploy transaction failed (code=$transaction_code); database downgrade was not performed"
+        exit "$transaction_code"
     fi
 }
 
