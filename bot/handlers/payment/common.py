@@ -65,6 +65,9 @@ async def _check_tariff_change_allowed(
     new_limit = getattr(tariff, "device_limit", 2)
     is_active = await _is_subscription_active(db_user)
     if is_active:
+        current_tariff_id = getattr(db_user, "current_tariff_id", None)
+        if current_tariff_id and current_tariff_id != getattr(tariff, "id", None):
+            return "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать."
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit < current_limit:
             return texts.PAYMENT_DOWNGRADE_BLOCKED.format(

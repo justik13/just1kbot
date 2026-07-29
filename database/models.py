@@ -16,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -278,6 +278,89 @@ class Tariff(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class TariffVersion(Base):
+    __tablename__ = "tariff_versions"
+    __table_args__ = (
+        UniqueConstraint("tariff_id", "version_number", name="uq_tariff_versions_number"),
+        CheckConstraint("duration_hours > 0", name="ck_tariff_versions_duration_positive"),
+        CheckConstraint("device_limit > 0", name="ck_tariff_versions_device_limit_positive"),
+        CheckConstraint("price_rub > 0", name="ck_tariff_versions_price_positive"),
+        CheckConstraint("currency = 'RUB'", name="ck_tariff_versions_currency_rub"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    tariff_id: Mapped[int] = mapped_column(ForeignKey("tariffs.id", ondelete="RESTRICT"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    name_snapshot: Mapped[str] = mapped_column(String(100))
+    duration_hours: Mapped[int] = mapped_column(Integer)
+    device_limit: Mapped[int] = mapped_column(Integer)
+    price_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class TariffQuote(Base):
+    __tablename__ = "tariff_quotes"
+    __table_args__ = (
+        CheckConstraint("operation_type IN ('purchase','renew','change')", name="ck_tariff_quotes_operation"),
+        CheckConstraint("status IN ('active','consumed','expired','cancelled','manual_review')", name="ck_tariff_quotes_status"),
+        CheckConstraint("currency = 'RUB'", name="ck_tariff_quotes_currency_rub"),
+        CheckConstraint("current_paid_hours >= 0 AND bonus_hours >= 0 AND resulting_paid_hours >= 0 AND resulting_bonus_hours >= 0", name="ck_tariff_quotes_hours_nonnegative"),
+        CheckConstraint("current_paid_value_rub >= 0 AND confirmed_payment_required_rub >= 0 AND resulting_paid_value_rub >= 0 AND rounding_loss_value_rub >= 0", name="ck_tariff_quotes_values_nonnegative"),
+        CheckConstraint("rounding_loss_hours >= 0 AND rounding_loss_hours < 1", name="ck_tariff_quotes_rounding_loss"),
+        CheckConstraint("resulting_paid_value_rub <= current_paid_value_rub + confirmed_payment_required_rub", name="ck_tariff_quotes_value_invariant"),
+        Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
+        Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", "operation_type", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    public_id: Mapped[object] = mapped_column(UUID(as_uuid=True), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    operation_type: Mapped[str] = mapped_column(String(20))
+    source_tariff_version_id: Mapped[int | None] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
+    target_tariff_version_id: Mapped[int] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
+    current_paid_hours: Mapped[int] = mapped_column(Integer)
+    current_paid_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    bonus_hours: Mapped[int] = mapped_column(Integer)
+    confirmed_payment_required_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
+    resulting_paid_hours: Mapped[int] = mapped_column(Integer)
+    resulting_paid_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    resulting_bonus_hours: Mapped[int] = mapped_column(Integer)
+    rounding_loss_hours: Mapped[Decimal] = mapped_column(Numeric(18, 12))
+    rounding_loss_value_rub: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    status: Mapped[str] = mapped_column(String(20), default="active")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    manual_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    diagnostic_reason: Mapped[str | None] = mapped_column(String(255))
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True)
+
+
+class PaidValueLedgerEntry(Base):
+    __tablename__ = "paid_value_ledger"
+    __table_args__ = (
+        CheckConstraint("entry_type IN ('confirmed_payment','tariff_conversion','payment_reversal','manual_adjustment')", name="ck_paid_value_ledger_entry_type"),
+        CheckConstraint("currency = 'RUB'", name="ck_paid_value_ledger_currency_rub"),
+        Index("uq_paid_value_confirmed_payment", "payment_id", unique=True, postgresql_where=text("entry_type='confirmed_payment'")),
+        Index("uq_paid_value_conversion_quote", "quote_id", unique=True, postgresql_where=text("entry_type='tariff_conversion'")),
+        Index("uq_paid_value_reversal", "reversal_of_id", unique=True, postgresql_where=text("entry_type='payment_reversal'")),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    source_type: Mapped[str] = mapped_column(String(40))
+    source_id: Mapped[str] = mapped_column(String(100))
+    entry_type: Mapped[str] = mapped_column(String(30))
+    paid_hours_delta: Mapped[int] = mapped_column(Integer)
+    paid_value_rub_delta: Mapped[Decimal] = mapped_column(Numeric(18, 6))
+    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    tariff_version_id: Mapped[int] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("tariff_quotes.id", ondelete="RESTRICT"))
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"))
+    reversal_of_id: Mapped[int | None] = mapped_column(ForeignKey("paid_value_ledger.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+
+
 class Payment(Base):
     __tablename__ = "payments"
 
@@ -311,6 +394,12 @@ class Payment(Base):
         Integer,
         ForeignKey("tariffs.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    tariff_quote_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True
+    )
+    tariff_version_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tariff_versions.id", ondelete="RESTRICT"), nullable=True
     )
 
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)

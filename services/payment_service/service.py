@@ -17,6 +17,7 @@ from database.repositories.payments_repo import (
     get_user_payments,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
+from database.repositories.tariff_quotes_repo import get_or_create_checkout_quote
 from services.audit_service import AuditService
 from services.yookassa_service import YooKassaService
 from services.referral_service import ReferralService
@@ -308,11 +309,34 @@ class PaymentService:
         from services.payment_provider_operations import enqueue_create
         decimal_amount=_to_decimal(amount); tariff=await get_tariff_by_id(session,tariff_id)
         if decimal_amount is None or not tariff: return None,None
-        payment=await create_payment(session,user_id,tariff_id,decimal_amount,"RUB")
+        user = await session.get(User, user_id)
+        active = bool(user and user.subscription_end and user.subscription_end > now_utc())
+        if active and user.current_tariff_id and user.current_tariff_id != tariff_id:
+            # Foundation only: a later PR will consume a confirmed change quote.
+            return None, "active_tariff_change_temporarily_unavailable"
+        operation_type = "renew" if active and user.current_tariff_id == tariff_id else "purchase"
+        quote, version = await get_or_create_checkout_quote(
+            session, user_id=user_id, tariff=tariff, operation_type=operation_type,
+        )
+        existing = await session.scalar(select(Payment).where(
+            Payment.tariff_quote_id == quote.id,
+            Payment.checkout_status == "active",
+        ).order_by(Payment.id.desc()).limit(1))
+        if existing:
+            return existing, existing.payment_url
+        # The caller's amount is intentionally not authoritative.
+        decimal_amount = Decimal(version.price_rub)
+        payment=await create_payment(
+            session,user_id,tariff_id,decimal_amount,"RUB",
+            snapshot_duration_days=version.duration_hours // 24,
+            snapshot_device_limit=version.device_limit,
+            snapshot_amount=version.price_rub,snapshot_currency=version.currency,
+            tariff_quote_id=quote.id,tariff_version_id=version.id,
+        )
+        quote.payment_id = payment.id
         payment.public_order_id="pay_"+uuid.uuid4().hex; payment.provider_idempotency_key=uuid.uuid4().hex
         payment.provider_status="creating"; payment.fulfillment_status="not_ready"; payment.reconciliation_status="ok"
-        await PaymentService._apply_payment_snapshot(session,payment,tariff)
-        settings=get_settings(); description=f"Предоставление доступа к вычислительному серверу ({tariff.name}, {tariff.duration_days} дн.)"
+        settings=get_settings(); description=f"Предоставление доступа к вычислительному серверу ({version.name_snapshot}, {version.duration_hours // 24} дн.)"
         return_url=settings.YOOKASSA_RETURN_URL.format(bot_username=bot_username.lstrip("@"))
         operation=await enqueue_create(session,payment,description,return_url)
         await _log_event_safe(session,payment.id,"payment_created",source="yookassa")

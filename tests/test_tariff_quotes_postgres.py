@@ -1,0 +1,86 @@
+import os
+import unittest
+import uuid
+from datetime import timedelta
+from decimal import Decimal
+
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from utils.datetime_helpers import now_utc
+
+
+@unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
+class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
+    """Database-enforced economic contracts, executed against real PostgreSQL."""
+
+    async def asyncSetUp(self):
+        self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        self.connection = await self.engine.connect()
+        self.transaction = await self.connection.begin()
+        marker = uuid.uuid4().hex
+        self.user_id = (await self.connection.execute(text(
+            "INSERT INTO users(telegram_id,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,device_creations_today,created_at) "
+            "VALUES(:telegram,0,0,false,false,false,0,false,false,false,false,false,0,now()) RETURNING id"
+        ), {"telegram": int(marker[:12], 16)})).scalar_one()
+        self.tariff_id = (await self.connection.execute(text(
+            "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) VALUES(:name,30,2,300,true,0,now()) RETURNING id"
+        ), {"name": marker})).scalar_one()
+        self.version_id = (await self.connection.execute(text(
+            "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,device_limit,price_rub,currency) VALUES(:tid,1,:name,720,2,300,'RUB') RETURNING id"
+        ), {"tid": self.tariff_id, "name": marker})).scalar_one()
+
+    async def asyncTearDown(self):
+        await self.transaction.rollback()
+        await self.connection.close()
+        await self.engine.dispose()
+
+    async def _quote(self, operation="change", minutes=15):
+        now = now_utc()
+        return (await self.connection.execute(text(
+            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at) "
+            "VALUES(:public,:uid,:operation,:version,0,0,24,300,720,300,24,0,0,'RUB','active',:expires,:created) RETURNING id"
+        ), {"public": uuid.uuid4(), "uid": self.user_id, "operation": operation,
+            "version": self.version_id, "created": now,
+            "expires": now + timedelta(minutes=minutes)})).scalar_one()
+
+    async def test_quote_expires_exactly_after_fifteen_minutes(self):
+        await self._quote()
+        with self.assertRaises(IntegrityError):
+            await self._quote(operation="purchase", minutes=14)
+
+    async def test_maximum_one_active_change_quote_per_user(self):
+        await self._quote()
+        with self.assertRaises(IntegrityError):
+            await self._quote()
+
+    async def test_quote_economic_fields_are_immutable(self):
+        quote_id = await self._quote()
+        with self.assertRaises(DBAPIError):
+            await self.connection.execute(text("UPDATE tariff_quotes SET resulting_paid_hours=721 WHERE id=:id"), {"id": quote_id})
+
+    async def test_tariff_version_is_immutable_after_quote(self):
+        await self._quote()
+        with self.assertRaises(DBAPIError):
+            await self.connection.execute(text("UPDATE tariff_versions SET price_rub=301 WHERE id=:id"), {"id": self.version_id})
+
+    async def test_bonus_hours_do_not_increase_paid_value(self):
+        now = now_utc()
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(text(
+                "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at) VALUES(:p,:u,'purchase',:v,0,0,100,0,1,1,100,0,0,'RUB','active',:e,:c)"
+            ), {"p": uuid.uuid4(), "u": self.user_id, "v": self.version_id,
+                "c": now, "e": now + timedelta(minutes=15)})
+
+    async def test_one_conversion_entry_per_quote(self):
+        quote = await self._quote()
+        statement = text("INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,paid_value_rub_delta,currency,tariff_version_id,quote_id) VALUES(:u,'quote',:s,'tariff_conversion',0,0,'RUB',:v,:q)")
+        values = {"u": self.user_id, "s": str(quote), "v": self.version_id, "q": quote}
+        await self.connection.execute(statement, values)
+        with self.assertRaises(IntegrityError):
+            await self.connection.execute(statement, values)
+
+
+if __name__ == "__main__":
+    unittest.main()
