@@ -20,12 +20,16 @@ async def create_payment(
     snapshot_device_limit: Optional[int] = None,
     snapshot_amount: Optional[Decimal] = None,
     snapshot_currency: Optional[str] = None,
+    tariff_quote_id: Optional[int] = None,
+    tariff_version_id: Optional[int] = None,
 ) -> Payment:
     payment = Payment(
         user_id=user_id,
         tariff_id=tariff_id,
         amount=amount,
         currency=currency,
+        tariff_quote_id=tariff_quote_id,
+        tariff_version_id=tariff_version_id,
         public_order_id="pay_" + uuid.uuid4().hex,
         provider_idempotency_key=uuid.uuid4().hex,
         provider_status="creating",

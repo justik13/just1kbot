@@ -2,9 +2,9 @@ import asyncio, json, os, unittest, uuid
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from database.models import (AuditLog, EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, User, WebhookInbox)
+from database.models import (AuditLog, EntitlementEntry, Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, ReferralEligibility, ReferralReward, Tariff, TariffQuote, TariffVersion, User, WebhookInbox)
 from services.payment_queue_admin import confirm_manual_retry, get_operation_card
 from services.payment_queue_health import get_payment_queue_health_snapshot
 from services.payment_provider_operations import (PaymentProviderOperationOwnershipError, ProviderOperationClaim, claim, ensure_reconcile_payment_operation, finalize, finalize_provider_failure, perform_http, recover_stale, retry_dead_provider_operation)
@@ -19,12 +19,37 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
  async def asyncSetUp(self):
   self.engine=create_async_engine(DB); self.sessions=async_sessionmaker(self.engine,expire_on_commit=False)
   async with self.sessions.begin() as s:
+   await s.execute(text("TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions CASCADE"))
    for model in (AuditLog,ReferralEligibility,ReferralReward,EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
    tariff=Tariff(name="T",duration_days=30,device_limit=2,price_rub=90,is_active=True); user=User(telegram_id=900000+uuid.uuid4().int%99999); s.add_all([tariff,user]); await s.flush(); self.tariff_id=tariff.id; self.user_id=user.id
  async def asyncTearDown(self): await self.engine.dispose()
  async def payment(self,s,**kw):
   values=dict(user_id=self.user_id,tariff_id=self.tariff_id,amount=Decimal("90"),currency="RUB",status="pending",public_order_id="pay_"+uuid.uuid4().hex,provider_idempotency_key=uuid.uuid4().hex,provider_status="pending",fulfillment_status="not_ready",reconciliation_status="ok",snapshot_amount=Decimal("90"),snapshot_currency="RUB",snapshot_duration_days=30,snapshot_device_limit=2,external_id="provider_"+uuid.uuid4().hex)
   values.update(kw); p=Payment(**values); s.add(p); await s.flush(); return p
+
+ async def test_quote_create_post_success_retries_then_verified_get_grants_once(self):
+  from datetime import datetime, timezone
+  captured=datetime.now(timezone.utc).replace(microsecond=0)
+  async with self.sessions.begin() as s:
+   tariff=await s.get(Tariff,self.tariff_id); version=TariffVersion(tariff_id=tariff.id,version_number=1,name_snapshot=tariff.name,duration_hours=720,device_limit=2,price_rub=Decimal("90"),currency="RUB"); s.add(version); await s.flush()
+   created=now_utc(); quote=TariffQuote(public_id=uuid.uuid4(),user_id=self.user_id,operation_type="purchase",target_tariff_version_id=version.id,current_paid_hours=0,current_paid_value_rub=0,bonus_hours=0,confirmed_payment_required_rub=90,resulting_paid_hours=720,resulting_paid_value_rub=90,resulting_bonus_hours=0,rounding_loss_hours=0,rounding_loss_value_rub=0,currency="RUB",status="active",created_at=created,expires_at=created+timedelta(minutes=15)); s.add(quote); await s.flush()
+   p=await self.payment(s,external_id=None,tariff_quote_id=quote.id,tariff_version_id=version.id,provider_status="creating"); quote.payment_id=p.id
+   op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="processing",idempotency_key=p.provider_idempotency_key,payload={"capture":True},attempts=1,max_attempts=5,next_attempt_at=now_utc(),locked_by="post",locked_at=now_utc()); s.add(op); await s.flush(); oid=op.id; pid=p.id
+   post_claim=ProviderOperationClaim(oid,pid,"create_payment",dict(op.payload),op.idempotency_key,"post",1,None,op.created_at)
+   provider_object=self.snapshot(p,captured_at=captured.isoformat(),confirmation={"confirmation_url":"https://pay"}); provider_object["id"]="provider-quote"
+   transport=type("Transport",(),{"create_payment_result":AsyncMock(return_value=YooKassaResult(True,value=provider_object)),"get_payment_result":AsyncMock(return_value=YooKassaResult(True,value=provider_object))})
+   post_result=await perform_http(post_claim,transport); await finalize(s,post_claim,post_result)
+   self.assertEqual(op.status,"retry"); self.assertEqual(p.external_id,"provider-quote"); self.assertIsNone(await s.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==p.id)))
+  async with self.sessions.begin() as s:
+   op=await s.get(PaymentProviderOperation,oid); op.next_attempt_at=now_utc()
+  async with self.sessions.begin() as s:
+   get_claim=await claim(s,"get")
+   self.assertEqual(get_claim.external_id,"provider-quote")
+   get_result=await perform_http(get_claim,transport); await finalize(s,get_claim,get_result)
+   op=await s.get(PaymentProviderOperation,oid); p=await s.get(Payment,pid)
+   self.assertEqual(op.status,"succeeded"); self.assertEqual(p.provider_confirmed_at,captured)
+   self.assertEqual(await s.scalar(select(func.count(PaymentFulfillmentOperation.id)).where(PaymentFulfillmentOperation.payment_id==pid,PaymentFulfillmentOperation.operation_type=="grant_subscription")),1)
+   transport.create_payment_result.assert_awaited_once(); transport.get_payment_result.assert_awaited_once_with("provider-quote")
 
  async def test_admin_retry_concurrent_provider_is_serialized_and_immutable(self):
   payload={"SECRET_CANARY":"immutable","capture":True}
@@ -417,15 +442,23 @@ class LegacyPaymentMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
   from alembic.command import downgrade, upgrade
   from alembic.config import Config
   cfg=Config("alembic.ini"); cfg.set_main_option("sqlalchemy.url",DB)
-  await asyncio.to_thread(downgrade,cfg,"-2")
-  engine=create_async_engine(DB); sessions=async_sessionmaker(engine,expire_on_commit=False)
-  async with sessions.begin() as s:
-   await s.execute(__import__('sqlalchemy').text("DELETE FROM referral_rewards"))
-   for model in (EntitlementEntry,PaymentRefund,WebhookInbox,PaymentFulfillmentOperation,PaymentProviderOperation,Payment,User,Tariff): await s.execute(delete(model))
-   t=Tariff(name="Legacy",duration_days=30,device_limit=2,price_rub=90,is_active=True); u=User(telegram_id=777001,subscription_end=now_utc()+timedelta(days=30),device_limit=2); s.add_all([t,u]); await s.flush(); original_end=u.subscription_end
-   p=Payment(user_id=u.id,tariff_id=t.id,amount=Decimal("90"),currency="RUB",status="completed",provider_status="succeeded",fulfillment_status="succeeded",reconciliation_status="ok",checkout_status="active",snapshot_duration_days=30,snapshot_device_limit=2,snapshot_amount=Decimal("90"),snapshot_currency="RUB",paid_at=now_utc()); s.add(p); await s.flush(); pid=p.id; uid=u.id
-  await engine.dispose(); await asyncio.to_thread(upgrade,cfg,"head")
-  engine=create_async_engine(DB); sessions=async_sessionmaker(engine,expire_on_commit=False)
-  async with sessions() as s:
-   entry=await s.scalar(select(EntitlementEntry).where(EntitlementEntry.source_id==str(pid),EntitlementEntry.entry_type=="payment_grant")); user=await s.get(User,uid); self.assertIsNotNone(entry); self.assertEqual(user.subscription_end,original_end)
-  await engine.dispose()
+  engine=None
+  try:
+   await asyncio.to_thread(downgrade,cfg,"ab17c4e92901")
+   engine=create_async_engine(DB)
+   async with engine.begin() as connection:
+    await connection.execute(__import__('sqlalchemy').text("TRUNCATE referral_rewards, entitlement_entries, payment_refunds, webhook_inbox, payment_fulfillment_operations, payment_provider_operations, payments, users, tariffs RESTART IDENTITY CASCADE"))
+    tariff_id=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) VALUES('Legacy',30,2,90,true,0,now()) RETURNING id"))).scalar_one()
+    original_end=now_utc()+timedelta(days=30)
+    uid=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO users(telegram_id,subscription_end,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,device_creations_today,created_at) VALUES(777001,:end,2,0,false,false,false,0,false,false,false,false,false,0,now()) RETURNING id"),{"end":original_end})).scalar_one()
+    pid=(await connection.execute(__import__('sqlalchemy').text("INSERT INTO payments(user_id,tariff_id,amount,currency,status,provider_status,fulfillment_status,reconciliation_status,checkout_status,snapshot_duration_days,snapshot_device_limit,snapshot_amount,snapshot_currency,referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at,paid_at) VALUES(:uid,:tid,90,'RUB','completed','succeeded','succeeded','ok','active',30,2,90,'RUB',0,0,now(),now(),now()) RETURNING id"),{"uid":uid,"tid":tariff_id})).scalar_one()
+   await engine.dispose(); engine=None
+   await asyncio.to_thread(upgrade,cfg,"head")
+   engine=create_async_engine(DB)
+   async with engine.connect() as connection:
+    entry=(await connection.execute(__import__('sqlalchemy').text("SELECT id FROM entitlement_entries WHERE source_id=:pid AND entry_type='payment_grant'"),{"pid":str(pid)})).scalar_one_or_none()
+    current_end=(await connection.execute(__import__('sqlalchemy').text("SELECT subscription_end FROM users WHERE id=:uid"),{"uid":uid})).scalar_one()
+    self.assertIsNotNone(entry); self.assertEqual(current_end,original_end)
+  finally:
+   if engine is not None: await engine.dispose()
+   await asyncio.to_thread(upgrade,cfg,"head")
