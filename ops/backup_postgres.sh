@@ -10,7 +10,10 @@ SKIP_RETENTION=${BACKUP_SKIP_RETENTION:-false}
 OFFSITE_DIR=${BACKUP_OFFSITE_DIR:-}
 REQUIRE_OFFSITE=${BACKUP_REQUIRE_OFFSITE:-false}
 FORMAT_VERSION=1
+RESULT_FILE=${BACKUP_RESULT_FILE:-}
+ARTIFACT_PIN=${BACKUP_ARTIFACT_PIN:-}
 tmpdir=""; local_partial=""; sidecar_partial=""; final=""; final_sidecar=""
+pin_file=""; result_partial=""
 offsite_partial=""; offsite_sidecar_partial=""; offsite_final=""; offsite_sidecar=""
 local_committed=false; offsite_committed=false; offsite_status=not-configured
 
@@ -18,9 +21,11 @@ finish() {
     rc=$?
     [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"
     rm -f -- ${local_partial:+"$local_partial"} ${sidecar_partial:+"$sidecar_partial"} \
-        ${offsite_partial:+"$offsite_partial"} ${offsite_sidecar_partial:+"$offsite_sidecar_partial"} 2>/dev/null || true
+        ${offsite_partial:+"$offsite_partial"} ${offsite_sidecar_partial:+"$offsite_sidecar_partial"} \
+        ${result_partial:+"$result_partial"} 2>/dev/null || true
     # A sidecar is preparation, not a commit: never leave it visible alone.
     [[ -z "$final_sidecar" || -e "$final" ]] || rm -f -- "$final_sidecar"
+    [[ -z "$pin_file" || -e "$final" ]] || rm -f -- "$pin_file"
     [[ -z "$offsite_sidecar" || -e "$offsite_final" ]] || rm -f -- "$offsite_sidecar"
     if (( rc != 0 )) && [[ "$REQUIRE_OFFSITE" == true && "$offsite_committed" != true ]]; then
         rm -f -- ${final:+"$final"} ${final_sidecar:+"$final_sidecar"} 2>/dev/null || true
@@ -38,6 +43,13 @@ for command in age pg_dump pg_restore psql flock sha256sum tar python3; do comma
 [[ "$REQUIRE_OFFSITE" == true || "$REQUIRE_OFFSITE" == false ]] || fail 'BACKUP_REQUIRE_OFFSITE must be true or false'
 [[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]] && (( RETENTION_COUNT >= 2 )) || fail 'BACKUP_RETENTION_COUNT must be at least 2'
 [[ "$SKIP_RETENTION" == true || "$SKIP_RETENTION" == false ]] || fail 'BACKUP_SKIP_RETENTION must be true or false'
+if [[ -n "$RESULT_FILE" ]]; then
+    [[ "$RESULT_FILE" == /* && ! -e "$RESULT_FILE" && ! -L "$(dirname -- "$RESULT_FILE")" ]] || fail 'BACKUP_RESULT_FILE is unsafe'
+fi
+if [[ -n "$ARTIFACT_PIN" ]]; then
+    [[ "$ARTIFACT_PIN" =~ ^restore_[0-9]{8}T[0-9]{6}Z_[a-f0-9]{8}(:finalize)?$ ]] || fail 'BACKUP_ARTIFACT_PIN is invalid'
+    [[ -n "$RESULT_FILE" ]] || fail 'pinned backup requires BACKUP_RESULT_FILE'
+fi
 [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || fail 'configuration file is missing or unsafe'
 mkdir -p -- "$BACKUP_DIR" "$(dirname -- "$LOCK_FILE")"; chmod 700 "$BACKUP_DIR"
 exec 9>"$LOCK_FILE"; flock -n 9 || fail 'another backup is already running' 3
@@ -100,6 +112,11 @@ chmod 600 "$local_partial" "$sidecar_partial"
 mv -- "$sidecar_partial" "$final_sidecar"       # preparation
 mv -- "$local_partial" "$final"                 # commit marker, always last
 local_committed=true
+if [[ -n "$ARTIFACT_PIN" ]]; then
+    pin_file="$final.pin"
+    printf 'format_version=1\nartifact_pin=%s\nartifact_sha256=%s\n' "$ARTIFACT_PIN" "$checksum" >"$pin_file.partial"
+    chmod 600 "$pin_file.partial"; mv -- "$pin_file.partial" "$pin_file"
+fi
 
 publish_offsite() {
     mkdir -p -- "$OFFSITE_DIR" || return 10
@@ -131,6 +148,15 @@ fi
 
 if [[ "$SKIP_RETENTION" == false ]]; then
     mapfile -t expired < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' | sort -rn | tail -n +$((RETENTION_COUNT+1)) | cut -d' ' -f2-)
-    for old in "${expired[@]:-}"; do [[ -z "$old" ]] || rm -f -- "$old" "$old.sha256"; done
+    for old in "${expired[@]:-}"; do
+        [[ -z "$old" || -f "$old.pin" ]] || rm -f -- "$old" "$old.sha256"
+    done
+fi
+if [[ -n "$RESULT_FILE" ]]; then
+    mkdir -p -- "$(dirname -- "$RESULT_FILE")"
+    result_partial="${RESULT_FILE}.partial.$$"
+    printf 'format_version=1\nartifact_path=%s\nartifact_sha256=%s\nartifact_pin=%s\n' \
+        "$final" "$checksum" "${ARTIFACT_PIN:-none}" >"$result_partial"
+    chmod 600 "$result_partial"; mv -- "$result_partial" "$RESULT_FILE"; result_partial=""
 fi
 printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=%s\n' "$(date -u +%FT%TZ)" "$name" "$(stat -c %s "$final")" "$checksum" "$offsite_status"

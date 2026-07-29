@@ -1,77 +1,107 @@
-"""Real PostgreSQL rename matrix for the production cutover primitives."""
-import json
-import os
-import pathlib
-import subprocess
-import tempfile
-import unittest
-import uuid
+"""Script-level production restore matrix against a real PostgreSQL server."""
+import json, os, pathlib, shutil, subprocess, sys, tempfile, time, unittest, uuid
 from urllib.parse import urlsplit
 
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+OPS = ROOT / "ops"
+LOCK_KEY = 5346144733319417682
 
-@unittest.skipUnless(os.getenv("RUN_PRODUCTION_RESTORE_INTEGRATION") == "1", "requires PostgreSQL integration service")
-class RealProductionCutoverMatrix(unittest.TestCase):
+@unittest.skipUnless(os.getenv("RUN_PRODUCTION_RESTORE_INTEGRATION") == "1", "requires PostgreSQL and age")
+class RestoreProductionScriptIntegration(unittest.TestCase):
     def setUp(self):
-        parsed = urlsplit(os.environ["PRODUCTION_RESTORE_TEST_DATABASE_URL"])
-        self.env = os.environ | {
-            "PGHOST": parsed.hostname or "localhost", "PGPORT": str(parsed.port or 5432),
-            "PGUSER": parsed.username or "", "PGPASSWORD": parsed.password or "",
-        }
-        self.tag = uuid.uuid4().hex[:8]
-        self.prod = f"cutover_prod_{self.tag}"
-        self.candidate = f"just1kbot_candidate_{self.tag}"
-        self.previous = f"just1kbot_previous_{self.tag}"
-        self.failed = f"just1kbot_failed_restore_{self.tag}"
-        self.temp = tempfile.TemporaryDirectory()
-        self.root = pathlib.Path(self.temp.name)
-        self._sql("postgres", f'CREATE DATABASE "{self.prod}"')
-        self._sql("postgres", f'CREATE DATABASE "{self.candidate}"')
-        for db, marker in ((self.prod, "SOURCE_UNIQUE"), (self.candidate, "TARGET_UNIQUE")):
-            self._sql(db, "CREATE TABLE cutover_probe(value text NOT NULL)")
-            self._sql(db, f"INSERT INTO cutover_probe VALUES ('{marker}_{self.tag}')")
-        # A real encrypted emergency pg_dump is retained throughout each matrix.
-        dump = self.root / "emergency.dump"
-        subprocess.run(["pg_dump", "-Fc", "-f", dump, self.prod], env=self.env, check=True)
-        identity = self.root / "identity.txt"
-        generated = subprocess.check_output(["age-keygen"], text=True, stderr=subprocess.STDOUT)
-        identity.write_text(generated)
-        recipient = next(line.split(": ", 1)[1] for line in generated.splitlines() if line.startswith("# public key:"))
-        self.emergency = self.root / "emergency.tar.age"
-        subprocess.run(["age", "-r", recipient, "-o", self.emergency, dump], check=True)
-        self.assertGreater(self.emergency.stat().st_size, 0)
+        self.tmp = tempfile.TemporaryDirectory(); self.root = pathlib.Path(self.tmp.name)
+        p = urlsplit(os.environ["PRODUCTION_RESTORE_TEST_DATABASE_URL"])
+        self.pg = os.environ | {"PGHOST":p.hostname or "localhost","PGPORT":str(p.port or 5432),"PGUSER":p.username or "","PGPASSWORD":p.password or ""}
+        self.tag=uuid.uuid4().hex[:8]; self.prod=f"prod_{self.tag}"; self.backups=self.root/"backups"; self.opsdir=self.root/"operations"; self.bin=self.root/"bin"
+        for d in (self.backups,self.opsdir,self.bin): d.mkdir(mode=0o700)
+        self.identity=self.root/"identity"; generated=subprocess.check_output(["age-keygen"],stderr=subprocess.STDOUT,text=True); self.identity.write_text(generated); self.identity.chmod(0o600)
+        self.recipient=next(x.split(": ",1)[1] for x in generated.splitlines() if x.startswith("# public key:"))
+        self.envfile=self.root/"config.env"; self.key="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+        self._write_env(); self._createdb(self.prod); self._migrate(self.prod); self._sql(self.prod,"CREATE TABLE restore_probe(value text NOT NULL); INSERT INTO restore_probe VALUES ('TARGET')")
+        target_result=self.root/"target.result"; env=self._base_env()|{"BACKUP_RESULT_FILE":str(target_result)}
+        subprocess.run([OPS/"backup_postgres.sh"],env=env,check=True,capture_output=True,text=True)
+        contract=dict(line.split("=",1) for line in target_result.read_text().splitlines()); self.artifact=pathlib.Path(contract["artifact_path"])
+        self._drop(self.prod); self._createdb(self.prod); self._migrate(self.prod); self._sql(self.prod,"CREATE TABLE restore_probe(value text NOT NULL); INSERT INTO restore_probe VALUES ('SOURCE')")
+        self.state=self.root/"service.state"; self.state.write_text("active")
+        self.adapter=self.bin/"service-adapter"; self.adapter.write_text(f'''#!/bin/bash
+case "$1" in stop) echo inactive >"{self.state}";; start) [[ ! -f "{self.root/'start-fail'}" ]] || exit 9; echo active >"{self.state}";; is-active) [[ $(cat "{self.state}") == active ]];; *) exit 2;; esac
+'''); self.adapter.chmod(0o755)
+        self.health=self.bin/"health"; self.health.write_text(f'''#!/bin/bash
+value=$(psql -XAt -d "{self.prod}" -c 'SELECT value FROM restore_probe' 2>/dev/null) || exit 1
+[[ ! -f "{self.root/'fail-target'}" || "$value" != TARGET ]] || exit 1
+[[ ! -f "{self.root/'fail-all'}" ]] || exit 1
+'''); self.health.chmod(0o755)
+        self.alembic=self.bin/"alembic"; self.alembic.write_text(f'#!/bin/bash\nexec "{sys.executable}" -m alembic "$@"\n'); self.alembic.chmod(0o755)
 
     def tearDown(self):
-        for db in (self.prod, self.candidate, self.previous, self.failed):
-            subprocess.run(["dropdb", "--force", "--if-exists", db], env=self.env, capture_output=True)
-        self.temp.cleanup()
+        rows=self._sql("postgres",f"SELECT datname FROM pg_database WHERE datname='{self.prod}' OR datname LIKE 'just1kbot_candidate_%' OR datname LIKE 'just1kbot_previous_%' OR datname LIKE 'just1kbot_failed_restore_%'",check=False).splitlines()
+        for db in rows: self._drop(db)
+        self.tmp.cleanup()
 
-    def _sql(self, db, statement):
-        return subprocess.check_output(["psql", "-XAt", "-v", "ON_ERROR_STOP=1", "-d", db, "-c", statement], env=self.env, text=True).strip()
+    def _write_env(self): self.envfile.write_text(f"DATABASE_URL=postgresql://{self.pg['PGUSER']}:{self.pg['PGPASSWORD']}@{self.pg['PGHOST']}:{self.pg['PGPORT']}/{self.prod}\nDB_ENCRYPTION_KEY={self.key}\nREDIS_URL=redis://test\nBOT_TOKEN=123456:TEST\n")
+    def _sql(self,db,q,check=True):
+        r=subprocess.run(["psql","-XAt","-v","ON_ERROR_STOP=1","-d",db,"-c",q],env=self.pg,text=True,capture_output=True)
+        if check and r.returncode: self.fail(r.stderr)
+        return r.stdout.strip()
+    def _createdb(self,db): subprocess.run(["createdb",db],env=self.pg,check=True,capture_output=True)
+    def _drop(self,db): subprocess.run(["dropdb","--force","--if-exists",db],env=self.pg,capture_output=True)
+    def _migrate(self,db):
+        url=f"postgresql+asyncpg://{self.pg['PGUSER']}:{self.pg['PGPASSWORD']}@{self.pg['PGHOST']}:{self.pg['PGPORT']}/{db}"
+        subprocess.run([sys.executable,"-m","alembic","upgrade","head"],cwd=ROOT,env=os.environ|{"DATABASE_URL":url,"DB_ENCRYPTION_KEY":self.key,"BOT_TOKEN":"123456:TEST"},check=True,capture_output=True)
+    def _base_env(self):
+        return self.pg|{"ENV_FILE":str(self.envfile),"PROJECT_DIR":str(ROOT),"BACKUP_DIR":str(self.backups),"BACKUP_LOCK_FILE":str(self.root/"backup.lock"),"BACKUP_AGE_RECIPIENT":self.recipient,"AGE_IDENTITY_FILE":str(self.identity),"DB_ENCRYPTION_KEY":self.key,"DATABASE_URL":f"postgresql+asyncpg://{self.pg['PGUSER']}:{self.pg['PGPASSWORD']}@{self.pg['PGHOST']}:{self.pg['PGPORT']}/{self.prod}","BOT_TOKEN":"123456:TEST"}
+    def _restore_env(self):
+        return self._base_env()|{"RESTORE_TEST_MODE":"true","RESTORE_PRODUCTION_DATABASE":self.prod,"RESTORE_OPERATION_DIR":str(self.opsdir),"RESTORE_LOCK_FILE":str(self.root/"restore.lock"),"DEPLOY_LOCK_FILE":str(self.root/"deploy.lock"),"VERIFY_BACKUP":str(OPS/"verify_backup.sh"),"BACKUP_COMMAND":str(OPS/"backup_postgres.sh"),"REHEARSAL_COMMAND":str(OPS/"restore_rehearsal.sh"),"RESTORE_CANDIDATE_VALIDATOR":str(OPS/"validate_restore_candidate.py"),"RESTORE_ADVISORY_HELPER":str(OPS/"hold_restore_advisory_lock.py"),"RESTORE_PYTHON":sys.executable,"RESTORE_ALEMBIC":str(self.alembic),"RESTORE_SERVICE_ADAPTER":str(self.adapter),"RESTORE_HEALTHCHECK":str(self.health),"RESTORE_HEALTH_TIMEOUT":"15","RESTORE_CRASH_WINDOW_SECONDS":"0","RESTORE_PG_FREE_SPACE_BYTES":str(20*1024**3),"TMPDIR":str(self.root)}
+    def _run(self,extra=None):
+        return subprocess.run([OPS/"restore_production.sh","--artifact",self.artifact,"--confirm-production-restore"],cwd=ROOT,env=self._restore_env()|(extra or {}),text=True,capture_output=True,timeout=240)
+    def _manifest(self):
+        files=list(self.opsdir.glob("*.json")); self.assertEqual(len(files),1); return json.loads(files[0].read_text())
 
-    def _swap(self):
-        self._sql("postgres", f'ALTER DATABASE "{self.prod}" RENAME TO "{self.previous}"')
-        self._sql("postgres", f'ALTER DATABASE "{self.candidate}" RENAME TO "{self.prod}"')
+    def test_actual_script_success_and_advisory_lock_lifetime(self):
+        ready=self.root/"lock-ready"; release=self.root/"lock-release"; release.write_text("hold")
+        hook=self.bin/"lock-hook"; hook.write_text(f'#!/bin/bash\ntouch "{ready}"\nwhile [[ -e "{release}" ]]; do sleep .1; done\n'); hook.chmod(0o755)
+        proc=subprocess.Popen([OPS/"restore_production.sh","--artifact",self.artifact,"--confirm-production-restore"],cwd=ROOT,env=self._restore_env()|{"RESTORE_TEST_AFTER_ADVISORY_HOOK":str(hook)},text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        deadline=time.time()+180
+        while not ready.exists() and time.time()<deadline:
+            if proc.poll() is not None: self.fail(proc.communicate()[1])
+            time.sleep(.2)
+        self.assertTrue(ready.exists()); self.assertEqual(self._sql("postgres",f"SELECT pg_try_advisory_lock({LOCK_KEY})"),"f")
+        release.unlink(); out,err=proc.communicate(timeout=120); self.assertEqual(proc.returncode,0,err)
+        self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"TARGET")
+        m=self._manifest(); self.assertEqual(m["result"],"success"); self.assertTrue(pathlib.Path(m["emergency_backup_path"]+".pin").is_file())
+        self.assertEqual(self._sql("postgres",f"SELECT pg_try_advisory_lock({LOCK_KEY}); SELECT pg_advisory_unlock({LOCK_KEY})").splitlines()[0],"t")
+        self.assertEqual(self._sql(m["previous_database_quarantine_name"],"SELECT value FROM restore_probe"),"SOURCE")
+        finalize=subprocess.run([OPS/"restore_production.sh","--finalize-operation",m["operation_id"],"--confirm-delete-previous"],cwd=ROOT,env=self._restore_env()|{"RESTORE_FINALIZE_SAFETY_SECONDS":"0"},text=True,capture_output=True,timeout=240)
+        self.assertEqual(finalize.returncode,0,finalize.stderr); finalized=self._manifest(); self.assertEqual(finalized["result"],"finalized")
+        self.assertTrue(pathlib.Path(finalized["finalize_backup_path"]+".pin").exists()); self.assertEqual(self._sql("postgres",f"SELECT count(*) FROM pg_database WHERE datname='{m['previous_database_quarantine_name']}'"),"0")
 
-    def test_success_preserves_previous_and_manifest(self):
-        self._swap()
-        self.assertEqual(self._sql(self.prod, "SELECT value FROM cutover_probe"), f"TARGET_UNIQUE_{self.tag}")
-        self.assertEqual(self._sql(self.previous, "SELECT value FROM cutover_probe"), f"SOURCE_UNIQUE_{self.tag}")
-        manifest = self.root / "operation.json"
-        manifest.write_text(json.dumps({"result": "success", "rollback_attempted": False, "previous_database_quarantine_name": self.previous}))
-        state = json.loads(manifest.read_text())
-        self.assertEqual(state["result"], "success")
-        self.assertFalse(state["rollback_attempted"])
-        self.assertTrue(self.emergency.exists())
+    def test_actual_script_automatic_rollback(self):
+        (self.root/"fail-target").touch(); r=self._run(); self.assertEqual(r.returncode,20,r.stderr)
+        self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE")
+        m=self._manifest(); self.assertEqual(m["result"],"rolled_back"); self.assertEqual(self._sql(m["failed_candidate_name"],"SELECT value FROM restore_probe"),"TARGET"); self.assertTrue(pathlib.Path(m["emergency_backup_path"]+".pin").exists())
 
-    def test_failed_health_real_rollback_preserves_failed_candidate(self):
-        self._swap()
-        # Simulated health adapter failure triggers the exact production rollback rename sequence.
-        self._sql("postgres", f'ALTER DATABASE "{self.prod}" RENAME TO "{self.failed}"')
-        self._sql("postgres", f'ALTER DATABASE "{self.previous}" RENAME TO "{self.prod}"')
-        self.assertEqual(self._sql(self.prod, "SELECT value FROM cutover_probe"), f"SOURCE_UNIQUE_{self.tag}")
-        self.assertEqual(self._sql(self.failed, "SELECT value FROM cutover_probe"), f"TARGET_UNIQUE_{self.tag}")
-        self.assertTrue(self.emergency.exists())
+    def test_rollback_failure_is_nonterminal_and_blocks_next_restore(self):
+        (self.root/"fail-target").touch(); r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":"4"}); self.assertEqual(r.returncode,42,r.stderr)
+        self.assertEqual(self._manifest()["result"],"rollback_failed")
+        again=self._run(); self.assertNotEqual(again.returncode,0); self.assertIn("incomplete_operation_exists",again.stderr)
+        before={p.name:p.read_bytes() for p in self.opsdir.iterdir()}; inspect=subprocess.run([OPS/"restore_production.sh","--inspect-incomplete"],env=self._restore_env(),text=True,capture_output=True); self.assertEqual(inspect.returncode,0,inspect.stderr); self.assertEqual(before,{p.name:p.read_bytes() for p in self.opsdir.iterdir()})
 
+    def test_first_and_second_rename_failures_recover_old_service(self):
+        for number in ("1","2"):
+            with self.subTest(rename=number):
+                r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":number}); self.assertNotEqual(r.returncode,0); self.assertEqual(self._sql(self.prod,"SELECT value FROM restore_probe"),"SOURCE"); self.assertEqual(self._manifest()["result"],"failed_safe")
+            if number=="1":
+                shutil.rmtree(self.opsdir); self.opsdir.mkdir(mode=0o700)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_old_service_health_failure_requires_manual_recovery(self):
+        # Arm the old-health failure only after pre-stop health and lock acquisition.
+        hook=self.bin/"arm-health-failure"; hook.write_text(f'#!/bin/bash\ntouch "{self.root/"fail-all"}"\n'); hook.chmod(0o755)
+        r=self._run({"RESTORE_TEST_FAIL_RENAME_NUMBER":"1","RESTORE_TEST_AFTER_ADVISORY_HOOK":str(hook)}); self.assertEqual(r.returncode,43,r.stderr); self.assertEqual(self._manifest()["result"],"requires_manual_recovery")
+
+    def test_emergency_backup_failure_recovers_or_fails_closed(self):
+        failing=self.bin/"backup-failure"; failing.write_text("#!/bin/bash\nexit 9\n"); failing.chmod(0o755)
+        r=self._run({"BACKUP_COMMAND":str(failing)}); self.assertNotEqual(r.returncode,0); self.assertEqual(self._manifest()["result"],"failed_safe"); self.assertEqual(self.state.read_text().strip(),"active")
+        shutil.rmtree(self.opsdir); self.opsdir.mkdir(mode=0o700); self.state.write_text("active"); (self.root/"start-fail").touch()
+        r=self._run({"BACKUP_COMMAND":str(failing)}); self.assertEqual(r.returncode,43,r.stderr); self.assertEqual(self._manifest()["result"],"requires_manual_recovery")
+
+if __name__ == "__main__": unittest.main()

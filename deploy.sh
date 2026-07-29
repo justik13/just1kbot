@@ -626,9 +626,11 @@ create_backup_script() {
         install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temporary"
         mv -f "$temporary" "$target"
     done
-    temporary="/usr/local/bin/validate_restore_candidate.py.new.$$"
-    install -o root -g root -m 0750 "$SOURCE_DIR/ops/validate_restore_candidate.py" "$temporary"
-    mv -f "$temporary" /usr/local/bin/validate_restore_candidate.py
+    for source in validate_restore_candidate.py hold_restore_advisory_lock.py; do
+        temporary="/usr/local/bin/${source}.new.$$"
+        install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temporary"
+        mv -f "$temporary" "/usr/local/bin/$source"
+    done
     cat > /etc/systemd/system/just1kbot-backup.service <<'EOF'
 [Unit]
 Description=Just1kBot encrypted PostgreSQL backup

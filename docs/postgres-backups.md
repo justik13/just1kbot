@@ -89,3 +89,27 @@ sudo /usr/local/bin/restore_production.sh \
 
 Never remove a previous/failed database or emergency artifact as part of the main
 restore flow. Investigate and finalize explicitly.
+
+### Persistent lock, recovery states, and pinned artifacts
+
+The cutover and every database-name recovery sequence are protected by a dedicated
+PostgreSQL session-level advisory lock. `hold_restore_advisory_lock.py` reports lock
+acquisition and keeps its connection open until the restore process closes its
+private release pipe; cleanup always closes that pipe and waits for the helper.
+A completed one-shot `psql -c` is not treated as a held lock.
+
+Operation results form a strict state machine: `in_progress`, `failed_safe`,
+`success`, `rolled_back`, `requires_manual_recovery`, `rollback_failed`, and
+`finalized`. `failed_safe` is written only after the original database name,
+service activity, and the full old-database health contract have been proved.
+Manual-recovery and rollback-failure states block later restores. Manifests have an
+exact JSON schema, root-only ownership/permissions in production, and database names
+are checked against both prefixes and actual PostgreSQL state.
+
+Emergency and finalization backups return their exact path, SHA-256, and operation
+pin through a mode-0600 result file. Each has a persistent `.pin` file, and all later
+retention passes skip pinned artifacts. Restore rejects malformed results, paths
+outside the configured backup directory, missing sidecars/pins, and checksum
+changes. Finalization strictly verifies and fully rehearses both the original
+emergency artifact and a new pinned production backup before rechecking health and
+deleting the exact manifest-recorded previous database.
