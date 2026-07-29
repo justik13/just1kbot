@@ -18,6 +18,8 @@ SERVICE_NAME="just1kbot"
 LOG_FILE="/var/log/just1kbot-deploy.log"
 ROLLBACK_LOG="/var/log/just1kbot-rollback.log"
 BACKUP_DIR="/root/backups/just1kbot"
+RESTORE_OPERATION_DIR="/root/restore-operations"
+DEPLOY_LOCK_FILE="/run/lock/just1kbot-deploy.lock"
 PYTHON_MIN_VERSION="3.11"
 SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
@@ -47,6 +49,12 @@ if [[ $EUID -ne 0 ]]; then
     echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}"
     exit 1
 fi
+
+# Deployment and production restore are mutually exclusive.  Both tools use
+# the same nonblocking lock contract and fail rather than waiting ambiguously.
+mkdir -p "$(dirname "$DEPLOY_LOCK_FILE")"
+exec 19>"$DEPLOY_LOCK_FILE"
+flock -n 19 || { echo "Ошибка: production restore или другой deploy уже выполняется." >&2; exit 3; }
 
 # --- Проверка ОС ---
 if [[ -f /etc/os-release ]]; then
@@ -609,15 +617,18 @@ create_backup_script() {
     for command in age pg_dump pg_restore flock sha256sum; do
         command -v "$command" >/dev/null || { error "Не найдена обязательная команда: $command"; return 1; }
     done
-    install -d -o root -g root -m 0700 "$BACKUP_DIR"
+    install -d -o root -g root -m 0700 "$BACKUP_DIR" "$RESTORE_OPERATION_DIR"
     local source target temporary
-    for source in backup_postgres.sh verify_backup.sh restore_rehearsal.sh just1kbot-restore.sh; do
+    for source in backup_postgres.sh verify_backup.sh restore_rehearsal.sh restore_production.sh just1kbot-restore.sh; do
         target="/usr/local/bin/${source}"
         [[ "$source" != backup_postgres.sh ]] || target=/usr/local/bin/just1kbot-backup.sh
         temporary="${target}.new.$$"
         install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temporary"
         mv -f "$temporary" "$target"
     done
+    temporary="/usr/local/bin/validate_restore_candidate.py.new.$$"
+    install -o root -g root -m 0750 "$SOURCE_DIR/ops/validate_restore_candidate.py" "$temporary"
+    mv -f "$temporary" /usr/local/bin/validate_restore_candidate.py
     cat > /etc/systemd/system/just1kbot-backup.service <<'EOF'
 [Unit]
 Description=Just1kBot encrypted PostgreSQL backup

@@ -7,8 +7,13 @@ trap cleanup EXIT INT TERM
 fail() { printf 'verification error: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 extract_dir=""
-if [[ ${1:-} == --extract-dir ]]; then extract_dir=${2:?missing extraction directory}; shift 2; fi
-artifact=${1:?usage: verify_backup.sh [--extract-dir DIR] ARTIFACT}
+extract_config=false
+if [[ ${1:-} == --extract-production-components ]]; then
+    extract_config=true; extract_dir=${2:?missing extraction directory}; shift 2
+elif [[ ${1:-} == --extract-dir ]]; then
+    extract_dir=${2:?missing extraction directory}; shift 2
+fi
+artifact=${1:?usage: verify_backup.sh [--extract-dir DIR|--extract-production-components DIR] ARTIFACT}
 for command in age pg_restore sha256sum tar python3 stat; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
 [[ -f "$artifact" && ! -L "$artifact" ]] || fail 'artifact is missing or is a symlink'
 mode=$(stat -c '%a' "$artifact")
@@ -111,6 +116,9 @@ if [[ -n "$extract_dir" ]]; then
     mkdir -m 700 "$extract_dir"
     install -m 600 "$tmpdir/extracted/manifest.json" "$extract_dir/manifest.json"
     install -m 600 "$tmpdir/extracted/dump.custom" "$extract_dir/dump.custom"
+    if [[ "$extract_config" == true ]]; then
+        install -m 600 "$tmpdir/extracted/config.env" "$extract_dir/config.env"
+    fi
 fi
 printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=not-checked\n' \
     "$(date -u +%FT%TZ)" "$(basename -- "$artifact")" "$(stat -c %s "$artifact")" "$(sha256sum "$artifact" | awk '{print $1}')"

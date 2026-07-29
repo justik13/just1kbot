@@ -30,3 +30,62 @@ exactly one hash each for `dump.custom` and `config.env`. Off-site publication u
 one controlled failure path for directory creation, copies, validation, permissions,
 and both commit-marker renames; optional failures preserve the local pair, whereas
 required failures remove it and suppress retention.
+
+## Manual production restore and cutover
+
+Production restore is never scheduled.  A root operator must supply both the encrypted
+artifact and the exact, non-interactive confirmation flag:
+
+```bash
+AGE_IDENTITY_FILE=/secure/offline-key.txt \
+BACKUP_AGE_RECIPIENT=age1... \
+sudo /usr/local/bin/restore_production.sh \
+  --artifact /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age \
+  --confirm-production-restore
+```
+
+The tool and deploy share `/run/lock/just1kbot-deploy.lock`; restore additionally
+uses nonblocking restore and backup locks. It pins artifact and sidecar identity,
+size, and checksums around strict verification, extracts configuration only into a
+mode-0700 workspace, and compares the encryption key without displaying it. It does
+**not** replace `.env`.
+
+The dump is restored to a generated `just1kbot_candidate_*` database. Its manifest
+revision and critical tables are checked before current migrations are run solely
+with a guarded candidate URL. A read-only application validator exercises the ORM
+and encrypted fields without polling, workers, messages, payments, or VPN API calls.
+Only then is the bot stopped and a retention-exempt encrypted emergency backup made,
+strictly verified, and rehearsed.
+
+The short cutover renames production to `just1kbot_previous_*` and candidate to the
+production name. The old database is retained. After startup the bounded health
+window requires service activity, consecutive fresh heartbeats, the existing health
+contract, database reads, durable payment queue reads, and no immediate crash. Any
+post-swap failure stops the service, quarantines the candidate as
+`just1kbot_failed_restore_*`, restores the previous name, restarts, and repeats health
+validation. A rollback-health failure exits with critical code 42 and preserves all
+databases and backups.
+
+Root-only JSON state lives in `/root/restore-operations`. Unknown interruptions are
+never resumed automatically:
+
+```bash
+sudo /usr/local/bin/restore_production.sh --inspect-incomplete
+sudo /usr/local/bin/restore_production.sh \
+  --rollback-operation restore_YYYYMMDDTHHMMSSZ_deadbeef \
+  --confirm-production-rollback
+```
+
+Inspection is read-only. Manual rollback accepts only names already recorded in the
+root-owned manifest. After a successful operation and the configured safety window,
+finalization verifies health and the pinned emergency backup, makes another fresh
+encrypted production backup, and only then deletes the exact previous database:
+
+```bash
+sudo /usr/local/bin/restore_production.sh \
+  --finalize-operation restore_YYYYMMDDTHHMMSSZ_deadbeef \
+  --confirm-delete-previous
+```
+
+Never remove a previous/failed database or emergency artifact as part of the main
+restore flow. Investigate and finalize explicitly.

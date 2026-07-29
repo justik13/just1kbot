@@ -6,6 +6,7 @@ BACKUP_DIR=${BACKUP_DIR:-/root/backups/just1kbot}
 ENV_FILE=${ENV_FILE:-/opt/just1kbot/.env}
 LOCK_FILE=${BACKUP_LOCK_FILE:-/run/lock/just1kbot-backup.lock}
 RETENTION_COUNT=${BACKUP_RETENTION_COUNT:-14}
+SKIP_RETENTION=${BACKUP_SKIP_RETENTION:-false}
 OFFSITE_DIR=${BACKUP_OFFSITE_DIR:-}
 REQUIRE_OFFSITE=${BACKUP_REQUIRE_OFFSITE:-false}
 FORMAT_VERSION=1
@@ -36,6 +37,7 @@ for command in age pg_dump pg_restore psql flock sha256sum tar python3; do comma
 [[ ${BACKUP_AGE_RECIPIENT:-} == age1* ]] || fail 'BACKUP_AGE_RECIPIENT is missing or invalid' 2
 [[ "$REQUIRE_OFFSITE" == true || "$REQUIRE_OFFSITE" == false ]] || fail 'BACKUP_REQUIRE_OFFSITE must be true or false'
 [[ "$RETENTION_COUNT" =~ ^[0-9]+$ ]] && (( RETENTION_COUNT >= 2 )) || fail 'BACKUP_RETENTION_COUNT must be at least 2'
+[[ "$SKIP_RETENTION" == true || "$SKIP_RETENTION" == false ]] || fail 'BACKUP_SKIP_RETENTION must be true or false'
 [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]] || fail 'configuration file is missing or unsafe'
 mkdir -p -- "$BACKUP_DIR" "$(dirname -- "$LOCK_FILE")"; chmod 700 "$BACKUP_DIR"
 exec 9>"$LOCK_FILE"; flock -n 9 || fail 'another backup is already running' 3
@@ -127,6 +129,8 @@ if [[ -n "$OFFSITE_DIR" ]]; then
 elif [[ "$REQUIRE_OFFSITE" == true ]]; then offsite_status=failure; fail 'off-site publication is required but BACKUP_OFFSITE_DIR is unset' 4
 fi
 
-mapfile -t expired < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' | sort -rn | tail -n +$((RETENTION_COUNT+1)) | cut -d' ' -f2-)
-for old in "${expired[@]:-}"; do [[ -z "$old" ]] || rm -f -- "$old" "$old.sha256"; done
+if [[ "$SKIP_RETENTION" == false ]]; then
+    mapfile -t expired < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' | sort -rn | tail -n +$((RETENTION_COUNT+1)) | cut -d' ' -f2-)
+    for old in "${expired[@]:-}"; do [[ -z "$old" ]] || rm -f -- "$old" "$old.sha256"; done
+fi
 printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=%s\n' "$(date -u +%FT%TZ)" "$name" "$(stat -c %s "$final")" "$checksum" "$offsite_status"
