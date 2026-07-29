@@ -42,46 +42,49 @@ cleanup_temp_files() {
 }
 trap cleanup_temp_files EXIT INT TERM
 
-# --- Проверка root ---
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}"
-    exit 1
-fi
-
-# --- Проверка ОС ---
-if [[ -f /etc/os-release ]]; then
-    . /etc/os-release
-    if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-        echo -e "${YELLOW}Внимание: скрипт оптимизирован для Ubuntu/Debian. Текущая ОС: $ID${NC}"
-        read -p "Продолжить? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Отменено."
-            exit 0
-        fi
-    fi
-fi
-
 # --- Флаги ---
 NON_INTERACTIVE=false
 DRY_RUN=false
 
-for arg in "$@"; do
-    case "$arg" in
-        --yes|-y|--force) NON_INTERACTIVE=true ;;
-        --dry-run) DRY_RUN=true ;;
-        --help|-h)
-            echo "Использование: sudo ./deploy.sh [--yes] [--dry-run]"
-            echo "  --yes, -y, --force  Неинтерактивный режим (значения из переменных окружения)"
-            echo "  --dry-run           Показать что будет сделано без выполнения"
-            exit 0
-            ;;
-    esac
-done
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}" >&2
+        return 1
+    fi
+}
 
-# --- Логирование ---
-mkdir -p "$(dirname "$LOG_FILE")"
-touch "$LOG_FILE"
+parse_args() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --yes|-y|--force) NON_INTERACTIVE=true ;;
+            --dry-run) DRY_RUN=true ;;
+            --help|-h)
+                echo "Использование: sudo ./deploy.sh [--yes] [--dry-run]"
+                echo "  --yes, -y, --force  Неинтерактивный режим (значения из переменных окружения)"
+                echo "  --dry-run           Показать что будет сделано без выполнения"
+                return 2
+                ;;
+        esac
+    done
+}
+
+check_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
+            echo -e "${YELLOW}Внимание: скрипт оптимизирован для Ubuntu/Debian. Текущая ОС: $ID${NC}"
+            read -p "Продолжить? (y/N): " -n 1 -r
+            echo
+            [[ $REPLY =~ ^[Yy]$ ]] || { echo "Отменено."; return 1; }
+        fi
+    fi
+}
+
+init_logging() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE"
+}
 
 log() {
     local timestamp
@@ -366,7 +369,9 @@ EOSQL
 setup_redis() {
     log "Настройка Redis..."
 
+    local configure_credentials="${1:-true}"
     local redis_conf="/etc/redis/redis.conf"
+    if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then redis_conf="${TEST_REDIS_CONF:?}"; fi
 
     # Сохраняем оригинал для rollback
     if [[ -f "$redis_conf" ]]; then
@@ -377,10 +382,14 @@ setup_redis() {
     if [[ -f "$redis_conf" ]]; then
         sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$redis_conf"
 
-        if grep -q "^requirepass" "$redis_conf"; then
-            sed -i "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$redis_conf"
+        if [[ "$configure_credentials" == true ]]; then
+            if grep -q "^requirepass" "$redis_conf"; then
+                sed -i "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$redis_conf"
+            else
+                echo "requirepass ${REDIS_PASSWORD}" >> "$redis_conf"
+            fi
         else
-            echo "requirepass ${REDIS_PASSWORD}" >> "$redis_conf"
+            log "Update deployment: существующий Redis credential сохранён без ротации"
         fi
 
         if grep -q "^maxmemory " "$redis_conf"; then
@@ -396,6 +405,7 @@ setup_redis() {
         fi
     else
         # Минимальный конфиг если файла нет
+        [[ "$configure_credentials" == true ]] || { error "Redis config отсутствует при update deployment"; return 1; }
         cat > "$redis_conf" <<EOF
 bind 127.0.0.1 ::1
 port 6379
@@ -413,6 +423,21 @@ EOF
     systemctl restart redis-server
 
     log "Redis настроен"
+}
+
+determine_install_kind() {
+    INITIAL_INSTALL=true
+    if [[ -L "$ENV_FILE" ]]; then error "Production .env не должен быть symlink"; return 1; fi
+    if [[ -e "$ENV_FILE" ]]; then
+        [[ -f "$ENV_FILE" ]] || { error "Production .env должен быть regular file"; return 1; }
+        local mode owner
+        mode=$(stat -c '%a' "$ENV_FILE") || return 1
+        owner=$(stat -c '%U' "$ENV_FILE") || return 1
+        (( (8#$mode & 8#077) == 0 )) || { error "Production .env имеет небезопасные permissions"; return 1; }
+        [[ "$owner" == root || "$owner" == "$BOT_USER" ]] || { error "Production .env имеет небезопасного owner"; return 1; }
+        INITIAL_INSTALL=false
+    fi
+    log "Deployment kind=$([[ "$INITIAL_INSTALL" == true ]] && echo initial || echo update)"
 }
 
 # --- Пользователь и директории ---
@@ -814,8 +839,48 @@ rollback() {
     error "Деплой отменён. Подробности: $ROLLBACK_LOG"
 }
 
+create_env_if_missing() {
+    if [[ -e "$ENV_FILE" ]]; then
+        log "Существующий production .env сохранён без изменений"
+        return 0
+    fi
+    log "Создание initial production .env..."
+    umask 077
+    printf '# Just1kBot Configuration\n# Generated: %s\n' "$(date -Iseconds)" > "$ENV_FILE"
+    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
+        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
+    fi
+    local db_password_encoded redis_password_encoded
+    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
+    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
+    write_env_var BOT_TOKEN "$BOT_TOKEN"
+    write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
+    write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
+    write_env_var REDIS_URL "redis://:${redis_password_encoded}@localhost:6379/0"
+    write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
+    write_env_var ADMIN_IDS "$ADMIN_IDS"
+    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
+    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
+    write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
+    write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
+    [[ -z "$DOMAIN" ]] || { write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook"; write_env_var DOMAIN "$DOMAIN"; }
+}
+
+prepare_release_runtime() { setup_user_and_dirs && create_env_if_missing && setup_venv; }
+activate_release() { setup_systemd; }
+
 # --- Main ---
 main() {
+    # This must be the first runtime action. DEPLOY_FUNCTIONS_ONLY only sources
+    # definitions for unit tests and never calls main.
+    require_root || exit 1
+    local parse_status=0
+    parse_args "$@" || parse_status=$?
+    [[ $parse_status -ne 2 ]] || exit 0
+    [[ $parse_status -eq 0 ]] || exit "$parse_status"
+    check_os || exit $?
+    init_logging
+
     echo ""
     echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
     echo -e "${BLUE}║     JUST1KBOT — Автоматический деплой   ║${NC}"
@@ -844,45 +909,10 @@ main() {
 
     collect_input
     preflight_checks
+    determine_install_kind
     install_dependencies
-    setup_user_and_dirs
-    sync_project_files
     setup_postgresql
-    setup_redis
-
-    # Создание .env
-    log "Создание .env..."
-    cat > "$ENV_FILE" <<EOF
-# Just1kBot Configuration
-# Generated: $(date -Iseconds)
-EOF
-    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
-        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
-    fi
-    local db_password_encoded redis_password_encoded
-    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
-    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
-    write_env_var "BOT_TOKEN" "$BOT_TOKEN"
-    write_env_var "DATABASE_URL" "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
-    write_env_var "DB_ENCRYPTION_KEY" "$DB_ENCRYPTION_KEY"
-    write_env_var "REDIS_URL" "redis://:${redis_password_encoded}@localhost:6379/0"
-    write_env_var "REDIS_PASSWORD" "$REDIS_PASSWORD"
-    write_env_var "ADMIN_IDS" "$ADMIN_IDS"
-    write_env_var "AMNEZIA_API_URL" "$AMNEZIA_API_URL"
-    write_env_var "AMNEZIA_API_KEY" "$AMNEZIA_API_KEY"
-    write_env_var "YOOKASSA_SHOP_ID" "$YOOKASSA_SHOP_ID"
-    write_env_var "YOOKASSA_SECRET_KEY" "$YOOKASSA_SECRET_KEY"
-    if [[ -n "$DOMAIN" ]]; then
-        write_env_var "WEBHOOK_URL" "https://${DOMAIN}/webhook"
-        write_env_var "DOMAIN" "$DOMAIN"
-    fi
-    chown "$BOT_USER:$BOT_USER" "$ENV_FILE"
-    chmod 600 "$ENV_FILE"
-    log ".env создан"
-
-    setup_venv
-    init_database
-    setup_systemd
+    setup_redis "$INITIAL_INSTALL"
     setup_nginx_ssl
     setup_logrotate
     create_backup_script
@@ -890,13 +920,24 @@ EOF
     create_healthcheck
     setup_firewall
 
-    if start_bot; then
+    SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
+    UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+    HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+    HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"
+    SERVICE_ADAPTER=""
+    # shellcheck source=ops/deploy_application.sh
+    source "$SOURCE_DIR/ops/deploy_application.sh"
+    PREPARE_COMMAND=(prepare_release_runtime)
+    MIGRATION_COMMAND=(init_database)
+    ACTIVATION_COMMAND=(activate_release)
+    if run_application_transaction; then
         show_status
         print_result
     else
-        rollback "Бот не запустился после деплоя"
-        exit 1
+        local transaction_code=$?
+        error "Application deploy transaction failed (code=$transaction_code); database downgrade was not performed"
+        exit "$transaction_code"
     fi
 }
 
-main "$@"
+if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" != 1 ]]; then main "$@"; fi
