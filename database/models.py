@@ -308,6 +308,9 @@ class TariffQuote(Base):
         CheckConstraint("current_paid_value_rub >= 0 AND confirmed_payment_required_rub >= 0 AND resulting_paid_value_rub >= 0 AND rounding_loss_value_rub >= 0", name="ck_tariff_quotes_values_nonnegative"),
         CheckConstraint("rounding_loss_hours >= 0 AND rounding_loss_hours < 1", name="ck_tariff_quotes_rounding_loss"),
         CheckConstraint("resulting_paid_value_rub <= current_paid_value_rub + confirmed_payment_required_rub", name="ck_tariff_quotes_value_invariant"),
+        CheckConstraint("operation_type <> 'change' OR ((source_tariff_version_id IS NOT NULL AND target_tariff_version_id IS NOT NULL AND source_tariff_version_id <> target_tariff_version_id AND balance_as_of IS NOT NULL AND source_subscription_end IS NOT NULL AND source_balance_fingerprint IS NOT NULL AND source_entitlement_entry_ids IS NOT NULL AND source_ledger_entry_ids IS NOT NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL AND diagnostic_reason = 'legacy_change_quote_source_snapshot_missing' AND balance_as_of IS NULL AND source_subscription_end IS NULL AND source_balance_fingerprint IS NULL AND source_entitlement_entry_ids IS NULL AND source_ledger_entry_ids IS NULL))", name="ck_tariff_quotes_change_source_snapshot"),
+        CheckConstraint("source_balance_fingerprint IS NULL OR source_balance_fingerprint ~ '^[0-9a-f]{64}$'", name="ck_tariff_quotes_fingerprint"),
+        CheckConstraint("(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)", name="ck_tariff_quotes_lifecycle_timestamps"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
         Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
     )
@@ -334,6 +337,11 @@ class TariffQuote(Base):
     manual_review_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     diagnostic_reason: Mapped[str | None] = mapped_column(String(255))
     payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True)
+    balance_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    source_balance_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    source_entitlement_entry_ids: Mapped[list | None] = mapped_column(JSONB)
+    source_ledger_entry_ids: Mapped[list | None] = mapped_column(JSONB)
 
 
 class PaidValueLedgerEntry(Base):

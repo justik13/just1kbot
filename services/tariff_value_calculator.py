@@ -85,7 +85,11 @@ def calculate_tariff_value(
         if source_price <= 0:
             raise TariffCalculationError("source price must be positive")
         max_source_value = Decimal(source_paid_hours) * source_price / source_tariff.duration_hours
-        if source_value > max_source_value:
+        # A tracked change balance may combine lots bought against historical
+        # versions of the same tariff.  Its append-only ledger value is the
+        # authority; only purchase/renew retain the single-version consistency
+        # check.
+        if operation_type != "change" and source_value > max_source_value:
             raise TariffCalculationError("source hours and value snapshots are incompatible")
     if requested_duration_hours is not None and requested_duration_hours != target_tariff.duration_hours:
         raise TariffCalculationError("arbitrary duration is not supported")

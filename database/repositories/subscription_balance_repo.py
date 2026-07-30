@@ -4,11 +4,14 @@ from sqlalchemy import select
 from database.models import EntitlementEntry, PaidValueLedgerEntry, Payment, TariffVersion, User
 
 
-async def load_subscription_balance_history(session, *, user_id: int, for_update: bool = False):
-    user_query = select(User).where(User.id == user_id)
-    if for_update:
-        user_query = user_query.with_for_update()
-    user = await session.scalar(user_query)
+async def load_subscription_balance_history(session, *, user_id: int, for_update: bool = False,
+                                            locked_user=None):
+    user = locked_user
+    if user is None:
+        user_query = select(User).where(User.id == user_id)
+        if for_update:
+            user_query = user_query.with_for_update()
+        user = await session.scalar(user_query)
     if user is None:
         raise LookupError("subscription_balance_user_not_found")
 

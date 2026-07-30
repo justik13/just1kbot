@@ -8,9 +8,10 @@ from services.subscription_balance_projector import (
 )
 
 
-async def get_subscription_balance_snapshot(session, *, user_id: int, as_of: datetime, for_update: bool = False):
+async def get_subscription_balance_snapshot(session, *, user_id: int, as_of: datetime, for_update: bool = False,
+                                            locked_user=None):
     user, entries, ledger, payments, versions = await load_subscription_balance_history(
-        session, user_id=user_id, for_update=for_update)
+        session, user_id=user_id, for_update=for_update, locked_user=locked_user)
     entitlement_values = tuple(EntitlementEvent(
         id=x.id, user_id=x.beneficiary_user_id, source_type=x.source_type,
         source_id=x.source_id, entry_type=x.entry_type, hours_delta=x.days_delta * 24,

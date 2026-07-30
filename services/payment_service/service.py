@@ -320,7 +320,9 @@ class PaymentService:
             quote, version = await get_or_create_checkout_quote(
                 session, user_id=user_id, tariff=tariff, operation_type=operation_type,
             )
-        except CheckoutQuoteConflictError:
+        except CheckoutQuoteConflictError as exc:
+            if str(exc) == "active_tariff_change_quote_exists":
+                return None, "active_tariff_change_quote_exists"
             return None,"active_checkout_quote_conflict"
         existing = await session.scalar(select(Payment).where(
             Payment.tariff_quote_id == quote.id,

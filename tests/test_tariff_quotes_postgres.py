@@ -36,6 +36,9 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.version_id = (await self.connection.execute(text(
             "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,device_limit,price_rub,currency) VALUES(:tid,1,:name,:hours,:limit,300,'RUB') RETURNING id"
         ), {"tid": self.tariff_id, "name": marker,"hours":self.duration_days*24,"limit":self.device_limit})).scalar_one()
+        self.source_version_id = (await self.connection.execute(text(
+            "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,device_limit,price_rub,currency) VALUES(:tid,2,:name,:hours,:limit,299,'RUB') RETURNING id"
+        ), {"tid": self.tariff_id, "name": marker,"hours":self.duration_days*24,"limit":self.device_limit})).scalar_one()
 
     async def asyncTearDown(self):
         try:
@@ -46,11 +49,14 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def _quote(self, operation="change", minutes=15):
         now = now_utc()
+        change_columns = ",source_tariff_version_id,balance_as_of,source_subscription_end,source_balance_fingerprint,source_entitlement_entry_ids,source_ledger_entry_ids" if operation == "change" else ""
+        change_values = ",:source,:created,:subscription_end,:fingerprint,'[]'::jsonb,'[]'::jsonb" if operation == "change" else ""
         return (await self.connection.execute(text(
-            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at) "
-            "VALUES(:public,:uid,:operation,:version,0,0,24,300,720,300,24,0,0,'RUB','active',:expires,:created) RETURNING id"
+            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at" + change_columns + ") "
+            "VALUES(:public,:uid,:operation,:version,0,0,24,300,720,300,24,0,0,'RUB','active',:expires,:created" + change_values + ") RETURNING id"
         ), {"public": uuid.uuid4(), "uid": self.user_id, "operation": operation,
-            "version": self.version_id, "created": now,
+            "version": self.version_id, "source": self.source_version_id,
+            "subscription_end": now + timedelta(days=30), "fingerprint": "a" * 64, "created": now,
             "expires": now + timedelta(minutes=minutes)})).scalar_one()
 
     async def test_quote_expires_exactly_after_fifteen_minutes(self):
