@@ -317,11 +317,12 @@ class PaymentService:
         if decimal_amount is None or not tariff: return None,None
         user = await lock_checkout_user(session, user_id)
         if user is None: return None,"checkout_user_missing"
-        from services.checkout_conflicts import get_unfinished_financial_checkout
-        conflict = await get_unfinished_financial_checkout(session, user_id=user_id)
-        if conflict:
-            if conflict.operation_type in {"purchase", "renew"} and conflict.payment.tariff_id == tariff_id:
-                return conflict.payment, conflict.payment.payment_url
+        from services.checkout_conflicts import get_unfinished_financial_checkouts, is_valid_reusable_purchase_intent
+        conflicts = await get_unfinished_financial_checkouts(session, user_id=user_id)
+        if conflicts:
+            if len(conflicts) == 1 and await is_valid_reusable_purchase_intent(
+                    session, conflicts[0], user_id=user_id, tariff_id=tariff_id):
+                return conflicts[0].payment, conflicts[0].payment.payment_url
             return None,"unfinished_checkout_exists"
         active = bool(user and user.subscription_end and user.subscription_end > now_utc())
         if active and user.current_tariff_id != tariff_id:
