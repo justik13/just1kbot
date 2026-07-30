@@ -9,6 +9,8 @@ from decimal import Decimal
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from alembic.command import downgrade, upgrade
+from alembic.config import Config
 
 from database.models import (EntitlementEntry, PaidValueLedgerEntry, Payment,
     PaymentFulfillmentOperation, PaymentProviderOperation, Tariff, TariffQuote, User)
@@ -290,6 +292,63 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             await transaction.rollback()
         async with self.sessions() as session:
             self.assertIsNone(await session.get(TariffQuote, quote_id))
+
+
+@unittest.skipUnless(DB, "TEST_DATABASE_URL is not configured")
+class TariffChangeQuoteMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
+    def config(self):
+        config = Config("alembic.ini")
+        config.set_main_option("sqlalchemy.url", DB)
+        return config
+
+    async def test_initial_upgrade_quarantines_legacy_change_quote(self):
+        config = self.config()
+        await asyncio.to_thread(downgrade, config, "7a4f19c82d11")
+        engine = create_async_engine(DB)
+        try:
+            now = now_utc().replace(microsecond=0)
+            async with engine.begin() as connection:
+                await connection.execute(text(
+                    "TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions, entitlement_entries, "
+                    "payments, users, tariffs RESTART IDENTITY CASCADE"))
+                tariff = (await connection.execute(text(
+                    "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
+                    "VALUES('legacy',30,2,90,true,1,:n) RETURNING id"), {"n": now})).scalar_one()
+                user = (await connection.execute(text(
+                    "INSERT INTO users(telegram_id,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,"
+                    "notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,"
+                    "notified_grace_12h,device_creations_today,created_at) "
+                    "VALUES(:tg,2,0,false,false,false,0,false,false,false,false,false,0,:n) RETURNING id"),
+                    {"tg": uuid.uuid4().int % 10**12, "n": now})).scalar_one()
+                version = (await connection.execute(text(
+                    "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,"
+                    "device_limit,price_rub,currency,created_at) VALUES(:t,1,'legacy',720,2,90,'RUB',:n) "
+                    "RETURNING id"), {"t": tariff, "n": now})).scalar_one()
+                quote_id = (await connection.execute(text(
+                    "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,"
+                    "current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,"
+                    "resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,"
+                    "rounding_loss_value_rub,currency,status,expires_at,created_at) "
+                    "VALUES(:p,:u,'change',:v,0,0,0,0,0,0,0,0,0,'RUB','active',:x,:n) RETURNING id"),
+                    {"p": uuid.uuid4(), "u": user, "v": version,
+                     "x": now + timedelta(minutes=15), "n": now})).scalar_one()
+            await engine.dispose()
+            await asyncio.to_thread(upgrade, config, "head")
+            engine = create_async_engine(DB)
+            async with engine.connect() as connection:
+                row = (await connection.execute(text(
+                    "SELECT status,manual_review_at,diagnostic_reason,balance_as_of,"
+                    "source_subscription_end,source_balance_fingerprint,source_entitlement_entry_ids,"
+                    "source_ledger_entry_ids FROM tariff_quotes WHERE id=:q"),
+                    {"q": quote_id})).one()
+                self.assertEqual(row.status, "manual_review")
+                self.assertIsNotNone(row.manual_review_at)
+                self.assertEqual(row.diagnostic_reason,
+                                 "legacy_change_quote_source_snapshot_missing")
+                self.assertTrue(all(value is None for value in row[3:]))
+        finally:
+            await engine.dispose()
+            await asyncio.to_thread(upgrade, config, "head")
 
 
 if __name__ == "__main__":
