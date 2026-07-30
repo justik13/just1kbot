@@ -387,6 +387,7 @@ class Payment(Base):
         Index("ix_payments_tariff_status", "tariff_id", "status"),
         Index("uq_payments_public_order_id_not_null", "public_order_id", unique=True, postgresql_where=text("public_order_id IS NOT NULL")),
         Index("uq_payments_provider_idempotency_key_not_null", "provider_idempotency_key", unique=True, postgresql_where=text("provider_idempotency_key IS NOT NULL")),
+        Index("uq_payments_tariff_quote", "tariff_quote_id", unique=True, postgresql_where=text("tariff_quote_id IS NOT NULL")),
         CheckConstraint("provider_status IN ('not_created','creating','pending','waiting_for_capture','succeeded','canceled','refunded','unknown','manual_review')", name="ck_payments_provider_status"),
         CheckConstraint("fulfillment_status IN ('not_ready','pending','processing','succeeded','failed','reversal_pending','reversed','manual_review')", name="ck_payments_fulfillment_status"),
         CheckConstraint("reconciliation_status IN ('ok','required','mismatch','manual_review')", name="ck_payments_reconciliation_status"),
@@ -420,6 +421,7 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     public_order_id: Mapped[str | None] = mapped_column(String(64))
     provider_idempotency_key: Mapped[str | None] = mapped_column(String(64))
+    provider_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     provider_status: Mapped[str] = mapped_column(String(30), default="not_created", server_default=text("'not_created'"))
     fulfillment_status: Mapped[str] = mapped_column(String(30), default="not_ready", server_default=text("'not_ready'"))
     reconciliation_status: Mapped[str] = mapped_column(String(30), default="ok", server_default=text("'ok'"))
@@ -473,6 +475,7 @@ class PaymentProviderOperation(Base):
         CheckConstraint("status IN ('pending','processing','retry','succeeded','dead','cancelled')", name="ck_payment_provider_operations_status"),
         Index("ix_payment_provider_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_payment_provider_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+        Index("uq_payment_provider_create", "payment_id", unique=True, postgresql_where=text("operation_type='create_payment'")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)

@@ -157,7 +157,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await session.scalar(select(func.count(TariffQuote.id)).where(
                 TariffQuote.operation_type == "change")), 1)
 
-    async def test_untracked_projection_sends_payment_bound_quote_to_manual_review(self):
+    async def test_change_quote_cannot_bind_an_unrelated_payment(self):
         user, _, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
             first = await create_tariff_change_quote(
@@ -165,21 +165,11 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             source_payment_id = await session.scalar(select(PaidValueLedgerEntry.payment_id).where(
                 PaidValueLedgerEntry.user_id == user,
                 PaidValueLedgerEntry.entry_type == "confirmed_payment"))
-            first.quote.payment_id = source_payment_id
-            await session.flush()
-            await session.execute(text(
-                "UPDATE payments SET snapshot_amount=snapshot_amount+1 WHERE id=:p"),
-                {"p": source_payment_id})
-            repeated = await create_tariff_change_quote(
-                session, user_id=user, target_tariff_id=target,
-                as_of=as_of + timedelta(minutes=1))
-            self.assertIsNone(repeated.quote)
-            self.assertEqual(repeated.failure_code, "active_change_quote_stale")
-            self.assertEqual((first.quote.status, first.quote.diagnostic_reason),
-                             ("manual_review", "source_balance_untracked"))
-            self.assertEqual(first.quote.manual_review_at, as_of + timedelta(minutes=1))
-            self.assertEqual(await session.scalar(select(func.count(TariffQuote.id)).where(
-                TariffQuote.operation_type == "change")), 1)
+            with self.assertRaises(DBAPIError):
+                async with session.begin_nested():
+                    first.quote.payment_id = source_payment_id
+                    await session.flush()
+                    await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()

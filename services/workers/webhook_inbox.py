@@ -4,7 +4,7 @@ from datetime import timedelta
 from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox
+from database.models import EntitlementEntry, Payment, PaymentFulfillmentOperation, PaymentRefund, WebhookInbox, TariffQuote
 from services.payment_lifecycle import project_legacy_status
 from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
@@ -15,6 +15,9 @@ class WebhookInboxOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
 class InboxClaim: inbox_id:int; worker_id:str; attempt_number:int; event_type:str; payment_external_id:str|None; public_order_id:str|None; payload:dict; event_key:str
 async def ensure_fulfillment(session,payment,typ):
+ if typ in {"grant_subscription", "grant_referral"} and payment.tariff_quote_id:
+  is_change=await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change"))
+  if is_change:return None
  key={"grant_subscription":"payment-grant","reverse_payment":"payment-reverse","grant_referral":"payment-referral"}[typ]+f":{payment.id}"
  await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type=typ,idempotency_key=key,status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
 async def claim(session,worker_id):
@@ -96,6 +99,7 @@ async def finalize(session,claim,result):
     payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review" if payment.fulfillment_status!="reversed" else payment.fulfillment_status; session.add(PaymentEvent(payment_id=payment.id,event_type="webhook_event_status_conflict",provider_status=observed,reason=f"{claim.event_type}_expected_{expected}",source="webhook_inbox"))
    elif transition.grant_allowed:
     payment.fulfillment_status="pending"; await ensure_fulfillment(session,payment,"grant_subscription")
+    if payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change")): payment.fulfillment_status="not_ready"
    elif transition.reason=="paid_after_cancel":
     queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for operation in queued: operation.status="cancelled"; operation.completed_at=now_utc()

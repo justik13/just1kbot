@@ -28,6 +28,11 @@ async def _entry(session,payment,user_id,typ,days,**kw):
     session.add(item); await session.flush(); return item,True
 async def grant(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
+    change_quote = payment and payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change"))
+    if change_quote:
+        payment.fulfillment_status="not_ready"; payment.fulfillment_last_error_code="tariff_change_legacy_grant_blocked"
+        op.status="dead"; op.last_error_code="tariff_change_legacy_grant_blocked"; op.completed_at=now_utc()
+        return
     manual=bool(op.payload.get("manual_without_provider_confirmation"))
     if (payment.provider_status!="succeeded" and not manual) or not user or user.is_deleted or user.is_banned:
         payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return

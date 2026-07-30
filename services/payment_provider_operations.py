@@ -4,7 +4,7 @@ import uuid
 from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from database.models import Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation
+from database.models import Payment, PaymentEvent, PaymentFulfillmentOperation, PaymentProviderOperation, TariffQuote
 from services.payment_lifecycle import project_legacy_status
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
@@ -124,6 +124,11 @@ async def finalize(session,claim,result,transport=YooKassaService):
         if result.ok:
             transition=await apply_provider_transition(session,payment,data,source=provider_transition_source(claim))
             if transition.outcome=="retry": result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
+            change_quote = bool(payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id, TariffQuote.operation_type=="change")))
+            if change_quote and transition.grant_allowed:
+                # Financial evidence is durable, but phase 6 deliberately has no
+                # entitlement/application route.
+                payment.fulfillment_status="not_ready"
             elif transition.grant_allowed:
                 payment.fulfillment_status="pending"
                 await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
