@@ -403,6 +403,17 @@ setup_redis() {
         else
             echo "maxmemory-policy allkeys-lru" >> "$redis_conf"
         fi
+
+        if grep -q "^appendonly" "$redis_conf"; then
+            sed -i 's/^appendonly .*/appendonly yes/' "$redis_conf"
+        else
+            echo "appendonly yes" >> "$redis_conf"
+        fi
+        if grep -q "^appendfsync" "$redis_conf"; then
+            sed -i 's/^appendfsync .*/appendfsync everysec/' "$redis_conf"
+        else
+            echo "appendfsync everysec" >> "$redis_conf"
+        fi
     else
         # Минимальный конфиг если файла нет
         [[ "$configure_credentials" == true ]] || { error "Redis config отсутствует при update deployment"; return 1; }
@@ -416,6 +427,8 @@ logfile /var/log/redis/redis-server.log
 requirepass ${REDIS_PASSWORD}
 maxmemory 256mb
 maxmemory-policy allkeys-lru
+appendonly yes
+appendfsync everysec
 EOF
     fi
 

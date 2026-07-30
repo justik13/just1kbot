@@ -25,7 +25,7 @@ from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
 
-from .common import _delete_server_background, _show_servers_list
+from .common import _show_servers_list
 
 router = Router()
 logger = logging.getLogger(__name__)

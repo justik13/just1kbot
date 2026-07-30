@@ -6,12 +6,11 @@ from cachetools import TTLCache
 from sqlalchemy import select, update
 
 from bot.constants import (
-    SELF_HEALING_MAX_PER_CYCLE,
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
 from config.settings import get_settings
-from database.connection import queue_post_commit_task, session_scope
+from database.connection import session_scope
 from database.models import Server, User, VPNProfile
 from services.amnezia_client import AmneziaClient
 from services.slots_cache import update_cached_peer_count
@@ -153,9 +152,6 @@ async def _traffic_sync_once():
 async def _process_server_traffic(server_info, api_clients):
     server_id = server_info["id"]
     updates_data = {}
-    healing_tasks = []
-    reverse_healing_tasks = []
-    disable_db_ids = []
     current_time = now_utc()
 
     async with session_scope() as session:
@@ -222,50 +218,24 @@ async def _process_server_traffic(server_info, api_clients):
                 (not is_active) or is_banned or is_subscription_expired
             )
 
-            if local_should_be_disabled:
-                if is_active:
-                    disable_db_ids.append(p_id)
-                if api_is_active:
-                    reason = (
-                        "banned"
-                        if is_banned
-                        else (
-                            "expired"
-                            if is_subscription_expired
-                            else "disabled"
-                        )
-                    )
-                    healing_tasks.append(
-                        {
-                            "profile_id": p_id,
-                            "api_url": server_info["api_url"],
-                            "api_key": server_info["api_key"],
-                            "peer_id": peer_id,
-                            "server_name": server_info["name"],
-                            "telegram_id": tg_id,
-                            "reason": reason,
-                            "target_status": "disabled",
-                            "expires_at": None,
-                            "clear_expires_at": False,
-                        }
-                    )
-            elif is_active and not api_is_active:
-                expires_ts = None
-                if sub_end and sub_end.year < 2100:
-                    expires_ts = int(sub_end.timestamp())
-                reverse_healing_tasks.append(
-                    {
-                        "profile_id": p_id,
-                        "api_url": server_info["api_url"],
-                        "api_key": server_info["api_key"],
-                        "peer_id": peer_id,
-                        "server_name": server_info["name"],
-                        "telegram_id": tg_id,
-                        "reason": "api_desync",
-                        "target_status": "active",
-                        "expires_at": expires_ts,
-                        "clear_expires_at": expires_ts is None,
-                    }
+            if local_should_be_disabled and api_is_active:
+                logger.debug(
+                    "Peer desync detected (read-only): "
+                    "server_id=%s, peer=%s, reason=%s",
+                    server_id,
+                    peer_id[:16],
+                    "banned"
+                    if is_banned
+                    else (
+                        "expired" if is_subscription_expired else "disabled"
+                    ),
+                )
+            elif is_active and not api_is_active and not local_should_be_disabled:
+                logger.debug(
+                    "Peer desync detected (read-only): "
+                    "server_id=%s, peer=%s, reason=api_desync",
+                    server_id,
+                    peer_id[:16],
                 )
 
             if (
@@ -309,26 +279,6 @@ async def _process_server_traffic(server_info, api_clients):
                         .where(VPNProfile.id == profile_id)
                         .values(**values)
                     )
-
-        if disable_db_ids:
-            await session.execute(
-                update(VPNProfile)
-                .where(VPNProfile.id.in_(disable_db_ids))
-                .values(is_active=False)
-            )
-
-        if healing_tasks:
-            queue_post_commit_task(
-                session,
-                lambda tasks=healing_tasks: _self_heal_peers(tasks),
-            )
-        if reverse_healing_tasks:
-            queue_post_commit_task(
-                session,
-                lambda tasks=reverse_healing_tasks: _self_heal_peers(
-                    tasks
-                ),
-            )
 
 
 async def _send_quota_alert(
@@ -385,10 +335,3 @@ async def _send_quota_alert(
                 )
     except Exception as e:
         logger.error("Failed to send quota alert: %s", e)
-
-
-async def _self_heal_peers(healing_tasks: list):
-    # Desired-state writes are produced by SubscriptionService.  Traffic is
-    # deliberately read-only and must never patch peers.
-    if healing_tasks:
-        logger.warning("Skipped %s legacy traffic self-heal writes", len(healing_tasks))

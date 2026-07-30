@@ -27,7 +27,6 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
     ttl=86400,
 )
 
-
 def _get_backoff_delay(retry_count: int) -> int:
     capped = min(retry_count, MAX_RETRY_COUNT)
 
@@ -54,12 +53,28 @@ def _maybe_reset_retry_on_type_change(
     notification_type: str,
 ) -> None:
     last_type = _last_notification_type.get(user.id)
+    if last_type is None:
+        last_type = _infer_last_notification_type(user)
 
     if last_type and last_type != notification_type:
         user.notification_retry_count = 0
         user.last_notification_attempt = None
 
     _last_notification_type[user.id] = notification_type
+
+
+def _infer_last_notification_type(user: User) -> str | None:
+    if user.notified_grace_12h:
+        return "grace_12h"
+    if user.notified_expired:
+        return "expired"
+    if user.notified_2h:
+        return "2h"
+    if user.notified_1d:
+        return "1d"
+    if user.notified_3d:
+        return "3d"
+    return None
 
 
 async def subscription_notifications_loop(

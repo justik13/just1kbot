@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import math
 import re
@@ -7,19 +6,14 @@ from urllib.parse import urlsplit, urlunsplit
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import delete as sql_delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
-from database.connection import session_scope
-from database.models import PendingAPIDeletion
 from database.repositories.servers_repo import (
     get_server_count,
     get_servers_paginated,
 )
-from services.amnezia_client import AmneziaClient
-from utils.datetime_helpers import now_utc
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
@@ -129,92 +123,3 @@ async def _show_server_card(
         )
     except TelegramBadRequest as e:
         logger.debug(f"_show_server_card edit_text failed: {e}")
-
-
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: ведём completed_peer_ids.
-# При timeout незавершённые пиры → failed, а не successful.
-# ──────────────────────────────────────────────────────────────
-async def _bulk_delete_peers_from_api(profiles_data, api_url: str, api_key: str):
-    """Compatibility shim: server deletion is now fulfilled by api_operations."""
-    return len(profiles_data), list(profiles_data)
-
-
-async def _delete_server_background(
-    bot,
-    admin_id: int,
-    server_name: str,
-    profiles_data: list,
-    api_url: str,
-    api_key: str,
-    deleted_profiles: int,
-):
-    if profiles_data:
-        api_fail, failed_peers = await _bulk_delete_peers_from_api(
-            profiles_data, api_url, api_key,
-        )
-        failed_peer_ids = {peer_id for _, peer_id in failed_peers}
-        success_peer_ids = [
-            peer_id
-            for _, peer_id in profiles_data
-            if peer_id not in failed_peer_ids
-        ]
-
-        if success_peer_ids:
-            try:
-                async with session_scope() as session:
-                    await session.execute(
-                        sql_delete(PendingAPIDeletion).where(
-                            PendingAPIDeletion.peer_id.in_(
-                                success_peer_ids
-                            ),
-                            PendingAPIDeletion.reason == "server_delete",
-                        )
-                    )
-            except Exception as e:
-                logger.error(
-                    f"Failed to cleanup pending deletions: {e}"
-                )
-
-        if failed_peers:
-            try:
-                async with session_scope() as session:
-                    current_time = now_utc()
-                    for _profile_id, peer_id in failed_peers:
-                        await session.execute(
-                            update(PendingAPIDeletion)
-                            .where(
-                                PendingAPIDeletion.peer_id == peer_id,
-                                PendingAPIDeletion.reason
-                                == "server_delete",
-                            )
-                            .values(
-                                attempts=1,
-                                last_attempt_at=current_time,
-                                last_error=(
-                                    "server_delete_background_failed"
-                                ),
-                            )
-                        )
-            except Exception as e:
-                logger.error(
-                    f"Failed to update pending deletions: {e}"
-                )
-
-        if failed_peers:
-            msg = (
-                f"⚠️ Сервер {server_name} удалён из БД "
-                f"({deleted_profiles} устр.),\n"
-                f"но {api_fail}/{len(profiles_data)} пиров "
-                f"не удалось удалить из API.\n"
-                f"Worker Cleanup подчистит позже."
-            )
-        else:
-            msg = f"✅ Сервер {server_name} удалён"
-    else:
-        msg = f"✅ Сервер {server_name} удалён"
-
-    try:
-        await bot.send_message(admin_id, msg)
-    except Exception as e:
-        logger.error(f"Failed to send background message: {e}")

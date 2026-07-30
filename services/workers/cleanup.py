@@ -335,13 +335,24 @@ async def _cleanup_dangling_peers():
 async def _process_pending_deletions():
     """Legacy queue is quarantine/report-only after durable migration."""
     async with session_scope() as session:
-        rows = (await session.execute(select(PendingAPIDeletion).where(PendingAPIDeletion.attempts >= 0))).scalars().all()
+        rows = (
+            await session.execute(
+                select(PendingAPIDeletion).where(
+                    PendingAPIDeletion.attempts >= 0
+                )
+            )
+        ).scalars().all()
+        if not rows:
+            return
         for row in rows:
             row.attempts = -1
             row.last_attempt_at = now_utc()
             row.last_error = f"{QUARANTINE_ERROR_PREFIX}: legacy worker disabled"
-        if rows:
-            logger.warning("Quarantined %s legacy pending deletions; no API writes performed", len(rows))
+        logger.warning(
+            "Quarantined %s legacy pending deletions; "
+            "no API writes performed",
+            len(rows),
+        )
 
 async def _cleanup_old_records():
     async with session_scope() as session:

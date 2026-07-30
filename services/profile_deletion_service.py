@@ -5,6 +5,7 @@ from database.models import APIOperation, Server, VPNProfile
 from services.api_operations_queue import (
     classify_create_side_effect_risk, ensure_delete_operation,
 )
+from utils.datetime_helpers import now_utc
 logger = logging.getLogger(__name__)
 
 class ProfileDeletionService:
@@ -49,7 +50,7 @@ class ProfileDeletionService:
                 risk = classify_create_side_effect_risk(create) if create else "may_have_created_peer"
                 if create and risk == "never_started":
                     create.status = "cancelled"
-                    create.completed_at = __import__("utils.datetime_helpers", fromlist=["now_utc"]).now_utc()
+                    create.completed_at = now_utc()
                     create.locked_at = create.locked_by = None
                     create.last_error_code = "create_cancelled_by_deletion"
                     await session.delete(profile)
