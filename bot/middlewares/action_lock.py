@@ -16,6 +16,7 @@ CALLBACK_PARAM_PATTERNS = {
     r'device_id=(\d+)': r'^\d+$',
     r'devices/(\d+)': r'^\d+$',
     r':(\d+):': r'^\d+$',
+    r':(\d+)$': r'^\d+$',
     # Server IDs: positive integers  
     r'server:(\d+)': r'^\d+$',
     r'servers/(\d+)': r'^\d+$',

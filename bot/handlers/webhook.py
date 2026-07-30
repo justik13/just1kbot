@@ -1,4 +1,6 @@
+import hashlib
 import ipaddress
+import json
 import logging
 import time
 import uuid
@@ -7,10 +9,14 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from aiohttp import web
+import redis.asyncio as aioredis
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert
 
 from bot.middlewares.correlation import set_request_id
+from config.settings import get_settings
 from database.connection import session_scope
+from database.models import WebhookInbox
 from services.audit_service import AuditService
 from services.payment_service import PaymentService
 from services.payment_service.alerts import (
@@ -19,6 +25,7 @@ from services.payment_service.alerts import (
 from services.yookassa_service import YooKassaService
 
 logger = logging.getLogger(__name__)
+_healthcheck_redis = None
 
 WEBHOOK_MAX_AGE_SECONDS = 300
 WEBHOOK_MAX_FUTURE_SKEW_SECONDS = 30
@@ -227,9 +234,6 @@ async def _verify_stale_webhook_via_api(
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     """Authenticate, validate and durably persist only; workers own all effects."""
-    import hashlib, json
-    from sqlalchemy.dialects.postgresql import insert
-    from database.models import WebhookInbox
     request_id = uuid.uuid4().hex[:8]
     set_request_id(request_id)
     peer_ip = _get_real_ip(request)
@@ -281,15 +285,8 @@ async def healthcheck_handler(
 
     # Проверка Redis
     try:
-        import redis.asyncio as aioredis
-        from config.settings import get_settings
-
-        settings = get_settings()
-        r = aioredis.from_url(
-            settings.REDIS_URL, socket_timeout=2.0,
-        )
+        r = _get_healthcheck_redis()
         await r.ping()
-        await r.aclose()
     except Exception as e:
         logger.warning("Healthcheck Redis failed: %s", e)
         return web.Response(
@@ -299,11 +296,29 @@ async def healthcheck_handler(
     return web.Response(status=200, text="OK")
 
 
+def _get_healthcheck_redis():
+    global _healthcheck_redis
+    if _healthcheck_redis is None:
+        settings = get_settings()
+        _healthcheck_redis = aioredis.from_url(
+            settings.REDIS_URL, socket_timeout=2.0,
+        )
+    return _healthcheck_redis
+
+
+async def _close_healthcheck_redis(app: web.Application) -> None:
+    global _healthcheck_redis
+    if _healthcheck_redis is not None:
+        await _healthcheck_redis.aclose()
+        _healthcheck_redis = None
+
+
 def setup_webhook_routes(app: web.Application):
     app.router.add_post(
         "/webhook/yookassa", yookassa_webhook_handler,
     )
     app.router.add_get("/health", healthcheck_handler)
+    app.on_cleanup.append(_close_healthcheck_redis)
     logger.info(
         "YooKassa webhook route registered: "
         "POST /webhook/yookassa"

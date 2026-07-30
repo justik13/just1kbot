@@ -190,10 +190,10 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
             confirmed_additional_payment_rub=required, bonus_hours=snapshot.remaining_bonus_hours)
     except TariffCalculationError:
         return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
-    fingerprint = balance_snapshot_fingerprint(user_id=user.id, subscription_end=user.subscription_end,
+    fingerprint = balance_snapshot_fingerprint(user_id=user_id, subscription_end=user.subscription_end,
                                                snapshot=snapshot)
     quote = TariffQuote(
-        public_id=uuid.uuid4(), user_id=user.id, operation_type="change",
+        public_id=uuid.uuid4(), user_id=user_id, operation_type="change",
         source_tariff_version_id=source_version.id, target_tariff_version_id=target_version.id,
         current_paid_hours=snapshot.remaining_paid_hours,
         current_paid_value_rub=snapshot.remaining_paid_value_rub,
