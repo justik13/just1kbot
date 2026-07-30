@@ -327,12 +327,14 @@ class PaymentService:
         active = bool(user and user.subscription_end and user.subscription_end > now_utc())
         if active and user.current_tariff_id is not None:
             current_tariff = await get_tariff_by_id(session, user.current_tariff_id)
-            if current_tariff is not None:
-                current_limit = getattr(current_tariff, "device_limit", 0)
-                new_limit = getattr(tariff, "device_limit", 0)
-                if current_limit != new_limit:
-                    # Foundation only: a later PR will consume a confirmed change quote.
-                    return None, "active_tariff_change_temporarily_unavailable"
+            if current_tariff is None:
+                # Тариф удалён → явная ошибка вместо молчаливого renew
+                return None, "current_tariff_deleted"
+            current_limit = getattr(current_tariff, "device_limit", 0)
+            new_limit = getattr(tariff, "device_limit", 0)
+            if current_limit != new_limit:
+                # Foundation only: a later PR will consume a confirmed change quote.
+                return None, "active_tariff_change_temporarily_unavailable"
         operation_type = "renew" if active and user.current_tariff_id is not None else "purchase"
         try:
             quote, version = await get_or_create_checkout_quote(
