@@ -272,6 +272,9 @@ class PaymentService:
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,"not_found"
         if payment.provider_status!="succeeded":return False,"provider_not_succeeded"
+        from services.payment_kind import is_tariff_change_payment
+        if await is_tariff_change_payment(session,payment):
+            return False,"tariff_change_legacy_grant_forbidden"
         await ensure_fulfillment(session,payment,"grant_subscription")
         return True,"queued"
 
@@ -282,6 +285,9 @@ class PaymentService:
         from services.payment_lifecycle import project_legacy_status
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,"Платёж не найден"
+        from services.payment_kind import is_tariff_change_payment
+        if await is_tariff_change_payment(session,payment):
+            return False,"tariff_change_legacy_grant_forbidden"
         operation=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}").with_for_update())
         if operation and operation.status=="processing":return False,"already_processing"
         if operation and operation.status=="succeeded":return True,"already_succeeded"
@@ -311,6 +317,13 @@ class PaymentService:
         if decimal_amount is None or not tariff: return None,None
         user = await lock_checkout_user(session, user_id)
         if user is None: return None,"checkout_user_missing"
+        from services.checkout_conflicts import get_unfinished_financial_checkouts, is_valid_reusable_purchase_intent
+        conflicts = await get_unfinished_financial_checkouts(session, user_id=user_id)
+        if conflicts:
+            if len(conflicts) == 1 and await is_valid_reusable_purchase_intent(
+                    session, conflicts[0], user_id=user_id, tariff_id=tariff_id):
+                return conflicts[0].payment, conflicts[0].payment.payment_url
+            return None,"unfinished_checkout_exists"
         active = bool(user and user.subscription_end and user.subscription_end > now_utc())
         if active and user.current_tariff_id != tariff_id:
             # Foundation only: a later PR will consume a confirmed change quote.
@@ -362,7 +375,9 @@ class PaymentService:
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,{"error":"not_found"}
         if payment.external_id and payment.provider_status not in {"refunded","canceled"}: await ensure_reconcile_payment_operation(session,payment,reason="user_refresh")
-        if payment.provider_status=="succeeded" and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
+        from services.payment_kind import is_tariff_change_payment
+        is_change=await is_tariff_change_payment(session,payment)
+        if payment.provider_status=="succeeded" and not is_change and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
         return True,{"provider_status":payment.provider_status,"fulfillment_status":payment.fulfillment_status,"reconciliation_status":payment.reconciliation_status}
 
     @staticmethod
@@ -380,7 +395,10 @@ class PaymentService:
                 quote.diagnostic_reason="checkout_abandoned_by_user"
         create_op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="create_payment").with_for_update())
         if not payment.external_id:
-            if create_op and create_op.status=="pending" and create_op.attempts==0: create_op.status="cancelled"; create_op.completed_at=now_utc()
+            if create_op and create_op.status=="pending" and create_op.attempts==0:
+                create_op.status="cancelled"; create_op.completed_at=now_utc(); payment.provider_status="not_created"
+            elif create_op is None and not payment.provider_required:
+                payment.provider_status="not_created"
             elif create_op and create_op.attempts>0: payment.reconciliation_status="required"
             return True
         if payment.provider_status=="waiting_for_capture": await ensure_cancel_payment_operation(session,payment)

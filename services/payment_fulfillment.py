@@ -12,6 +12,7 @@ from services.payment_lifecycle import project_legacy_status
 from services.payment_queue_timing import FULFILLMENT_LEASE_SECONDS
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from services.payment_kind import is_tariff_change_payment
 class PaymentFulfillmentOperationOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
 class FulfillmentClaim: operation_id:int; worker_id:str; attempt_number:int; operation_type:str
@@ -28,6 +29,11 @@ async def _entry(session,payment,user_id,typ,days,**kw):
     session.add(item); await session.flush(); return item,True
 async def grant(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
+    change_quote = payment and await is_tariff_change_payment(session,payment)
+    if change_quote:
+        payment.fulfillment_status="not_ready"; payment.fulfillment_last_error_code="tariff_change_legacy_grant_blocked"
+        op.status="dead"; op.last_error_code="tariff_change_legacy_grant_blocked"; op.completed_at=now_utc()
+        return
     manual=bool(op.payload.get("manual_without_provider_confirmation"))
     if (payment.provider_status!="succeeded" and not manual) or not user or user.is_deleted or user.is_banned:
         payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
@@ -95,6 +101,7 @@ async def grant(session,op):
         await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{payment.id}",status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
 async def referral(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
+    if await is_tariff_change_payment(session,payment): op.status="dead"; op.last_error_code="tariff_change_legacy_grant_blocked"; op.completed_at=now_utc(); return
     reversal=await session.scalar(select(EntitlementEntry.id).where(EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
     if not user or user.is_deleted or user.is_banned or not user.referred_by or user.referred_by==user.telegram_id or payment.provider_status!="succeeded" or payment.fulfillment_status!="succeeded" or reversal:
         op.status="cancelled"; op.completed_at=now_utc(); return
@@ -121,6 +128,7 @@ async def referral(session,op):
     payment.referral_user_bonus_days=user_days; payment.referral_referrer_bonus_days=ref_days; op.status="succeeded"; op.completed_at=now_utc()
 async def reverse(session,op):
     payment=await session.scalar(select(Payment).where(Payment.id==op.payment_id).with_for_update()); user=await session.scalar(select(User).where(User.id==payment.user_id).with_for_update())
+    if await is_tariff_change_payment(session,payment): payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="tariff_change_legacy_reversal_blocked"; op.status="dead"; op.last_error_code="tariff_change_legacy_reversal_blocked"; op.completed_at=now_utc(); return
     grant_entry=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type.in_(("payment_grant","manual_grant"))))
     reversal=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="payment_reversal"))
     user_bonus=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==payment.user_id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type=="referral_user_bonus"))

@@ -19,6 +19,7 @@ from services.subscription_balance_service import get_subscription_balance_snaps
 from services.tariff_value_calculator import (
     TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
 )
+from services.checkout_conflicts import get_unfinished_financial_checkout
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,9 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="subscription_inactive")
     if user.current_tariff_id is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
+
+    if await get_unfinished_financial_checkout(session, user_id=user_id):
+        return TariffChangeQuoteResult(failure_code="unfinished_checkout_exists")
 
     active = await get_active_financial_quotes_for_update(
         session, user_id=user_id, as_of=as_of)

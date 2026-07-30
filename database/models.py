@@ -313,6 +313,7 @@ class TariffQuote(Base):
         CheckConstraint("(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)", name="ck_tariff_quotes_lifecycle_timestamps"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
         Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+        Index("uq_tariff_quotes_payment_id", "payment_id", unique=True, postgresql_where=text("payment_id IS NOT NULL")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     public_id: Mapped[object] = mapped_column(UUID(as_uuid=True), unique=True)
@@ -387,6 +388,7 @@ class Payment(Base):
         Index("ix_payments_tariff_status", "tariff_id", "status"),
         Index("uq_payments_public_order_id_not_null", "public_order_id", unique=True, postgresql_where=text("public_order_id IS NOT NULL")),
         Index("uq_payments_provider_idempotency_key_not_null", "provider_idempotency_key", unique=True, postgresql_where=text("provider_idempotency_key IS NOT NULL")),
+        Index("uq_payments_tariff_quote", "tariff_quote_id", unique=True, postgresql_where=text("tariff_quote_id IS NOT NULL")),
         CheckConstraint("provider_status IN ('not_created','creating','pending','waiting_for_capture','succeeded','canceled','refunded','unknown','manual_review')", name="ck_payments_provider_status"),
         CheckConstraint("fulfillment_status IN ('not_ready','pending','processing','succeeded','failed','reversal_pending','reversed','manual_review')", name="ck_payments_fulfillment_status"),
         CheckConstraint("reconciliation_status IN ('ok','required','mismatch','manual_review')", name="ck_payments_reconciliation_status"),
@@ -420,6 +422,7 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(30), default="pending", index=True)
     public_order_id: Mapped[str | None] = mapped_column(String(64))
     provider_idempotency_key: Mapped[str | None] = mapped_column(String(64))
+    provider_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     provider_status: Mapped[str] = mapped_column(String(30), default="not_created", server_default=text("'not_created'"))
     fulfillment_status: Mapped[str] = mapped_column(String(30), default="not_ready", server_default=text("'not_ready'"))
     reconciliation_status: Mapped[str] = mapped_column(String(30), default="ok", server_default=text("'ok'"))
@@ -473,6 +476,7 @@ class PaymentProviderOperation(Base):
         CheckConstraint("status IN ('pending','processing','retry','succeeded','dead','cancelled')", name="ck_payment_provider_operations_status"),
         Index("ix_payment_provider_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_payment_provider_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+        Index("uq_payment_provider_create", "payment_id", unique=True, postgresql_where=text("operation_type='create_payment'")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)
