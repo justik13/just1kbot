@@ -4,7 +4,6 @@ from decimal import Decimal
 
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from bot.middlewares.user_context import invalidate_user_cache
 from database.connection import queue_post_commit_task, session_scope
@@ -20,7 +19,6 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.tariff_quotes_repo import CheckoutQuoteConflictError, get_or_create_checkout_quote, lock_checkout_user
 from services.audit_service import AuditService
 from services.yookassa_service import YooKassaService
-from services.referral_service import ReferralService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
@@ -122,8 +120,12 @@ async def _notify_payment_success(
         try:
             async with session_scope() as session:
                 await mark_user_bot_blocked(session, telegram_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "mark_user_bot_blocked failed in notify_payment_success: %s",
+                e,
+                exc_info=True,
+            )
     except Exception as e:
         logger.error(
             "Failed to send payment success notification to %s: %s",

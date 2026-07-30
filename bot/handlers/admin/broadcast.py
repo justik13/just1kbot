@@ -412,7 +412,7 @@ async def _send_broadcast_to_users_with_resume(
                 parse_mode="HTML",
             )
         except Exception:
-            pass
+            logger.debug("Failed to send broadcast error alert to admin %s", admin_id, exc_info=True)
 
     finally:
         if stop_event:

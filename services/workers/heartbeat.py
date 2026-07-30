@@ -92,8 +92,8 @@ async def _check_circuit_breakers():
                 server = await get_server_by_api_url(session, api_url)
                 if server:
                     server_name = server.name
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to fetch server name for heartbeat alert: %s", e, exc_info=True)
 
         alert_msg = (
             f"⚠️ <b>Сервер Amnezia недоступен!</b>\n"

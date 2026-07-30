@@ -35,6 +35,6 @@ class DBSessionMiddleware(BaseMiddleware):
                         texts.ERROR_TECHNICAL_MESSAGE,
                     )
             except Exception:
-                pass
+                logger.debug("Failed to answer DB error callback", exc_info=True)
 
             return None

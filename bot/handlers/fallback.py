@@ -4,9 +4,13 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
+import logging
+
 from bot import texts
 from bot.keyboards import get_back_button
 from utils.telegram import render_hub
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -78,4 +82,4 @@ async def stale_callback_fallback(
             show_alert=True,
         )
     except Exception:
-        pass
+        logger.debug("Failed to answer stale callback fallback", exc_info=True)

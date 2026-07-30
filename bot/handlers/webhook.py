@@ -17,11 +17,6 @@ from bot.middlewares.correlation import set_request_id
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import WebhookInbox
-from services.audit_service import AuditService
-from services.payment_service import PaymentService
-from services.payment_service.alerts import (
-    _send_payment_not_found_alert_now,
-)
 from services.yookassa_service import YooKassaService
 
 logger = logging.getLogger(__name__)
@@ -119,117 +114,8 @@ async def _verify_stale_webhook_via_api(
     normalized_status: str,
     transaction_id: str,
 ) -> tuple[bool, Optional[dict]]:
-    api_data = await YooKassaService.get_payment(transaction_id)
-    if not api_data:
-        return False, None
-
-    api_status_raw = api_data.get("status", "")
-    api_status_map = {
-        "succeeded": "CONFIRMED",
-        "canceled": "CANCELED",
-        "pending": "PENDING",
-        "processing": "PROCESSING",
-        "waiting_for_capture": "WAITING_FOR_CAPTURE",
-        "refunded": "REFUNDED",
-    }
-    api_status = api_status_map.get(
-        api_status_raw, api_status_raw.upper(),
-    )
-
-    if normalized_status == "CHARGEBACKED":
-        if api_status not in {
-            "REFUNDED", "CANCELED", "CHARGEBACKED"
-        }:
-            logger.warning(
-                "Stale webhook chargeback status mismatch: "
-                "callback=%s, api=%s, payment=%s",
-                normalized_status, api_status, transaction_id,
-            )
-            return False, None
-
-        # Проверка суммы для chargeback
-        callback_amount_str = None
-        amount_obj = webhook_object.get("amount")
-        if isinstance(amount_obj, dict):
-            callback_amount_str = amount_obj.get("value")
-        api_amount = api_data.get("amount", {})
-        api_amount_str = (
-            api_amount.get("value")
-            if isinstance(api_amount, dict)
-            else None
-        )
-        if callback_amount_str and api_amount_str:
-            cb_decimal = _safe_decimal(callback_amount_str)
-            api_decimal = _safe_decimal(api_amount_str)
-            if cb_decimal is not None and api_decimal is not None:
-                if cb_decimal != api_decimal:
-                    logger.warning(
-                        "Stale webhook chargeback amount mismatch: "
-                        "callback=%s, api=%s, payment=%s",
-                        callback_amount_str, api_amount_str,
-                        transaction_id,
-                    )
-                    return False, None
-
-        # Проверка payload для chargeback
-        callback_metadata = webhook_object.get("metadata") or {}
-        callback_payload = callback_metadata.get("payload", "")
-        api_metadata = api_data.get("metadata") or {}
-        api_payload = api_metadata.get("payload", "")
-        if callback_payload != api_payload:
-            logger.warning(
-                "Stale webhook chargeback payload mismatch: "
-                "callback=%s, api=%s, payment=%s",
-                callback_payload, api_payload, transaction_id,
-            )
-            return False, None
-
-        return True, api_data
-
-    if api_status != normalized_status:
-        logger.warning(
-            "Stale webhook status mismatch: "
-            "callback=%s, api=%s, payment=%s",
-            normalized_status, api_status, transaction_id,
-        )
-        return False, None
-
-    callback_amount_str = None
-    amount_obj = webhook_object.get("amount")
-    if isinstance(amount_obj, dict):
-        callback_amount_str = amount_obj.get("value")
-    api_amount = api_data.get("amount", {})
-    api_amount_str = (
-        api_amount.get("value")
-        if isinstance(api_amount, dict)
-        else None
-    )
-    if callback_amount_str and api_amount_str:
-        cb_decimal = _safe_decimal(callback_amount_str)
-        api_decimal = _safe_decimal(api_amount_str)
-        if cb_decimal is not None and api_decimal is not None:
-            if cb_decimal != api_decimal:
-                logger.warning(
-                    "Stale webhook amount mismatch: "
-                    "callback=%s, api=%s, payment=%s",
-                    callback_amount_str, api_amount_str,
-                    transaction_id,
-                )
-                return False, None
-
-    callback_metadata = webhook_object.get("metadata") or {}
-    callback_payload = callback_metadata.get("payload", "")
-    api_metadata = api_data.get("metadata") or {}
-    api_payload = api_metadata.get("payload", "")
-    if callback_payload != api_payload:
-        logger.warning(
-            "Stale webhook payload mismatch: "
-            "callback=%s, api=%s, payment=%s",
-            callback_payload, api_payload, transaction_id,
-        )
-        return False, None
-
-    return True, api_data
+    """Deprecated: legacy function kept for backward compatibility only."""
+    return False, None
 
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:
@@ -262,7 +148,6 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     try:
         async with session_scope() as session:
             await session.execute(insert(WebhookInbox).values(provider="yookassa",event_key=event_key,event_type=event,provider_object_id=str(provider_object_id),payment_external_id=str(payment_external_id),public_order_id=public_order_id,payload=payload).on_conflict_do_nothing(constraint="uq_webhook_inbox_provider_event_key"))
-            await session.commit()
     except Exception:
         logger.exception("[%s] webhook inbox commit failed",request_id)
         return web.Response(status=500,text="Database unavailable")

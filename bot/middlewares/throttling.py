@@ -39,7 +39,7 @@ class ThrottlingMiddleware(BaseMiddleware):
                         texts.ERROR_TOO_FREQUENT, show_alert=False
                     )
             except Exception:
-                pass
+                logger.debug("Failed to answer throttled callback", exc_info=True)
             return
 
         self._global_throttle[global_key] = True
@@ -68,7 +68,7 @@ class ThrottlingMiddleware(BaseMiddleware):
                         texts.ERROR_TOO_FREQUENT, show_alert=False
                     )
                 except Exception:
-                    pass
+                    logger.debug("Failed to answer duplicate callback", exc_info=True)
             elif isinstance(event, Message):
                 logger.debug(
                     f"Throttled message from user {user_id}: {action_key}"

@@ -3,7 +3,7 @@ import logging
 import time
 from datetime import timedelta
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select
 
 from database.connection import session_scope
 from database.models import (

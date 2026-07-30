@@ -56,7 +56,7 @@ class BanCheckMiddleware(BaseMiddleware):
                             show_alert=True,
                         )
                     except Exception:
-                        pass
+                        logger.debug("Failed to answer banned user callback", exc_info=True)
 
                 elif isinstance(event, Message):
                     try:
@@ -64,7 +64,7 @@ class BanCheckMiddleware(BaseMiddleware):
                             texts.ERROR_BANNED_MESSAGE,
                         )
                     except Exception:
-                        pass
+                        logger.debug("Failed to answer banned user message", exc_info=True)
 
             else:
                 logger.debug(

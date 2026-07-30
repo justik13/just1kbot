@@ -175,8 +175,12 @@ async def _notify_client_manual_review_now(
                 await mark_user_bot_blocked(
                     session, user_telegram_id
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "mark_user_bot_blocked failed for manual review: %s",
+                e,
+                exc_info=True,
+            )
     except Exception as e:
         logger.error(
             "Failed to notify client about manual review: %s", e
@@ -298,8 +302,12 @@ async def _notify_client_paid_after_cancel_now(
                 await mark_user_bot_blocked(
                     session, user_telegram_id
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "mark_user_bot_blocked failed for paid_after_cancel: %s",
+                e,
+                exc_info=True,
+            )
     except Exception as e:
         logger.error("Failed to notify client: %s", e)
 
@@ -360,8 +368,12 @@ async def _notify_client_chargeback_now(
                 await mark_user_bot_blocked(
                     session, user_telegram_id
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "mark_user_bot_blocked failed for chargeback: %s",
+                e,
+                exc_info=True,
+            )
     except Exception as e:
         logger.error(
             "Failed to send chargeback notification: %s", e

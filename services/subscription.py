@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,6 +169,8 @@ class SubscriptionService:
                 referred_by,
             )
         except IntegrityError:
+            # Rollback only the failed INSERT, not the entire transaction from middleware.
+            # The session remains usable for the subsequent SELECT.
             await session.rollback()
 
             user = await get_user_by_telegram_id_any(session, telegram_id)

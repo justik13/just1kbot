@@ -14,9 +14,6 @@ async def _run_claim(module,claim):
   if module is provider:
    result=await provider.perform_http(claim)
    async with session_scope() as session: await provider.finalize(session,claim,result)
-  elif module is webhook_inbox:
-   result=await webhook_inbox.fetch_provider(claim)
-   async with session_scope() as session: await webhook_inbox.finalize(session,claim,result)
   else:
    async with session_scope() as session: await fulfillment.execute(session,claim)
  except asyncio.CancelledError: raise
@@ -25,7 +22,6 @@ async def _run_claim(module,claim):
   try:
    async with session_scope() as session:
     if module is provider: await provider.finalize_provider_failure(session,claim,error_code=type(exc).__name__,retryable=True)
-    elif module is webhook_inbox: await webhook_inbox.finalize_webhook_failure(session,claim,error_code=type(exc).__name__,retryable=True)
     else: await fulfillment.finalize_fulfillment_failure(session,claim,error_code=type(exc).__name__,retryable=True)
   except Exception: logger.error("Payment failure finalizer rejected stale ownership queue=%s",module.__name__)
 async def payment_pipeline_loop(bot,shutdown_event:asyncio.Event)->None:

@@ -108,7 +108,7 @@ async def global_error_handler(
         try:
             await state.clear()
         except Exception:
-            pass
+            logger.debug("Failed to clear FSM state in error handler", exc_info=True)
 
     try:
         settings = get_settings()
@@ -134,7 +134,7 @@ async def global_error_handler(
                         admin_id, error_msg, parse_mode="HTML"
                     )
                 except Exception:
-                    pass
+                    logger.debug("Failed to send error alert to admin %s", admin_id, exc_info=True)
     except Exception as e:
         logger.error("[%s] Failed to send error alert: %s", request_id, e)
 
@@ -148,7 +148,7 @@ async def global_error_handler(
                 texts.ERROR_TECHNICAL_MESSAGE, parse_mode="HTML"
             )
     except Exception:
-        pass
+        logger.debug("Failed to answer error update", exc_info=True)
 
     return True
 

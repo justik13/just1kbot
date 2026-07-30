@@ -202,7 +202,7 @@ class ActionLockMiddleware(BaseMiddleware):
                     show_alert=True,
                 )
             except Exception:
-                pass
+                logger.debug("Failed to answer invalid callback", exc_info=True)
 
             logger.warning(
                 "Invalid callback data rejected for user %d: %s",
@@ -220,7 +220,7 @@ class ActionLockMiddleware(BaseMiddleware):
                     show_alert=True,
                 )
             except Exception:
-                pass
+                logger.debug("Failed to answer stale callback", exc_info=True)
 
             return None
 
@@ -240,7 +240,7 @@ class ActionLockMiddleware(BaseMiddleware):
                         show_alert=True,
                     )
                 except Exception:
-                    pass
+                    logger.debug("Failed to answer parse error callback", exc_info=True)
 
                 return None
 
@@ -253,7 +253,7 @@ class ActionLockMiddleware(BaseMiddleware):
                     show_alert=False,
                 )
             except Exception:
-                pass
+                logger.debug("Failed to answer busy lock callback", exc_info=True)
 
             logger.debug(
                 "Action blocked for user %d: %s (lock busy)",
@@ -279,6 +279,6 @@ class ActionLockMiddleware(BaseMiddleware):
                         show_alert=True,
                     )
                 except Exception:
-                    pass
+                    logger.debug("Failed to answer handler error callback", exc_info=True)
 
                 return None
