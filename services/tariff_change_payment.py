@@ -31,6 +31,23 @@ def _failure(code: str) -> TariffChangePaymentResult:
     return TariffChangePaymentResult(None, False, None, code)
 
 
+def _valid_create_payload(payment: Payment, payload: object) -> bool:
+    if not isinstance(payload, dict) or set(payload) != {"amount", "description", "confirmation", "metadata", "capture"}:
+        return False
+    return (
+        payload.get("amount") == {"value": format(payment.amount, ".2f"), "currency": payment.currency}
+        and payload.get("capture") is True
+        and payload.get("metadata") == {"order_id": payment.public_order_id,
+                                        "local_payment_id": str(payment.id)}
+        and isinstance(payload.get("description"), str) and bool(payload["description"])
+        and isinstance(payload.get("confirmation"), dict)
+        and set(payload["confirmation"]) == {"type", "return_url"}
+        and payload["confirmation"].get("type") == "redirect"
+        and isinstance(payload["confirmation"].get("return_url"), str)
+        and bool(payload["confirmation"]["return_url"])
+    )
+
+
 async def create_tariff_change_payment(
     session: AsyncSession, *, user_id: int, quote_public_id: uuid.UUID | str,
     bot_username: str, as_of: datetime,
@@ -55,10 +72,6 @@ async def create_tariff_change_payment(
         return _failure("quote_not_found")
     if quote.operation_type != "change":
         return _failure("quote_wrong_operation")
-    if quote.status != "active":
-        return _failure("quote_" + str(quote.status))
-    if quote.expires_at is None or as_of >= quote.expires_at:
-        return _failure("quote_expired")
     frozen = (quote.source_tariff_version_id, quote.target_tariff_version_id,
               quote.balance_as_of, quote.source_subscription_end,
               quote.source_balance_fingerprint, quote.source_entitlement_entry_ids,
@@ -95,6 +108,8 @@ async def create_tariff_change_payment(
             payment.snapshot_amount != amount,
             payment.currency != quote.currency,
             payment.snapshot_currency != quote.currency,
+            payment.snapshot_duration_days is not None,
+            payment.snapshot_device_limit is not None,
         )):
             return _failure("quote_payment_conflict")
         operations = list((await session.scalars(select(PaymentProviderOperation).where(
@@ -111,44 +126,23 @@ async def create_tariff_change_payment(
                  payment.provider_status != "not_created"))):
             return _failure("provider_operation_conflict")
         if positive:
-            settings = get_settings()
-            expected = create_payload(
-                payment, f"Доплата за смену тарифа ({target.name_snapshot})",
-                settings.YOOKASSA_RETURN_URL.format(bot_username=bot_username.lstrip("@")),
-            )
-            if (op.idempotency_key != payment.provider_idempotency_key or op.payload != expected or
-                    op.payload.get("metadata") != {"order_id": payment.public_order_id,
-                                                   "local_payment_id": str(payment.id)}):
+            if op.idempotency_key != payment.provider_idempotency_key or not _valid_create_payload(payment, op.payload):
                 return _failure("provider_operation_conflict")
+        if quote.status == "manual_review" or quote.diagnostic_reason:
+            return _failure("quote_manual_review")
+        if quote.status not in {"active", "expired"}:
+            return _failure("quote_" + str(quote.status))
         return TariffChangePaymentResult(payment, False, op, None)
     if quote.payment_id is not None or by_quote is not None:
         return _failure("quote_payment_conflict")
 
-    # A checkout conflicts until provider impossibility and legacy fulfillment
-    # finality are both established.  `abandoned` alone is never evidence.
-    from sqlalchemy import and_, exists, or_
-    from database.models import PaymentFulfillmentOperation
-    provider_unfinished = exists(select(PaymentProviderOperation.id).where(
-        PaymentProviderOperation.payment_id == Payment.id,
-        PaymentProviderOperation.status.in_(("pending", "processing", "retry")),
-    ))
-    fulfillment_unfinished = exists(select(PaymentFulfillmentOperation.id).where(
-        PaymentFulfillmentOperation.payment_id == Payment.id,
-        PaymentFulfillmentOperation.status.in_(("pending", "processing", "retry")),
-    ))
-    conflict = await session.scalar(select(Payment.id).join(
-        TariffQuote, TariffQuote.id == Payment.tariff_quote_id,
-    ).where(
-        Payment.user_id == user_id,
-        TariffQuote.operation_type.in_(("purchase", "renew")),
-        or_(
-            Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown", "manual_review")),
-            provider_unfinished,
-            and_(Payment.provider_status == "succeeded",
-                 Payment.fulfillment_status.not_in(("succeeded", "reversed"))),
-            fulfillment_unfinished,
-        ),
-    ).limit(1))
+    if quote.status != "active":
+        return _failure("quote_" + str(quote.status))
+    if quote.expires_at is None or as_of >= quote.expires_at:
+        return _failure("quote_expired")
+
+    from services.checkout_conflicts import get_unfinished_financial_checkout
+    conflict = await get_unfinished_financial_checkout(session, user_id=user_id)
     if conflict is not None:
         return _failure("unfinished_checkout_exists")
 

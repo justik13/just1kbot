@@ -133,6 +133,25 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.provider_operation.idempotency_key, first.payment.provider_idempotency_key)
             self.assertEqual(first.provider_operation.payload["metadata"], {"order_id": first.payment.public_order_id, "local_payment_id": str(first.payment.id)})
 
+    async def test_phase6_retry_after_expiry_returns_immutable_intent(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            quote = (await create_tariff_change_quote(session,user_id=user,target_tariff_id=target,as_of=as_of)).quote
+            first = await create_tariff_change_payment(session,user_id=user,quote_public_id=quote.public_id,bot_username="bot",as_of=as_of)
+            payment_id, operation_id, key = first.payment.id, first.provider_operation.id, first.payment.provider_idempotency_key
+        async with self.sessions.begin() as session:
+            repeated = await create_tariff_change_payment(session,user_id=user,quote_public_id=quote.public_id,bot_username="different_bot",as_of=quote.expires_at+timedelta(seconds=1))
+            self.assertFalse(repeated.created)
+            self.assertEqual((repeated.payment.id,repeated.provider_operation.id,repeated.payment.provider_idempotency_key),(payment_id,operation_id,key))
+
+    async def test_quote_less_legacy_unknown_payment_blocks_change_quote(self):
+        user, source, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            await session.execute(text("INSERT INTO payments(user_id,tariff_id,amount,currency,status,provider_status,fulfillment_status,reconciliation_status,checkout_status,referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at,provider_required) VALUES(:u,:t,90,'RUB','pending','unknown','not_ready','required','abandoned',0,0,:n,:n,true)"),{"u":user,"t":source,"n":as_of})
+        async with self.sessions.begin() as session:
+            result=await create_tariff_change_quote(session,user_id=user,target_tariff_id=target,as_of=as_of)
+            self.assertEqual(result.failure_code,"unfinished_checkout_exists")
+
     async def test_phase6_malformed_uuid_and_exact_expiry_fail_closed(self):
         user, _, target, as_of = await self.seed()
         async with self.sessions.begin() as session:

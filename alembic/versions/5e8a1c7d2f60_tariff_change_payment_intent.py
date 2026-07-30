@@ -30,7 +30,16 @@ def upgrade():
           p.tariff_version_id IS DISTINCT FROM q.target_tariff_version_id OR p.tariff_id IS DISTINCT FROM v.tariff_id OR
           p.amount IS DISTINCT FROM q.confirmed_payment_required_rub OR p.snapshot_amount IS DISTINCT FROM q.confirmed_payment_required_rub OR
           p.currency IS DISTINCT FROM q.currency OR p.snapshot_currency IS DISTINCT FROM q.currency OR
-          p.public_order_id IS NULL OR p.provider_required IS DISTINCT FROM (p.amount>0)))
+          p.public_order_id IS NULL OR p.snapshot_duration_days IS NOT NULL OR p.snapshot_device_limit IS NOT NULL OR
+          p.amount::text IN ('NaN','Infinity','-Infinity') OR p.amount<0 OR p.provider_required IS DISTINCT FROM (p.amount>0) OR
+          (p.amount>0 AND (SELECT count(*) FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment')<>1) OR
+          (p.amount>0 AND EXISTS (SELECT 1 FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment' AND
+             (o.idempotency_key IS DISTINCT FROM p.provider_idempotency_key OR o.payload#>>'{amount,value}' IS DISTINCT FROM to_char(p.amount,'FM9999999990.00') OR
+              o.payload#>>'{amount,currency}' IS DISTINCT FROM p.currency OR o.payload->>'capture' IS DISTINCT FROM 'true' OR
+              o.payload#>>'{metadata,order_id}' IS DISTINCT FROM p.public_order_id OR o.payload#>>'{metadata,local_payment_id}' IS DISTINCT FROM p.id::text OR
+              (SELECT count(*) FROM jsonb_object_keys(o.payload))<>5 OR NOT (o.payload ?& ARRAY['amount','description','confirmation','metadata','capture'])))) OR
+          (p.amount=0 AND ((SELECT count(*) FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment')<>0 OR
+             p.provider_idempotency_key IS NOT NULL OR p.external_id IS NOT NULL OR p.payment_url IS NOT NULL OR p.paid_at IS NOT NULL OR p.provider_confirmed_at IS NOT NULL))))
         OR EXISTS (SELECT 1 FROM payments p JOIN tariff_quotes q ON q.id=p.tariff_quote_id WHERE q.operation_type='change' AND q.payment_id IS DISTINCT FROM p.id)
       THEN RAISE EXCEPTION 'conflicting legacy tariff change payment rows'; END IF;
     END $$
@@ -40,19 +49,26 @@ def upgrade():
 
     _exec_many(r"""
     CREATE FUNCTION phase6_validate_change_payment() RETURNS trigger LANGUAGE plpgsql AS $$
-    DECLARE q tariff_quotes%ROWTYPE; p payments%ROWTYPE; v tariff_versions%ROWTYPE; n integer;
+    DECLARE q tariff_quotes%ROWTYPE; p payments%ROWTYPE; v tariff_versions%ROWTYPE; n integer; create_op payment_provider_operations%ROWTYPE;
     BEGIN
       IF TG_TABLE_NAME='payments' THEN p:=NEW; IF p.tariff_quote_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO q FROM tariff_quotes WHERE id=p.tariff_quote_id;
       ELSE q:=NEW; IF q.payment_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO p FROM payments WHERE id=q.payment_id; END IF;
       IF q.operation_type IS DISTINCT FROM 'change' THEN RETURN NULL; END IF;
       SELECT * INTO v FROM tariff_versions WHERE id=q.target_tariff_version_id;
       SELECT count(*) INTO n FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment';
+      IF n=1 THEN SELECT * INTO create_op FROM payment_provider_operations x WHERE x.payment_id=p.id AND x.operation_type='create_payment'; END IF;
       IF p.id IS NULL OR v.id IS NULL OR q.payment_id IS DISTINCT FROM p.id OR p.tariff_quote_id IS DISTINCT FROM q.id
          OR p.user_id IS DISTINCT FROM q.user_id OR p.tariff_version_id IS DISTINCT FROM q.target_tariff_version_id
          OR p.tariff_id IS DISTINCT FROM v.tariff_id OR p.amount IS DISTINCT FROM q.confirmed_payment_required_rub
          OR p.snapshot_amount IS DISTINCT FROM q.confirmed_payment_required_rub OR p.currency IS DISTINCT FROM q.currency
          OR p.snapshot_currency IS DISTINCT FROM q.currency OR q.currency IS DISTINCT FROM 'RUB' OR p.public_order_id IS NULL
-         OR p.provider_required IS DISTINCT FROM (p.amount>0) OR (p.provider_required AND (p.provider_idempotency_key IS NULL OR n<>1))
+         OR p.snapshot_duration_days IS NOT NULL OR p.snapshot_device_limit IS NOT NULL
+         OR p.amount::text IN ('NaN','Infinity','-Infinity') OR p.amount<0
+         OR p.provider_required IS DISTINCT FROM (p.amount>0) OR (p.provider_required AND (p.provider_idempotency_key IS NULL OR n<>1
+             OR create_op.idempotency_key IS DISTINCT FROM p.provider_idempotency_key OR create_op.payload#>>'{amount,value}' IS DISTINCT FROM to_char(p.amount,'FM9999999990.00')
+             OR create_op.payload#>>'{amount,currency}' IS DISTINCT FROM p.currency OR create_op.payload->>'capture' IS DISTINCT FROM 'true'
+             OR create_op.payload#>>'{metadata,order_id}' IS DISTINCT FROM p.public_order_id OR create_op.payload#>>'{metadata,local_payment_id}' IS DISTINCT FROM p.id::text
+             OR (SELECT count(*) FROM jsonb_object_keys(create_op.payload))<>5 OR NOT (create_op.payload ?& ARRAY['amount','description','confirmation','metadata','capture'])))
          OR (NOT p.provider_required AND (p.provider_idempotency_key IS NOT NULL OR n<>0 OR p.external_id IS NOT NULL OR p.payment_url IS NOT NULL
              OR p.paid_at IS NOT NULL OR p.provider_confirmed_at IS NOT NULL OR p.provider_status IS DISTINCT FROM 'not_created'))
       THEN RAISE EXCEPTION 'invalid reciprocal tariff change payment identity' USING ERRCODE='23514'; END IF;
@@ -65,8 +81,8 @@ def upgrade():
     -- PHASE6_SPLIT
     CREATE FUNCTION phase6_immutable_financial_identity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
       IF OLD.tariff_quote_id IS NOT NULL AND EXISTS(SELECT 1 FROM tariff_quotes q WHERE q.id=OLD.tariff_quote_id AND q.operation_type='change') AND
-         ROW(NEW.user_id,NEW.tariff_quote_id,NEW.tariff_version_id,NEW.tariff_id,NEW.amount,NEW.currency,NEW.snapshot_amount,NEW.snapshot_currency,NEW.public_order_id,NEW.provider_idempotency_key,NEW.provider_required)
-         IS DISTINCT FROM ROW(OLD.user_id,OLD.tariff_quote_id,OLD.tariff_version_id,OLD.tariff_id,OLD.amount,OLD.currency,OLD.snapshot_amount,OLD.snapshot_currency,OLD.public_order_id,OLD.provider_idempotency_key,OLD.provider_required)
+         ROW(NEW.user_id,NEW.tariff_quote_id,NEW.tariff_version_id,NEW.tariff_id,NEW.amount,NEW.currency,NEW.snapshot_amount,NEW.snapshot_currency,NEW.snapshot_duration_days,NEW.snapshot_device_limit,NEW.public_order_id,NEW.provider_idempotency_key,NEW.provider_required)
+         IS DISTINCT FROM ROW(OLD.user_id,OLD.tariff_quote_id,OLD.tariff_version_id,OLD.tariff_id,OLD.amount,OLD.currency,OLD.snapshot_amount,OLD.snapshot_currency,OLD.snapshot_duration_days,OLD.snapshot_device_limit,OLD.public_order_id,OLD.provider_idempotency_key,OLD.provider_required)
       THEN RAISE EXCEPTION 'immutable tariff change payment identity' USING ERRCODE='23514'; END IF; RETURN NEW; END $$;
     -- PHASE6_SPLIT
     CREATE TRIGGER phase6_payment_immutable BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION phase6_immutable_financial_identity();
@@ -87,7 +103,8 @@ def upgrade():
       IF NEW.operation_type='create_payment' AND (NOT p.provider_required OR NEW.idempotency_key IS DISTINCT FROM p.provider_idempotency_key OR
          NEW.payload#>>'{amount,value}' IS DISTINCT FROM to_char(p.amount,'FM9999999990.00') OR NEW.payload#>>'{amount,currency}' IS DISTINCT FROM p.currency OR
          NEW.payload#>>'{metadata,order_id}' IS DISTINCT FROM p.public_order_id OR NEW.payload#>>'{metadata,local_payment_id}' IS DISTINCT FROM p.id::text OR
-         NEW.payload->>'capture' IS DISTINCT FROM 'true') THEN RAISE EXCEPTION 'invalid create-payment payload' USING ERRCODE='23514'; END IF;
+         NEW.payload->>'capture' IS DISTINCT FROM 'true' OR (SELECT count(*) FROM jsonb_object_keys(NEW.payload))<>5 OR
+         NOT (NEW.payload ?& ARRAY['amount','description','confirmation','metadata','capture'])) THEN RAISE EXCEPTION 'invalid create-payment payload' USING ERRCODE='23514'; END IF;
       RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
     END $$;
     -- PHASE6_SPLIT
