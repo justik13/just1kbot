@@ -272,7 +272,8 @@ class PaymentService:
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,"not_found"
         if payment.provider_status!="succeeded":return False,"provider_not_succeeded"
-        if payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change")):
+        from services.payment_kind import is_tariff_change_payment
+        if await is_tariff_change_payment(session,payment):
             return False,"tariff_change_legacy_grant_forbidden"
         await ensure_fulfillment(session,payment,"grant_subscription")
         return True,"queued"
@@ -284,7 +285,8 @@ class PaymentService:
         from services.payment_lifecycle import project_legacy_status
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,"Платёж не найден"
-        if payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change")):
+        from services.payment_kind import is_tariff_change_payment
+        if await is_tariff_change_payment(session,payment):
             return False,"tariff_change_legacy_grant_forbidden"
         operation=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==f"payment-grant:{payment.id}").with_for_update())
         if operation and operation.status=="processing":return False,"already_processing"
@@ -366,7 +368,8 @@ class PaymentService:
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment:return False,{"error":"not_found"}
         if payment.external_id and payment.provider_status not in {"refunded","canceled"}: await ensure_reconcile_payment_operation(session,payment,reason="user_refresh")
-        is_change=bool(payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change")))
+        from services.payment_kind import is_tariff_change_payment
+        is_change=await is_tariff_change_payment(session,payment)
         if payment.provider_status=="succeeded" and not is_change and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
         return True,{"provider_status":payment.provider_status,"fulfillment_status":payment.fulfillment_status,"reconciliation_status":payment.reconciliation_status}
 

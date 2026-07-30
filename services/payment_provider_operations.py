@@ -10,6 +10,7 @@ from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
 from services.yookassa_service import YooKassaService, YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
+from services.payment_kind import is_tariff_change_payment
 
 class PaymentProviderOperationOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
@@ -124,7 +125,7 @@ async def finalize(session,claim,result,transport=YooKassaService):
         if result.ok:
             transition=await apply_provider_transition(session,payment,data,source=provider_transition_source(claim))
             if transition.outcome=="retry": result=YooKassaResult(False,error_kind=YooKassaErrorKind.INVALID_RESPONSE,retryable=True,ambiguous=False)
-            change_quote = bool(payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id, TariffQuote.operation_type=="change")))
+            change_quote = await is_tariff_change_payment(session,payment)
             if change_quote and transition.grant_allowed:
                 # Financial evidence is durable, but phase 6 deliberately has no
                 # entitlement/application route.

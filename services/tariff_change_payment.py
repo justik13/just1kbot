@@ -1,8 +1,8 @@
 """Durably prepare a tariff-change payment, without HTTP or transaction ownership.
 
-Lock order is checkout advisory lock -> User -> quote -> Payment -> provider
-operation.  Provider/fulfillment finalizers start at Payment and never acquire the
-checkout advisory lock, so this order cannot form a cycle with those workers.
+The only mutable locks are checkout advisory lock -> User -> quote. Existing
+Payment/provider identity is immutable and is deliberately read without another
+``FOR UPDATE`` lock, avoiding inversion with Payment -> User finalizers.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -32,12 +32,16 @@ def _failure(code: str) -> TariffChangePaymentResult:
 
 
 async def create_tariff_change_payment(
-    session: AsyncSession, *, user_id: int, quote_public_id: object,
+    session: AsyncSession, *, user_id: int, quote_public_id: uuid.UUID | str,
     bot_username: str, as_of: datetime,
 ) -> TariffChangePaymentResult:
     """Create only frozen local intent; caller owns commit/rollback."""
     if as_of.tzinfo is None or as_of.utcoffset() is None:
         return _failure("as_of_timezone_required")
+    try:
+        quote_public_id = uuid.UUID(str(quote_public_id))
+    except (ValueError, TypeError, AttributeError):
+        return _failure("quote_public_id_invalid")
     user = await lock_checkout_user(session, user_id)
     if user is None:
         return _failure("user_not_found")
@@ -79,8 +83,8 @@ async def create_tariff_change_payment(
 
     linked = None
     if quote.payment_id is not None:
-        linked = await session.scalar(select(Payment).where(Payment.id == quote.payment_id).with_for_update())
-    by_quote = await session.scalar(select(Payment).where(Payment.tariff_quote_id == quote.id).with_for_update())
+        linked = await session.get(Payment, quote.payment_id)
+    by_quote = await session.scalar(select(Payment).where(Payment.tariff_quote_id == quote.id))
     if linked is not None or by_quote is not None:
         payment = linked or by_quote
         if linked is None or by_quote is None or linked.id != by_quote.id or any((
@@ -93,22 +97,57 @@ async def create_tariff_change_payment(
             payment.snapshot_currency != quote.currency,
         )):
             return _failure("quote_payment_conflict")
-        op = await session.scalar(select(PaymentProviderOperation).where(
+        operations = list((await session.scalars(select(PaymentProviderOperation).where(
             PaymentProviderOperation.payment_id == payment.id,
             PaymentProviderOperation.operation_type == "create_payment",
-        ).with_for_update())
-        if payment.provider_required and op is None:
-            return _failure("provider_operation_missing")
-        if not payment.provider_required and op is not None:
+        ))).all())
+        op = operations[0] if len(operations) == 1 else None
+        positive = amount > 0
+        if (payment.provider_required != positive or not payment.public_order_id or
+                (positive and (not payment.provider_idempotency_key or op is None)) or
+                (not positive and (payment.provider_idempotency_key is not None or operations or
+                 payment.external_id is not None or payment.payment_url is not None or
+                 payment.paid_at is not None or payment.provider_confirmed_at is not None or
+                 payment.provider_status != "not_created"))):
             return _failure("provider_operation_conflict")
+        if positive:
+            settings = get_settings()
+            expected = create_payload(
+                payment, f"Доплата за смену тарифа ({target.name_snapshot})",
+                settings.YOOKASSA_RETURN_URL.format(bot_username=bot_username.lstrip("@")),
+            )
+            if (op.idempotency_key != payment.provider_idempotency_key or op.payload != expected or
+                    op.payload.get("metadata") != {"order_id": payment.public_order_id,
+                                                   "local_payment_id": str(payment.id)}):
+                return _failure("provider_operation_conflict")
         return TariffChangePaymentResult(payment, False, op, None)
     if quote.payment_id is not None or by_quote is not None:
         return _failure("quote_payment_conflict")
 
-    conflict = await session.scalar(select(Payment.id).where(
+    # A checkout conflicts until provider impossibility and legacy fulfillment
+    # finality are both established.  `abandoned` alone is never evidence.
+    from sqlalchemy import and_, exists, or_
+    from database.models import PaymentFulfillmentOperation
+    provider_unfinished = exists(select(PaymentProviderOperation.id).where(
+        PaymentProviderOperation.payment_id == Payment.id,
+        PaymentProviderOperation.status.in_(("pending", "processing", "retry")),
+    ))
+    fulfillment_unfinished = exists(select(PaymentFulfillmentOperation.id).where(
+        PaymentFulfillmentOperation.payment_id == Payment.id,
+        PaymentFulfillmentOperation.status.in_(("pending", "processing", "retry")),
+    ))
+    conflict = await session.scalar(select(Payment.id).join(
+        TariffQuote, TariffQuote.id == Payment.tariff_quote_id,
+    ).where(
         Payment.user_id == user_id,
-        Payment.checkout_status == "active",
-        Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
+        TariffQuote.operation_type.in_(("purchase", "renew")),
+        or_(
+            Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown", "manual_review")),
+            provider_unfinished,
+            and_(Payment.provider_status == "succeeded",
+                 Payment.fulfillment_status.not_in(("succeeded", "reversed"))),
+            fulfillment_unfinished,
+        ),
     ).limit(1))
     if conflict is not None:
         return _failure("unfinished_checkout_exists")

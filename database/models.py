@@ -313,6 +313,7 @@ class TariffQuote(Base):
         CheckConstraint("(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)", name="ck_tariff_quotes_lifecycle_timestamps"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
         Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+        Index("uq_tariff_quotes_payment_id", "payment_id", unique=True, postgresql_where=text("payment_id IS NOT NULL")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     public_id: Mapped[object] = mapped_column(UUID(as_uuid=True), unique=True)

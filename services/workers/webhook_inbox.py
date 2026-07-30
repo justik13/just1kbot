@@ -11,13 +11,12 @@ from services.payment_provider_state import apply_provider_transition
 from database.models import PaymentEvent
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
+from services.payment_kind import is_tariff_change_payment
 class WebhookInboxOwnershipError(RuntimeError): pass
 @dataclass(frozen=True)
 class InboxClaim: inbox_id:int; worker_id:str; attempt_number:int; event_type:str; payment_external_id:str|None; public_order_id:str|None; payload:dict; event_key:str
 async def ensure_fulfillment(session,payment,typ):
- if typ in {"grant_subscription", "grant_referral"} and payment.tariff_quote_id:
-  is_change=await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change"))
-  if is_change:return None
+ if typ in {"grant_subscription", "grant_referral", "reverse_payment"} and await is_tariff_change_payment(session,payment): return None
  key={"grant_subscription":"payment-grant","reverse_payment":"payment-reverse","grant_referral":"payment-referral"}[typ]+f":{payment.id}"
  await session.execute(insert(PaymentFulfillmentOperation).values(payment_id=payment.id,operation_type=typ,idempotency_key=key,status="pending",payload={},next_attempt_at=now_utc()).on_conflict_do_nothing(index_elements=["idempotency_key"]))
 async def claim(session,worker_id):
@@ -53,7 +52,9 @@ async def finalize(session,claim,result):
   else:
    await session.execute(insert(PaymentRefund).values(payment_id=payment.id,provider_refund_id=str(refund_id),amount=amount,currency=currency,provider_status="succeeded",event_key=claim.event_key,processed_at=now_utc()).on_conflict_do_nothing(index_elements=["provider_refund_id"]))
    await session.flush(); total=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))
-   if total==payment.amount:
+   if total==payment.amount and await is_tariff_change_payment(session,payment):
+    payment.provider_status="refunded"; payment.fulfillment_status="manual_review"; payment.reconciliation_status="manual_review"; payment.manual_review_reason="tariff_change_refund_requires_future_policy"
+   elif total==payment.amount:
     payment.provider_status="refunded"
     reverse_key=f"payment-reverse:{payment.id}"
     reverse_op=await session.scalar(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.idempotency_key==reverse_key).with_for_update())
@@ -99,7 +100,7 @@ async def finalize(session,claim,result):
     payment.reconciliation_status="mismatch"; payment.fulfillment_status="manual_review" if payment.fulfillment_status!="reversed" else payment.fulfillment_status; session.add(PaymentEvent(payment_id=payment.id,event_type="webhook_event_status_conflict",provider_status=observed,reason=f"{claim.event_type}_expected_{expected}",source="webhook_inbox"))
    elif transition.grant_allowed:
     payment.fulfillment_status="pending"; await ensure_fulfillment(session,payment,"grant_subscription")
-    if payment.tariff_quote_id and await session.scalar(select(TariffQuote.id).where(TariffQuote.id==payment.tariff_quote_id,TariffQuote.operation_type=="change")): payment.fulfillment_status="not_ready"
+    if await is_tariff_change_payment(session,payment): payment.fulfillment_status="not_ready"
    elif transition.reason=="paid_after_cancel":
     queued=(await session.scalars(select(PaymentFulfillmentOperation).where(PaymentFulfillmentOperation.payment_id==payment.id,PaymentFulfillmentOperation.operation_type.in_(("grant_subscription","grant_referral")),PaymentFulfillmentOperation.status.in_(("pending","retry"))).with_for_update())).all()
     for operation in queued: operation.status="cancelled"; operation.completed_at=now_utc()
