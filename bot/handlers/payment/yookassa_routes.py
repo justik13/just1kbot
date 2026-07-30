@@ -43,6 +43,7 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 _PAYMENT_ERROR_MESSAGES = {
+    "current_tariff_deleted": "Текущий тариф удалён. Обратитесь в поддержку для проверки подписки.",
     "active_tariff_change_temporarily_unavailable": "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать.",
     "active_tariff_change_quote_exists": "У вас есть незавершённая смена тарифа. Завершите или отмените её перед созданием нового платежа.",
     "unfinished_checkout_exists": "У вас есть незавершённый платёж. Завершите или отмените его перед созданием нового.",
