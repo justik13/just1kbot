@@ -38,11 +38,13 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
         as_of = now_utc().replace(microsecond=0)
         async with self.sessions.begin() as session:
             source = (await session.execute(text(
-                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order) "
-                "VALUES('source',30,2,90,true,1) RETURNING id"))).scalar_one()
+                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
+                "VALUES('source',30,2,90,true,1,:created_at) RETURNING id"),
+                {"created_at": as_of})).scalar_one()
             target = (await session.execute(text(
-                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order) "
-                "VALUES('target',30,5,180,true,2) RETURNING id"))).scalar_one()
+                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
+                "VALUES('target',30,5,180,true,2,:created_at) RETURNING id"),
+                {"created_at": as_of})).scalar_one()
             user = (await session.execute(text(
                 "INSERT INTO users(telegram_id,subscription_end,device_limit,current_tariff_id,"
                 "referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,"
@@ -179,8 +181,9 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             first = await create_tariff_change_quote(session, user_id=user, target_tariff_id=target, as_of=as_of)
             different = (await session.execute(text(
-                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order) "
-                "VALUES('other',30,6,200,true,3) RETURNING id"))).scalar_one()
+                "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
+                "VALUES('other',30,6,200,true,3,:created_at) RETURNING id"),
+                {"created_at": as_of})).scalar_one()
             conflict = await create_tariff_change_quote(session, user_id=user,
                 target_tariff_id=different, as_of=as_of)
             self.assertEqual(conflict.failure_code, "active_change_quote_exists")
@@ -240,10 +243,25 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             result = await create_tariff_change_quote(session, user_id=user,
                 target_tariff_id=target, as_of=as_of)
             quote_id = result.quote.id
-            await session.execute(text("UPDATE tariff_quotes SET status='expired' WHERE id=:q"), {"q": quote_id})
-            await session.execute(text("UPDATE tariff_quotes SET status='manual_review',manual_review_at=:n WHERE id=:q"), {"q": quote_id, "n": as_of})
+            await session.execute(text(
+                "UPDATE tariff_quotes SET status='consumed',consumed_at=:n WHERE id=:q"),
+                {"q": quote_id, "n": as_of})
             with self.assertRaises(DBAPIError):
-                await session.execute(text("UPDATE tariff_quotes SET status='active',manual_review_at=NULL WHERE id=:q"), {"q": quote_id})
+                async with session.begin_nested():
+                    await session.execute(text(
+                        "UPDATE tariff_quotes SET status='active',consumed_at=NULL WHERE id=:q"),
+                        {"q": quote_id})
+            await session.execute(text(
+                "UPDATE tariff_quotes SET status='manual_review',manual_review_at=:n WHERE id=:q"),
+                {"q": quote_id, "n": as_of + timedelta(seconds=1)})
+            row = await session.get(TariffQuote, quote_id)
+            await session.refresh(row)
+            self.assertEqual(row.consumed_at, as_of)
+            with self.assertRaises(DBAPIError):
+                async with session.begin_nested():
+                    await session.execute(text(
+                        "UPDATE tariff_quotes SET status='active',consumed_at=NULL,manual_review_at=NULL WHERE id=:q"),
+                        {"q": quote_id})
 
     async def test_source_id_array_validator_contract(self):
         cases = {

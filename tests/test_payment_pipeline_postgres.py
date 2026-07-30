@@ -11,6 +11,7 @@ from services.payment_provider_operations import (PaymentProviderOperationOwners
 from services.workers.webhook_inbox import InboxClaim, finalize_webhook_failure, retry_dead_webhook_operation
 from services.payment_fulfillment import FulfillmentClaim, finalize_fulfillment_failure, referral, reverse, retry_dead_fulfillment_operation
 from services.yookassa_service import YooKassaResult
+from services.payment_provider_state import apply_provider_transition
 from services.payment_service import PaymentService
 from utils.datetime_helpers import now_utc
 DB=os.getenv("TEST_DATABASE_URL")
@@ -189,6 +190,22 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
    self.assertEqual((await self._retry_audit_outcomes(s,"webhook",oid)).count("retry_scheduled"),1)
  def snapshot(self,p,status="succeeded",**kw):
   data={"id":p.external_id,"status":status,"amount":{"value":"90.00","currency":"RUB"},"metadata":{"order_id":p.public_order_id,"local_payment_id":str(p.id)}}; data.update(kw); return data
+
+ async def test_late_captured_at_conflict_escalates_consumed_quote(self):
+  from datetime import timezone
+  consumed_at=now_utc().replace(microsecond=0); old_captured=consumed_at-timedelta(minutes=2); new_captured=consumed_at-timedelta(minutes=1)
+  async with self.sessions.begin() as s:
+   tariff=await s.get(Tariff,self.tariff_id)
+   version=TariffVersion(tariff_id=tariff.id,version_number=77,name_snapshot=tariff.name,duration_hours=720,device_limit=2,price_rub=Decimal("90"),currency="RUB"); s.add(version); await s.flush()
+   quote=TariffQuote(public_id=uuid.uuid4(),user_id=self.user_id,operation_type="purchase",target_tariff_version_id=version.id,current_paid_hours=0,current_paid_value_rub=0,bonus_hours=0,confirmed_payment_required_rub=90,resulting_paid_hours=720,resulting_paid_value_rub=90,resulting_bonus_hours=0,rounding_loss_hours=0,rounding_loss_value_rub=0,currency="RUB",status="consumed",created_at=consumed_at-timedelta(minutes=10),expires_at=consumed_at+timedelta(minutes=5),consumed_at=consumed_at); s.add(quote); await s.flush()
+   payment=await self.payment(s,tariff_quote_id=quote.id,tariff_version_id=version.id,provider_status="succeeded",fulfillment_status="succeeded",reconciliation_status="ok",provider_confirmed_at=old_captured,paid_at=old_captured); quote.payment_id=payment.id; await s.flush()
+   transition=await apply_provider_transition(s,payment,self.snapshot(payment,captured_at=new_captured.astimezone(timezone.utc).isoformat()),source="provider_reconcile_get")
+   self.assertEqual((transition.outcome,transition.reason),("conflict","captured_at_changed")); payment_id=payment.id; quote_id=quote.id
+  async with self.sessions() as s:
+   payment=await s.get(Payment,payment_id); quote=await s.get(TariffQuote,quote_id)
+   self.assertEqual((payment.reconciliation_status,payment.fulfillment_status),("manual_review","manual_review"))
+   self.assertEqual(quote.status,"manual_review"); self.assertIsNotNone(quote.manual_review_at); self.assertEqual(quote.consumed_at,consumed_at)
+   event=await s.scalar(select(PaymentEvent).where(PaymentEvent.payment_id==payment_id,PaymentEvent.event_type=="provider_captured_at_conflict")); self.assertIsNotNone(event)
  async def cancel_claim(self,s,p,*,attempts=1,max_attempts=3,key=None):
   op=PaymentProviderOperation(payment_id=p.id,operation_type="cancel_payment",status="processing",idempotency_key=key or uuid.uuid4().hex,payload={"provider_payment_id":p.external_id},attempts=attempts,max_attempts=max_attempts,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush()
   return op,ProviderOperationClaim(op.id,p.id,op.operation_type,dict(op.payload),op.idempotency_key,"w",attempts,p.external_id,op.created_at)
