@@ -395,7 +395,10 @@ class PaymentService:
                 quote.diagnostic_reason="checkout_abandoned_by_user"
         create_op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="create_payment").with_for_update())
         if not payment.external_id:
-            if create_op and create_op.status=="pending" and create_op.attempts==0: create_op.status="cancelled"; create_op.completed_at=now_utc()
+            if create_op and create_op.status=="pending" and create_op.attempts==0:
+                create_op.status="cancelled"; create_op.completed_at=now_utc(); payment.provider_status="not_created"
+            elif create_op is None and not payment.provider_required:
+                payment.provider_status="not_created"
             elif create_op and create_op.attempts>0: payment.reconciliation_status="required"
             return True
         if payment.provider_status=="waiting_for_capture": await ensure_cancel_payment_operation(session,payment)

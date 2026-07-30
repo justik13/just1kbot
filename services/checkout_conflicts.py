@@ -2,11 +2,11 @@
 from dataclasses import dataclass
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from utils.datetime_helpers import now_utc
 
 from database.models import (EntitlementEntry, PaidValueLedgerEntry, Payment,
-    PaymentFulfillmentOperation, PaymentProviderOperation, TariffQuote, TariffVersion)
+    PaymentFulfillmentOperation, PaymentProviderOperation, PaymentRefund, TariffQuote, TariffVersion)
 
 RUNNABLE = {"pending", "processing", "retry"}
 
@@ -32,8 +32,8 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
     ).order_by(Payment.id))).all())
     conflicts = []
     for payment in payments:
-        quote_type = await session.scalar(select(TariffQuote.operation_type).where(
-            TariffQuote.id == payment.tariff_quote_id)) if payment.tariff_quote_id else None
+        quote = await session.get(TariffQuote, payment.tariff_quote_id) if payment.tariff_quote_id else None
+        quote_type = quote.operation_type if quote else None
         provider_ops = list((await session.scalars(select(PaymentProviderOperation).where(
             PaymentProviderOperation.payment_id == payment.id))).all())
         fulfillment_ops = list((await session.scalars(select(PaymentFulfillmentOperation).where(
@@ -42,17 +42,20 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
         # Strongest local proof: no HTTP could have happened and no command can
         # ever mutate provider or User state. A zero change intent may use this
         # path after explicit local abandonment.
-        harmless_create = all(op.operation_type == "create_payment" and
-                              op.status == "cancelled" and op.attempts == 0
-                              for op in provider_ops)
+        harmless_create = ((not payment.provider_required and not provider_ops) or
+            (payment.provider_required and len(provider_ops) == 1 and
+             provider_ops[0].operation_type == "create_payment" and
+             provider_ops[0].status == "cancelled" and provider_ops[0].attempts == 0))
         locally_abandoned = (
             payment.checkout_status == "abandoned" and payment.provider_status == "not_created"
             and payment.external_id is None and payment.payment_url is None
             and payment.paid_at is None and payment.provider_confirmed_at is None
             and not fulfillment_ops and harmless_create
         )
-        if locally_abandoned:
+        if locally_abandoned and payment.reconciliation_status == "ok":
             continue
+        if payment.reconciliation_status in {"required", "mismatch", "manual_review"}:
+            reason = "reconciliation_not_terminal"
         if any(op.status in RUNNABLE for op in provider_ops): reason = "provider_operation_unfinished"
         if any(op.status != "succeeded" for op in fulfillment_ops): reason = reason or "fulfillment_operation_retryable"
         if quote_type == "change" and payment.fulfillment_status not in {"succeeded", "reversed"}:
@@ -80,6 +83,11 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
                 reason = reason or "refund_reversal_not_terminal"
         elif payment.provider_status == "refunded":
             reason = reason or "refund_reversal_not_terminal"
+        if payment.provider_status == "refunded":
+            refunded_total = await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(
+                PaymentRefund.payment_id == payment.id, PaymentRefund.provider_status == "succeeded"))
+            if refunded_total != payment.amount:
+                reason = reason or "refund_total_incomplete"
         # Dead/cancelled commands may follow an ambiguous POST. Only an actual
         # provider terminal state proves that no future charge/grant is possible.
         if payment.provider_status not in {"canceled", "refunded", "succeeded"}:
@@ -89,8 +97,10 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
                 and payment.checkout_status == "abandoned"
             )
             if not no_provider_was_possible: reason = reason or "terminality_unproven"
-        if payment.provider_status == "canceled" and fulfillment_ops:
-            reason = reason or "canceled_has_fulfillment_history"
+        if payment.provider_status == "canceled" and (
+                fulfillment_ops or payment.checkout_status != "abandoned" or
+                (quote is not None and quote.status not in {"cancelled", "expired"})):
+            reason = reason or "canceled_not_closed"
         if reason: conflicts.append(FinancialCheckoutConflict(payment, quote_type, reason))
     return conflicts
 

@@ -89,4 +89,10 @@ async def apply_provider_transition(session,payment,data,*,source,event_type=Non
     if current=="canceled" and observed in {"pending","waiting_for_capture"}:
         payment.reconciliation_status="mismatch"; session.add(PaymentEvent(payment_id=payment.id,event_type="provider_transition_conflict",provider_status=observed,reason=f"canceled_to_{observed}",source=source)); return ProviderTransition("conflict",observed,reason="terminal_regression")
     payment.provider_status=observed
+    if observed=="canceled":
+        payment.checkout_status="abandoned"; payment.payment_url=None
+        if payment.tariff_quote_id:
+            quote=await session.scalar(select(TariffQuote).where(TariffQuote.id==payment.tariff_quote_id).with_for_update())
+            if quote and quote.status=="active":
+                quote.status="cancelled"; quote.diagnostic_reason="provider_canceled"
     return ProviderTransition("applied",observed)

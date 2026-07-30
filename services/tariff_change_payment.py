@@ -118,8 +118,9 @@ async def create_tariff_change_payment(
         op = operations[0] if len(operations) == 1 else None
         positive = amount > 0
         if (payment.provider_required != positive or not (payment.public_order_id or "").strip() or
-                payment.reconciliation_status in {"mismatch", "manual_review"} or
-                payment.provider_status == "manual_review" or
+                payment.reconciliation_status in {"required", "mismatch", "manual_review"} or
+                payment.provider_status in {"manual_review", "canceled", "refunded"} or
+                payment.checkout_status == "abandoned" or
                 (positive and (not (payment.provider_idempotency_key or "").strip() or op is None or
                  len(all_operations) != 1 or op.status not in {"pending", "processing", "retry", "succeeded"})) or
                 (not positive and (payment.provider_idempotency_key is not None or all_operations or
@@ -129,6 +130,12 @@ async def create_tariff_change_payment(
             return _failure("provider_operation_conflict")
         if positive:
             if op.idempotency_key != payment.provider_idempotency_key or not _valid_create_payload(payment, op.payload):
+                return _failure("provider_operation_conflict")
+            before_http = (op.status in {"pending", "processing", "retry"} and
+                payment.provider_status == "creating" and payment.external_id is None and payment.payment_url is None)
+            after_create = (op.status == "succeeded" and payment.provider_status in {"pending", "waiting_for_capture", "succeeded"} and
+                bool(payment.external_id) and bool((payment.payment_url or "").strip()))
+            if not (before_http or after_create):
                 return _failure("provider_operation_conflict")
         if quote.status == "manual_review" or quote.diagnostic_reason:
             return _failure("quote_manual_review")
@@ -142,6 +149,20 @@ async def create_tariff_change_payment(
         return _failure("quote_" + str(quote.status))
     if quote.expires_at is None or as_of >= quote.expires_at:
         return _failure("quote_expired")
+
+    from services.subscription_balance_service import get_subscription_balance_snapshot
+    snapshot = await get_subscription_balance_snapshot(
+        session, user_id=user_id, as_of=as_of, locked_user=user)
+    same_history = (
+        snapshot.tracked and user.current_tariff_id == source.tariff_id
+        and quote.source_subscription_end == user.subscription_end
+        and sorted(quote.source_entitlement_entry_ids or []) == sorted(snapshot.source_entitlement_entry_ids)
+        and sorted(quote.source_ledger_entry_ids or []) == sorted(snapshot.source_ledger_entry_ids)
+    )
+    if not same_history:
+        quote.status="cancelled"; quote.diagnostic_reason="source_balance_changed"
+        await session.flush()
+        return _failure("quote_source_history_changed")
 
     from services.checkout_conflicts import get_unfinished_financial_checkout
     conflict = await get_unfinished_financial_checkout(session, user_id=user_id)
