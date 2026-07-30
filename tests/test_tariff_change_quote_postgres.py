@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (EntitlementEntry, PaidValueLedgerEntry, Payment,
     PaymentFulfillmentOperation, PaymentProviderOperation, Tariff, TariffQuote, User)
 from services.tariff_change_quote import create_tariff_change_quote
+from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.payment_service.service import PaymentService
 from database.repositories.tariff_quotes_repo import get_or_create_checkout_quote, lock_checkout_user
 from utils.datetime_helpers import now_utc
@@ -127,6 +128,52 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first.quote.status, "cancelled")
             self.assertEqual(first.quote.diagnostic_reason, "source_balance_changed")
 
+    async def test_untracked_projection_cancels_unbound_active_quote(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            first = await create_tariff_change_quote(
+                session, user_id=user, target_tariff_id=target, as_of=as_of)
+            await session.execute(text(
+                "UPDATE payments SET snapshot_amount=snapshot_amount+1 WHERE id=("
+                "SELECT payment_id FROM paid_value_ledger WHERE user_id=:u AND entry_type='confirmed_payment')"),
+                {"u": user})
+            snapshot = await get_subscription_balance_snapshot(
+                session, user_id=user, as_of=as_of + timedelta(minutes=1))
+            self.assertFalse(snapshot.tracked)
+            repeated = await create_tariff_change_quote(
+                session, user_id=user, target_tariff_id=target,
+                as_of=as_of + timedelta(minutes=1))
+            self.assertIsNone(repeated.quote)
+            self.assertEqual(repeated.failure_code, "subscription_balance_untracked")
+            self.assertEqual((first.quote.status, first.quote.diagnostic_reason),
+                             ("cancelled", "source_balance_untracked"))
+            self.assertEqual(await session.scalar(select(func.count(TariffQuote.id)).where(
+                TariffQuote.operation_type == "change")), 1)
+
+    async def test_untracked_projection_sends_payment_bound_quote_to_manual_review(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            first = await create_tariff_change_quote(
+                session, user_id=user, target_tariff_id=target, as_of=as_of)
+            source_payment_id = await session.scalar(select(PaidValueLedgerEntry.payment_id).where(
+                PaidValueLedgerEntry.user_id == user,
+                PaidValueLedgerEntry.entry_type == "confirmed_payment"))
+            first.quote.payment_id = source_payment_id
+            await session.flush()
+            await session.execute(text(
+                "UPDATE payments SET snapshot_amount=snapshot_amount+1 WHERE id=:p"),
+                {"p": source_payment_id})
+            repeated = await create_tariff_change_quote(
+                session, user_id=user, target_tariff_id=target,
+                as_of=as_of + timedelta(minutes=1))
+            self.assertIsNone(repeated.quote)
+            self.assertEqual(repeated.failure_code, "active_change_quote_stale")
+            self.assertEqual((first.quote.status, first.quote.diagnostic_reason),
+                             ("manual_review", "source_balance_untracked"))
+            self.assertEqual(first.quote.manual_review_at, as_of + timedelta(minutes=1))
+            self.assertEqual(await session.scalar(select(func.count(TariffQuote.id)).where(
+                TariffQuote.operation_type == "change")), 1)
+
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
@@ -197,6 +244,19 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             await session.execute(text("UPDATE tariff_quotes SET status='manual_review',manual_review_at=:n WHERE id=:q"), {"q": quote_id, "n": as_of})
             with self.assertRaises(DBAPIError):
                 await session.execute(text("UPDATE tariff_quotes SET status='active',manual_review_at=NULL WHERE id=:q"), {"q": quote_id})
+
+    async def test_source_id_array_validator_contract(self):
+        cases = {
+            "[]": True, "[0,1,2]": True, "[-1]": False, "[1.5]": False,
+            "[null]": False, '["1"]': False, "{}": False, "null": False,
+        }
+        async with self.sessions() as session:
+            for raw, expected in cases.items():
+                with self.subTest(raw=raw):
+                    actual = await session.scalar(text(
+                        "SELECT is_nonnegative_integer_json_array(CAST(:value AS jsonb))"),
+                        {"value": raw})
+                    self.assertIs(actual, expected)
 
     async def test_outer_rollback_removes_quote(self):
         user, _, target, as_of = await self.seed()

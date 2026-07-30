@@ -23,10 +23,14 @@ def upgrade():
     op.create_check_constraint("ck_tariff_quotes_change_source_snapshot", "tariff_quotes", "operation_type <> 'change' OR (source_tariff_version_id IS NOT NULL AND target_tariff_version_id IS NOT NULL AND source_tariff_version_id <> target_tariff_version_id AND balance_as_of IS NOT NULL AND source_subscription_end IS NOT NULL AND source_balance_fingerprint IS NOT NULL AND source_entitlement_entry_ids IS NOT NULL AND source_ledger_entry_ids IS NOT NULL)")
     op.create_check_constraint("ck_tariff_quotes_fingerprint", "tariff_quotes", "source_balance_fingerprint IS NULL OR source_balance_fingerprint ~ '^[0-9a-f]{64}$'")
     op.execute("""CREATE FUNCTION is_nonnegative_integer_json_array(value jsonb) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$
-      SELECT value IS NOT NULL AND jsonb_typeof(value)='array' AND NOT EXISTS (
-        SELECT 1 FROM jsonb_array_elements(value) item
-        WHERE jsonb_typeof(item) <> 'number' OR (item::text)::numeric < 0
-          OR trunc((item::text)::numeric) <> (item::text)::numeric)
+      SELECT jsonb_typeof(value) = 'array' AND NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(
+          CASE WHEN jsonb_typeof(value) = 'array' THEN value ELSE '[]'::jsonb END
+        ) item
+        WHERE CASE WHEN jsonb_typeof(item) = 'number' THEN
+          (item::text)::numeric < 0
+          OR trunc((item::text)::numeric) <> (item::text)::numeric
+        ELSE true END
       ) $$""")
     op.create_check_constraint("ck_tariff_quotes_source_arrays", "tariff_quotes", "(source_entitlement_entry_ids IS NULL OR is_nonnegative_integer_json_array(source_entitlement_entry_ids)) AND (source_ledger_entry_ids IS NULL OR is_nonnegative_integer_json_array(source_ledger_entry_ids))")
     op.create_check_constraint("ck_tariff_quotes_lifecycle_timestamps", "tariff_quotes", "(status = 'consumed') = (consumed_at IS NOT NULL) AND (status = 'manual_review') = (manual_review_at IS NOT NULL)")
@@ -42,12 +46,12 @@ def upgrade():
 def downgrade():
     op.execute("DROP TRIGGER tariff_quotes_immutable ON tariff_quotes")
     op.execute("DROP FUNCTION reject_quote_economic_change()")
-    op.execute(_OLD_FUNCTION)
-    op.execute("CREATE TRIGGER tariff_quotes_immutable BEFORE UPDATE OR DELETE ON tariff_quotes FOR EACH ROW EXECUTE FUNCTION reject_quote_economic_change()")
-    op.drop_constraint("ck_tariff_quotes_lifecycle_timestamps", "tariff_quotes", type_="check")
     op.drop_constraint("ck_tariff_quotes_source_arrays", "tariff_quotes", type_="check")
     op.execute("DROP FUNCTION is_nonnegative_integer_json_array(jsonb)")
+    op.drop_constraint("ck_tariff_quotes_lifecycle_timestamps", "tariff_quotes", type_="check")
     op.drop_constraint("ck_tariff_quotes_fingerprint", "tariff_quotes", type_="check")
     op.drop_constraint("ck_tariff_quotes_change_source_snapshot", "tariff_quotes", type_="check")
     for column in ("source_ledger_entry_ids", "source_entitlement_entry_ids", "source_balance_fingerprint", "source_subscription_end", "balance_as_of"):
         op.drop_column("tariff_quotes", column)
+    op.execute(_OLD_FUNCTION)
+    op.execute("CREATE TRIGGER tariff_quotes_immutable BEFORE UPDATE OR DELETE ON tariff_quotes FOR EACH ROW EXECUTE FUNCTION reject_quote_economic_change()")

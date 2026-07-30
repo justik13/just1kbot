@@ -123,8 +123,22 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     if profiles > target.device_limit:
         return TariffChangeQuoteResult(failure_code="target_device_limit_too_small")
 
+    existing_change = next((q for q in active if q.operation_type == "change"), None)
     snapshot = await get_subscription_balance_snapshot(
         session, user_id=user_id, as_of=as_of, locked_user=user)
+    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
+        if existing_change is not None:
+            if existing_change.payment_id is not None:
+                existing_change.status = "manual_review"
+                existing_change.manual_review_at = as_of
+                existing_change.diagnostic_reason = "source_balance_untracked"
+                await session.flush()
+                return TariffChangeQuoteResult(failure_code="active_change_quote_stale")
+            existing_change.status = "cancelled"
+            existing_change.diagnostic_reason = "source_balance_untracked"
+            await session.flush()
+        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
+
     version_ids = {lot.tariff_version_id for lot in snapshot.paid_lots}
     lot_versions = (await session.scalars(select(TariffVersion).where(TariffVersion.id.in_(version_ids)))).all() if version_ids else []
     if len(lot_versions) != len(version_ids) or any(v.tariff_id != user.current_tariff_id for v in lot_versions):
@@ -132,7 +146,6 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     source_version = await get_or_create_current_version(session, source)
     target_version = await get_or_create_current_version(session, target)
 
-    existing_change = next((q for q in active if q.operation_type == "change"), None)
     if existing_change:
         source_version_tariff_id = await session.scalar(select(TariffVersion.tariff_id).where(
             TariffVersion.id == existing_change.source_tariff_version_id))
@@ -159,9 +172,6 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
             existing_change = None
         if existing_change is not None:
             return TariffChangeQuoteResult(failure_code="active_change_quote_exists")
-
-    if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
-        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
 
     required = max(Decimal(0), target_version.price_rub - snapshot.remaining_paid_value_rub).quantize(
         Decimal("1"), rounding=ROUND_CEILING)
