@@ -34,25 +34,28 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.engine.dispose()
 
-    async def seed(self, *, tracked=True, active=True, current=True):
+    async def seed(self, *, tracked=True, active=True, current=True, duration_days=30):
         as_of = now_utc().replace(microsecond=0)
         async with self.sessions.begin() as session:
             source = (await session.execute(text(
                 "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
-                "VALUES('source',30,2,90,true,1,:created_at) RETURNING id"),
-                {"created_at": as_of})).scalar_one()
+                "VALUES('source',:duration_days,2,90,true,1,:created_at) RETURNING id"),
+                {"duration_days": duration_days, "created_at": as_of})).scalar_one()
             target = (await session.execute(text(
                 "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
-                "VALUES('target',30,5,180,true,2,:created_at) RETURNING id"),
-                {"created_at": as_of})).scalar_one()
+                "VALUES('target',:duration_days,5,180,true,2,:created_at) RETURNING id"),
+                {"duration_days": duration_days, "created_at": as_of})).scalar_one()
             user = (await session.execute(text(
                 "INSERT INTO users(telegram_id,subscription_end,device_limit,current_tariff_id,"
                 "referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,"
-                "notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,device_creations_today) "
-                "VALUES(:tg,:end,2,:tariff,0,false,false,false,0,false,false,false,false,false,0) RETURNING id"),
+                "notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,"
+                "device_creations_today,created_at) "
+                "VALUES(:tg,:end,2,:tariff,0,false,false,false,0,false,false,false,false,false,0,:created_at) "
+                "RETURNING id"),
                 {"tg": uuid.uuid4().int % 10**12,
                  "end": as_of + timedelta(days=30) if active else as_of,
-                 "tariff": source if current else None})).scalar_one()
+                 "tariff": source if current else None,
+                 "created_at": as_of})).scalar_one()
             version = (await session.execute(text(
                 "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,"
                 "device_limit,price_rub,currency) VALUES(:t,1,'source',720,2,90,'RUB') RETURNING id"),
@@ -71,7 +74,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                     "status,provider_status,fulfillment_status,reconciliation_status,checkout_status,"
                     "snapshot_duration_days,snapshot_device_limit,snapshot_amount,snapshot_currency,"
                     "referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at) "
-                    "VALUES(:u,:t,:q,:v,90,'RUB','completed','succeeded','succeeded','ok','inactive',"
+                    "VALUES(:u,:t,:q,:v,90,'RUB','completed','succeeded','succeeded','ok','abandoned',"
                     "30,2,90,'RUB',0,0,:n,:n) RETURNING id"),
                     {"u": user, "t": source, "q": consumed, "v": version, "n": as_of})).scalar_one()
                 await session.execute(text("UPDATE tariff_quotes SET payment_id=:p WHERE id=:q"),
@@ -190,7 +193,8 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             after_expiry = await create_tariff_change_quote(session, user_id=user,
                 target_tariff_id=different, as_of=as_of + timedelta(minutes=15))
             self.assertTrue(after_expiry.created)
-        legacy, _, legacy_target, legacy_as_of = await self.seed(tracked=False)
+        legacy, _, legacy_target, legacy_as_of = await self.seed(
+            tracked=False, duration_days=31)
         async with self.sessions.begin() as session:
             result = await create_tariff_change_quote(session, user_id=legacy,
                 target_tariff_id=legacy_target, as_of=legacy_as_of)
