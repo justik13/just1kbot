@@ -68,21 +68,15 @@ async def _check_tariff_change_allowed(
         current_tariff_id = getattr(db_user, "current_tariff_id", None)
         if current_tariff_id is None:
             return "Не удалось надёжно определить текущий тариф. Покупка временно недоступна — обратитесь в поддержку для проверки подписки."
-        if current_tariff_id != getattr(tariff, "id", None):
-            return "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать."
         current_limit = await _get_effective_device_limit(session, db_user)
-        if new_limit < current_limit:
-            return texts.PAYMENT_DOWNGRADE_BLOCKED.format(
-                current_limit=current_limit,
+        if new_limit != current_limit:
+            return "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать."
+        profiles_count = await get_user_profiles_count(session, db_user.id)
+        if profiles_count > new_limit:
+            return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                profiles_count=profiles_count,
                 new_limit=new_limit,
-                valid_until=format_datetime(db_user.subscription_end),
             )
-    profiles_count = await get_user_profiles_count(session, db_user.id)
-    if profiles_count > new_limit:
-        return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-            profiles_count=profiles_count,
-            new_limit=new_limit,
-        )
     return None
 
 

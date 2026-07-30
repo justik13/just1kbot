@@ -662,6 +662,9 @@ async def stop_broadcast(callback: CallbackQuery):
         )
         return
     admin_id = callback.from_user.id
+    if admin_id not in _broadcast_in_progress:
+        await callback.answer("Рассылка не запущена", show_alert=True)
+        return
     try:
         async with session_scope() as session:
             await session.execute(

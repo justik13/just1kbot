@@ -42,6 +42,14 @@ from .common import (
 router = Router()
 logger = logging.getLogger(__name__)
 
+_PAYMENT_ERROR_MESSAGES = {
+    "active_tariff_change_temporarily_unavailable": "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать.",
+    "active_tariff_change_quote_exists": "У вас есть незавершённая смена тарифа. Завершите или отмените её перед созданием нового платежа.",
+    "unfinished_checkout_exists": "У вас есть незавершённый платёж. Завершите или отмените его перед созданием нового.",
+    "active_checkout_quote_conflict": "Конфликт котировок. Попробуйте позже или обратитесь в поддержку.",
+    "checkout_user_missing": texts.ERROR_USER_NOT_FOUND,
+}
+
 
 def _is_yookassa_configured() -> bool:
     settings = get_settings()
@@ -78,7 +86,7 @@ async def _create_and_show_payment(
 ) -> None:
     bot_info = await target.bot.get_me()
     amount = Decimal(str(tariff.price_rub))
-    payment, _ = await PaymentService.create_yookassa_payment(
+    payment, error_code = await PaymentService.create_yookassa_payment(
         session=session,
         user_id=db_user.id,
         tariff_id=tariff.id,
@@ -87,7 +95,17 @@ async def _create_and_show_payment(
         bot_username=bot_info.username,
     )
     if not payment:
-        await render_hub(target.bot,target.chat.id,texts.ERROR_PAYMENT_SERVICE,get_back_button(back_callback))
+        error_text = (
+            _PAYMENT_ERROR_MESSAGES.get(
+                error_code, texts.ERROR_PAYMENT_SERVICE,
+            )
+            if error_code
+            else texts.ERROR_PAYMENT_SERVICE
+        )
+        await render_hub(
+            target.bot, target.chat.id, error_text,
+            get_back_button(back_callback),
+        )
         return
     if not payment.payment_url:
         builder=InlineKeyboardBuilder()
