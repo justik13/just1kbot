@@ -112,15 +112,17 @@ async def create_tariff_change_payment(
             payment.snapshot_device_limit is not None,
         )):
             return _failure("quote_payment_conflict")
-        operations = list((await session.scalars(select(PaymentProviderOperation).where(
-            PaymentProviderOperation.payment_id == payment.id,
-            PaymentProviderOperation.operation_type == "create_payment",
-        ))).all())
+        all_operations = list((await session.scalars(select(PaymentProviderOperation).where(
+            PaymentProviderOperation.payment_id == payment.id))).all())
+        operations = [row for row in all_operations if row.operation_type == "create_payment"]
         op = operations[0] if len(operations) == 1 else None
         positive = amount > 0
-        if (payment.provider_required != positive or not payment.public_order_id or
-                (positive and (not payment.provider_idempotency_key or op is None)) or
-                (not positive and (payment.provider_idempotency_key is not None or operations or
+        if (payment.provider_required != positive or not (payment.public_order_id or "").strip() or
+                payment.reconciliation_status in {"mismatch", "manual_review"} or
+                payment.provider_status == "manual_review" or
+                (positive and (not (payment.provider_idempotency_key or "").strip() or op is None or
+                 len(all_operations) != 1 or op.status not in {"pending", "processing", "retry", "succeeded"})) or
+                (not positive and (payment.provider_idempotency_key is not None or all_operations or
                  payment.external_id is not None or payment.payment_url is not None or
                  payment.paid_at is not None or payment.provider_confirmed_at is not None or
                  payment.provider_status != "not_created"))):

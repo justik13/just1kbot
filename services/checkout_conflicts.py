@@ -1,9 +1,12 @@
 """Fail-closed classification of financial checkouts under the user checkout lock."""
 from dataclasses import dataclass
+from datetime import timedelta
 
 from sqlalchemy import select
+from utils.datetime_helpers import now_utc
 
-from database.models import Payment, PaymentFulfillmentOperation, PaymentProviderOperation, TariffQuote, TariffVersion
+from database.models import (EntitlementEntry, PaidValueLedgerEntry, Payment,
+    PaymentFulfillmentOperation, PaymentProviderOperation, TariffQuote, TariffVersion)
 
 RUNNABLE = {"pending", "processing", "retry"}
 
@@ -36,6 +39,20 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
         fulfillment_ops = list((await session.scalars(select(PaymentFulfillmentOperation).where(
             PaymentFulfillmentOperation.payment_id == payment.id))).all())
         reason = None
+        # Strongest local proof: no HTTP could have happened and no command can
+        # ever mutate provider or User state. A zero change intent may use this
+        # path after explicit local abandonment.
+        harmless_create = all(op.operation_type == "create_payment" and
+                              op.status == "cancelled" and op.attempts == 0
+                              for op in provider_ops)
+        locally_abandoned = (
+            payment.checkout_status == "abandoned" and payment.provider_status == "not_created"
+            and payment.external_id is None and payment.payment_url is None
+            and payment.paid_at is None and payment.provider_confirmed_at is None
+            and not fulfillment_ops and harmless_create
+        )
+        if locally_abandoned:
+            continue
         if any(op.status in RUNNABLE for op in provider_ops): reason = "provider_operation_unfinished"
         if any(op.status != "succeeded" for op in fulfillment_ops): reason = reason or "fulfillment_operation_retryable"
         if quote_type == "change" and payment.fulfillment_status not in {"succeeded", "reversed"}:
@@ -44,10 +61,25 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
             reason = reason or "provider_not_terminal"
         if payment.provider_status == "succeeded" and payment.fulfillment_status not in {"succeeded", "reversed"}:
             reason = reason or "fulfillment_not_terminal"
-        if payment.provider_status == "refunded":
+        if payment.provider_status in {"refunded", "succeeded"} and payment.fulfillment_status == "reversed":
             reverse_succeeded = any(op.operation_type == "reverse_payment" and op.status == "succeeded" for op in fulfillment_ops)
-            if payment.fulfillment_status != "reversed" or not reverse_succeeded:
+            grant = await session.scalar(select(EntitlementEntry.id).where(
+                EntitlementEntry.source_type == "payment", EntitlementEntry.source_id == str(payment.id),
+                EntitlementEntry.entry_type.in_(("payment_grant", "manual_grant"))))
+            entitlement_reversal = await session.scalar(select(EntitlementEntry.id).where(
+                EntitlementEntry.source_type == "payment", EntitlementEntry.source_id == str(payment.id),
+                EntitlementEntry.entry_type == "payment_reversal"))
+            paid = await session.scalar(select(PaidValueLedgerEntry.id).where(
+                PaidValueLedgerEntry.payment_id == payment.id,
+                PaidValueLedgerEntry.entry_type == "confirmed_payment"))
+            paid_reversal = await session.scalar(select(PaidValueLedgerEntry.id).where(
+                PaidValueLedgerEntry.reversal_of_id == paid,
+                PaidValueLedgerEntry.entry_type == "payment_reversal")) if paid else None
+            if (not reverse_succeeded or (grant is not None and entitlement_reversal is None)
+                    or (paid is not None and paid_reversal is None)):
                 reason = reason or "refund_reversal_not_terminal"
+        elif payment.provider_status == "refunded":
+            reason = reason or "refund_reversal_not_terminal"
         # Dead/cancelled commands may follow an ambiguous POST. Only an actual
         # provider terminal state proves that no future charge/grant is possible.
         if payment.provider_status not in {"canceled", "refunded", "succeeded"}:
@@ -57,8 +89,8 @@ async def get_unfinished_financial_checkouts(session, *, user_id: int,
                 and payment.checkout_status == "abandoned"
             )
             if not no_provider_was_possible: reason = reason or "terminality_unproven"
-        if payment.provider_status == "canceled" and any(op.status != "succeeded" for op in fulfillment_ops):
-            reason = reason or "canceled_has_retryable_fulfillment"
+        if payment.provider_status == "canceled" and fulfillment_ops:
+            reason = reason or "canceled_has_fulfillment_history"
         if reason: conflicts.append(FinancialCheckoutConflict(payment, quote_type, reason))
     return conflicts
 
@@ -78,6 +110,9 @@ async def is_valid_reusable_purchase_intent(session, conflict: FinancialCheckout
     version = await session.get(TariffVersion, payment.tariff_version_id) if payment.tariff_version_id else None
     if not quote or not version or quote.payment_id != payment.id or quote.user_id != user_id:
         return False
+    if (quote.status != "active" or quote.diagnostic_reason is not None or
+            quote.manual_review_at is not None or quote.expires_at <= now_utc()):
+        return False
     if (quote.operation_type != conflict.operation_type or quote.target_tariff_version_id != version.id or
             version.tariff_id != tariff_id or payment.tariff_id != tariff_id or
             payment.amount != quote.confirmed_payment_required_rub or payment.amount != version.price_rub or
@@ -85,15 +120,33 @@ async def is_valid_reusable_purchase_intent(session, conflict: FinancialCheckout
             payment.snapshot_currency != payment.currency or payment.currency != version.currency or
             payment.snapshot_duration_days != version.duration_hours // 24 or
             payment.snapshot_device_limit != version.device_limit or not payment.public_order_id or
-            not payment.provider_idempotency_key):
+            not payment.provider_idempotency_key or not payment.provider_required or
+            payment.checkout_status != "active" or payment.fulfillment_status != "not_ready" or
+            payment.reconciliation_status in {"mismatch", "manual_review"} or
+            payment.provider_status not in {"creating", "pending", "waiting_for_capture"}):
         return False
     operations = list((await session.scalars(select(PaymentProviderOperation).where(
         PaymentProviderOperation.payment_id == payment.id,
         PaymentProviderOperation.operation_type == "create_payment"))).all())
     if len(operations) != 1 or operations[0].idempotency_key != payment.provider_idempotency_key:
         return False
-    payload = operations[0].payload
-    return (isinstance(payload, dict) and payload.get("amount") == {
+    operation = operations[0]
+    if (operation.status not in {"pending", "processing", "retry"} or
+            operation.attempts >= operation.max_attempts or now_utc() - operation.created_at >= timedelta(hours=24)):
+        return False
+    if payment.provider_status == "creating" and (payment.external_id is not None or payment.payment_url is not None):
+        return False
+    if payment.provider_status in {"pending", "waiting_for_capture"} and (
+            not payment.external_id or not payment.payment_url):
+        return False
+    payload = operation.payload
+    return (isinstance(payload, dict) and set(payload) == {"amount","description","confirmation","metadata","capture"}
+        and payload.get("amount") == {
         "value": format(payment.amount, ".2f"), "currency": payment.currency}
         and payload.get("capture") is True and payload.get("metadata") == {
-            "order_id": payment.public_order_id, "local_payment_id": str(payment.id)})
+            "order_id": payment.public_order_id, "local_payment_id": str(payment.id)}
+        and isinstance(payload.get("description"),str) and bool(payload["description"])
+        and isinstance(payload.get("confirmation"),dict)
+        and set(payload["confirmation"]) == {"type","return_url"}
+        and payload["confirmation"].get("type") == "redirect"
+        and bool(payload["confirmation"].get("return_url")))

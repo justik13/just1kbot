@@ -34,6 +34,10 @@ def upgrade():
           p.amount::text IN ('NaN','Infinity','-Infinity') OR p.amount<0 OR p.provider_required IS DISTINCT FROM (p.amount>0) OR
           (p.amount>0 AND nullif(btrim(p.provider_idempotency_key),'') IS NULL) OR
           (p.amount>0 AND (SELECT count(*) FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment')<>1) OR
+          (p.amount>0 AND p.external_id IS NULL AND (SELECT count(*) FROM payment_provider_operations o WHERE o.payment_id=p.id)<>1) OR
+          EXISTS (SELECT 1 FROM payment_provider_operations x WHERE x.payment_id=p.id AND (
+            (x.operation_type='cancel_payment' AND (p.external_id IS NULL OR p.provider_status IS DISTINCT FROM 'waiting_for_capture' OR x.idempotency_key IS DISTINCT FROM concat('payment-cancel:',p.id::text,':','v1') OR x.payload IS DISTINCT FROM jsonb_build_object('provider_payment_id',p.external_id))) OR
+            (x.operation_type='reconcile_payment' AND (p.external_id IS NULL OR p.provider_status NOT IN ('pending','waiting_for_capture','unknown','manual_review','succeeded') OR x.idempotency_key NOT LIKE 'payment-reconcile:'||p.id::text||':%' OR (SELECT count(*) FROM jsonb_object_keys(x.payload))<>2 OR NOT (x.payload ?& ARRAY['provider_payment_id','reason']) OR x.payload->>'provider_payment_id' IS DISTINCT FROM p.external_id OR nullif(x.payload->>'reason','') IS NULL)))) OR
           (p.amount>0 AND EXISTS (SELECT 1 FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment' AND
              (o.idempotency_key IS DISTINCT FROM p.provider_idempotency_key OR o.payload#>>'{amount,value}' IS DISTINCT FROM to_char(p.amount,'FM9999999990.00') OR
               o.payload#>>'{amount,currency}' IS DISTINCT FROM p.currency OR o.payload->>'capture' IS DISTINCT FROM 'true' OR
@@ -54,13 +58,14 @@ def upgrade():
 
     _exec_many(r"""
     CREATE FUNCTION phase6_validate_change_payment() RETURNS trigger LANGUAGE plpgsql AS $$
-    DECLARE q tariff_quotes%ROWTYPE; p payments%ROWTYPE; v tariff_versions%ROWTYPE; n integer; create_op payment_provider_operations%ROWTYPE;
+    DECLARE q tariff_quotes%ROWTYPE; p payments%ROWTYPE; v tariff_versions%ROWTYPE; n integer; total_ops integer; create_op payment_provider_operations%ROWTYPE; initial_link boolean:=false;
     BEGIN
-      IF TG_TABLE_NAME='payments' THEN p:=NEW; IF p.tariff_quote_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO q FROM tariff_quotes WHERE id=p.tariff_quote_id;
-      ELSE q:=NEW; IF q.payment_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO p FROM payments WHERE id=q.payment_id; END IF;
+      IF TG_TABLE_NAME='payments' THEN p:=NEW; initial_link:=(TG_OP='INSERT'); IF p.tariff_quote_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO q FROM tariff_quotes WHERE id=p.tariff_quote_id;
+      ELSE q:=NEW; initial_link:=(TG_OP='UPDATE' AND OLD.payment_id IS NULL AND NEW.payment_id IS NOT NULL); IF q.payment_id IS NULL THEN RETURN NULL; END IF; SELECT * INTO p FROM payments WHERE id=q.payment_id; END IF;
       IF q.operation_type IS DISTINCT FROM 'change' THEN RETURN NULL; END IF;
       SELECT * INTO v FROM tariff_versions WHERE id=q.target_tariff_version_id;
       SELECT count(*) INTO n FROM payment_provider_operations o WHERE o.payment_id=p.id AND o.operation_type='create_payment';
+      SELECT count(*) INTO total_ops FROM payment_provider_operations o WHERE o.payment_id=p.id;
       IF n=1 THEN SELECT * INTO create_op FROM payment_provider_operations x WHERE x.payment_id=p.id AND x.operation_type='create_payment'; END IF;
       IF p.id IS NULL OR v.id IS NULL OR q.payment_id IS DISTINCT FROM p.id OR p.tariff_quote_id IS DISTINCT FROM q.id
          OR p.user_id IS DISTINCT FROM q.user_id OR p.tariff_version_id IS DISTINCT FROM q.target_tariff_version_id
@@ -69,6 +74,10 @@ def upgrade():
          OR p.snapshot_currency IS DISTINCT FROM q.currency OR q.currency IS DISTINCT FROM 'RUB' OR nullif(btrim(p.public_order_id),'') IS NULL
          OR p.snapshot_duration_days IS NOT NULL OR p.snapshot_device_limit IS NOT NULL
          OR p.amount::text IN ('NaN','Infinity','-Infinity') OR p.amount<0
+         OR (initial_link AND (q.status IS DISTINCT FROM 'active' OR q.manual_review_at IS NOT NULL OR q.diagnostic_reason IS NOT NULL OR p.created_at>=q.expires_at))
+         OR EXISTS (SELECT 1 FROM payment_provider_operations x WHERE x.payment_id=p.id AND (
+            (x.operation_type='cancel_payment' AND (p.external_id IS NULL OR p.provider_status IS DISTINCT FROM 'waiting_for_capture' OR x.idempotency_key IS DISTINCT FROM concat('payment-cancel:',p.id::text,':','v1') OR x.payload IS DISTINCT FROM jsonb_build_object('provider_payment_id',p.external_id))) OR
+            (x.operation_type='reconcile_payment' AND (p.external_id IS NULL OR p.provider_status NOT IN ('pending','waiting_for_capture','unknown','manual_review','succeeded') OR x.idempotency_key NOT LIKE 'payment-reconcile:'||p.id::text||':%' OR (SELECT count(*) FROM jsonb_object_keys(x.payload))<>2 OR NOT (x.payload ?& ARRAY['provider_payment_id','reason']) OR x.payload->>'provider_payment_id' IS DISTINCT FROM p.external_id OR nullif(x.payload->>'reason','') IS NULL))))
          OR p.provider_required IS DISTINCT FROM (p.amount>0) OR (p.provider_required AND (nullif(btrim(p.provider_idempotency_key),'') IS NULL OR n<>1
              OR create_op.idempotency_key IS DISTINCT FROM p.provider_idempotency_key OR create_op.payload#>>'{amount,value}' IS DISTINCT FROM to_char(p.amount,'FM9999999990.00')
              OR create_op.payload#>>'{amount,currency}' IS DISTINCT FROM p.currency OR create_op.payload->>'capture' IS DISTINCT FROM 'true'
@@ -77,7 +86,8 @@ def upgrade():
              OR (SELECT count(*) FROM jsonb_object_keys(create_op.payload->'amount'))<>2 OR NOT (create_op.payload->'amount' ?& ARRAY['value','currency'])
              OR (SELECT count(*) FROM jsonb_object_keys(create_op.payload->'metadata'))<>2 OR NOT (create_op.payload->'metadata' ?& ARRAY['order_id','local_payment_id'])
              OR (SELECT count(*) FROM jsonb_object_keys(create_op.payload->'confirmation'))<>2 OR NOT (create_op.payload->'confirmation' ?& ARRAY['type','return_url'])
-             OR create_op.payload#>>'{confirmation,type}' IS DISTINCT FROM 'redirect' OR nullif(create_op.payload->>'description','') IS NULL OR nullif(create_op.payload#>>'{confirmation,return_url}','') IS NULL))
+             OR create_op.payload#>>'{confirmation,type}' IS DISTINCT FROM 'redirect' OR nullif(create_op.payload->>'description','') IS NULL OR nullif(create_op.payload#>>'{confirmation,return_url}','') IS NULL
+             OR (p.external_id IS NULL AND total_ops<>1)))
          OR (NOT p.provider_required AND (p.provider_idempotency_key IS NOT NULL OR (SELECT count(*) FROM payment_provider_operations z WHERE z.payment_id=p.id)<>0 OR p.external_id IS NOT NULL OR p.payment_url IS NOT NULL
              OR p.paid_at IS NOT NULL OR p.provider_confirmed_at IS NOT NULL OR p.provider_status IS DISTINCT FROM 'not_created'))
       THEN RAISE EXCEPTION 'invalid reciprocal tariff change payment identity' USING ERRCODE='23514'; END IF;
@@ -89,6 +99,9 @@ def upgrade():
     CREATE CONSTRAINT TRIGGER phase6_quote_reciprocal AFTER INSERT OR UPDATE ON tariff_quotes DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION phase6_validate_change_payment();
     -- PHASE6_SPLIT
     CREATE FUNCTION phase6_immutable_financial_identity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF OLD.tariff_quote_id IS NULL AND NEW.tariff_quote_id IS NOT NULL AND EXISTS(SELECT 1 FROM tariff_quotes q WHERE q.id=NEW.tariff_quote_id AND q.operation_type='change') THEN
+        RAISE EXCEPTION 'pre-existing payment cannot be attached to change quote' USING ERRCODE='23514';
+      END IF;
       IF OLD.tariff_quote_id IS NOT NULL AND EXISTS(SELECT 1 FROM tariff_quotes q WHERE q.id=OLD.tariff_quote_id AND q.operation_type='change') AND
          ROW(NEW.user_id,NEW.tariff_quote_id,NEW.tariff_version_id,NEW.tariff_id,NEW.amount,NEW.currency,NEW.snapshot_amount,NEW.snapshot_currency,NEW.snapshot_duration_days,NEW.snapshot_device_limit,NEW.public_order_id,NEW.provider_idempotency_key,NEW.provider_required)
          IS DISTINCT FROM ROW(OLD.user_id,OLD.tariff_quote_id,OLD.tariff_version_id,OLD.tariff_id,OLD.amount,OLD.currency,OLD.snapshot_amount,OLD.snapshot_currency,OLD.snapshot_duration_days,OLD.snapshot_device_limit,OLD.public_order_id,OLD.provider_idempotency_key,OLD.provider_required)
@@ -121,6 +134,13 @@ def upgrade():
          (SELECT count(*) FROM jsonb_object_keys(NEW.payload->'confirmation'))<>2 OR NOT (NEW.payload->'confirmation' ?& ARRAY['type','return_url']) OR
          NEW.payload#>>'{confirmation,type}' IS DISTINCT FROM 'redirect' OR nullif(NEW.payload->>'description','') IS NULL OR
          nullif(NEW.payload#>>'{confirmation,return_url}','') IS NULL) THEN RAISE EXCEPTION 'invalid create-payment payload' USING ERRCODE='23514'; END IF;
+      IF NEW.operation_type='cancel_payment' AND (p.external_id IS NULL OR p.provider_status IS DISTINCT FROM 'waiting_for_capture' OR
+         NEW.idempotency_key IS DISTINCT FROM concat('payment-cancel:',p.id::text,':','v1') OR
+         NEW.payload IS DISTINCT FROM jsonb_build_object('provider_payment_id',p.external_id)) THEN RAISE EXCEPTION 'invalid change cancel command' USING ERRCODE='23514'; END IF;
+      IF NEW.operation_type='reconcile_payment' AND (p.external_id IS NULL OR p.provider_status NOT IN ('pending','waiting_for_capture','unknown','manual_review','succeeded') OR
+         NEW.idempotency_key NOT LIKE 'payment-reconcile:'||p.id::text||':%' OR
+         (SELECT count(*) FROM jsonb_object_keys(NEW.payload))<>2 OR NOT (NEW.payload ?& ARRAY['provider_payment_id','reason']) OR
+         NEW.payload->>'provider_payment_id' IS DISTINCT FROM p.external_id OR nullif(NEW.payload->>'reason','') IS NULL) THEN RAISE EXCEPTION 'invalid change reconcile command' USING ERRCODE='23514'; END IF;
       RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
     END $$;
     -- PHASE6_SPLIT
