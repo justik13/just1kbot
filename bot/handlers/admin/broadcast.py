@@ -265,6 +265,7 @@ async def _send_broadcast_to_users_with_resume(
     last_id = None
     final_progress = None
     should_finalize = False
+    blocked_user_ids = []
 
     try:
         async with session_scope() as session:
@@ -297,7 +298,6 @@ async def _send_broadcast_to_users_with_resume(
             admin_id, progress_id, last_id,
         )
 
-        blocked_user_ids = []
         local_success = 0
         local_fail = 0
 

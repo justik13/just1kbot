@@ -1,272 +1,324 @@
+# Just1kBot
+
 Telegram-бот для продажи VPN-доступа на базе **AmneziaWG 2.0**.
 
-Пользователь покупает подписку → создаёт устройства → получает конфиги для подключения.
-Админ управляет серверами, тарифами, пользователями и платежами прямо из бота.
-
----
+Пользователь покупает подписку, создаёт устройства и получает конфигурации для подключения. Администратор управляет серверами, тарифами, пользователями, платежами и рассылками непосредственно из Telegram.
 
 ## Возможности
 
-### Для пользователя
+### Пользователь
 
-- **Подписка** — покупка, продление, смена тарифа через YooKassa
-- **Устройства** — создание VPN-профилей на выбранном сервере, переименование, удаление
-- **Конфиги** — выдача `.vpn` (AmneziaVPN) и `.conf` (AmneziaWG) файлов + ключ текстом
-- **Реферальная программа** — бонусные дни за приглашённых друзей
-- **Профиль** — статистика, история оплат, список рефералов
-- **Поддержка** — FAQ, условия сервиса, политика конфиденциальности
-- **Уведомления** — напоминания за 3 дня / 1 день / 2 часа до истечения, grace-период 48 ч
+- покупка и продление подписки через YooKassa;
+- создание, переименование и удаление VPN-устройств;
+- получение `.vpn` и `.conf` конфигураций;
+- история платежей и профиль подписки;
+- реферальная программа;
+- уведомления об окончании подписки;
+- раздел поддержки.
 
-### Для админа
+### Администратор
 
-- **Дашборд** — статистика: пользователи, подписки, свободные IP
-- **Пользователи** — поиск, карточка, бан/разбан, управление подпиской (продление, уменьшение, смена тарифа, выдача доступа), удаление устройств
-- **Серверы** — добавление, редактирование (имя, флаг, URL, ключ, лимит), вкл/выкл, удаление с очисткой пиров
-- **Тарифы** — изменение цены, вкл/выкл на витрине
-- **Платежи** — список, карточка, ручная выдача подписки
-- **Рассылка** — всем / только активным, с медиа, с возобновлением после рестарта
-- **Аудит-лог** — последние действия администраторов
-- **Техработы** — ограничение действий для пользователей без остановки сервиса
-
----
+- статистика пользователей, подписок и серверов;
+- управление пользователями, банами и подписками;
+- управление Amnezia-серверами и тарифами;
+- просмотр и ручная обработка платежей;
+- рассылки с сохранением прогресса;
+- аудит административных действий;
+- режим технических работ.
 
 ## Стек
 
 | Компонент | Технология |
 |---|---|
 | Язык | Python 3.11+ |
-| Бот | aiogram 3 |
-| ORM | SQLAlchemy 2 (async) |
-| БД | PostgreSQL (asyncpg) |
-| Кэш / FSM | Redis |
-| Платежи | YooKassa (aioyookassa) |
-| VPN API | [kyoresuas/amnezia-api](https://github.com/kyoresuas/amnezia-api) |
-| Шифрование | cryptography (Fernet) |
+| Telegram | aiogram 3 |
+| ORM | SQLAlchemy 2 async |
+| База данных | PostgreSQL |
+| Очереди и FSM | Redis |
+| Платежи | YooKassa |
+| VPN API | Amnezia API, `amneziawg2` |
 | HTTP | aiohttp |
+| Шифрование | Fernet |
+| Миграции | Alembic |
 
----
+## Структура
 
-## Структура проекта
-
-```
-├── bot/
-│   ├── handlers/           # Роутеры aiogram
-│   │   ├── admin/          #   Админка (dashboard, users, servers, tariffs, payments, broadcast)
-│   │   ├── connection/     #   Устройства пользователя
-│   │   ├── payment/        #   Витрина, YooKassa
-│   │   ├── start.py        #   /start, главное меню
-│   │   ├── profile.py      #   Профиль, рефералы, история
-│   │   ├── support.py      #   Поддержка, FAQ
-│   │   ├── fallback.py     #   Обработка неизвестных сообщений
-│   │   └── webhook.py      #   YooKassa webhook + /health
-│   ├── keyboards/          # Inline-клавиатуры
-│   ├── middlewares/        # Throttling, ban-check, DB-session, user-context, clean-chat, action-lock
-│   ├── texts_data/         # Все тексты бота (user / admin / overrides)
-│   ├── states.py           # FSM-состояния
-│   ├── constants.py        # Константы
-│   └── main.py             # Точка входа
-├── config/
-│   └── settings.py         # pydantic-settings (.env)
-├── database/
-│   ├── connection.py       # Engine, session_scope, сиды, индексы
-│   ├── models.py           # SQLAlchemy-модели
-│   └── repositories/       # CRUD-функции
-├── services/
-│   ├── amnezia_client.py   # Клиент Amnezia API (circuit breaker, rate limiter)
-│   ├── payment_service/    # Платежи: создание, webhook, chargeback, manual review
-│   ├── subscription.py     # Подписка: onboarding, продление, sync доступа
-│   ├── device_service.py   # Создание/удаление устройств (Redis-локи, daily limit)
-│   ├── ban_service.py      # Бан с удалением устройств
-│   ├── referral_service.py # Реферальные бонусы
-│   ├── maintenance_service.py  # Режим техработ
-│   ├── profile_deletion_service.py  # Фоновое удаление пиров
-│   ├── slots_cache.py      # Кэш свободных слотов на серверах
-│   ├── yookassa_service.py # Обёртка над aioyookassa
-│   └── workers/            # Фоновые воркеры
-│       ├── traffic.py      #   Синхронизация трафика + self-healing
-│       ├── notifications.py#   Уведомления о подписке
-│       ├── cleanup.py      #   Очистка dangling peers, grace-период
-│       ├── payments.py     #   Проверка зависших платежей
-│       └── heartbeat.py    #   Heartbeat для healthcheck
-├── utils/
-│   ├── encryption.py       # EncryptedString (Fernet) для SQLAlchemy
-│   ├── vpn_parser.py       # Декодирование vpn:// URI, генерация .conf
-│   ├── security.py         # SSRF-защита, SafeResolver
-│   ├── datetime_helpers.py # UTC / MSK хелперы
-│   └── ...
-├── deploy.sh               # Полный деплой на чистый сервер
-├── setup-amnezia-api.sh    # Настройка HTTPS для Amnezia API
-├── uninstall.sh            # Деинсталляция
-└── requirements.txt
+```text
+bot/                         Telegram handlers, middlewares и webhook
+config/                      настройки приложения
+database/                    модели, repositories и подключение к PostgreSQL
+services/                    платежи, Amnezia, подписки и workers
+ops/                         backup, restore rehearsal и deployment transaction
+alembic/                     миграции PostgreSQL
+deploy.sh                    установка, обновление и эксплуатационные команды
+setup-amnezia-api.sh         настройка HTTPS для Amnezia API
 ```
 
----
-
-## Требования
-
-- Ubuntu / Debian
-- Python 3.11+
-- PostgreSQL 14+
-- Redis 7+
-- Работающий [Amnezia API](https://github.com/kyoresuas/amnezia-api) с протоколом `amneziawg2`
-- (Опционально) YooKassa-аккаунт для приёма платежей
-
----
-
-## Быстрый старт
-
-### 1. Клонирование и зависимости
+## Локальный запуск
 
 ```bash
-git clone <repo-url> && cd projectx-main
+git clone <repo-url>
+cd projectx
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+python -m bot.main
 ```
 
-### 2. Переменные окружения
-
-Создай `.env` в корне проекта:
+Минимальный `.env`:
 
 ```env
-# Telegram
-BOT_TOKEN=123456:ABC-DEF...
-ADMIN_IDS=[123456789]
-SUPPORT_USERNAME=your_support
-
-# Database
-DATABASE_URL=postgresql+asyncpg://just1kbot:password@localhost:5432/just1kbot_bot
-DB_ENCRYPTION_KEY=<base64url-ключ-32-байта>
-
-# Redis
-REDIS_URL=redis://:password@localhost:6379/0
+BOT_TOKEN=123456:ABC-DEF
+ADMIN_IDS=123456789
+DATABASE_URL=postgresql+asyncpg://user:password@127.0.0.1:5432/database
+DB_ENCRYPTION_KEY=<Fernet key>
+REDIS_URL=redis://:password@127.0.0.1:6379/0
 REDIS_PASSWORD=password
 
-# YooKassa (опционально — без неё платежи не работают)
 YOOKASSA_SHOP_ID=
 YOOKASSA_SECRET_KEY=
 YOOKASSA_RETURN_URL=https://t.me/{bot_username}
 YOOKASSA_WEBHOOK_PORT=8080
-
-# Безопасность
-ALLOW_LOCAL_HTTP=false
-ALLOW_LOCAL_HTTPS=false
 ```
 
 Генерация `DB_ENCRYPTION_KEY`:
 
 ```bash
-python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
 ```
 
-> ⚠️ **Не теряй этот ключ.** Им зашифрованы API-ключи серверов и конфиги пользователей в БД. Смена ключа без перешифровки = потеря данных.
+`DB_ENCRYPTION_KEY` нельзя менять или терять. Им зашифрованы конфигурации VPN и секреты Amnezia в PostgreSQL.
 
-### 3. Запуск
+# Production deployment
 
-```bash
-python -m bot.main
-```
+## Первичная установка
 
-При первом старте автоматически:
-- Создаются таблицы
-- Сидятся тарифы по умолчанию (Базовый / Семейный / Pro)
-- Создаётся запись режима техработ
-
----
-
-## Деплой на продакшн
-
-Полный автоматический деплой на чистый сервер (Ubuntu/Debian):
+Запускать из отдельного checkout репозитория на Ubuntu или Debian:
 
 ```bash
 sudo bash deploy.sh
 ```
 
-Скрипт делает:
-1. Ставит зависимости (Python, PostgreSQL, Redis, Nginx, UFW)
-2. Создаёт БД и пользователя PostgreSQL
-3. Настраивает Redis с паролем
-4. Настраивает UFW (SSH, HTTP, HTTPS; блокирует 8080, 6379 извне)
-5. Синхронизирует код в `/opt/just1kbot-bot`
-6. Создаёт venv и ставит pip-зависимости
-7. Конфигурирует `.env` (интерактивно)
-8. Инициализирует схему БД
-9. Создаёт systemd-сервис с рестартом
-10. (При YooKassa) Настраивает Nginx reverse proxy + SSL через certbot
-11. Настраивает автобэкапы (cron, 03:00) и healthcheck (каждые 5 мин)
-
-Управление после деплоя:
+Неинтерактивный вариант:
 
 ```bash
-sudo bash deploy.sh --status     # Статус сервиса
-sudo bash deploy.sh --logs       # Логи (journalctl -f)
-sudo bash deploy.sh --restart    # Перезапуск
-sudo bash deploy.sh --backup     # Ручной бэкап
-sudo bash deploy.sh --restore <stamp>  # Восстановление
+sudo env \
+  BOT_TOKEN='...' \
+  DB_PASSWORD='...' \
+  REDIS_PASSWORD='...' \
+  ADMIN_IDS='123456789' \
+  DOMAIN='vpn.example.com' \
+  SSL_EMAIL='admin@example.com' \
+  YOOKASSA_SHOP_ID='...' \
+  YOOKASSA_SECRET_KEY='...' \
+  bash deploy.sh --yes
 ```
 
----
+`DOMAIN` имеет смысл только вместе с YooKassa. Nginx публикует только:
 
-## Amnezia API
+- `POST /webhook/yookassa`;
+- `GET /health`.
 
-Бот работает **только** с протоколом `amneziawg2`.
+Остальные HTTP-маршруты возвращают `404`. Порт приложения `8080`, PostgreSQL `5432` и Redis `6379` закрываются UFW для внешнего доступа.
 
-Для настройки публичного HTTPS-доступа к API на сервере с VPN:
+## Безопасное обновление
+
+Новый код должен находиться в отдельном checkout или release-каталоге. Нельзя сначала заменять файлы непосредственно в `/opt/just1kbot`, иначе rollback не сможет сохранить предыдущую версию.
 
 ```bash
-sudo bash setup-amnezia-api.sh --domain api.example.com --email admin@example.com
+cd /root/releases/projectx-new
+sudo bash deploy.sh
 ```
 
-После этого добавь сервер в админке бота: **🛠 Админка → 🌍 Серверы → ➕ Добавить сервер**.
+При существующем `/opt/just1kbot/.env` скрипт автоматически выбирает режим обновления:
 
-Бот проверит healthcheck, получит `server info`, убедится в наличии `amneziawg2` и сохранит сервер.
+1. проверяет, что `.env` является обычным файлом с закрытыми permissions;
+2. проверяет наличие `BOT_TOKEN`, `DATABASE_URL`, `REDIS_URL` и корректного `DB_ENCRYPTION_KEY`;
+3. не запрашивает и не меняет production-пароли;
+4. останавливает старый процесс и проверяет, что его PID завершён;
+5. создаёт обязательный зашифрованный PostgreSQL backup;
+6. сохраняет предыдущий код, virtualenv и systemd unit в rollback snapshot;
+7. копирует новый release и устанавливает зависимости;
+8. запускает `alembic upgrade head`;
+9. запускает новую версию;
+10. ожидает два обновления heartbeat и проверяет PostgreSQL с Redis;
+11. при ошибке возвращает предыдущий application release.
 
----
+Автоматический downgrade PostgreSQL при rollback **не выполняется**. Если новая миграция несовместима со старым кодом, требуется ручное решение администратора.
 
-## Платежи (YooKassa)
+## Dry run
 
-- Webhook принимает события на `POST /webhook/yookassa` (только IP YooKassa)
-- Healthcheck: `GET /health` (проверяет DB + Redis)
-- Поддерживаются: `payment.succeeded`, `payment.canceled`, `refund.succeeded`
-- Защита от stale webhook: проверка `created_at` + верификация через API
-- Ручная проверка (`requires_manual_review`) при несовпадении суммы / валюты / payload
-- Chargeback: отзыв доступа, удаление устройств, откат реферальных бонусов
+```bash
+sudo bash deploy.sh --dry-run
+```
 
----
+Команда только показывает план и ничего не изменяет.
 
-## Фоновые воркеры
+## Эксплуатационные команды
 
-| Воркер | Интервал | Что делает |
-|---|---|---|
-| `traffic` | 15 мин | Синхронизация трафика из API, self-healing (вкл/выкл пиров), алерты при >1 TiB |
-| `notifications` | 30 мин | Уведомления за 3д / 1д / 2ч до истечения + grace-уведомления |
-| `cleanup` | 15 мин | Удаление dangling peers, grace-очистка (48 ч), обработка pending-удалений |
-| `stale_payments` | 1 ч | Проверка зависших платежей через YooKassa API, алерты админам |
-| `heartbeat` | 60 с | Запись heartbeat-файла, мониторинг circuit breaker'ов |
+```bash
+sudo bash deploy.sh --status
+sudo bash deploy.sh --logs
+sudo bash deploy.sh --restart
+sudo bash deploy.sh --backup
+```
 
-Все воркеры работают под supervisor'ом: при падении — автоматический рестарт с exponential backoff + алерт админам.
+Неизвестный или ошибочно написанный аргумент завершает скрипт с кодом `2`. Полный deployment при этом не запускается.
 
----
+### Статус
 
-## Безопасность
+```bash
+sudo bash deploy.sh --status
+```
 
-- **Шифрование БД** — API-ключи серверов и VPN-конфиги хранятся зашифрованными (Fernet)
-- **SSRF-защита** — `SafeResolver` блокирует приватные IP, loopback, metadata endpoints
-- **Rate limiting** — throttling на сообщения и callback'и, token bucket для API и рассылок
-- **Action lock** — защита от двойных нажатий на критичные кнопки
-- **Ban middleware** — заблокированные пользователи не могут выполнять действия
-- **Private chat only** — бот игнорирует группы и каналы
-- **Callback валидация** — проверка на SQL/command injection в callback data
-- **Секреты в логах** — санитизация traceback'ов, редатирование callback'ов и сообщений
+Показывает:
 
----
+- состояние приложения, PostgreSQL, Redis и Nginx;
+- состояние backup и healthcheck timers;
+- `MainPID` и число systemd-рестартов;
+- возраст heartbeat;
+- результат проверки PostgreSQL и Redis.
 
-## Тарифы по умолчанию
+### Логи
 
-| Тариф | Устройства | 7 дн. | 30 дн. | 90 дн. |
-|---|---|---|---|---|
-| 📱 Базовый | 2 | 35 ₽ | 90 ₽ | 240 ₽ |
-| 👨‍👩‍👧‍👦 Семейный | 5 | — | 180 ₽ | 480 ₽ |
-| 🚀 Pro | 10 | — | 320 ₽ | 850 ₽ |
+```bash
+sudo bash deploy.sh --logs
+```
 
-Цены меняются в админке. Структура тарифов (дни / лимиты) захардкожена в `database/connection.py`.
+Открывает `journalctl -u just1kbot -f`.
+
+### Перезапуск
+
+```bash
+sudo bash deploy.sh --restart
+```
+
+Команда ждёт готовность приложения. Успех возвращается только после появления свежего heartbeat и успешной проверки PostgreSQL с Redis.
+
+# Backup и восстановление
+
+## Автоматический backup
+
+После deployment устанавливается systemd timer:
+
+```bash
+systemctl status just1kbot-backup.timer
+```
+
+Backup создаётся ежедневно около `03:00 UTC` и сохраняется в:
+
+```text
+/root/backups/just1kbot/
+```
+
+Артефакт содержит:
+
+- PostgreSQL custom-format dump;
+- зашифрованную копию production `.env`;
+- Alembic revision;
+- manifest и checksums.
+
+Архив шифруется `age`. При первичной установке без готовой backup-конфигурации создаются:
+
+```text
+/etc/just1kbot-backup.conf
+/root/.config/just1kbot/backup.agekey
+```
+
+Закрытый ключ `/root/.config/just1kbot/backup.agekey` необходимо скопировать в защищённое место вне production-сервера. Потеря этого ключа делает backup нечитаемым.
+
+Ручной backup:
+
+```bash
+sudo bash deploy.sh --backup
+```
+
+## Проверка восстановления
+
+`--restore` не заменяет рабочую production-БД. Он расшифровывает backup, создаёт временную PostgreSQL database, восстанавливает данные, проверяет Alembic revision и критические таблицы, затем удаляет временную database.
+
+```bash
+sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+  bash deploy.sh --restore \
+  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
+```
+
+Production restore/cutover выполняется только вручную после успешного rehearsal, полной остановки writers и отдельного подтверждённого плана восстановления.
+
+# Rollback приложения
+
+Перед обновлением release snapshots сохраняются в:
+
+```text
+/var/lib/just1kbot/rollback-releases/
+```
+
+Хранятся последние три snapshot. В них не копируется production `.env`.
+
+При неудачном запуске новой версии deployment transaction:
+
+- останавливает неуспешный процесс;
+- возвращает предыдущий код, virtualenv и systemd unit;
+- сохраняет текущий production `.env`;
+- запускает предыдущую версию;
+- повторно выполняет readiness gate.
+
+Схема PostgreSQL автоматически назад не откатывается.
+
+# Healthcheck
+
+Systemd timer запускает healthcheck каждые две минуты:
+
+```bash
+systemctl status just1kbot-healthcheck.timer
+journalctl -u just1kbot-healthcheck.service
+```
+
+Проверяются:
+
+- активность systemd-сервиса;
+- наличие heartbeat и возраст не более 180 секунд;
+- `SELECT 1` в PostgreSQL;
+- `PING` в Redis.
+
+# YooKassa
+
+Публичный webhook:
+
+```text
+POST https://<DOMAIN>/webhook/yookassa
+```
+
+Публичный health endpoint:
+
+```text
+GET https://<DOMAIN>/health
+```
+
+Webhook должен быть настроен в кабинете YooKassa только после успешного deployment и проверки HTTPS.
+
+# Amnezia API
+
+Бот работает с протоколом `amneziawg2`.
+
+Пример настройки API-сервера:
+
+```bash
+sudo bash setup-amnezia-api.sh \
+  --domain api.example.com \
+  --email admin@example.com
+```
+
+После настройки сервер добавляется через Telegram-админку.
+
+# Безопасность
+
+- Amnezia API keys и VPN configs шифруются в PostgreSQL;
+- секреты фильтруются из traceback и логов;
+- webhook имеет ограничение размера request body;
+- Redis, PostgreSQL и внутренний webhook port не публикуются наружу;
+- systemd unit работает от отдельного пользователя;
+- release rollback не перезаписывает `.env`;
+- обновление запрещено из live-каталога;
+- migrations выполняются только после обязательного encrypted backup;
+- restore по команде является только изолированным rehearsal.

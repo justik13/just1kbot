@@ -275,9 +275,14 @@ async def _stop_broadcast_tasks():
 
 
 async def main():
-    settings = get_settings()
+    settings = None
+    bot = None
+    dp = None
+    webhook_runner = None
 
     try:
+        settings = get_settings()
+
         if not settings.DB_ENCRYPTION_KEY:
             logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
             return
@@ -320,7 +325,6 @@ async def main():
         bot, dp = await setup_bot()
         set_bot_ref(bot)
 
-        webhook_runner = None
         if settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY:
             webhook_runner = await start_webhook_server(
                 settings.YOOKASSA_WEBHOOK_PORT
@@ -398,10 +402,34 @@ async def main():
         logger.info("Cleaning up resources...")
 
         if webhook_runner is not None:
-            await webhook_runner.cleanup()
+            try:
+                await webhook_runner.cleanup()
+            except Exception as e:
+                logger.error("Failed to clean up webhook server: %s", e)
 
-        await close_http_session()
-        await close_yookassa_client()
+        set_bot_ref(None)
+
+        if dp is not None:
+            try:
+                await dp.storage.close()
+            except Exception as e:
+                logger.error("Failed to close dispatcher storage: %s", e)
+
+        if bot is not None:
+            try:
+                await bot.session.close()
+            except Exception as e:
+                logger.error("Failed to close Telegram bot session: %s", e)
+
+        try:
+            await close_http_session()
+        except Exception as e:
+            logger.error("Failed to close Amnezia HTTP session: %s", e)
+
+        try:
+            await close_yookassa_client()
+        except Exception as e:
+            logger.error("Failed to close YooKassa client: %s", e)
 
         try:
             from services.device_service import (
@@ -419,7 +447,10 @@ async def main():
         except Exception as e:
             logger.error("Failed to close payment Redis: %s", e)
 
-        await close_db()
+        try:
+            await close_db()
+        except Exception as e:
+            logger.error("Failed to close database: %s", e)
 
         logger.info("Работа бота завершена")
 

@@ -1,525 +1,620 @@
 #!/bin/bash
 # =============================================================================
-# JUST1KBOT - Автоматический деплой
+# JUST1KBOT — безопасная установка, обновление и эксплуатационные команды
 # =============================================================================
-# Использование: sudo ./deploy.sh [--yes] [--dry-run]
-# Лог: /var/log/just1kbot-deploy.log
+# Первичная установка: sudo bash deploy.sh
+# Обновление:          sudo bash deploy.sh
+# Управление:          sudo bash deploy.sh --status|--logs|--restart|--backup
+# Проверка восстановления:
+#   sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+#       bash deploy.sh --restore /root/backups/just1kbot/<backup>.tar.age
 # =============================================================================
 
-set -euo pipefail
+set -Eeuo pipefail
 IFS=$'\n\t'
+umask 027
 
-# --- Константы ---
 BOT_USER="just1kbot"
 PROJECT_DIR="/opt/just1kbot"
 VENV_DIR="$PROJECT_DIR/venv"
 ENV_FILE="$PROJECT_DIR/.env"
 SERVICE_NAME="just1kbot"
+UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 LOG_FILE="/var/log/just1kbot-deploy.log"
 ROLLBACK_LOG="/var/log/just1kbot-rollback.log"
 BACKUP_DIR="/root/backups/just1kbot"
+BACKUP_CONF="/etc/just1kbot-backup.conf"
+BACKUP_IDENTITY="/root/.config/just1kbot/backup.agekey"
+SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
+HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"
+DEPLOY_LOCK_FILE="/run/lock/just1kbot-deploy.lock"
 PYTHON_MIN_VERSION="3.11"
 SOURCE_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 
-# --- Цвета ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# --- Временные файлы ---
-PG_PASS_FILE=""
-TEMP_FILES=()
-
-cleanup_temp_files() {
-    for f in "${TEMP_FILES[@]:-}"; do
-        rm -f "$f" 2>/dev/null || true
-    done
-    if [[ -n "${PG_PASS_FILE:-}" ]]; then
-        rm -f "$PG_PASS_FILE" 2>/dev/null || true
-    fi
-}
-trap cleanup_temp_files EXIT INT TERM
-
-# --- Флаги ---
+ACTION="deploy"
+ACTION_ARG=""
 NON_INTERACTIVE=false
 DRY_RUN=false
+INITIAL_INSTALL=false
+DOMAIN=""
+SSL_EMAIL=""
 
-require_root() {
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}Ошибка: скрипт должен быть запущен с правами root (sudo).${NC}" >&2
-        return 1
-    fi
-}
+TEMP_FILES=()
+TEMP_DIRS=()
 
-parse_args() {
-    local arg
-    for arg in "$@"; do
-        case "$arg" in
-            --yes|-y|--force) NON_INTERACTIVE=true ;;
-            --dry-run) DRY_RUN=true ;;
-            --help|-h)
-                echo "Использование: sudo ./deploy.sh [--yes] [--dry-run]"
-                echo "  --yes, -y, --force  Неинтерактивный режим (значения из переменных окружения)"
-                echo "  --dry-run           Показать что будет сделано без выполнения"
-                return 2
-                ;;
-        esac
+cleanup_temp_files() {
+    local path
+    for path in "${TEMP_FILES[@]:-}"; do
+        [[ -z "$path" ]] || rm -f -- "$path" 2>/dev/null || true
+    done
+    for path in "${TEMP_DIRS[@]:-}"; do
+        [[ -z "$path" ]] || rm -rf -- "$path" 2>/dev/null || true
     done
 }
-
-check_os() {
-    if [[ -f /etc/os-release ]]; then
-        . /etc/os-release
-        if [[ "$ID" != "ubuntu" && "$ID" != "debian" ]]; then
-            echo -e "${YELLOW}Внимание: скрипт оптимизирован для Ubuntu/Debian. Текущая ОС: $ID${NC}"
-            read -p "Продолжить? (y/N): " -n 1 -r
-            echo
-            [[ $REPLY =~ ^[Yy]$ ]] || { echo "Отменено."; return 1; }
-        fi
-    fi
-}
-
-init_logging() {
-    mkdir -p "$(dirname "$LOG_FILE")"
-    touch "$LOG_FILE"
-}
+trap cleanup_temp_files EXIT INT TERM
 
 log() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${GREEN}[$timestamp]${NC} $1"
-    echo "[$timestamp] $1" >> "$LOG_FILE"
+    printf '%b[%s]%b %s\n' "$GREEN" "$timestamp" "$NC" "$1"
+    printf '[%s] %s\n' "$timestamp" "$1" >> "$LOG_FILE"
 }
 
 warn() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${YELLOW}[$timestamp] ВНИМАНИЕ:${NC} $1"
-    echo "[$timestamp] WARNING: $1" >> "$LOG_FILE"
+    printf '%b[%s] ВНИМАНИЕ:%b %s\n' "$YELLOW" "$timestamp" "$NC" "$1"
+    printf '[%s] WARNING: %s\n' "$timestamp" "$1" >> "$LOG_FILE"
 }
 
 error() {
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo -e "${RED}[$timestamp] ОШИБКА:${NC} $1" >&2
-    echo "[$timestamp] ERROR: $1" >> "$LOG_FILE"
-}
-
-info() {
-    echo -e "${BLUE}$1${NC}"
-}
-
-# --- Утилиты ---
-
-# Безопасная запись переменной в .env
-write_env_var() {
-    local key="$1"
-    local value="$2"
-    # Экранирование одинарных кавычек для single-quoted контекста
-    value=${value//\'/\\\'}
-    printf "%s='%s'\n" "$key" "$value" >> "$ENV_FILE"
-    chown "$BOT_USER:$BOT_USER" "$ENV_FILE" 2>/dev/null || true
-    chmod 600 "$ENV_FILE"
-}
-
-# Безопасное присваивание переменной (без eval)
-assign_var() {
-    local var_name="$1"
-    local value="$2"
-    printf -v "$var_name" '%s' "$value"
-}
-
-read_required() {
-    local prompt="$1"
-    local var_name="$2"
-    local value=""
-
-    while true; do
-        read -rp "$(echo -e "${BLUE}$prompt${NC}")" value
-        if [[ -n "$value" ]]; then
-            assign_var "$var_name" "$value"
-            break
-        fi
-        warn "Значение не может быть пустым. Попробуйте снова."
-    done
-}
-
-read_required_secret() {
-    local prompt="$1"
-    local var_name="$2"
-    local value=""
-
-    while true; do
-        read -rsp "$(echo -e "${BLUE}$prompt${NC}")" value
-        echo
-        if [[ -n "$value" ]]; then
-            assign_var "$var_name" "$value"
-            break
-        fi
-        warn "Значение не может быть пустым. Попробуйте снова."
-    done
-}
-
-read_optional() {
-    local prompt="$1"
-    local var_name="$2"
-    local default="$3"
-    local value=""
-
-    read -rp "$(echo -e "${BLUE}$prompt [${default}]${NC}")" value
-    if [[ -z "$value" ]]; then
-        assign_var "$var_name" "$default"
-    else
-        assign_var "$var_name" "$value"
+    printf '%b[%s] ОШИБКА:%b %s\n' "$RED" "$timestamp" "$NC" "$1" >&2
+    if [[ -e "$LOG_FILE" ]]; then
+        printf '[%s] ERROR: %s\n' "$timestamp" "$1" >> "$LOG_FILE"
     fi
 }
 
-read_db_password() {
-    local prompt="$1"
-    local var_name="$2"
-    local value=""
+info() {
+    printf '%b%s%b\n' "$BLUE" "$1" "$NC"
+}
 
+usage() {
+    cat <<'USAGE'
+Использование:
+  sudo bash deploy.sh [--yes] [--dry-run]
+  sudo bash deploy.sh --status
+  sudo bash deploy.sh --logs
+  sudo bash deploy.sh --restart
+  sudo bash deploy.sh --backup
+  sudo AGE_IDENTITY_FILE=/path/to/key bash deploy.sh --restore <backup.tar.age>
+  bash deploy.sh --help
+
+Команды:
+  без команды       Первичная установка или безопасное обновление.
+  --status          Статус приложения, PostgreSQL, Redis, Nginx и таймеров.
+  --logs            Следить за журналом systemd приложения.
+  --restart         Перезапустить приложение и выполнить healthcheck.
+  --backup          Создать зашифрованный PostgreSQL backup.
+  --restore FILE    Выполнить изолированную проверку восстановления FILE.
+                    Рабочая production-БД не изменяется.
+  --yes, -y         Неинтерактивная первичная установка из env-переменных.
+  --dry-run         Показать план установки/обновления без изменений.
+  --help, -h        Показать эту справку.
+
+Неизвестные аргументы завершают скрипт с кодом 2 и никогда не запускают деплой.
+USAGE
+}
+
+set_action() {
+    local next_action=$1
+    if [[ "$ACTION" != deploy && "$ACTION" != "$next_action" ]]; then
+        printf 'Нельзя одновременно использовать несколько команд управления.\n' >&2
+        exit 2
+    fi
+    ACTION=$next_action
+}
+
+parse_args() {
+    while (( $# > 0 )); do
+        case "$1" in
+            --yes|-y|--force)
+                NON_INTERACTIVE=true
+                ;;
+            --dry-run)
+                DRY_RUN=true
+                ;;
+            --status)
+                set_action status
+                ;;
+            --logs)
+                set_action logs
+                ;;
+            --restart)
+                set_action restart
+                ;;
+            --backup)
+                set_action backup
+                ;;
+            --restore)
+                set_action restore
+                shift
+                if (( $# == 0 )) || [[ "$1" == --* ]]; then
+                    printf 'Для --restore требуется путь к backup-файлу.\n' >&2
+                    exit 2
+                fi
+                ACTION_ARG=$1
+                ;;
+            --help|-h)
+                set_action help
+                ;;
+            --)
+                shift
+                if (( $# > 0 )); then
+                    printf 'Неожиданный позиционный аргумент: %s\n' "$1" >&2
+                    exit 2
+                fi
+                break
+                ;;
+            --*)
+                printf 'Неизвестный аргумент: %s\n' "$1" >&2
+                usage >&2
+                exit 2
+                ;;
+            *)
+                printf 'Неожиданный аргумент: %s\n' "$1" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+        shift
+    done
+
+    if [[ "$ACTION" != deploy && ( "$NON_INTERACTIVE" == true || "$DRY_RUN" == true ) ]]; then
+        printf '--yes и --dry-run применимы только к установке/обновлению.\n' >&2
+        exit 2
+    fi
+}
+
+require_root() {
+    if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+        printf 'Ошибка: команда должна быть запущена через sudo/root.\n' >&2
+        exit 1
+    fi
+}
+
+init_logging() {
+    install -d -o root -g root -m 0750 "$(dirname "$LOG_FILE")"
+    touch "$LOG_FILE" "$ROLLBACK_LOG"
+    chmod 0640 "$LOG_FILE" "$ROLLBACK_LOG"
+}
+
+acquire_deploy_lock() {
+    install -d -o root -g root -m 0755 "$(dirname "$DEPLOY_LOCK_FILE")"
+    exec 200>"$DEPLOY_LOCK_FILE"
+    if ! flock -n 200; then
+        error "Другой deploy/restart уже выполняется"
+        return 1
+    fi
+}
+
+command_required() {
+    command -v "$1" >/dev/null 2>&1 || {
+        error "Не найдена обязательная команда: $1"
+        return 1
+    }
+}
+
+read_env_value() {
+    local key=$1
+    ENV_FILE_PATH="$ENV_FILE" ENV_KEY="$key" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ["ENV_FILE_PATH"])
+key = os.environ["ENV_KEY"]
+for raw in path.read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    current, value = line.split("=", 1)
+    if current.strip() != key:
+        continue
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        value = value[1:-1]
+    print(value)
+    break
+PY
+}
+
+validate_env_file() {
+    if [[ -L "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
+        error "Production .env отсутствует, не является regular file или является symlink"
+        return 1
+    fi
+
+    local mode owner
+    mode=$(stat -c '%a' "$ENV_FILE")
+    owner=$(stat -c '%U' "$ENV_FILE")
+
+    if (( (8#$mode & 8#077) != 0 )); then
+        error "Production .env имеет небезопасные permissions: $mode"
+        return 1
+    fi
+    if [[ "$owner" != root && "$owner" != "$BOT_USER" ]]; then
+        error "Production .env имеет неожиданного владельца: $owner"
+        return 1
+    fi
+
+    local required value
+    for required in BOT_TOKEN DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
+        value=$(read_env_value "$required")
+        if [[ -z "$value" ]]; then
+            error "В production .env отсутствует обязательный параметр: $required"
+            return 1
+        fi
+    done
+
+    local encryption_key
+    encryption_key=$(read_env_value DB_ENCRYPTION_KEY)
+    DB_KEY="$encryption_key" python3 - <<'PY'
+import base64
+import os
+
+key = os.environ["DB_KEY"].encode("ascii")
+try:
+    decoded = base64.urlsafe_b64decode(key)
+except Exception as exc:
+    raise SystemExit(f"invalid DB_ENCRYPTION_KEY: {type(exc).__name__}")
+if len(decoded) != 32:
+    raise SystemExit("invalid DB_ENCRYPTION_KEY length")
+PY
+}
+
+determine_install_kind() {
+    if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
+        INITIAL_INSTALL=false
+        validate_env_file
+        log "Режим: безопасное обновление существующей установки"
+    else
+        INITIAL_INSTALL=true
+        log "Режим: первичная установка"
+    fi
+}
+
+check_os() {
+    if [[ ! -f /etc/os-release ]]; then
+        error "Не удалось определить операционную систему"
+        return 1
+    fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    if [[ "${ID:-}" != ubuntu && "${ID:-}" != debian ]]; then
+        error "Поддерживаются только Ubuntu и Debian; обнаружено: ${ID:-unknown}"
+        return 1
+    fi
+}
+
+validate_source_tree() {
+    local required
+    for required in \
+        requirements.txt \
+        alembic.ini \
+        bot/main.py \
+        ops/deploy_application.sh \
+        ops/backup_postgres.sh \
+        ops/verify_backup.sh \
+        ops/restore_rehearsal.sh \
+        ops/just1kbot-restore.sh; do
+        if [[ ! -f "$SOURCE_DIR/$required" ]]; then
+            error "В исходном каталоге отсутствует $required"
+            return 1
+        fi
+    done
+
+    if [[ "$INITIAL_INSTALL" == false ]]; then
+        local source_real project_real
+        source_real=$(cd "$SOURCE_DIR" && pwd -P)
+        project_real=$(cd "$PROJECT_DIR" && pwd -P)
+        if [[ "$source_real" == "$project_real" ]]; then
+            error "Обновление нельзя запускать прямо из live-каталога $PROJECT_DIR"
+            error "Используйте отдельный checkout/release-каталог, чтобы rollback сохранял старую версию"
+            return 1
+        fi
+    fi
+}
+
+assign_var() {
+    printf -v "$1" '%s' "$2"
+}
+
+read_optional() {
+    local prompt=$1 var_name=$2 default=$3 value=""
+    read -rp "$prompt [$default]: " value
+    assign_var "$var_name" "${value:-$default}"
+}
+
+read_db_password() {
+    local prompt=$1 var_name=$2 value=""
     while true; do
-        read -rsp "$(echo -e "${BLUE}$prompt${NC}")" value
-        echo
-        if [[ ${#value} -lt 8 ]]; then
-            warn "Пароль должен быть не менее 8 символов."
-            continue
+        read -rsp "$prompt" value
+        printf '\n'
+        if [[ "$value" =~ ^[A-Za-z0-9_@%*+=-]{8,}$ ]]; then
+            assign_var "$var_name" "$value"
+            return
         fi
-        if [[ ! "$value" =~ ^[a-zA-Z0-9_@#%*+=-]+$ ]]; then
-            warn "Пароль содержит недопустимые символы. Используйте: a-z, A-Z, 0-9, _ @ # % * + = -"
-            continue
-        fi
-        assign_var "$var_name" "$value"
-        break
+        printf 'Минимум 8 символов. Разрешены A-Z, a-z, 0-9, _ @ %% * + = -\n'
     done
 }
 
 read_bot_token() {
-    local prompt="$1"
-    local var_name="$2"
     local value=""
-
     while true; do
-        read -rp "$(echo -e "${BLUE}$prompt${NC}")" value
-        if [[ "$value" =~ ^[0-9]+:[a-zA-Z0-9_-]+$ ]]; then
-            assign_var "$var_name" "$value"
-            break
+        read -rp 'BOT_TOKEN: ' value
+        if [[ "$value" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+            BOT_TOKEN=$value
+            return
         fi
-        warn "Неверный формат токена. Ожидается: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+        printf 'Неверный формат BOT_TOKEN.\n'
     done
 }
 
 read_admin_ids() {
-    local prompt="$1"
-    local var_name="$2"
     local value=""
-
     while true; do
-        read -rp "$(echo -e "${BLUE}$prompt${NC}")" value
+        read -rp 'ADMIN_IDS, числа через запятую: ' value
         if [[ "$value" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
-            assign_var "$var_name" "$value"
-            break
+            ADMIN_IDS=$value
+            return
         fi
-        warn "Неверный формат. Введите числа через запятую: 123456789,987654321"
+        printf 'Неверный формат ADMIN_IDS.\n'
     done
 }
 
-# --- Сбор данных ---
-collect_input() {
-    echo ""
-    info "=== Ввод данных для деплоя ==="
-    echo ""
-    info "Для отмены введите /cancel в любом поле."
-    echo ""
-
+collect_initial_input() {
     if [[ "$NON_INTERACTIVE" == true ]]; then
-        BOT_TOKEN="${BOT_TOKEN:?Переменная BOT_TOKEN не задана}"
-        DB_PASSWORD="${DB_PASSWORD:?Переменная DB_PASSWORD не задана}"
-        REDIS_PASSWORD="${REDIS_PASSWORD:?Переменная REDIS_PASSWORD не задана}"
-        ADMIN_IDS="${ADMIN_IDS:?Переменная ADMIN_IDS не задана}"
-        DOMAIN="${DOMAIN:-}"
-        SSL_EMAIL="${SSL_EMAIL:-admin@example.com}"
-        AMNEZIA_API_URL="${AMNEZIA_API_URL:-http://127.0.0.1:4001}"
-        AMNEZIA_API_KEY="${AMNEZIA_API_KEY:-}"
-        YOOKASSA_SHOP_ID="${YOOKASSA_SHOP_ID:-}"
-        YOOKASSA_SECRET_KEY="${YOOKASSA_SECRET_KEY:-}"
-        DB_ENCRYPTION_KEY="${DB_ENCRYPTION_KEY:-}"
-        log "Неинтерактивный режим: данные взяты из переменных окружения"
+        BOT_TOKEN=${BOT_TOKEN:?BOT_TOKEN не задан}
+        DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD не задан}
+        REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD не задан}
+        ADMIN_IDS=${ADMIN_IDS:?ADMIN_IDS не задан}
+        DOMAIN=${DOMAIN:-}
+        SSL_EMAIL=${SSL_EMAIL:-admin@example.com}
+        AMNEZIA_API_URL=${AMNEZIA_API_URL:-http://127.0.0.1:4001}
+        AMNEZIA_API_KEY=${AMNEZIA_API_KEY:-}
+        YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:-}
+        YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:-}
+        DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
         return
     fi
 
-    read_bot_token "Токен бота (от @BotFather): " BOT_TOKEN
-    [[ "$BOT_TOKEN" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
-
-    read_db_password "Пароль PostgreSQL (мин. 8 символов): " DB_PASSWORD
-    [[ "$DB_PASSWORD" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
-
-    read_db_password "Пароль Redis (мин. 8 символов): " REDIS_PASSWORD
-    [[ "$REDIS_PASSWORD" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
-
-    read_admin_ids "Admin IDs (через запятую): " ADMIN_IDS
-    [[ "$ADMIN_IDS" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
-
-    read_optional "Домен (Enter = пропустить SSL): " DOMAIN ""
-    [[ "$DOMAIN" == "/cancel" ]] && { log "Отменено пользователем"; exit 0; }
-
+    info "=== Первичная конфигурация ==="
+    read_bot_token
+    read_db_password 'Пароль PostgreSQL: ' DB_PASSWORD
+    read_db_password 'Пароль Redis: ' REDIS_PASSWORD
+    read_admin_ids
+    read_optional 'Домен для webhook/health; Enter — без HTTPS' DOMAIN ''
     if [[ -n "$DOMAIN" ]]; then
-        read_optional "Email для Let's Encrypt: " SSL_EMAIL "admin@example.com"
-    else
-        SSL_EMAIL=""
+        read_optional "Email Let's Encrypt" SSL_EMAIL 'admin@example.com'
     fi
-
-    read_optional "Amnezia API URL: " AMNEZIA_API_URL "http://127.0.0.1:4001"
-    read_optional "Amnezia API Key: " AMNEZIA_API_KEY ""
-    read_optional "YooKassa Shop ID: " YOOKASSA_SHOP_ID ""
-    read_optional "YooKassa Secret Key: " YOOKASSA_SECRET_KEY ""
+    read_optional 'Amnezia API URL' AMNEZIA_API_URL 'http://127.0.0.1:4001'
+    read_optional 'Amnezia API Key; Enter — пусто' AMNEZIA_API_KEY ''
+    read_optional 'YooKassa Shop ID; Enter — отключено' YOOKASSA_SHOP_ID ''
+    read_optional 'YooKassa Secret Key; Enter — отключено' YOOKASSA_SECRET_KEY ''
 }
 
-# --- Предварительные проверки ---
-preflight_checks() {
-    log "Предварительные проверки..."
-
-    if ! command -v python3 &> /dev/null; then
-        error "python3 не найден. Установите Python >= $PYTHON_MIN_VERSION"
-        exit 1
+validate_initial_input() {
+    if [[ ! "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        error "BOT_TOKEN имеет неверный формат"
+        return 1
     fi
-
-    local py_version
-    py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-    if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 11) else 1)"; then
-        error "Требуется Python >= $PYTHON_MIN_VERSION, найдено: $py_version"
-        exit 1
+    if [[ ! "$DB_PASSWORD" =~ ^[A-Za-z0-9_@%*+=-]{8,}$ ]]; then
+        error "DB_PASSWORD имеет неверный формат"
+        return 1
     fi
-
-    log "Python $py_version — OK"
-
-    if [[ ! "$DB_PASSWORD" =~ ^[a-zA-Z0-9_@%*+=-]{8,}$ ]]; then
-        error "Пароль PostgreSQL должен содержать минимум 8 безопасных символов"
-        exit 1
+    if [[ ! "$REDIS_PASSWORD" =~ ^[A-Za-z0-9_@%*+=-]{8,}$ ]]; then
+        error "REDIS_PASSWORD имеет неверный формат"
+        return 1
     fi
-    if [[ ! "$REDIS_PASSWORD" =~ ^[a-zA-Z0-9_@%*+=-]{8,}$ ]]; then
-        error "Пароль Redis должен содержать минимум 8 безопасных символов"
-        exit 1
+    if [[ ! "$ADMIN_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        error "ADMIN_IDS имеет неверный формат"
+        return 1
+    fi
+    if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+        error "DOMAIN имеет неверный формат"
+        return 1
     fi
     if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] || \
        [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
-        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY должны задаваться вместе"
-        exit 1
-    fi
-}
-
-# --- Проверка доступности портов ---
-check_port_available() {
-    local port="$1"
-    local service="$2"
-    if ss -tlnp 2>/dev/null | grep -q ":${port} " || \
-       netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-        warn "Порт $port уже занят ($service)."
+        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются только вместе"
         return 1
     fi
-    return 0
+    if [[ -n "$DOMAIN" && -z "$YOOKASSA_SHOP_ID" ]]; then
+        error "DOMAIN используется для YooKassa webhook и требует настроенную YooKassa"
+        return 1
+    fi
 }
 
-# --- Установка зависимостей ---
 install_dependencies() {
-    log "Обновление пакетов..."
+    log "Установка системных зависимостей"
     apt-get update -qq
-    apt-get install -y -qq \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         python3 python3-venv python3-pip python3-dev \
-        postgresql postgresql-contrib age util-linux \
-        redis-server \
+        postgresql postgresql-contrib redis-server \
         nginx certbot python3-certbot-nginx \
-        ufw curl git rsync \
-        build-essential libpq-dev \
-        logrotate \
-        > /dev/null 2>&1
-
-    log "Зависимости установлены"
+        age ufw curl git rsync build-essential libpq-dev \
+        logrotate util-linux >/dev/null
 }
 
-# --- PostgreSQL ---
-setup_postgresql() {
-    log "Настройка PostgreSQL..."
+validate_runtime_commands() {
+    local command
+    for command in python3 rsync systemctl stat git flock runuser age age-keygen pg_dump pg_restore psql sha256sum; do
+        command_required "$command"
+    done
 
-    systemctl enable postgresql > /dev/null 2>&1
-    systemctl start postgresql
+    if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+        error "Требуется Python >= $PYTHON_MIN_VERSION"
+        return 1
+    fi
+}
 
-    if su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'\"" 2>/dev/null | grep -q 1; then
-        log "База данных just1kbot_bot уже существует — пропускаю создание"
-    else
-        su - postgres -c "psql -v ON_ERROR_STOP=1" <<EOSQL
+setup_user_and_dirs() {
+    if ! id "$BOT_USER" >/dev/null 2>&1; then
+        useradd -r -m -s /bin/bash "$BOT_USER"
+    fi
+
+    install -d -o "$BOT_USER" -g "$BOT_USER" -m 0750 "$PROJECT_DIR"
+    install -d -o root -g root -m 0700 "$BACKUP_DIR" "$SNAPSHOT_DIR"
+    install -d -o "$BOT_USER" -g "$BOT_USER" -m 0750 /var/log/just1kbot
+}
+
+setup_postgresql_initial() {
+    log "Настройка PostgreSQL"
+    systemctl enable --now postgresql >/dev/null
+
+    su - postgres -c "psql -v ON_ERROR_STOP=1" <<EOSQL
 DO \$\$
 BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'just1kbot') THEN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'just1kbot') THEN
+        ALTER ROLE just1kbot WITH LOGIN PASSWORD '${DB_PASSWORD}';
+    ELSE
         CREATE ROLE just1kbot WITH LOGIN PASSWORD '${DB_PASSWORD}';
     END IF;
 END
 \$\$;
-CREATE DATABASE just1kbot_bot OWNER just1kbot;
-GRANT ALL PRIVILEGES ON DATABASE just1kbot_bot TO just1kbot;
 EOSQL
-        log "База данных создана"
+
+    if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'\"" | grep -q 1; then
+        su - postgres -c "createdb -O just1kbot just1kbot_bot"
     fi
 }
 
-# --- Redis ---
-setup_redis() {
-    log "Настройка Redis..."
+setup_redis_initial() {
+    log "Настройка Redis"
+    local conf=/etc/redis/redis.conf
+    [[ -f "$conf" ]] || {
+        error "Не найден $conf"
+        return 1
+    }
 
-    local configure_credentials="${1:-true}"
-    local redis_conf="/etc/redis/redis.conf"
-    if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then redis_conf="${TEST_REDIS_CONF:?}"; fi
+    cp -a "$conf" "$conf.bak.$(date +%s)"
+    sed -i -E 's/^bind .*/bind 127.0.0.1 ::1/' "$conf"
 
-    # Сохраняем оригинал для rollback
-    if [[ -f "$redis_conf" ]]; then
-        cp "$redis_conf" "${redis_conf}.bak.$(date +%s)"
-    fi
-
-    # Модифицируем существующий конфиг через sed (не перезаписываем)
-    if [[ -f "$redis_conf" ]]; then
-        sed -i 's/^bind .*/bind 127.0.0.1 ::1/' "$redis_conf"
-
-        if [[ "$configure_credentials" == true ]]; then
-            if grep -q "^requirepass" "$redis_conf"; then
-                sed -i "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$redis_conf"
-            else
-                echo "requirepass ${REDIS_PASSWORD}" >> "$redis_conf"
-            fi
-        else
-            log "Update deployment: существующий Redis credential сохранён без ротации"
-        fi
-
-        if grep -q "^maxmemory " "$redis_conf"; then
-            sed -i 's/^maxmemory .*/maxmemory 256mb/' "$redis_conf"
-        else
-            echo "maxmemory 256mb" >> "$redis_conf"
-        fi
-
-        if grep -q "^maxmemory-policy" "$redis_conf"; then
-            sed -i 's/^maxmemory-policy .*/maxmemory-policy allkeys-lru/' "$redis_conf"
-        else
-            echo "maxmemory-policy allkeys-lru" >> "$redis_conf"
-        fi
-
-        if grep -q "^appendonly" "$redis_conf"; then
-            sed -i 's/^appendonly .*/appendonly yes/' "$redis_conf"
-        else
-            echo "appendonly yes" >> "$redis_conf"
-        fi
-        if grep -q "^appendfsync" "$redis_conf"; then
-            sed -i 's/^appendfsync .*/appendfsync everysec/' "$redis_conf"
-        else
-            echo "appendfsync everysec" >> "$redis_conf"
-        fi
+    if grep -q '^requirepass ' "$conf"; then
+        sed -i -E "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$conf"
     else
-        # Минимальный конфиг если файла нет
-        [[ "$configure_credentials" == true ]] || { error "Redis config отсутствует при update deployment"; return 1; }
-        cat > "$redis_conf" <<EOF
-bind 127.0.0.1 ::1
-port 6379
-daemonize no
-supervised systemd
-dir /var/lib/redis
-logfile /var/log/redis/redis-server.log
-requirepass ${REDIS_PASSWORD}
-maxmemory 256mb
-maxmemory-policy allkeys-lru
-appendonly yes
-appendfsync everysec
-EOF
+        printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$conf"
     fi
 
-    systemctl enable redis-server > /dev/null 2>&1
+    if grep -q '^maxmemory ' "$conf"; then
+        sed -i -E 's/^maxmemory .*/maxmemory 256mb/' "$conf"
+    else
+        printf 'maxmemory 256mb\n' >> "$conf"
+    fi
+
+    if grep -q '^maxmemory-policy ' "$conf"; then
+        sed -i -E 's/^maxmemory-policy .*/maxmemory-policy allkeys-lru/' "$conf"
+    else
+        printf 'maxmemory-policy allkeys-lru\n' >> "$conf"
+    fi
+
+    if grep -q '^appendonly ' "$conf"; then
+        sed -i -E 's/^appendonly .*/appendonly yes/' "$conf"
+    else
+        printf 'appendonly yes\n' >> "$conf"
+    fi
+
+    systemctl enable --now redis-server >/dev/null
     systemctl restart redis-server
-
-    log "Redis настроен"
 }
 
-determine_install_kind() {
-    INITIAL_INSTALL=true
-    if [[ -L "$ENV_FILE" ]]; then error "Production .env не должен быть symlink"; return 1; fi
+write_env_var() {
+    local key=$1 value=$2
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/\\n}
+    printf '%s="%s"\n' "$key" "$value" >> "$ENV_FILE"
+}
+
+create_env_if_missing() {
     if [[ -e "$ENV_FILE" ]]; then
-        [[ -f "$ENV_FILE" ]] || { error "Production .env должен быть regular file"; return 1; }
-        local mode owner
-        mode=$(stat -c '%a' "$ENV_FILE") || return 1
-        owner=$(stat -c '%U' "$ENV_FILE") || return 1
-        (( (8#$mode & 8#077) == 0 )) || { error "Production .env имеет небезопасные permissions"; return 1; }
-        [[ "$owner" == root || "$owner" == "$BOT_USER" ]] || { error "Production .env имеет небезопасного owner"; return 1; }
-        INITIAL_INSTALL=false
-    fi
-    log "Deployment kind=$([[ "$INITIAL_INSTALL" == true ]] && echo initial || echo update)"
-}
-
-# --- Пользователь и директории ---
-setup_user_and_dirs() {
-    log "Создание пользователя и директорий..."
-
-    if ! id "$BOT_USER" &>/dev/null; then
-        useradd -r -m -s /bin/bash "$BOT_USER"
+        validate_env_file
+        log "Существующий production .env сохранён без изменений"
+        return
     fi
 
-    mkdir -p "$PROJECT_DIR"
-    mkdir -p "$BACKUP_DIR"
-    mkdir -p "/var/log/just1kbot"
+    log "Создание production .env"
+    install -o "$BOT_USER" -g "$BOT_USER" -m 0600 /dev/null "$ENV_FILE"
 
-    chown -R "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
-    chown -R "$BOT_USER:$BOT_USER" "/var/log/just1kbot"
-
-    log "Пользователь и директории готовы"
-}
-
-sync_project_files() {
-    log "Копирование проекта из $SOURCE_DIR..."
-    if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
-        rsync -a --delete \
-            --exclude '.git/' \
-            --exclude '.env' \
-            --exclude 'venv/' \
-            --exclude '__pycache__/' \
-            "$SOURCE_DIR/" "$PROJECT_DIR/"
+    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
+        DB_ENCRYPTION_KEY=$(python3 - <<'PY'
+import base64
+import secrets
+print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())
+PY
+)
     fi
-    chown -R "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
-    log "Файлы проекта синхронизированы"
+
+    local db_encoded redis_encoded
+    db_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
+    redis_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
+
+    write_env_var BOT_TOKEN "$BOT_TOKEN"
+    write_env_var ADMIN_IDS "$ADMIN_IDS"
+    write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_encoded}@127.0.0.1:5432/just1kbot_bot"
+    write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
+    write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
+    write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
+    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
+    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
+    write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
+    write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
+    write_env_var YOOKASSA_RETURN_URL 'https://t.me/{bot_username}'
+    write_env_var YOOKASSA_WEBHOOK_PORT '8080'
+    if [[ -n "$DOMAIN" ]]; then
+        write_env_var DOMAIN "$DOMAIN"
+        write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook/yookassa"
+    fi
+
+    chown "$BOT_USER:$BOT_USER" "$ENV_FILE"
+    chmod 0600 "$ENV_FILE"
+    validate_env_file
 }
 
-# --- Виртуальное окружение ---
 setup_venv() {
-    log "Создание виртуального окружения..."
-
-    if [[ ! -d "$VENV_DIR" ]]; then
+    log "Подготовка Python virtualenv"
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
         python3 -m venv "$VENV_DIR"
     fi
-
-    "$VENV_DIR/bin/pip" install --upgrade pip --quiet
-    "$VENV_DIR/bin/pip" install -r "$PROJECT_DIR/requirements.txt" --quiet
-
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
+    "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt" --quiet
     chown -R "$BOT_USER:$BOT_USER" "$VENV_DIR"
-
-    log "Виртуальное окружение готово"
 }
 
-# --- Инициализация БД ---
 init_database() {
-    log "Инициализация базы данных (alembic)..."
-
-    cd "$PROJECT_DIR"
-    su "$BOT_USER" -c "cd $PROJECT_DIR && $VENV_DIR/bin/alembic upgrade head" 2>> "$LOG_FILE"
-
-    log "Миграции применены"
+    log "Применение Alembic migrations"
+    runuser -u "$BOT_USER" -- \
+        env PYTHONPATH="$PROJECT_DIR" \
+        bash -c "cd '$PROJECT_DIR' && '$VENV_DIR/bin/alembic' upgrade head" \
+        2>> "$LOG_FILE"
 }
 
-# --- Systemd сервис ---
 setup_systemd() {
-    log "Создание systemd сервиса..."
-
-    cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
+    log "Установка systemd unit"
+    cat > "$UNIT_FILE" <<EOF_UNIT
 [Unit]
 Description=Just1kBot Telegram Bot
-After=network.target postgresql.service redis-server.service
-Wants=postgresql.service redis-server.service
+After=network-online.target postgresql.service redis-server.service
+Wants=network-online.target postgresql.service redis-server.service
 
 [Service]
 Type=simple
@@ -527,105 +622,296 @@ User=${BOT_USER}
 Group=${BOT_USER}
 WorkingDirectory=${PROJECT_DIR}
 Environment=PYTHONPATH=${PROJECT_DIR}
+Environment=PYTHONUNBUFFERED=1
 ExecStart=${VENV_DIR}/bin/python -m bot.main
 Restart=always
 RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
 StandardOutput=journal
 StandardError=journal
 
-# Hardening
-ProtectSystem=strict
-ReadWritePaths=${PROJECT_DIR} /var/log/just1kbot
-PrivateTmp=true
 NoNewPrivileges=true
-ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=${PROJECT_DIR} /var/log/just1kbot
 MemoryMax=512M
 CPUQuota=80%
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOF_UNIT
 
+    chmod 0644 "$UNIT_FILE"
     systemctl daemon-reload
-    systemctl enable "$SERVICE_NAME" > /dev/null 2>&1
-
-    log "Systemd сервис создан"
+    systemctl enable "$SERVICE_NAME" >/dev/null
 }
 
-# --- Nginx + SSL ---
-setup_nginx_ssl() {
-    if [[ -z "$DOMAIN" ]]; then
-        log "Домен не указан — пропускаю настройку Nginx/SSL"
-        return
-    fi
+install_backup_tooling() {
+    log "Установка зашифрованного backup/restore tooling"
+    local source target temp
 
-    log "Настройка Nginx для домена: $DOMAIN"
-
-    # Валидация домена
-    while true; do
-        if [[ "$DOMAIN" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
-            break
-        fi
-        warn "Некорректный домен: $DOMAIN"
-        if [[ "$NON_INTERACTIVE" == true ]]; then
-            error "Некорректный домен в неинтерактивном режиме"
-            exit 1
-        fi
-        read -rp "Введите корректный домен (или Enter для пропуска SSL): " DOMAIN
-        if [[ -z "$DOMAIN" ]]; then
-            log "SSL пропущен"
-            return
-        fi
+    for source in backup_postgres.sh verify_backup.sh restore_rehearsal.sh just1kbot-restore.sh; do
+        target="/usr/local/bin/$source"
+        [[ "$source" != backup_postgres.sh ]] || target=/usr/local/bin/just1kbot-backup.sh
+        temp="${target}.new.$$"
+        install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temp"
+        mv -f -- "$temp" "$target"
     done
 
-    # Проверка доступности портов
-    check_port_available 80 "nginx/веб-сервер" || true
-    check_port_available 443 "nginx/веб-сервер" || true
+    install -d -o root -g root -m 0700 "$(dirname "$BACKUP_IDENTITY")" "$BACKUP_DIR"
 
-    # Временный конфиг для certbot
-    cat > "/etc/nginx/sites-available/${DOMAIN}" <<EOF
-server {
-    listen 80;
-    server_name ${DOMAIN};
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-
-    ln -sf "/etc/nginx/sites-available/${DOMAIN}" "/etc/nginx/sites-enabled/${DOMAIN}"
-    rm -f /etc/nginx/sites-enabled/default
-    nginx -t 2>> "$LOG_FILE"
-    systemctl reload nginx
-
-    # Certbot
-    log "Получение SSL сертификата..."
-    if certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$SSL_EMAIL" --redirect 2>> "$LOG_FILE"; then
-        log "SSL сертификат получен"
-    else
-        warn "Не удалось получить сертификат. Проверьте DNS и firewall."
+    local recipient="" local_recipient=""
+    if [[ -f "$BACKUP_CONF" ]]; then
+        recipient=$(awk -F= '/^BACKUP_AGE_RECIPIENT=age1/ {value=$2} END {print value}' "$BACKUP_CONF")
     fi
 
-    # Автообновление
-    systemctl enable certbot.timer > /dev/null 2>&1
-    systemctl start certbot.timer 2>/dev/null || true
+    if [[ "$recipient" != age1* ]]; then
+        if [[ ! -s "$BACKUP_IDENTITY" ]]; then
+            age-keygen -o "$BACKUP_IDENTITY" >/dev/null
+            chmod 0600 "$BACKUP_IDENTITY"
+            warn "Создан backup age identity: $BACKUP_IDENTITY"
+            warn "Скопируйте этот ключ в защищённое место вне сервера"
+        fi
 
-    log "Nginx настроен"
+        recipient=$(age-keygen -y "$BACKUP_IDENTITY")
+        [[ "$recipient" == age1* ]] || {
+            error "Не удалось получить age recipient"
+            return 1
+        }
+
+        local temp_conf
+        temp_conf=$(mktemp)
+        TEMP_FILES+=("$temp_conf")
+        if [[ -f "$BACKUP_CONF" ]]; then
+            grep -v '^BACKUP_AGE_RECIPIENT=' "$BACKUP_CONF" > "$temp_conf" || :
+        else
+            printf 'BACKUP_RETENTION_COUNT=14\nBACKUP_REQUIRE_OFFSITE=false\n' > "$temp_conf"
+        fi
+        printf 'BACKUP_AGE_RECIPIENT=%s\n' "$recipient" >> "$temp_conf"
+        install -o root -g root -m 0600 "$temp_conf" "$BACKUP_CONF"
+    elif [[ -s "$BACKUP_IDENTITY" ]]; then
+        local_recipient=$(age-keygen -y "$BACKUP_IDENTITY" 2>/dev/null || true)
+        if [[ -n "$local_recipient" && "$local_recipient" != "$recipient" ]]; then
+            warn "Настроенный BACKUP_AGE_RECIPIENT не соответствует локальному $BACKUP_IDENTITY"
+            warn "Для restore используйте закрытый ключ, соответствующий настроенному recipient"
+        fi
+    else
+        warn "Backup использует внешний age recipient; локальный закрытый ключ не найден"
+    fi
+
+    cat > /etc/systemd/system/just1kbot-backup.service <<'EOF_BACKUP_SERVICE'
+[Unit]
+Description=Just1kBot encrypted PostgreSQL backup
+After=postgresql.service
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/just1kbot-backup.conf
+Environment=PROJECT_DIR=/opt/just1kbot
+Environment=ENV_FILE=/opt/just1kbot/.env
+ExecStart=/usr/local/bin/just1kbot-backup.sh
+PrivateTmp=true
+NoNewPrivileges=true
+EOF_BACKUP_SERVICE
+
+    cat > /etc/systemd/system/just1kbot-backup.timer <<'EOF_BACKUP_TIMER'
+[Unit]
+Description=Daily Just1kBot encrypted PostgreSQL backup
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=20m
+Unit=just1kbot-backup.service
+
+[Install]
+WantedBy=timers.target
+EOF_BACKUP_TIMER
+
+    systemctl daemon-reload
 }
 
-# --- Logrotate ---
-setup_logrotate() {
-    log "Настройка logrotate..."
+create_encrypted_backup() {
+    local context=${1:-manual}
+    log "Создание encrypted PostgreSQL backup: context=$context"
 
-    cat > /etc/logrotate.d/just1kbot <<EOF
+    local deadline started latest
+    deadline=$(( $(date +%s) + 180 ))
+    while systemctl is-active --quiet just1kbot-backup.service; do
+        if (( $(date +%s) > deadline )); then
+            error "Предыдущий backup не завершился за 180 секунд"
+            return 1
+        fi
+        sleep 2
+    done
+
+    started=$(date +%s)
+    systemctl start just1kbot-backup.service
+
+    latest=$(find "$BACKUP_DIR" -maxdepth 1 -type f \
+        -name 'just1kbot-pg-v1-*.tar.age' -printf '%T@ %p\n' \
+        | sort -rn | head -1 | cut -d' ' -f2-)
+    if [[ -z "$latest" || ! -s "$latest" || ! -s "$latest.sha256" ]]; then
+        error "Backup service завершился без готового артефакта"
+        return 1
+    fi
+    if (( $(stat -c %Y "$latest") < started )); then
+        error "Не создан новый backup для текущей операции"
+        return 1
+    fi
+    log "Encrypted backup: $(basename "$latest")"
+}
+
+create_pre_migration_backup() {
+    create_encrypted_backup pre-migration
+}
+
+install_healthcheck() {
+    log "Установка healthcheck"
+    cat > "$HEALTHCHECK_COMMAND" <<'EOF_HEALTH'
+#!/bin/bash
+set -Eeuo pipefail
+
+SERVICE=just1kbot
+PROJECT_DIR=/opt/just1kbot
+VENV_DIR="$PROJECT_DIR/venv"
+HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
+MAX_HEARTBEAT_AGE=180
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || exit 0
+
+if ! systemctl is-active --quiet "$SERVICE"; then
+    echo "healthcheck: service is not active" >&2
+    exit 1
+fi
+
+if [[ ! -f "$HEARTBEAT_FILE" ]]; then
+    echo "healthcheck: heartbeat is missing" >&2
+    exit 2
+fi
+
+age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE") ))
+if (( age < 0 || age > MAX_HEARTBEAT_AGE )); then
+    echo "healthcheck: heartbeat is stale, age=${age}s" >&2
+    exit 2
+fi
+
+runuser -u just1kbot -- env PYTHONPATH="$PROJECT_DIR" "$VENV_DIR/bin/python" - <<'PY'
+import asyncio
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+import redis.asyncio as redis
+
+from config.settings import get_settings
+
+
+async def check() -> None:
+    settings = get_settings()
+    engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True)
+    client = redis.from_url(settings.REDIS_URL)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        if not await client.ping():
+            raise RuntimeError("redis ping returned false")
+    finally:
+        await client.aclose()
+        await engine.dispose()
+
+
+asyncio.run(check())
+PY
+EOF_HEALTH
+    chmod 0750 "$HEALTHCHECK_COMMAND"
+
+    cat > /etc/systemd/system/just1kbot-healthcheck.service <<'EOF_HEALTH_SERVICE'
+[Unit]
+Description=Just1kBot application healthcheck
+After=just1kbot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/just1kbot-healthcheck.sh
+EOF_HEALTH_SERVICE
+
+    cat > /etc/systemd/system/just1kbot-healthcheck.timer <<'EOF_HEALTH_TIMER'
+[Unit]
+Description=Run Just1kBot healthcheck every two minutes
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=2m
+AccuracySec=15s
+Persistent=true
+Unit=just1kbot-healthcheck.service
+
+[Install]
+WantedBy=timers.target
+EOF_HEALTH_TIMER
+
+    systemctl daemon-reload
+
+    # Remove only legacy healthcheck cron; preserve every unrelated root cron line.
+    if command -v crontab >/dev/null 2>&1; then
+        local current filtered
+        current=$(mktemp)
+        filtered=$(mktemp)
+        TEMP_FILES+=("$current" "$filtered")
+        crontab -l > "$current" 2>/dev/null || :
+        grep -v 'just1kbot-healthcheck' "$current" > "$filtered" || :
+        if ! cmp -s "$current" "$filtered"; then
+            crontab "$filtered"
+        fi
+    fi
+}
+
+pause_operational_timers() {
+    systemctl stop just1kbot-healthcheck.timer 2>/dev/null || true
+    systemctl stop just1kbot-backup.timer 2>/dev/null || true
+
+    local deadline=$(( $(date +%s) + 180 ))
+    while systemctl is-active --quiet just1kbot-backup.service; do
+        if (( $(date +%s) > deadline )); then
+            error "Активный backup не завершился за 180 секунд"
+            return 1
+        fi
+        sleep 2
+    done
+}
+
+resume_operational_timers() {
+    systemctl enable --now just1kbot-backup.timer >/dev/null
+    systemctl enable --now just1kbot-healthcheck.timer >/dev/null
+}
+
+wait_for_application_health() {
+    local deadline=$(( $(date +%s) + 150 ))
+    while (( $(date +%s) <= deadline )); do
+        if [[ -x "$HEALTHCHECK_COMMAND" ]] && "$HEALTHCHECK_COMMAND" >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 3
+    done
+    return 1
+}
+
+setup_logrotate() {
+    cat > /etc/logrotate.d/just1kbot <<'EOF_LOGROTATE'
 /var/log/just1kbot-deploy.log
 /var/log/just1kbot-rollback.log
-/var/log/just1kbot-uninstall.log
 /var/log/just1kbot/*.log
 {
     weekly
@@ -636,321 +922,408 @@ setup_logrotate() {
     notifempty
     create 0640 root root
 }
-EOF
-
-    log "Logrotate настроен"
+EOF_LOGROTATE
 }
 
-# --- Version-controlled backup and rehearsal tooling ---
-create_backup_script() {
-    log "Установка инструментов зашифрованного бэкапа..."
-    for command in age pg_dump pg_restore flock sha256sum; do
-        command -v "$command" >/dev/null || { error "Не найдена обязательная команда: $command"; return 1; }
-    done
-    install -d -o root -g root -m 0700 "$BACKUP_DIR"
-    local source target temporary
-    for source in backup_postgres.sh verify_backup.sh restore_rehearsal.sh just1kbot-restore.sh; do
-        target="/usr/local/bin/${source}"
-        [[ "$source" != backup_postgres.sh ]] || target=/usr/local/bin/just1kbot-backup.sh
-        temporary="${target}.new.$$"
-        install -o root -g root -m 0750 "$SOURCE_DIR/ops/$source" "$temporary"
-        mv -f "$temporary" "$target"
-    done
-    cat > /etc/systemd/system/just1kbot-backup.service <<'EOF'
-[Unit]
-Description=Just1kBot encrypted PostgreSQL backup
-[Service]
-Type=oneshot
-EnvironmentFile=/etc/just1kbot-backup.conf
-ExecStart=/usr/local/bin/just1kbot-backup.sh
-EOF
-    cat > /etc/systemd/system/just1kbot-backup.timer <<'EOF'
-[Unit]
-Description=Daily Just1kBot encrypted PostgreSQL backup
-[Timer]
-OnCalendar=*-*-* 03:00:00 UTC
-Persistent=true
-RandomizedDelaySec=20m
-[Install]
-WantedBy=timers.target
-EOF
-    if [[ ! -e /etc/just1kbot-backup.conf ]]; then
-        install -o root -g root -m 0600 /dev/null /etc/just1kbot-backup.conf
-        printf '%s\n' '# Set BACKUP_AGE_RECIPIENT=age1... before enabling the timer.' > /etc/just1kbot-backup.conf
-    fi
-    systemctl daemon-reload
-    # Migrate only the legacy backup command; preserve healthcheck and every
-    # unrelated root cron line byte-for-byte.
-    local cron_current cron_filtered
-    cron_current=$(mktemp)
-    cron_filtered=$(mktemp)
-    TEMP_FILES+=("$cron_current" "$cron_filtered")
-    crontab -l >"$cron_current" 2>/dev/null || :
-    awk '!(NF == 6 && $6 == "/usr/local/bin/just1kbot-backup.sh")' "$cron_current" >"$cron_filtered"
-    if ! cmp -s "$cron_current" "$cron_filtered"; then
-        crontab "$cron_filtered"
-        log "Legacy backup cron удалён; остальные cron-задачи сохранены"
-    fi
-    if compgen -G "$BACKUP_DIR/backup_*.tar.gz" >/dev/null; then
-        warn "Обнаружены legacy plaintext backup_*.tar.gz; перенесите или удалите их вручную только после проверки нового encrypted backup"
-    fi
-    # Fail closed until the operator provisions the public recipient.
-    if grep -q '^BACKUP_AGE_RECIPIENT=age1' /etc/just1kbot-backup.conf; then
-        systemctl enable --now just1kbot-backup.timer
+write_nginx_proxy_config() {
+    local domain=$1
+    local cert_dir="/etc/letsencrypt/live/$domain"
+
+    if [[ -f "$cert_dir/fullchain.pem" && -f "$cert_dir/privkey.pem" ]]; then
+        cat > "/etc/nginx/sites-available/$domain" <<EOF_NGINX_TLS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+    return 301 https://\$host\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert_dir}/fullchain.pem;
+    ssl_certificate_key ${cert_dir}/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 64k;
+
+    location = /health {
+        proxy_pass http://127.0.0.1:8080/health;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location = /webhook/yookassa {
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:8080/webhook/yookassa;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location / {
+        return 404;
+    }
+}
+EOF_NGINX_TLS
     else
-        systemctl disable --now just1kbot-backup.timer 2>/dev/null || true
-        warn "Backup timer не включён: задайте BACKUP_AGE_RECIPIENT в /etc/just1kbot-backup.conf"
-    fi
-    log "Инструменты бэкапа установлены (systemd timer, Persistent=true)"
+        cat > "/etc/nginx/sites-available/$domain" <<EOF_NGINX_HTTP
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    client_max_body_size 64k;
+
+    location = /health {
+        proxy_pass http://127.0.0.1:8080/health;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location = /webhook/yookassa {
+        limit_except POST { deny all; }
+        proxy_pass http://127.0.0.1:8080/webhook/yookassa;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location / {
+        return 404;
+    }
 }
-
-# Kept as a separate deployment step for compatibility; it is now fail-safe.
-create_restore_script() {
-    [[ -x /usr/local/bin/just1kbot-restore.sh ]] || return 1
-}
-
-# --- Healthcheck ---
-create_healthcheck() {
-    log "Создание healthcheck..."
-
-    cat > /usr/local/bin/just1kbot-healthcheck.sh <<'HC_EOF'
-#!/bin/bash
-SERVICE="just1kbot"
-MAX_CRASHES=5
-CRASH_FILE="/tmp/just1kbot_crash_count"
-HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
-LOG="/var/log/just1kbot/healthcheck.log"
-
-# Проверяем heartbeat (бот должен писать этот файл каждые 60 сек)
-if [[ -f "$HEARTBEAT_FILE" ]]; then
-    age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE") ))
-    if [[ $age -lt 120 ]]; then
-        rm -f "$CRASH_FILE"
-        exit 0
-    fi
-fi
-
-# Бот не отвечает
-if systemctl is-active --quiet "$SERVICE"; then
-    echo "[$(date)] Heartbeat stale, restarting" >> "$LOG"
-    systemctl restart "$SERVICE"
-else
-    count=$(cat "$CRASH_FILE" 2>/dev/null || echo 0)
-    count=$((count + 1))
-    echo "$count" > "$CRASH_FILE"
-
-    if [[ $count -ge $MAX_CRASHES ]]; then
-        echo "[$(date)] MAX CRASHES reached ($count). Not restarting." >> "$LOG"
-        exit 1
+EOF_NGINX_HTTP
     fi
 
-    echo "[$(date)] Service down, restart attempt $count/$MAX_CRASHES" >> "$LOG"
-    systemctl start "$SERVICE"
-fi
-HC_EOF
-
-    chmod +x /usr/local/bin/just1kbot-healthcheck.sh
-
-    # Cron: каждые 2 минуты
-    (crontab -l 2>/dev/null | grep -v "just1kbot-healthcheck"; echo "*/2 * * * * /usr/local/bin/just1kbot-healthcheck.sh") | crontab -
-
-    log "Healthcheck создан (cron: каждые 2 мин)"
+    ln -sfn "/etc/nginx/sites-available/$domain" "/etc/nginx/sites-enabled/$domain"
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t
+    systemctl enable --now nginx >/dev/null
+    systemctl reload nginx
 }
 
-# --- Firewall ---
-setup_firewall() {
-    log "Настройка UFW..."
+setup_nginx_initial() {
+    [[ -n "$DOMAIN" ]] || return 0
+    command_required nginx
+    command_required certbot
+    log "Настройка Nginx/HTTPS для $DOMAIN"
 
-    # Не сбрасываем существующие правила: сервер может обслуживать другие
-    # приложения или использовать нестандартный SSH-порт.
-    local ssh_port="22"
+    write_nginx_proxy_config "$DOMAIN"
+
+    if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]]; then
+        certbot certonly --nginx \
+            -d "$DOMAIN" \
+            --non-interactive \
+            --agree-tos \
+            -m "$SSL_EMAIL"
+    fi
+
+    write_nginx_proxy_config "$DOMAIN"
+    systemctl enable --now certbot.timer >/dev/null 2>&1 || true
+}
+
+refresh_existing_nginx() {
+    DOMAIN=$(read_env_value DOMAIN)
+    [[ -n "$DOMAIN" ]] || return 0
+    command_required nginx
+    if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ||           ! -f "/etc/letsencrypt/live/$DOMAIN/privkey.pem" ]]; then
+        error "DOMAIN=$DOMAIN задан, но production SSL-сертификат отсутствует"
+        return 1
+    fi
+    write_nginx_proxy_config "$DOMAIN"
+}
+
+setup_firewall_initial() {
+    log "Настройка UFW без сброса существующих правил"
+    local ssh_port=22
     if [[ -n "${SSH_CONNECTION:-}" ]]; then
         ssh_port=$(awk '{print $4}' <<< "$SSH_CONNECTION")
     fi
-    ufw default deny incoming > /dev/null 2>&1
-    ufw default allow outgoing > /dev/null 2>&1
-    ufw allow "${ssh_port}/tcp" > /dev/null 2>&1
-    ufw allow 80/tcp > /dev/null 2>&1
-    ufw allow 443/tcp > /dev/null 2>&1
-    ufw deny 8080/tcp > /dev/null 2>&1
-    ufw deny 6379/tcp > /dev/null 2>&1
-    ufw deny 5432/tcp > /dev/null 2>&1
-    ufw --force enable > /dev/null 2>&1
 
-    log "Firewall настроен"
-}
-
-# --- Запуск бота ---
-start_bot() {
-    log "Запуск бота..."
-
-    systemctl start "$SERVICE_NAME"
-    sleep 3
-
-    if systemctl is-active --quiet "$SERVICE_NAME"; then
-        log "Бот запущен успешно"
-    else
-        error "Бот не запустился. Проверьте: journalctl -u $SERVICE_NAME -n 50"
-        return 1
+    ufw default deny incoming >/dev/null
+    ufw default allow outgoing >/dev/null
+    ufw allow "${ssh_port}/tcp" >/dev/null
+    if [[ -n "$DOMAIN" ]]; then
+        ufw allow 80/tcp >/dev/null
+        ufw allow 443/tcp >/dev/null
     fi
+    ufw deny 8080/tcp >/dev/null
+    ufw deny 6379/tcp >/dev/null
+    ufw deny 5432/tcp >/dev/null
+    ufw --force enable >/dev/null
 }
 
-# --- Статус ---
+prepare_release_runtime() {
+    setup_user_and_dirs
+    create_env_if_missing
+    setup_venv
+}
+
+activate_release() {
+    setup_systemd
+}
+
+run_manual_backup() {
+    [[ -x /usr/local/bin/just1kbot-backup.sh ]] || {
+        error "Backup tooling не установлен. Сначала выполните deploy/update"
+        return 1
+    }
+    create_encrypted_backup manual
+}
+
+run_restore_rehearsal() {
+    local artifact=$1
+    [[ -f "$artifact" && ! -L "$artifact" ]] || {
+        error "Backup-файл не найден или небезопасен: $artifact"
+        return 1
+    }
+    [[ -n "${AGE_IDENTITY_FILE:-}" && -f "$AGE_IDENTITY_FILE" && ! -L "$AGE_IDENTITY_FILE" ]] || {
+        error "Задайте AGE_IDENTITY_FILE с закрытым age-ключом"
+        return 1
+    }
+    [[ -x /usr/local/bin/just1kbot-restore.sh ]] || {
+        error "Restore tooling не установлен. Сначала выполните deploy/update"
+        return 1
+    }
+    systemctl is-active --quiet postgresql || {
+        error "PostgreSQL не запущен"
+        return 1
+    }
+
+    local work artifact_copy identity_copy sidecar_copy rc
+    work=$(mktemp -d /var/lib/postgresql/just1kbot-restore.XXXXXX)
+    TEMP_DIRS+=("$work")
+    chown postgres:postgres "$work"
+    chmod 0700 "$work"
+    artifact_copy="$work/$(basename "$artifact")"
+    identity_copy="$work/identity.agekey"
+    install -o postgres -g postgres -m 0400 "$artifact" "$artifact_copy"
+    install -o postgres -g postgres -m 0400 "$AGE_IDENTITY_FILE" "$identity_copy"
+    if [[ -f "$artifact.sha256" && ! -L "$artifact.sha256" ]]; then
+        sidecar_copy="$artifact_copy.sha256"
+        install -o postgres -g postgres -m 0400 "$artifact.sha256" "$sidecar_copy"
+    fi
+
+    set +e
+    runuser -u postgres -- env \
+        AGE_IDENTITY_FILE="$identity_copy" \
+        REHEARSAL_MAINTENANCE_DATABASE=postgres \
+        /usr/local/bin/just1kbot-restore.sh "$artifact_copy"
+    rc=$?
+    set -e
+    rm -rf -- "$work"
+    return "$rc"
+}
+
 show_status() {
-    echo ""
-    info "=== Статус сервисов ==="
-    echo ""
-    printf "%-20s %s\n" "Сервис" "Статус"
-    printf "%-20s %s\n" "-------" "------"
-    for svc in postgresql redis-server nginx "$SERVICE_NAME"; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null; then
-            printf "%-20s ${GREEN}%s${NC}\n" "$svc" "active"
+    printf '\n%-32s %s\n' 'Компонент' 'Состояние'
+    printf '%-32s %s\n' '---------' '---------'
+
+    local unit state
+    for unit in postgresql redis-server nginx "$SERVICE_NAME" \
+        just1kbot-backup.timer just1kbot-healthcheck.timer; do
+        state=$(systemctl is-active "$unit" 2>/dev/null || true)
+        if [[ "$state" == active ]]; then
+            printf '%-32s %b%s%b\n' "$unit" "$GREEN" "$state" "$NC"
         else
-            printf "%-20s ${RED}%s${NC}\n" "$svc" "inactive"
+            printf '%-32s %b%s%b\n' "$unit" "$RED" "${state:-unknown}" "$NC"
         fi
     done
-    echo ""
-}
 
-# --- Итоговый вывод ---
-print_result() {
-    echo ""
-    echo -e "${GREEN}============================================${NC}"
-    echo -e "${GREEN}  ДЕПЛОЙ ЗАВЕРШЁН${NC}"
-    echo -e "${GREEN}============================================${NC}"
-    echo ""
-    echo "  Проект:     $PROJECT_DIR"
-    echo "  Сервис:     systemctl status $SERVICE_NAME"
-    echo "  Логи:       journalctl -u $SERVICE_NAME -f"
-    echo "  Бэкап:      /usr/local/bin/just1kbot-backup.sh"
-    echo "  Rehearsal:  AGE_IDENTITY_FILE=... /usr/local/bin/restore_rehearsal.sh <file>"
-    if [[ -n "$DOMAIN" ]]; then
-        echo "  Домен:      https://$DOMAIN"
-    fi
-    echo ""
-    echo "  Полезные команды:"
-    echo "    systemctl restart $SERVICE_NAME"
-    echo "    journalctl -u $SERVICE_NAME -n 100 --no-pager"
-    echo "    sudo -u $BOT_USER $VENV_DIR/bin/alembic upgrade head"
-    echo ""
-}
+    printf '\nMainPID: %s\n' "$(systemctl show "$SERVICE_NAME" -p MainPID --value 2>/dev/null || printf 0)"
+    printf 'NRestarts: %s\n' "$(systemctl show "$SERVICE_NAME" -p NRestarts --value 2>/dev/null || printf 0)"
 
-# --- Rollback ---
-rollback() {
-    local reason="$1"
-    echo "[$(date)] ROLLBACK: $reason" >> "$ROLLBACK_LOG"
-    warn "Откат: $reason"
-
-    # Восстановление Redis конфига
-    local redis_bak
-    redis_bak=$(ls -t /etc/redis/redis.conf.bak.* 2>/dev/null | head -1)
-    if [[ -n "$redis_bak" ]]; then
-        cp "$redis_bak" /etc/redis/redis.conf
-        systemctl restart redis-server 2>/dev/null || true
+    if [[ -f "$HEARTBEAT_FILE" ]]; then
+        printf 'Heartbeat age: %ss\n' "$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE") ))"
+    else
+        printf 'Heartbeat: отсутствует\n'
     fi
 
-    error "Деплой отменён. Подробности: $ROLLBACK_LOG"
+    if [[ -x "$HEALTHCHECK_COMMAND" ]]; then
+        if "$HEALTHCHECK_COMMAND" >/dev/null 2>&1; then
+            printf 'Application health: %bhealthy%b\n' "$GREEN" "$NC"
+        else
+            printf 'Application health: %bunhealthy%b\n' "$RED" "$NC"
+        fi
+    fi
+
+    systemctl list-timers --all \
+        just1kbot-backup.timer just1kbot-healthcheck.timer \
+        --no-pager 2>/dev/null || true
 }
 
-create_env_if_missing() {
-    if [[ -e "$ENV_FILE" ]]; then
-        log "Существующий production .env сохранён без изменений"
-        return 0
-    fi
-    log "Создание initial production .env..."
-    umask 077
-    printf '# Just1kBot Configuration\n# Generated: %s\n' "$(date -Iseconds)" > "$ENV_FILE"
-    if [[ -z "${DB_ENCRYPTION_KEY:-}" ]]; then
-        DB_ENCRYPTION_KEY=$(python3 -c 'import base64, secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())')
-    fi
-    local db_password_encoded redis_password_encoded
-    db_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
-    redis_password_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
-    write_env_var BOT_TOKEN "$BOT_TOKEN"
-    write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_password_encoded}@localhost:5432/just1kbot_bot"
-    write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
-    write_env_var REDIS_URL "redis://:${redis_password_encoded}@localhost:6379/0"
-    write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
-    write_env_var ADMIN_IDS "$ADMIN_IDS"
-    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
-    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
-    write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
-    write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
-    [[ -z "$DOMAIN" ]] || { write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook"; write_env_var DOMAIN "$DOMAIN"; }
-}
-
-prepare_release_runtime() { setup_user_and_dirs && create_env_if_missing && setup_venv; }
-activate_release() { setup_systemd; }
-
-# --- Main ---
-main() {
-    # This must be the first runtime action. DEPLOY_FUNCTIONS_ONLY only sources
-    # definitions for unit tests and never calls main.
-    require_root || exit 1
-    local parse_status=0
-    parse_args "$@" || parse_status=$?
-    [[ $parse_status -ne 2 ]] || exit 0
-    [[ $parse_status -eq 0 ]] || exit "$parse_status"
-    check_os || exit $?
+run_management_action() {
+    require_root
     init_logging
 
-    echo ""
-    echo -e "${BLUE}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${BLUE}║     JUST1KBOT — Автоматический деплой   ║${NC}"
-    echo -e "${BLUE}╚══════════════════════════════════════════╝${NC}"
-    echo ""
+    case "$ACTION" in
+        status)
+            show_status
+            ;;
+        logs)
+            exec journalctl -u "$SERVICE_NAME" -f -n 100
+            ;;
+        restart)
+            acquire_deploy_lock
+            systemctl restart "$SERVICE_NAME"
+            if ! wait_for_application_health; then
+                journalctl -u "$SERVICE_NAME" -n 80 --no-pager >&2 || true
+                printf 'Сервис перезапущен, но readiness/healthcheck не пройден.\n' >&2
+                exit 1
+            fi
+            show_status
+            ;;
+        backup)
+            run_manual_backup
+            ;;
+        restore)
+            run_restore_rehearsal "$ACTION_ARG"
+            ;;
+    esac
+}
+
+print_dry_run() {
+    info "=== DRY RUN ==="
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        cat <<'EOF_DRY_INITIAL'
+Будет выполнена первичная установка:
+1. Установка системных зависимостей.
+2. Создание системного пользователя, PostgreSQL DB/role и Redis-конфигурации.
+3. Создание production .env с новым DB_ENCRYPTION_KEY.
+4. Установка зашифрованных backup/restore инструментов и systemd timers.
+5. Настройка Nginx, UFW, logrotate и healthcheck.
+6. Транзакционная активация приложения и Alembic migrations.
+EOF_DRY_INITIAL
+    else
+        cat <<'EOF_DRY_UPDATE'
+Будет выполнено безопасное обновление:
+1. Production .env и DB_ENCRYPTION_KEY останутся без изменений.
+2. Старый процесс будет остановлен и проверен на завершение.
+3. Перед migrations будет создан обязательный зашифрованный PostgreSQL backup.
+4. Текущий release и virtualenv будут сохранены в rollback snapshot.
+5. Новый код и зависимости будут установлены, затем применятся Alembic migrations.
+6. Новая версия пройдёт readiness gate: process, heartbeat, PostgreSQL и Redis.
+7. При ошибке приложение откатится; автоматический downgrade БД не выполняется.
+EOF_DRY_UPDATE
+    fi
+}
+
+print_result() {
+    printf '\n%bДЕПЛОЙ ЗАВЕРШЁН%b\n' "$GREEN" "$NC"
+    printf 'Проект: %s\n' "$PROJECT_DIR"
+    printf 'Статус: sudo bash deploy.sh --status\n'
+    printf 'Логи: sudo bash deploy.sh --logs\n'
+    printf 'Backup: sudo bash deploy.sh --backup\n'
+    printf 'Backup config: %s\n' "$BACKUP_CONF"
+    if [[ -s "$BACKUP_IDENTITY" ]]; then
+        printf 'Локальный age identity: %s — сохраните копию вне сервера\n' "$BACKUP_IDENTITY"
+    fi
+    printf 'Rollback snapshots: %s\n' "$SNAPSHOT_DIR"
+    printf 'Автоматический downgrade PostgreSQL при rollback не выполняется.\n'
+}
+
+run_deploy() {
+    require_root
+    init_logging
+    acquire_deploy_lock
+    check_os
+    determine_install_kind
+    validate_source_tree
 
     if [[ "$DRY_RUN" == true ]]; then
-        info "[DRY RUN] Следующие действия будут выполнены:"
-        echo "  1. Установка пакетов (python3, postgresql, redis, nginx, ufw, logrotate)"
-        echo "  2. Создание пользователя $BOT_USER"
-        echo "  3. Настройка PostgreSQL (БД: just1kbot_bot)"
-        echo "  4. Настройка Redis (пароль, maxmemory 256mb)"
-        echo "  5. Создание venv в $VENV_DIR"
-        echo "  6. Применение миграций (alembic)"
-        echo "  7. Создание systemd сервиса"
-        echo "  8. Настройка UFW"
-        echo "  9. Создание бэкап/restore/healthcheck скриптов"
-        echo "  10. Настройка logrotate"
-        if [[ -n "${DOMAIN:-}" ]]; then
-            echo "  11. Nginx + SSL для $DOMAIN"
-        fi
-        echo ""
-        info "[DRY RUN] Никаких изменений не внесено."
-        exit 0
+        print_dry_run
+        return
     fi
 
-    collect_input
-    preflight_checks
-    determine_install_kind
-    install_dependencies
-    setup_postgresql
-    setup_redis "$INITIAL_INSTALL"
-    setup_nginx_ssl
-    setup_logrotate
-    create_backup_script
-    create_restore_script
-    create_healthcheck
-    setup_firewall
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        collect_initial_input
+        validate_initial_input
+        install_dependencies
+    fi
 
-    SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
-    UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
-    HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
-    HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"
-    SERVICE_ADAPTER=""
+    validate_runtime_commands
+    setup_user_and_dirs
+
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        setup_postgresql_initial
+        setup_redis_initial
+    else
+        systemctl is-active --quiet postgresql || {
+            error "PostgreSQL не запущен"
+            return 1
+        }
+        systemctl is-active --quiet redis-server || {
+            error "Redis не запущен"
+            return 1
+        }
+    fi
+
+    install_backup_tooling
+    install_healthcheck
+    setup_logrotate
+
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        setup_nginx_initial
+        setup_firewall_initial
+    else
+        refresh_existing_nginx
+    fi
+
+    pause_operational_timers
+
     # shellcheck source=ops/deploy_application.sh
     source "$SOURCE_DIR/ops/deploy_application.sh"
     PREPARE_COMMAND=(prepare_release_runtime)
     MIGRATION_COMMAND=(init_database)
     ACTIVATION_COMMAND=(activate_release)
+    BACKUP_COMMAND=()
+    if [[ "$INITIAL_INSTALL" == false ]]; then
+        BACKUP_COMMAND=(create_pre_migration_backup)
+    fi
+
     if run_application_transaction; then
+        resume_operational_timers
         show_status
         print_result
     else
-        local transaction_code=$?
-        error "Application deploy transaction failed (code=$transaction_code); database downgrade was not performed"
-        exit "$transaction_code"
+        local code=$?
+        resume_operational_timers || true
+        error "Application deploy transaction failed (code=$code)"
+        error "Database downgrade не выполнялся; проверьте журнал и rollback snapshot"
+        return "$code"
     fi
 }
 
-if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" != 1 ]]; then main "$@"; fi
+main() {
+    parse_args "$@"
+
+    case "$ACTION" in
+        help)
+            usage
+            ;;
+        deploy)
+            run_deploy
+            ;;
+        status|logs|restart|backup|restore)
+            run_management_action
+            ;;
+        *)
+            printf 'Внутренняя ошибка: неизвестное действие %s\n' "$ACTION" >&2
+            exit 2
+            ;;
+    esac
+}
+
+if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" != 1 ]]; then
+    main "$@"
+fi
