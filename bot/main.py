@@ -404,14 +404,6 @@ async def main():
         await close_yookassa_client()
 
         try:
-            from services.device_service import (
-                close_redis as close_device_redis,
-            )
-            await close_device_redis()
-        except Exception as e:
-            logger.error("Failed to close device Redis: %s", e)
-
-        try:
             from services.payment_service import (
                 close_redis as close_payment_redis,
             )

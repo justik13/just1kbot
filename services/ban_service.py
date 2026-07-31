@@ -79,7 +79,7 @@ class BanService:
                 Payment.user_id == user.id,
                 Payment.status == "pending",
             )
-            .values(status="canceled")
+            .values(status="cancelled")
         )
 
         # 3. Ставим бан.

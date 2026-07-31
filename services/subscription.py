@@ -169,11 +169,21 @@ class SubscriptionService:
                 referred_by,
             )
         except IntegrityError:
-            # Rollback only the failed INSERT, not the entire transaction from middleware.
-            # The session remains usable for the subsequent SELECT.
-            await session.rollback()
-
-            user = await get_user_by_telegram_id_any(session, telegram_id)
+            # Rollback only the failed INSERT using a savepoint.
+            # begin_nested() creates a savepoint; rolling it back doesn't affect
+            # the outer transaction from DBSessionMiddleware.
+            async with session.begin_nested():
+                try:
+                    user = await create_user(
+                        session,
+                        telegram_id,
+                        username,
+                        first_name,
+                        referred_by,
+                    )
+                except IntegrityError:
+                    await session.rollback()  # rollback the savepoint only
+                    user = await get_user_by_telegram_id_any(session, telegram_id)
 
             if user is not None and user.is_deleted:
                 user.is_deleted = False
