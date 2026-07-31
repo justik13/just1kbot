@@ -621,14 +621,9 @@ setup_redis() {
         printf 'appendfsync everysec\n' >> "$conf"
     fi
 
-    if [[ "${DEPLOY_TEST_MODE:-0}" != 1 ]]; then
-        command_required redis-server || return 1
-        if ! redis-server "$conf" --test-memory 2 >/dev/null 2>&1; then
-            error "Новая Redis-конфигурация не прошла проверку"
-            cp -a -- "$backup" "$conf"
-            return 1
-        fi
-    fi
+    # Redis 7 does not provide a config-only validation command.
+    # --test-memory checks RAM rather than redis.conf, so startup below is the
+    # authoritative validation. On failure the previous config is restored.
 
     systemctl enable redis-server >/dev/null 2>&1 || true
     systemctl reset-failed redis-server >/dev/null 2>&1 || true
