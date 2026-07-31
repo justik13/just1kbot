@@ -69,7 +69,7 @@ python -m bot.main
 
 ```env
 BOT_TOKEN=123456:ABC-DEF
-ADMIN_IDS=123456789
+ADMIN_IDS=[123456789]
 DATABASE_URL=postgresql+asyncpg://user:password@127.0.0.1:5432/database
 DB_ENCRYPTION_KEY=<Fernet key>
 REDIS_URL=redis://:password@127.0.0.1:6379/0
@@ -113,6 +113,8 @@ sudo env \
   YOOKASSA_SECRET_KEY='...' \
   bash deploy.sh --yes
 ```
+
+`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic.
 
 `DOMAIN` имеет смысл только вместе с YooKassa. Nginx публикует только:
 
@@ -279,7 +281,8 @@ journalctl -u just1kbot-healthcheck.service
 - активность systemd-сервиса;
 - наличие heartbeat и возраст не более 180 секунд;
 - `SELECT 1` в PostgreSQL;
-- `PING` в Redis.
+- `PING` в Redis;
+- загрузка production `.env` из `/opt/just1kbot`.
 
 # YooKassa
 

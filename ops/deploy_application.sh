@@ -408,7 +408,7 @@ run_application_transaction() {
     fi
 
     set_stage success
-    deploy_log 'deployment_readiness=success'
+    deploy_log 'deployment readiness=success'
     cleanup_snapshots || deploy_log 'warning=snapshot_cleanup_failed'
     return 0
 }

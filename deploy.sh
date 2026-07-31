@@ -26,7 +26,7 @@ BACKUP_DIR="/root/backups/just1kbot"
 BACKUP_CONF="/etc/just1kbot-backup.conf"
 BACKUP_IDENTITY="/root/.config/just1kbot/backup.agekey"
 SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
-HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
 HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"
 DEPLOY_LOCK_FILE="/run/lock/just1kbot-deploy.lock"
 PYTHON_MIN_VERSION="3.11"
@@ -236,7 +236,7 @@ for raw in path.read_text(encoding="utf-8").splitlines():
 PY
 }
 
-validate_env_file() {
+validate_env_file_safety() {
     if [[ -L "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
         error "Production .env отсутствует, не является regular file или является symlink"
         return 1
@@ -254,15 +254,32 @@ validate_env_file() {
         error "Production .env имеет неожиданного владельца: $owner"
         return 1
     fi
+}
+
+validate_env_file() {
+    validate_env_file_safety || return 1
 
     local required value
-    for required in BOT_TOKEN DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
+    for required in BOT_TOKEN ADMIN_IDS DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
         value=$(read_env_value "$required")
         if [[ -z "$value" ]]; then
             error "В production .env отсутствует обязательный параметр: $required"
             return 1
         fi
     done
+
+    local admin_ids
+    admin_ids=$(read_env_value ADMIN_IDS)
+    ADMIN_IDS_JSON="$admin_ids" python3 - <<'PY'
+import json
+import os
+
+value = json.loads(os.environ["ADMIN_IDS_JSON"])
+if not isinstance(value, list) or not value:
+    raise SystemExit("ADMIN_IDS must be a non-empty JSON array")
+if any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in value):
+    raise SystemExit("ADMIN_IDS must contain positive integers")
+PY
 
     local encryption_key
     encryption_key=$(read_env_value DB_ENCRYPTION_KEY)
@@ -283,7 +300,11 @@ PY
 determine_install_kind() {
     if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
         INITIAL_INSTALL=false
-        validate_env_file
+        if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then
+            validate_env_file_safety
+        else
+            validate_env_file
+        fi
         log "Режим: безопасное обновление существующей установки"
     else
         INITIAL_INSTALL=true
@@ -498,21 +519,37 @@ EOSQL
     fi
 }
 
-setup_redis_initial() {
-    log "Настройка Redis"
-    local conf=/etc/redis/redis.conf
+setup_redis() {
+    local configure_credentials="${1:-true}"
+    local conf="/etc/redis/redis.conf"
+
+    if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then
+        conf="${TEST_REDIS_CONF:?TEST_REDIS_CONF не задан}"
+    fi
+
     [[ -f "$conf" ]] || {
         error "Не найден $conf"
         return 1
     }
 
-    cp -a "$conf" "$conf.bak.$(date +%s)"
-    sed -i -E 's/^bind .*/bind 127.0.0.1 ::1/' "$conf"
+    if [[ "${DEPLOY_TEST_MODE:-0}" != 1 ]]; then
+        cp -a "$conf" "$conf.bak.$(date +%s)"
+    fi
 
-    if grep -q '^requirepass ' "$conf"; then
-        sed -i -E "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$conf"
+    if grep -q '^bind ' "$conf"; then
+        sed -i -E 's/^bind .*/bind 127.0.0.1 ::1/' "$conf"
     else
-        printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$conf"
+        printf 'bind 127.0.0.1 ::1\n' >> "$conf"
+    fi
+
+    if [[ "$configure_credentials" == true ]]; then
+        if grep -q '^requirepass ' "$conf"; then
+            sed -i -E "s/^requirepass .*/requirepass ${REDIS_PASSWORD}/" "$conf"
+        else
+            printf 'requirepass %s\n' "$REDIS_PASSWORD" >> "$conf"
+        fi
+    else
+        log "Update deployment: существующий Redis credential сохранён без ротации"
     fi
 
     if grep -q '^maxmemory ' "$conf"; then
@@ -533,8 +570,33 @@ setup_redis_initial() {
         printf 'appendonly yes\n' >> "$conf"
     fi
 
-    systemctl enable --now redis-server >/dev/null
+    if grep -q '^appendfsync ' "$conf"; then
+        sed -i -E 's/^appendfsync .*/appendfsync everysec/' "$conf"
+    else
+        printf 'appendfsync everysec\n' >> "$conf"
+    fi
+
+    systemctl enable redis-server >/dev/null 2>&1 || true
     systemctl restart redis-server
+}
+
+setup_redis_initial() {
+    log "Настройка Redis"
+    setup_redis true
+}
+
+normalize_admin_ids_json() {
+    local raw=$1
+    python3 - "$raw" <<'PY'
+import json
+import re
+import sys
+
+raw = sys.argv[1].strip()
+if not re.fullmatch(r"[0-9]+(?:,[0-9]+)*", raw):
+    raise SystemExit("invalid ADMIN_IDS")
+print(json.dumps([int(value) for value in raw.split(",")], separators=(",", ":")))
+PY
 }
 
 write_env_var() {
@@ -569,7 +631,7 @@ PY
     redis_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
 
     write_env_var BOT_TOKEN "$BOT_TOKEN"
-    write_env_var ADMIN_IDS "$ADMIN_IDS"
+    write_env_var ADMIN_IDS "$(normalize_admin_ids_json "$ADMIN_IDS")"
     write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_encoded}@127.0.0.1:5432/just1kbot_bot"
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
     write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
@@ -785,7 +847,7 @@ set -Eeuo pipefail
 SERVICE=just1kbot
 PROJECT_DIR=/opt/just1kbot
 VENV_DIR="$PROJECT_DIR/venv"
-HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
 LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
 MAX_HEARTBEAT_AGE=180
 
@@ -808,6 +870,7 @@ if (( age < 0 || age > MAX_HEARTBEAT_AGE )); then
     exit 2
 fi
 
+cd "$PROJECT_DIR"
 runuser -u just1kbot -- env PYTHONPATH="$PROJECT_DIR" "$VENV_DIR/bin/python" - <<'PY'
 import asyncio
 
@@ -844,6 +907,7 @@ After=just1kbot.service
 
 [Service]
 Type=oneshot
+WorkingDirectory=/opt/just1kbot
 ExecStart=/usr/local/bin/just1kbot-healthcheck.sh
 EOF_HEALTH_SERVICE
 
@@ -1273,8 +1337,8 @@ run_deploy() {
     setup_logrotate
 
     if [[ "$INITIAL_INSTALL" == true ]]; then
-        setup_nginx_initial
         setup_firewall_initial
+        setup_nginx_initial
     else
         refresh_existing_nginx
     fi
