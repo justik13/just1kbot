@@ -2,9 +2,7 @@ import hashlib
 import ipaddress
 import json
 import logging
-import time
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Optional
 
@@ -27,9 +25,6 @@ from services.yookassa_service import YooKassaService
 logger = logging.getLogger(__name__)
 _healthcheck_redis = None
 
-WEBHOOK_MAX_AGE_SECONDS = 300
-WEBHOOK_MAX_FUTURE_SKEW_SECONDS = 30
-
 YOOKASSA_IP_RANGES = [
     "185.71.76.0/27",
     "185.71.77.0/27",
@@ -43,6 +38,25 @@ YOOKASSA_IP_RANGES = [
 OFFICIAL_YOOKASSA_EVENTS = {"payment.waiting_for_capture","payment.succeeded","payment.canceled","refund.succeeded"}
 LEGACY_UNSUPPORTED_EVENTS = {"payment.refunded"}
 REFUND_EVENTS = {"refund.succeeded","payment.refunded"}
+
+
+def _validate_webhook_object(obj: dict, event: str) -> tuple[str, str]:
+    if event in REFUND_EVENTS:
+        provider_object_id = obj.get("id")
+        payment_external_id = obj.get("payment_id")
+
+        if not payment_external_id:
+            payment = obj.get("payment")
+            if isinstance(payment, dict):
+                payment_external_id = payment.get("id")
+    else:
+        provider_object_id = obj.get("id")
+        payment_external_id = provider_object_id
+
+    if not provider_object_id or not payment_external_id:
+        raise ValueError("identity")
+
+    return str(provider_object_id), str(payment_external_id)
 
 
 def _is_yookassa_ip(ip: str) -> bool:
@@ -73,38 +87,6 @@ def _get_real_ip(request: web.Request) -> str:
     return remote
 
 
-def _is_recent_timestamp(
-    created_at: str,
-    max_age_seconds: int = WEBHOOK_MAX_AGE_SECONDS,
-) -> bool:
-    if not created_at or not isinstance(created_at, str):
-        return False
-    created_at = created_at.strip()
-    if not created_at:
-        return False
-    try:
-        ts = float(created_at)
-        if ts > 1e12:
-            ts = ts / 1000.0
-        age = time.time() - ts
-        return -WEBHOOK_MAX_FUTURE_SKEW_SECONDS <= age <= max_age_seconds
-    except (ValueError, TypeError, OverflowError):
-        pass
-    try:
-        dt = datetime.fromisoformat(
-            created_at.replace("Z", "+00:00")
-        )
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        age = (
-            datetime.now(timezone.utc) - dt
-        ).total_seconds()
-        return -WEBHOOK_MAX_FUTURE_SKEW_SECONDS <= age <= max_age_seconds
-    except (ValueError, TypeError, OverflowError):
-        pass
-    return False
-
-
 def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
     if value is None:
         return None
@@ -112,6 +94,8 @@ def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
         return Decimal(value)
     except (InvalidOperation, ValueError, TypeError):
         return None
+
+
 
 
 async def _verify_stale_webhook_via_api(
@@ -247,13 +231,10 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         if event not in OFFICIAL_YOOKASSA_EVENTS|LEGACY_UNSUPPORTED_EVENTS: raise ValueError("unsupported_event")
         obj = payload.get("object")
         if not isinstance(event, str) or not isinstance(obj, dict): raise ValueError("structure")
-        if event in REFUND_EVENTS:
-            provider_object_id = obj.get("id")
-            payment_external_id = obj.get("payment_id") or obj.get("payment", {}).get("id")
-        else:
-            provider_object_id = payment_external_id = obj.get("id")
-        if not provider_object_id or not payment_external_id or not obj.get("created_at"): raise ValueError("identity")
-        if not _is_recent_timestamp(str(obj["created_at"])): raise ValueError("stale")
+
+        # Validate webhook object identifiers
+        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
+
         metadata = obj.get("metadata") or {}
         public_order_id = metadata.get("order_id")
         canonical=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False)
