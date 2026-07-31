@@ -25,10 +25,16 @@ from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
 logger = logging.getLogger(__name__)
 
+
+class _ServerEndpointChanged(RuntimeError):
+    """Stored operation identity no longer matches the current server."""
+
+
 @dataclass(frozen=True)
 class CleanupDecision:
     outcome: str
     peer_id: str | None = None
+
 
 def _select_create_cleanup_target(*, clients, saved_peer_id: str | None,
         expected_client_name: str,
@@ -59,11 +65,25 @@ async def _fail(op, *, retryable: bool, code: str, message: str = ""):
 
 
 async def _client(op):
-    async with session_scope() as session:
-        server = await session.get(Server, op.server_id) if op.server_id else None
-        url = server.api_url if server else op.api_url_snapshot
-        key = server.api_key if server else op.api_key_snapshot
-    return AmneziaClient(url, key) if url and key else None
+    url = op.api_url_snapshot
+    key = op.api_key_snapshot
+
+    if not url or not key:
+        return None
+
+    # The durable operation always executes against its immutable snapshot.
+    # The current Server row is used only to detect identity changes.
+    if op.server_id:
+        async with session_scope() as session:
+            server = await session.get(Server, op.server_id)
+            if server is not None and (
+                server.api_url != url
+                or server.api_key != key
+            ):
+                raise _ServerEndpointChanged
+
+    # A deleted Server row does not erase the encrypted operation snapshot.
+    return AmneziaClient(url, key)
 
 
 async def _execute_create(op, client):
@@ -240,14 +260,45 @@ async def _execute_delete(op, client):
                                   expected_attempt_number=op.attempt_number)
 
 
-async def execute_claimed_api_operation(operation: ClaimedAPIOperation) -> None:
-    client = await _client(operation)
+async def execute_claimed_api_operation(
+    operation: ClaimedAPIOperation,
+) -> None:
+    try:
+        client = await _client(operation)
+    except _ServerEndpointChanged:
+        logger.error(
+            "Amnezia operation endpoint changed: "
+            "operation_id=%s server_id=%s operation_type=%s",
+            operation.id,
+            operation.server_id,
+            operation.operation_type,
+        )
+        return await _fail(
+            operation,
+            retryable=False,
+            code="server_endpoint_changed",
+            message=(
+                "operation endpoint snapshot does not match "
+                "the current server identity"
+            ),
+        )
+
     if client is None:
-        return await _fail(operation, retryable=False, code="configuration")
+        return await _fail(
+            operation,
+            retryable=False,
+            code="configuration",
+        )
+
     if operation.operation_type == "create_peer":
         return await _execute_create(operation, client)
     if operation.operation_type == "update_peer":
         return await _execute_update(operation, client)
     if operation.operation_type == "delete_peer":
         return await _execute_delete(operation, client)
-    await _fail(operation, retryable=False, code="unknown_operation")
+
+    await _fail(
+        operation,
+        retryable=False,
+        code="unknown_operation",
+    )

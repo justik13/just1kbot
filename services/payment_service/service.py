@@ -316,7 +316,10 @@ class PaymentService:
         decimal_amount=_to_decimal(amount); tariff=await get_tariff_by_id(session,tariff_id)
         if decimal_amount is None or not tariff: return None,None
         user = await lock_checkout_user(session, user_id)
-        if user is None: return None,"checkout_user_missing"
+        if user is None or user.is_deleted:
+            return None,"checkout_user_missing"
+        if user.is_banned:
+            return None,"checkout_user_banned"
         from services.checkout_conflicts import get_unfinished_financial_checkouts, is_valid_reusable_purchase_intent
         conflicts = await get_unfinished_financial_checkouts(session, user_id=user_id)
         if conflicts:
@@ -388,18 +391,30 @@ class PaymentService:
         return True,{"provider_status":payment.provider_status,"fulfillment_status":payment.fulfillment_status,"reconciliation_status":payment.reconciliation_status}
 
     @staticmethod
-    async def cancel_payment_via_api(session: AsyncSession, payment_id: int) -> bool:
+    async def cancel_payment_via_api(
+        session: AsyncSession,
+        payment_id: int,
+        *,
+        source: str = "user",
+    ) -> bool:
         from services.payment_provider_operations import ensure_cancel_payment_operation, ensure_reconcile_payment_operation
         from database.models import PaymentProviderOperation
         payment=await get_payment_by_id_for_update(session,payment_id)
         if not payment or payment.provider_status in {"succeeded","refunded","canceled"}:return False
-        payment.checkout_status="abandoned"; payment.user_cancel_requested_at=now_utc(); payment.payment_url=None
+        payment.checkout_status="abandoned"
+        if source == "user":
+            payment.user_cancel_requested_at=now_utc()
+        payment.payment_url=None
         if payment.tariff_quote_id:
             quote=await session.scalar(select(TariffQuote).where(
                 TariffQuote.id==payment.tariff_quote_id).with_for_update())
             if quote and quote.status=="active":
                 quote.status="cancelled"
-                quote.diagnostic_reason="checkout_abandoned_by_user"
+                quote.diagnostic_reason=(
+                    "checkout_abandoned_by_user"
+                    if source == "user"
+                    else f"checkout_abandoned_by_{source}"
+                )
         create_op=await session.scalar(select(PaymentProviderOperation).where(PaymentProviderOperation.payment_id==payment.id,PaymentProviderOperation.operation_type=="create_payment").with_for_update())
         if not payment.external_id:
             if create_op and create_op.status=="pending" and create_op.attempts==0:
@@ -409,7 +424,7 @@ class PaymentService:
             elif create_op and create_op.attempts>0: payment.reconciliation_status="required"
             return True
         if payment.provider_status=="waiting_for_capture": await ensure_cancel_payment_operation(session,payment)
-        else: await ensure_reconcile_payment_operation(session,payment,reason="checkout_abandoned")
+        else: await ensure_reconcile_payment_operation(session,payment,reason=f"checkout_abandoned_{source}")
         return True
 
     @staticmethod
