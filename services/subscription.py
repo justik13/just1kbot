@@ -161,29 +161,18 @@ class SubscriptionService:
                 logger.info("New user %s referred by %s", telegram_id, ref_id)
 
         try:
-            user = await create_user(
-                session,
-                telegram_id,
-                username,
-                first_name,
-                referred_by,
-            )
-        except IntegrityError:
-            # Rollback only the failed INSERT using a savepoint.
-            # begin_nested() creates a savepoint; rolling it back doesn't affect
-            # the outer transaction from DBSessionMiddleware.
             async with session.begin_nested():
-                try:
-                    user = await create_user(
-                        session,
-                        telegram_id,
-                        username,
-                        first_name,
-                        referred_by,
-                    )
-                except IntegrityError:
-                    await session.rollback()  # rollback the savepoint only
-                    user = await get_user_by_telegram_id_any(session, telegram_id)
+                user = await create_user(
+                    session,
+                    telegram_id,
+                    username,
+                    first_name,
+                    referred_by,
+                )
+        except IntegrityError:
+            # Savepoint was rolled back automatically by context manager.
+            # Outer transaction from DBSessionMiddleware is not affected.
+            user = await get_user_by_telegram_id_any(session, telegram_id)
 
             if user is not None and user.is_deleted:
                 user.is_deleted = False
