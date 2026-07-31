@@ -298,8 +298,8 @@ async def _notify_client_paid_after_cancel_now(
                 await mark_user_bot_blocked(
                     session, user_telegram_id
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to mark user %s as bot_blocked: %s", user_telegram_id, e, exc_info=True)
     except Exception as e:
         logger.error("Failed to notify client: %s", e)
 
