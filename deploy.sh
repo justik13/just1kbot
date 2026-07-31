@@ -441,6 +441,27 @@ collect_initial_input() {
     read_optional_secret 'YooKassa Secret Key; Enter — отключено' YOOKASSA_SECRET_KEY ''
 }
 
+normalize_domain() {
+    DOMAIN_VALUE="$1" python3 - <<'PY_DOMAIN'
+import os
+import re
+
+raw = os.environ["DOMAIN_VALUE"].strip().lower().rstrip(".")
+if not raw or len(raw) > 253:
+    raise SystemExit(1)
+
+labels = raw.split(".")
+if len(labels) < 2:
+    raise SystemExit(1)
+
+label_pattern = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+if any(not label_pattern.fullmatch(label) for label in labels):
+    raise SystemExit(1)
+
+print(raw)
+PY_DOMAIN
+}
+
 validate_amnezia_api_url() {
     AMNEZIA_API_URL_VALUE="$1" python3 - <<'PY'
 import os
@@ -485,9 +506,13 @@ validate_initial_input() {
         error "AMNEZIA_API_URL должен быть полным http:// или https:// URL без логина, query и fragment"
         return 1
     fi
-    if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
-        error "DOMAIN имеет неверный формат"
-        return 1
+    if [[ -n "$DOMAIN" ]]; then
+        local normalized_domain
+        if ! normalized_domain=$(normalize_domain "$DOMAIN"); then
+            error "DOMAIN имеет неверный формат"
+            return 1
+        fi
+        DOMAIN=$normalized_domain
     fi
     if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] || \
        [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
