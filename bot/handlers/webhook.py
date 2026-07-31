@@ -253,6 +253,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         else:
             provider_object_id = payment_external_id = obj.get("id")
         if not provider_object_id or not payment_external_id or not obj.get("created_at"): raise ValueError("identity")
+        if not _is_recent_timestamp(str(obj["created_at"])): raise ValueError("stale")
         metadata = obj.get("metadata") or {}
         public_order_id = metadata.get("order_id")
         canonical=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False)
