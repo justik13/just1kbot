@@ -246,11 +246,17 @@ async def download_conf(
     except Exception as e:
         logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
 
-    await append_hub_message(
-        callback.bot, callback.message.chat.id,
-        text=texts.DEVICE_CONFIG_INSTRUCTION,
-        reply_markup=get_back_button(f"manage_device:{profile.id}"),
-        parse_mode="HTML",
-    )
-
-    await delete_hub_ids(callback.bot, callback.message.chat.id, old_hub_ids)
+    try:
+        await append_hub_message(
+            callback.bot, callback.message.chat.id,
+            text=texts.DEVICE_CONFIG_INSTRUCTION,
+            reply_markup=get_back_button(f"manage_device:{profile.id}"),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
+    finally:
+        try:
+            await delete_hub_ids(callback.bot, callback.message.chat.id, old_hub_ids)
+        except Exception as e:
+            logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
