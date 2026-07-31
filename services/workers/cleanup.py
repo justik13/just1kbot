@@ -194,6 +194,12 @@ async def _cleanup_expired_profiles_grace():
                                 "⚠️ Ваши устройства были удалены из-за истечения подписки. "
                                 "Продлите доступ, чтобы создать новые.",
                             )
+                    except TelegramForbiddenError:
+                        user.is_bot_blocked = True
+                        logger.info(
+                            "User %s blocked the bot (grace cleanup notification)",
+                            user.telegram_id,
+                        )
                     except Exception as e:
                         logger.warning(
                             "Failed to send grace cleanup notification to user %s: %s",
