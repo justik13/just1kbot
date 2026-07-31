@@ -122,8 +122,8 @@ async def _notify_payment_success(
         try:
             async with session_scope() as session:
                 await mark_user_bot_blocked(session, telegram_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to mark user %s as bot_blocked: %s", telegram_id, e, exc_info=True)
     except Exception as e:
         logger.error(
             "Failed to send payment success notification to %s: %s",
