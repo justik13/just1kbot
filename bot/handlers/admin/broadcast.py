@@ -373,17 +373,6 @@ async def _send_broadcast_to_users_with_resume(
                     await session.commit()
                     final_progress = progress
 
-        if blocked_user_ids:
-            for uid in blocked_user_ids:
-                try:
-                    async with session_scope() as session:
-                        await mark_user_bot_blocked(session, uid)
-                except Exception as e:
-                    logger.error(
-                        "Failed to mark user %s as "
-                        "bot_blocked: %s", uid, e,
-                    )
-
     # ── ДОБАВЛЕНО: ловим неожиданные ошибки ──
     except Exception as e:
         logger.error(
@@ -420,6 +409,18 @@ async def _send_broadcast_to_users_with_resume(
             stop_event.clear()
         _broadcast_in_progress.discard(admin_id)
         _cleanup_stop_event(admin_id)
+
+        if blocked_user_ids:
+            logger.info("Marking %d users as bot_blocked (bulk)", len(blocked_user_ids))
+            try:
+                async with session_scope() as session:
+                    await session.execute(
+                        update(User)
+                        .where(User.telegram_id.in_(blocked_user_ids))
+                        .values(is_bot_blocked=True)
+                    )
+            except Exception as bulk_err:
+                logger.warning("Failed to bulk mark users as bot_blocked: %s", bulk_err, exc_info=True)
 
         if final_progress and admin_id:
             try:
