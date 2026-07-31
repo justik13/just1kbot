@@ -161,16 +161,15 @@ class SubscriptionService:
                 logger.info("New user %s referred by %s", telegram_id, ref_id)
 
         try:
-            user = await create_user(
-                session,
-                telegram_id,
-                username,
-                first_name,
-                referred_by,
-            )
+            async with session.begin_nested():
+                user = await create_user(
+                    session,
+                    telegram_id,
+                    username,
+                    first_name,
+                    referred_by,
+                )
         except IntegrityError:
-            await session.rollback()
-
             user = await get_user_by_telegram_id_any(session, telegram_id)
 
             if user is not None and user.is_deleted:
