@@ -35,8 +35,10 @@ async def grant(session,op):
         op.status="dead"; op.last_error_code="tariff_change_legacy_grant_blocked"; op.completed_at=now_utc()
         return
     manual=bool(op.payload.get("manual_without_provider_confirmation"))
+    # Защита: забаненный или удалённый пользователь не должен получить подписку.
     if (payment.provider_status!="succeeded" and not manual) or not user or user.is_deleted or user.is_banned:
-        payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code="ineligible"; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
+        error_code = "user_banned_or_deleted" if (user and (user.is_deleted or user.is_banned)) else "ineligible"
+        payment.fulfillment_status="manual_review"; payment.fulfillment_last_error_code=error_code; op.status="dead"; op.completed_at=now_utc(); project_legacy_status(payment); return
     grant_entry_type="manual_grant" if manual else "payment_grant"
     existing=await session.scalar(select(EntitlementEntry).where(EntitlementEntry.beneficiary_user_id==user.id,EntitlementEntry.source_type=="payment",EntitlementEntry.source_id==str(payment.id),EntitlementEntry.entry_type==grant_entry_type))
     refunded=await session.scalar(select(func.coalesce(func.sum(PaymentRefund.amount),0)).where(PaymentRefund.payment_id==payment.id,PaymentRefund.provider_status=="succeeded"))

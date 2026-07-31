@@ -418,6 +418,35 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
   async with self.sessions.begin() as s:
    invited=await s.get(User,self.user_id); invited.referred_by=invited.telegram_id; p=await self.payment(s,provider_status="succeeded",fulfillment_status="succeeded"); op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_referral",idempotency_key=f"payment-referral:{p.id}",status="processing",payload={},attempts=1,max_attempts=3,next_attempt_at=now_utc(),locked_by="w",locked_at=now_utc()); s.add(op); await s.flush(); await referral(s,op); self.assertEqual(op.status,"cancelled"); self.assertIsNone(await s.scalar(select(ReferralReward).where(ReferralReward.source_payment_id==p.id)))
 
+ async def test_ban_cancels_active_create_payment_and_blocks_fulfillment(self):
+  """Проверка: при бане пользователя активный create-платёж отменяется (checkout_status=abandoned),
+     и подписка НЕ выдаётся даже если провайдер подтвердит платёж после бана."""
+  from services.ban_service import BanService
+  from services.payment_fulfillment import grant
+  async with self.sessions.begin() as s:
+   # Создаём платёж в состоянии creating (без external_id, с pending create-операцией)
+   p=await self.payment(s,external_id=None,provider_status="creating",checkout_status="active",fulfillment_status="not_ready")
+   op=PaymentProviderOperation(payment_id=p.id,operation_type="create_payment",status="pending",idempotency_key=p.provider_idempotency_key,payload={"capture":True},attempts=0,max_attempts=5,next_attempt_at=now_utc())
+   s.add(op); await s.flush()
+   user=await s.get(User,self.user_id)
+   # Бан пользователя через BanService
+   ok,msg=await BanService.toggle_ban(s,admin_id=999999,telegram_id=user.telegram_id)
+   self.assertTrue(ok); self.assertEqual(msg,"забанен")
+   # Проверяем, что платёж abandoned
+   self.assertEqual(p.checkout_status,"abandoned")
+   # Проверяем, что create-операция отменена
+   self.assertEqual(op.status,"cancelled")
+   # Пользователь забанен
+   self.assertTrue(user.is_banned)
+   # Пытаемся выдать подписку через grant (эмулируем late webhook после бана)
+   fulfill_op=PaymentFulfillmentOperation(payment_id=p.id,operation_type="grant_subscription",idempotency_key=f"payment-grant:{p.id}",status="pending",payload={},attempts=0,max_attempts=3,next_attempt_at=now_utc())
+   s.add(fulfill_op); await s.flush()
+   await grant(s,fulfill_op)
+   # Подписка НЕ выдана: fulfillment_status=manual_review, error_code=user_banned_or_deleted
+   self.assertEqual(p.fulfillment_status,"manual_review")
+   self.assertEqual(p.fulfillment_last_error_code,"user_banned_or_deleted")
+   self.assertEqual(fulfill_op.status,"dead")
+
  async def test_stale_recovery_preserves_each_terminal_provider_state(self):
   for terminal in ("succeeded","refunded","canceled"):
    async with self.sessions.begin() as s:
