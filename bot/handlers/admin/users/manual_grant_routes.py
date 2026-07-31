@@ -256,11 +256,10 @@ async def admin_manual_grant_apply(
 
                 try:
                     if payment and payment.user:
-                        async with session_scope() as notify_session:
-                            await mark_user_bot_blocked(
-                                notify_session,
-                                payment.user.telegram_id,
-                            )
+                        await mark_user_bot_blocked(
+                            session,
+                            payment.user.telegram_id,
+                        )
                 except Exception as block_error:
                     logger.error(
                         "Failed to mark user as bot_blocked "
