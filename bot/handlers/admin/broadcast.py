@@ -1,4 +1,5 @@
 import asyncio
+import html
 import logging
 
 from aiogram import Router, F
@@ -408,11 +409,11 @@ async def _send_broadcast_to_users_with_resume(
             await bot.send_message(
                 admin_id,
                 f"🚨 <b>Рассылка остановлена из-за ошибки</b>\n"
-                f"<code>{type(e).__name__}: {str(e)[:200]}</code>",
+                f"<code>{html.escape(type(e).__name__ + ': ' + str(e)[:200])}</code>",
                 parse_mode="HTML",
             )
-        except Exception:
-            pass
+        except Exception as alert_err:
+            logger.warning("Failed to send crash alert to admin %s: %s", admin_id, alert_err)
 
     finally:
         if stop_event:
