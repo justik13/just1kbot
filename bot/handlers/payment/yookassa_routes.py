@@ -5,6 +5,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -412,6 +413,10 @@ async def cancel_invoice(
 
     try:
         queued = await PaymentService.cancel_payment_via_api(session,payment_id)
+    except (OperationalError, OSError, TimeoutError) as e:
+        logger.warning("Temporary error cancelling payment %s: %s", payment_id, e)
+        await callback.answer("⚠️ Временная ошибка. Попробуйте позже.", show_alert=True)
+        return
     except Exception as e:
         logger.warning("Failed to queue cancellation %s: %s",payment_id,e)
         queued = False
