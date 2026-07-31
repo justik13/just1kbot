@@ -365,6 +365,13 @@ read_optional() {
     assign_var "$var_name" "${value:-$default}"
 }
 
+read_optional_secret() {
+    local prompt=$1 var_name=$2 default=$3 value=""
+    read -rsp "$prompt: " value
+    printf '\n'
+    assign_var "$var_name" "${value:-$default}"
+}
+
 read_db_password() {
     local prompt=$1 var_name=$2 value=""
     while true; do
@@ -381,7 +388,8 @@ read_db_password() {
 read_bot_token() {
     local value=""
     while true; do
-        read -rp 'BOT_TOKEN: ' value
+        read -rsp 'BOT_TOKEN: ' value
+        printf '\n'
         if [[ "$value" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
             BOT_TOKEN=$value
             return
@@ -428,9 +436,32 @@ collect_initial_input() {
         read_optional "Email Let's Encrypt" SSL_EMAIL 'admin@example.com'
     fi
     read_optional 'Amnezia API URL' AMNEZIA_API_URL 'http://127.0.0.1:4001'
-    read_optional 'Amnezia API Key; Enter — пусто' AMNEZIA_API_KEY ''
+    read_optional_secret 'Amnezia API Key; Enter — пусто' AMNEZIA_API_KEY ''
     read_optional 'YooKassa Shop ID; Enter — отключено' YOOKASSA_SHOP_ID ''
-    read_optional 'YooKassa Secret Key; Enter — отключено' YOOKASSA_SECRET_KEY ''
+    read_optional_secret 'YooKassa Secret Key; Enter — отключено' YOOKASSA_SECRET_KEY ''
+}
+
+validate_amnezia_api_url() {
+    AMNEZIA_API_URL_VALUE="$1" python3 - <<'PY'
+import os
+from urllib.parse import urlsplit
+
+raw = os.environ["AMNEZIA_API_URL_VALUE"].strip()
+if not raw or any(character.isspace() for character in raw):
+    raise SystemExit(1)
+
+parsed = urlsplit(raw)
+if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    raise SystemExit(1)
+if parsed.username is not None or parsed.password is not None:
+    raise SystemExit(1)
+if parsed.query or parsed.fragment:
+    raise SystemExit(1)
+try:
+    parsed.port
+except ValueError:
+    raise SystemExit(1)
+PY
 }
 
 validate_initial_input() {
@@ -448,6 +479,10 @@ validate_initial_input() {
     fi
     if [[ ! "$ADMIN_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
         error "ADMIN_IDS имеет неверный формат"
+        return 1
+    fi
+    if ! validate_amnezia_api_url "$AMNEZIA_API_URL"; then
+        error "AMNEZIA_API_URL должен быть полным http:// или https:// URL без логина, query и fragment"
         return 1
     fi
     if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
@@ -522,24 +557,34 @@ EOSQL
 setup_redis() {
     local configure_credentials="${1:-true}"
     local conf="/etc/redis/redis.conf"
+    local backup=""
 
     if [[ "${DEPLOY_TEST_MODE:-0}" == 1 ]]; then
         conf="${TEST_REDIS_CONF:?TEST_REDIS_CONF не задан}"
     fi
 
-    [[ -f "$conf" ]] || {
-        error "Не найден $conf"
+    [[ -f "$conf" && ! -L "$conf" ]] || {
+        error "Redis config отсутствует, не является regular file или является symlink: $conf"
         return 1
     }
 
     if [[ "${DEPLOY_TEST_MODE:-0}" != 1 ]]; then
-        cp -a "$conf" "$conf.bak.$(date +%s)"
+        backup="${conf}.bak.$(date +%s).$$"
+        cp -a -- "$conf" "$backup"
     fi
 
     if grep -q '^bind ' "$conf"; then
         sed -i -E 's/^bind .*/bind 127.0.0.1 ::1/' "$conf"
     else
         printf 'bind 127.0.0.1 ::1\n' >> "$conf"
+    fi
+
+    # Under systemd Redis must log to stdout/stderr. A filesystem logfile can
+    # prevent the whole service from starting when distro permissions differ.
+    if grep -Eq '^[[:space:]]*logfile([[:space:]]+|$)' "$conf"; then
+        sed -i -E 's|^[[:space:]]*logfile([[:space:]]+.*)?$|logfile ""|' "$conf"
+    else
+        printf 'logfile ""\n' >> "$conf"
     fi
 
     if [[ "$configure_credentials" == true ]]; then
@@ -576,10 +621,38 @@ setup_redis() {
         printf 'appendfsync everysec\n' >> "$conf"
     fi
 
-    systemctl enable redis-server >/dev/null 2>&1 || true
-    systemctl restart redis-server
-}
+    if [[ "${DEPLOY_TEST_MODE:-0}" != 1 ]]; then
+        command_required redis-server || return 1
+        if ! redis-server "$conf" --test-memory 2 >/dev/null 2>&1; then
+            error "Новая Redis-конфигурация не прошла проверку"
+            cp -a -- "$backup" "$conf"
+            return 1
+        fi
+    fi
 
+    systemctl enable redis-server >/dev/null 2>&1 || true
+    systemctl reset-failed redis-server >/dev/null 2>&1 || true
+
+    if systemctl restart redis-server && systemctl is-active --quiet redis-server; then
+        return 0
+    fi
+
+    error "Redis не запустился с новой конфигурацией"
+    journalctl -u redis-server -n 40 --no-pager >&2 2>/dev/null || true
+
+    if [[ -n "$backup" && -f "$backup" ]]; then
+        warn "Восстановление предыдущей Redis-конфигурации"
+        cp -a -- "$backup" "$conf"
+        systemctl reset-failed redis-server >/dev/null 2>&1 || true
+        if systemctl restart redis-server && systemctl is-active --quiet redis-server; then
+            error "Новая конфигурация отклонена; предыдущая восстановлена, deploy остановлен"
+        else
+            error "Не удалось запустить Redis даже после восстановления предыдущей конфигурации"
+            journalctl -u redis-server -n 40 --no-pager >&2 2>/dev/null || true
+        fi
+    fi
+    return 1
+}
 setup_redis_initial() {
     log "Настройка Redis"
     setup_redis true
