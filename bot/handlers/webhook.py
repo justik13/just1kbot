@@ -264,8 +264,8 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         async with session_scope() as session:
             await session.execute(insert(WebhookInbox).values(provider="yookassa",event_key=event_key,event_type=event,provider_object_id=str(provider_object_id),payment_external_id=str(payment_external_id),public_order_id=public_order_id,payload=payload).on_conflict_do_nothing(constraint="uq_webhook_inbox_provider_event_key"))
     except Exception:
-        logger.exception("[%s] webhook inbox commit failed",request_id)
-        return web.Response(status=500,text="Database unavailable")
+        logger.exception("[%s] webhook inbox commit failed", request_id)
+        return web.Response(status=500, text="Database unavailable")
     return web.Response(status=200,text="OK")
 
 
