@@ -21,9 +21,11 @@ class ShellStage3Tests(unittest.TestCase):
             "ReadOnlyPaths=${PROJECT_DIR}",
             "ReadWritePaths=${RUNTIME_DIR} /var/log/just1kbot",
             "PYTHONDONTWRITEBYTECODE=1",
+            'new_venv="${VENV_DIR}.new.$$"',
         ):
             self.assertIn(marker, self.deploy)
         self.assertNotIn("ReadWritePaths=${PROJECT_DIR}", self.deploy)
+        self.assertNotIn('"$VENV_DIR/bin/python" -m pip install', self.deploy)
 
     def test_heartbeat_uses_systemd_runtime_directory(self):
         for marker in (
@@ -37,6 +39,8 @@ class ShellStage3Tests(unittest.TestCase):
 
     def test_healthcheck_is_bounded_and_lock_contention_fails(self):
         for marker in (
+            "flock -s -w 5 8",
+            "[[ ! -e /proc/self/fd/200 ]]",
             "flock -w 5 9",
             "exit 75",
             "timeout --signal=TERM --kill-after=5s 25s",
@@ -45,9 +49,11 @@ class ShellStage3Tests(unittest.TestCase):
             'connect_args={"timeout": 5, "command_timeout": 5}',
             "socket_connect_timeout=5",
             "socket_timeout=5",
+            "ReadWritePaths=/run/lock",
         ):
             self.assertIn(marker, self.deploy)
         self.assertNotIn("flock -n 9 || exit 0", self.deploy)
+        self.assertIn("rollback_heartbeat=legacy", self.deploy)
 
     def test_ci_runs_shellcheck_for_repository_scripts(self):
         self.assertIn("shellcheck", self.workflow)
