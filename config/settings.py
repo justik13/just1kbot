@@ -1,7 +1,32 @@
+import os
+import pwd
 from functools import lru_cache
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_SERVICE_USER = "just1kbot"
+_SERVICE_RUNTIME_HOME = "/run/just1kbot"
+
+
+def _configure_database_client_home() -> None:
+    """Keep asyncpg/libpq client-file discovery inside the systemd sandbox."""
+
+    try:
+        username = pwd.getpwuid(os.geteuid()).pw_name
+    except KeyError:
+        return
+
+    if username == _SERVICE_USER:
+        # The hardened unit intentionally uses ProtectHome=true. asyncpg still
+        # checks standard PostgreSQL client paths below HOME while parsing a
+        # DSN, even when no client certificate is configured. Point HOME at the
+        # service runtime directory so those checks stay accessible and private.
+        os.environ["HOME"] = _SERVICE_RUNTIME_HOME
+
+
+_configure_database_client_home()
 
 
 class Settings(BaseSettings):
