@@ -1,52 +1,55 @@
+import os
 import pathlib
+import types
 import unittest
+from unittest.mock import patch
+
+from config import settings
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "scripts" / "deploy.sh"
-UNINSTALL = ROOT / "scripts" / "uninstall.sh"
 
 
 class ServiceHomeHotfixTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.deploy = DEPLOY.read_text(encoding="utf-8")
-        cls.uninstall = UNINSTALL.read_text(encoding="utf-8")
+    def test_hardened_unit_keeps_protect_home_enabled(self):
+        deploy = DEPLOY.read_text(encoding="utf-8")
+        self.assertIn("ProtectHome=true", deploy)
 
-    def test_protected_home_uses_runtime_home_for_database_clients(self):
-        for marker in (
-            'SERVICE_HOME="$RUNTIME_DIR"',
-            'Environment=HOME=${SERVICE_HOME}',
-            'env HOME="$SERVICE_HOME" PYTHONPATH="$PROJECT_DIR"',
-            'env HOME=/run/just1kbot PYTHONPATH="$PROJECT_DIR"',
-            "ProtectHome=true",
+    def test_service_account_uses_runtime_home(self):
+        with (
+            patch.object(settings.os, "geteuid", return_value=12345),
+            patch.object(
+                settings.pwd,
+                "getpwuid",
+                return_value=types.SimpleNamespace(pw_name="just1kbot"),
+            ),
+            patch.dict(os.environ, {"HOME": "/home/just1kbot"}, clear=False),
         ):
-            self.assertIn(marker, self.deploy)
+            settings._configure_database_client_home()
+            self.assertEqual(os.environ["HOME"], "/run/just1kbot")
 
-    def test_account_home_is_validated_and_postgresql_directory_is_accessible(self):
-        for marker in (
-            'BOT_ACCOUNT_HOME="/home/$BOT_USER"',
-            "validate_bot_account_home",
-            'useradd -r -M -d "$BOT_ACCOUNT_HOME"',
-            'useradd -r -m -d "$BOT_ACCOUNT_HOME"',
-            'install -d -o "$BOT_USER" -g "$BOT_USER" -m 0700 "$BOT_ACCOUNT_HOME/.postgresql"',
+    def test_other_accounts_keep_their_home(self):
+        with (
+            patch.object(settings.os, "geteuid", return_value=12345),
+            patch.object(
+                settings.pwd,
+                "getpwuid",
+                return_value=types.SimpleNamespace(pw_name="runner"),
+            ),
+            patch.dict(os.environ, {"HOME": "/home/runner"}, clear=False),
         ):
-            self.assertIn(marker, self.deploy)
+            settings._configure_database_client_home()
+            self.assertEqual(os.environ["HOME"], "/home/runner")
 
-    def test_purge_removes_and_verifies_exact_service_home(self):
-        for marker in (
-            "BOT_HOME=/home/just1kbot",
-            "safe_remove_bot_home",
-            "purge_bot_user",
-            '[[ "$configured_home" == "$BOT_HOME" ]]',
-            'rm -rf --one-file-system -- "$BOT_HOME"',
-            "service home still exists after purge",
+    def test_missing_passwd_entry_is_fail_safe(self):
+        with (
+            patch.object(settings.os, "geteuid", return_value=12345),
+            patch.object(settings.pwd, "getpwuid", side_effect=KeyError),
+            patch.dict(os.environ, {"HOME": "/tmp/original"}, clear=False),
         ):
-            self.assertIn(marker, self.uninstall)
-
-        purge_saved = self.uninstall[self.uninstall.index("purge_saved(){") :]
-        self.assertIn("purge_bot_user", purge_saved)
-        self.assertNotIn('userdel "$BOT_USER"\n}', purge_saved)
+            settings._configure_database_client_home()
+            self.assertEqual(os.environ["HOME"], "/tmp/original")
 
 
 if __name__ == "__main__":
