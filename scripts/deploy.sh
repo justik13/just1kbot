@@ -1,7 +1,7 @@
 #!/bin/bash
 # Safe adapter around the existing audited deploy implementation.
 # It keeps the old behavior while fixing PostgreSQL cluster/port discovery,
-# the first-install rollback path, and the repository layout.
+# release ownership, runtime isolation, and the repository layout.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -27,6 +27,8 @@ source "$LEGACY_DEPLOY"
 unset DEPLOY_FUNCTIONS_ONLY
 
 SOURCE_DIR="$ROOT_DIR"
+RUNTIME_DIR="/run/just1kbot"
+HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"
 
 # shellcheck source=lib/postgresql.sh
 source "$POSTGRES_LIBRARY"
@@ -39,7 +41,6 @@ clone_function() {
 }
 
 clone_function install_backup_tooling legacy_install_backup_tooling
-clone_function setup_systemd legacy_setup_systemd
 clone_function setup_firewall_initial legacy_setup_firewall_initial
 clone_function show_status legacy_show_status
 
@@ -110,6 +111,19 @@ ensure_env_permissions() {
     validate_env_file
 }
 
+setup_user_and_dirs() {
+    if ! id "$BOT_USER" >/dev/null 2>&1; then
+        useradd -r -m -s /bin/bash "$BOT_USER"
+    fi
+
+    # The service may read the release but must never be able to rewrite code,
+    # the virtualenv, deploy scripts, or .env.
+    install -d -o root -g "$BOT_USER" -m 0750 "$PROJECT_DIR"
+    install -d -o root -g root -m 0700 "$BACKUP_DIR" "$SNAPSHOT_DIR"
+    install -d -o "$BOT_USER" -g "$BOT_USER" -m 0750 \
+        /var/log/just1kbot "$RUNTIME_DIR"
+}
+
 create_env_if_missing() {
     if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
         validate_env_file
@@ -159,6 +173,59 @@ PY
     ensure_env_permissions
 }
 
+setup_venv() {
+    log "Подготовка root-owned Python virtualenv"
+
+    if [[ -e "$VENV_DIR" && ( ! -d "$VENV_DIR" || -L "$VENV_DIR" ) ]]; then
+        error "Virtualenv path небезопасен: $VENV_DIR"
+        return 1
+    fi
+    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+        python3 -m venv "$VENV_DIR"
+    fi
+
+    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
+    "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt" --quiet
+
+    chown -R root:"$BOT_USER" "$VENV_DIR"
+    find "$VENV_DIR" -xdev -type d -exec chmod 0750 {} +
+    find "$VENV_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} +
+    find "$VENV_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
+}
+
+harden_live_tree() {
+    log "Запрет записи service user в live-код и virtualenv"
+
+    if [[ -L "$PROJECT_DIR/.heartbeat" || -L "$PROJECT_DIR/.heartbeat.tmp" ]]; then
+        error "Legacy heartbeat path является symlink; требуется ручная проверка"
+        return 1
+    fi
+    rm -f -- "$PROJECT_DIR/.heartbeat" "$PROJECT_DIR/.heartbeat.tmp"
+
+    chown -R root:"$BOT_USER" "$PROJECT_DIR"
+    find "$PROJECT_DIR" -xdev -type d -exec chmod 0750 {} +
+    find "$PROJECT_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} +
+    find "$PROJECT_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
+    ensure_env_permissions
+
+    if find "$PROJECT_DIR" -xdev -user "$BOT_USER" -print -quit | grep -q .; then
+        error "В live release остались файлы, принадлежащие service user"
+        return 1
+    fi
+    if find "$PROJECT_DIR" -xdev -perm /022 -print -quit | grep -q .; then
+        error "В live release остались group/other-writable пути"
+        return 1
+    fi
+}
+
+init_database() {
+    log "Применение Alembic migrations"
+    runuser -u "$BOT_USER" -- \
+        env PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
+        bash -c "cd '$PROJECT_DIR' && '$VENV_DIR/bin/alembic' upgrade head" \
+        2>> "$LOG_FILE"
+}
+
 setup_postgresql_initial() {
     log "Настройка PostgreSQL-кластера ${PG_VERSION}/${PG_CLUSTER} на порту ${PG_PORT}"
     pg_prepare_initial_database
@@ -181,9 +248,193 @@ install_backup_tooling() {
 }
 
 setup_systemd() {
-    legacy_setup_systemd
-    patch_postgresql_unit_dependency "$UNIT_FILE"
+    log "Установка hardened systemd unit"
+    [[ -n "$PG_UNIT" ]] || {
+        error "PostgreSQL systemd unit не определён"
+        return 1
+    }
+
+    cat > "$UNIT_FILE" <<EOF_UNIT
+[Unit]
+Description=Just1kBot Telegram Bot
+After=network-online.target ${PG_UNIT} redis-server.service
+Wants=network-online.target ${PG_UNIT} redis-server.service
+
+[Service]
+Type=simple
+User=${BOT_USER}
+Group=${BOT_USER}
+WorkingDirectory=${PROJECT_DIR}
+Environment=PYTHONPATH=${PROJECT_DIR}
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=JUST1KBOT_HEARTBEAT_FILE=${HEARTBEAT_FILE}
+ExecStart=${VENV_DIR}/bin/python -m bot.main
+Restart=always
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGTERM
+UMask=0027
+RuntimeDirectory=just1kbot
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=no
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=${PROJECT_DIR}
+ReadWritePaths=${RUNTIME_DIR} /var/log/just1kbot
+MemoryMax=512M
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target
+EOF_UNIT
+
+    chmod 0644 "$UNIT_FILE"
     systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME" >/dev/null
+}
+
+install_healthcheck() {
+    log "Установка bounded healthcheck"
+    command_required timeout
+
+    cat > "$HEALTHCHECK_COMMAND" <<'EOF_HEALTH'
+#!/bin/bash
+set -Eeuo pipefail
+
+SERVICE=just1kbot
+PROJECT_DIR=/opt/just1kbot
+VENV_DIR="$PROJECT_DIR/venv"
+HEARTBEAT_FILE=/run/just1kbot/heartbeat
+LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
+MAX_HEARTBEAT_AGE=180
+
+exec 9>"$LOCK_FILE"
+if ! flock -w 5 9; then
+    echo "healthcheck: another check still holds the lock" >&2
+    exit 75
+fi
+
+if ! systemctl is-active --quiet "$SERVICE"; then
+    echo "healthcheck: service is not active" >&2
+    exit 1
+fi
+
+if [[ ! -f "$HEARTBEAT_FILE" || -L "$HEARTBEAT_FILE" ]]; then
+    echo "healthcheck: heartbeat is missing or unsafe" >&2
+    exit 2
+fi
+
+age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE") ))
+if (( age < 0 || age > MAX_HEARTBEAT_AGE )); then
+    echo "healthcheck: heartbeat is stale, age=${age}s" >&2
+    exit 2
+fi
+
+cd "$PROJECT_DIR"
+timeout --signal=TERM --kill-after=5s 25s \
+    runuser -u just1kbot -- \
+    env PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
+    "$VENV_DIR/bin/python" - <<'PY'
+import asyncio
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+import redis.asyncio as redis
+
+from config.settings import get_settings
+
+
+async def check() -> None:
+    settings = get_settings()
+    engine = create_async_engine(
+        settings.DATABASE_URL,
+        pool_pre_ping=True,
+        pool_timeout=5,
+        connect_args={"timeout": 5, "command_timeout": 5},
+    )
+    client = redis.from_url(
+        settings.REDIS_URL,
+        socket_connect_timeout=5,
+        socket_timeout=5,
+        retry_on_timeout=False,
+    )
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        if not await client.ping():
+            raise RuntimeError("redis ping returned false")
+    finally:
+        await client.aclose()
+        await engine.dispose()
+
+
+asyncio.run(asyncio.wait_for(check(), timeout=20))
+PY
+EOF_HEALTH
+    chmod 0750 "$HEALTHCHECK_COMMAND"
+
+    cat > /etc/systemd/system/just1kbot-healthcheck.service <<'EOF_HEALTH_SERVICE'
+[Unit]
+Description=Just1kBot application healthcheck
+After=just1kbot.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/just1kbot
+ExecStart=/usr/local/bin/just1kbot-healthcheck.sh
+TimeoutStartSec=35s
+RuntimeMaxSec=35s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/opt/just1kbot
+EOF_HEALTH_SERVICE
+
+    cat > /etc/systemd/system/just1kbot-healthcheck.timer <<'EOF_HEALTH_TIMER'
+[Unit]
+Description=Run Just1kBot healthcheck every two minutes
+
+[Timer]
+OnBootSec=3m
+OnUnitActiveSec=2m
+AccuracySec=15s
+Persistent=true
+Unit=just1kbot-healthcheck.service
+
+[Install]
+WantedBy=timers.target
+EOF_HEALTH_TIMER
+
+    systemctl daemon-reload
+
+    # Remove only legacy healthcheck cron; preserve every unrelated root cron line.
+    if command -v crontab >/dev/null 2>&1; then
+        local current filtered
+        current=$(mktemp)
+        filtered=$(mktemp)
+        TEMP_FILES+=("$current" "$filtered")
+        crontab -l > "$current" 2>/dev/null || :
+        grep -v 'just1kbot-healthcheck' "$current" > "$filtered" || :
+        if ! cmp -s "$current" "$filtered"; then
+            crontab "$filtered"
+        fi
+    fi
 }
 
 setup_firewall_initial() {
@@ -201,6 +452,13 @@ show_status() {
             "$(systemctl is-active "$PG_UNIT" 2>/dev/null || true)" \
             "$PG_PORT"
     fi
+}
+
+prepare_release_runtime() {
+    setup_user_and_dirs
+    create_env_if_missing
+    setup_venv
+    harden_live_tree
 }
 
 run_restore_rehearsal() {
@@ -365,6 +623,7 @@ run_deploy() {
     fi
 
     validate_runtime_commands
+    command_required timeout
     command_required pg_lsclusters
     command_required pg_ctlcluster
     command_required pg_isready
