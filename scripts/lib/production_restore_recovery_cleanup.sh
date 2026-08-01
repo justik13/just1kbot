@@ -2,6 +2,8 @@
 # An ambiguous recovery must preserve the durable journal and every database
 # exactly as observed so an operator can inspect and retry safely.
 
+RESTORE_DEFINITIONS_ONLY=${RESTORE_FUNCTIONS_ONLY:-0}
+
 usage() {
     cat <<'EOF_USAGE'
 Just1kBot production PostgreSQL restore/cutover
@@ -41,7 +43,7 @@ unset _base_update_journal_definition
 
 begin_cutover_journal() {
     local operation=$1 phase=$2
-    if [[ "${RESTORE_FUNCTIONS_ONLY:-0}" == 1 && -z "$TRANSACTION_ID" ]]; then
+    if [[ "$RESTORE_DEFINITIONS_ONLY" == 1 && -z "$TRANSACTION_ID" ]]; then
         JOURNAL_OPERATION=$operation
         JOURNAL_PHASE=$phase
         return 0
@@ -51,7 +53,7 @@ begin_cutover_journal() {
 
 update_cutover_journal() {
     local phase=$1
-    if [[ "${RESTORE_FUNCTIONS_ONLY:-0}" == 1 && -z "$TRANSACTION_ID" ]]; then
+    if [[ "$RESTORE_DEFINITIONS_ONLY" == 1 && -z "$TRANSACTION_ID" ]]; then
         JOURNAL_PHASE=$phase
         return 0
     fi
