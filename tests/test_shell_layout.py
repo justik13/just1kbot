@@ -19,6 +19,7 @@ class ShellLayoutTests(unittest.TestCase):
         required = {
             "deploy.sh",
             "deploy_full.sh",
+            "deploy_full_library.sh",
             "update_from_github.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
@@ -46,6 +47,29 @@ class ShellLayoutTests(unittest.TestCase):
         for script in scripts:
             with self.subTest(script=script.relative_to(ROOT)):
                 subprocess.run(["bash", "-n", str(script)], check=True)
+
+    def test_legacy_deploy_is_source_only(self):
+        result = subprocess.run(
+            ["bash", str(SCRIPTS / "deploy_full.sh")],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("direct execution is forbidden", result.stderr)
+
+        source_result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f"DEPLOY_FUNCTIONS_ONLY=1 source {str(SCRIPTS / 'deploy_full.sh')!r}; "
+                "declare -F parse_args >/dev/null",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(source_result.returncode, 0, source_result.stderr)
 
     def test_menu_help_is_non_destructive(self):
         result = subprocess.run(
@@ -76,6 +100,7 @@ class ShellLayoutTests(unittest.TestCase):
 
     def test_signal_cleanup_uses_exit_owned_cleanup(self):
         for relative in (
+            "deploy_full.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
             "update_from_github.sh",
