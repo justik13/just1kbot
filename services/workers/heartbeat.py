@@ -12,15 +12,15 @@ from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
 
-PRODUCTION_HEARTBEAT_FILE = Path("/opt/just1kbot/.heartbeat")
+PRODUCTION_HEARTBEAT_FILE = Path("/run/just1kbot/heartbeat")
 
 
 def get_heartbeat_file() -> Path:
-    """Return the production path unless explicitly overridden for local use."""
+    """Return the production runtime path unless explicitly overridden."""
     explicit_file = os.environ.get("JUST1KBOT_HEARTBEAT_FILE")
     if explicit_file:
         return Path(explicit_file)
-    project_dir = os.environ.get("just1kbot_DIR")
+    project_dir = os.environ.get("JUST1KBOT_DIR") or os.environ.get("just1kbot_DIR")
     if project_dir:
         return Path(project_dir) / ".heartbeat"
     return PRODUCTION_HEARTBEAT_FILE
@@ -142,7 +142,7 @@ def _write_heartbeat(final: bool = False):
             os.fsync(f.fileno())
         os.replace(temp_file, HEARTBEAT_FILE)
         try:
-            os.chmod(HEARTBEAT_FILE, 0o644)
+            os.chmod(HEARTBEAT_FILE, 0o640)
         except PermissionError:
             pass
     except Exception as e:

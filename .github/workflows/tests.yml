@@ -36,8 +36,10 @@ jobs:
           python-version: "3.13"
           cache: pip
       - run: python -m pip install -r requirements.txt
-      - name: Install backup tools
-        run: sudo apt-get update && sudo apt-get install -y age postgresql-client
+      - name: Install backup and shell tools
+        run: sudo apt-get update && sudo apt-get install -y age postgresql-client shellcheck
+      - name: ShellCheck repository scripts
+        run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - run: alembic upgrade head
       - run: python -m unittest discover -s tests -v
         env:
