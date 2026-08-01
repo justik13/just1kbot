@@ -32,7 +32,7 @@ class ProductionRestoreInputTests(unittest.TestCase):
             "permissions are too broad",
             'validate_restore_input_file "$ARTIFACT" \'backup artifact\' 600',
             'validate_restore_input_file "$ARTIFACT.sha256"',
-            'validate_restore_input_file "$AGE_IDENTITY_FILE"',
+            'validate_restore_input_file "${AGE_IDENTITY_FILE:-}"',
             "base_extract_and_verify_backup",
         ):
             self.assertIn(marker, self.guard)
