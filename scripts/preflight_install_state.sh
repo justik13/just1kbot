@@ -253,10 +253,17 @@ validate_complete_install() {
 }
 
 main() {
+    local argument
+
     [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'запустите от root'
 
-    for command in python3 pg_lsclusters psql runuser age-keygen systemctl; do
-        command -v "$command" >/dev/null 2>&1 || fail "не найдена команда: $command"
+    for argument in "$@"; do
+        case "$argument" in
+            --check|--dry-run)
+                log 'read-only команда: восстановительный preflight не изменяет сервер'
+                return 0
+                ;;
+        esac
     done
 
     if [[ ! -e "$ENV_FILE" && ! -L "$ENV_FILE" ]]; then
@@ -265,6 +272,10 @@ main() {
         log 'признаков предыдущей установки нет; будет обычная первичная установка'
         return 0
     fi
+
+    for argument in python3 pg_lsclusters psql runuser age-keygen systemctl; do
+        command -v "$argument" >/dev/null 2>&1 || fail "не найдена команда: $argument"
+    done
 
     require_regular_file "$ENV_FILE"
 
