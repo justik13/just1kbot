@@ -18,6 +18,6 @@ validate_restore_input_file() {
 extract_and_verify_backup() {
     validate_restore_input_file "$ARTIFACT" 'backup artifact' 600
     validate_restore_input_file "$ARTIFACT.sha256" 'backup checksum sidecar'
-    validate_restore_input_file "$AGE_IDENTITY_FILE" 'age identity'
+    validate_restore_input_file "${AGE_IDENTITY_FILE:-}" 'age identity'
     base_extract_and_verify_backup
 }
