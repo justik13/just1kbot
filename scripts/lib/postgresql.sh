@@ -35,6 +35,14 @@ pg_error() {
     fi
 }
 
+pg_admin_psql_on_port() {
+    local port=$1
+    shift
+    runuser -u postgres -- \
+        psql -X -A -t -q -v ON_ERROR_STOP=1 \
+        -h "$PG_SOCKET_DIR" -p "$port" -d postgres "$@"
+}
+
 pg_require_commands() {
     local name
     for name in pg_lsclusters pg_ctlcluster pg_isready psql createdb runuser python3 systemctl; do
@@ -94,12 +102,13 @@ pg_database_exists_on_port() {
     pg_isready -q -h "$PG_SOCKET_DIR" -p "$port" -d postgres -t 2 || return 1
 
     result=$(
-        runuser -u postgres -- \
-            psql -X -A -t -q -v ON_ERROR_STOP=1 \
+        pg_admin_psql_on_port "$port" \
             -v database_name="$PG_DATABASE" \
-            -h "$PG_SOCKET_DIR" -p "$port" -d postgres \
-            -c "SELECT 1 FROM pg_database WHERE datname = :'database_name';" \
-            2>/dev/null
+            2>/dev/null <<'SQL'
+SELECT 1
+FROM pg_database
+WHERE datname = :'database_name';
+SQL
     ) || return 1
 
     [[ "$result" == 1 ]]
@@ -261,11 +270,12 @@ pg_start_cluster() {
 pg_role_exists() {
     local result
     result=$(
-        runuser -u postgres -- \
-            psql -X -A -t -q -v ON_ERROR_STOP=1 \
-            -v role_name="$PG_ROLE" \
-            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "SELECT 1 FROM pg_roles WHERE rolname = :'role_name';"
+        pg_admin_psql_on_port "$PG_PORT" \
+            -v role_name="$PG_ROLE" <<'SQL'
+SELECT 1
+FROM pg_roles
+WHERE rolname = :'role_name';
+SQL
     ) || return 1
     [[ "$result" == 1 ]]
 }
@@ -299,19 +309,17 @@ pg_prepare_initial_database() {
     }
 
     if pg_role_exists; then
-        runuser -u postgres -- \
-            psql -X -q -v ON_ERROR_STOP=1 \
+        pg_admin_psql_on_port "$PG_PORT" \
             -v role_name="$PG_ROLE" -v role_password="$DB_PASSWORD" \
-            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "ALTER ROLE :\"role_name\" WITH LOGIN PASSWORD :'role_password';" \
-            >/dev/null
+            >/dev/null <<'SQL'
+ALTER ROLE :"role_name" WITH LOGIN PASSWORD :'role_password';
+SQL
     else
-        runuser -u postgres -- \
-            psql -X -q -v ON_ERROR_STOP=1 \
+        pg_admin_psql_on_port "$PG_PORT" \
             -v role_name="$PG_ROLE" -v role_password="$DB_PASSWORD" \
-            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "CREATE ROLE :\"role_name\" WITH LOGIN PASSWORD :'role_password';" \
-            >/dev/null
+            >/dev/null <<'SQL'
+CREATE ROLE :"role_name" WITH LOGIN PASSWORD :'role_password';
+SQL
     fi
 
     if pg_database_exists; then
