@@ -25,6 +25,7 @@ jobs:
           git apply --check .github/hotfix-first-install.patch
           git apply .github/hotfix-first-install.patch
           rm -f .github/hotfix-first-install.patch
+          rm -f .github/.hotfix-trigger .github/.hotfix-trigger-2
           rm -f .github/workflows/hotfix-first-install-bootstrap.yml
 
       - name: Install shell tools
