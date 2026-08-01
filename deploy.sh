@@ -10,6 +10,7 @@ umask 027
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 SCRIPTS_DIR="$ROOT_DIR/scripts"
+OPERATION_LOCK=/run/lock/just1kbot-deploy.lock
 
 die() {
     printf 'Ошибка: %s\n' "$*" >&2
@@ -52,9 +53,16 @@ run_script() {
     exec bash "$target" "$@"
 }
 
+run_locked_script() {
+    install -d -o root -g root -m 0755 "$(dirname "$OPERATION_LOCK")"
+    exec 201>"$OPERATION_LOCK"
+    flock -n 201 || die "другая операция deploy/backup/restore/uninstall уже выполняется"
+    run_script "$@"
+}
+
 usage() {
     cat <<'EOF'
-Just1kBot — управление сервером
+Just1kBot — pуправление сервером
 
 Использование:
   sudo bash deploy.sh
@@ -96,7 +104,7 @@ dispatch() {
             run_script deploy.sh --restart "$@"
             ;;
         backup)
-            run_script deploy.sh --backup "$@"
+            run_locked_script deploy.sh --backup "$@"
             ;;
         verify-backup)
             (( $# == 1 )) || die "verify-backup требует ровно один backup-файл"
@@ -104,7 +112,7 @@ dispatch() {
             ;;
         restore-test)
             (( $# == 1 )) || die "restore-test требует ровно один backup-файл"
-            run_script deploy.sh --restore "$1"
+            run_locked_script deploy.sh --restore "$1"
             ;;
         amnezia)
             run_script setup-amnezia-api.sh "$@"
@@ -118,12 +126,18 @@ dispatch() {
         "")
             interactive_menu
             ;;
+        --backup)
+            run_locked_script deploy.sh --backup "$@"
+            ;;
+        --restore)
+            run_locked_script deploy.sh --restore "$@"
+            ;;
         --*)
             # Backward-compatible entrypoint for the previous deploy.sh CLI.
             run_script deploy.sh "$command" "$@"
             ;;
         *)
-            printf 'Неизвестная команда: %s\n\n' "$command" >&2
+            printf 'Неизвестная романда: %s\n\n' "$command" >&2
             usage >&2
             exit 2
             ;;
@@ -140,10 +154,10 @@ Just1kBot — управление сервером
 
 1. Установить или обновить бота
 2. Проверить состояние
-3. Показать логи
+3. Показать соги
 4. Перезапустить бота
-5. Создать backup
-6. Проверить backup
+5. Создать бackup
+6. Проверить бackup
 7. Проверить восстановление в тестовой БД
 8. Настроить Amnezia API
 9. Удалить бота
