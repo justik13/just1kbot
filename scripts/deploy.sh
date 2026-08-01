@@ -132,6 +132,41 @@ setup_user_and_dirs() {
         /var/log/just1kbot "$RUNTIME_DIR"
 }
 
+preflight_initial_database_without_env() {
+    [[ ! -e "$ENV_FILE" && ! -L "$ENV_FILE" ]] || return 0
+    pg_database_exists || return 0
+
+    local object_count
+    object_count=$(
+        runuser -u postgres -- \
+            psql -X -A -t -q -v ON_ERROR_STOP=1 \
+            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d "$PG_DATABASE" <<'SQL'
+SELECT count(*)
+FROM pg_class AS c
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND n.nspname !~ '^pg_toast'
+  AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f');
+SQL
+    ) || {
+        error "Не удалось проверить существующую database $PG_DATABASE"
+        return 1
+    }
+
+    [[ "$object_count" =~ ^[0-9]+$ ]] || {
+        error "PostgreSQL вернул некорректный результат проверки database"
+        return 1
+    }
+
+    if (( object_count > 0 )); then
+        error "Database $PG_DATABASE содержит пользовательские объекты, но production .env отсутствует"
+        error "Восстановите исходный .env и DB_ENCRYPTION_KEY; новый ключ создавать запрещено"
+        return 1
+    fi
+
+    log "Существующая database $PG_DATABASE пуста; первичная установка разрешена"
+}
+
 create_env_if_missing() {
     if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
         validate_env_file
@@ -221,6 +256,35 @@ setup_venv() {
     rm -rf -- "$old_venv"
 }
 
+validate_live_symlinks() {
+    local link resolved owner mode
+
+    while IFS= read -r -d '' link; do
+        if [[ "$link" != "$VENV_DIR/"* ]]; then
+            error "Symlink вне virtualenv запрещён: $link"
+            return 1
+        fi
+
+        resolved=$(readlink -f -- "$link") || {
+            error "Не удалось разрешить symlink: $link"
+            return 1
+        }
+        [[ -e "$resolved" ]] || {
+            error "Symlink указывает на отсутствующий target: $link"
+            return 1
+        }
+
+        if [[ "$resolved" != "$VENV_DIR/"* ]]; then
+            owner=$(stat -Lc '%U' "$resolved") || return 1
+            mode=$(stat -Lc '%a' "$resolved") || return 1
+            if [[ "$owner" != root ]] || (( (8#$mode & 8#022) != 0 )); then
+                error "External virtualenv symlink имеет небезопасный target: $link -> $resolved"
+                return 1
+            fi
+        fi
+    done < <(find "$PROJECT_DIR" -xdev -type l -print0)
+}
+
 harden_live_tree() {
     log "Запрет записи service user в live-код и virtualenv"
 
@@ -235,12 +299,13 @@ harden_live_tree() {
     find "$PROJECT_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} +
     find "$PROJECT_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
     ensure_env_permissions
+    validate_live_symlinks || return 1
 
     if find "$PROJECT_DIR" -xdev -user "$BOT_USER" -print -quit | grep -q .; then
         error "В live release остались файлы, принадлежащие service user"
         return 1
     fi
-    if find "$PROJECT_DIR" -xdev -perm /022 -print -quit | grep -q .; then
+    if find "$PROJECT_DIR" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q .; then
         error "В live release остались group/other-writable пути"
         return 1
     fi
@@ -722,6 +787,7 @@ run_deploy() {
     if [[ "$INITIAL_INSTALL" == true ]]; then
         pg_select_cluster
         pg_start_cluster
+        preflight_initial_database_without_env
         setup_postgresql_initial
         setup_redis_initial
         setup_firewall_initial

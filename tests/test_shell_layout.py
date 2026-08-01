@@ -162,6 +162,28 @@ pg_repair_env_port
             self.assertEqual(before.st_uid, after.st_uid)
             self.assertEqual(before.st_gid, after.st_gid)
 
+    def test_live_tree_permission_check_handles_virtualenv_symlinks(self):
+        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("validate_live_symlinks", adapter)
+        self.assertIn(
+            'find "$PROJECT_DIR" -xdev \\( -type f -o -type d \\) -perm /022',
+            adapter,
+        )
+        self.assertNotIn(
+            'find "$PROJECT_DIR" -xdev -perm /022',
+            adapter,
+        )
+        self.assertIn('[[ "$link" != "$VENV_DIR/"* ]]', adapter)
+        self.assertIn("readlink -f", adapter)
+
+    def test_existing_database_without_env_is_checked_before_initial_setup(self):
+        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("preflight_initial_database_without_env", adapter)
+        initial = adapter.index('if [[ "$INITIAL_INSTALL" == true ]]; then', adapter.index("run_deploy()"))
+        guard = adapter.index("preflight_initial_database_without_env", initial)
+        setup = adapter.index("setup_postgresql_initial", initial)
+        self.assertLess(guard, setup)
+
     def test_first_install_rollback_does_not_start_absent_service(self):
         adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn('previous_service=absent start_not_attempted=true', adapter)
