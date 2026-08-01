@@ -64,7 +64,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 is_valid_sha() {
-    [[ ${1:-} =~ ^[0-9a-f]{40,64}$ ]]
+    [[ ${1:-} =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
 }
 
 require_root() {
