@@ -47,6 +47,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           ruff --version | tee /tmp/ruff-version.txt
+          python scripts/audit_human_factor_fix.py
           ruff check \
             bot config database services utils alembic tests scripts \
             --select E401,E701,E702,E703,E731 \
@@ -73,7 +74,6 @@ jobs:
             bot config database services utils alembic tests scripts \
             --select PLW1510,B904,B905 \
             --fix --unsafe-fixes --exit-zero
-          python scripts/audit_human_factor_fix.py
           git diff --name-only -z -- '*.py' | xargs -0 -r ruff format --
           git diff --check
           git diff --binary > /tmp/ruff-autofix.patch
