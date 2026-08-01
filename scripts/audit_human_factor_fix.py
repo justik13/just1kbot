@@ -83,8 +83,8 @@ def fix_unused_results() -> None:
     )
     replace_exact(
         "services/payment_service/service.py",
-        "        operation = await enqueue_create(\n",
-        "        await enqueue_create(\n",
+        "        operation = await enqueue_create(session, payment, description, return_url)\n",
+        "        await enqueue_create(session, payment, description, return_url)\n",
     )
     replace_exact(
         "services/tariff_value_calculator.py",
