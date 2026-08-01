@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MARKER = ROOT / "tests/test_action_lock_validation.py"
 
 
 def read(path: str) -> str:
@@ -208,18 +209,39 @@ def fix_named_helpers_and_variables() -> None:
     )
 
 
+def callback_regression_test() -> str:
+    return '''import unittest\n\nfrom bot.middlewares.action_lock import _validate_callback_params\n\n\nclass CallbackValidationTests(unittest.TestCase):\n    def test_sql_word_boundaries_reject_injection_fragments(self):\n        for callback_data in (\n            "device:1 OR 1=1",\n            "device:1 AND 1=1",\n            "device:1 UNION SELECT",\n            "device:1 SELECT value",\n        ):\n            with self.subTest(callback_data=callback_data):\n                self.assertFalse(_validate_callback_params(callback_data))\n\n    def test_normal_callback_remains_valid(self):\n        self.assertTrue(_validate_callback_params("select_server:123"))\n\n\nif __name__ == "__main__":\n    unittest.main()\n'''
+
+
 def ensure_callback_regression_test() -> None:
-    path = ROOT / "tests/test_action_lock_validation.py"
-    expected = '''import unittest\n\nfrom bot.middlewares.action_lock import _validate_callback_params\n\n\nclass CallbackValidationTests(unittest.TestCase):\n    def test_sql_word_boundaries_reject_injection_fragments(self):\n        for callback_data in (\n            "device:1 OR 1=1",\n            "device:1 AND 1=1",\n            "device:1 UNION SELECT",\n            "device:1 SELECT value",\n        ):\n            with self.subTest(callback_data=callback_data):\n                self.assertFalse(_validate_callback_params(callback_data))\n\n    def test_normal_callback_remains_valid(self):\n        self.assertTrue(_validate_callback_params("select_server:123"))\n\n\nif __name__ == "__main__":\n    unittest.main()\n'''
-    if path.exists():
-        current = path.read_text(encoding="utf-8")
+    expected = callback_regression_test()
+    if MARKER.exists():
+        current = MARKER.read_text(encoding="utf-8")
         if current != expected:
-            raise RuntimeError(f"{path}: unexpected existing content")
+            raise RuntimeError(f"{MARKER}: unexpected existing content")
         return
-    path.write_text(expected, encoding="utf-8")
+    MARKER.write_text(expected, encoding="utf-8")
+
+
+def verify_applied() -> None:
+    if "\x08" in read("bot/middlewares/action_lock.py"):
+        raise RuntimeError("callback regex still contains backspace characters")
+    if MARKER.read_text(encoding="utf-8") != callback_regression_test():
+        raise RuntimeError("callback regression marker differs from expected content")
+    for root in ("bot", "database", "services"):
+        for path in (ROOT / root).rglob("*.py"):
+            content = path.read_text(encoding="utf-8")
+            if re.search(
+                r"\b[A-Z][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]* == (True|False)",
+                content,
+            ):
+                raise RuntimeError(f"{path}: unfixed SQLAlchemy boolean comparison")
 
 
 def main() -> None:
+    if MARKER.exists():
+        verify_applied()
+        return
     fix_sqlalchemy_boolean_comparisons()
     fix_callback_regex_boundaries()
     fix_unused_results()
