@@ -50,6 +50,25 @@ jobs:
           gzip -dc /tmp/apply_shell_audit_fixes.py.gz > /tmp/apply_shell_audit_fixes.py
           python /tmp/apply_shell_audit_fixes.py
 
+      - name: Preserve function-only restore mode
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/lib/production_restore_recovery.sh")
+          text = path.read_text(encoding="utf-8")
+          old = 'JOURNAL_FILE=${RESTORE_JOURNAL_FILE:-$STATE_DIR/cutover-journal.env}\n\n_base_show_status_definition'
+          new = 'JOURNAL_FILE=${RESTORE_JOURNAL_FILE:-$STATE_DIR/cutover-journal.env}\nRESTORE_FUNCTIONS_ONLY_MODE=${RESTORE_FUNCTIONS_ONLY:-0}\n\n_base_show_status_definition'
+          if text.count(old) != 1:
+              raise SystemExit("unexpected recovery journal header")
+          text = text.replace(old, new)
+          old = '[[ "${RESTORE_FUNCTIONS_ONLY:-0}" != 1 || "${RESTORE_TEST_JOURNAL:-0}" == 1 ]]'
+          new = '[[ "$RESTORE_FUNCTIONS_ONLY_MODE" != 1 || "${RESTORE_TEST_JOURNAL:-0}" == 1 ]]'
+          if text.count(old) != 1:
+              raise SystemExit("unexpected journal_enabled implementation")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+
       - name: Install dependencies
         run: |
           sudo apt-get update
