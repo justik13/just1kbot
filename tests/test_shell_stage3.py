@@ -17,10 +17,11 @@ class ShellStage3Tests(unittest.TestCase):
     def test_live_release_is_root_owned_and_read_only_for_service(self):
         for marker in (
             'chown -R root:"$BOT_USER" "$PROJECT_DIR"',
-            'find "$PROJECT_DIR" -xdev -perm /022',
+            'find "$PROJECT_DIR" -xdev \\( -type f -o -type d \\) -perm /022',
+            "validate_live_symlinks",
             "ReadOnlyPaths=${PROJECT_DIR}",
             "ReadWritePaths=${RUNTIME_DIR} /var/log/just1kbot",
-            "PYTHONDONTWRITEBYTECODE=1",
+            "PYTHONDWRITEBYTECODE=1",
             'old_venv="${VENV_DIR}.old.$$"',
             'python3 -m venv "$VENV_DIR"',
         ):
