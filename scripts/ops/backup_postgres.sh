@@ -46,6 +46,8 @@ finish() {
     fi
     exit "$rc"
 }
+# Compatibility contract from the original backup tests: trap finish EXIT INT TERM.
+# EXIT now owns cleanup while the signal traps preserve conventional statuses.
 trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
