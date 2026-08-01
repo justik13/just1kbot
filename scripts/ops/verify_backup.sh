@@ -111,6 +111,7 @@ if [[ -n "$extract_dir" ]]; then
     mkdir -m 700 "$extract_dir"
     install -m 600 "$tmpdir/extracted/manifest.json" "$extract_dir/manifest.json"
     install -m 600 "$tmpdir/extracted/dump.custom" "$extract_dir/dump.custom"
+    install -m 600 "$tmpdir/extracted/config.env" "$extract_dir/config.env"
 fi
 printf 'timestamp=%s artifact=%s size=%s result=success checksum=%s offsite=not-checked\n' \
     "$(date -u +%FT%TZ)" "$(basename -- "$artifact")" "$(stat -c %s "$artifact")" "$(sha256sum "$artifact" | awk '{print $1}')"

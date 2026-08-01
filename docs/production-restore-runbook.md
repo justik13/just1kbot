@@ -1,209 +1,173 @@
-# Ручное восстановление production PostgreSQL
+# Production restore/cutover PostgreSQL
 
-> **Аварийная ручная процедура.** Этот runbook не является автоматизацией
-> production cutover. Все команды и весь порядок действий сначала проверяют на
-> staging или на изолированной копии production. Если любой шаг имеет
-> неоднозначный результат, остановитесь и разберите состояние вручную.
+Эта процедура восстанавливает проверенный encrypted backup в новую staging-БД,
+проверяет её текущим приложением и только затем выполняет короткий production
+cutover. Текущая production-БД не удаляется: она сохраняется под rollback-именем
+до отдельной команды `restore-finalize`.
 
-## Правила безопасности
+## Что автоматизировано
 
-- Запланируйте maintenance window и заранее назначьте ответственного оператора.
-- Не вставляйте реальные пароли, приватные ключи, bot token, платёжные credentials
-  или другие секреты в команды, логи, тикеты и shell history. Используйте
-  root-only файлы конфигурации и безопасно переданные environment variables.
-- Не используйте `dropdb` для текущей production database.
-- Не переименовывайте и не удаляйте старую production database автоматически.
-- Не заменяйте production `.env` автоматически.
-- Сохраните текущий `DB_ENCRYPTION_KEY`: данные из backup должны расшифровываться
-  тем же ключом. Если ключ из backup и текущий ключ несовместимы, остановитесь и
-  планируйте отдельную ручную процедуру.
-- Не продолжайте после ошибки strict verifier или restore rehearsal.
-- Старую database удаляют только отдельным ручным решением после подтверждённого
-  периода стабильной работы.
+Команда production restore выполняет следующий порядок:
 
-## 1. Подготовка maintenance window
+1. Берёт exclusive lock всех deploy/backup/restore/uninstall операций.
+2. Проверяет production `.env`, локальный PostgreSQL cluster и настоящий port.
+3. Проверяет artifact, sidecar, age identity, manifest и все checksums.
+4. Сравнивает `DB_ENCRYPTION_KEY` из backup с текущим production key без вывода
+   значения в журнал.
+5. Проверяет свободное место для одновременного хранения текущей и восстановленной
+   database.
+6. Восстанавливает dump в новую `just1kbot_stg_*` database.
+7. Применяет текущий `alembic upgrade head` только к staging database.
+8. Проверяет единственный Alembic head и критические application/payment tables.
+9. Показывает basename, SHA-256, дату backup и staging revision.
+10. После точного подтверждения останавливает timers и application writers.
+11. Создаёт новый encrypted backup текущей production database и сразу проверяет,
+    что он расшифровывается доступным age identity.
+12. Запрещает новые подключения к обеим database и завершает оставшиеся sessions.
+13. Переименовывает текущую production database в `just1kbot_rb_*`.
+14. Переименовывает staging database в `just1kbot_bot` без изменения `.env`.
+15. Запускает приложение и ждёт штатный bounded healthcheck.
+16. При readiness failure автоматически возвращает предыдущую database, а
+    неуспешную восстановленную database сохраняет как `just1kbot_fail_*`.
 
-До начала убедитесь, что доступны:
+Старую database нельзя удалить той же командой, которая выполняет cutover.
 
-- выбранный encrypted backup artifact `*.tar.age`;
-- соответствующий sidecar `*.tar.age.sha256`;
-- безопасный regular-файл `AGE_IDENTITY_FILE`;
-- текущий production `.env`;
-- текущий `DB_ENCRYPTION_KEY`;
-- доступ к PostgreSQL maintenance database и systemd;
-- достаточно дискового пространства для rehearsal, новой database и ещё одного
-  encrypted production backup.
+## Предварительные условия
 
-Запишите безопасные идентификаторы операции: время UTC, basename выбранного
-artifact, его SHA-256, текущий git revision и имя старой production database. Не
-записывайте connection URL или значения секретов.
+До restore должны быть установлены и работать:
 
-## 2. Проверка выбранного backup
+- версия приложения с production restore engine;
+- `/opt/just1kbot/.env` с локальным `DATABASE_URL`;
+- exact PostgreSQL cluster, определяемый `pg_lsclusters`;
+- `just1kbot.service` и штатный healthcheck;
+- encrypted backup tooling и systemd backup service;
+- artifact `*.tar.age`, matching `.sha256` и соответствующий private age key.
 
-Сначала запустите strict verifier. Artifact и matching `.sha256` должны находиться
-рядом и иметь безопасные permissions.
+Artifact и identity должны быть regular files, не symlink. Artifact должен иметь
+mode `0600`, как требует strict verifier.
 
-```bash
-AGE_IDENTITY_FILE=/secure/identity.txt \
-/usr/local/bin/verify_backup.sh \
-/root/backups/just1kbot/<artifact>.tar.age
-```
+## Проверка без production cutover
 
-Затем выполните восстановление только в отдельную rehearsal database:
-
-```bash
-AGE_IDENTITY_FILE=/secure/identity.txt \
-/usr/local/bin/restore_rehearsal.sh \
-/root/backups/just1kbot/<artifact>.tar.age
-```
-
-**Не продолжайте**, если verifier или rehearsal завершились ненулевым exit code,
-если rehearsal database не была безопасно очищена либо если результат проверки
-неоднозначен.
-
-## 3. Свежий backup текущей production database
-
-До остановки сервиса создайте свежий encrypted backup текущей production database,
-используя настроенный age recipient:
+Сначала всегда выполните isolated rehearsal:
 
 ```bash
-sudo --preserve-env=BACKUP_AGE_RECIPIENT \
-/usr/local/bin/just1kbot-backup.sh
+sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+  bash /opt/just1kbot/deploy.sh restore-test \
+  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
-Запишите basename и SHA-256 созданного artifact. Проверьте **этот точный artifact**
-тем же strict verifier, а затем restore rehearsal:
+Rehearsal создаёт только `just1kbot_rehearsal_*`, проверяет данные и удаляет эту
+database. Production database не переименовывается и не удаляется.
+
+## Production restore
+
+Интерактивный запуск:
 
 ```bash
-AGE_IDENTITY_FILE=/secure/identity.txt \
-/usr/local/bin/verify_backup.sh \
-/root/backups/just1kbot/<fresh-artifact>.tar.age
-
-AGE_IDENTITY_FILE=/secure/identity.txt \
-/usr/local/bin/restore_rehearsal.sh \
-/root/backups/just1kbot/<fresh-artifact>.tar.age
+sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+  bash /opt/just1kbot/deploy.sh restore-production \
+  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
-При любой ошибке остановите процедуру. Не переходите к maintenance window без
-двух проверенных encrypted backups: выбранного recovery backup и свежего backup
-текущей production database.
+До остановки приложения staging restore и migrations уже должны успешно
+завершиться. Для начала cutover скрипт потребует фразу с первыми 12 символами
+точного SHA-256 artifact.
 
-## 4. Остановка приложения
-
-Остановите bot service и отдельно подтвердите inactive state:
+Неинтерактивный запуск разрешён только с полным ожидаемым SHA-256:
 
 ```bash
-sudo systemctl stop just1kbot
-sudo systemctl is-active just1kbot
+sudo AGE_IDENTITY_FILE=/secure/backup.agekey \
+  bash /opt/just1kbot/deploy.sh restore-production \
+  --yes \
+  --expected-sha256 '<64 lowercase hex characters>' \
+  /secure/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
-Ожидаемый результат второй команды — `inactive`. Дополнительно убедитесь, что не
-осталось процесса бота. Если service или процесс не остановился, не выполняйте
-никаких изменений database.
+Произвольное `--yes` без exact checksum отклоняется.
 
-## 5. Восстановление в новую database
+## Проверка состояния
 
-Сгенерируйте новое безопасное имя, например
-`just1kbot_manual_restore_YYYYMMDDHHMMSS`. Не используйте имя текущей production
-DB. Из verified artifact получите dump только утверждённым verifier/rehearsal
-процессом в private root-only workspace; не распаковывайте `config.env` в общий
-каталог и не выводите его содержимое.
-
-Создайте новую database с согласованными owner, encoding и locale. Восстановите
-проверенный custom dump только в неё:
+После успешного cutover:
 
 ```bash
-pg_restore \
-  --exit-on-error \
-  --no-owner \
-  --no-acl \
-  --dbname="just1kbot_manual_restore_YYYYMMDDHHMMSS" \
-  /secure/private-workspace/dump.custom
+sudo bash /opt/just1kbot/deploy.sh restore-status
 ```
 
-Точные `createdb`, owner, locale и connection параметры сначала подтвердите на
-staging. Оператор обязан проверить, что `--dbname` указывает на новую database, а
-не на текущую production database.
+Статус показывает только безопасные идентификаторы:
 
-## 6. Проверка новой database и migrations
+- transaction ID;
+- active или rolled_back;
+- production, rollback и failed database names;
+- artifact basename и SHA-256;
+- время backup/cutover;
+- basename свежего pre-cutover safety backup.
 
-До переключения выполните read-only проверки новой database:
+Connection URL, password, private key и `DB_ENCRYPTION_KEY` не выводятся.
 
-- существует ровно одна ожидаемая строка `alembic_version`;
-- доступны таблицы пользователей;
-- доступны payment tables и durable payment queues;
-- открывается новое подключение;
-- выполняются простые read-only `SELECT`;
-- критические encrypted поля читаются с текущим `DB_ENCRYPTION_KEY`;
-- отсутствуют очевидные нарушения внешних ключей.
+## Откат после успешного restore
 
-Не запускайте Alembic против старой production database. Если восстановленная
-новая database имеет старую revision, сформируйте отдельный `DATABASE_URL`, ещё
-раз проверьте имя новой database и примените migrations **только к ней**:
+Пока transaction имеет status `active`, можно вернуть предыдущую database:
 
 ```bash
-DATABASE_URL='postgresql+asyncpg://<credentials>@<host>:<port>/just1kbot_manual_restore_YYYYMMDDHHMMSS' \
-alembic upgrade head
+sudo bash /opt/just1kbot/deploy.sh restore-rollback
 ```
 
-Не помещайте реальный URL с паролем в shell history. После migration повторите все
-read-only проверки и подтвердите exact Alembic head.
+Перед rollback приложение снова останавливается и создаётся свежий encrypted
+backup текущей восстановленной database. Затем:
 
-## 7. Ручное переключение
+- текущая restored database сохраняется как `just1kbot_fail_*`;
+- `just1kbot_rb_*` возвращается под именем `just1kbot_bot`;
+- приложение должно пройти healthcheck.
 
-Не меняйте `.env` автоматически и не заменяйте `DB_ENCRYPTION_KEY`. После ручной
-проверки измените **только** database name/URL в production configuration так,
-чтобы приложение подключалось к новой database. Сохраните защищённую копию
-предыдущего `DATABASE_URL`, необходимую для rollback.
+Поздний rollback логически теряет для активного приложения записи, сделанные
+после cutover. Эти записи не уничтожаются: restored database остаётся отдельной
+`just1kbot_fail_*` до finalize. Решение о переносе отдельных данных принимается
+отдельно, без автоматического merge databases.
 
-Старая production database остаётся на месте под прежним именем. Этот runbook не
-предписывает автоматический rename, swap или удаление databases.
-
-## 8. Запуск и health validation
-
-Запустите service:
+Неинтерактивный rollback требует exact transaction ID:
 
 ```bash
-sudo systemctl start just1kbot
-sudo systemctl is-active just1kbot
+sudo bash /opt/just1kbot/deploy.sh restore-rollback \
+  --yes --transaction-id 'YYYYMMDDHHMMSS_PID'
 ```
 
-В ограниченном временном окне проверьте:
+## Finalize
 
-- systemd сообщает `active`;
-- heartbeat свежий и продолжает обновляться;
-- штатный healthcheck успешен;
-- payment queues доступны для безопасного чтения;
-- нет немедленного crash loop;
-- read-only запросы выполняются через production application configuration.
+После подтверждённого периода стабильной работы и повторной проверки backups:
 
-Не выполняйте тестовый платёж, не создавайте VPN peer и не вызывайте внешние API
-только ради этой проверки.
+```bash
+sudo bash /opt/just1kbot/deploy.sh restore-finalize
+```
 
-## 9. Ручной rollback при проблеме
+Finalize сначала требует успешный production healthcheck. Затем он удаляет только
+сохранённую non-production database:
 
-Если новая database или приложение не проходят health validation:
+- при status `active` — предыдущую `just1kbot_rb_*`;
+- при status `rolled_back` — неуспешную `just1kbot_fail_*`.
 
-1. Остановите service и подтвердите inactive state.
-2. Верните сохранённый старый `DATABASE_URL`; не меняйте остальные `.env` values.
-3. Снова запустите service.
-4. Подтвердите systemd active, свежий heartbeat, штатный healthcheck, чтение
-   payment queues и отсутствие crash loop.
-5. Сохраните новую database для диагностики; не удаляйте её в ходе rollback.
+Имя `just1kbot_bot` имеет отдельный fail-closed запрет на удаление.
 
-Если старый service не восстанавливается, не выполняйте циклические restart и не
-утверждайте, что rollback успешен. Зафиксируйте безопасное состояние и продолжите
-ручную диагностику.
+Неинтерактивный finalize также требует exact transaction ID:
 
-## 10. Хранение после восстановления
+```bash
+sudo bash /opt/just1kbot/deploy.sh restore-finalize \
+  --yes --transaction-id 'YYYYMMDDHHMMSS_PID'
+```
 
-В день восстановления не удаляйте:
+После finalize active state атомарно переносится в root-only archive под:
 
-- старую production database;
-- выбранный encrypted recovery backup и его `.sha256`;
-- свежий encrypted backup прежней production database и его `.sha256`;
-- новую восстановленную database, если был rollback.
+```text
+/var/lib/just1kbot/restore-transactions/
+```
 
-Удаление старой database разрешается только отдельным ручным решением после
-достаточного периода стабильной работы, повторной проверки backups и подтверждения
-того, что rollback к ней больше не требуется.
+## Ограничения
+
+- Restore не меняет и не восстанавливает production `.env`.
+- Несовпадение `DB_ENCRYPTION_KEY` блокирует операцию.
+- Restore работает только с локальной `just1kbot_bot` и ролью `just1kbot`.
+- Одновременно разрешена только одна незавершённая restore transaction.
+- PostgreSQL cluster не создаётся, не удаляется и не пересоздаётся.
+- Restore не объединяет записи из старой и новой databases.
+- UFW, Redis, Amnezia API и Let's Encrypt не являются частью database cutover.
+- GitHub Actions не заменяют controlled запуск на настоящем VPS; первый production
+  restore следует выполнять в maintenance window с доступом к systemd/journal.

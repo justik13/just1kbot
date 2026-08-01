@@ -1,0 +1,93 @@
+import pathlib
+import subprocess
+import tempfile
+import textwrap
+import unittest
+
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+ENGINE = ROOT / "scripts" / "ops" / "production_restore.sh"
+CRASH = ROOT / "scripts" / "lib" / "production_restore_crash.sh"
+ACTIONS = ROOT / "scripts" / "lib" / "production_restore_actions.sh"
+
+
+class ProductionRestoreCrashTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.engine = ENGINE.read_text(encoding="utf-8")
+        cls.crash = CRASH.read_text(encoding="utf-8")
+        cls.actions = ACTIONS.read_text(encoding="utf-8")
+
+    def test_crash_override_is_loaded_last_and_hardened(self):
+        self.assertIn("production_restore_crash.sh; do", self.engine)
+        self.assertLess(
+            self.engine.index("production_restore_actions.sh"),
+            self.engine.index("production_restore_crash.sh"),
+        )
+        self.assertIn("unsafe library mode", self.engine)
+        self.assertIn("library is not root-owned", self.engine)
+
+    def test_manual_rollback_state_failure_has_recovery_path(self):
+        for marker in (
+            'CUTOVER_PHASE="manual_rollback_swapped"',
+            'CUTOVER_PHASE="manual_restored_returned"',
+        ):
+            self.assertIn(marker, self.actions)
+        for marker in (
+            '[[ "$CUTOVER_PHASE" == manual_rollback_swapped ]]',
+            'write_active_state rolled_back "$FAILED_DB"',
+            "return_restored_database_after_manual_rollback",
+            'write_active_state active "" || true',
+        ):
+            self.assertIn(marker, self.crash)
+
+    def test_finalize_is_idempotent_after_preserved_database_drop(self):
+        for marker in (
+            "preserved database is already absent; completing interrupted finalize",
+            "preserved database still exists after finalize drop",
+            '[[ "$preserved" != "$LIVE_DATABASE" ]]',
+        ):
+            self.assertIn(marker, self.actions)
+
+    def test_return_restored_database_order_is_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = pathlib.Path(directory) / "calls"
+            command = textwrap.dedent(
+                f"""
+                set -Eeuo pipefail
+                RESTORE_FUNCTIONS_ONLY=1 source {str(ENGINE)!r}
+                LIVE_DATABASE=just1kbot_bot
+                ROLLBACK_DB=just1kbot_rb_20260801000000_1
+                FAILED_DB=just1kbot_fail_20260801000000_1
+                record() {{ printf '%s\\n' "$*" >> {str(log)!r}; }}
+                database_allow_connections() {{ record "allow $1 $2"; }}
+                terminate_database_connections() {{ record "terminate $1"; }}
+                rename_database() {{ record "rename $1 $2"; }}
+                set_database_owner() {{ record "owner $1"; }}
+                return_restored_database_after_manual_rollback
+                """
+            )
+            result = subprocess.run(
+                ["bash", "-c", command],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                log.read_text(encoding="utf-8").splitlines(),
+                [
+                    "allow just1kbot_bot false",
+                    "terminate just1kbot_bot",
+                    "allow just1kbot_fail_20260801000000_1 false",
+                    "terminate just1kbot_fail_20260801000000_1",
+                    "rename just1kbot_bot just1kbot_rb_20260801000000_1",
+                    "rename just1kbot_fail_20260801000000_1 just1kbot_bot",
+                    "owner just1kbot_bot",
+                    "allow just1kbot_bot true",
+                ],
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

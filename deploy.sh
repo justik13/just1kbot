@@ -74,6 +74,10 @@ Just1kBot — управление сервером
   sudo bash deploy.sh backup
   sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh verify-backup /path/backup.tar.age
   sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh restore-test /path/backup.tar.age
+  sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh restore-production /path/backup.tar.age
+  sudo bash deploy.sh restore-status
+  sudo bash deploy.sh restore-rollback
+  sudo bash deploy.sh restore-finalize
   sudo bash deploy.sh amnezia
   sudo bash deploy.sh uninstall
   bash deploy.sh help
@@ -84,6 +88,10 @@ Just1kBot — управление сервером
 Команда update скачивает только main из фиксированного GitHub repository в
 отдельный root-only release-каталог и запускает transactional deploy. Команда
 deploy предназначена для ручного запуска из уже подготовленного checkout.
+
+Production restore сначала создаёт и проверяет staging database. Во время
+короткого cutover текущая database сохраняется под rollback-именем и не удаляется
+до отдельной команды restore-finalize.
 
 Совместимость со старыми командами:
   sudo bash deploy.sh --status
@@ -125,7 +133,20 @@ dispatch() {
             ;;
         restore-test)
             (( $# == 1 )) || die "restore-test требует ровно один backup-файл"
-            run_locked_script deploy.sh --restore "$1"
+            run_locked_script ops/just1kbot-restore.sh rehearsal "$1"
+            ;;
+        restore-production)
+            run_script ops/just1kbot-restore.sh production "$@"
+            ;;
+        restore-status)
+            (( $# == 0 )) || die "restore-status не принимает аргументы"
+            run_script ops/just1kbot-restore.sh status
+            ;;
+        restore-rollback)
+            run_script ops/just1kbot-restore.sh rollback "$@"
+            ;;
+        restore-finalize)
+            run_script ops/just1kbot-restore.sh finalize "$@"
             ;;
         amnezia)
             run_script setup-amnezia-api.sh "$@"
@@ -143,7 +164,8 @@ dispatch() {
             run_locked_script deploy.sh --backup "$@"
             ;;
         --restore)
-            run_locked_script deploy.sh --restore "$@"
+            (( $# == 1 )) || die "--restore требует ровно один backup-файл"
+            run_locked_script ops/just1kbot-restore.sh rehearsal "$1"
             ;;
         --*)
             # Backward-compatible entrypoint for the previous deploy.sh CLI.
@@ -173,8 +195,12 @@ Just1kBot — управление сервером
 6. Создать backup
 7. Проверить backup
 8. Проверить восстановление в тестовой БД
-9. Настроить Amnezia API
-10. Удалить бота
+9. Восстановить production БД из backup
+10. Показать состояние production restore
+11. Откатить последний production restore
+12. Завершить restore и удалить сохранённую БД
+13. Настроить Amnezia API
+14. Удалить бота
 0. Выход
 EOF_MENU
         read -rp 'Выберите действие: ' choice
@@ -209,9 +235,28 @@ EOF_MENU
                 dispatch restore-test "$restore_file"
                 ;;
             9)
-                dispatch amnezia
+                local production_file production_identity
+                read -rp 'Путь к production backup.tar.age: ' production_file
+                read -rp 'Путь к соответствующему age identity: ' production_identity
+                AGE_IDENTITY_FILE=$production_identity
+                export AGE_IDENTITY_FILE
+                dispatch restore-production "$production_file"
                 ;;
             10)
+                dispatch restore-status
+                ;;
+            11)
+                printf '\nВНИМАНИЕ: изменения после restore будут сохранены в отдельной БД, но production вернётся к предыдущей БД.\n'
+                dispatch restore-rollback
+                ;;
+            12)
+                printf '\nВНИМАНИЕ: сохранённая rollback/failed БД будет безвозвратно удалена после healthcheck.\n'
+                dispatch restore-finalize
+                ;;
+            13)
+                dispatch amnezia
+                ;;
+            14)
                 printf '\nВНИМАНИЕ: будет запущен destructive uninstall.\n'
                 dispatch uninstall
                 ;;

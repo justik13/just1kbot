@@ -22,11 +22,17 @@ class ShellLayoutTests(unittest.TestCase):
             "setup-amnezia-api.sh",
             "uninstall.sh",
             "lib/postgresql.sh",
+            "lib/operational_transaction.sh",
             "ops/deploy_application.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
             "ops/restore_rehearsal.sh",
             "ops/just1kbot-restore.sh",
+            "ops/production_restore.sh",
+            "lib/production_restore_core.sh",
+            "lib/production_restore_runtime.sh",
+            "lib/production_restore_actions.sh",
+            "lib/production_restore_crash.sh",
         }
         missing = sorted(name for name in required if not (SCRIPTS / name).is_file())
         self.assertEqual(missing, [])
@@ -48,6 +54,7 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Just1kBot", result.stdout)
         self.assertIn("restore-test", result.stdout)
+        self.assertIn("restore-production", result.stdout)
         self.assertIn("update", result.stdout)
 
     def test_postgresql_port_repair_changes_only_database_url_port(self):
