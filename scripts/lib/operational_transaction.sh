@@ -54,8 +54,8 @@ snapshot_operational_files() {
 
         target="$root$path"
         if [[ -e "$path" || -L "$path" ]]; then
-            if [[ -d "$path" && ! -L "$path" ]]; then
-                deploy_log "operational_snapshot directory_not_allowed=true path=$path"
+            if [[ ! -f "$path" && ! -L "$path" ]]; then
+                deploy_log "operational_snapshot unsupported_file_type=true path=$path"
                 return 1
             fi
             install -d -m 0700 "$(dirname "$target")"
@@ -103,7 +103,7 @@ restore_operational_files() {
         source="$root$path"
         case "$state" in
             present)
-                [[ -e "$source" || -L "$source" ]] || return 1
+                [[ -f "$source" || -L "$source" ]] || return 1
                 rm -rf -- "$path"
                 ensure_operational_parent "$path" || return 1
                 cp -a -- "$source" "$path" || return 1
