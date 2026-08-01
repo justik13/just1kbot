@@ -41,7 +41,7 @@ resolve_rehearsal() {
 }
 
 case ${1:-} in
-    production|status|recover|rollback|finalize)
+    production|status|rollback|finalize|recover)
         engine=$(resolve_engine) || {
             printf 'production restore engine is unavailable\n' >&2
             exit 1
