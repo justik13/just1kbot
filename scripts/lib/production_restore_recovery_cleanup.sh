@@ -25,6 +25,39 @@ rollback or finalize. If status reports an interrupted journal, run recover firs
 EOF_USAGE
 }
 
+# Function-order unit tests source the engine in definitions-only mode and mock
+# all database mutations without constructing a real restore transaction. Keep
+# durable journaling mandatory for every executable action while allowing those
+# isolated tests to exercise rename order without writing root state.
+_base_begin_journal_definition=$(declare -f begin_cutover_journal)
+_base_begin_journal_definition=${_base_begin_journal_definition/#"begin_cutover_journal ()"/"base_begin_cutover_journal ()"}
+eval "$_base_begin_journal_definition"
+unset _base_begin_journal_definition
+
+_base_update_journal_definition=$(declare -f update_cutover_journal)
+_base_update_journal_definition=${_base_update_journal_definition/#"update_cutover_journal ()"/"base_update_cutover_journal ()"}
+eval "$_base_update_journal_definition"
+unset _base_update_journal_definition
+
+begin_cutover_journal() {
+    local operation=$1 phase=$2
+    if [[ "${RESTORE_FUNCTIONS_ONLY:-0}" == 1 && -z "$TRANSACTION_ID" ]]; then
+        JOURNAL_OPERATION=$operation
+        JOURNAL_PHASE=$phase
+        return 0
+    fi
+    base_begin_cutover_journal "$operation" "$phase"
+}
+
+update_cutover_journal() {
+    local phase=$1
+    if [[ "${RESTORE_FUNCTIONS_ONLY:-0}" == 1 && -z "$TRANSACTION_ID" ]]; then
+        JOURNAL_PHASE=$phase
+        return 0
+    fi
+    base_update_cutover_journal "$phase"
+}
+
 cleanup_on_exit() {
     local rc=$?
     set +e
