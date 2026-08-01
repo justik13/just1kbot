@@ -94,8 +94,8 @@ try:
         if set(names) != allowed or len(names) != len(allowed):
             raise ValueError('archive members do not match the allowlist')
         for member in members:
-            path = pathlib.PurePosixPath(member.name)
-            if path.is_absolute() or '..' in path.parts or not member.isfile():
+            p = pathlib.PurePosixPath(member.name)
+            if p.is_absolute() or '..' in p.parts or not member.isfile():
                 raise ValueError('unsafe archive member')
             if member.size < 0 or member.size > limits[member.name]:
                 raise ValueError(f'archive member exceeds size limit: {member.name}')
