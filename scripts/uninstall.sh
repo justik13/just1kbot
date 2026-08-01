@@ -17,6 +17,7 @@ STATE_FILE=/etc/just1kbot-amnezia.conf
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 PG_LIB="$SCRIPT_DIR/lib/postgresql.sh"
 MODE=
+declare -a PURGE_REDIS_CONNECTION=()
 
 fail(){ printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
 log(){ printf '[uninstall] %s\n' "$*"; }
@@ -88,10 +89,13 @@ preflight_restore_state(){
   fi
 }
 
-lock_all(){
+acquire_uninstall_lock(){
   install -d -o root -g root -m 0755 "$(dirname "$LOCK_FILE")"
   exec 200>"$LOCK_FILE"
   flock -n 200 || fail 'deploy/backup/restore is already running'
+}
+
+pause_operational_work(){
   systemctl stop just1kbot-backup.timer 2>/dev/null || true
   systemctl stop just1kbot-healthcheck.timer 2>/dev/null || true
   ! systemctl is-active --quiet just1kbot-backup.timer 2>/dev/null || fail 'backup timer did not stop'
@@ -242,15 +246,75 @@ print(prefix)
 PY
 }
 
+load_redis_connection(){
+  local output
+  if ! output=$(redis_connection); then
+    fail 'failed to parse REDIS_URL'
+  fi
+
+  mapfile -t PURGE_REDIS_CONNECTION <<<"$output"
+  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || fail 'failed to parse REDIS_URL'
+}
+
+ping_redis_connection(){
+  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || load_redis_connection
+
+  local host=${PURGE_REDIS_CONNECTION[0]}
+  local port=${PURGE_REDIS_CONNECTION[1]}
+  local database=${PURGE_REDIS_CONNECTION[2]}
+  local password=${PURGE_REDIS_CONNECTION[3]}
+
+  if [[ -n "$password" ]]; then
+    REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" PING |
+      grep -qx PONG || fail 'Redis PING failed'
+  else
+    redis-cli -h "$host" -p "$port" -n "$database" PING |
+      grep -qx PONG || fail 'Redis PING failed'
+  fi
+}
+
+preflight_purge(){
+  command -v redis-cli >/dev/null 2>&1 || fail 'redis-cli is required to purge data'
+  load_redis_connection
+  ping_redis_connection
+
+  [[ -f "$PG_LIB" && ! -L "$PG_LIB" ]] || fail 'PostgreSQL library is missing'
+  # shellcheck source=lib/postgresql.sh
+  source "$PG_LIB"
+  pg_select_cluster
+  pg_start_cluster
+
+  local database_output
+  local -a databases=()
+  local database
+  if ! database_output=$(
+    pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
+SELECT datname
+FROM pg_database
+WHERE datname = :'main_database'
+   OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$'
+ORDER BY datname;
+SQL
+  ); then
+    fail 'failed to enumerate Just1kBot databases'
+  fi
+  if [[ -n "$database_output" ]]; then
+    mapfile -t databases <<<"$database_output"
+  fi
+
+  for database in "${databases[@]}"; do
+    [[ "$database" == "$PG_DATABASE" || "$database" =~ ^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$ ]] ||
+      fail "refusing to purge unexpected database: $database"
+  done
+}
+
 purge_redis(){
   command -v redis-cli >/dev/null 2>&1 || fail 'redis-cli is required to purge data'
+  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || load_redis_connection
 
-  local -a connection
-  mapfile -t connection < <(redis_connection)
-  (( ${#connection[@]} == 5 )) || fail 'failed to parse REDIS_URL'
-
-  local host=${connection[0]} port=${connection[1]} database=${connection[2]}
-  local password=${connection[3]} prefix=${connection[4]} output key deleted=0
+  local host=${PURGE_REDIS_CONNECTION[0]} port=${PURGE_REDIS_CONNECTION[1]}
+  local database=${PURGE_REDIS_CONNECTION[2]} password=${PURGE_REDIS_CONNECTION[3]}
+  local prefix=${PURGE_REDIS_CONNECTION[4]} output key deleted=0
 
   if [[ -n "$password" ]]; then
     REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" PING |
@@ -286,9 +350,10 @@ purge_db(){
   pg_select_cluster
   pg_start_cluster
 
-  local -a databases
+  local database_output
+  local -a databases=()
   local database
-  mapfile -t databases < <(
+  if ! database_output=$(
     pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
 SELECT datname
 FROM pg_database
@@ -296,7 +361,12 @@ WHERE datname = :'main_database'
    OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$'
 ORDER BY datname;
 SQL
-  )
+  ); then
+    fail 'failed to enumerate Just1kBot databases'
+  fi
+  if [[ -n "$database_output" ]]; then
+    mapfile -t databases <<<"$database_output"
+  fi
 
   for database in "${databases[@]}"; do
     [[ "$database" == "$PG_DATABASE" || "$database" =~ ^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$ ]] ||
@@ -425,13 +495,20 @@ main(){
   parse "$@"
   [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
   safe_path
-  lock_all
+  acquire_uninstall_lock
   preflight_restore_state
 
   if [[ "$MODE" == keep ]]; then
-    backup_before_keep
+    :
   else
     confirm_purge
+    preflight_purge
+  fi
+
+  pause_operational_work
+
+  if [[ "$MODE" == keep ]]; then
+    backup_before_keep
   fi
 
   stop_units

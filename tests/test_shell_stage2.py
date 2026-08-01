@@ -55,11 +55,21 @@ class ShellStage2Tests(unittest.TestCase):
             "preflight_restore_state",
             "cutover-journal.env",
             "^just1kbot_(stg|rb|fail)_",
+            "acquire_uninstall_lock",
+            "pause_operational_work",
+            "preflight_purge",
+            "PURGE_REDIS_CONNECTION",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("--force", text)
         self.assertNotIn("apt-get remove", text)
         self.assertNotIn("/root/.just1kbot-snapshots", text)
+        self.assertNotIn("mapfile -t connection < <(redis_connection)", text)
+        self.assertIn("if ! output=$(redis_connection); then", text)
+
+        main = text[text.index("main(){"):]
+        self.assertLess(main.index("preflight_purge"), main.index("pause_operational_work"))
+        self.assertLess(main.index("pause_operational_work"), main.index("stop_units"))
 
     def test_amnezia_is_explicit_interactive_and_transactional(self):
         text = (SCRIPTS / "setup-amnezia-api.sh").read_text(
