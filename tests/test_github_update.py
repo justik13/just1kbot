@@ -112,7 +112,8 @@ class GithubUpdateTests(unittest.TestCase):
         update_case = self.menu[
             self.menu.index("        update)") : self.menu.index("        deploy)")
         ]
-        self.assertIn('run_script update_from_github.sh "$@"', update_case)
+        self.assertIn('call_script update_from_github.sh "$@"', update_case)
+        self.assertIn("post_operation_smokecheck", update_case)
         self.assertNotIn("run_locked_script", update_case)
         self.assertIn("Обновить код из GitHub (main)", self.menu)
         self.assertIn("sudo bash /opt/just1kbot/deploy.sh update", self.menu)
