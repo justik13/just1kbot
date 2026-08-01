@@ -18,12 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: agent/hotfix-first-install-rollback
           fetch-depth: 0
 
       - name: Apply hotfix patch
         run: |
-          git apply --check .github/hotfix-first-install.patch
-          git apply .github/hotfix-first-install.patch
+          git apply --recount --check .github/hotfix-first-install.patch
+          git apply --recount .github/hotfix-first-install.patch
           rm -f .github/hotfix-first-install.patch
           rm -f .github/.hotfix-trigger .github/.hotfix-trigger-2
           rm -f .github/workflows/hotfix-first-install-bootstrap.yml
