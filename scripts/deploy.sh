@@ -174,23 +174,39 @@ PY
 }
 
 setup_venv() {
-    log "Подготовка root-owned Python virtualenv"
+    log "Подготовка нового root-owned Python virtualenv"
 
     if [[ -e "$VENV_DIR" && ( ! -d "$VENV_DIR" || -L "$VENV_DIR" ) ]]; then
         error "Virtualenv path небезопасен: $VENV_DIR"
         return 1
     fi
-    if [[ ! -x "$VENV_DIR/bin/python" ]]; then
-        python3 -m venv "$VENV_DIR"
+
+    # Never execute an interpreter previously writable by the service user.
+    # Build a clean environment as root, then atomically replace the old one.
+    local new_venv="${VENV_DIR}.new.$$"
+    local old_venv="${VENV_DIR}.old.$$"
+    rm -rf -- "$new_venv" "$old_venv"
+    TEMP_DIRS+=("$new_venv" "$old_venv")
+
+    python3 -m venv "$new_venv"
+    "$new_venv/bin/python" -m pip install --upgrade pip --quiet
+    "$new_venv/bin/python" -m pip install \
+        -r "$PROJECT_DIR/requirements.txt" --quiet
+
+    chown -R root:"$BOT_USER" "$new_venv"
+    find "$new_venv" -xdev -type d -exec chmod 0750 {} +
+    find "$new_venv" -xdev -type f -perm /111 -exec chmod 0750 {} +
+    find "$new_venv" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
+
+    if [[ -d "$VENV_DIR" ]]; then
+        mv -- "$VENV_DIR" "$old_venv"
     fi
-
-    "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet
-    "$VENV_DIR/bin/python" -m pip install -r "$PROJECT_DIR/requirements.txt" --quiet
-
-    chown -R root:"$BOT_USER" "$VENV_DIR"
-    find "$VENV_DIR" -xdev -type d -exec chmod 0750 {} +
-    find "$VENV_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} +
-    find "$VENV_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
+    if ! mv -- "$new_venv" "$VENV_DIR"; then
+        [[ ! -d "$old_venv" ]] || mv -- "$old_venv" "$VENV_DIR"
+        error "Не удалось активировать новый virtualenv"
+        return 1
+    fi
+    rm -rf -- "$old_venv"
 }
 
 harden_live_tree() {
@@ -318,8 +334,23 @@ SERVICE=just1kbot
 PROJECT_DIR=/opt/just1kbot
 VENV_DIR="$PROJECT_DIR/venv"
 HEARTBEAT_FILE=/run/just1kbot/heartbeat
+LEGACY_HEARTBEAT_FILE=/opt/just1kbot/.heartbeat
+DEPLOY_LOCK=/run/lock/just1kbot-deploy.lock
 LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
 MAX_HEARTBEAT_AGE=180
+
+# Never inspect a release while deploy/backup/restore/uninstall holds the
+# exclusive operation lock.
+# A healthcheck launched by deploy inherits fd 200 and may inspect the release
+# as part of its own readiness gate. Timer/manual checks do not inherit it and
+# must acquire a shared operation lock.
+if [[ ! -e /proc/self/fd/200 ]]; then
+    exec 8>"$DEPLOY_LOCK"
+    if ! flock -s -w 5 8; then
+        echo "healthcheck: deployment operation holds the lock" >&2
+        exit 75
+    fi
+fi
 
 exec 9>"$LOCK_FILE"
 if ! flock -w 5 9; then
@@ -332,6 +363,11 @@ if ! systemctl is-active --quiet "$SERVICE"; then
     exit 1
 fi
 
+# Transitional fallback keeps a previous release observable if this stage
+# rolls back to the old unit. A successful stage-3 deploy deletes this file.
+if [[ ! -f "$HEARTBEAT_FILE" && -f "$LEGACY_HEARTBEAT_FILE" && ! -L "$LEGACY_HEARTBEAT_FILE" ]]; then
+    HEARTBEAT_FILE=$LEGACY_HEARTBEAT_FILE
+fi
 if [[ ! -f "$HEARTBEAT_FILE" || -L "$HEARTBEAT_FILE" ]]; then
     echo "healthcheck: heartbeat is missing or unsafe" >&2
     exit 2
@@ -404,6 +440,7 @@ PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
 ReadOnlyPaths=/opt/just1kbot
+ReadWritePaths=/run/lock
 EOF_HEALTH_SERVICE
 
     cat > /etc/systemd/system/just1kbot-healthcheck.timer <<'EOF_HEALTH_TIMER'
@@ -537,6 +574,16 @@ install_rollback_override() {
         capture_diagnostics "$original_code"
         deploy_log 'database_downgrade=not_performed'
         restore_snapshot || return 2
+
+        # A pre-stage-3 unit writes heartbeat inside the project directory.
+        # Restore its original write boundary only for rollback compatibility.
+        if [[ -f "$UNIT_FILE" ]] &&
+            ! grep -Fq "JUST1KBOT_HEARTBEAT_FILE=${RUNTIME_DIR}/heartbeat" "$UNIT_FILE"; then
+            chown "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
+            chmod 0750 "$PROJECT_DIR"
+            HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+            deploy_log 'rollback_heartbeat=legacy project_root_writable=true'
+        fi
 
         # No systemd unit in the snapshot means there was no previous installed
         # service. A failed first/incomplete install must not try to start it.
