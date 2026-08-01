@@ -21,6 +21,7 @@ class InstallStatePreflightTests(unittest.TestCase):
             update_case.index("preflight_deploy_state"),
             update_case.index('run_script update_from_github.sh'),
         )
+        self.assertIn('preflight_deploy_state "$@"', update_case)
 
         deploy_case = ENTRYPOINT[ENTRYPOINT.index("        deploy)") :]
         deploy_case = deploy_case[: deploy_case.index("            ;;")]
@@ -28,6 +29,7 @@ class InstallStatePreflightTests(unittest.TestCase):
             deploy_case.index("preflight_deploy_state"),
             deploy_case.index('run_script deploy.sh'),
         )
+        self.assertIn('preflight_deploy_state "$@"', deploy_case)
 
     def test_fresh_install_is_not_forced_to_have_installed_dependencies(self):
         main = PREFLIGHT[PREFLIGHT.index("main() {") :]
@@ -36,6 +38,9 @@ class InstallStatePreflightTests(unittest.TestCase):
             main.index("pg_lsclusters"),
         )
         self.assertIn("--check|--dry-run", main)
+
+    def test_postgresql_cluster_parser_overrides_strict_global_ifs(self):
+        self.assertIn("while IFS=' ' read -r version cluster cluster_port status _", PREFLIGHT)
 
     def test_incomplete_install_repairs_only_required_operational_state(self):
         for marker in (
