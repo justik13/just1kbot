@@ -21,7 +21,7 @@ class ShellStage3Tests(unittest.TestCase):
             "validate_live_symlinks",
             "ReadOnlyPaths=${PROJECT_DIR}",
             "ReadWritePaths=${RUNTIME_DIR} /var/log/just1kbot",
-            "PYTHONDWRITEBYTECODE=1",
+            "PYTHONDONTWRITEBYTECODE=1",
             'old_venv="${VENV_DIR}.old.$$"',
             'python3 -m venv "$VENV_DIR"',
         ):
