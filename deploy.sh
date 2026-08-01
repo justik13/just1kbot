@@ -76,6 +76,7 @@ Just1kBot — управление сервером
   sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh restore-test /path/backup.tar.age
   sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh restore-production /path/backup.tar.age
   sudo bash deploy.sh restore-status
+  sudo bash deploy.sh restore-recover
   sudo bash deploy.sh restore-rollback
   sudo bash deploy.sh restore-finalize
   sudo bash deploy.sh amnezia
@@ -91,7 +92,8 @@ deploy предназначена для ручного запуска из уж
 
 Production restore сначала создаёт и проверяет staging database. Во время
 короткого cutover текущая database сохраняется под rollback-именем и не удаляется
-до отдельной команды restore-finalize.
+до отдельной команды restore-finalize. Если сервер аварийно выключился во время
+переименования БД, restore-recover завершает или безопасно откатывает операцию.
 
 Совместимость со старыми командами:
   sudo bash deploy.sh --status
@@ -141,6 +143,10 @@ dispatch() {
         restore-status)
             (( $# == 0 )) || die "restore-status не принимает аргументы"
             run_script ops/just1kbot-restore.sh status
+            ;;
+        restore-recover)
+            (( $# == 0 )) || die "restore-recover не принимает аргументы"
+            run_script ops/just1kbot-restore.sh recover
             ;;
         restore-rollback)
             run_script ops/just1kbot-restore.sh rollback "$@"
@@ -197,10 +203,11 @@ Just1kBot — управление сервером
 8. Проверить восстановление в тестовой БД
 9. Восстановить production БД из backup
 10. Показать состояние production restore
-11. Откатить последний production restore
-12. Завершить restore и удалить сохранённую БД
-13. Настроить Amnezia API
-14. Удалить бота
+11. Восстановиться после аварийно прерванного restore
+12. Откатить последний production restore
+13. Завершить restore и удалить сохранённую БД
+14. Настроить Amnezia API
+15. Удалить бота
 0. Выход
 EOF_MENU
         read -rp 'Выберите действие: ' choice
@@ -246,17 +253,21 @@ EOF_MENU
                 dispatch restore-status
                 ;;
             11)
+                printf '\nБудет прочитан durable journal и восстановлено безопасное состояние production БД.\n'
+                dispatch restore-recover
+                ;;
+            12)
                 printf '\nВНИМАНИЕ: изменения после restore будут сохранены в отдельной БД, но production вернётся к предыдущей БД.\n'
                 dispatch restore-rollback
                 ;;
-            12)
+            13)
                 printf '\nВНИМАНИЕ: сохранённая rollback/failed БД будет безвозвратно удалена после healthcheck.\n'
                 dispatch restore-finalize
                 ;;
-            13)
+            14)
                 dispatch amnezia
                 ;;
-            14)
+            15)
                 printf '\nВНИМАНИЕ: будет запущен destructive uninstall.\n'
                 dispatch uninstall
                 ;;
