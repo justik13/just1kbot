@@ -155,6 +155,7 @@ finalize_restore() {
 
 recover_restore() {
     MUTATING_ACTION=true
+    RECOVERY_ACTION=true
     (( $# == 0 )) || { printf 'recover accepts no arguments\n' >&2; exit 2; }
     require_root
     for command in flock stat python3 runuser psql dropdb systemctl timeout; do require_command "$command"; done
