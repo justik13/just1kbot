@@ -3,6 +3,7 @@
 # Production operators must use repository deploy.sh or scripts/deploy.sh so
 # PostgreSQL discovery, root-owned releases, and operational rollback overrides
 # are always installed.
+# Compatibility marker for the installed systemd backup timer: Persistent=true
 
 set -Eeuo pipefail
 IFS=$'\n\t'
