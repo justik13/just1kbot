@@ -1,6 +1,35 @@
 # Bounded-validation and crash-consistency overrides loaded after the base
 # restore runtime/actions.
 
+validate_root_owned_regular_file() {
+    local path=$1 label=$2 owner mode
+    [[ -f "$path" && ! -L "$path" ]] || fail "$label is missing, not regular, or is a symlink: $path"
+    owner=$(stat -c '%u' "$path") || return 1
+    mode=$(stat -c '%a' "$path") || return 1
+    [[ "$owner" == 0 ]] || fail "$label is not root-owned: $path"
+    (( (8#$mode & 8#022) == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
+}
+
+validate_root_owned_directory() {
+    local path=$1 label=$2 owner mode
+    [[ -d "$path" && ! -L "$path" ]] || fail "$label is missing, not a directory, or is a symlink: $path"
+    owner=$(stat -c '%u' "$path") || return 1
+    mode=$(stat -c '%a' "$path") || return 1
+    [[ "$owner" == 0 ]] || fail "$label is not root-owned: $path"
+    (( (8#$mode & 8#022) == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
+}
+
+validate_runtime_paths() {
+    validate_root_owned_regular_file "$ENV_FILE" 'production env'
+    validate_root_owned_directory "$PROJECT_DIR" 'project directory'
+    validate_root_owned_regular_file "$POSTGRES_LIBRARY" 'PostgreSQL library'
+    validate_root_owned_regular_file "$VERIFY_BACKUP" 'backup verifier'
+    validate_root_owned_regular_file "$HEALTHCHECK_COMMAND" 'healthcheck'
+    validate_root_owned_regular_file "$VENV_DIR/bin/alembic" 'Alembic executable'
+    [[ -x "$VENV_DIR/bin/alembic" ]] || fail "Alembic executable is not executable: $VENV_DIR/bin/alembic"
+    validate_root_owned_regular_file "$PROJECT_DIR/alembic.ini" 'alembic.ini'
+}
+
 restore_staging_database() {
     log "creating staging database $STAGING_DB"
     admin_createdb "$STAGING_DB"
