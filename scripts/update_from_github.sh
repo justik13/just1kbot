@@ -14,6 +14,7 @@ readonly RELEASE_ROOT='/var/lib/just1kbot/source-releases'
 readonly LIVE_DIR='/opt/just1kbot'
 readonly RELEASE_METADATA='.release-version'
 readonly RELEASE_RETENTION=3
+readonly GIT_TIMEOUT_SECONDS=120
 
 ASSUME_YES=false
 CHECK_ONLY=false
@@ -130,10 +131,16 @@ prepare_release_root() {
 
 read_current_sha() {
     local metadata="$LIVE_DIR/$RELEASE_METADATA"
-    local value count
+    local value count owner mode
 
     CURRENT_SHA=unknown
     [[ -f "$metadata" && ! -L "$metadata" ]] || return 0
+    owner=$(stat -c '%u' "$metadata" 2>/dev/null || true)
+    mode=$(stat -c '%a' "$metadata" 2>/dev/null || true)
+    [[ "$owner" == 0 && "$mode" =~ ^[0-7]{3,4}$ ]] || return 0
+    (( (8#$mode & 8#022) == 0 )) || return 0
+    grep -Fxq "source_repository=$REPOSITORY_URL" "$metadata" || return 0
+    grep -Fxq "source_ref=$REPOSITORY_REF" "$metadata" || return 0
 
     count=$(grep -c '^source_commit=' "$metadata" 2>/dev/null || true)
     [[ "$count" == 1 ]] || return 0
@@ -144,7 +151,8 @@ read_current_sha() {
 }
 
 run_git() {
-    env -i \
+    timeout --foreground "$GIT_TIMEOUT_SECONDS" \
+        env -i \
         PATH="$PATH" \
         HOME=/root \
         LC_ALL=C \
@@ -325,7 +333,7 @@ run_transactional_deploy() {
 main() {
     parse_args "$@"
     require_root
-    for command in git python3 realpath stat find grep sed sort cut mktemp install date; do
+    for command in git python3 realpath stat find grep sed sort cut mktemp install date timeout; do
         require_command "$command"
     done
 
