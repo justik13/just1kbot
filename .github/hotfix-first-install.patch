@@ -1,0 +1,323 @@
+diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+index a0550d9..0000000 100755
+--- a/scripts/deploy.sh
++++ b/scripts/deploy.sh
+@@ -137,6 +137,45 @@ setup_user_and_dirs() {
+         /var/log/just1kbot "$RUNTIME_DIR"
+ }
+ 
++preflight_initial_database_without_env() {
++    [[ ! -e "$ENV_FILE" && ! -L "$ENV_FILE" ]] || return 0
++    pg_database_exists || return 0
++
++    local object_count
++    object_count=$(
++        runuser -u postgres -- \
++            psql -X -A -t -q -v ON_ERROR_STOP=1 \
++            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d "$PG_DATABASE" <<'SQL'
++SELECT count(*)
++FROM pg_class AS c
++JOIN pg_namespace AS n ON n.oid = c.relnamespace
++WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
++  AND n.nspname !~ '^pg_toast'
++  AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f');
++SQL
++    ) || {
++        error "Не удалось проверить существующую database $PG_DATABASE"
++        return 1
++    }
++
++    [[ "$object_count" =~ ^[0-9]+$ ]] || {
++        error "PostgreSQL вернул некорректный результат проверки database"
++        return 1
++    }
++
++    if (( object_count > 0 )); then
++        error "Database $PG_DATABASE содержит пользовательские объекты, но production .env отсутствует"
++        error "Восстановите исходный .env и DB_ENCRYPTION_KEY; новый ключ создавать запрещено"
++        return 1
++    fi
++
++    log "Существующая database $PG_DATABASE пуста; первичная установка разрешена"
++}
++
+ create_env_if_missing() {
+     if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
+         validate_env_file
+@@ -220,6 +259,43 @@ setup_venv() {
+     rm -rf -- "$old_venv"
+ }
+ 
++validate_live_symlinks() {
++    local link resolved owner mode
++
++    while IFS= read -r -d '' link; do
++        if [[ "$link" != "$VENV_DIR/"* ]]; then
++            error "Symlink вне virtualenv запрещён: $link"
++            return 1
++        fi
++
++        resolved=$(readlink -f -- "$link") || {
++            error "Не удалось разрешить symlink: $link"
++            return 1
++        }
++        [[ -e "$resolved" ]] || {
++            error "Symlink указывает на отсутствующий target: $link"
++            return 1
++        }
++
++        if [[ "$resolved" != "$VENV_DIR/"* ]]; then
++            owner=$(stat -Lc '%U' "$resolved") || return 1
++            mode=$(stat -Lc '%a' "$resolved") || return 1
++            if [[ "$owner" != root ]] || (( (8#$mode & 8#022) != 0 )); then
++                error "External virtualenv symlink имеет небезопасный target: $link -> $resolved"
++                return 1
++            fi
++        fi
++    done < <(find "$PROJECT_DIR" -xdev -type l -print0)
++}
++
+ harden_live_tree() {
+     log "Запрет записи service user в live-код и virtualenv"
+ 
+@@ -234,12 +310,13 @@ harden_live_tree() {
+     find "$PROJECT_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} +
+     find "$PROJECT_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
+     ensure_env_permissions
++    validate_live_symlinks || return 1
+ 
+     if find "$PROJECT_DIR" -xdev -user "$BOT_USER" -print -quit | grep -q .; then
+         error "В live release остались файлы, принадлежащие service user"
+         return 1
+     fi
+-    if find "$PROJECT_DIR" -xdev -perm /022 -print -quit | grep -q .; then
++    if find "$PROJECT_DIR" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q .; then
+         error "В live release остались group/other-writable пути"
+         return 1
+     fi
+@@ -708,6 +785,7 @@ run_deploy() {
+     if [[ "$INITIAL_INSTALL" == true ]]; then
+         pg_select_cluster
+         pg_start_cluster
++        preflight_initial_database_without_env
+         setup_postgresql_initial
+         setup_redis_initial
+         setup_firewall_initial
+diff --git a/scripts/uninstall.sh b/scripts/uninstall.sh
+index e2cf74e..0000000 100755
+--- a/scripts/uninstall.sh
++++ b/scripts/uninstall.sh
+@@ -17,6 +17,7 @@ STATE_FILE=/etc/just1kbot-amnezia.conf
+ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+ PG_LIB="$SCRIPT_DIR/lib/postgresql.sh"
+ MODE=
++declare -a PURGE_REDIS_CONNECTION=()
+ 
+ fail(){ printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
+ log(){ printf '[uninstall] %s\n' "$*"; }
+@@ -90,10 +91,13 @@ preflight_restore_state(){
+   fi
+ }
+ 
+-lock_all(){
++acquire_uninstall_lock(){
+   install -d -o root -g root -m 0755 "$(dirname "$LOCK_FILE")"
+   exec 200>"$LOCK_FILE"
+   flock -n 200 || fail 'deploy/backup/restore is already running'
++}
++
++pause_operational_work(){
+   systemctl stop just1kbot-backup.timer 2>/dev/null || true
+   systemctl stop just1kbot-healthcheck.timer 2>/dev/null || true
+   ! systemctl is-active --quiet just1kbot-backup.timer 2>/dev/null || fail 'backup timer did not stop'
+@@ -234,11 +238,79 @@ print(prefix)
+ PY
+ }
+ 
++load_redis_connection(){
++  local output
++  if ! output=$(redis_connection); then
++    fail 'failed to parse REDIS_URL'
++  fi
++
++  mapfile -t PURGE_REDIS_CONNECTION <<<"$output"
++  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || fail 'failed to parse REDIS_URL'
++}
++
++ping_redis_connection(){
++  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || load_redis_connection
++
++  local host=${PURGE_REDIS_CONNECTION[0]}
++  local port=${PURGE_REDIS_CONNECTION[1]}
++  local database=${PURGE_REDIS_CONNECTION[2]}
++  local password=${PURGE_REDIS_CONNECTION[3]}
++
++  if [[ -n "$password" ]]; then
++    REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" PING |
++      grep -qx PONG || fail 'Redis PING failed'
++  else
++    redis-cli -h "$host" -p "$port" -n "$database" PING |
++      grep -qx PONG || fail 'Redis PING failed'
++  fi
++}
++
++preflight_purge(){
++  command -v redis-cli >/dev/null 2>&1 || fail 'redis-cli is required to purge data'
++  load_redis_connection
++  ping_redis_connection
++
++  [[ -f "$PG_LIB" && ! -L "$PG_LIB" ]] || fail 'PostgreSQL library is missing'
++  # shellcheck source=lib/postgresql.sh
++  source "$PG_LIB"
++  pg_select_cluster
++  pg_start_cluster
++
++  local database_output
++  local -a databases=()
++  local database
++  if ! database_output=$(
++    pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
++SELECT datname
++FROM pg_database
++WHERE datname = :'main_database'
++   OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$'
++ORDER BY datname;
++SQL
++  ); then
++    fail 'failed to enumerate Just1kBot databases'
++  fi
++  if [[ -n "$database_output" ]]; then
++    mapfile -t databases <<<"$database_output"
++  fi
++
++  for database in "${databases[@]}"; do
++    [[ "$database" == "$PG_DATABASE" || "$database" =~ ^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$ ]] ||
++      fail "refusing to purge unexpected database: $database"
++  done
++}
++
+ purge_redis(){
+   command -v redis-cli >/dev/null 2>&1 || fail 'redis-cli is required to purge data'
++  (( ${#PURGE_REDIS_CONNECTION[@]} == 5 )) || load_redis_connection
+ 
+-  local -a connection
+-  mapfile -t connection < <(redis_connection)
+-  (( ${#connection[@]} == 5 )) || fail 'failed to parse REDIS_URL'
+-
+-  local host=${connection[0]} port=${connection[1]} database=${connection[2]}
+-  local password=${connection[3]} prefix=${connection[4]} output key deleted=0
++  local host=${PURGE_REDIS_CONNECTION[0]} port=${PURGE_REDIS_CONNECTION[1]}
++  local database=${PURGE_REDIS_CONNECTION[2]} password=${PURGE_REDIS_CONNECTION[3]}
++  local prefix=${PURGE_REDIS_CONNECTION[4]} output key deleted=0
+ 
+   if [[ -n "$password" ]]; then
+     REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" PING |
+@@ -282,17 +354,24 @@ purge_db(){
+   pg_start_cluster
+ 
+-  local -a databases
++  local database_output
++  local -a databases=()
+   local database
+-  mapfile -t databases < <(
++  if ! database_output=$(
+     pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
+ SELECT datname
+ FROM pg_database
+ WHERE datname = :'main_database'
+    OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$'
+ ORDER BY datname;
+ SQL
+-  )
++  ); then
++    fail 'failed to enumerate Just1kBot databases'
++  fi
++  if [[ -n "$database_output" ]]; then
++    mapfile -t databases <<<"$database_output"
++  fi
+ 
+   for database in "${databases[@]}"; do
+@@ -438,18 +517,20 @@ main(){
+   parse "$@"
+   [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
+   safe_path
+-  lock_all
++  acquire_uninstall_lock
+   preflight_restore_state
+ 
+   if [[ "$MODE" == keep ]]; then
+-    backup_before_keep
++    :
+   else
+     confirm_purge
++    preflight_purge
+   fi
+ 
++  pause_operational_work
++
++  if [[ "$MODE" == keep ]]; then
++    backup_before_keep
++  fi
++
+   stop_units
+ 
+   if [[ "$MODE" == purge ]]; then
+diff --git a/tests/test_shell_layout.py b/tests/test_shell_layout.py
+index ab5442f..0000000 100644
+--- a/tests/test_shell_layout.py
++++ b/tests/test_shell_layout.py
+@@ -131,6 +131,28 @@ class ShellLayoutTests(unittest.TestCase):
+             self.assertEqual(before.st_gid, after.st_gid)
+ 
++    def test_live_tree_permission_check_handles_virtualenv_symlinks(self):
++        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
++        self.assertIn("validate_live_symlinks", adapter)
++        self.assertIn(
++            'find "$PROJECT_DIR" -xdev \\( -type f -o -type d \\) -perm /022',
++            adapter,
++        )
++        self.assertNotIn(
++            'find "$PROJECT_DIR" -xdev -perm /022',
++            adapter,
++        )
++        self.assertIn('[[ "$link" != "$VENV_DIR/"* ]]', adapter)
++        self.assertIn("readlink -f", adapter)
++
++    def test_existing_database_without_env_is_checked_before_initial_setup(self):
++        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
++        self.assertIn("preflight_initial_database_without_env", adapter)
++        initial = adapter.index('if [[ "$INITIAL_INSTALL" == true ]]; then', adapter.index("run_deploy()"))
++        guard = adapter.index("preflight_initial_database_without_env", initial)
++        setup = adapter.index("setup_postgresql_initial", initial)
++        self.assertLess(guard, setup)
++
+     def test_first_install_rollback_does_not_start_absent_service(self):
+         adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
+         self.assertIn('previous_service=absent start_not_attempted=true', adapter)
+diff --git a/tests/test_shell_stage2.py b/tests/test_shell_stage2.py
+index 1917d96..0000000 100644
+--- a/tests/test_shell_stage2.py
++++ b/tests/test_shell_stage2.py
+@@ -47,11 +47,23 @@ class ShellStage2Tests(unittest.TestCase):
+             "pg_select_cluster",
+             "preflight_restore_state",
+             "cutover-journal.env",
+             "^just1kbot_(stg|rb|fail)_",
++            "acquire_uninstall_lock",
++            "pause_operational_work",
++            "preflight_purge",
++            "PURGE_REDIS_CONNECTION",
+         ):
+             self.assertIn(marker, text)
+         self.assertNotIn("--force", text)
+         self.assertNotIn("apt-get remove", text)
+         self.assertNotIn("/root/.just1kbot-snapshots", text)
++        self.assertNotIn("mapfile -t connection < <(redis_connection)", text)
++        self.assertIn("if ! output=$(redis_connection); then", text)
++
++        main = text[text.index("main(){"):]
++        self.assertLess(main.index("preflight_purge"), main.index("pause_operational_work"))
++        self.assertLess(main.index("pause_operational_work"), main.index("stop_units"))
+ 
+     def test_amnezia_is_explicit_interactive_and_transactional(self):
+         text = (SCRIPTS / "setup-amnezia-api.sh").read_text(
