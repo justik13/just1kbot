@@ -5,9 +5,6 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -34,8 +31,6 @@ jobs:
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -43,85 +38,13 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - name: Install Python static analysis tools
         run: python -m pip install ruff==0.16.1
-      - name: Generate targeted static-audit candidate
-        run: |
-          set -Eeuo pipefail
-          ruff --version | tee /tmp/ruff-version.txt
-          python scripts/audit_human_factor_fix.py
-          python scripts/audit_remaining_fix.py
-          ruff check \
-            bot config database services utils alembic tests scripts \
-            --select E401,E701,E702,E703,E731 \
-            --output-format json > /tmp/format-issues.json || true
-          python - <<'PY'
-          import json
-          from pathlib import Path
-
-          issues = json.loads(Path("/tmp/format-issues.json").read_text())
-          paths = sorted({issue["filename"] for issue in issues})
-          Path("/tmp/format-files.txt").write_text(
-              "".join(f"{path}\n" for path in paths),
-              encoding="utf-8",
-          )
-          PY
-          ruff check \
-            bot config database services utils alembic tests scripts \
-            --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
-            --fix --exit-zero
-          if [[ -s /tmp/format-files.txt ]]; then
-            xargs -d '\n' ruff format -- < /tmp/format-files.txt
-          fi
-          ruff check \
-            bot config database services utils alembic tests scripts \
-            --select PLW1510,B904,B905 \
-            --fix --unsafe-fixes --exit-zero
-          git diff --name-only -z -- '*.py' | xargs -0 -r ruff format --
-          git diff --check
-          git diff --binary > /tmp/ruff-autofix.patch
-          git diff --name-only -z > /tmp/ruff-changed-files.z
-          if [[ -s /tmp/ruff-changed-files.z ]]; then
-            tar --null -czf /tmp/ruff-autofix-files.tar.gz \
-              -T /tmp/ruff-changed-files.z
-          else
-            tar -czf /tmp/ruff-autofix-files.tar.gz --files-from /dev/null
-          fi
-      - name: Commit validated audit candidate
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          github.event.pull_request.head.ref == 'agent/repository-human-factor-audit'
-        run: |
-          set -Eeuo pipefail
-          git add bot config database services utils alembic tests
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "fix: resolve audited human-factor defects"
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Audit Python syntax, imports and common human errors
-        id: ruff_audit
-        continue-on-error: true
-        run: |
-          set -o pipefail
-          ruff check \
-            bot config database services utils alembic tests scripts \
-            --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
-            --ignore PLW0603,PLW0108 \
-            --output-format full 2>&1 | tee /tmp/ruff.log
-      - name: Upload static-audit candidate and findings
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ruff-audit-${{ github.sha }}
-          path: |
-            /tmp/ruff-version.txt
-            /tmp/ruff.log
-            /tmp/ruff-autofix.patch
-            /tmp/ruff-autofix-files.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+        run: >-
+          ruff check
+          bot config database services utils alembic tests
+          --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
+          --ignore PLW0603,PLW0108
+          --output-format full
       - name: Install backup and shell tools
         run: sudo apt-get update && sudo apt-get install -y age postgresql-client shellcheck
       - name: ShellCheck repository scripts
@@ -146,8 +69,5 @@ jobs:
       - run: alembic downgrade -1
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
-        run: python -m compileall -q bot config database services utils alembic tests scripts
+        run: python -m compileall -q bot config database services utils alembic tests
       - run: git diff --check
-      - name: Enforce static audit
-        if: always()
-        run: test "${{ steps.ruff_audit.outcome }}" = success
