@@ -65,7 +65,11 @@ def add_explicit_subprocess_policy() -> None:
             insertions.append(closing)
 
         for closing in sorted(insertions, reverse=True):
-            data = data[:closing] + b", check=False" + data[closing:]
+            previous = closing - 1
+            while previous >= 0 and data[previous : previous + 1].isspace():
+                previous -= 1
+            prefix = b"check=False" if data[previous : previous + 1] == b"," else b", check=False"
+            data = data[:closing] + prefix + data[closing:]
         path.write_bytes(data)
 
 
