@@ -184,7 +184,12 @@ admin_dropdb() {
 
 database_exists() {
     local result
-    result=$(admin_psql -v db_name="$1" -c "SELECT 1 FROM pg_database WHERE datname = :'db_name';") || return 2
+    result=$(admin_psql -v db_name="$1" <<'SQL'
+SELECT 1
+FROM pg_database
+WHERE datname = :'db_name';
+SQL
+    ) || return 2
     [[ "$result" == 1 ]]
 }
 
@@ -201,25 +206,32 @@ assert_database_absent() {
 database_allow_connections() {
     local db=$1 allowed=$2
     [[ "$allowed" == true || "$allowed" == false ]] || return 64
-    admin_psql -v db_name="$db" -v allowed="$allowed" \
-        -c 'ALTER DATABASE :"db_name" WITH ALLOW_CONNECTIONS = :allowed;' >/dev/null
+    admin_psql -v db_name="$db" -v allowed="$allowed" >/dev/null <<'SQL'
+ALTER DATABASE :"db_name" WITH ALLOW_CONNECTIONS = :allowed;
+SQL
 }
 
 terminate_database_connections() {
-    admin_psql -v db_name="$1" -c \
-        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = :'db_name' AND pid <> pg_backend_pid();" >/dev/null
+    admin_psql -v db_name="$1" >/dev/null <<'SQL'
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'db_name'
+  AND pid <> pg_backend_pid();
+SQL
 }
 
 rename_database() {
     local old=$1 new=$2
     is_safe_database_name "$old" && is_safe_database_name "$new" || return 64
-    admin_psql -v old_name="$old" -v new_name="$new" \
-        -c 'ALTER DATABASE :"old_name" RENAME TO :"new_name";' >/dev/null
+    admin_psql -v old_name="$old" -v new_name="$new" >/dev/null <<'SQL'
+ALTER DATABASE :"old_name" RENAME TO :"new_name";
+SQL
 }
 
 set_database_owner() {
-    admin_psql -v db_name="$1" -v role_name="$LIVE_ROLE" \
-        -c 'ALTER DATABASE :"db_name" OWNER TO :"role_name";' >/dev/null
+    admin_psql -v db_name="$1" -v role_name="$LIVE_ROLE" >/dev/null <<'SQL'
+ALTER DATABASE :"db_name" OWNER TO :"role_name";
+SQL
 }
 
 make_database_url() {
@@ -301,7 +313,10 @@ PY
 
 check_free_space() {
     local production_size dump_size free required
-    production_size=$(admin_psql -v db_name="$LIVE_DATABASE" -c "SELECT pg_database_size(:'db_name');")
+    production_size=$(admin_psql -v db_name="$LIVE_DATABASE" <<'SQL'
+SELECT pg_database_size(:'db_name');
+SQL
+    )
     [[ "$production_size" =~ ^[0-9]+$ ]] || fail 'could not determine production database size'
     dump_size=$(stat -c '%s' "$WORK_DIR/verified/dump.custom")
     free=$(df -PB1 "$PG_DATA_DIR" | awk 'NR==2 {print $4}')
