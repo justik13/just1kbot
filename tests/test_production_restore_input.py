@@ -1,4 +1,5 @@
 import pathlib
+import subprocess
 import unittest
 
 
@@ -35,6 +36,21 @@ class ProductionRestoreInputTests(unittest.TestCase):
             "base_extract_and_verify_backup",
         ):
             self.assertIn(marker, self.guard)
+
+    def test_base_and_guarded_extract_functions_load_executably(self):
+        command = (
+            "set -Eeuo pipefail; "
+            f"RESTORE_FUNCTIONS_ONLY=1 source {str(ENGINE)!r}; "
+            "declare -F base_extract_and_verify_backup >/dev/null; "
+            "declare -F extract_and_verify_backup >/dev/null"
+        )
+        result = subprocess.run(
+            ["bash", "-c", command],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
