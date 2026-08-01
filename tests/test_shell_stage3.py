@@ -21,11 +21,13 @@ class ShellStage3Tests(unittest.TestCase):
             "ReadOnlyPaths=${PROJECT_DIR}",
             "ReadWritePaths=${RUNTIME_DIR} /var/log/just1kbot",
             "PYTHONDONTWRITEBYTECODE=1",
-            'new_venv="${VENV_DIR}.new.$$"',
+            'old_venv="${VENV_DIR}.old.$$"',
+            'python3 -m venv "$VENV_DIR"',
         ):
             self.assertIn(marker, self.deploy)
         self.assertNotIn("ReadWritePaths=${PROJECT_DIR}", self.deploy)
-        self.assertNotIn('"$VENV_DIR/bin/python" -m pip install', self.deploy)
+        self.assertNotIn('new_venv="${VENV_DIR}.new.$$"', self.deploy)
+        self.assertIn("предыдущий восстановлен", self.deploy)
 
     def test_heartbeat_uses_systemd_runtime_directory(self):
         for marker in (
