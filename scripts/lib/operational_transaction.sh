@@ -18,6 +18,16 @@ ensure_operational_parent() {
     local parent mode=0755
 
     parent=$(dirname "$path")
+    if [[ -L "$parent" ]]; then
+        return 1
+    fi
+    if [[ -d "$parent" ]]; then
+        return 0
+    fi
+    if [[ -e "$parent" ]]; then
+        return 1
+    fi
+
     case "$parent" in
         /root|/root/*)
             mode=0700
