@@ -10,6 +10,7 @@ class ShellStage2Tests(unittest.TestCase):
     def test_required_runtime_files_exist(self):
         required = [
             "deploy_full.sh",
+            "deploy_full_library.sh",
             "ops/deploy_application.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
@@ -19,7 +20,9 @@ class ShellStage2Tests(unittest.TestCase):
             "lib/production_restore_core.sh",
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
+            "lib/production_restore_input.sh",
             "lib/production_restore_crash.sh",
+            "lib/production_restore_recovery_cleanup.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
         ]
@@ -48,7 +51,10 @@ class ShellStage2Tests(unittest.TestCase):
             "purge_redis",
             "REDISCLI_AUTH",
             "DROP ROLE IF EXISTS",
-            "pg_prepare update",
+            "pg_select_cluster",
+            "preflight_restore_state",
+            "cutover-journal.env",
+            "^just1kbot_(stg|rb|fail)_",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("--force", text)
@@ -64,9 +70,15 @@ class ShellStage2Tests(unittest.TestCase):
             "Публичный reverse proxy создаётся только явным действием publish",
             "curl --fail --show-error --silent",
             "certbot certonly --webroot",
-            "trap rollback EXIT INT TERM",
+            "trap rollback EXIT",
+            "trap 'exit 130' INT",
+            "trap 'exit 143' TERM",
             "CERT_CREATED",
             "ADDED_HTTP",
+            "REMOVED_HTTP",
+            "OPERATION_LOCK=/run/lock/just1kbot-deploy.lock",
+            "another managed Amnezia domain",
+            "UFW explicitly denies",
             "/etc/nginx/conf.d/just1kbot-amnezia-rate-limit.conf",
             "Опубликовать HTTPS reverse proxy",
         ):
@@ -78,6 +90,7 @@ class ShellStage2Tests(unittest.TestCase):
             text.index("certbot certonly", publish),
         )
         self.assertIn("begin", text[text.index("unpublish(){"):])
+        self.assertIn("ufw delete allow 80/tcp", text[text.index("unpublish(){"):])
 
     def test_root_menu_targets_interactive_and_locked_operations(self):
         menu = (ROOT / "deploy.sh").read_text(encoding="utf-8")
@@ -90,6 +103,10 @@ class ShellStage2Tests(unittest.TestCase):
         )
         self.assertIn(
             'run_script ops/just1kbot-restore.sh production "$@"',
+            menu,
+        )
+        self.assertIn(
+            "run_script ops/just1kbot-restore.sh recover",
             menu,
         )
         self.assertIn('DEPLOY_FUNCTIONS_ONLY:-0}', menu)

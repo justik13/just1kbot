@@ -24,6 +24,7 @@ HEALTH_TIMER=${HEALTH_TIMER:-just1kbot-healthcheck.timer}
 LOCK_FILE=${RESTORE_LOCK_FILE:-/run/lock/just1kbot-deploy.lock}
 STATE_DIR=${RESTORE_STATE_DIR:-/var/lib/just1kbot/restore-transactions}
 ACTIVE_STATE=${RESTORE_ACTIVE_STATE:-$STATE_DIR/active.env}
+JOURNAL_STATE=${RESTORE_JOURNAL_STATE:-$STATE_DIR/cutover-journal.env}
 RESTORE_TIMEOUT=${RESTORE_TIMEOUT:-600}
 HEALTH_TIMEOUT=${RESTORE_HEALTH_TIMEOUT:-180}
 MIN_FREE_MARGIN_BYTES=${RESTORE_FREE_MARGIN_BYTES:-1073741824}
@@ -48,6 +49,7 @@ CODE_HEAD_REVISION=""
 PRE_CUTOVER_BACKUP=""
 CUTOVER_PHASE="none"
 MUTATING_ACTION=false
+RECOVERY_ACTION=false
 RUNTIME_PAUSED=false
 RUNTIME_RESTORED=false
 SERVICE_WAS_ACTIVE=false
@@ -63,6 +65,17 @@ STATE_ARTIFACT_SHA256=""
 STATE_BACKUP_CREATED_AT=""
 STATE_CUTOVER_AT=""
 STATE_PRE_CUTOVER_BACKUP=""
+JOURNAL_OPERATION=""
+JOURNAL_PHASE=""
+JOURNAL_TRANSACTION_ID=""
+JOURNAL_LIVE_DB=""
+JOURNAL_STAGING_DB=""
+JOURNAL_ROLLBACK_DB=""
+JOURNAL_FAILED_DB=""
+JOURNAL_ARTIFACT_NAME=""
+JOURNAL_ARTIFACT_SHA256=""
+JOURNAL_BACKUP_CREATED_AT=""
+JOURNAL_PRE_CUTOVER_BACKUP=""
 
 log() { printf '[restore] %s\n' "$*"; }
 warn() { printf '[restore] WARNING: %s\n' "$*" >&2; }
@@ -75,7 +88,8 @@ for library in \
     production_restore_runtime.sh \
     production_restore_actions.sh \
     production_restore_input.sh \
-    production_restore_crash.sh; do
+    production_restore_crash.sh \
+    production_restore_recovery_cleanup.sh; do
     path="$RESTORE_LIBRARY_DIR/$library"
     [[ -f "$path" && ! -L "$path" ]] || {
         printf 'restore error: missing safe library: %s\n' "$path" >&2

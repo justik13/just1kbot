@@ -41,7 +41,7 @@ resolve_rehearsal() {
 }
 
 case ${1:-} in
-    production|status|rollback|finalize)
+    production|status|rollback|finalize|recover)
         engine=$(resolve_engine) || {
             printf 'production restore engine is unavailable\n' >&2
             exit 1
@@ -59,6 +59,7 @@ Isolated rehearsal:
 Production lifecycle:
   just1kbot-restore.sh production ARTIFACT
   just1kbot-restore.sh status
+  just1kbot-restore.sh recover
   just1kbot-restore.sh rollback
   just1kbot-restore.sh finalize
 EOF_USAGE

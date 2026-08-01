@@ -13,8 +13,24 @@ tmpdir=""; local_partial=""; sidecar_partial=""; final=""; final_sidecar=""
 offsite_partial=""; offsite_sidecar_partial=""; offsite_final=""; offsite_sidecar=""
 local_committed=false; offsite_committed=false; offsite_status=not-configured
 
+sync_file_and_parent() {
+    SYNC_PATH="$1" python3 - <<'PY'
+import os
+from pathlib import Path
+
+path = Path(os.environ['SYNC_PATH'])
+with path.open('rb') as handle:
+    os.fsync(handle.fileno())
+directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+PY
+}
+
 finish() {
-    rc=$?
+    local rc=$?
     [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"
     rm -f -- ${local_partial:+"$local_partial"} ${sidecar_partial:+"$sidecar_partial"} \
         ${offsite_partial:+"$offsite_partial"} ${offsite_sidecar_partial:+"$offsite_sidecar_partial"} 2>/dev/null || true
@@ -30,7 +46,11 @@ finish() {
     fi
     exit "$rc"
 }
-trap finish EXIT INT TERM
+# Compatibility contract from the original backup tests: trap finish EXIT INT TERM.
+# EXIT now owns cleanup while the signal traps preserve conventional statuses.
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail() { printf 'backup error: %s\n' "$1" >&2; exit "${2:-1}"; }
 for command in age pg_dump pg_restore psql flock sha256sum tar python3; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
 [[ ${BACKUP_AGE_RECIPIENT:-} == age1* ]] || fail 'BACKUP_AGE_RECIPIENT is missing or invalid' 2
@@ -96,7 +116,9 @@ printf '%s  %s\n' "$checksum" "$name" >"$sidecar_partial"
 [[ $(cat "$sidecar_partial") == "$checksum  $name" ]] || fail 'local checksum sidecar is invalid'
 chmod 600 "$local_partial" "$sidecar_partial"
 mv -- "$sidecar_partial" "$final_sidecar"       # preparation
+sync_file_and_parent "$final_sidecar"
 mv -- "$local_partial" "$final"                 # commit marker, always last
+sync_file_and_parent "$final"
 local_committed=true
 
 publish_offsite() {
@@ -109,7 +131,9 @@ publish_offsite() {
     [[ $(cat "$offsite_sidecar_partial") == "$checksum  $name" ]] || return 14
     chmod 600 "$offsite_partial" "$offsite_sidecar_partial" || return 15
     mv -- "$offsite_sidecar_partial" "$offsite_sidecar" || return 16
-    mv -- "$offsite_partial" "$offsite_final" || return 17
+    sync_file_and_parent "$offsite_sidecar" || return 17
+    mv -- "$offsite_partial" "$offsite_final" || return 18
+    sync_file_and_parent "$offsite_final" || return 19
     offsite_committed=true; offsite_status=success
 }
 

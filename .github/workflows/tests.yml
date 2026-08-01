@@ -41,10 +41,21 @@ jobs:
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - run: alembic upgrade head
-      - run: python -m unittest discover -s tests -v
+      - name: Run full test suite
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log
         env:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
+      - name: Upload failing unittest log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unittest-log-${{ github.sha }}
+          path: /tmp/unittest.log
+          if-no-files-found: error
+          retention-days: 7
       - run: alembic downgrade -1
       - run: alembic upgrade head
       - run: python -m compileall bot database services utils
