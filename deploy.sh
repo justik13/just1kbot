@@ -70,7 +70,7 @@ run_locked_script() {
 }
 
 preflight_deploy_state() {
-    call_script preflight_install_state.sh
+    call_script preflight_install_state.sh "$@"
 }
 
 usage() {
@@ -128,11 +128,11 @@ dispatch() {
             # Repair only a proven incomplete install before fetching main.
             # The downloaded release still acquires the deploy lock immediately
             # before its own production transaction.
-            preflight_deploy_state
+            preflight_deploy_state "$@"
             run_script update_from_github.sh "$@"
             ;;
         deploy)
-            preflight_deploy_state
+            preflight_deploy_state "$@"
             run_script deploy.sh "$@"
             ;;
         status)
