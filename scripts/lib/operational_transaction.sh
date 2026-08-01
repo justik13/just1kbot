@@ -130,6 +130,8 @@ restore_operational_units() {
         systemctl stop "$unit" >/dev/null 2>&1 || true
     done < "$manifest"
 
+    # Temporarily unmask every unit. A unit can legitimately have been active
+    # and masked at snapshot time; it must be started before its mask returns.
     while IFS=$'\t' read -r enabled active unit; do
         [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
         systemctl unmask "$unit" >/dev/null 2>&1 || true
@@ -140,11 +142,7 @@ restore_operational_units() {
             enabled-runtime)
                 systemctl enable --runtime "$unit" >/dev/null 2>&1 || return 1
                 ;;
-            masked)
-                systemctl mask "$unit" >/dev/null 2>&1 || return 1
-                ;;
-            masked-runtime)
-                systemctl mask --runtime "$unit" >/dev/null 2>&1 || return 1
+            masked|masked-runtime)
                 ;;
             *)
                 systemctl disable "$unit" >/dev/null 2>&1 || true
@@ -161,6 +159,20 @@ restore_operational_units() {
         case "$active" in
             active|activating|reloading)
                 systemctl start "$unit" >/dev/null 2>&1 || return 1
+                ;;
+        esac
+    done < "$manifest"
+
+    # Restore masks last so an active-and-masked snapshot remains both active
+    # and protected from future starts after rollback.
+    while IFS=$'\t' read -r enabled active unit; do
+        [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
+        case "$enabled" in
+            masked)
+                systemctl mask "$unit" >/dev/null 2>&1 || return 1
+                ;;
+            masked-runtime)
+                systemctl mask --runtime "$unit" >/dev/null 2>&1 || return 1
                 ;;
         esac
     done < "$manifest"
