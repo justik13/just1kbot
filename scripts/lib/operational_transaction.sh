@@ -137,6 +137,21 @@ validate_restored_nginx() {
     return 1
 }
 
+stop_operational_unit() {
+    local unit=$1 state
+    systemctl stop "$unit" >/dev/null 2>&1 || true
+    state=$(systemctl is-active "$unit" 2>/dev/null || true)
+    case "$state" in
+        inactive|failed|unknown)
+            return 0
+            ;;
+        *)
+            deploy_log "operational_restore unit_stop_confirmed=false unit=$unit state=${state:-empty}"
+            return 1
+            ;;
+    esac
+}
+
 restore_operational_units() {
     local snapshot=$1
     local manifest="$snapshot/operational/units.tsv"
@@ -151,7 +166,7 @@ restore_operational_units() {
     # preserving a process started from files that have just been rolled back.
     while IFS=$'\t' read -r enabled active unit; do
         [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
-        systemctl stop "$unit" >/dev/null 2>&1 || true
+        stop_operational_unit "$unit" || return 1
     done < "$manifest"
 
     # Temporarily unmask every unit. A unit can legitimately have been active
