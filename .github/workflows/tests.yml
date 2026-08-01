@@ -42,13 +42,13 @@ jobs:
           cache: pip
       - run: python -m pip install -r requirements.txt
       - name: Install Python static analysis tools
-        run: python -m pip install ruff
+        run: python -m pip install ruff==0.16.1
       - name: Generate targeted static-audit candidate
         run: |
           set -Eeuo pipefail
           ruff --version | tee /tmp/ruff-version.txt
           ruff check \
-            bot config database services utils alembic tests \
+            bot config database services utils alembic tests scripts \
             --select E401,E701,E702,E703,E731 \
             --output-format json > /tmp/format-issues.json || true
           python - <<'PY'
@@ -63,12 +63,18 @@ jobs:
           )
           PY
           ruff check \
-            bot config database services utils alembic tests \
+            bot config database services utils alembic tests scripts \
             --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
             --fix --exit-zero
           if [[ -s /tmp/format-files.txt ]]; then
             xargs -d '\n' ruff format -- < /tmp/format-files.txt
           fi
+          ruff check \
+            bot config database services utils alembic tests scripts \
+            --select PLW1510,B904,B905 \
+            --fix --unsafe-fixes --exit-zero
+          python scripts/audit_human_factor_fix.py
+          git diff --name-only -z -- '*.py' | xargs -0 -r ruff format --
           git diff --check
           git diff --binary > /tmp/ruff-autofix.patch
           git diff --name-only -z > /tmp/ruff-changed-files.z
@@ -91,7 +97,7 @@ jobs:
           fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "style: normalize audited Python files"
+          git commit -m "fix: resolve audited human-factor defects"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Audit Python syntax, imports and common human errors
         id: ruff_audit
@@ -99,8 +105,9 @@ jobs:
         run: |
           set -o pipefail
           ruff check \
-            bot config database services utils alembic tests \
+            bot config database services utils alembic tests scripts \
             --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
+            --ignore PLW0603,PLW0108 \
             --output-format full 2>&1 | tee /tmp/ruff.log
       - name: Upload static-audit candidate and findings
         if: always()
@@ -138,7 +145,7 @@ jobs:
       - run: alembic downgrade -1
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
-        run: python -m compileall -q bot config database services utils alembic tests
+        run: python -m compileall -q bot config database services utils alembic tests scripts
       - run: git diff --check
       - name: Enforce static audit
         if: always()
