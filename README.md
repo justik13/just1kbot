@@ -48,10 +48,11 @@ bot/                         Telegram handlers, middlewares и webhook
 config/                      настройки приложения
 database/                    модели, repositories и подключение к PostgreSQL
 services/                    платежи, Amnezia, подписки и workers
-ops/                         backup, restore rehearsal и deployment transaction
+scripts/                     deploy, backup, restore, uninstall и Amnezia tooling
+scripts/ops/                 canonical backup/restore/deployment transaction scripts
+scripts/lib/                 PostgreSQL и operational rollback libraries
 alembic/                     миграции PostgreSQL
-deploy.sh                    установка, обновление и эксплуатационные команды
-setup-amnezia-api.sh         настройка HTTPS для Amnezia API
+deploy.sh                    единственная корневая shell-точка входа и меню
 ```
 
 ## Локальный запуск
@@ -121,7 +122,7 @@ sudo env \
 - `POST /webhook/yookassa`;
 - `GET /health`.
 
-Остальные HTTP-маршруты возвращают `404`. Порт приложения `8080`, PostgreSQL `5432` и Redis `6379` закрываются UFW для внешнего доступа.
+Остальные HTTP-маршруты возвращают `404`. Порт приложения `8080`, PostgreSQL и Redis закрываются UFW для внешнего доступа.
 
 ## Безопасное обновление
 
@@ -134,17 +135,19 @@ sudo bash deploy.sh
 
 При существующем `/opt/just1kbot/.env` скрипт автоматически выбирает режим обновления:
 
-1. проверяет, что `.env` является обычным файлом с закрытыми permissions;
-2. проверяет наличие `BOT_TOKEN`, `DATABASE_URL`, `REDIS_URL` и корректного `DB_ENCRYPTION_KEY`;
-3. не запрашивает и не меняет production-пароли;
-4. останавливает старый процесс и проверяет, что его PID завершён;
-5. создаёт обязательный зашифрованный PostgreSQL backup;
-6. сохраняет предыдущий код, virtualenv и systemd unit в rollback snapshot;
-7. копирует новый release и устанавливает зависимости;
-8. запускает `alembic upgrade head`;
-9. запускает новую версию;
-10. ожидает два обновления heartbeat и проверяет PostgreSQL с Redis;
-11. при ошибке возвращает предыдущий application release.
+1. проверяет `.env`, production secrets, PostgreSQL cluster и Redis;
+2. нормализует `DOMAIN`, прежде чем использовать его в root-owned Nginx paths;
+3. атомарно сохраняет предыдущий код, virtualenv, основной systemd unit и operational state;
+4. snapshot включает backup/restore/health scripts, timers, logrotate, backup config/key и текущий Nginx site;
+5. останавливает старый процесс и подтверждает завершение прежнего PID;
+6. останавливает operational timers и ждёт завершения уже запущенного backup;
+7. создаёт обязательный encrypted PostgreSQL backup старым проверенным tooling;
+8. копирует новый release и создаёт новый root-owned virtualenv;
+9. запускает `alembic upgrade head`;
+10. устанавливает новые operational scripts, units, Nginx и основной application unit;
+11. запускает новую версию и ожидает два обновления heartbeat;
+12. проверяет PostgreSQL и Redis с ограниченными таймаутами;
+13. при ошибке возвращает application release, operational files, timer states и Nginx configuration.
 
 Автоматический downgrade PostgreSQL при rollback **не выполняется**. Если новая миграция несовместима со старым кодом, требуется ручное решение администратора.
 
@@ -159,18 +162,18 @@ sudo bash deploy.sh --dry-run
 ## Эксплуатационные команды
 
 ```bash
-sudo bash deploy.sh --status
-sudo bash deploy.sh --logs
-sudo bash deploy.sh --restart
-sudo bash deploy.sh --backup
+sudo bash deploy.sh status
+sudo bash deploy.sh logs
+sudo bash deploy.sh restart
+sudo bash deploy.sh backup
 ```
 
-Неизвестный или ошибочно написанный аргумент завершает скрипт с кодом `2`. Полный deployment при этом не запускается.
+Старые совместимые флаги `--status`, `--logs`, `--restart` и `--backup` также поддерживаются. Неизвестная команда завершается с кодом `2` и никогда не запускает deployment.
 
 ### Статус
 
 ```bash
-sudo bash deploy.sh --status
+sudo bash deploy.sh status
 ```
 
 Показывает:
@@ -184,7 +187,7 @@ sudo bash deploy.sh --status
 ### Логи
 
 ```bash
-sudo bash deploy.sh --logs
+sudo bash deploy.sh logs
 ```
 
 Открывает `journalctl -u just1kbot -f`.
@@ -192,7 +195,7 @@ sudo bash deploy.sh --logs
 ### Перезапуск
 
 ```bash
-sudo bash deploy.sh --restart
+sudo bash deploy.sh restart
 ```
 
 Команда ждёт готовность приложения. Успех возвращается только после появления свежего heartbeat и успешной проверки PostgreSQL с Redis.
@@ -232,40 +235,52 @@ Backup создаётся ежедневно около `03:00 UTC` и сохр�
 Ручной backup:
 
 ```bash
-sudo bash deploy.sh --backup
+sudo bash deploy.sh backup
 ```
 
 ## Проверка восстановления
 
-`--restore` не заменяет рабочую production-БД. Он расшифровывает backup, создаёт временную PostgreSQL database, восстанавливает данные, проверяет Alembic revision и критические таблицы, затем удаляет временную database.
+`restore-test` не заменяет рабочую production-БД. Команда расшифровывает backup, создаёт временную PostgreSQL database, восстанавливает данные, проверяет Alembic revision и критические таблицы, затем удаляет временную database.
 
 ```bash
 sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
-  bash deploy.sh --restore \
+  bash deploy.sh restore-test \
   /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
 Production restore/cutover выполняется только вручную после успешного rehearsal, полной остановки writers и отдельного подтверждённого плана восстановления.
 
-# Rollback приложения
+# Rollback deployment
 
-Перед обновлением release snapshots сохраняются в:
+Перед обновлением snapshots сохраняются в:
 
 ```text
 /var/lib/just1kbot/rollback-releases/
 ```
 
-Хранятся последние три snapshot. В них не копируется production `.env`.
+Хранятся последние три полностью готовых `release-*`. Незавершённый operational snapshot остаётся под скрытым `.incomplete-operational-*` и никогда не считается готовым release snapshot.
+
+Snapshot не копирует production `.env`, PostgreSQL data, Redis data и encrypted backup artifacts. Он сохраняет:
+
+- предыдущий application code и virtualenv;
+- основной systemd unit;
+- установленные backup/restore/health scripts;
+- backup и healthcheck units/timers вместе с enabled/active state;
+- logrotate configuration;
+- backup config и локальный age identity, если они существовали;
+- текущий domain-specific Nginx site и symlink state.
 
 При неудачном запуске новой версии deployment transaction:
 
 - останавливает неуспешный процесс;
-- возвращает предыдущий код, virtualenv и systemd unit;
+- возвращает предыдущий application release;
 - сохраняет текущий production `.env`;
-- запускает предыдущую версию;
-- повторно выполняет readiness gate.
+- восстанавливает operational files и отсутствовавшие до deploy paths;
+- возвращает persistent/runtime enable, mask и active state units;
+- проверяет восстановленную Nginx configuration до запуска Nginx;
+- запускает предыдущую версию и повторяет readiness gate.
 
-Схема PostgreSQL автоматически назад не откатывается.
+Схема PostgreSQL автоматически назад не откатывается. UFW и Let's Encrypt account/certificate storage не входят в automatic rollback snapshot.
 
 # Healthcheck
 
@@ -279,10 +294,12 @@ journalctl -u just1kbot-healthcheck.service
 Проверяются:
 
 - активность systemd-сервиса;
-- наличие heartbeat и возраст не более 180 секунд;
+- heartbeat `/run/just1kbot/heartbeat` и возраст не более 180 секунд;
 - `SELECT 1` в PostgreSQL;
 - `PING` в Redis;
 - загрузка production `.env` из `/opt/just1kbot`.
+
+Healthcheck имеет отдельный lock, shared deploy-operation lock, process timeout и сетевые таймауты. Конфликт lock возвращает ошибку, а не ложный healthy status.
 
 # YooKassa
 
@@ -304,12 +321,10 @@ Webhook должен быть настроен в кабинете YooKassa то
 
 Бот работает с протоколом `amneziawg2`.
 
-Пример настройки API-сервера:
+Настройка API-сервера запускается через единственную корневую точку входа:
 
 ```bash
-sudo bash setup-amnezia-api.sh \
-  --domain api.example.com \
-  --email admin@example.com
+sudo bash deploy.sh amnezia
 ```
 
 После настройки сервер добавляется через Telegram-админку.
@@ -321,7 +336,9 @@ sudo bash setup-amnezia-api.sh \
 - webhook имеет ограничение размера request body;
 - Redis, PostgreSQL и внутренний webhook port не публикуются наружу;
 - systemd unit работает от отдельного пользователя;
+- live code и virtualenv принадлежат root и доступны service user только для чтения;
 - release rollback не перезаписывает `.env`;
 - обновление запрещено из live-каталога;
 - migrations выполняются только после обязательного encrypted backup;
+- operational tooling меняется только внутри rollback transaction;
 - restore по команде является только изолированным rehearsal.

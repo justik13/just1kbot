@@ -10,7 +10,7 @@ import uuid
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-OPS = ROOT / "ops"
+OPS = ROOT / "scripts" / "ops"
 
 
 class BackupOperationsContractTests(unittest.TestCase):
@@ -19,7 +19,7 @@ class BackupOperationsContractTests(unittest.TestCase):
         cls.backup = (OPS / "backup_postgres.sh").read_text()
         cls.verify = (OPS / "verify_backup.sh").read_text()
         cls.rehearsal = (OPS / "restore_rehearsal.sh").read_text()
-        cls.deploy = (ROOT / "deploy.sh").read_text()
+        cls.deploy = (ROOT / "scripts" / "deploy_full.sh").read_text()
 
     def test_backup_requires_age_recipient(self):
         self.assertIn("BACKUP_AGE_RECIPIENT is missing or invalid", self.backup)

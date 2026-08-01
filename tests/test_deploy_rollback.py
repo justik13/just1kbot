@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-HELPER = ROOT / "ops/deploy_application.sh"
+HELPER = ROOT / "scripts/ops/deploy_application.sh"
 
 
 class DeployRollbackTests(unittest.TestCase):

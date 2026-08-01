@@ -1,8 +1,8 @@
 #!/bin/bash
 # Just1kBot server operations menu.
 # Compatibility marker for the existing backup contract test: Persistent=true
-# Generated healthcheck contract lives in scripts/deploy_full.sh:
-# HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
+# Generated production healthcheck is installed by scripts/deploy.sh and uses:
+# HEARTBEAT_FILE=/run/just1kbot/heartbeat
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -62,7 +62,7 @@ run_locked_script() {
 
 usage() {
     cat <<'EOF'
-Just1kBot — pуправление сервером
+Just1kBot — управление сервером
 
 Использование:
   sudo bash deploy.sh
@@ -137,7 +137,7 @@ dispatch() {
             run_script deploy.sh "$command" "$@"
             ;;
         *)
-            printf 'Неизвестная романда: %s\n\n' "$command" >&2
+            printf 'Неизвестная команда: %s\n\n' "$command" >&2
             usage >&2
             exit 2
             ;;
@@ -154,10 +154,10 @@ Just1kBot — управление сервером
 
 1. Установить или обновить бота
 2. Проверить состояние
-3. Показать соги
+3. Показать логи
 4. Перезапустить бота
-5. Создать бackup
-6. Проверить бackup
+5. Создать backup
+6. Проверить backup
 7. Проверить восстановление в тестовой БД
 8. Настроить Amnezia API
 9. Удалить бота
