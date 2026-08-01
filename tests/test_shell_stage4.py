@@ -79,6 +79,8 @@ class ShellStage4Tests(unittest.TestCase):
     def test_operational_file_snapshot_restores_exact_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = pathlib.Path(directory)
+            root.chmod(0o700)
+            original_parent_mode = root.stat().st_mode & 0o777
             existing = root / "existing"
             absent = root / "absent"
             link = root / "link"
@@ -115,6 +117,7 @@ restore_operational_files {str(snapshot)!r}
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(root.stat().st_mode & 0o777, original_parent_mode)
 
     def test_operational_snapshot_rejects_directories(self):
         with tempfile.TemporaryDirectory() as directory:
