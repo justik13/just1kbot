@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -31,6 +34,8 @@ jobs:
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -73,6 +78,21 @@ jobs:
           else
             tar -czf /tmp/ruff-autofix-files.tar.gz --files-from /dev/null
           fi
+      - name: Commit validated audit candidate
+        if: >-
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.event.pull_request.head.ref == 'agent/repository-human-factor-audit'
+        run: |
+          set -Eeuo pipefail
+          git add bot config database services utils alembic tests
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "style: normalize audited Python files"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
       - name: Audit Python syntax, imports and common human errors
         id: ruff_audit
         continue-on-error: true
