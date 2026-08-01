@@ -15,11 +15,6 @@ from bot.middlewares.correlation import set_request_id
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import WebhookInbox
-from services.audit_service import AuditService
-from services.payment_service import PaymentService
-from services.payment_service.alerts import (
-    _send_payment_not_found_alert_now,
-)
 from services.yookassa_service import YooKassaService
 
 logger = logging.getLogger(__name__)
@@ -35,9 +30,14 @@ YOOKASSA_IP_RANGES = [
     "2a02:5180::/32",
 ]
 
-OFFICIAL_YOOKASSA_EVENTS = {"payment.waiting_for_capture","payment.succeeded","payment.canceled","refund.succeeded"}
+OFFICIAL_YOOKASSA_EVENTS = {
+    "payment.waiting_for_capture",
+    "payment.succeeded",
+    "payment.canceled",
+    "refund.succeeded",
+}
 LEGACY_UNSUPPORTED_EVENTS = {"payment.refunded"}
-REFUND_EVENTS = {"refund.succeeded","payment.refunded"}
+REFUND_EVENTS = {"refund.succeeded", "payment.refunded"}
 
 
 def _validate_webhook_object(obj: dict, event: str) -> tuple[str, str]:
@@ -77,9 +77,7 @@ def _get_real_ip(request: web.Request) -> str:
         real_ip = request.headers.get("X-Real-IP", "").strip()
         if real_ip:
             return real_ip
-        forwarded = request.headers.get(
-            "X-Forwarded-For", ""
-        ).strip()
+        forwarded = request.headers.get("X-Forwarded-For", "").strip()
         if forwarded:
             first_ip = forwarded.split(",")[0].strip()
             if first_ip:
@@ -94,8 +92,6 @@ def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
         return Decimal(value)
     except (InvalidOperation, ValueError, TypeError):
         return None
-
-
 
 
 async def _verify_stale_webhook_via_api(
@@ -117,17 +113,18 @@ async def _verify_stale_webhook_via_api(
         "refunded": "REFUNDED",
     }
     api_status = api_status_map.get(
-        api_status_raw, api_status_raw.upper(),
+        api_status_raw,
+        api_status_raw.upper(),
     )
 
     if normalized_status == "CHARGEBACKED":
-        if api_status not in {
-            "REFUNDED", "CANCELED", "CHARGEBACKED"
-        }:
+        if api_status not in {"REFUNDED", "CANCELED", "CHARGEBACKED"}:
             logger.warning(
                 "Stale webhook chargeback status mismatch: "
                 "callback=%s, api=%s, payment=%s",
-                normalized_status, api_status, transaction_id,
+                normalized_status,
+                api_status,
+                transaction_id,
             )
             return False, None
 
@@ -138,9 +135,7 @@ async def _verify_stale_webhook_via_api(
             callback_amount_str = amount_obj.get("value")
         api_amount = api_data.get("amount", {})
         api_amount_str = (
-            api_amount.get("value")
-            if isinstance(api_amount, dict)
-            else None
+            api_amount.get("value") if isinstance(api_amount, dict) else None
         )
         if callback_amount_str and api_amount_str:
             cb_decimal = _safe_decimal(callback_amount_str)
@@ -150,7 +145,8 @@ async def _verify_stale_webhook_via_api(
                     logger.warning(
                         "Stale webhook chargeback amount mismatch: "
                         "callback=%s, api=%s, payment=%s",
-                        callback_amount_str, api_amount_str,
+                        callback_amount_str,
+                        api_amount_str,
                         transaction_id,
                     )
                     return False, None
@@ -164,7 +160,9 @@ async def _verify_stale_webhook_via_api(
             logger.warning(
                 "Stale webhook chargeback payload mismatch: "
                 "callback=%s, api=%s, payment=%s",
-                callback_payload, api_payload, transaction_id,
+                callback_payload,
+                api_payload,
+                transaction_id,
             )
             return False, None
 
@@ -172,9 +170,10 @@ async def _verify_stale_webhook_via_api(
 
     if api_status != normalized_status:
         logger.warning(
-            "Stale webhook status mismatch: "
-            "callback=%s, api=%s, payment=%s",
-            normalized_status, api_status, transaction_id,
+            "Stale webhook status mismatch: callback=%s, api=%s, payment=%s",
+            normalized_status,
+            api_status,
+            transaction_id,
         )
         return False, None
 
@@ -183,20 +182,16 @@ async def _verify_stale_webhook_via_api(
     if isinstance(amount_obj, dict):
         callback_amount_str = amount_obj.get("value")
     api_amount = api_data.get("amount", {})
-    api_amount_str = (
-        api_amount.get("value")
-        if isinstance(api_amount, dict)
-        else None
-    )
+    api_amount_str = api_amount.get("value") if isinstance(api_amount, dict) else None
     if callback_amount_str and api_amount_str:
         cb_decimal = _safe_decimal(callback_amount_str)
         api_decimal = _safe_decimal(api_amount_str)
         if cb_decimal is not None and api_decimal is not None:
             if cb_decimal != api_decimal:
                 logger.warning(
-                    "Stale webhook amount mismatch: "
-                    "callback=%s, api=%s, payment=%s",
-                    callback_amount_str, api_amount_str,
+                    "Stale webhook amount mismatch: callback=%s, api=%s, payment=%s",
+                    callback_amount_str,
+                    api_amount_str,
                     transaction_id,
                 )
                 return False, None
@@ -207,9 +202,10 @@ async def _verify_stale_webhook_via_api(
     api_payload = api_metadata.get("payload", "")
     if callback_payload != api_payload:
         logger.warning(
-            "Stale webhook payload mismatch: "
-            "callback=%s, api=%s, payment=%s",
-            callback_payload, api_payload, transaction_id,
+            "Stale webhook payload mismatch: callback=%s, api=%s, payment=%s",
+            callback_payload,
+            api_payload,
+            transaction_id,
         )
         return False, None
 
@@ -228,26 +224,44 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     try:
         payload = await request.json()
         event = payload.get("event")
-        if event not in OFFICIAL_YOOKASSA_EVENTS|LEGACY_UNSUPPORTED_EVENTS: raise ValueError("unsupported_event")
+        if event not in OFFICIAL_YOOKASSA_EVENTS | LEGACY_UNSUPPORTED_EVENTS:
+            raise ValueError("unsupported_event")
         obj = payload.get("object")
-        if not isinstance(event, str) or not isinstance(obj, dict): raise ValueError("structure")
+        if not isinstance(event, str) or not isinstance(obj, dict):
+            raise ValueError("structure")
 
         # Validate webhook object identifiers
         provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
 
         metadata = obj.get("metadata") or {}
         public_order_id = metadata.get("order_id")
-        canonical=json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=False)
-        event_key=hashlib.sha256(canonical.encode()).hexdigest()
+        canonical = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        event_key = hashlib.sha256(canonical.encode()).hexdigest()
     except Exception:
-        return web.Response(status=400,text="Invalid webhook")
+        return web.Response(status=400, text="Invalid webhook")
     try:
         async with session_scope() as session:
-            await session.execute(insert(WebhookInbox).values(provider="yookassa",event_key=event_key,event_type=event,provider_object_id=str(provider_object_id),payment_external_id=str(payment_external_id),public_order_id=public_order_id,payload=payload).on_conflict_do_nothing(constraint="uq_webhook_inbox_provider_event_key"))
+            await session.execute(
+                insert(WebhookInbox)
+                .values(
+                    provider="yookassa",
+                    event_key=event_key,
+                    event_type=event,
+                    provider_object_id=str(provider_object_id),
+                    payment_external_id=str(payment_external_id),
+                    public_order_id=public_order_id,
+                    payload=payload,
+                )
+                .on_conflict_do_nothing(
+                    constraint="uq_webhook_inbox_provider_event_key"
+                )
+            )
     except Exception:
         logger.exception("[%s] webhook inbox commit failed", request_id)
         return web.Response(status=500, text="Database unavailable")
-    return web.Response(status=200,text="OK")
+    return web.Response(status=200, text="OK")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -270,9 +284,7 @@ async def healthcheck_handler(
         await r.ping()
     except Exception as e:
         logger.warning("Healthcheck Redis failed: %s", e)
-        return web.Response(
-            status=503, text="Redis unavailable"
-        )
+        return web.Response(status=503, text="Redis unavailable")
 
     return web.Response(status=200, text="OK")
 
@@ -282,7 +294,8 @@ def _get_healthcheck_redis():
     if _healthcheck_redis is None:
         settings = get_settings()
         _healthcheck_redis = aioredis.from_url(
-            settings.REDIS_URL, socket_timeout=2.0,
+            settings.REDIS_URL,
+            socket_timeout=2.0,
         )
     return _healthcheck_redis
 
@@ -296,12 +309,10 @@ async def _close_healthcheck_redis(app: web.Application) -> None:
 
 def setup_webhook_routes(app: web.Application):
     app.router.add_post(
-        "/webhook/yookassa", yookassa_webhook_handler,
+        "/webhook/yookassa",
+        yookassa_webhook_handler,
     )
     app.router.add_get("/health", healthcheck_handler)
     app.on_cleanup.append(_close_healthcheck_redis)
-    logger.info(
-        "YooKassa webhook route registered: "
-        "POST /webhook/yookassa"
-    )
+    logger.info("YooKassa webhook route registered: POST /webhook/yookassa")
     logger.info("Healthcheck endpoint registered: GET /health")

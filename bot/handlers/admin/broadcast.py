@@ -24,7 +24,6 @@ from bot.keyboards.admin.broadcast import (
 from bot.states import AdminStates
 from database.connection import session_scope
 from database.models import BroadcastProgress, User
-from database.repositories.users_repo import mark_user_bot_blocked
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc

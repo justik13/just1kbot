@@ -3,8 +3,8 @@ import logging
 import time
 from datetime import timedelta
 
-from aiogram.exceptions import TelegramForbiddenError, TelegramRetryAfter
-from sqlalchemy import delete, select, update
+from aiogram.exceptions import TelegramForbiddenError
+from sqlalchemy import delete, select
 
 from database.connection import session_scope
 from database.models import (

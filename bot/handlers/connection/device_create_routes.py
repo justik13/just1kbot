@@ -9,7 +9,7 @@ from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_device_keyboard
+from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
 from database.models import User
 from database.repositories.servers_repo import (

@@ -4,6 +4,7 @@ The only mutable locks are checkout advisory lock -> User -> quote. Existing
 Payment/provider identity is immutable and is deliberately read without another
 ``FOR UPDATE`` lock, avoiding inversion with Payment -> User finalizers.
 """
+
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -13,7 +14,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
-from database.models import Payment, PaymentProviderOperation, TariffQuote, TariffVersion
+from database.models import (
+    Payment,
+    PaymentProviderOperation,
+    TariffQuote,
+    TariffVersion,
+)
 from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.payment_provider_operations import create_payload
 from utils.datetime_helpers import now_utc
@@ -32,14 +38,22 @@ def _failure(code: str) -> TariffChangePaymentResult:
 
 
 def _valid_create_payload(payment: Payment, payload: object) -> bool:
-    if not isinstance(payload, dict) or set(payload) != {"amount", "description", "confirmation", "metadata", "capture"}:
+    if not isinstance(payload, dict) or set(payload) != {
+        "amount",
+        "description",
+        "confirmation",
+        "metadata",
+        "capture",
+    }:
         return False
     return (
-        payload.get("amount") == {"value": format(payment.amount, ".2f"), "currency": payment.currency}
+        payload.get("amount")
+        == {"value": format(payment.amount, ".2f"), "currency": payment.currency}
         and payload.get("capture") is True
-        and payload.get("metadata") == {"order_id": payment.public_order_id,
-                                        "local_payment_id": str(payment.id)}
-        and isinstance(payload.get("description"), str) and bool(payload["description"])
+        and payload.get("metadata")
+        == {"order_id": payment.public_order_id, "local_payment_id": str(payment.id)}
+        and isinstance(payload.get("description"), str)
+        and bool(payload["description"])
         and isinstance(payload.get("confirmation"), dict)
         and set(payload["confirmation"]) == {"type", "return_url"}
         and payload["confirmation"].get("type") == "redirect"
@@ -49,8 +63,12 @@ def _valid_create_payload(payment: Payment, payload: object) -> bool:
 
 
 async def create_tariff_change_payment(
-    session: AsyncSession, *, user_id: int, quote_public_id: uuid.UUID | str,
-    bot_username: str, as_of: datetime,
+    session: AsyncSession,
+    *,
+    user_id: int,
+    quote_public_id: uuid.UUID | str,
+    bot_username: str,
+    as_of: datetime,
 ) -> TariffChangePaymentResult:
     """Create only frozen local intent; caller owns commit/rollback."""
     if as_of.tzinfo is None or as_of.utcoffset() is None:
@@ -64,25 +82,37 @@ async def create_tariff_change_payment(
         return _failure("user_not_found")
     if user.is_deleted or user.is_banned or user.is_bot_blocked:
         return _failure("user_ineligible")
-    quote = await session.scalar(select(TariffQuote).where(
-        TariffQuote.public_id == quote_public_id,
-        TariffQuote.user_id == user_id,
-    ).with_for_update())
+    quote = await session.scalar(
+        select(TariffQuote)
+        .where(
+            TariffQuote.public_id == quote_public_id,
+            TariffQuote.user_id == user_id,
+        )
+        .with_for_update()
+    )
     if quote is None:
         return _failure("quote_not_found")
     if quote.operation_type != "change":
         return _failure("quote_wrong_operation")
-    frozen = (quote.source_tariff_version_id, quote.target_tariff_version_id,
-              quote.balance_as_of, quote.source_subscription_end,
-              quote.source_balance_fingerprint, quote.source_entitlement_entry_ids,
-              quote.source_ledger_entry_ids)
+    frozen = (
+        quote.source_tariff_version_id,
+        quote.target_tariff_version_id,
+        quote.balance_as_of,
+        quote.source_subscription_end,
+        quote.source_balance_fingerprint,
+        quote.source_entitlement_entry_ids,
+        quote.source_ledger_entry_ids,
+    )
     if any(value is None for value in frozen) or quote.diagnostic_reason:
         return _failure("quote_quarantined_or_incomplete")
     source = await session.get(TariffVersion, quote.source_tariff_version_id)
     target = await session.get(TariffVersion, quote.target_tariff_version_id)
     if not source or not target or source.id == target.id:
         return _failure("quote_tariff_version_invalid")
-    if user.current_tariff_id != source.tariff_id or target.tariff_id == source.tariff_id:
+    if (
+        user.current_tariff_id != source.tariff_id
+        or target.tariff_id == source.tariff_id
+    ):
         return _failure("quote_tariff_version_invalid")
     if quote.currency != "RUB" or target.currency != quote.currency:
         return _failure("quote_currency_invalid")
@@ -97,44 +127,93 @@ async def create_tariff_change_payment(
     linked = None
     if quote.payment_id is not None:
         linked = await session.get(Payment, quote.payment_id)
-    by_quote = await session.scalar(select(Payment).where(Payment.tariff_quote_id == quote.id))
+    by_quote = await session.scalar(
+        select(Payment).where(Payment.tariff_quote_id == quote.id)
+    )
     if linked is not None or by_quote is not None:
         payment = linked or by_quote
-        if linked is None or by_quote is None or linked.id != by_quote.id or any((
-            payment.user_id != quote.user_id,
-            payment.tariff_version_id != target.id,
-            payment.tariff_id != target.tariff_id,
-            payment.amount != amount,
-            payment.snapshot_amount != amount,
-            payment.currency != quote.currency,
-            payment.snapshot_currency != quote.currency,
-            payment.snapshot_duration_days is not None,
-            payment.snapshot_device_limit is not None,
-        )):
+        if (
+            linked is None
+            or by_quote is None
+            or linked.id != by_quote.id
+            or any(
+                (
+                    payment.user_id != quote.user_id,
+                    payment.tariff_version_id != target.id,
+                    payment.tariff_id != target.tariff_id,
+                    payment.amount != amount,
+                    payment.snapshot_amount != amount,
+                    payment.currency != quote.currency,
+                    payment.snapshot_currency != quote.currency,
+                    payment.snapshot_duration_days is not None,
+                    payment.snapshot_device_limit is not None,
+                )
+            )
+        ):
             return _failure("quote_payment_conflict")
-        all_operations = list((await session.scalars(select(PaymentProviderOperation).where(
-            PaymentProviderOperation.payment_id == payment.id))).all())
-        operations = [row for row in all_operations if row.operation_type == "create_payment"]
+        all_operations = list(
+            (
+                await session.scalars(
+                    select(PaymentProviderOperation).where(
+                        PaymentProviderOperation.payment_id == payment.id
+                    )
+                )
+            ).all()
+        )
+        operations = [
+            row for row in all_operations if row.operation_type == "create_payment"
+        ]
         op = operations[0] if len(operations) == 1 else None
         positive = amount > 0
-        if (payment.provider_required != positive or not (payment.public_order_id or "").strip() or
-                payment.reconciliation_status in {"required", "mismatch", "manual_review"} or
-                payment.provider_status in {"manual_review", "canceled", "refunded"} or
-                payment.checkout_status == "abandoned" or
-                (positive and (not (payment.provider_idempotency_key or "").strip() or op is None or
-                 len(all_operations) != 1 or op.status not in {"pending", "processing", "retry", "succeeded"})) or
-                (not positive and (payment.provider_idempotency_key is not None or all_operations or
-                 payment.external_id is not None or payment.payment_url is not None or
-                 payment.paid_at is not None or payment.provider_confirmed_at is not None or
-                 payment.provider_status != "not_created"))):
+        if (
+            payment.provider_required != positive
+            or not (payment.public_order_id or "").strip()
+            or payment.reconciliation_status
+            in {"required", "mismatch", "manual_review"}
+            or payment.provider_status in {"manual_review", "canceled", "refunded"}
+            or payment.checkout_status == "abandoned"
+            or (
+                positive
+                and (
+                    not (payment.provider_idempotency_key or "").strip()
+                    or op is None
+                    or len(all_operations) != 1
+                    or op.status not in {"pending", "processing", "retry", "succeeded"}
+                )
+            )
+            or (
+                not positive
+                and (
+                    payment.provider_idempotency_key is not None
+                    or all_operations
+                    or payment.external_id is not None
+                    or payment.payment_url is not None
+                    or payment.paid_at is not None
+                    or payment.provider_confirmed_at is not None
+                    or payment.provider_status != "not_created"
+                )
+            )
+        ):
             return _failure("provider_operation_conflict")
         if positive:
-            if op.idempotency_key != payment.provider_idempotency_key or not _valid_create_payload(payment, op.payload):
+            if (
+                op.idempotency_key != payment.provider_idempotency_key
+                or not _valid_create_payload(payment, op.payload)
+            ):
                 return _failure("provider_operation_conflict")
-            before_http = (op.status in {"pending", "processing", "retry"} and
-                payment.provider_status == "creating" and payment.external_id is None and payment.payment_url is None)
-            after_create = (op.status == "succeeded" and payment.provider_status in {"pending", "waiting_for_capture", "succeeded"} and
-                bool(payment.external_id) and bool((payment.payment_url or "").strip()))
+            before_http = (
+                op.status in {"pending", "processing", "retry"}
+                and payment.provider_status == "creating"
+                and payment.external_id is None
+                and payment.payment_url is None
+            )
+            after_create = (
+                op.status == "succeeded"
+                and payment.provider_status
+                in {"pending", "waiting_for_capture", "succeeded"}
+                and bool(payment.external_id)
+                and bool((payment.payment_url or "").strip())
+            )
             if not (before_http or after_create):
                 return _failure("provider_operation_conflict")
         if quote.status == "manual_review" or quote.diagnostic_reason:
@@ -151,36 +230,51 @@ async def create_tariff_change_payment(
         return _failure("quote_expired")
 
     from services.subscription_balance_service import get_subscription_balance_snapshot
+
     snapshot = await get_subscription_balance_snapshot(
-        session, user_id=user_id, as_of=as_of, locked_user=user)
+        session, user_id=user_id, as_of=as_of, locked_user=user
+    )
     same_history = (
-        snapshot.tracked and user.current_tariff_id == source.tariff_id
+        snapshot.tracked
+        and user.current_tariff_id == source.tariff_id
         and quote.source_subscription_end == user.subscription_end
-        and sorted(quote.source_entitlement_entry_ids or []) == sorted(snapshot.source_entitlement_entry_ids)
-        and sorted(quote.source_ledger_entry_ids or []) == sorted(snapshot.source_ledger_entry_ids)
+        and sorted(quote.source_entitlement_entry_ids or [])
+        == sorted(snapshot.source_entitlement_entry_ids)
+        and sorted(quote.source_ledger_entry_ids or [])
+        == sorted(snapshot.source_ledger_entry_ids)
     )
     if not same_history:
-        quote.status="cancelled"; quote.diagnostic_reason="source_balance_changed"
+        quote.status = "cancelled"
+        quote.diagnostic_reason = "source_balance_changed"
         await session.flush()
         return _failure("quote_source_history_changed")
 
     from services.checkout_conflicts import get_unfinished_financial_checkout
+
     conflict = await get_unfinished_financial_checkout(session, user_id=user_id)
     if conflict is not None:
         return _failure("unfinished_checkout_exists")
 
     positive = amount > 0
     payment = Payment(
-        user_id=user_id, tariff_quote_id=quote.id, tariff_version_id=target.id,
-        tariff_id=target.tariff_id, amount=amount, currency=quote.currency,
-        snapshot_amount=amount, snapshot_currency=quote.currency,
-        snapshot_duration_days=None, snapshot_device_limit=None,
+        user_id=user_id,
+        tariff_quote_id=quote.id,
+        tariff_version_id=target.id,
+        tariff_id=target.tariff_id,
+        amount=amount,
+        currency=quote.currency,
+        snapshot_amount=amount,
+        snapshot_currency=quote.currency,
+        snapshot_duration_days=None,
+        snapshot_device_limit=None,
         public_order_id="chg_" + uuid.uuid4().hex,
         provider_idempotency_key=uuid.uuid4().hex if positive else None,
         provider_required=positive,
         provider_status="creating" if positive else "not_created",
-        fulfillment_status="not_ready", reconciliation_status="ok",
-        status="pending", checkout_status="active",
+        fulfillment_status="not_ready",
+        reconciliation_status="ok",
+        status="pending",
+        checkout_status="active",
     )
     session.add(payment)
     await session.flush()
@@ -189,11 +283,16 @@ async def create_tariff_change_payment(
     if positive:
         settings = get_settings()
         description = f"Доплата за смену тарифа ({target.name_snapshot})"
-        return_url = settings.YOOKASSA_RETURN_URL.format(bot_username=bot_username.lstrip("@"))
+        return_url = settings.YOOKASSA_RETURN_URL.format(
+            bot_username=bot_username.lstrip("@")
+        )
         operation = PaymentProviderOperation(
-            payment_id=payment.id, operation_type="create_payment", status="pending",
+            payment_id=payment.id,
+            operation_type="create_payment",
+            status="pending",
             idempotency_key=payment.provider_idempotency_key,
-            payload=create_payload(payment, description, return_url), next_attempt_at=now_utc(),
+            payload=create_payload(payment, description, return_url),
+            next_attempt_at=now_utc(),
         )
         session.add(operation)
     await session.flush()

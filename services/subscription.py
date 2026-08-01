@@ -2,7 +2,7 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,13 +11,12 @@ from bot.constants import (
     PERMANENT_END_DATE,
 )
 from bot.middlewares.user_context import invalidate_user_cache
-from database.models import User, VPNProfile
+from database.models import User
 from services.api_operations_queue import enqueue_api_operation
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
 )
-from database.repositories.servers_repo import get_server_by_id
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id,
