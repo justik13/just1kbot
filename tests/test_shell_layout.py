@@ -23,6 +23,7 @@ class ShellLayoutTests(unittest.TestCase):
             "update_from_github.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
+            "lib/deploy_full_legacy.inc",
             "lib/postgresql.sh",
             "lib/operational_transaction.sh",
             "ops/deploy_application.sh",
@@ -43,20 +44,23 @@ class ShellLayoutTests(unittest.TestCase):
 
     def test_all_repository_shell_scripts_parse(self):
         scripts = sorted(ROOT.rglob("*.sh"))
+        scripts.append(SCRIPTS / "lib" / "deploy_full_legacy.inc")
         self.assertTrue(scripts)
         for script in scripts:
             with self.subTest(script=script.relative_to(ROOT)):
                 subprocess.run(["bash", "-n", str(script)], check=True)
 
     def test_legacy_deploy_is_source_only(self):
-        result = subprocess.run(
-            ["bash", str(SCRIPTS / "deploy_full.sh")],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 64)
-        self.assertIn("direct execution is forbidden", result.stderr)
+        for loader in ("deploy_full.sh", "deploy_full_library.sh"):
+            result = subprocess.run(
+                ["bash", str(SCRIPTS / loader)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            with self.subTest(loader=loader):
+                self.assertEqual(result.returncode, 64)
+                self.assertIn("direct execution is forbidden", result.stderr)
 
         source_result = subprocess.run(
             [
