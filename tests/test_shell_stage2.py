@@ -15,6 +15,10 @@ class ShellStage2Tests(unittest.TestCase):
             "ops/verify_backup.sh",
             "ops/restore_rehearsal.sh",
             "ops/just1kbot-restore.sh",
+            "ops/production_restore.sh",
+            "lib/production_restore_core.sh",
+            "lib/production_restore_runtime.sh",
+            "lib/production_restore_actions.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
         ]
@@ -27,6 +31,7 @@ class ShellStage2Tests(unittest.TestCase):
         for script in (
             SCRIPTS / "setup-amnezia-api.sh",
             SCRIPTS / "uninstall.sh",
+            SCRIPTS / "ops/production_restore.sh",
         ):
             subprocess.run(["bash", "-n", str(script)], check=True)
 
@@ -78,7 +83,14 @@ class ShellStage2Tests(unittest.TestCase):
         self.assertIn("run_script setup-amnezia-api.sh", menu)
         self.assertIn("run_script uninstall.sh", menu)
         self.assertIn("run_locked_script deploy.sh --backup", menu)
-        self.assertIn("run_locked_script deploy.sh --restore", menu)
+        self.assertIn(
+            'run_locked_script ops/just1kbot-restore.sh rehearsal "$1"',
+            menu,
+        )
+        self.assertIn(
+            'run_script ops/just1kbot-restore.sh production "$@"',
+            menu,
+        )
         self.assertIn('DEPLOY_FUNCTIONS_ONLY:-0}', menu)
 
 
