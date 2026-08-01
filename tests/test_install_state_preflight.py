@@ -19,7 +19,11 @@ class InstallStatePreflightTests(unittest.TestCase):
         update_case = update_case[: update_case.index("            ;;")]
         self.assertLess(
             update_case.index("preflight_deploy_state"),
-            update_case.index('run_script update_from_github.sh'),
+            update_case.index('call_script update_from_github.sh'),
+        )
+        self.assertLess(
+            update_case.index('call_script update_from_github.sh'),
+            update_case.index("post_operation_smokecheck"),
         )
         self.assertIn('preflight_deploy_state "$@"', update_case)
 
@@ -27,7 +31,11 @@ class InstallStatePreflightTests(unittest.TestCase):
         deploy_case = deploy_case[: deploy_case.index("            ;;")]
         self.assertLess(
             deploy_case.index("preflight_deploy_state"),
-            deploy_case.index('run_script deploy.sh'),
+            deploy_case.index('call_script deploy.sh'),
+        )
+        self.assertLess(
+            deploy_case.index('call_script deploy.sh'),
+            deploy_case.index("post_operation_smokecheck"),
         )
         self.assertIn('preflight_deploy_state "$@"', deploy_case)
 
