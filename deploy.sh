@@ -73,6 +73,24 @@ preflight_deploy_state() {
     call_script preflight_install_state.sh "$@"
 }
 
+is_read_only_deploy_request() {
+    local argument
+    for argument in "$@"; do
+        case "$argument" in
+            --check|--dry-run)
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+post_operation_smokecheck() {
+    if ! call_script ops/doctor.sh --smoke; then
+        die "операция завершилась, но итоговая диагностика не пройдена; автоматический rollback на этом этапе не выполнялся"
+    fi
+}
+
 usage() {
     cat <<'EOF_USAGE'
 Just1kBot — управление сервером
@@ -82,6 +100,7 @@ Just1kBot — управление сервером
   sudo bash deploy.sh update [--check] [--yes] [--dry-run]
   sudo bash deploy.sh deploy [--yes] [--dry-run]
   sudo bash deploy.sh status
+  sudo bash deploy.sh doctor
   sudo bash deploy.sh logs
   sudo bash deploy.sh restart
   sudo bash deploy.sh backup
@@ -104,6 +123,8 @@ Just1kBot — управление сервером
 deploy предназначена для ручного запуска из уже подготовленного checkout.
 Перед update/deploy выполняется fail-closed preflight состояния установки,
 backup tooling, service account, permissions и systemd ProtectHome runtime.
+После успешных update/deploy/restart запускается read-only doctor: service,
+heartbeat, permissions, Alembic, PostgreSQL, Redis, Telegram и backup contract.
 
 Production restore сначала создаёт и проверяет staging database. Во время
 короткого cutover текущая database сохраняется под rollback-именем и не удаляется
@@ -129,20 +150,31 @@ dispatch() {
             # The downloaded release still acquires the deploy lock immediately
             # before its own production transaction.
             preflight_deploy_state "$@"
-            run_script update_from_github.sh "$@"
+            call_script update_from_github.sh "$@"
+            if ! is_read_only_deploy_request "$@"; then
+                post_operation_smokecheck
+            fi
             ;;
         deploy)
             preflight_deploy_state "$@"
-            run_script deploy.sh "$@"
+            call_script deploy.sh "$@"
+            if ! is_read_only_deploy_request "$@"; then
+                post_operation_smokecheck
+            fi
             ;;
         status)
-            run_script deploy.sh --status "$@"
+            call_script deploy.sh --status "$@"
+            run_script ops/doctor.sh
+            ;;
+        doctor)
+            run_script ops/doctor.sh "$@"
             ;;
         logs)
             run_script deploy.sh --logs "$@"
             ;;
         restart)
-            run_script deploy.sh --restart "$@"
+            call_script deploy.sh --restart "$@"
+            post_operation_smokecheck
             ;;
         backup)
             run_locked_script deploy.sh --backup "$@"
@@ -213,7 +245,7 @@ Just1kBot — управление сервером
 
 1. Обновить код из GitHub (main)
 2. Установить или обновить из текущего checkout
-3. Проверить состояние
+3. Проверить состояние и диагностику
 4. Показать логи
 5. Перезапустить бота
 6. Создать backup
