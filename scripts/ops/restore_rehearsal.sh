@@ -85,6 +85,8 @@ SQL
       "$result" "${test_db:-not-created}" "$cleanup_status"
     exit "$final_rc"
 }
+# Compatibility contract: trap finish EXIT INT TERM.
+# EXIT owns cleanup; signal traps preserve the conventional 130/143 exit codes.
 trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
