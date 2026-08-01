@@ -13,6 +13,19 @@ operational_validate_path() {
     [[ "$path" != */../* && "$path" != */.. && "$path" != /../* ]] || return 1
 }
 
+ensure_operational_parent() {
+    local path=$1
+    local parent mode=0755
+
+    parent=$(dirname "$path")
+    case "$parent" in
+        /root|/root/*)
+            mode=0700
+            ;;
+    esac
+    install -d -m "$mode" "$parent"
+}
+
 snapshot_operational_files() {
     local snapshot=$1
     local root="$snapshot/operational/rootfs"
@@ -82,7 +95,7 @@ restore_operational_files() {
             present)
                 [[ -e "$source" || -L "$source" ]] || return 1
                 rm -rf -- "$path"
-                install -d "$(dirname "$path")"
+                ensure_operational_parent "$path" || return 1
                 cp -a -- "$source" "$path" || return 1
                 ;;
             absent)
@@ -95,6 +108,11 @@ restore_operational_files() {
     done < "$manifest"
 }
 
+validate_restored_nginx() {
+    [[ "$OPERATIONAL_NGINX" == true ]] || return 0
+    nginx -t
+}
+
 restore_operational_units() {
     local snapshot=$1
     local manifest="$snapshot/operational/units.tsv"
@@ -105,26 +123,44 @@ restore_operational_units() {
         return 1
     }
 
+    # Stop every tracked unit before changing masks or enablement. This avoids
+    # preserving a process started from files that have just been rolled back.
     while IFS=$'\t' read -r enabled active unit; do
         [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
+        systemctl stop "$unit" >/dev/null 2>&1 || true
+    done < "$manifest"
+
+    while IFS=$'\t' read -r enabled active unit; do
+        [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
+        systemctl unmask "$unit" >/dev/null 2>&1 || true
         case "$enabled" in
-            enabled|enabled-runtime)
+            enabled)
                 systemctl enable "$unit" >/dev/null 2>&1 || return 1
                 ;;
-            masked|masked-runtime)
+            enabled-runtime)
+                systemctl enable --runtime "$unit" >/dev/null 2>&1 || return 1
+                ;;
+            masked)
                 systemctl mask "$unit" >/dev/null 2>&1 || return 1
+                ;;
+            masked-runtime)
+                systemctl mask --runtime "$unit" >/dev/null 2>&1 || return 1
                 ;;
             *)
                 systemctl disable "$unit" >/dev/null 2>&1 || true
                 ;;
         esac
+    done < "$manifest"
 
+    # Validate restored Nginx files before any previously-active Nginx unit is
+    # started. A broken restored config is a critical rollback failure.
+    validate_restored_nginx || return 1
+
+    while IFS=$'\t' read -r enabled active unit; do
+        [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
         case "$active" in
             active|activating|reloading)
                 systemctl start "$unit" >/dev/null 2>&1 || return 1
-                ;;
-            *)
-                systemctl stop "$unit" >/dev/null 2>&1 || true
                 ;;
         esac
     done < "$manifest"
@@ -191,18 +227,39 @@ install_operational_transaction_overrides() {
     clone_function restore_snapshot application_restore_snapshot
 
     snapshot_previous_release() {
+        local final incomplete
+
         application_snapshot_previous_release || return 1
         [[ -n "$ROLLBACK_SNAPSHOT" && -d "$ROLLBACK_SNAPSHOT" ]] || return 1
 
-        if ! snapshot_operational_files "$ROLLBACK_SNAPSHOT" ||
-            ! snapshot_operational_units "$ROLLBACK_SNAPSHOT"; then
+        # The application helper already publishes release-* atomically. Move
+        # it back under an incomplete name while appending operational state so
+        # a hard interruption never leaves a partially complete release-*.
+        final=$ROLLBACK_SNAPSHOT
+        incomplete="$SNAPSHOT_DIR/.incomplete-operational-$(basename "$final")"
+        rm -rf -- "$incomplete"
+        if ! mv -- "$final" "$incomplete"; then
+            rm -rf -- "$final"
+            ROLLBACK_SNAPSHOT=""
+            return 1
+        fi
+        ROLLBACK_SNAPSHOT=$incomplete
+
+        if ! snapshot_operational_files "$incomplete" ||
+            ! snapshot_operational_units "$incomplete"; then
             deploy_log 'operational_snapshot complete=false'
-            rm -rf -- "$ROLLBACK_SNAPSHOT"
+            rm -rf -- "$incomplete"
             ROLLBACK_SNAPSHOT=""
             return 1
         fi
 
-        chmod -R go-rwx "$ROLLBACK_SNAPSHOT/operational"
+        chmod -R go-rwx "$incomplete/operational"
+        if ! mv -- "$incomplete" "$final"; then
+            rm -rf -- "$incomplete"
+            ROLLBACK_SNAPSHOT=""
+            return 1
+        fi
+        ROLLBACK_SNAPSHOT=$final
         deploy_log 'operational_snapshot complete=true'
     }
 
