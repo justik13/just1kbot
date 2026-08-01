@@ -88,7 +88,7 @@ class ShellLayoutTests(unittest.TestCase):
     def test_psql_variables_are_never_embedded_in_dash_c_sql(self):
         # psql performs :name, :'name' and :"name" interpolation only while
         # reading its input stream or a file, not inside a -c argument.
-        variable = re.compile(r":(?:'|\\?")?[A-Za-z_][A-Za-z0-9_]*")
+        variable = re.compile(r""":(?:'|")?[A-Za-z_][A-Za-z0-9_]*""")
         for script in sorted(ROOT.rglob("*.sh")):
             text = script.read_text(encoding="utf-8")
             logical_lines = text.replace("\\\n", " ").splitlines()
