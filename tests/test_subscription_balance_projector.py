@@ -372,14 +372,16 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             "subscription_end_projection_mismatch",
         )
         e = EntitlementEvent(1, 1, "payment", "10", "payment_grant", 24, T0)
-        l = LedgerEntry(11, 1, "confirmed_payment", 24, Decimal(24), "RUB", 100, 10)
+        ledger_entry = LedgerEntry(
+            11, 1, "confirmed_payment", 24, Decimal(24), "RUB", 100, 10
+        )
         p = PaymentSnapshot(10, 1, 100, 100, Decimal(24), "RUB", 24, Decimal(24), "RUB")
         v = TariffVersionSnapshot(100, 100, 24, Decimal(24), "RUB")
         s = project_subscription_balance(
             as_of=T0,
             subscription_end=None,
             entitlement_events=(e,),
-            ledger_entries=(l,),
+            ledger_entries=(ledger_entry,),
             tariff_versions={100: v},
             payments={10: p},
         )

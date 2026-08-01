@@ -105,7 +105,9 @@ async def start_add_device(
 
     if not await MaintenanceService.can_user_perform_action(session, user_id):
         await callback.answer(show_alert=False)
-        await _render_maintenance(callback.message, session, back_to="back_to_connections")
+        await _render_maintenance(
+            callback.message, session, back_to="back_to_connections"
+        )
         return
 
     if user_id in _creating_devices:
@@ -114,7 +116,9 @@ async def start_add_device(
 
     user = db_user or await get_user_by_telegram_id(session, user_id)
 
-    if not user or not await SubscriptionService.check_access(session, user.telegram_id):
+    if not user or not await SubscriptionService.check_access(
+        session, user.telegram_id
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -172,15 +176,21 @@ async def select_server(
 ):
     await callback.answer(show_alert=False)
 
-    if not await MaintenanceService.can_user_perform_action(session, callback.from_user.id):
-        await _render_maintenance(callback.message, session, back_to="back_to_connections")
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(
+            callback.message, session, back_to="back_to_connections"
+        )
         _creating_devices.pop(callback.from_user.id, None)
         await state.clear()
         return
 
     user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
 
-    if not user or not await SubscriptionService.check_access(session, user.telegram_id):
+    if not user or not await SubscriptionService.check_access(
+        session, user.telegram_id
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -250,7 +260,9 @@ async def enter_device_name(
 
     user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
 
-    if not user or not await SubscriptionService.check_access(session, user.telegram_id):
+    if not user or not await SubscriptionService.check_access(
+        session, user.telegram_id
+    ):
         await render_hub(
             message.bot,
             message.chat.id,
@@ -322,9 +334,12 @@ async def enter_device_name(
             db_user_id = user.id
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
-            profile = await DeviceService.create_device(
-                session, user_id=db_user_id, server_id=server_id,
-                device_name=device_name, snapshot=snapshot,
+            await DeviceService.create_device(
+                session,
+                user_id=db_user_id,
+                server_id=server_id,
+                device_name=device_name,
+                snapshot=snapshot,
             )
         except NoActiveSubscription:
             await render_hub(

@@ -55,8 +55,7 @@ def _is_executable_pending_deletion(reason: str | None) -> bool:
 def _safe_log_value(value, limit=64):
     text = str(value or "unknown")
     sanitized = "".join(
-        character if character.isprintable() else "?"
-        for character in text
+        character if character.isprintable() else "?" for character in text
     )
     return sanitized[:limit]
 
@@ -66,11 +65,10 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
 
     try:
         await asyncio.wait_for(
-            shutdown_event.wait(), timeout=CLEANUP_START_DELAY,
+            shutdown_event.wait(),
+            timeout=CLEANUP_START_DELAY,
         )
-        logger.info(
-            "Cleanup worker stopped during start delay (shutdown)"
-        )
+        logger.info("Cleanup worker stopped during start delay (shutdown)")
         return
     except asyncio.TimeoutError:
         pass
@@ -92,7 +90,8 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
         except Exception as e:
             logger.error(
                 "Критическая ошибка в цикле очистки: %s",
-                e, exc_info=True,
+                e,
+                exc_info=True,
             )
             if shutdown_event.is_set():
                 break
@@ -116,8 +115,8 @@ async def _cleanup_expired_profiles_grace():
         stmt = (
             select(User.id)
             .where(
-                User.is_deleted == False,
-                User.subscription_end != None,
+                User.is_deleted.is_(False),
+                User.subscription_end.is_not(None),
                 User.subscription_end < threshold,
             )
             .order_by(User.subscription_end.asc())
@@ -135,11 +134,7 @@ async def _cleanup_expired_profiles_grace():
     for user_id in user_ids:
         try:
             async with session_scope() as session:
-                user_stmt = (
-                    select(User)
-                    .where(User.id == user_id)
-                    .with_for_update()
-                )
+                user_stmt = select(User).where(User.id == user_id).with_for_update()
                 user_result = await session.execute(user_stmt)
                 user = user_result.scalar_one_or_none()
 
@@ -157,23 +152,17 @@ async def _cleanup_expired_profiles_grace():
                 profiles_stmt = select(VPNProfile).where(
                     VPNProfile.user_id == user.id,
                 )
-                profiles_result = await session.execute(
-                    profiles_stmt
-                )
-                profiles = list(
-                    profiles_result.scalars().all()
-                )
+                profiles_result = await session.execute(profiles_stmt)
+                profiles = list(profiles_result.scalars().all())
 
                 if not profiles:
                     continue
 
-                deleted = (
-                    await ProfileDeletionService.delete_profiles_list(
-                        session,
-                        profiles,
-                        reason="grace_delete",
-                        background=True,
-                    )
+                deleted = await ProfileDeletionService.delete_profiles_list(
+                    session,
+                    profiles,
+                    reason="grace_delete",
+                    background=True,
                 )
 
                 if deleted > 0:
@@ -182,12 +171,15 @@ async def _cleanup_expired_profiles_grace():
                     logger.info(
                         "Grace cleanup: removed %s expired profiles "
                         "for user_id=%s (subscription_end=%s)",
-                        deleted, user_id, user.subscription_end,
+                        deleted,
+                        user_id,
+                        user.subscription_end,
                     )
 
                     # Уведомить пользователя об удалении устройств
                     try:
                         from services.workers.heartbeat import get_bot_ref
+
                         bot = get_bot_ref()
                         if bot:
                             await bot.send_message(
@@ -204,19 +196,23 @@ async def _cleanup_expired_profiles_grace():
                     except Exception as e:
                         logger.warning(
                             "Failed to send grace cleanup notification to user %s: %s",
-                            user.telegram_id, e,
+                            user.telegram_id,
+                            e,
                         )
 
         except Exception as e:
             logger.error(
                 "Grace cleanup failed for user_id=%s: %s",
-                user_id, e, exc_info=True,
+                user_id,
+                e,
+                exc_info=True,
             )
 
     if deleted_users_count > 0:
         logger.info(
             "Grace cleanup completed: %s users, %s profiles removed",
-            deleted_users_count, deleted_profiles_count,
+            deleted_users_count,
+            deleted_profiles_count,
         )
 
 
@@ -228,13 +224,9 @@ async def _cleanup_dangling_peers():
         servers_result = await session.execute(select(Server))
         servers = servers_result.scalars().all()
 
-        result = await session.execute(
-            select(VPNProfile.server_id, VPNProfile.peer_id)
-        )
+        result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
         db_server_peers = {
-            (row[0], row[1])
-            for row in result.all()
-            if row[0] is not None and row[1]
+            (row[0], row[1]) for row in result.all() if row[0] is not None and row[1]
         }
 
         servers_data = [
@@ -253,7 +245,8 @@ async def _cleanup_dangling_peers():
 
     async def _fetch_api_peers(server_info):
         client = AmneziaClient(
-            server_info["api_url"], server_info["api_key"],
+            server_info["api_url"],
+            server_info["api_key"],
         )
         try:
             api_clients_list = await client.get_all_clients()
@@ -263,14 +256,13 @@ async def _cleanup_dangling_peers():
         except Exception as e:
             logger.error(
                 "Ошибка получения списка пиров на %s: %s",
-                server_info["name"], e,
+                server_info["name"],
+                e,
             )
             return server_info, []
 
     tasks = [_fetch_api_peers(s) for s in servers_data]
-    results = await asyncio.gather(
-        *tasks, return_exceptions=True
-    )
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     unmanaged_count = 0
 
@@ -284,9 +276,7 @@ async def _cleanup_dangling_peers():
 
         for api_client in api_clients_list:
             client_id = api_client.id
-            client_name = (
-                api_client.clientName or api_client.name
-            )
+            client_name = api_client.clientName or api_client.name
 
             if not client_name or not client_name.startswith("tg_"):
                 continue
@@ -299,18 +289,14 @@ async def _cleanup_dangling_peers():
                 async with session_scope() as session:
                     fresh_result = await session.execute(
                         select(VPNProfile.id).where(
-                            VPNProfile.server_id
-                            == server_info["id"],
+                            VPNProfile.server_id == server_info["id"],
                             VPNProfile.peer_id == client_id,
                         )
                     )
-                    peer_exists_in_db = (
-                        fresh_result.first() is not None
-                    )
+                    peer_exists_in_db = fresh_result.first() is not None
             except Exception as e:
                 logger.error(
-                    "Double-check failed for server_id=%s, "
-                    "peer=%s..., error_kind=%s",
+                    "Double-check failed for server_id=%s, peer=%s..., error_kind=%s",
                     server_info["id"],
                     _safe_log_value(client_id, 16),
                     type(e).__name__,
@@ -333,8 +319,7 @@ async def _cleanup_dangling_peers():
 
     if unmanaged_count:
         logger.warning(
-            "Unmanaged VPN peers detected: %s; "
-            "automatic deletion disabled",
+            "Unmanaged VPN peers detected: %s; automatic deletion disabled",
             unmanaged_count,
         )
 
@@ -343,12 +328,14 @@ async def _process_pending_deletions():
     """Legacy queue is quarantine/report-only after durable migration."""
     async with session_scope() as session:
         rows = (
-            await session.execute(
-                select(PendingAPIDeletion).where(
-                    PendingAPIDeletion.attempts >= 0
+            (
+                await session.execute(
+                    select(PendingAPIDeletion).where(PendingAPIDeletion.attempts >= 0)
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if not rows:
             return
         for row in rows:
@@ -356,10 +343,10 @@ async def _process_pending_deletions():
             row.last_attempt_at = now_utc()
             row.last_error = f"{QUARANTINE_ERROR_PREFIX}: legacy worker disabled"
         logger.warning(
-            "Quarantined %s legacy pending deletions; "
-            "no API writes performed",
+            "Quarantined %s legacy pending deletions; no API writes performed",
             len(rows),
         )
+
 
 async def _cleanup_old_records():
     async with session_scope() as session:
@@ -368,19 +355,10 @@ async def _cleanup_old_records():
         threshold_broadcasts = current_time - timedelta(days=7)
         stmt_broadcasts = (
             delete(BroadcastProgress)
-            .where(
-                BroadcastProgress.status.in_(
-                    ["completed", "stopped"]
-                )
-            )
-            .where(
-                BroadcastProgress.updated_at
-                < threshold_broadcasts
-            )
+            .where(BroadcastProgress.status.in_(["completed", "stopped"]))
+            .where(BroadcastProgress.updated_at < threshold_broadcasts)
         )
-        result_broadcasts = await session.execute(
-            stmt_broadcasts
-        )
+        result_broadcasts = await session.execute(stmt_broadcasts)
         broadcasts_deleted = result_broadcasts.rowcount
 
         deleted_logs = await clear_audit_logs(
@@ -389,19 +367,15 @@ async def _cleanup_old_records():
         )
 
         threshold_hub = current_time - timedelta(days=1)
-        stmt_hub = delete(HubMessage).where(
-            HubMessage.created_at < threshold_hub
-        )
+        stmt_hub = delete(HubMessage).where(HubMessage.created_at < threshold_hub)
         result_hub = await session.execute(stmt_hub)
         hub_deleted = result_hub.rowcount
 
-        if (
-            broadcasts_deleted > 0
-            or deleted_logs > 0
-            or hub_deleted > 0
-        ):
+        if broadcasts_deleted > 0 or deleted_logs > 0 or hub_deleted > 0:
             logger.info(
                 "Cleanup: %s old broadcasts, %s old audit logs, "
                 "%s old hub_messages deleted",
-                broadcasts_deleted, deleted_logs, hub_deleted,
+                broadcasts_deleted,
+                deleted_logs,
+                hub_deleted,
             )

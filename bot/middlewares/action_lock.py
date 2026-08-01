@@ -13,21 +13,21 @@ logger = logging.getLogger(__name__)
 # Regex patterns for validating callback data parameters
 CALLBACK_PARAM_PATTERNS = {
     # Device IDs: positive integers
-    r'device_id=(\d+)': r'^\d+$',
-    r'devices/(\d+)': r'^\d+$',
-    r':(\d+):': r'^\d+$',
-    r':(\d+)$': r'^\d+$',
-    # Server IDs: positive integers  
-    r'server:(\d+)': r'^\d+$',
-    r'servers/(\d+)': r'^\d+$',
+    r"device_id=(\d+)": r"^\d+$",
+    r"devices/(\d+)": r"^\d+$",
+    r":(\d+):": r"^\d+$",
+    r":(\d+)$": r"^\d+$",
+    # Server IDs: positive integers
+    r"server:(\d+)": r"^\d+$",
+    r"servers/(\d+)": r"^\d+$",
     # Tariff IDs: positive integers
-    r'tariff:(\d+)': r'^\d+$',
-    r'tariffs/(\d+)': r'^\d+$',
+    r"tariff:(\d+)": r"^\d+$",
+    r"tariffs/(\d+)": r"^\d+$",
     # User IDs: positive integers
-    r'user:(\d+)': r'^\d+$',
-    r'users/(\d+)': r'^\d+$',
+    r"user:(\d+)": r"^\d+$",
+    r"users/(\d+)": r"^\d+$",
     # Payment amounts: decimal numbers
-    r'amount:(\d+(?:\.\d+)?)': r'^\d+(?:\.\d+)?$',
+    r"amount:(\d+(?:\.\d+)?)": r"^\d+(?:\.\d+)?$",
 }
 
 LOCKED_ACTION_PREFIXES = (
@@ -35,44 +35,34 @@ LOCKED_ACTION_PREFIXES = (
     "add_device",
     "select_server:",
     "confirm_delete_device:",
-
     # Админское удаление устройства.
     "admin_delete_device_apply:",
-
     # Генерация конфигураций.
     "download_conf:",
     "show_config:",
-
     # Платежи.
     "pay_yookassa:",
     "check_payment:",
     "cancel_invoice:",
-
     # Админские платежи.
     "admin_payment_refund_apply:",
-
     # Админские действия с подпиской.
     "admin_sub_apply_tariff:",
     "admin_sub_apply_extend:",
     "admin_sub_apply_reduce:",
     "admin_sub_grant_apply:",
-
     # Админские действия с пользователями.
     "admin_ban_apply:",
     "admin_unban_apply:",
     "admin_manual_grant:",
     "admin_manual_grant_apply:",
-
     # Админские действия с серверами.
     "confirm_server_delete:",
     "admin_server_toggle_apply:",
-
     # Админские действия с тарифами.
     "admin_tariff_toggle_apply:",
-
     # Режим технических работ.
     "admin_maintenance_toggle_apply",
-
     # Рассылка.
     "broadcast_send_all",
     "broadcast_send_active",
@@ -107,32 +97,36 @@ def _validate_callback_params(callback_data: str) -> bool:
     """
     if not callback_data:
         return False
-    
+
     # Check for SQL injection patterns
     dangerous_patterns = [
-        r';\s*DROP\s+',
-        r';\s*DELETE\s+',
-        r';\s*UPDATE\s+',
-        r';\s*INSERT\s+',
-        r'--',
-        r'/\*',
-        r'\*/',
-        r'OR\s+\d+\s*=\s*\d+',
-        r'AND\s+\d+\s*=\s*\d+',
-        r'UNION',
-        r'SELECT',
+        r";\s*DROP\s+",
+        r";\s*DELETE\s+",
+        r";\s*UPDATE\s+",
+        r";\s*INSERT\s+",
+        r"--",
+        r"/\*",
+        r"\*/",
+        r"\bOR\b\s+\d+\s*=\s*\d+",
+        r"\bAND\b\s+\d+\s*=\s*\d+",
+        r"\bUNION\b",
+        r"\bSELECT\b",
     ]
-    
+
     for pattern in dangerous_patterns:
         if re.search(pattern, callback_data, re.IGNORECASE):
-            logger.warning("Potential SQL injection in callback data: %s", callback_data[:100])
+            logger.warning(
+                "Potential SQL injection in callback data: %s", callback_data[:100]
+            )
             return False
-    
+
     # Check for command injection patterns
-    if any(char in callback_data for char in ['|', '`', '$', '&', ';', '<', '>']):
-        logger.warning("Potential command injection in callback data: %s", callback_data[:100])
+    if any(char in callback_data for char in ["|", "`", "$", "&", ";", "<", ">"]):
+        logger.warning(
+            "Potential command injection in callback data: %s", callback_data[:100]
+        )
         return False
-    
+
     # Validate numeric parameters match expected patterns
     for param_pattern, validation_pattern in CALLBACK_PARAM_PATTERNS.items():
         matches = re.findall(param_pattern, callback_data)
@@ -144,7 +138,7 @@ def _validate_callback_params(callback_data: str) -> bool:
                     callback_data[:100],
                 )
                 return False
-    
+
     return True
 
 

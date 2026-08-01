@@ -482,6 +482,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             first = await create_tariff_change_quote(
                 session, user_id=user, target_tariff_id=target, as_of=as_of
             )
+            self.assertTrue(first.created)
             different = (
                 await session.execute(
                     text(
@@ -557,6 +558,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             change = await create_tariff_change_quote(
                 session, user_id=user, target_tariff_id=target, as_of=as_of
             )
+            self.assertTrue(change.created)
             before_payments = await session.scalar(select(func.count(Payment.id)))
             payment, failure = await PaymentService.create_yookassa_payment(
                 session, user, source, Decimal("90"), 1, "bot"

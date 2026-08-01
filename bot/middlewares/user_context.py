@@ -70,7 +70,7 @@ class UserContextMiddleware(BaseMiddleware):
 
         stmt = select(User).where(
             User.telegram_id == telegram_id,
-            User.is_deleted == False,
+            User.is_deleted.is_(False),
         )
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
@@ -104,10 +104,7 @@ class UserContextMiddleware(BaseMiddleware):
                         session,
                         telegram_id,
                     )
-                    if (
-                        existing_any is not None
-                        and not existing_any.is_deleted
-                    ):
+                    if existing_any is not None and not existing_any.is_deleted:
                         user = existing_any
                     else:
                         user = None

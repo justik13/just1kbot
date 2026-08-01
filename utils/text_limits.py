@@ -25,11 +25,12 @@ def split_text_by_lines(
                 parts.append(current)
 
             if len(line) > limit:
-                while len(line) > limit:
-                    parts.append(line[:limit])
-                    line = line[limit:]
+                remaining_line = line
+                while len(remaining_line) > limit:
+                    parts.append(remaining_line[:limit])
+                    remaining_line = remaining_line[limit:]
 
-                current = line
+                current = remaining_line
             else:
                 current = line
         else:

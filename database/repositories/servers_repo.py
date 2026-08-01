@@ -23,11 +23,7 @@ PROTECTED_SERVER_FIELDS = {"id", "created_at"}
 async def get_active_servers(
     session: AsyncSession,
 ) -> List[Server]:
-    stmt = (
-        select(Server)
-        .where(Server.is_active == True)
-        .order_by(Server.name)
-    )
+    stmt = select(Server).where(Server.is_active.is_(True)).order_by(Server.name)
 
     result = await session.execute(stmt)
 
@@ -53,20 +49,14 @@ async def get_available_servers(
     if not servers:
         return []
 
-    counts_stmt = (
-        select(
-            VPNProfile.server_id,
-            func.count(VPNProfile.id),
-        )
-        .group_by(VPNProfile.server_id)
-    )
+    counts_stmt = select(
+        VPNProfile.server_id,
+        func.count(VPNProfile.id),
+    ).group_by(VPNProfile.server_id)
 
     counts_result = await session.execute(counts_stmt)
 
-    db_counts = {
-        row[0]: row[1]
-        for row in counts_result.all()
-    }
+    db_counts = {row[0]: row[1] for row in counts_result.all()}
 
     available: List[Server] = []
 
@@ -153,20 +143,14 @@ async def get_total_free_ips(
     if not active_servers:
         return 0
 
-    counts_stmt = (
-        select(
-            VPNProfile.server_id,
-            func.count(VPNProfile.id),
-        )
-        .group_by(VPNProfile.server_id)
-    )
+    counts_stmt = select(
+        VPNProfile.server_id,
+        func.count(VPNProfile.id),
+    ).group_by(VPNProfile.server_id)
 
     counts_result = await session.execute(counts_stmt)
 
-    db_counts = {
-        row[0]: row[1]
-        for row in counts_result.all()
-    }
+    db_counts = {row[0]: row[1] for row in counts_result.all()}
 
     total_free = 0
 
@@ -200,10 +184,7 @@ async def get_servers_paginated(
     offset = (page - 1) * per_page
 
     result = await session.execute(
-        select(Server)
-        .order_by(Server.name)
-        .offset(offset)
-        .limit(per_page)
+        select(Server).order_by(Server.name).offset(offset).limit(per_page)
     )
 
     return result.scalars().all()

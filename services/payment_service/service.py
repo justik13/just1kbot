@@ -456,7 +456,7 @@ class PaymentService:
         return_url = settings.YOOKASSA_RETURN_URL.format(
             bot_username=bot_username.lstrip("@")
         )
-        operation = await enqueue_create(session, payment, description, return_url)
+        await enqueue_create(session, payment, description, return_url)
         await _log_event_safe(session, payment.id, "payment_created", source="yookassa")
         await session.commit()  # worker performs HTTP after this durability boundary
         return payment, payment.payment_url

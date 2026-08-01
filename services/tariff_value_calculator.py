@@ -3,6 +3,7 @@
 This module deliberately knows nothing about persistence, Telegram or payment
 providers.  Bonus time is carried separately and never enters the value pool.
 """
+
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, localcontext
 
@@ -49,10 +50,14 @@ def _money(value, field: str) -> Decimal:
 
 
 def calculate_tariff_value(
-    *, operation_type: str, source_paid_hours: int, source_paid_value_rub,
+    *,
+    operation_type: str,
+    source_paid_hours: int,
+    source_paid_value_rub,
     source_tariff: TariffVersionSnapshot | None,
     target_tariff: TariffVersionSnapshot,
-    confirmed_additional_payment_rub, bonus_hours: int,
+    confirmed_additional_payment_rub,
+    bonus_hours: int,
     requested_duration_hours: int | None = None,
     bonus_value_rub=Decimal("0"),
 ) -> TariffCalculation:
@@ -84,16 +89,25 @@ def calculate_tariff_value(
         source_price = _money(source_tariff.price_rub, "source price")
         if source_price <= 0:
             raise TariffCalculationError("source price must be positive")
-        max_source_value = Decimal(source_paid_hours) * source_price / source_tariff.duration_hours
+        max_source_value = (
+            Decimal(source_paid_hours) * source_price / source_tariff.duration_hours
+        )
         # A tracked change balance may combine lots bought against historical
         # versions of the same tariff.  Its append-only ledger value is the
         # authority; only purchase/renew retain the single-version consistency
         # check.
         if operation_type != "change" and source_value > max_source_value:
-            raise TariffCalculationError("source hours and value snapshots are incompatible")
-    if requested_duration_hours is not None and requested_duration_hours != target_tariff.duration_hours:
+            raise TariffCalculationError(
+                "source hours and value snapshots are incompatible"
+            )
+    if (
+        requested_duration_hours is not None
+        and requested_duration_hours != target_tariff.duration_hours
+    ):
         raise TariffCalculationError("arbitrary duration is not supported")
-    if operation_type == "purchase" and (source_tariff is not None or source_paid_hours or source_value):
+    if operation_type == "purchase" and (
+        source_tariff is not None or source_paid_hours or source_value
+    ):
         raise TariffCalculationError("purchase cannot contain a source balance")
     if operation_type == "renew" and (
         source_tariff is None or source_tariff.tariff_id != target_tariff.tariff_id
@@ -103,8 +117,10 @@ def calculate_tariff_value(
         source_tariff is None or source_tariff.tariff_id == target_tariff.tariff_id
     ):
         raise TariffCalculationError("change requires different tariffs")
-    due_base = target_price if operation_type in {"purchase", "renew"} else max(
-        Decimal("0"), target_price - source_value
+    due_base = (
+        target_price
+        if operation_type in {"purchase", "renew"}
+        else max(Decimal("0"), target_price - source_value)
     )
     required = due_base.quantize(Decimal("1"), rounding=ROUND_CEILING)
     if payment != required:
@@ -124,10 +140,11 @@ def calculate_tariff_value(
         pool = source_value + payment
         with localcontext() as context:
             context.prec = 50
-            hourly_rate = target_price / Decimal(target_tariff.duration_hours)
             exact_hours = pool * Decimal(target_tariff.duration_hours) / target_price
             whole_hours = int(exact_hours.to_integral_value(rounding=ROUND_FLOOR))
-            paid_after = Decimal(whole_hours) * target_price / target_tariff.duration_hours
+            paid_after = (
+                Decimal(whole_hours) * target_price / target_tariff.duration_hours
+            )
             loss_hours = exact_hours - Decimal(whole_hours)
             loss_value = pool - paid_after
     pool = source_value + payment
@@ -135,12 +152,22 @@ def calculate_tariff_value(
     if not invariant or loss_hours < 0 or loss_hours >= 1 or loss_value < 0:
         raise TariffCalculationError("paid-value invariant violated")
     if operation_type == "change":
-        source_rate = _money(source_tariff.price_rub, "source price") / source_tariff.duration_hours
+        source_rate = (
+            _money(source_tariff.price_rub, "source price")
+            / source_tariff.duration_hours
+        )
         target_rate = target_price / target_tariff.duration_hours
         reason = "upgrade" if target_rate > source_rate else "downgrade"
     else:
         reason = operation_type
     return TariffCalculation(
-        required, whole_hours, bonus_hours, loss_hours, loss_value,
-        source_value, paid_after, invariant, reason,
+        required,
+        whole_hours,
+        bonus_hours,
+        loss_hours,
+        loss_value,
+        source_value,
+        paid_after,
+        invariant,
+        reason,
     )

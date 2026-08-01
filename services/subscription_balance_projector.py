@@ -142,7 +142,10 @@ def project_subscription_balance(
     """Replay source-attributed append-only history without infrastructure dependencies."""
     events = tuple(sorted(entitlement_events, key=lambda e: (e.created_at, e.id)))
     ledger = tuple(ledger_entries)
-    fail = lambda code, end=None: _failed(as_of, code, events, ledger, end)
+
+    def fail(code, end=None):
+        return _failed(as_of, code, events, ledger, end)
+
     grants_types = {
         "payment_grant",
         "referral_user_bonus",

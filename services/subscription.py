@@ -203,7 +203,7 @@ class SubscriptionService:
             select(User)
             .where(
                 User.telegram_id == telegram_id,
-                User.is_deleted == False,
+                User.is_deleted.is_(False),
             )
             .with_for_update()
         )
@@ -236,11 +236,7 @@ class SubscriptionService:
         if days == 0:
             new_end = user.subscription_end
         else:
-            base_end = (
-                user.subscription_end
-                if had_active_subscription
-                else now
-            )
+            base_end = user.subscription_end if had_active_subscription else now
 
             new_end = (
                 PERMANENT_END_DATE
@@ -287,32 +283,58 @@ class SubscriptionService:
 
     @staticmethod
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
-        target_active = bool(user.subscription_end and not is_expired(user.subscription_end) and not user.is_banned)
+        target_active = bool(
+            user.subscription_end
+            and not is_expired(user.subscription_end)
+            and not user.is_banned
+        )
         profiles = await get_user_profiles(session, user.id)
         for profile in profiles:
-            if profile.provisioning_status in {"deleting", "create_failed", "delete_failed"}:
+            if profile.provisioning_status in {
+                "deleting",
+                "create_failed",
+                "delete_failed",
+            }:
                 continue
             was_pending_create = profile.provisioning_status == "pending_create"
             profile.desired_version += 1
             profile.desired_is_active = target_active
-            profile.desired_expires_at = user.subscription_end if target_active else None
+            profile.desired_expires_at = (
+                user.subscription_end if target_active else None
+            )
             profile.is_active = target_active
-            profile.provisioning_status = "pending_create" if was_pending_create else "pending_update"
+            profile.provisioning_status = (
+                "pending_create" if was_pending_create else "pending_update"
+            )
             if was_pending_create:
                 continue
-            permanent = bool(target_active and user.subscription_end and user.subscription_end.year >= 2100)
-            expires_at = int(user.subscription_end.timestamp()) if target_active and user.subscription_end and not permanent else None
+            permanent = bool(
+                target_active
+                and user.subscription_end
+                and user.subscription_end.year >= 2100
+            )
+            expires_at = (
+                int(user.subscription_end.timestamp())
+                if target_active and user.subscription_end and not permanent
+                else None
+            )
             server = profile.server
-            await enqueue_api_operation(session, operation_type="update_peer",
+            await enqueue_api_operation(
+                session,
+                operation_type="update_peer",
                 idempotency_key=f"update-peer:{profile.id}:v{profile.desired_version}",
-                server_id=profile.server_id, profile_id=profile.id, peer_id=profile.peer_id,
+                server_id=profile.server_id,
+                profile_id=profile.id,
+                peer_id=profile.peer_id,
                 server_name_snapshot=server.name if server else None,
                 api_url_snapshot=server.api_url if server else None,
                 api_key_snapshot=server.api_key if server else None,
-                client_name=profile.client_name, payload={
+                client_name=profile.client_name,
+                payload={
                     "desired_version": profile.desired_version,
                     "status": "active" if target_active else "disabled",
                     "expires_at": expires_at,
                     "clear_expires_at": target_active and expires_at is None,
-                })
+                },
+            )
         await session.flush()

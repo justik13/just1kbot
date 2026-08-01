@@ -490,7 +490,7 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             operation_id = op.id
             key = op.idempotency_key
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             async with self.sessions.begin() as s:
                 version = (
                     await get_operation_card(s, "provider", operation_id)
@@ -855,13 +855,11 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
         now = now_utc()
         async with self.sessions.begin() as s:
             p = await self.payment(s)
-            for index, (status, next_at, locked_at) in enumerate(
-                (
-                    ("pending", now + timedelta(hours=1), None),
-                    ("retry", now - timedelta(minutes=2), None),
-                    ("processing", now, now - timedelta(minutes=3)),
-                    ("dead", now, None),
-                )
+            for status, next_at, locked_at in (
+                ("pending", now + timedelta(hours=1), None),
+                ("retry", now - timedelta(minutes=2), None),
+                ("processing", now, now - timedelta(minutes=3)),
+                ("dead", now, None),
             ):
                 s.add(
                     PaymentProviderOperation(

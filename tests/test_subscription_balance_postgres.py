@@ -9,6 +9,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import (
@@ -305,7 +306,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_entitlement_update_is_rejected(self):
         u, _, _ = await self.seed()
-        with self.assertRaises(Exception):
+        with self.assertRaises(DBAPIError):
             async with self.sessions.begin() as s:
                 await s.execute(
                     text(
@@ -316,7 +317,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_entitlement_delete_is_rejected(self):
         u, _, _ = await self.seed()
-        with self.assertRaises(Exception):
+        with self.assertRaises(DBAPIError):
             async with self.sessions.begin() as s:
                 await s.execute(
                     text(
@@ -340,7 +341,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_entitlement_invalid_sign_is_rejected(self):
         u, _, _ = await self.seed()
-        with self.assertRaises(Exception):
+        with self.assertRaises(DBAPIError):
             async with self.sessions.begin() as s:
                 await s.execute(
                     text(

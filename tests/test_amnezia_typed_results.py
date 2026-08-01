@@ -69,7 +69,9 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
 
     def use_session(self, *outcomes):
         session = FakeSession(*outcomes)
-        getter = patch.object(module, "get_http_session", new=AsyncMock(return_value=session))
+        getter = patch.object(
+            module, "get_http_session", new=AsyncMock(return_value=session)
+        )
         getter.start()
         self.addCleanup(getter.stop)
         return session
@@ -126,25 +128,29 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
     async def test_auth_errors_do_not_increment_breaker(self):
         for status in (401, 403):
             with self.subTest(status=status):
-                session = self.use_session(FakeResponse(status))
+                self.use_session(FakeResponse(status))
                 result = await self.client._request_result(
                     "GET", "/server", semantics=RequestSemantics.READ
                 )
                 self.assertEqual(result.error_kind, AmneziaErrorKind.AUTH_FAILED)
                 self.assertFalse(result.retryable)
                 self.assertFalse(result.ambiguous)
-                self.assertEqual(module._get_circuit_breaker(self.client.api_url).failure_count, 0)
+                self.assertEqual(
+                    module._get_circuit_breaker(self.client.api_url).failure_count, 0
+                )
                 self.addCleanup(lambda: None)
 
     async def test_validation_errors_do_not_increment_breaker(self):
         for status in (400, 422):
-            session = self.use_session(FakeResponse(status))
+            self.use_session(FakeResponse(status))
             result = await self.client._request_result(
                 "GET", "/clients", semantics=RequestSemantics.READ
             )
             self.assertEqual(result.error_kind, AmneziaErrorKind.VALIDATION_FAILED)
             self.assertFalse(result.retryable)
-            self.assertEqual(module._get_circuit_breaker(self.client.api_url).failure_count, 0)
+            self.assertEqual(
+                module._get_circuit_breaker(self.client.api_url).failure_count, 0
+            )
 
     async def test_create_429_is_retryable_but_not_retried_or_breaker_failure(self):
         session = self.use_session(FakeResponse(429))
@@ -153,7 +159,9 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error_kind, AmneziaErrorKind.RATE_LIMITED)
         self.assertTrue(result.retryable)
         self.assertFalse(result.ambiguous)
-        self.assertEqual(module._get_circuit_breaker(self.client.api_url).failure_count, 0)
+        self.assertEqual(
+            module._get_circuit_breaker(self.client.api_url).failure_count, 0
+        )
 
     async def test_exhausted_read_5xx_increments_breaker(self):
         attempts = module.API_RETRY_COUNT + 1
@@ -162,7 +170,9 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
             "GET", "/server", semantics=RequestSemantics.READ
         )
         self.assertEqual(result.error_kind, AmneziaErrorKind.SERVER_ERROR)
-        self.assertEqual(module._get_circuit_breaker(self.client.api_url).failure_count, 1)
+        self.assertEqual(
+            module._get_circuit_breaker(self.client.api_url).failure_count, 1
+        )
 
     async def test_circuit_open_skips_network(self):
         session = self.use_session(FakeResponse(200, {}))
@@ -177,20 +187,31 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.retryable)
 
     async def test_compatibility_wrappers(self):
-        success = AmneziaAPIResult(True, AmneziaClientCreateResponse(
-            id="1", config="vpn", protocol="awg"
-        ), None, 200, False, False)
-        failure = AmneziaAPIResult(False, None, AmneziaErrorKind.TIMEOUT,
-                                   None, False, True)
-        with patch.object(self.client, "create_user_result", new=AsyncMock(
-            side_effect=[success, failure]
-        )):
-            self.assertIsInstance(await self.client.create_user("alice"),
-                                  AmneziaClientCreateResponse)
+        success = AmneziaAPIResult(
+            True,
+            AmneziaClientCreateResponse(id="1", config="vpn", protocol="awg"),
+            None,
+            200,
+            False,
+            False,
+        )
+        failure = AmneziaAPIResult(
+            False, None, AmneziaErrorKind.TIMEOUT, None, False, True
+        )
+        with patch.object(
+            self.client,
+            "create_user_result",
+            new=AsyncMock(side_effect=[success, failure]),
+        ):
+            self.assertIsInstance(
+                await self.client.create_user("alice"), AmneziaClientCreateResponse
+            )
             self.assertIsNone(await self.client.create_user("alice"))
-        with patch.object(self.client, "update_client_result", new=AsyncMock(
-            side_effect=[module.AmneziaClient._success(), failure]
-        )):
+        with patch.object(
+            self.client,
+            "update_client_result",
+            new=AsyncMock(side_effect=[module.AmneziaClient._success(), failure]),
+        ):
             self.assertTrue(await self.client.update_client("1"))
             self.assertFalse(await self.client.update_client("1"))
         self.use_session(FakeResponse(404))
@@ -279,9 +300,7 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.ok)
 
     async def test_create_body_timeout_is_ambiguous_and_not_retried(self):
-        session = self.use_session(
-            FakeResponse(200, json_error=asyncio.TimeoutError())
-        )
+        session = self.use_session(FakeResponse(200, json_error=asyncio.TimeoutError()))
         result = await self.client.create_user_result("alice")
         self.assertEqual(session.request.call_count, 1)
         self.assertEqual(result.error_kind, AmneziaErrorKind.TIMEOUT)
@@ -301,13 +320,15 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_idempotent_write_body_client_error_retries(self):
         attempts = module.API_RETRY_COUNT + 1
-        session = self.use_session(*(
-            FakeResponse(
-                200,
-                json_error=aiohttp.ClientPayloadError("truncated"),
+        session = self.use_session(
+            *(
+                FakeResponse(
+                    200,
+                    json_error=aiohttp.ClientPayloadError("truncated"),
+                )
+                for _ in range(attempts)
             )
-            for _ in range(attempts)
-        ))
+        )
         result = await self.client.update_client_result("peer-1", status="active")
         self.assertEqual(session.request.call_count, attempts)
         self.assertEqual(result.error_kind, AmneziaErrorKind.NETWORK_ERROR)

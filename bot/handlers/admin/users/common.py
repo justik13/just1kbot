@@ -79,9 +79,7 @@ def _format_time_left(subscription_end) -> str:
 
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
     result = await session.execute(
-        select(Tariff)
-        .where(Tariff.is_active == True)
-        .order_by(Tariff.device_limit)
+        select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.device_limit)
     )
 
     return list(result.scalars().all())
@@ -149,30 +147,22 @@ async def _build_users_list_text_and_kb(
         for user in users:
             status = (
                 "🟢"
-                if user.subscription_end
-                and user.subscription_end > current_time
+                if user.subscription_end and user.subscription_end > current_time
                 else "🔴"
             )
 
             ban = "🚫" if user.is_banned else ""
 
             username = (
-                f"@{user.username}"
-                if user.username
-                else f"ID:{user.telegram_id}"
+                f"@{user.username}" if user.username else f"ID:{user.telegram_id}"
             )
 
             days = format_days_left(user.subscription_end)
 
-            profiles_count = (
-                len(user.profiles)
-                if user.profiles
-                else 0
-            )
+            profiles_count = len(user.profiles) if user.profiles else 0
 
             button_text = truncate_button_text(
-                f"{status}{ban} {username} · "
-                f"{days} · {profiles_count} устр."
+                f"{status}{ban} {username} · {days} · {profiles_count} устр."
             )
 
             builder.button(

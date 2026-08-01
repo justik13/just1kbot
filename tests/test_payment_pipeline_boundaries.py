@@ -77,7 +77,7 @@ class PaymentBoundaries(unittest.TestCase):
                             and isinstance(node.args[0], ast.Dict)
                         ):
                             for key, value in zip(
-                                node.args[0].keys, node.args[0].values
+                                node.args[0].keys, node.args[0].values, strict=False
                             ):
                                 if (
                                     isinstance(key, ast.Constant)
@@ -88,7 +88,6 @@ class PaymentBoundaries(unittest.TestCase):
                                     self.fail(str(path))
 
     def test_payment_context_has_no_direct_legacy_effects(self):
-        allowed = ROOT / "services/payment_fulfillment.py"
         for path in list((ROOT / "services/payment_service").rglob("*.py")) + [
             ROOT / "services/workers/payments.py",
             ROOT / "bot/handlers/webhook.py",

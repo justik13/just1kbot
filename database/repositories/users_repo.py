@@ -9,25 +9,42 @@ from database.models import User
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
-    "username", "first_name", "subscription_end", "device_limit",
-    "current_tariff_id", "is_banned", "is_bot_blocked",
-    "referred_by", "referral_days", "device_creations_today",
-    "last_creation_date", "last_payment_at", "notified_3d", "notified_1d",
-    "notified_2h", "notified_expired", "notified_grace_12h",
-    "notification_retry_count", "last_notification_attempt",
+    "username",
+    "first_name",
+    "subscription_end",
+    "device_limit",
+    "current_tariff_id",
+    "is_banned",
+    "is_bot_blocked",
+    "referred_by",
+    "referral_days",
+    "device_creations_today",
+    "last_creation_date",
+    "last_payment_at",
+    "notified_3d",
+    "notified_1d",
+    "notified_2h",
+    "notified_expired",
+    "notified_grace_12h",
+    "notification_retry_count",
+    "last_notification_attempt",
 }
 
 
-async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Optional[User]:
+async def get_user_by_telegram_id(
+    session: AsyncSession, telegram_id: int
+) -> Optional[User]:
     stmt = select(User).where(
         User.telegram_id == telegram_id,
-        User.is_deleted == False,
+        User.is_deleted.is_(False),
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 
-async def get_user_by_telegram_id_any(session: AsyncSession, telegram_id: int) -> Optional[User]:
+async def get_user_by_telegram_id_any(
+    session: AsyncSession, telegram_id: int
+) -> Optional[User]:
     """
     Ищет пользователя включая soft-deleted.
     Используется для безопасного восстановления и предотвращения unique constraint.
@@ -75,6 +92,7 @@ async def extend_subscription(session: AsyncSession, user: User, days: int) -> U
 
     if days >= 36500:
         from bot.constants import PERMANENT_END_DATE
+
         new_end = PERMANENT_END_DATE
     else:
         new_end = current_end + timedelta(days=days)
@@ -83,7 +101,7 @@ async def extend_subscription(session: AsyncSession, user: User, days: int) -> U
 
 
 async def get_user_count(session: AsyncSession) -> int:
-    stmt = select(func.count(User.id)).where(User.is_deleted == False)
+    stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
     result = await session.execute(stmt)
     return result.scalar_one()
 
@@ -91,7 +109,8 @@ async def get_user_count(session: AsyncSession) -> int:
 async def get_active_subscriptions_count(session: AsyncSession) -> int:
     now = now_utc()
     stmt = select(func.count(User.id)).where(
-        User.subscription_end > now, User.is_deleted == False,
+        User.subscription_end > now,
+        User.is_deleted.is_(False),
     )
     result = await session.execute(stmt)
     return result.scalar_one()
@@ -100,7 +119,8 @@ async def get_active_subscriptions_count(session: AsyncSession) -> int:
 async def get_new_users_count_24h(session: AsyncSession) -> int:
     now = now_utc()
     stmt = select(func.count(User.id)).where(
-        User.created_at > now - timedelta(hours=24), User.is_deleted == False,
+        User.created_at > now - timedelta(hours=24),
+        User.is_deleted.is_(False),
     )
     result = await session.execute(stmt)
     return result.scalar_one()
@@ -111,26 +131,36 @@ async def get_dashboard_stats(session: AsyncSession) -> dict:
     stmt = select(
         func.count(User.id).label("total"),
         func.count(User.id).filter(User.subscription_end > now).label("active"),
-        func.count(User.id).filter(User.created_at > now - timedelta(hours=24)).label("new_24h"),
-    ).where(User.is_deleted == False)
+        func.count(User.id)
+        .filter(User.created_at > now - timedelta(hours=24))
+        .label("new_24h"),
+    ).where(User.is_deleted.is_(False))
     result = await session.execute(stmt)
     row = result.one()
     return {"total": row.total, "active": row.active, "new_24h": row.new_24h}
 
 
-async def get_users_paginated(session: AsyncSession, page: int = 1, per_page: int = 10) -> list[User]:
+async def get_users_paginated(
+    session: AsyncSession, page: int = 1, per_page: int = 10
+) -> list[User]:
     offset = (page - 1) * per_page
     result = await session.execute(
-        select(User).where(User.is_deleted == False).order_by(User.created_at.desc()).offset(offset).limit(per_page)
+        select(User)
+        .where(User.is_deleted.is_(False))
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
     )
     return result.scalars().all()
 
 
-async def get_users_paginated_with_profiles(session: AsyncSession, page: int = 1, per_page: int = 10) -> list[User]:
+async def get_users_paginated_with_profiles(
+    session: AsyncSession, page: int = 1, per_page: int = 10
+) -> list[User]:
     offset = (page - 1) * per_page
     stmt = (
         select(User)
-        .where(User.is_deleted == False)
+        .where(User.is_deleted.is_(False))
         .options(selectinload(User.profiles))
         .order_by(User.created_at.desc())
         .offset(offset)
@@ -141,13 +171,23 @@ async def get_users_paginated_with_profiles(session: AsyncSession, page: int = 1
 
 
 async def get_user_referrals(session: AsyncSession, telegram_id: int) -> list[User]:
-    stmt = select(User).where(User.referred_by == telegram_id, User.is_deleted == False).order_by(User.created_at.desc())
+    stmt = (
+        select(User)
+        .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
+        .order_by(User.created_at.desc())
+    )
     result = await session.execute(stmt)
     return result.scalars().all()
 
 
-async def get_user_with_referrals(session: AsyncSession, telegram_id: int) -> tuple[Optional[User], list[User]]:
-    stmt = select(User).options(selectinload(User.profiles)).where(User.telegram_id == telegram_id, User.is_deleted == False)
+async def get_user_with_referrals(
+    session: AsyncSession, telegram_id: int
+) -> tuple[Optional[User], list[User]]:
+    stmt = (
+        select(User)
+        .options(selectinload(User.profiles))
+        .where(User.telegram_id == telegram_id, User.is_deleted.is_(False))
+    )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
     referrals: list[User] = []
@@ -165,13 +205,17 @@ async def mark_user_bot_blocked(session: AsyncSession, telegram_id: int) -> None
 
 async def mark_user_bot_unblocked(session: AsyncSession, telegram_id: int) -> bool:
     result = await session.execute(
-        update(User).where(User.telegram_id == telegram_id, User.is_bot_blocked == True).values(is_bot_blocked=False)
+        update(User)
+        .where(User.telegram_id == telegram_id, User.is_bot_blocked.is_(True))
+        .values(is_bot_blocked=False)
     )
     await session.flush()
     return result.rowcount > 0
 
 
 async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
-    stmt = select(func.count(User.id)).where(User.current_tariff_id == tariff_id, User.is_deleted == False)
+    stmt = select(func.count(User.id)).where(
+        User.current_tariff_id == tariff_id, User.is_deleted.is_(False)
+    )
     result = await session.execute(stmt)
     return result.scalar_one() or 0
