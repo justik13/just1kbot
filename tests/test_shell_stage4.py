@@ -74,6 +74,7 @@ class ShellStage4Tests(unittest.TestCase):
             "systemctl enable --runtime",
             "systemctl mask --runtime",
             "unsupported_file_type=true",
+            "unit_stop_confirmed=false",
         ):
             self.assertIn(marker, self.operational)
 
@@ -181,6 +182,10 @@ fi
             systemctl.write_text(
                 "#!/bin/bash\n"
                 "printf '%s\\n' \"$*\" >> \"$CALLS\"\n"
+                "if [[ \"$1\" == is-active ]]; then\n"
+                "  echo inactive\n"
+                "  exit 3\n"
+                "fi\n"
                 "exit 0\n",
                 encoding="utf-8",
             )
