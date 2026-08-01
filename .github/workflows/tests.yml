@@ -48,6 +48,7 @@ jobs:
           set -Eeuo pipefail
           ruff --version | tee /tmp/ruff-version.txt
           python scripts/audit_human_factor_fix.py
+          python scripts/audit_remaining_fix.py
           ruff check \
             bot config database services utils alembic tests scripts \
             --select E401,E701,E702,E703,E731 \
