@@ -61,11 +61,12 @@ run_locked_script() {
 }
 
 usage() {
-    cat <<'EOF'
+    cat <<'EOF_USAGE'
 Just1kBot — управление сервером
 
 Использование:
   sudo bash deploy.sh
+  sudo bash deploy.sh update [--check] [--yes] [--dry-run]
   sudo bash deploy.sh deploy [--yes] [--dry-run]
   sudo bash deploy.sh status
   sudo bash deploy.sh logs
@@ -77,13 +78,20 @@ Just1kBot — управление сервером
   sudo bash deploy.sh uninstall
   bash deploy.sh help
 
+Рекомендуемое обновление production:
+  sudo bash /opt/just1kbot/deploy.sh update
+
+Команда update скачивает только main из фиксированного GitHub repository в
+отдельный root-only release-каталог и запускает transactional deploy. Команда
+deploy предназначена для ручного запуска из уже подготовленного checkout.
+
 Совместимость со старыми командами:
   sudo bash deploy.sh --status
   sudo bash deploy.sh --logs
   sudo bash deploy.sh --restart
   sudo bash deploy.sh --backup
   sudo AGE_IDENTITY_FILE=/path/key bash deploy.sh --restore /path/backup.tar.age
-EOF
+EOF_USAGE
 }
 
 dispatch() {
@@ -91,6 +99,11 @@ dispatch() {
     shift || true
 
     case "$command" in
+        update)
+            # Fetching is non-mutating for production. The downloaded release
+            # acquires the deploy lock immediately before production changes.
+            run_script update_from_github.sh "$@"
+            ;;
         deploy)
             run_script deploy.sh "$@"
             ;;
@@ -148,53 +161,57 @@ interactive_menu() {
     local choice
 
     while true; do
-        cat <<'EOF'
+        cat <<'EOF_MENU'
 
 Just1kBot — управление сервером
 
-1. Установить или обновить бота
-2. Проверить состояние
-3. Показать логи
-4. Перезапустить бота
-5. Создать backup
-6. Проверить backup
-7. Проверить восстановление в тестовой БД
-8. Настроить Amnezia API
-9. Удалить бота
+1. Обновить код из GitHub (main)
+2. Установить или обновить из текущего checkout
+3. Проверить состояние
+4. Показать логи
+5. Перезапустить бота
+6. Создать backup
+7. Проверить backup
+8. Проверить восстановление в тестовой БД
+9. Настроить Amnezia API
+10. Удалить бота
 0. Выход
-EOF
+EOF_MENU
         read -rp 'Выберите действие: ' choice
 
         case "$choice" in
             1)
-                dispatch deploy
+                dispatch update
                 ;;
             2)
-                dispatch status
+                dispatch deploy
                 ;;
             3)
-                dispatch logs
+                dispatch status
                 ;;
             4)
-                dispatch restart
+                dispatch logs
                 ;;
             5)
-                dispatch backup
+                dispatch restart
                 ;;
             6)
+                dispatch backup
+                ;;
+            7)
                 local verify_file
                 read -rp 'Путь к backup.tar.age: ' verify_file
                 dispatch verify-backup "$verify_file"
                 ;;
-            7)
+            8)
                 local restore_file
                 read -rp 'Путь к backup.tar.age: ' restore_file
                 dispatch restore-test "$restore_file"
                 ;;
-            8)
+            9)
                 dispatch amnezia
                 ;;
-            9)
+            10)
                 printf '\nВНИМАНИЕ: будет запущен destructive uninstall.\n'
                 dispatch uninstall
                 ;;
