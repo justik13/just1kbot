@@ -1,0 +1,426 @@
+diff --git a/scripts/deploy.sh b/scripts/deploy.sh
+index 4068257..1111111 100755
+--- a/scripts/deploy.sh
++++ b/scripts/deploy.sh
+@@ -32,6 +32,8 @@ unset DEPLOY_FUNCTIONS_ONLY
+ SOURCE_DIR="$ROOT_DIR"
+ RUNTIME_DIR="/run/just1kbot"
+ HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"
++BOT_HOME="/home/$BOT_USER"
++RECOVERY_INSTALL=false
+ 
+ # shellcheck source=lib/postgresql.sh
+ source "$POSTGRES_LIBRARY"
+@@ -47,6 +49,111 @@ clone_function install_backup_tooling legacy_install_backup_tooling
+ clone_function setup_firewall_initial legacy_setup_firewall_initial
+ clone_function show_status legacy_show_status
+ 
++determine_install_kind() {
++    if [[ -L "$UNIT_FILE" ]]; then
++        error "Systemd unit является symlink: $UNIT_FILE"
++        return 1
++    fi
++
++    if [[ ! -e "$ENV_FILE" && ! -L "$ENV_FILE" ]]; then
++        if [[ -e "$UNIT_FILE" ]]; then
++            error "Systemd unit существует, но production .env отсутствует"
++            error "Автоматическая первичная установка в противоречивом состоянии запрещена"
++            return 1
++        fi
++        INITIAL_INSTALL=true
++        RECOVERY_INSTALL=false
++        log "Режим: первичная установка"
++        return 0
++    fi
++
++    INITIAL_INSTALL=false
++    validate_env_file
++
++    if [[ -f "$UNIT_FILE" ]]; then
++        RECOVERY_INSTALL=false
++        log "Режим: безопасное обновление существующей установки"
++    else
++        RECOVERY_INSTALL=true
++        log "Режим: продолжение незавершённой установки"
++    fi
++}
++
++validate_installed_backup_tooling() {
++    local required
++    for required in \
++        /usr/local/bin/just1kbot-backup.sh \
++        /etc/systemd/system/just1kbot-backup.service \
++        "$BACKUP_CONF"; do
++        [[ -f "$required" && ! -L "$required" ]] || {
++            error "Установленная система не имеет безопасного backup-компонента: $required"
++            error "Обновление остановлено до snapshot, backup и миграций"
++            return 1
++        }
++    done
++
++    [[ -x /usr/local/bin/just1kbot-backup.sh ]] || {
++        error "Backup script не является исполняемым"
++        return 1
++    }
++
++    systemctl daemon-reload
++    systemctl cat just1kbot-backup.service >/dev/null 2>&1 || {
++        error "Systemd не видит just1kbot-backup.service"
++        return 1
++    }
++}
++
++create_encrypted_backup() {
++    local context=${1:-manual}
++    log "Создание encrypted PostgreSQL backup: context=$context"
++
++    validate_installed_backup_tooling || return 1
++
++    local deadline started latest
++    deadline=$(( $(date +%s) + 180 ))
++    while systemctl is-active --quiet just1kbot-backup.service; do
++        if (( $(date +%s) > deadline )); then
++            error "Предыдущий backup не завершился за 180 секунд"
++            return 1
++        fi
++        sleep 2
++    done
++
++    started=$(date +%s)
++    if ! systemctl start just1kbot-backup.service; then
++        error "Не удалось запустить just1kbot-backup.service"
++        journalctl -u just1kbot-backup.service -n 60 --no-pager >&2 2>/dev/null || true
++        return 1
++    fi
++
++    latest=$(find "$BACKUP_DIR" -maxdepth 1 -type f \
++        -name 'just1kbot-pg-v1-*.tar.age' -printf '%T@ %p\n' \
++        | sort -rn | head -1 | cut -d' ' -f2-)
++    if [[ -z "$latest" || ! -s "$latest" || ! -s "$latest.sha256" ]]; then
++        error "Backup service завершился без готового артефакта"
++        return 1
++    fi
++    if (( $(stat -c %Y "$latest") < started )); then
++        error "Не создан новый backup для текущей операции"
++        return 1
++    fi
++    log "Encrypted backup: $(basename "$latest")"
++}
++
+ validate_env_file_safety() {
+     if [[ -L "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
+         error "Production .env отсутствует, не является regular file или является symlink"
+@@ -117,14 +224,60 @@ ensure_env_permissions() {
+     validate_env_file
+ }
+ 
++ensure_service_account_home() {
++    local configured_home
++    configured_home=$(getent passwd "$BOT_USER" | cut -d: -f6) || {
++        error "Не удалось прочитать service account $BOT_USER"
++        return 1
++    }
++    [[ "$configured_home" == "$BOT_HOME" ]] || {
++        error "Неожиданный home service account: $configured_home"
++        return 1
++    }
++    [[ -d "$BOT_HOME" && ! -L "$BOT_HOME" ]] || {
++        error "Home service account отсутствует, не является directory или является symlink"
++        return 1
++    }
++
++    chown -R "$BOT_USER:$BOT_USER" "$BOT_HOME"
++    chmod 0750 "$BOT_HOME"
++    if find "$BOT_HOME" -xdev \( -type f -o -type d \) \
++        -perm /022 -print -quit | grep -q .; then
++        error "В home service account есть group/other-writable пути"
++        return 1
++    fi
++}
++
+ setup_user_and_dirs() {
+     if ! id "$BOT_USER" >/dev/null 2>&1; then
+-        useradd -r -m -s /bin/bash "$BOT_USER"
++        [[ ! -L "$BOT_HOME" ]] || {
++            error "Home service account является symlink"
++            return 1
++        }
++        if [[ -e "$BOT_HOME" ]]; then
++            [[ -d "$BOT_HOME" ]] || {
++                error "Home service account существует и не является directory"
++                return 1
++            }
++            useradd -r -M -d "$BOT_HOME" -s /bin/bash "$BOT_USER"
++        else
++            useradd -r -m -d "$BOT_HOME" -s /bin/bash "$BOT_USER"
++        fi
+     fi
++    ensure_service_account_home || return 1
+ 
+     # The service may read the release but must never be able to rewrite code,
+     # the virtualenv, deploy scripts, or .env.
+     install -d -o root -g "$BOT_USER" -m 0750 "$PROJECT_DIR"
+     install -d -o root -g root -m 0700 "$BACKUP_DIR" "$SNAPSHOT_DIR"
+     install -d -o "$BOT_USER" -g "$BOT_USER" -m 0750 \
+         /var/log/just1kbot "$RUNTIME_DIR"
++    install -d -o "$BOT_USER" -g "$BOT_USER" -m 0700 \
++        "$RUNTIME_DIR/.postgresql"
+ }
+ 
+ preflight_initial_database_without_env() {
+@@ -168,6 +321,52 @@ SQL
+     log "Существующая database $PG_DATABASE пуста; первичная установка разрешена"
+ }
+ 
++validate_recovery_install_state() {
++    [[ "$RECOVERY_INSTALL" == true ]] || return 0
++
++    pg_database_exists || {
++        error "Production .env существует, systemd unit отсутствует, но database $PG_DATABASE не найдена"
++        return 1
++    }
++
++    local nonempty
++    nonempty=$(
++        runuser -u postgres -- \
++            psql -X -A -t -q -v ON_ERROR_STOP=1 \
++            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d "$PG_DATABASE" <<'SQL'
++SELECT format(
++    'SELECT %L WHERE EXISTS (SELECT 1 FROM %I.%I LIMIT 1);',
++    n.nspname || '.' || c.relname,
++    n.nspname,
++    c.relname
++)
++FROM pg_class AS c
++JOIN pg_namespace AS n ON n.oid = c.relnamespace
++WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
++  AND n.nspname !~ '^pg_toast'
++  AND c.relkind IN ('r', 'p')
++  AND NOT (n.nspname = 'public' AND c.relname = 'alembic_version')
++ORDER BY n.nspname, c.relname
++\gexec
++SQL
++    ) || {
++        error "Не удалось проверить данные незавершённой установки"
++        return 1
++    }
++
++    if grep -q '[^[:space:]]' <<< "$nonempty"; then
++        error "Незавершённая установка содержит application data"
++        error "Автоматически пропускать pre-migration backup запрещено"
++        printf '%s\n' "$nonempty" >&2
++        return 1
++    fi
++
++    log "Незавершённая установка не содержит application data; разрешено безопасное продолжение без pre-migration backup"
++}
++
+ create_env_if_missing() {
+     if [[ -e "$ENV_FILE" || -L "$ENV_FILE" ]]; then
+         validate_env_file
+@@ -292,6 +491,32 @@ harden_live_tree() {
+         error "В live release остались group/other-writable пути"
+         return 1
+     fi
++
++    validate_service_runtime_access
++}
++
++validate_service_runtime_access() {
++    [[ -x "$VENV_DIR/bin/python" ]] || {
++        error "Python virtualenv отсутствует или не исполняемый"
++        return 1
++    }
++    runuser -u "$BOT_USER" -- test -x "$VENV_DIR/bin/python" || {
++        error "Service user не может выполнить virtualenv Python; проверьте права каталогов"
++        return 1
++    }
++    runuser -u "$BOT_USER" -- test -r "$ENV_FILE" || {
++        error "Service user не может прочитать production .env"
++        return 1
++    }
++    runuser -u "$BOT_USER" -- \
++        env HOME="$RUNTIME_DIR" "$VENV_DIR/bin/python" - <<'PY'
++from pathlib import Path
++
++expected = Path("/run/just1kbot")
++if Path.home() != expected:
++    raise SystemExit(f"unexpected service HOME: {Path.home()}")
++(expected / ".postgresql" / "postgresql.key").exists()
++PY
+ }
+ 
+ init_database() {
+     log "Применение Alembic migrations"
+     runuser -u "$BOT_USER" -- \
+-        env PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
++        env HOME="$RUNTIME_DIR" PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
+         bash -c "cd '$PROJECT_DIR' && '$VENV_DIR/bin/alembic' upgrade head" \
+         2>> "$LOG_FILE"
+ }
+@@ -351,6 +576,7 @@ Type=simple
+ User=${BOT_USER}
+ Group=${BOT_USER}
+ WorkingDirectory=${PROJECT_DIR}
++Environment=HOME=${RUNTIME_DIR}
+ Environment=PYTHONPATH=${PROJECT_DIR}
+ Environment=PYTHONUNBUFFERED=1
+ Environment=PYTHONDONTWRITEBYTECODE=1
+@@ -470,7 +696,7 @@ fi
+ cd "$PROJECT_DIR"
+ timeout --signal=TERM --kill-after=5s 25s \
+     runuser -u just1kbot -- \
+-    env PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
++    env HOME=/run/just1kbot PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
+     "$VENV_DIR/bin/python" - <<'PY'
+ import asyncio
+ 
+@@ -754,6 +980,13 @@ run_deploy() {
+         pg_repair_env_port
+         ensure_env_permissions
+ 
++        if [[ "$RECOVERY_INSTALL" == true ]]; then
++            validate_recovery_install_state
++        else
++            validate_installed_backup_tooling
++        fi
++
+         systemctl is-active --quiet redis-server || {
+             error "Redis не запущен"
+             return 1
+@@ -773,7 +1006,8 @@ run_deploy() {
+     MIGRATION_COMMAND=(init_database)
+     ACTIVATION_COMMAND=(activate_release_bundle)
+ 
+-    if [[ "$INITIAL_INSTALL" == true ]]; then
++    if [[ "$INITIAL_INSTALL" == true || "$RECOVERY_INSTALL" == true ]]; then
++        [[ "$RECOVERY_INSTALL" != true ]] || log "Recovery mode: pre-migration backup пропущен только после проверки отсутствия application data"
+         BACKUP_COMMAND=(pause_operational_timers)
+     else
+         BACKUP_COMMAND=(pause_and_create_pre_migration_backup)
+diff --git a/scripts/uninstall.sh b/scripts/uninstall.sh
+index 98132cd..2222222 100755
+--- a/scripts/uninstall.sh
++++ b/scripts/uninstall.sh
+@@ -4,6 +4,7 @@ IFS=$'\n\t'
+ umask 077
+ 
+ BOT_USER=just1kbot
++BOT_HOME=/home/just1kbot
+ PROJECT_DIR=/opt/just1kbot
+ BACKUP_DIR=/root/backups/just1kbot
+ BACKUP_CONF=/etc/just1kbot-backup.conf
+@@ -487,10 +488,42 @@ remove_installed(){
+     /var/log/just1kbot-rollback.log
+ }
+ 
++purge_service_account(){
++  local configured_home
++
++  [[ "$BOT_HOME" == /home/just1kbot && "$BOT_HOME" != *'..'* ]] ||
++    fail 'unsafe BOT_HOME'
++  [[ ! -L "$BOT_HOME" ]] || fail 'BOT_HOME is a symlink'
++
++  if id "$BOT_USER" >/dev/null 2>&1; then
++    configured_home=$(getent passwd "$BOT_USER" | cut -d: -f6) ||
++      fail 'failed to read service account'
++    [[ "$configured_home" == "$BOT_HOME" ]] ||
++      fail "unexpected service account home: $configured_home"
++    userdel "$BOT_USER" || fail 'failed to delete service account'
++  fi
++
++  if [[ -e "$BOT_HOME" ]]; then
++    [[ -d "$BOT_HOME" ]] || fail 'BOT_HOME exists and is not a directory'
++    [[ "$(realpath -m -- "$BOT_HOME")" == /home/just1kbot ]] ||
++      fail 'canonical BOT_HOME mismatch'
++    rm -rf --one-file-system -- "$BOT_HOME"
++  fi
++
++  [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] ||
++    fail 'service account home still exists after purge'
++  ! id "$BOT_USER" >/dev/null 2>&1 ||
++    fail 'service account still exists after purge'
++}
++
+ purge_saved(){
+   rm -rf -- "$BACKUP_DIR" "$SNAPSHOT_DIR"
+   rm -f -- "$BACKUP_CONF" "$AGE_IDENTITY_DEFAULT"
+-  id "$BOT_USER" >/dev/null 2>&1 && userdel "$BOT_USER"
++  purge_service_account
+ }
+ 
+ main(){
+diff --git a/tests/test_install_recovery_hotfix.py b/tests/test_install_recovery_hotfix.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/tests/test_install_recovery_hotfix.py
+@@ -0,0 +1,83 @@
++import pathlib
++import unittest
++
++
++ROOT = pathlib.Path(__file__).resolve().parents[1]
++DEPLOY = (ROOT / "scripts" / "deploy.sh").read_text(encoding="utf-8")
++UNINSTALL = (ROOT / "scripts" / "uninstall.sh").read_text(encoding="utf-8")
++
++
++class IncompleteInstallRecoveryTests(unittest.TestCase):
++    def test_install_state_uses_env_and_service_unit(self):
++        self.assertIn("RECOVERY_INSTALL=false", DEPLOY)
++        self.assertIn("продолжение незавершённой установки", DEPLOY)
++        self.assertIn('if [[ -f "$UNIT_FILE" ]]', DEPLOY)
++        self.assertIn("Systemd unit существует, но production .env отсутствует", DEPLOY)
++
++    def test_recovery_requires_empty_application_tables(self):
++        self.assertIn("validate_recovery_install_state", DEPLOY)
++        self.assertIn("c.relname = 'alembic_version'", DEPLOY)
++        self.assertIn("Незавершённая установка содержит application data", DEPLOY)
++
++        run_deploy = DEPLOY[DEPLOY.index("run_deploy() {") :]
++        self.assertLess(
++            run_deploy.index("validate_recovery_install_state"),
++            run_deploy.index("configure_operational_transaction"),
++        )
++        self.assertIn(
++            '[[ "$INITIAL_INSTALL" == true || "$RECOVERY_INSTALL" == true ]]',
++            run_deploy,
++        )
++
++    def test_established_update_fails_before_backup_when_tooling_is_missing(self):
++        self.assertIn("validate_installed_backup_tooling", DEPLOY)
++        self.assertIn("Обновление остановлено до snapshot, backup и миграций", DEPLOY)
++        self.assertIn('if ! systemctl start just1kbot-backup.service; then', DEPLOY)
++        self.assertIn("Не удалось запустить just1kbot-backup.service", DEPLOY)
++
++    def test_service_runtime_access_and_home_are_explicit(self):
++        for marker in (
++            'BOT_HOME="/home/$BOT_USER"',
++            "ensure_service_account_home",
++            'useradd -r -M -d "$BOT_HOME"',
++            'runuser -u "$BOT_USER" -- test -x "$VENV_DIR/bin/python"',
++            'env HOME="$RUNTIME_DIR" "$VENV_DIR/bin/python"',
++            "Environment=HOME=${RUNTIME_DIR}",
++            'env HOME="$RUNTIME_DIR" PYTHONPATH="$PROJECT_DIR"',
++            "env HOME=/run/just1kbot PYTHONPATH=\"$PROJECT_DIR\"",
++            "ProtectHome=true",
++        ):
++            self.assertIn(marker, DEPLOY)
++
++    def test_full_purge_removes_exact_service_home(self):
++        for marker in (
++            "BOT_HOME=/home/just1kbot",
++            "purge_service_account",
++            '[[ "$configured_home" == "$BOT_HOME" ]]',
++            'rm -rf --one-file-system -- "$BOT_HOME"',
++            "service account home still exists after purge",
++        ):
++            self.assertIn(marker, UNINSTALL)
++
++        purge_saved = UNINSTALL[UNINSTALL.index("purge_saved(){") :]
++        self.assertIn("purge_service_account", purge_saved)
++        self.assertNotIn('userdel "$BOT_USER"\n}', purge_saved)
++
++
++if __name__ == "__main__":
++    unittest.main()
