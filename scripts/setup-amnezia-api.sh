@@ -7,7 +7,8 @@ LOCAL_URL=http://127.0.0.1:4001
 STATE=/etc/just1kbot-amnezia.conf
 RATE=/etc/nginx/conf.d/just1kbot-amnezia-rate-limit.conf
 ACME=/var/www/just1kbot-certbot
-LOCK=/run/lock/just1kbot-amnezia.lock
+OPERATION_LOCK=/run/lock/just1kbot-deploy.lock
+LOCAL_LOCK=/run/lock/just1kbot-amnezia.lock
 
 if (( $# == 0 )); then
   ACTION=menu
@@ -25,6 +26,7 @@ COMMITTED=false
 ADDED=false
 ADDED_HTTP=false
 REMOVED=false
+REMOVED_HTTP=false
 CERT_CREATED=false
 
 fail(){ printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
@@ -37,6 +39,7 @@ usage(){ cat <<'TXT'
 
 Без аргументов открывается интерактивное меню.
 Публичный reverse proxy создаётся только явным действием publish.
+Одновременно управляется только один публичный Amnezia API domain.
 TXT
 }
 
@@ -82,9 +85,11 @@ esac
   { usage >&2; exit 2; }
 [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
 
-install -d -m 0755 "$(dirname "$LOCK")"
-exec 200>"$LOCK"
-flock -n 200 || fail 'operation already running'
+install -d -o root -g root -m 0755 "$(dirname "$OPERATION_LOCK")"
+exec 199>"$OPERATION_LOCK"
+flock -n 199 || fail 'deploy/backup/restore/uninstall operation already running'
+exec 200>"$LOCAL_LOCK"
+flock -n 200 || fail 'Amnezia operation already running'
 
 norm(){
   DOMAIN_VALUE="$1" python3 - <<'PY'
@@ -114,8 +119,16 @@ paths(){
   ENABLED="/etc/nginx/sites-enabled/just1kbot-amnezia-$DOMAIN"
 }
 
+validate_state(){
+  [[ ! -e "$STATE" && ! -L "$STATE" ]] && return 0
+  [[ -f "$STATE" && ! -L "$STATE" ]] || fail 'Amnezia state is unsafe'
+  [[ $(stat -c '%u' "$STATE") == 0 && $(stat -c '%a' "$STATE") == 600 ]] ||
+    fail 'Amnezia state must be root-owned mode 0600'
+}
+
 state(){
-  [[ -f "$STATE" && ! -L "$STATE" ]] &&
+  validate_state
+  [[ -f "$STATE" ]] &&
     awk -F= -v key="$1" '$1==key{value=$2}END{print value}' "$STATE"
 }
 
@@ -123,7 +136,7 @@ backup_one(){
   local path=$1 name
   name=$(printf %s "$path" | sha256sum | awk '{print $1}')
   if [[ -e "$path" || -L "$path" ]]; then
-    cp -a "$path" "$TX/$name"
+    cp -a -- "$path" "$TX/$name"
   else
     name=-
   fi
@@ -141,45 +154,64 @@ begin(){
 
 rollback(){
   local rc=$? name path
-  [[ "$COMMITTED" == true || -z "$TX" || ! -f "$TX/list" ]] &&
-    return "$rc"
+  if [[ "$COMMITTED" != true && -n "$TX" && -f "$TX/list" ]]; then
+    while IFS=$'\t' read -r name path; do
+      rm -rf -- "$path"
+      [[ "$name" == - ]] || cp -a -- "$TX/$name" "$path"
+    done <"$TX/list"
 
-  while IFS=$'\t' read -r name path; do
-    rm -rf -- "$path"
-    [[ "$name" == - ]] || cp -a "$TX/$name" "$path"
-  done <"$TX/list"
+    [[ "$ADDED" == true ]] &&
+      ufw delete allow "$PORT/tcp" >/dev/null 2>&1 || true
+    [[ "$ADDED_HTTP" == true ]] &&
+      ufw delete allow 80/tcp >/dev/null 2>&1 || true
+    [[ "$REMOVED" == true ]] &&
+      ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+    [[ "$REMOVED_HTTP" == true ]] &&
+      ufw allow 80/tcp >/dev/null 2>&1 || true
 
-  [[ "$ADDED" == true ]] &&
-    ufw delete allow "$PORT/tcp" >/dev/null 2>&1 || true
-  [[ "$ADDED_HTTP" == true ]] &&
-    ufw delete allow 80/tcp >/dev/null 2>&1 || true
-  [[ "$REMOVED" == true ]] &&
-    ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+    if [[ "$CERT_CREATED" == true ]] &&
+      command -v certbot >/dev/null 2>&1; then
+      certbot delete --cert-name "$DOMAIN" \
+        --non-interactive >/dev/null 2>&1 || true
+    fi
 
-  if [[ "$CERT_CREATED" == true ]] &&
-    command -v certbot >/dev/null 2>&1; then
-    certbot delete --cert-name "$DOMAIN" \
-      --non-interactive >/dev/null 2>&1 || true
+    if command -v nginx >/dev/null 2>&1 &&
+      nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx || true
+    fi
   fi
-
-  if command -v nginx >/dev/null 2>&1 &&
-    nginx -t >/dev/null 2>&1; then
-    systemctl reload nginx || true
-  fi
+  [[ -z "$TX" ]] || rm -rf -- "$TX"
   return "$rc"
 }
-trap rollback EXIT INT TERM
+trap rollback EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+ufw_active(){
+  command -v ufw >/dev/null 2>&1 || return 1
+  ufw status | grep -q '^Status: active'
+}
+
+ufw_has_action(){
+  local port=$1 action=$2
+  ufw status | grep -Eq "^${port}/tcp([[:space:]]+[(]v6[)])?[[:space:]]+${action}([[:space:]]|$)"
+}
 
 firewall_add(){
-  command -v ufw >/dev/null 2>&1 || return 0
-  ufw status | grep -q '^Status: active' || return 0
+  ufw_active || return 0
 
-  if ! ufw status | grep -Eq '(^| )80/tcp( |$)'; then
+  if ufw_has_action 80 DENY; then
+    fail 'UFW explicitly denies 80/tcp; remove the deny rule before publish'
+  fi
+  if ufw_has_action "$PORT" DENY; then
+    fail "UFW explicitly denies $PORT/tcp; remove the deny rule before publish"
+  fi
+
+  if ! ufw_has_action 80 ALLOW; then
     ufw allow 80/tcp >/dev/null
     ADDED_HTTP=true
   fi
-
-  if ! ufw status | grep -Eq "(^| )$PORT/tcp( |$)"; then
+  if ! ufw_has_action "$PORT" ALLOW; then
     ufw allow "$PORT/tcp" >/dev/null
     ADDED=true
   fi
@@ -239,6 +271,12 @@ publish(){
   [[ "$PORT" =~ ^[1-9][0-9]{0,4}$ ]] &&
     (( PORT<=65535 && PORT!=80 )) || fail 'invalid port'
 
+  validate_state
+  local managed_domain
+  managed_domain=$(state DOMAIN || true)
+  [[ -z "$managed_domain" || "$managed_domain" == "$DOMAIN" ]] ||
+    fail "another managed Amnezia domain is already published: $managed_domain"
+
   health
 
   DEBIAN_FRONTEND=noninteractive apt-get update -qq
@@ -291,6 +329,7 @@ publish(){
 
   COMMITTED=true
   rm -rf "$TX"
+  TX=
   printf 'Published: https://%s:%s\n' "$DOMAIN" "$PORT"
 }
 
@@ -299,13 +338,14 @@ unpublish(){
   paths
   begin
 
-  local saved_domain saved_port saved_ufw
+  local saved_domain saved_port saved_ufw saved_http
   saved_domain=$(state DOMAIN || true)
   saved_port=$(state PUBLIC_PORT || true)
   saved_ufw=$(state UFW_PUBLIC_ADDED || true)
+  saved_http=$(state UFW_HTTP_ADDED || true)
 
-  [[ -z "$saved_domain" || "$saved_domain" == "$DOMAIN" ]] ||
-    fail 'state domain mismatch'
+  [[ -n "$saved_domain" ]] || fail 'no managed Amnezia publication state exists'
+  [[ "$saved_domain" == "$DOMAIN" ]] || fail 'state domain mismatch'
 
   rm -f -- "$ENABLED" "$CONF"
 
@@ -323,6 +363,10 @@ unpublish(){
     ufw delete allow "$PORT/tcp" >/dev/null 2>&1 &&
       REMOVED=true || true
   fi
+  if [[ "$saved_http" == true ]]; then
+    ufw delete allow 80/tcp >/dev/null 2>&1 &&
+      REMOVED_HTTP=true || true
+  fi
 
   rm -f -- "$STATE"
 
@@ -334,6 +378,7 @@ unpublish(){
 
   COMMITTED=true
   rm -rf "$TX"
+  TX=
   printf 'Public proxy removed; local API remains at %s\n' "$LOCAL_URL"
 }
 
