@@ -9,6 +9,9 @@ BACKUP_DIR=/root/backups/just1kbot
 BACKUP_CONF=/etc/just1kbot-backup.conf
 AGE_IDENTITY_DEFAULT=/root/.config/just1kbot/backup.agekey
 SNAPSHOT_DIR=/var/lib/just1kbot/rollback-releases
+RESTORE_STATE_DIR=/var/lib/just1kbot/restore-transactions
+RESTORE_ACTIVE_STATE=$RESTORE_STATE_DIR/active.env
+RESTORE_JOURNAL_STATE=$RESTORE_STATE_DIR/cutover-journal.env
 LOCK_FILE=/run/lock/just1kbot-deploy.lock
 STATE_FILE=/etc/just1kbot-amnezia.conf
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -27,9 +30,12 @@ usage(){ cat <<'TXT'
 
 --keep-data  удаляет приложение, но сохраняет PostgreSQL data и encrypted backups;
              перед удалением создаёт и проверяет новый backup.
---purge-data удаляет приложение, database/role, Redis keys, backups и age identity;
+--purge-data удаляет приложение, все Just1kBot production/restore databases,
+             role, Redis keys, backups и age identity;
              требует точную фразу DELETE JUST1KBOT.
 
+При незавершённой restore-транзакции uninstall запрещён: сначала выполните
+restore recover, затем rollback или finalize.
 Глобальные пакеты PostgreSQL, Redis, Nginx, Certbot и Python не удаляются.
 TXT
 }
@@ -72,11 +78,24 @@ safe_path(){
     fail 'canonical PROJECT_DIR mismatch'
 }
 
+preflight_restore_state(){
+  [[ ! -L "$RESTORE_STATE_DIR" ]] || fail 'restore state directory is a symlink'
+  if [[ -e "$RESTORE_JOURNAL_STATE" || -L "$RESTORE_JOURNAL_STATE" ]]; then
+    fail 'interrupted production restore exists; run restore recover before uninstall'
+  fi
+  if [[ -e "$RESTORE_ACTIVE_STATE" || -L "$RESTORE_ACTIVE_STATE" ]]; then
+    fail 'pending production restore exists; run rollback or finalize before uninstall'
+  fi
+}
+
 lock_all(){
   install -d -o root -g root -m 0755 "$(dirname "$LOCK_FILE")"
   exec 200>"$LOCK_FILE"
   flock -n 200 || fail 'deploy/backup/restore is already running'
   systemctl stop just1kbot-backup.timer 2>/dev/null || true
+  systemctl stop just1kbot-healthcheck.timer 2>/dev/null || true
+  ! systemctl is-active --quiet just1kbot-backup.timer 2>/dev/null || fail 'backup timer did not stop'
+  ! systemctl is-active --quiet just1kbot-healthcheck.timer 2>/dev/null || fail 'health timer did not stop'
   local end=$(( $(date +%s)+180 ))
   while systemctl is-active --quiet just1kbot-backup.service 2>/dev/null; do
     (( $(date +%s) <= end )) || fail 'active backup timeout'
@@ -175,26 +194,27 @@ redis_connection(){
 
   ENV_FILE_PATH="$PROJECT_DIR/.env" python3 - <<'PY'
 import os
+import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-values = []
+values = {}
+counts = {}
 for raw in Path(os.environ["ENV_FILE_PATH"]).read_text(encoding="utf-8").splitlines():
     line = raw.strip()
     if not line or line.startswith("#") or "=" not in line:
         continue
     key, value = line.split("=", 1)
-    if key.strip() != "REDIS_URL":
-        continue
+    key = key.strip()
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         value = value[1:-1]
-    values.append(value)
+    counts[key] = counts.get(key, 0) + 1
+    values[key] = value
 
-if len(values) != 1:
+if counts.get('REDIS_URL') != 1:
     raise SystemExit("expected exactly one REDIS_URL")
-
-parsed = urlsplit(values[0])
+parsed = urlsplit(values['REDIS_URL'])
 if parsed.scheme != "redis" or parsed.hostname not in {"127.0.0.1", "localhost"}:
     raise SystemExit("REDIS_URL must target local redis://")
 if parsed.username not in {None, ""}:
@@ -210,11 +230,15 @@ if not database_text.isdigit():
 database = int(database_text)
 if not (1 <= port <= 65535 and 0 <= database <= 15):
     raise SystemExit("Redis endpoint out of range")
+prefix = values.get('REDIS_KEY_PREFIX', 'just1kbot_bot:')
+if not re.fullmatch(r'[A-Za-z0-9:_-]{1,128}', prefix):
+    raise SystemExit('invalid REDIS_KEY_PREFIX')
 
 print(parsed.hostname)
 print(port)
 print(database)
 print(unquote(parsed.password or ""))
+print(prefix)
 PY
 }
 
@@ -223,21 +247,21 @@ purge_redis(){
 
   local -a connection
   mapfile -t connection < <(redis_connection)
-  (( ${#connection[@]} == 4 )) || fail 'failed to parse REDIS_URL'
+  (( ${#connection[@]} == 5 )) || fail 'failed to parse REDIS_URL'
 
   local host=${connection[0]} port=${connection[1]} database=${connection[2]}
-  local password=${connection[3]} output key deleted=0
+  local password=${connection[3]} prefix=${connection[4]} output key deleted=0
 
   if [[ -n "$password" ]]; then
     REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" PING |
       grep -qx PONG || fail 'Redis PING failed'
     output=$(REDISCLI_AUTH="$password" redis-cli -h "$host" -p "$port" -n "$database" \
-      --scan --pattern 'just1kbot_bot:*') || fail 'Redis scan failed'
+      --scan --pattern "${prefix}*") || fail 'Redis scan failed'
   else
     redis-cli -h "$host" -p "$port" -n "$database" PING |
       grep -qx PONG || fail 'Redis PING failed'
     output=$(redis-cli -h "$host" -p "$port" -n "$database" \
-      --scan --pattern 'just1kbot_bot:*') || fail 'Redis scan failed'
+      --scan --pattern "${prefix}*") || fail 'Redis scan failed'
   fi
 
   while IFS= read -r key; do
@@ -259,41 +283,75 @@ purge_db(){
   [[ -f "$PG_LIB" && ! -L "$PG_LIB" ]] || fail 'PostgreSQL library is missing'
   # shellcheck source=lib/postgresql.sh
   source "$PG_LIB"
-  pg_prepare update
+  pg_select_cluster
+  pg_start_cluster
 
-  runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_DATABASE" \
-    -c "SELECT pg_terminate_backend(pid)
-        FROM pg_stat_activity
-        WHERE datname=:'n' AND pid<>pg_backend_pid();" >/dev/null
+  local -a databases
+  local database
+  mapfile -t databases < <(
+    pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
+SELECT datname
+FROM pg_database
+WHERE datname = :'main_database'
+   OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$'
+ORDER BY datname;
+SQL
+  )
 
-  runuser -u postgres -- dropdb \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" \
-    --maintenance-db=postgres "$PG_DATABASE"
+  for database in "${databases[@]}"; do
+    [[ "$database" == "$PG_DATABASE" || "$database" =~ ^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$ ]] ||
+      fail "refusing to purge unexpected database: $database"
+    pg_admin_psql_on_port "$PG_PORT" -v database_name="$database" >/dev/null <<'SQL'
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'database_name'
+  AND pid <> pg_backend_pid();
+SQL
+    runuser -u postgres -- dropdb \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" \
+      --if-exists --maintenance-db=postgres "$database"
+  done
 
-  ! runuser -u postgres -- psql -XAtq \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_DATABASE" \
-    -c "SELECT 1 FROM pg_database WHERE datname=:'n';" |
-      grep -qx 1 || fail 'database still exists'
+  local remaining
+  remaining=$(pg_admin_psql_on_port "$PG_PORT" -v main_database="$PG_DATABASE" <<'SQL'
+SELECT count(*)
+FROM pg_database
+WHERE datname = :'main_database'
+   OR datname ~ '^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$';
+SQL
+  )
+  [[ "$remaining" == 0 ]] || fail 'one or more Just1kBot databases still exist'
 
-  runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_ROLE" -c 'DROP ROLE IF EXISTS :"n";' >/dev/null
-
-  ! runuser -u postgres -- psql -XAtq \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_ROLE" \
-    -c "SELECT 1 FROM pg_roles WHERE rolname=:'n';" |
-      grep -qx 1 || fail 'role still exists'
+  pg_admin_psql_on_port "$PG_PORT" -v role_name="$PG_ROLE" >/dev/null <<'SQL'
+DROP ROLE IF EXISTS :"role_name";
+SQL
+  local role_remaining
+  role_remaining=$(pg_admin_psql_on_port "$PG_PORT" -v role_name="$PG_ROLE" <<'SQL'
+SELECT count(*)
+FROM pg_roles
+WHERE rolname = :'role_name';
+SQL
+  )
+  [[ "$role_remaining" == 0 ]] || fail 'role still exists'
 }
 
 remove_installed(){
-  local p amnezia_domain webhook_domain
+  local p amnezia_domain amnezia_port amnezia_ufw amnezia_http webhook_domain
   amnezia_domain=$(
     [[ -f "$STATE_FILE" && ! -L "$STATE_FILE" ]] &&
       awk -F= '$1=="DOMAIN"{v=$2}END{print v}' "$STATE_FILE" || true
+  )
+  amnezia_port=$(
+    [[ -f "$STATE_FILE" && ! -L "$STATE_FILE" ]] &&
+      awk -F= '$1=="PUBLIC_PORT"{v=$2}END{print v}' "$STATE_FILE" || true
+  )
+  amnezia_ufw=$(
+    [[ -f "$STATE_FILE" && ! -L "$STATE_FILE" ]] &&
+      awk -F= '$1=="UFW_PUBLIC_ADDED"{v=$2}END{print v}' "$STATE_FILE" || true
+  )
+  amnezia_http=$(
+    [[ -f "$STATE_FILE" && ! -L "$STATE_FILE" ]] &&
+      awk -F= '$1=="UFW_HTTP_ADDED"{v=$2}END{print v}' "$STATE_FILE" || true
   )
   webhook_domain=$(read_safe_domain) || fail 'unsafe DOMAIN in production .env'
 
@@ -336,6 +394,10 @@ remove_installed(){
   fi
 
   if command -v ufw >/dev/null 2>&1; then
+    [[ "$amnezia_ufw" == true && "$amnezia_port" =~ ^[1-9][0-9]{0,4}$ ]] &&
+      ufw delete allow "$amnezia_port/tcp" >/dev/null 2>&1 || true
+    [[ "$amnezia_http" == true ]] &&
+      ufw delete allow 80/tcp >/dev/null 2>&1 || true
     ufw delete deny 8080/tcp >/dev/null 2>&1 || true
     ufw delete deny 6379/tcp >/dev/null 2>&1 || true
     ufw delete deny 5432/tcp >/dev/null 2>&1 || true
@@ -364,6 +426,7 @@ main(){
   [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
   safe_path
   lock_all
+  preflight_restore_state
 
   if [[ "$MODE" == keep ]]; then
     backup_before_keep
