@@ -38,19 +38,60 @@ jobs:
       - run: python -m pip install -r requirements.txt
       - name: Install Python static analysis tools
         run: python -m pip install ruff
+      - name: Generate targeted static-audit candidate
+        run: |
+          set -Eeuo pipefail
+          ruff --version | tee /tmp/ruff-version.txt
+          ruff check \
+            bot config database services utils alembic tests \
+            --select E401,E701,E702,E703,E731 \
+            --output-format json > /tmp/format-issues.json || true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          issues = json.loads(Path("/tmp/format-issues.json").read_text())
+          paths = sorted({issue["filename"] for issue in issues})
+          Path("/tmp/format-files.txt").write_text(
+              "".join(f"{path}\n" for path in paths),
+              encoding="utf-8",
+          )
+          PY
+          ruff check \
+            bot config database services utils alembic tests \
+            --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
+            --fix --exit-zero
+          if [[ -s /tmp/format-files.txt ]]; then
+            xargs -d '\n' ruff format -- < /tmp/format-files.txt
+          fi
+          git diff --check
+          git diff --binary > /tmp/ruff-autofix.patch
+          git diff --name-only -z > /tmp/ruff-changed-files.z
+          if [[ -s /tmp/ruff-changed-files.z ]]; then
+            tar --null -czf /tmp/ruff-autofix-files.tar.gz \
+              -T /tmp/ruff-changed-files.z
+          else
+            tar -czf /tmp/ruff-autofix-files.tar.gz --files-from /dev/null
+          fi
       - name: Audit Python syntax, imports and common human errors
+        id: ruff_audit
+        continue-on-error: true
         run: |
           set -o pipefail
           ruff check \
             bot config database services utils alembic tests \
             --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
             --output-format full 2>&1 | tee /tmp/ruff.log
-      - name: Upload failing Ruff log
-        if: failure()
+      - name: Upload static-audit candidate and findings
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ruff-log-${{ github.sha }}
-          path: /tmp/ruff.log
+          name: ruff-audit-${{ github.sha }}
+          path: |
+            /tmp/ruff-version.txt
+            /tmp/ruff.log
+            /tmp/ruff-autofix.patch
+            /tmp/ruff-autofix-files.tar.gz
           if-no-files-found: error
           retention-days: 7
       - name: Install backup and shell tools
@@ -59,6 +100,7 @@ jobs:
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - run: alembic upgrade head
       - name: Run full test suite
+        id: unittests
         run: |
           set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log
@@ -66,7 +108,7 @@ jobs:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
       - name: Upload failing unittest log
-        if: failure()
+        if: steps.unittests.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: unittest-log-${{ github.sha }}
@@ -78,3 +120,6 @@ jobs:
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic tests
       - run: git diff --check
+      - name: Enforce static audit
+        if: always()
+        run: test "${{ steps.ruff_audit.outcome }}" = success
