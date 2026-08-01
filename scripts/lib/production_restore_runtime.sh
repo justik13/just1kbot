@@ -4,7 +4,7 @@ restore_staging_database() {
     timeout --foreground "$RESTORE_TIMEOUT" runuser -u postgres -- \
         pg_restore --exit-on-error --no-owner --no-acl --role="$LIVE_ROLE" \
         -h "$PG_SOCKET_DIR" -p "$PG_PORT" --dbname="$STAGING_DB" \
-        "$WORK_DIR/verified/dump.custom" >/dev/null
+        "$POSTGRES_WORK_DIR/dump.custom" >/dev/null
 
     local staging_url
     staging_url=$(make_database_url "$STAGING_DB")
@@ -327,7 +327,10 @@ cleanup_on_exit() {
         elif [[ "$CUTOVER_PHASE" == new_renamed || "$CUTOVER_PHASE" == complete ]]; then
             systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
             if database_exists "$LIVE_DATABASE" && database_exists "$ROLLBACK_DB"; then
-                database_rollback_to_previous "$FAILED_DB" || true
+                if database_rollback_to_previous "$FAILED_DB"; then
+                    CUTOVER_PHASE="rolled_back"
+                    write_active_state rolled_back "$FAILED_DB" || true
+                fi
             fi
         fi
         if [[ "$RUNTIME_PAUSED" == true && "$RUNTIME_RESTORED" != true ]]; then
@@ -336,11 +339,11 @@ cleanup_on_exit() {
             fi
             restore_runtime_without_start || true
         fi
-        if [[ -n "$STAGING_DB" && "$CUTOVER_PHASE" == none ]] && database_exists "$STAGING_DB"; then
+        if [[ -n "$STAGING_DB" && ( "$CUTOVER_PHASE" == none || "$CUTOVER_PHASE" == recovered_before_cutover ) ]] && database_exists "$STAGING_DB"; then
             admin_dropdb "$STAGING_DB" >/dev/null 2>&1 || true
         fi
     fi
+    [[ -z "$POSTGRES_WORK_DIR" ]] || rm -rf -- "$POSTGRES_WORK_DIR"
     [[ -z "$WORK_DIR" ]] || rm -rf -- "$WORK_DIR"
     exit "$rc"
 }
-

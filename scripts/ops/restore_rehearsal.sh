@@ -13,6 +13,8 @@ MAINTENANCE_DATABASE=${REHEARSAL_MAINTENANCE_DATABASE:-postgres}
 RESTORE_TIMEOUT=${REHEARSAL_RESTORE_TIMEOUT:-600}
 tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/just1kbot-rehearsal.XXXXXX")
 test_db=""
+postgres_work=""
+restore_dump=""
 work_result=failure
 cleanup_status=not-needed
 USE_POSTGRES_OS_USER=false
@@ -36,6 +38,7 @@ finish() {
     final_rc=$original_rc
     set +e
     rm -rf -- "$tmpdir"
+    [[ -z "$postgres_work" ]] || rm -rf -- "$postgres_work"
     if [[ -n "$test_db" ]]; then
         if [[ "$keep" == true ]]; then
             cleanup_status=kept
@@ -117,6 +120,15 @@ PY
 fi
 
 "$VERIFY_BACKUP" --extract-dir "$tmpdir/verified" "$artifact" >/dev/null
+restore_dump="$tmpdir/verified/dump.custom"
+if [[ "$USE_POSTGRES_OS_USER" == true ]]; then
+    [[ -d /var/lib/postgresql && ! -L /var/lib/postgresql ]] || { log_error 'unsafe PostgreSQL workspace parent'; exit 1; }
+    postgres_work=$(mktemp -d /var/lib/postgresql/just1kbot-rehearsal.XXXXXX)
+    chown postgres:postgres "$postgres_work"
+    chmod 0700 "$postgres_work"
+    install -o postgres -g postgres -m 0600 "$restore_dump" "$postgres_work/dump.custom"
+    restore_dump="$postgres_work/dump.custom"
+fi
 expected_revision=$(MANIFEST="$tmpdir/verified/manifest.json" python3 - <<'PY'
 import json, os
 print(json.load(open(os.environ['MANIFEST'], encoding='utf-8'))['alembic_revision'])
@@ -130,11 +142,11 @@ if [[ "$USE_POSTGRES_OS_USER" == true ]]; then
     timeout --foreground "$RESTORE_TIMEOUT" runuser -u postgres -- \
         env PGHOST="$PGHOST" PGPORT="$PGPORT" \
         pg_restore --exit-on-error --no-owner --no-acl --dbname="$test_db" \
-        "$tmpdir/verified/dump.custom" >/dev/null
+        "$restore_dump" >/dev/null
 else
     timeout --foreground "$RESTORE_TIMEOUT" \
         pg_restore --exit-on-error --no-owner --no-acl --dbname="$test_db" \
-        "$tmpdir/verified/dump.custom" >/dev/null
+        "$restore_dump" >/dev/null
 fi
 
 [[ $(sql "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='alembic_version'") == 1 ]] || {

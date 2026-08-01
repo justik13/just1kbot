@@ -243,6 +243,13 @@ extract_and_verify_backup() {
     chmod 0700 "$WORK_DIR"
     "$VERIFY_BACKUP" --extract-dir "$WORK_DIR/verified" "$ARTIFACT" >/dev/null
 
+    [[ -d /var/lib/postgresql && ! -L /var/lib/postgresql ]] || fail 'PostgreSQL private workspace parent is missing or unsafe'
+    POSTGRES_WORK_DIR=$(mktemp -d /var/lib/postgresql/just1kbot-production-restore.XXXXXX)
+    chown postgres:postgres "$POSTGRES_WORK_DIR"
+    chmod 0700 "$POSTGRES_WORK_DIR"
+    install -o postgres -g postgres -m 0600 \
+        "$WORK_DIR/verified/dump.custom" "$POSTGRES_WORK_DIR/dump.custom"
+
     ARTIFACT_SHA256=$(sha256sum "$ARTIFACT" | awk '{print $1}')
     is_sha256 "$ARTIFACT_SHA256" || fail 'artifact SHA-256 has an invalid format'
 

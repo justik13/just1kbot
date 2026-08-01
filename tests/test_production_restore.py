@@ -80,6 +80,18 @@ class ProductionRestoreContractTests(unittest.TestCase):
         self.assertIn('admin_dropdb "$preserved"', self.restore)
         self.assertIn('[[ "$preserved" != "$LIVE_DATABASE" ]]', self.restore)
 
+    def test_dump_is_copied_to_postgres_private_workspace(self):
+        for marker in (
+            "POSTGRES_WORK_DIR=$(mktemp -d /var/lib/postgresql/just1kbot-production-restore.",
+            'chown postgres:postgres "$POSTGRES_WORK_DIR"',
+            'install -o postgres -g postgres -m 0600',
+            '"$POSTGRES_WORK_DIR/dump.custom"',
+        ):
+            self.assertIn(marker, self.restore)
+        rehearsal = (ROOT / "scripts" / "ops" / "restore_rehearsal.sh").read_text(encoding="utf-8")
+        self.assertIn("/var/lib/postgresql/just1kbot-rehearsal.", rehearsal)
+        self.assertIn('restore_dump="$postgres_work/dump.custom"', rehearsal)
+
     def test_verifier_extracts_config_only_to_private_extract_dir(self):
         self.assertIn('mkdir -m 700 "$extract_dir"', self.verify)
         self.assertIn('install -m 600 "$tmpdir/extracted/config.env" "$extract_dir/config.env"', self.verify)
