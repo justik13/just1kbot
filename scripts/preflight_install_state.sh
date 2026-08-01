@@ -178,7 +178,7 @@ prepare_backup_config() {
 
     if [[ -e "$BACKUP_CONF" || -L "$BACKUP_CONF" ]]; then
         require_regular_file "$BACKUP_CONF"
-        [[ "$(stat -c '%U:%G %a' "$BACKUP_CONF")" == 'root:root 600' ]] ||
+        [[ "$(stat --format='%U:%G %a' "$BACKUP_CONF")" == 'root:root 600' ]] ||
             fail 'существующий backup config должен быть root:root 0600'
         recipient=$(awk -F= '/^BACKUP_AGE_RECIPIENT=age1/ {value=$2} END {print value}' "$BACKUP_CONF")
         [[ "$recipient" == age1* ]] || fail 'существующий backup config не содержит валидный age recipient'
@@ -187,7 +187,7 @@ prepare_backup_config() {
 
     if [[ -e "$BACKUP_IDENTITY" || -L "$BACKUP_IDENTITY" ]]; then
         require_regular_file "$BACKUP_IDENTITY"
-        [[ "$(stat -c '%U:%G %a' "$BACKUP_IDENTITY")" == 'root:root 600' ]] ||
+        [[ "$(stat --format='%U:%G %a' "$BACKUP_IDENTITY")" == 'root:root 600' ]] ||
             fail 'существующий backup age identity должен быть root:root 0600'
     else
         age-keygen -o "$BACKUP_IDENTITY" >/dev/null
