@@ -10,6 +10,7 @@ class ShellStage2Tests(unittest.TestCase):
     def test_required_runtime_files_exist(self):
         required = [
             "deploy_full.sh",
+            "deploy_full_library.sh",
             "ops/deploy_application.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
