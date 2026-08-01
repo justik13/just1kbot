@@ -49,8 +49,10 @@ class GithubUpdateTests(unittest.TestCase):
         self.assertNotIn("--repository", self.updater)
         self.assertNotIn("--branch", self.updater)
 
-    def test_git_fetch_is_sanitized_and_commit_is_pinned(self):
+    def test_git_fetch_is_sanitized_bounded_and_commit_is_pinned(self):
         for marker in (
+            "readonly GIT_TIMEOUT_SECONDS=120",
+            'timeout --foreground "$GIT_TIMEOUT_SECONDS"',
             "env -i",
             "GIT_TERMINAL_PROMPT=0",
             "GIT_CONFIG_NOSYSTEM=1",
@@ -62,6 +64,18 @@ class GithubUpdateTests(unittest.TestCase):
             "FETCH_HEAD^{commit}",
             'checkout --quiet --detach --force "$TARGET_SHA"',
             "fsck --strict --no-dangling",
+        ):
+            self.assertIn(marker, self.updater)
+
+    def test_installed_sha_requires_trusted_metadata(self):
+        for marker in (
+            "source_repository=$REPOSITORY_URL",
+            "source_ref=$REPOSITORY_REF",
+            "source_commit=$TARGET_SHA",
+            "stat -c '%u'",
+            "(8#$mode & 8#022) == 0",
+            'grep -Fxq "source_repository=$REPOSITORY_URL"',
+            'grep -Fxq "source_ref=$REPOSITORY_REF"',
         ):
             self.assertIn(marker, self.updater)
 
