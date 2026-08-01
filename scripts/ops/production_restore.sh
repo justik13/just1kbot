@@ -68,13 +68,13 @@ log() { printf '[restore] %s\n' "$*"; }
 warn() { printf '[restore] WARNING: %s\n' "$*" >&2; }
 fail() { printf '[restore] ERROR: %s\n' "$*" >&2; return 1; }
 
-
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 RESTORE_LIBRARY_DIR=${RESTORE_LIBRARY_DIR:-$(cd -- "$SCRIPT_DIR/../lib" && pwd -P)}
 for library in \
     production_restore_core.sh \
     production_restore_runtime.sh \
     production_restore_actions.sh \
+    production_restore_input.sh \
     production_restore_crash.sh; do
     path="$RESTORE_LIBRARY_DIR/$library"
     [[ -f "$path" && ! -L "$path" ]] || {
