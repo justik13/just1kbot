@@ -11,6 +11,9 @@ AGE_IDENTITY_DEFAULT=/root/.config/just1kbot/backup.agekey
 SNAPSHOT_DIR=/var/lib/just1kbot/rollback-releases
 LOCK_FILE=/run/lock/just1kbot-deploy.lock
 STATE_FILE=/etc/just1kbot-amnezia.conf
+RESTORE_STATE_DIR=/var/lib/just1kbot/restore-transactions
+RESTORE_ACTIVE_STATE="$RESTORE_STATE_DIR/active.env"
+RESTORE_JOURNAL="$RESTORE_STATE_DIR/cutover-journal.env"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 PG_LIB="$SCRIPT_DIR/lib/postgresql.sh"
 MODE=
@@ -82,6 +85,13 @@ lock_all(){
     (( $(date +%s) <= end )) || fail 'active backup timeout'
     sleep 2
   done
+}
+
+assert_no_pending_restore(){
+  [[ ! -e "$RESTORE_ACTIVE_STATE" && ! -L "$RESTORE_ACTIVE_STATE" ]] ||
+    fail 'pending production restore exists; run restore-status then rollback or finalize'
+  [[ ! -e "$RESTORE_JOURNAL" && ! -L "$RESTORE_JOURNAL" ]] ||
+    fail 'interrupted production restore exists; run restore recover first'
 }
 
 latest_backup(){
@@ -261,32 +271,66 @@ purge_db(){
   source "$PG_LIB"
   pg_prepare update
 
+  local -a databases=()
+  mapfile -t databases < <(
+    runuser -u postgres -- psql -XAtq -v ON_ERROR_STOP=1 \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
+      -v production="$PG_DATABASE" <<'SQL'
+SELECT datname
+FROM pg_database
+WHERE datname = :'production'
+   OR datname ~ '^just1kbot_(rb|fail|stg)_[0-9]{14}_[0-9]+$'
+ORDER BY datname;
+SQL
+  )
+
+  local database
+  for database in "${databases[@]}"; do
+    [[ "$database" == "$PG_DATABASE" ||
+       "$database" =~ ^just1kbot_(rb|fail|stg)_[0-9]{14}_[0-9]+$ ]] ||
+      fail "refusing to drop unexpected database: $database"
+    runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
+      -v n="$database" >/dev/null <<'SQL'
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'n'
+  AND pid <> pg_backend_pid();
+SQL
+    runuser -u postgres -- dropdb \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" \
+      --maintenance-db=postgres "$database"
+  done
+
+  mapfile -t databases < <(
+    runuser -u postgres -- psql -XAtq -v ON_ERROR_STOP=1 \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
+      -v production="$PG_DATABASE" <<'SQL'
+SELECT datname
+FROM pg_database
+WHERE datname = :'production'
+   OR datname ~ '^just1kbot_(rb|fail|stg)_[0-9]{14}_[0-9]+$';
+SQL
+  )
+  (( ${#databases[@]} == 0 )) || fail 'one or more Just1kBot databases still exist'
+
   runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 \
     -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_DATABASE" \
-    -c "SELECT pg_terminate_backend(pid)
-        FROM pg_stat_activity
-        WHERE datname=:'n' AND pid<>pg_backend_pid();" >/dev/null
+    -v n="$PG_ROLE" >/dev/null <<'SQL'
+DROP ROLE IF EXISTS :"n";
+SQL
 
-  runuser -u postgres -- dropdb \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" \
-    --maintenance-db=postgres "$PG_DATABASE"
-
-  ! runuser -u postgres -- psql -XAtq \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_DATABASE" \
-    -c "SELECT 1 FROM pg_database WHERE datname=:'n';" |
-      grep -qx 1 || fail 'database still exists'
-
-  runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_ROLE" -c 'DROP ROLE IF EXISTS :"n";' >/dev/null
-
-  ! runuser -u postgres -- psql -XAtq \
-    -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-    -v n="$PG_ROLE" \
-    -c "SELECT 1 FROM pg_roles WHERE rolname=:'n';" |
-      grep -qx 1 || fail 'role still exists'
+  local role_exists
+  role_exists=$(
+    runuser -u postgres -- psql -XAtq -v ON_ERROR_STOP=1 \
+      -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
+      -v n="$PG_ROLE" <<'SQL'
+SELECT 1
+FROM pg_roles
+WHERE rolname = :'n';
+SQL
+  )
+  [[ -z "$role_exists" ]] || fail 'role still exists'
 }
 
 remove_installed(){
@@ -364,6 +408,7 @@ main(){
   [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
   safe_path
   lock_all
+  assert_no_pending_restore
 
   if [[ "$MODE" == keep ]]; then
     backup_before_keep

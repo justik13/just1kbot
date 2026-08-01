@@ -15,6 +15,7 @@ readonly LIVE_DIR='/opt/just1kbot'
 readonly RELEASE_METADATA='.release-version'
 readonly RELEASE_RETENTION=3
 readonly GIT_TIMEOUT_SECONDS=120
+readonly UPDATE_LOCK='/run/lock/just1kbot-update.lock'
 
 ASSUME_YES=false
 CHECK_ONLY=false
@@ -61,7 +62,9 @@ cleanup() {
     fi
     exit "$rc"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 is_valid_sha() {
     [[ ${1:-} =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]]
@@ -73,6 +76,33 @@ require_root() {
 
 require_command() {
     command -v "$1" >/dev/null 2>&1 || fail "не найдена обязательная команда: $1"
+}
+
+acquire_update_lock() {
+    install -d -o root -g root -m 0755 "$(dirname "$UPDATE_LOCK")"
+    exec 199>"$UPDATE_LOCK"
+    flock -n 199 || fail 'другая операция update уже выполняется'
+}
+
+fsync_path_and_parent() {
+    python3 - "$1" <<'PY_FSYNC'
+import os
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+flags = os.O_RDONLY | (os.O_DIRECTORY if path.is_dir() else 0)
+fd = os.open(path, flags)
+try:
+    os.fsync(fd)
+finally:
+    os.close(fd)
+parent_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+try:
+    os.fsync(parent_fd)
+finally:
+    os.close(parent_fd)
+PY_FSYNC
 }
 
 parse_args() {
@@ -271,6 +301,7 @@ harden_and_publish_release() {
     final="$RELEASE_ROOT/release-${stamp}-${TARGET_SHA:0:12}-$$"
     [[ ! -e "$final" && ! -L "$final" ]] || fail 'конфликт имени release directory'
     mv -- "$TEMP_RELEASE" "$final"
+    fsync_path_and_parent "$final"
     TEMP_RELEASE=''
     PUBLISHED_RELEASE=$final
 }
@@ -337,6 +368,7 @@ main() {
         require_command "$command"
     done
 
+    acquire_update_lock
     prepare_release_root
     read_current_sha
     fetch_release

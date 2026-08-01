@@ -30,8 +30,25 @@ finish() {
     fi
     exit "$rc"
 }
-trap finish EXIT INT TERM
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail() { printf 'backup error: %s\n' "$1" >&2; exit "${2:-1}"; }
+
+fsync_paths() {
+    python3 - "$@" <<'PY_FSYNC'
+import os
+import sys
+
+for raw in sys.argv[1:]:
+    flags = os.O_RDONLY | (os.O_DIRECTORY if os.path.isdir(raw) else 0)
+    fd = os.open(raw, flags)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+PY_FSYNC
+}
 for command in age pg_dump pg_restore psql flock sha256sum tar python3; do command -v "$command" >/dev/null || fail "required command is unavailable: $command"; done
 [[ ${BACKUP_AGE_RECIPIENT:-} == age1* ]] || fail 'BACKUP_AGE_RECIPIENT is missing or invalid' 2
 [[ "$REQUIRE_OFFSITE" == true || "$REQUIRE_OFFSITE" == false ]] || fail 'BACKUP_REQUIRE_OFFSITE must be true or false'
@@ -97,6 +114,7 @@ printf '%s  %s\n' "$checksum" "$name" >"$sidecar_partial"
 chmod 600 "$local_partial" "$sidecar_partial"
 mv -- "$sidecar_partial" "$final_sidecar"       # preparation
 mv -- "$local_partial" "$final"                 # commit marker, always last
+fsync_paths "$final_sidecar" "$final" "$BACKUP_DIR"
 local_committed=true
 
 publish_offsite() {
@@ -110,6 +128,7 @@ publish_offsite() {
     chmod 600 "$offsite_partial" "$offsite_sidecar_partial" || return 15
     mv -- "$offsite_sidecar_partial" "$offsite_sidecar" || return 16
     mv -- "$offsite_partial" "$offsite_final" || return 17
+    fsync_paths "$offsite_sidecar" "$offsite_final" "$OFFSITE_DIR" || return 18
     offsite_committed=true; offsite_status=success
 }
 

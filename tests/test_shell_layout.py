@@ -33,6 +33,8 @@ class ShellLayoutTests(unittest.TestCase):
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
             "lib/production_restore_crash.sh",
+            "lib/production_restore_input.sh",
+            "lib/production_restore_recovery.sh",
         }
         missing = sorted(name for name in required if not (SCRIPTS / name).is_file())
         self.assertEqual(missing, [])

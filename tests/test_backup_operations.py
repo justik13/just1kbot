@@ -28,7 +28,9 @@ class BackupOperationsContractTests(unittest.TestCase):
         self.assertIn("rm -rf -- \"$tmpdir\"", self.backup)
 
     def test_plaintext_config_is_cleaned_after_error(self):
-        self.assertIn("trap finish EXIT INT TERM", self.backup)
+        self.assertIn("trap finish EXIT", self.backup)
+        self.assertIn("trap 'exit 130' INT", self.backup)
+        self.assertIn("trap 'exit 143' TERM", self.backup)
 
     def test_dump_list_precedes_publication(self):
         self.assertLess(self.backup.index("pg_restore --list"), self.backup.index('mv -- "$local_partial" "$final"'))

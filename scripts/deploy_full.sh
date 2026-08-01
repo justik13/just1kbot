@@ -14,6 +14,13 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 027
 
+if [[ "${BASH_SOURCE[0]}" == "$0" &&
+      "${DEPLOY_FUNCTIONS_ONLY:-0}" != 1 &&
+      "${DEPLOY_TEST_MODE:-0}" != 1 ]]; then
+    printf 'Direct execution is forbidden; use repository deploy.sh.\n' >&2
+    exit 64
+fi
+
 BOT_USER="just1kbot"
 PROJECT_DIR="/opt/just1kbot"
 VENV_DIR="$PROJECT_DIR/venv"
@@ -58,7 +65,9 @@ cleanup_temp_files() {
         [[ -z "$path" ]] || rm -rf -- "$path" 2>/dev/null || true
     done
 }
-trap cleanup_temp_files EXIT INT TERM
+trap cleanup_temp_files EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 log() {
     local timestamp
@@ -1036,8 +1045,19 @@ EOF_HEALTH_TIMER
 }
 
 pause_operational_timers() {
-    systemctl stop just1kbot-healthcheck.timer 2>/dev/null || true
-    systemctl stop just1kbot-backup.timer 2>/dev/null || true
+    local unit
+    for unit in just1kbot-healthcheck.timer just1kbot-backup.timer; do
+        if systemctl cat "$unit" >/dev/null 2>&1; then
+            systemctl stop "$unit" || {
+                error "Не удалось остановить $unit"
+                return 1
+            }
+            if systemctl is-active --quiet "$unit"; then
+                error "$unit остался active после stop"
+                return 1
+            fi
+        fi
+    done
 
     local deadline=$(( $(date +%s) + 180 ))
     while systemctl is-active --quiet just1kbot-backup.service; do

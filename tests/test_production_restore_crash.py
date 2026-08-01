@@ -19,10 +19,14 @@ class ProductionRestoreCrashTests(unittest.TestCase):
         cls.actions = ACTIONS.read_text(encoding="utf-8")
 
     def test_crash_override_is_loaded_last_and_hardened(self):
-        self.assertIn("production_restore_crash.sh; do", self.engine)
+        self.assertIn("production_restore_recovery.sh; do", self.engine)
         self.assertLess(
             self.engine.index("production_restore_actions.sh"),
             self.engine.index("production_restore_crash.sh"),
+        )
+        self.assertLess(
+            self.engine.index("production_restore_crash.sh"),
+            self.engine.index("production_restore_recovery.sh"),
         )
         self.assertIn("unsafe library mode", self.engine)
         self.assertIn("library is not root-owned", self.engine)

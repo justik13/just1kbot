@@ -98,8 +98,11 @@ pg_database_exists_on_port() {
             psql -X -A -t -q -v ON_ERROR_STOP=1 \
             -v database_name="$PG_DATABASE" \
             -h "$PG_SOCKET_DIR" -p "$port" -d postgres \
-            -c "SELECT 1 FROM pg_database WHERE datname = :'database_name';" \
-            2>/dev/null
+            2>/dev/null <<'SQL'
+SELECT 1
+FROM pg_database
+WHERE datname = :'database_name';
+SQL
     ) || return 1
 
     [[ "$result" == 1 ]]
@@ -264,8 +267,11 @@ pg_role_exists() {
         runuser -u postgres -- \
             psql -X -A -t -q -v ON_ERROR_STOP=1 \
             -v role_name="$PG_ROLE" \
-            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "SELECT 1 FROM pg_roles WHERE rolname = :'role_name';"
+            -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres <<'SQL'
+SELECT 1
+FROM pg_roles
+WHERE rolname = :'role_name';
+SQL
     ) || return 1
     [[ "$result" == 1 ]]
 }
@@ -303,15 +309,17 @@ pg_prepare_initial_database() {
             psql -X -q -v ON_ERROR_STOP=1 \
             -v role_name="$PG_ROLE" -v role_password="$DB_PASSWORD" \
             -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "ALTER ROLE :\"role_name\" WITH LOGIN PASSWORD :'role_password';" \
-            >/dev/null
+            >/dev/null <<'SQL'
+ALTER ROLE :"role_name" WITH LOGIN PASSWORD :'role_password';
+SQL
     else
         runuser -u postgres -- \
             psql -X -q -v ON_ERROR_STOP=1 \
             -v role_name="$PG_ROLE" -v role_password="$DB_PASSWORD" \
             -h "$PG_SOCKET_DIR" -p "$PG_PORT" -d postgres \
-            -c "CREATE ROLE :\"role_name\" WITH LOGIN PASSWORD :'role_password';" \
-            >/dev/null
+            >/dev/null <<'SQL'
+CREATE ROLE :"role_name" WITH LOGIN PASSWORD :'role_password';
+SQL
     fi
 
     if pg_database_exists; then

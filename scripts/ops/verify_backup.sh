@@ -3,7 +3,9 @@ set -Eeuo pipefail
 umask 077
 tmpdir=""
 cleanup() { rc=$?; [[ -z "$tmpdir" ]] || rm -rf -- "$tmpdir"; exit "$rc"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 fail() { printf 'verification error: %s\n' "$1" >&2; exit "${2:-1}"; }
 
 extract_dir=""
@@ -17,16 +19,28 @@ sidecar="$artifact.sha256"
 [[ -f "$sidecar" && ! -L "$sidecar" ]] || fail 'external checksum is missing or unsafe'
 ARTIFACT="$artifact" SIDECAR="$sidecar" python3 - <<'PY' || exit $?
 import hashlib, os, pathlib, re, sys
+
 artifact = pathlib.Path(os.environ['ARTIFACT'])
+sidecar = pathlib.Path(os.environ['SIDECAR'])
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 try:
-    text = pathlib.Path(os.environ['SIDECAR']).read_text(encoding='ascii')
+    if sidecar.stat().st_size > 4096:
+        raise ValueError('external checksum sidecar is too large')
+    text = sidecar.read_text(encoding='ascii')
     match = re.fullmatch(r'([0-9A-Fa-f]{64})  ([^\r\n]+)\n?', text)
     if not match or match.group(2) != artifact.name:
         raise ValueError('invalid external checksum schema')
     name = pathlib.PurePosixPath(match.group(2))
     if name.is_absolute() or '..' in name.parts or len(name.parts) != 1:
         raise ValueError('unsafe external checksum filename')
-    actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    actual = sha256_file(artifact)
     if actual.lower() != match.group(1).lower():
         raise ValueError('external checksum mismatch')
 except Exception as exc:
@@ -60,9 +74,28 @@ mkdir "$tmpdir/extracted"
 tar -xf "$tmpdir/bundle.tar" -C "$tmpdir/extracted" --no-same-owner --no-same-permissions
 ROOT="$tmpdir/extracted" python3 - <<'PY' || exit $?
 import hashlib, json, os, pathlib, re, sys
+
 root = pathlib.Path(os.environ['ROOT'])
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 try:
-    manifest = json.loads((root/'manifest.json').read_text())
+    limits = {
+        'manifest.json': 1024 * 1024,
+        'checksums.sha256': 64 * 1024,
+        'config.env': 1024 * 1024,
+    }
+    for name, limit in limits.items():
+        component = root / name
+        if component.is_symlink() or component.stat().st_size > limit:
+            raise ValueError(f'unsafe or oversized component: {name}')
+
+    manifest = json.loads((root/'manifest.json').read_text(encoding='utf-8'))
     required = {'format_version', 'created_at_utc', 'database_name', 'postgresql_version',
                 'alembic_revision', 'git_commit_sha', 'files'}
     if set(manifest) != required or manifest['format_version'] != 1:
@@ -73,10 +106,8 @@ try:
     if not isinstance(revision, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}', revision):
         raise ValueError('invalid Alembic revision')
     config = root/'config.env'
-    if config.is_symlink() or config.stat().st_size > 1024 * 1024:
-        raise ValueError('unsafe configuration component')
     keys = set()
-    for line in config.read_text().splitlines():
+    for line in config.read_text(encoding='utf-8').splitlines():
         if '=' in line and not line.lstrip().startswith('#'):
             keys.add(line.split('=', 1)[0].strip())
     missing = {'DATABASE_URL', 'DB_ENCRYPTION_KEY', 'REDIS_URL', 'BOT_TOKEN'} - keys
@@ -99,7 +130,7 @@ try:
     if set(entries) != {'dump.custom', 'config.env'}:
         raise ValueError('internal checksum names do not match allowlist')
     for name, expected in entries.items():
-        if hashlib.sha256((root/name).read_bytes()).hexdigest() != expected:
+        if sha256_file(root/name) != expected:
             raise ValueError('internal checksum mismatch')
 except Exception as exc:
     print(f'verification error: {exc}', file=sys.stderr)

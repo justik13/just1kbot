@@ -42,7 +42,7 @@ class ProductionRestoreContractTests(unittest.TestCase):
 
     def test_legacy_artifact_invocation_stays_rehearsal_only(self):
         self.assertIn('exec bash "$rehearsal" "$@"', self.wrapper)
-        self.assertIn('production|status|rollback|finalize', self.wrapper)
+        self.assertIn('production|status|recover|rollback|finalize', self.wrapper)
         self.assertNotIn("dropdb", self.wrapper)
         self.assertNotIn("systemctl stop", self.wrapper)
         artifact_branch = self.wrapper.rindex("    *)")

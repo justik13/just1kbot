@@ -7,6 +7,7 @@ LOCAL_URL=http://127.0.0.1:4001
 STATE=/etc/just1kbot-amnezia.conf
 RATE=/etc/nginx/conf.d/just1kbot-amnezia-rate-limit.conf
 ACME=/var/www/just1kbot-certbot
+COMMON_LOCK=/run/lock/just1kbot-deploy.lock
 LOCK=/run/lock/just1kbot-amnezia.lock
 
 if (( $# == 0 )); then
@@ -25,6 +26,7 @@ COMMITTED=false
 ADDED=false
 ADDED_HTTP=false
 REMOVED=false
+REMOVED_HTTP=false
 CERT_CREATED=false
 
 fail(){ printf 'ОШИБКА: %s\n' "$*" >&2; exit 1; }
@@ -82,9 +84,12 @@ esac
   { usage >&2; exit 2; }
 [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'run as root'
 
-install -d -m 0755 "$(dirname "$LOCK")"
+install -d -o root -g root -m 0755 "$(dirname "$COMMON_LOCK")"
+exec 199>"$COMMON_LOCK"
+flock -n 199 || fail 'deploy/backup/restore/uninstall operation already running'
+install -d -o root -g root -m 0755 "$(dirname "$LOCK")"
 exec 200>"$LOCK"
-flock -n 200 || fail 'operation already running'
+flock -n 200 || fail 'Amnezia operation already running'
 
 norm(){
   DOMAIN_VALUE="$1" python3 - <<'PY'
@@ -154,7 +159,9 @@ rollback(){
   [[ "$ADDED_HTTP" == true ]] &&
     ufw delete allow 80/tcp >/dev/null 2>&1 || true
   [[ "$REMOVED" == true ]] &&
-    ufw allow "$PORT/tcp" >/dev/null 2>&1 || true
+    ufw insert 1 allow "$PORT/tcp" >/dev/null 2>&1 || true
+  [[ "$REMOVED_HTTP" == true ]] &&
+    ufw insert 1 allow 80/tcp >/dev/null 2>&1 || true
 
   if [[ "$CERT_CREATED" == true ]] &&
     command -v certbot >/dev/null 2>&1; then
@@ -168,19 +175,26 @@ rollback(){
   fi
   return "$rc"
 }
-trap rollback EXIT INT TERM
+trap rollback EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+firewall_rule_allowed(){
+  local rule=$1
+  ufw status | grep -Eq "^${rule}[[:space:]]+ALLOW([[:space:]]|$)"
+}
 
 firewall_add(){
   command -v ufw >/dev/null 2>&1 || return 0
   ufw status | grep -q '^Status: active' || return 0
 
-  if ! ufw status | grep -Eq '(^| )80/tcp( |$)'; then
-    ufw allow 80/tcp >/dev/null
+  if ! firewall_rule_allowed '80/tcp'; then
+    ufw insert 1 allow 80/tcp >/dev/null
     ADDED_HTTP=true
   fi
 
-  if ! ufw status | grep -Eq "(^| )$PORT/tcp( |$)"; then
-    ufw allow "$PORT/tcp" >/dev/null
+  if ! firewall_rule_allowed "$PORT/tcp"; then
+    ufw insert 1 allow "$PORT/tcp" >/dev/null
     ADDED=true
   fi
 }
@@ -234,6 +248,13 @@ EOF_HTTPS
 
 publish(){
   DOMAIN=$(norm "$DOMAIN") || fail 'invalid domain'
+  if [[ -e "$STATE" || -L "$STATE" ]]; then
+    [[ -f "$STATE" && ! -L "$STATE" ]] || fail 'unsafe Amnezia state file'
+    [[ "$(stat -c '%u:%a' "$STATE")" == '0:600' ]] || fail 'unsafe Amnezia state ownership or mode'
+    existing_domain=$(state DOMAIN || true)
+    [[ -z "$existing_domain" || "$existing_domain" == "$DOMAIN" ]] ||
+      fail "another Amnezia domain is already published: $existing_domain"
+  fi
   [[ "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] ||
     fail 'invalid email'
   [[ "$PORT" =~ ^[1-9][0-9]{0,4}$ ]] &&
@@ -299,10 +320,11 @@ unpublish(){
   paths
   begin
 
-  local saved_domain saved_port saved_ufw
+  local saved_domain saved_port saved_ufw saved_http
   saved_domain=$(state DOMAIN || true)
   saved_port=$(state PUBLIC_PORT || true)
   saved_ufw=$(state UFW_PUBLIC_ADDED || true)
+  saved_http=$(state UFW_HTTP_ADDED || true)
 
   [[ -z "$saved_domain" || "$saved_domain" == "$DOMAIN" ]] ||
     fail 'state domain mismatch'
@@ -322,6 +344,10 @@ unpublish(){
     PORT=$saved_port
     ufw delete allow "$PORT/tcp" >/dev/null 2>&1 &&
       REMOVED=true || true
+  fi
+  if [[ "$saved_http" == true ]]; then
+    ufw delete allow 80/tcp >/dev/null 2>&1 &&
+      REMOVED_HTTP=true || true
   fi
 
   rm -f -- "$STATE"

@@ -151,7 +151,9 @@ restore_operational_units() {
     # preserving a process started from files that have just been rolled back.
     while IFS=$'\t' read -r enabled active unit; do
         [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
-        systemctl stop "$unit" >/dev/null 2>&1 || true
+        if systemctl cat "$unit" >/dev/null 2>&1; then
+            systemctl stop "$unit" >/dev/null 2>&1 || return 1
+        fi
     done < "$manifest"
 
     # Temporarily unmask every unit. A unit can legitimately have been active
