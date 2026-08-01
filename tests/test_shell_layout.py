@@ -18,6 +18,7 @@ class ShellLayoutTests(unittest.TestCase):
         required = {
             "deploy.sh",
             "deploy_full.sh",
+            "update_from_github.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
             "lib/postgresql.sh",
@@ -47,6 +48,7 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Just1kBot", result.stdout)
         self.assertIn("restore-test", result.stdout)
+        self.assertIn("update", result.stdout)
 
     def test_postgresql_port_repair_changes_only_database_url_port(self):
         with tempfile.TemporaryDirectory() as directory:
