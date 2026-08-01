@@ -7,6 +7,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+# Regression coverage for production shell-operation safety contracts.
 class ShellAuditFixTests(unittest.TestCase):
     def test_no_psql_variables_are_passed_through_dash_c(self):
         offenders = []
