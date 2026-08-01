@@ -1,7 +1,7 @@
 #!/bin/bash
 # Safe adapter around the existing audited deploy implementation.
 # It keeps the old behavior while fixing PostgreSQL cluster/port discovery,
-# release ownership, runtime isolation, and the repository layout.
+# release ownership, runtime isolation, and transactional operational rollback.
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -11,6 +11,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
 LEGACY_DEPLOY="$SCRIPT_DIR/deploy_full.sh"
 POSTGRES_LIBRARY="$SCRIPT_DIR/lib/postgresql.sh"
+OPERATIONAL_LIBRARY="$SCRIPT_DIR/lib/operational_transaction.sh"
 
 [[ -f "$LEGACY_DEPLOY" && ! -L "$LEGACY_DEPLOY" ]] || {
     printf 'Отсутствует scripts/deploy_full.sh\n' >&2
@@ -18,6 +19,10 @@ POSTGRES_LIBRARY="$SCRIPT_DIR/lib/postgresql.sh"
 }
 [[ -f "$POSTGRES_LIBRARY" && ! -L "$POSTGRES_LIBRARY" ]] || {
     printf 'Отсутствует scripts/lib/postgresql.sh\n' >&2
+    exit 1
+}
+[[ -f "$OPERATIONAL_LIBRARY" && ! -L "$OPERATIONAL_LIBRARY" ]] || {
+    printf 'Отсутствует scripts/lib/operational_transaction.sh\n' >&2
     exit 1
 }
 
@@ -32,6 +37,8 @@ HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"
 
 # shellcheck source=lib/postgresql.sh
 source "$POSTGRES_LIBRARY"
+# shellcheck source=lib/operational_transaction.sh
+source "$OPERATIONAL_LIBRARY"
 
 clone_function() {
     local original=$1 replacement=$2 definition
@@ -78,6 +85,7 @@ validate_source_tree() {
         bot/main.py \
         scripts/deploy_full.sh \
         scripts/lib/postgresql.sh \
+        scripts/lib/operational_transaction.sh \
         scripts/ops/deploy_application.sh \
         scripts/ops/backup_postgres.sh \
         scripts/ops/verify_backup.sh \
@@ -502,6 +510,36 @@ prepare_release_runtime() {
     harden_live_tree
 }
 
+refresh_configured_nginx() {
+    [[ -n "$DOMAIN" ]] || return 0
+    command_required nginx
+    if [[ ! -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ||
+          ! -f "/etc/letsencrypt/live/$DOMAIN/privkey.pem" ]]; then
+        error "DOMAIN=$DOMAIN задан, но production SSL-сертификат отсутствует"
+        return 1
+    fi
+    write_nginx_proxy_config "$DOMAIN"
+}
+
+activate_release_bundle() {
+    install_backup_tooling
+    install_healthcheck
+    setup_logrotate
+
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        setup_nginx_initial
+    else
+        refresh_configured_nginx
+    fi
+
+    setup_systemd
+}
+
+pause_and_create_pre_migration_backup() {
+    pause_operational_timers
+    create_pre_migration_backup
+}
+
 run_restore_rehearsal() {
     local artifact=$1
 
@@ -686,6 +724,7 @@ run_deploy() {
         pg_start_cluster
         setup_postgresql_initial
         setup_redis_initial
+        setup_firewall_initial
     else
         pg_prepare update
         pg_repair_env_port
@@ -697,31 +736,22 @@ run_deploy() {
         }
     fi
 
-    install_backup_tooling
-    install_healthcheck
-    setup_logrotate
-
-    if [[ "$INITIAL_INSTALL" == true ]]; then
-        setup_firewall_initial
-        setup_nginx_initial
-    else
-        refresh_existing_nginx
-    fi
-
-    pause_operational_timers
+    configure_operational_transaction
 
     # shellcheck source=ops/deploy_application.sh
     source "$SCRIPT_DIR/ops/deploy_application.sh"
+    install_operational_transaction_overrides
     install_rollback_override
 
     SOURCE_DIR="$ROOT_DIR"
     PREPARE_COMMAND=(prepare_release_runtime)
     MIGRATION_COMMAND=(init_database)
-    ACTIVATION_COMMAND=(activate_release)
-    BACKUP_COMMAND=()
+    ACTIVATION_COMMAND=(activate_release_bundle)
 
-    if [[ "$INITIAL_INSTALL" == false ]]; then
-        BACKUP_COMMAND=(create_pre_migration_backup)
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        BACKUP_COMMAND=(pause_operational_timers)
+    else
+        BACKUP_COMMAND=(pause_and_create_pre_migration_backup)
     fi
 
     if run_application_transaction; then
@@ -730,8 +760,7 @@ run_deploy() {
         print_result
     else
         local code=$?
-        resume_operational_timers || true
-        error "Application deploy transaction failed (code=$code)"
+        error "Application/operational deploy transaction failed (code=$code)"
         error "Database downgrade не выполнялся; проверьте журнал и rollback snapshot"
         return "$code"
     fi
