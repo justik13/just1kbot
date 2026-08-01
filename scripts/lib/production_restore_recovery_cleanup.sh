@@ -1,6 +1,29 @@
-# Recovery-specific EXIT behavior loaded after all restore overrides.
+# Recovery-specific behavior loaded after all restore overrides.
 # An ambiguous recovery must preserve the durable journal and every database
 # exactly as observed so an operator can inspect and retry safely.
+
+usage() {
+    cat <<'EOF_USAGE'
+Just1kBot production PostgreSQL restore/cutover
+
+Production restore/cutover:
+  sudo AGE_IDENTITY_FILE=/secure/key production_restore.sh production ARTIFACT
+  sudo AGE_IDENTITY_FILE=/secure/key production_restore.sh production \
+    --yes --expected-sha256 SHA256 ARTIFACT
+
+Transaction and crash recovery:
+  sudo production_restore.sh status
+  sudo production_restore.sh recover
+  sudo production_restore.sh rollback
+  sudo production_restore.sh rollback --yes --transaction-id ID
+  sudo production_restore.sh finalize
+  sudo production_restore.sh finalize --yes --transaction-id ID
+
+Production restore never overwrites .env and never drops the previous database.
+After a successful cutover, run status, observe the bot, then explicitly choose
+rollback or finalize. If status reports an interrupted journal, run recover first.
+EOF_USAGE
+}
 
 cleanup_on_exit() {
     local rc=$?
