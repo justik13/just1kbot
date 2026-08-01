@@ -1,5 +1,6 @@
 import os
 import pathlib
+import re
 import subprocess
 import tempfile
 import unittest
@@ -32,7 +33,9 @@ class ShellLayoutTests(unittest.TestCase):
             "lib/production_restore_core.sh",
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
+            "lib/production_restore_input.sh",
             "lib/production_restore_crash.sh",
+            "lib/production_restore_recovery_cleanup.sh",
         }
         missing = sorted(name for name in required if not (SCRIPTS / name).is_file())
         self.assertEqual(missing, [])
@@ -55,7 +58,38 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertIn("Just1kBot", result.stdout)
         self.assertIn("restore-test", result.stdout)
         self.assertIn("restore-production", result.stdout)
+        self.assertIn("restore-recover", result.stdout)
         self.assertIn("update", result.stdout)
+
+    def test_psql_variables_are_never_embedded_in_dash_c_sql(self):
+        # psql performs :name, :'name' and :"name" interpolation only while
+        # reading its input stream or a file, not inside a -c argument.
+        variable = re.compile(r":(?:'|\\?")?[A-Za-z_][A-Za-z0-9_]*")
+        for script in sorted(ROOT.rglob("*.sh")):
+            text = script.read_text(encoding="utf-8")
+            logical_lines = text.replace("\\\n", " ").splitlines()
+            for line_number, line in enumerate(logical_lines, start=1):
+                if " -c " not in f" {line} ":
+                    continue
+                with self.subTest(script=script.relative_to(ROOT), line=line_number):
+                    self.assertIsNone(variable.search(line), line)
+
+    def test_signal_cleanup_uses_exit_owned_cleanup(self):
+        for relative in (
+            "ops/backup_postgres.sh",
+            "ops/verify_backup.sh",
+            "update_from_github.sh",
+            "setup-amnezia-api.sh",
+        ):
+            text = (SCRIPTS / relative).read_text(encoding="utf-8")
+            with self.subTest(script=relative):
+                self.assertRegex(text, r"trap [A-Za-z_][A-Za-z0-9_]* EXIT")
+                self.assertIn("trap 'exit 130' INT", text)
+                self.assertIn("trap 'exit 143' TERM", text)
+                self.assertNotRegex(
+                    text,
+                    r"trap [A-Za-z_][A-Za-z0-9_]* EXIT INT TERM",
+                )
 
     def test_postgresql_port_repair_changes_only_database_url_port(self):
         with tempfile.TemporaryDirectory() as directory:
