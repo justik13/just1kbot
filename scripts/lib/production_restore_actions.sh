@@ -76,11 +76,12 @@ manual_rollback() {
     pause_runtime
     create_final_pre_cutover_backup
     database_rollback_to_previous "$FAILED_DB"
-    CUTOVER_PHASE="manual_rollback_complete"
+    CUTOVER_PHASE="manual_rollback_swapped"
     ARTIFACT=$STATE_ARTIFACT_NAME
     ARTIFACT_SHA256=$STATE_ARTIFACT_SHA256
     BACKUP_CREATED_AT=$STATE_BACKUP_CREATED_AT
     write_active_state rolled_back "$FAILED_DB"
+    CUTOVER_PHASE="manual_rollback_state_written"
     if wait_for_application_health; then
         restore_timer_states
         RUNTIME_RESTORED=true
@@ -90,13 +91,8 @@ manual_rollback() {
 
     warn 'previous database failed readiness; attempting to return restored database'
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    database_allow_connections "$LIVE_DATABASE" false || true
-    terminate_database_connections "$LIVE_DATABASE" || true
-    database_allow_connections "$FAILED_DB" false || true
-    terminate_database_connections "$FAILED_DB" || true
-    rename_database "$LIVE_DATABASE" "$ROLLBACK_DB" || fail 'could not preserve previous database after failed manual rollback'
-    rename_database "$FAILED_DB" "$LIVE_DATABASE" || fail 'could not return restored production database after failed manual rollback'
-    database_allow_connections "$LIVE_DATABASE" true || fail 'could not re-enable restored production database'
+    return_restored_database_after_manual_rollback || fail 'could not return restored production database after failed manual rollback'
+    CUTOVER_PHASE="manual_restored_returned"
     write_active_state active ""
     CUTOVER_PHASE="complete"
     if wait_for_application_health; then
@@ -131,9 +127,21 @@ finalize_restore() {
         final_status=rollback_finalized
     fi
     [[ -n "$preserved" ]] || fail 'restore state does not identify a preserved database'
-    database_exists "$preserved" || fail "preserved database is missing: $preserved"
     [[ "$preserved" != "$LIVE_DATABASE" ]] || fail 'refusing to drop the production database'
-    admin_dropdb "$preserved"
+    local exists_rc
+    if database_exists "$preserved"; then
+        admin_dropdb "$preserved"
+    else
+        exists_rc=$?
+        (( exists_rc == 1 )) || fail "could not determine preserved database state: $preserved"
+        warn "preserved database is already absent; completing interrupted finalize: $preserved"
+    fi
+    if database_exists "$preserved"; then
+        fail "preserved database still exists after finalize drop: $preserved"
+    else
+        exists_rc=$?
+        (( exists_rc == 1 )) || fail "could not verify preserved database removal: $preserved"
+    fi
     archive_active_state "$final_status"
     log "restore transaction finalized; removed preserved database $preserved"
 }

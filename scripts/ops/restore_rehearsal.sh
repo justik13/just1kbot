@@ -166,7 +166,7 @@ for table in "${table_list[@]}"; do
     [[ $(sql "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='$table'") == 1 ]] || {
         log_error "missing critical table: $table"; exit 1;
     }
-    sql "SELECT count(*) FROM \"$table\"" >/dev/null
+    sql "SELECT 1 FROM \"$table\" LIMIT 1" >/dev/null
 done
 sql 'SELECT 1' >/dev/null
 work_result=success

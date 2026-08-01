@@ -19,6 +19,7 @@ class ShellStage2Tests(unittest.TestCase):
             "lib/production_restore_core.sh",
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
+            "lib/production_restore_crash.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
         ]

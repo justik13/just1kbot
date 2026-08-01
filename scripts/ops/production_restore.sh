@@ -74,12 +74,23 @@ RESTORE_LIBRARY_DIR=${RESTORE_LIBRARY_DIR:-$(cd -- "$SCRIPT_DIR/../lib" && pwd -
 for library in \
     production_restore_core.sh \
     production_restore_runtime.sh \
-    production_restore_actions.sh; do
+    production_restore_actions.sh \
+    production_restore_crash.sh; do
     path="$RESTORE_LIBRARY_DIR/$library"
     [[ -f "$path" && ! -L "$path" ]] || {
         printf 'restore error: missing safe library: %s\n' "$path" >&2
         exit 1
     }
+    owner=$(stat -c '%u' "$path")
+    mode=$(stat -c '%a' "$path")
+    (( (8#$mode & 8#022) == 0 )) || {
+        printf 'restore error: unsafe library mode: %s\n' "$path" >&2
+        exit 1
+    }
+    if (( EUID == 0 )) && [[ "$owner" != 0 ]]; then
+        printf 'restore error: library is not root-owned: %s\n' "$path" >&2
+        exit 1
+    fi
     # shellcheck disable=SC1090
     source "$path"
 done
