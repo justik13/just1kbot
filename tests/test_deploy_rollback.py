@@ -121,7 +121,12 @@ class DeployRollbackTests(unittest.TestCase):
         )
         env.update(extra or {})
         return subprocess.run(
-            [str(HELPER)], env=env, text=True, capture_output=True, timeout=15
+            [str(HELPER)],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
         )
 
     def test_snapshot_precedes_active_change(self):
@@ -285,14 +290,20 @@ class DeployRollbackTests(unittest.TestCase):
             f'source {source}; LOG_FILE={test_log}; BOT_USER="$(id -un)"; {script}'
         )
         return subprocess.run(
-            ["bash", "-c", command], env=values, text=True, capture_output=True
+            ["bash", "-c", command],
+            env=values,
+            text=True,
+            capture_output=True,
+            check=False,
         )
 
     def run_unprivileged(self, command, env=None):
         values = os.environ.copy()
         values.update(env or {})
         if os.geteuid() != 0:
-            return subprocess.run(command, env=values, text=True, capture_output=True)
+            return subprocess.run(
+                command, env=values, text=True, capture_output=True, check=False
+            )
         if not shutil.which("runuser"):
             self.skipTest("root environment has no runuser")
         try:
@@ -306,6 +317,7 @@ class DeployRollbackTests(unittest.TestCase):
             env=values,
             text=True,
             capture_output=True,
+            check=False,
         )
 
     def test_nonroot_functions_only_source_loads_definitions(self):

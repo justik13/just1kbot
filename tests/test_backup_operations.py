@@ -171,7 +171,11 @@ class BackupFailurePathTests(unittest.TestCase):
         env = self.env | {k: str(v) for k, v in extra.items()}
         env["REVISION_INDEX"] = str(self.root / "revision-index")
         return subprocess.run(
-            [OPS / "backup_postgres.sh"], env=env, text=True, capture_output=True
+            [OPS / "backup_postgres.sh"],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
         )
 
     def visible(self, directory=None):
@@ -363,6 +367,7 @@ class BackupFailurePathTests(unittest.TestCase):
                         [OPS / "verify_backup.sh", artifact],
                         env=env,
                         capture_output=True,
+                        check=False,
                     ).returncode,
                     0,
                 )
@@ -386,6 +391,7 @@ class BackupFailurePathTests(unittest.TestCase):
                         [OPS / "verify_backup.sh", artifact],
                         env=env,
                         capture_output=True,
+                        check=False,
                     ).returncode,
                     0,
                 )
@@ -397,6 +403,7 @@ class BackupFailurePathTests(unittest.TestCase):
             env=env,
             text=True,
             capture_output=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -405,7 +412,10 @@ class BackupFailurePathTests(unittest.TestCase):
             artifact, env = self._archive(kind)
             self.assertNotEqual(
                 subprocess.run(
-                    [OPS / "verify_backup.sh", artifact], env=env, capture_output=True
+                    [OPS / "verify_backup.sh", artifact],
+                    env=env,
+                    capture_output=True,
+                    check=False,
                 ).returncode,
                 0,
             )
@@ -415,7 +425,10 @@ class BackupFailurePathTests(unittest.TestCase):
             artifact, env = self._archive(kind)
             self.assertNotEqual(
                 subprocess.run(
-                    [OPS / "verify_backup.sh", artifact], env=env, capture_output=True
+                    [OPS / "verify_backup.sh", artifact],
+                    env=env,
+                    capture_output=True,
+                    check=False,
                 ).returncode,
                 0,
             )
@@ -425,7 +438,10 @@ class BackupFailurePathTests(unittest.TestCase):
         (self.root / "bad.tar.age.sha256").write_text("0" * 64 + "  bad.tar.age\n")
         self.assertNotEqual(
             subprocess.run(
-                [OPS / "verify_backup.sh", artifact], env=env, capture_output=True
+                [OPS / "verify_backup.sh", artifact],
+                env=env,
+                capture_output=True,
+                check=False,
             ).returncode,
             0,
         )
@@ -435,7 +451,10 @@ class BackupFailurePathTests(unittest.TestCase):
         self._shim("age", "exit 5")
         self.assertNotEqual(
             subprocess.run(
-                [OPS / "verify_backup.sh", artifact], env=env, capture_output=True
+                [OPS / "verify_backup.sh", artifact],
+                env=env,
+                capture_output=True,
+                check=False,
             ).returncode,
             0,
         )
@@ -470,6 +489,7 @@ class BackupFailurePathTests(unittest.TestCase):
             env=env,
             text=True,
             capture_output=True,
+            check=False,
         ), self.root / "database"
 
     def test_manifest_revision_mismatch_fails_rehearsal(self):
