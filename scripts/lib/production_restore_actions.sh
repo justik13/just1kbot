@@ -10,6 +10,7 @@ production_restore() {
     validate_runtime_paths
     acquire_operation_lock
     prepare_state_dir
+    [[ ! -e "$JOURNAL_STATE" && ! -L "$JOURNAL_STATE" ]] || fail 'an interrupted restore must be recovered before starting another restore'
     [[ ! -e "$ACTIVE_STATE" && ! -L "$ACTIVE_STATE" ]] || fail 'a previous restore transaction must be finalized before another restore'
     read_env_contract
     load_postgresql_library
@@ -23,6 +24,7 @@ production_restore() {
     create_final_pre_cutover_backup
     database_cutover
     write_active_state active ""
+    clear_cutover_journal
 
     if wait_for_application_health; then
         restore_timer_states
@@ -36,10 +38,11 @@ production_restore() {
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
     database_rollback_to_previous "$FAILED_DB" || {
         write_active_state active "$FAILED_DB" || true
-        fail 'automatic database rollback failed; manual recovery is required'
+        fail 'automatic database rollback failed; run restore recover'
     }
     CUTOVER_PHASE="rolled_back"
     write_active_state rolled_back "$FAILED_DB"
+    clear_cutover_journal
     if ! wait_for_application_health; then
         restore_timer_states
         RUNTIME_RESTORED=true
@@ -58,6 +61,7 @@ manual_rollback() {
     validate_runtime_paths
     acquire_operation_lock
     prepare_state_dir
+    [[ ! -e "$JOURNAL_STATE" && ! -L "$JOURNAL_STATE" ]] || fail 'an interrupted restore must be recovered before rollback'
     read_env_contract
     load_postgresql_library
     load_active_state
@@ -72,15 +76,16 @@ manual_rollback() {
     FAILED_DB="just1kbot_fail_${TRANSACTION_ID}"
     is_safe_database_name "$FAILED_DB" || fail 'generated failed database name is unsafe'
     assert_database_absent "$FAILED_DB"
+    ARTIFACT=$STATE_ARTIFACT_NAME
+    ARTIFACT_SHA256=$STATE_ARTIFACT_SHA256
+    BACKUP_CREATED_AT=$STATE_BACKUP_CREATED_AT
 
     pause_runtime
     create_final_pre_cutover_backup
     database_rollback_to_previous "$FAILED_DB"
     CUTOVER_PHASE="manual_rollback_swapped"
-    ARTIFACT=$STATE_ARTIFACT_NAME
-    ARTIFACT_SHA256=$STATE_ARTIFACT_SHA256
-    BACKUP_CREATED_AT=$STATE_BACKUP_CREATED_AT
     write_active_state rolled_back "$FAILED_DB"
+    clear_cutover_journal
     CUTOVER_PHASE="manual_rollback_state_written"
     if wait_for_application_health; then
         restore_timer_states
@@ -91,9 +96,10 @@ manual_rollback() {
 
     warn 'previous database failed readiness; attempting to return restored database'
     systemctl stop "$SERVICE_NAME" >/dev/null 2>&1 || true
-    return_restored_database_after_manual_rollback || fail 'could not return restored production database after failed manual rollback'
+    return_restored_database_after_manual_rollback || fail 'could not return restored production database; run restore recover'
     CUTOVER_PHASE="manual_restored_returned"
     write_active_state active ""
+    clear_cutover_journal
     CUTOVER_PHASE="complete"
     if wait_for_application_health; then
         restore_timer_states
@@ -112,6 +118,7 @@ finalize_restore() {
     validate_runtime_paths
     acquire_operation_lock
     prepare_state_dir
+    [[ ! -e "$JOURNAL_STATE" && ! -L "$JOURNAL_STATE" ]] || fail 'an interrupted restore must be recovered before finalize'
     read_env_contract
     load_postgresql_library
     load_active_state
@@ -146,6 +153,19 @@ finalize_restore() {
     log "restore transaction finalized; removed preserved database $preserved"
 }
 
+recover_restore() {
+    MUTATING_ACTION=true
+    (( $# == 0 )) || { printf 'recover accepts no arguments\n' >&2; exit 2; }
+    require_root
+    for command in flock stat python3 runuser psql dropdb systemctl timeout; do require_command "$command"; done
+    validate_runtime_paths
+    acquire_operation_lock
+    prepare_state_dir
+    read_env_contract
+    load_postgresql_library
+    recover_interrupted_cutover
+    log 'interrupted restore recovery completed'
+}
 
 main() {
     case "$ACTION" in
@@ -156,6 +176,9 @@ main() {
             (( $# == 0 )) || { printf 'status accepts no arguments\n' >&2; exit 2; }
             require_root
             show_status
+            ;;
+        recover)
+            recover_restore "$@"
             ;;
         rollback)
             manual_rollback "$@"
