@@ -107,12 +107,16 @@ class ShellLayoutTests(unittest.TestCase):
             "setup-amnezia-api.sh",
         ):
             text = (SCRIPTS / relative).read_text(encoding="utf-8")
+            executable = "\n".join(
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("#")
+            )
             with self.subTest(script=relative):
-                self.assertRegex(text, r"trap [A-Za-z_][A-Za-z0-9_]* EXIT")
-                self.assertIn("trap 'exit 130' INT", text)
-                self.assertIn("trap 'exit 143' TERM", text)
+                self.assertRegex(executable, r"trap [A-Za-z_][A-Za-z0-9_]* EXIT")
+                self.assertIn("trap 'exit 130' INT", executable)
+                self.assertIn("trap 'exit 143' TERM", executable)
                 self.assertNotRegex(
-                    text,
+                    executable,
                     r"trap [A-Za-z_][A-Za-z0-9_]* EXIT INT TERM",
                 )
 
