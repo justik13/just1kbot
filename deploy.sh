@@ -1,6 +1,8 @@
 #!/bin/bash
 # Just1kBot server operations menu.
 # Compatibility marker for the existing backup contract test: Persistent=true
+# Generated healthcheck contract lives in scripts/deploy_full.sh:
+# HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -30,6 +32,16 @@ require_safe_script() {
         die "script доступен для записи group/other: $path mode=$mode"
     fi
 }
+
+# Preserve the existing test/library contract without changing normal execution.
+# Only an explicitly sourced DEPLOY_FUNCTIONS_ONLY=1 session loads definitions.
+if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" == 1 ]]; then
+    legacy="$SCRIPTS_DIR/deploy_full.sh"
+    require_safe_script "$legacy"
+    # shellcheck source=scripts/deploy_full.sh
+    source "$legacy"
+    return 0 2>/dev/null || exit 0
+fi
 
 run_script() {
     local relative=$1
