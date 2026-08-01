@@ -119,8 +119,22 @@ restore_operational_files() {
 }
 
 validate_restored_nginx() {
+    local manifest=$1
+    local enabled active unit
+
     [[ "$OPERATIONAL_NGINX" == true ]] || return 0
-    nginx -t
+    while IFS=$'\t' read -r enabled active unit; do
+        if [[ "$unit" == nginx.service ]]; then
+            case "$active" in
+                active|activating|reloading)
+                    nginx -t
+                    return
+                    ;;
+            esac
+            return 0
+        fi
+    done < "$manifest"
+    return 1
 }
 
 restore_operational_units() {
@@ -160,9 +174,9 @@ restore_operational_units() {
         esac
     done < "$manifest"
 
-    # Validate restored Nginx files before any previously-active Nginx unit is
-    # started. A broken restored config is a critical rollback failure.
-    validate_restored_nginx || return 1
+    # Validate restored Nginx files only when Nginx was previously active and
+    # is about to be started. An inactive prior state is restored as-is.
+    validate_restored_nginx "$manifest" || return 1
 
     while IFS=$'\t' read -r enabled active unit; do
         [[ "$unit" =~ ^[A-Za-z0-9_.@:-]+$ ]] || return 1
