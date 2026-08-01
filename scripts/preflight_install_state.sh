@@ -76,11 +76,11 @@ PY
 }
 
 select_postgresql_cluster() {
-    local port=$1 version cluster cluster_port status owner rest
+    local port=$1 version cluster cluster_port status
     PG_VERSION=
     PG_CLUSTER=
 
-    while read -r version cluster cluster_port status owner rest; do
+    while IFS=' ' read -r version cluster cluster_port status _; do
         if [[ "$cluster_port" == "$port" && "$status" == online ]]; then
             [[ -z "$PG_VERSION" ]] || fail "несколько online PostgreSQL-кластеров используют port=$port"
             PG_VERSION=$version
