@@ -25,6 +25,8 @@ class ShellStage2Tests(unittest.TestCase):
             "lib/production_restore_recovery_cleanup.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
+            "uninstall_entrypoint.sh",
+            "preflight_install_state.sh",
         ]
         self.assertEqual(
             [path for path in required if not (SCRIPTS / path).is_file()],
@@ -35,6 +37,8 @@ class ShellStage2Tests(unittest.TestCase):
         for script in (
             SCRIPTS / "setup-amnezia-api.sh",
             SCRIPTS / "uninstall.sh",
+            SCRIPTS / "uninstall_entrypoint.sh",
+            SCRIPTS / "preflight_install_state.sh",
             SCRIPTS / "ops/production_restore.sh",
         ):
             subprocess.run(["bash", "-n", str(script)], check=True)
@@ -105,7 +109,7 @@ class ShellStage2Tests(unittest.TestCase):
     def test_root_menu_targets_interactive_and_locked_operations(self):
         menu = (ROOT / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn("run_script setup-amnezia-api.sh", menu)
-        self.assertIn("run_script uninstall.sh", menu)
+        self.assertIn("run_script uninstall_entrypoint.sh", menu)
         self.assertIn("run_locked_script deploy.sh --backup", menu)
         self.assertIn(
             'run_locked_script ops/just1kbot-restore.sh rehearsal "$1"',
