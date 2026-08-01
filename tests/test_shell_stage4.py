@@ -73,6 +73,7 @@ class ShellStage4Tests(unittest.TestCase):
             ".incomplete-operational-",
             "systemctl enable --runtime",
             "systemctl mask --runtime",
+            "unsupported_file_type=true",
         ):
             self.assertIn(marker, self.operational)
 
@@ -125,6 +126,30 @@ restore_operational_files {str(snapshot)!r}
             tracked = root / "tracked-directory"
             snapshot = root / "snapshot"
             tracked.mkdir()
+            snapshot.mkdir()
+            command = f"""
+set -Eeuo pipefail
+deploy_log() {{ :; }}
+source {str(OPERATIONAL)!r}
+OPERATIONAL_PATHS=({str(tracked)!r})
+if snapshot_operational_files {str(snapshot)!r}; then
+    exit 9
+fi
+"""
+            result = subprocess.run(
+                ["bash", "-c", command],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_operational_snapshot_rejects_fifo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            tracked = root / "tracked-fifo"
+            snapshot = root / "snapshot"
+            os.mkfifo(tracked)
             snapshot.mkdir()
             command = f"""
 set -Eeuo pipefail
