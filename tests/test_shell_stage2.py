@@ -73,10 +73,13 @@ class ShellStage2Tests(unittest.TestCase):
         )
         self.assertIn("begin", text[text.index("unpublish(){"):])
 
-    def test_root_menu_targets_interactive_scripts(self):
+    def test_root_menu_targets_interactive_and_locked_operations(self):
         menu = (ROOT / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn("run_script setup-amnezia-api.sh", menu)
         self.assertIn("run_script uninstall.sh", menu)
+        self.assertIn("run_locked_script deploy.sh --backup", menu)
+        self.assertIn("run_locked_script deploy.sh --restore", menu)
+        self.assertIn('DEPLOY_FUNCTIONS_ONLY:-0}', menu)
 
 
 if __name__ == "__main__":
