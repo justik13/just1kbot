@@ -182,30 +182,34 @@ setup_venv() {
     fi
 
     # Never execute an interpreter previously writable by the service user.
-    # Build a clean environment as root, then atomically replace the old one.
-    local new_venv="${VENV_DIR}.new.$$"
+    # Console-script shebangs embed the venv path, so the clean environment
+    # must be built at its final path rather than built elsewhere and renamed.
     local old_venv="${VENV_DIR}.old.$$"
-    rm -rf -- "$new_venv" "$old_venv"
-    TEMP_DIRS+=("$new_venv" "$old_venv")
+    rm -rf -- "$old_venv"
+    TEMP_DIRS+=("$old_venv")
 
-    python3 -m venv "$new_venv"
-    "$new_venv/bin/python" -m pip install --upgrade pip --quiet
-    "$new_venv/bin/python" -m pip install \
-        -r "$PROJECT_DIR/requirements.txt" --quiet
-
-    chown -R root:"$BOT_USER" "$new_venv"
-    find "$new_venv" -xdev -type d -exec chmod 0750 {} +
-    find "$new_venv" -xdev -type f -perm /111 -exec chmod 0750 {} +
-    find "$new_venv" -xdev -type f ! -perm /111 -exec chmod 0640 {} +
-
-    if [[ -d "$VENV_DIR" ]]; then
-        mv -- "$VENV_DIR" "$old_venv"
-    fi
-    if ! mv -- "$new_venv" "$VENV_DIR"; then
-        [[ ! -d "$old_venv" ]] || mv -- "$old_venv" "$VENV_DIR"
-        error "Не удалось активировать новый virtualenv"
+    if [[ -d "$VENV_DIR" ]] && ! mv -- "$VENV_DIR" "$old_venv"; then
+        error "Не удалось отложить предыдущий virtualenv"
         return 1
     fi
+
+    if ! python3 -m venv "$VENV_DIR" ||
+        ! "$VENV_DIR/bin/python" -m pip install --upgrade pip --quiet ||
+        ! "$VENV_DIR/bin/python" -m pip install \
+            -r "$PROJECT_DIR/requirements.txt" --quiet ||
+        ! chown -R root:"$BOT_USER" "$VENV_DIR" ||
+        ! find "$VENV_DIR" -xdev -type d -exec chmod 0750 {} + ||
+        ! find "$VENV_DIR" -xdev -type f -perm /111 -exec chmod 0750 {} + ||
+        ! find "$VENV_DIR" -xdev -type f ! -perm /111 -exec chmod 0640 {} +; then
+        rm -rf -- "$VENV_DIR"
+        if [[ -d "$old_venv" ]] && ! mv -- "$old_venv" "$VENV_DIR"; then
+            error "Новый virtualenv не создан, предыдущий также не удалось вернуть"
+            return 2
+        fi
+        error "Не удалось создать новый virtualenv; предыдущий восстановлен"
+        return 1
+    fi
+
     rm -rf -- "$old_venv"
 }
 
