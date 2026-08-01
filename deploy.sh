@@ -44,6 +44,15 @@ if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
+call_script() {
+    local relative=$1
+    shift
+
+    local target="$SCRIPTS_DIR/$relative"
+    require_safe_script "$target"
+    bash "$target" "$@"
+}
+
 run_script() {
     local relative=$1
     shift
@@ -58,6 +67,10 @@ run_locked_script() {
     exec 201>"$OPERATION_LOCK"
     flock -n 201 || die "другая операция deploy/backup/restore/uninstall уже выполняется"
     run_script "$@"
+}
+
+preflight_deploy_state() {
+    call_script preflight_install_state.sh
 }
 
 usage() {
@@ -89,6 +102,8 @@ Just1kBot — управление сервером
 Команда update скачивает только main из фиксированного GitHub repository в
 отдельный root-only release-каталог и запускает transactional deploy. Команда
 deploy предназначена для ручного запуска из уже подготовленного checkout.
+Перед update/deploy выполняется fail-closed preflight состояния установки,
+backup tooling, service account, permissions и systemd ProtectHome runtime.
 
 Production restore сначала создаёт и проверяет staging database. Во время
 короткого cutover текущая database сохраняется под rollback-именем и не удаляется
@@ -110,11 +125,14 @@ dispatch() {
 
     case "$command" in
         update)
-            # Fetching is non-mutating for production. The downloaded release
-            # acquires the deploy lock immediately before production changes.
+            # Repair only a proven incomplete install before fetching main.
+            # The downloaded release still acquires the deploy lock immediately
+            # before its own production transaction.
+            preflight_deploy_state
             run_script update_from_github.sh "$@"
             ;;
         deploy)
+            preflight_deploy_state
             run_script deploy.sh "$@"
             ;;
         status)
@@ -158,7 +176,7 @@ dispatch() {
             run_script setup-amnezia-api.sh "$@"
             ;;
         uninstall)
-            run_script uninstall.sh "$@"
+            run_script uninstall_entrypoint.sh "$@"
             ;;
         help|-h|--help)
             usage
