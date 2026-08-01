@@ -10,7 +10,7 @@ OPERATIONAL = ROOT / "scripts" / "lib" / "operational_transaction.sh"
 
 
 class OperationalNginxRollbackTests(unittest.TestCase):
-    def _run_restore(self, active_state: str):
+    def _run_restore(self, active_state: str, stopped_state: str = "inactive"):
         temporary = tempfile.TemporaryDirectory()
         root = pathlib.Path(temporary.name)
         snapshot = root / "snapshot"
@@ -25,6 +25,10 @@ class OperationalNginxRollbackTests(unittest.TestCase):
         systemctl.write_text(
             "#!/bin/bash\n"
             "printf '%s\\n' \"$*\" >> \"$CALLS\"\n"
+            "if [[ \"$1\" == is-active ]]; then\n"
+            "  printf '%s\\n' \"$STOPPED_STATE\"\n"
+            "  [[ \"$STOPPED_STATE\" == active ]] && exit 0 || exit 3\n"
+            "fi\n"
             "exit 0\n",
             encoding="utf-8",
         )
@@ -55,6 +59,7 @@ restore_operational_units {str(snapshot)!r}
             "PATH": f"{binary}:{os.environ['PATH']}",
             "CALLS": str(calls),
             "NGINX_CALLS": str(nginx_calls),
+            "STOPPED_STATE": stopped_state,
         }
         result = subprocess.run(
             ["bash", "-c", command],
@@ -70,6 +75,8 @@ restore_operational_units {str(snapshot)!r}
         with temporary:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             lines = calls.read_text(encoding="utf-8").splitlines()
+            self.assertIn("stop nginx.service", lines)
+            self.assertIn("is-active nginx.service", lines)
             self.assertNotIn("start nginx.service", lines)
             self.assertFalse(nginx_calls.exists())
 
@@ -80,6 +87,17 @@ restore_operational_units {str(snapshot)!r}
             self.assertEqual(nginx_calls.read_text(encoding="utf-8").strip(), "-t")
             lines = calls.read_text(encoding="utf-8").splitlines()
             self.assertNotIn("start nginx.service", lines)
+
+    def test_rollback_aborts_when_unit_remains_active(self):
+        temporary, result, calls, nginx_calls = self._run_restore(
+            "inactive", stopped_state="active"
+        )
+        with temporary:
+            self.assertNotEqual(result.returncode, 0)
+            lines = calls.read_text(encoding="utf-8").splitlines()
+            self.assertIn("stop nginx.service", lines)
+            self.assertIn("is-active nginx.service", lines)
+            self.assertFalse(nginx_calls.exists())
 
 
 if __name__ == "__main__":
