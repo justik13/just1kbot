@@ -88,7 +88,8 @@ for library in \
     production_restore_runtime.sh \
     production_restore_actions.sh \
     production_restore_input.sh \
-    production_restore_crash.sh; do
+    production_restore_crash.sh \
+    production_restore_recovery_cleanup.sh; do
     path="$RESTORE_LIBRARY_DIR/$library"
     [[ -f "$path" && ! -L "$path" ]] || {
         printf 'restore error: missing safe library: %s\n' "$path" >&2
