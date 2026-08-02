@@ -69,6 +69,9 @@ jobs:
       - run: alembic downgrade base
       - name: Verify downgrade leaves no application tables
         run: |
+          # The real backup rehearsal intentionally creates this test-only sentinel.
+          PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test \
+            -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS backup_rehearsal_data'
           remaining="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
             "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version' ORDER BY tablename")"
           if [ -n "$remaining" ]; then
