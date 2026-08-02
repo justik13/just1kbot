@@ -398,16 +398,28 @@ async def enqueue_payment_refund(
         )
         return
 
-    if request.created:
-        message = (
-            f"Возврат {int(request.operation.amount)} ₽ поставлен в durable-очередь. "
-            f"Operation: {request.operation.operation_id}"
-        )
-    else:
-        message = (
-            f"Этот возврат уже обрабатывается. "
-            f"Operation: {request.operation.operation_id}"
-        )
-    await callback.answer(message, show_alert=True)
-    callback.data = f"admin_payment_card:{payment_id}"
-    await show_payment_card(callback, state, session)
+    await state.clear()
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="← Назад к платежу",
+        callback_data=f"admin_payment_card:{payment_id}",
+    )
+    builder.button(text="💳 К списку платежей", callback_data="admin_payments")
+    builder.adjust(1)
+    status_text = (
+        "Возврат поставлен в durable-очередь."
+        if request.created
+        else "Этот возврат уже находится в durable-очереди."
+    )
+    await callback.message.edit_text(
+        "✅ <b>Возврат принят</b>\n\n"
+        f"{status_text}\n"
+        f"Сумма: <b>{int(request.operation.amount)} RUB</b>\n"
+        f"Operation: <code>{request.operation.operation_id}</code>\n"
+        f"Статус: <code>{safe(request.operation.status)}</code>\n\n"
+        "Зарезервированная сумма недоступна для новых покупок до "
+        "подтверждения или безопасного завершения операции.",
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
+    await callback.answer()
