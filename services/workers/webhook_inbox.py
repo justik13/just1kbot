@@ -18,7 +18,7 @@ from services.payment_provider_state import apply_provider_transition
 from database.models import PaymentEvent
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
-from services.payment_kind import is_tariff_change_payment
+from services.payment_kind import is_balance_topup, is_tariff_change_payment
 
 
 class WebhookInboxOwnershipError(RuntimeError):
@@ -38,6 +38,8 @@ class InboxClaim:
 
 
 async def ensure_fulfillment(session, payment, typ):
+    if is_balance_topup(payment):
+        return None
     if typ in {
         "grant_subscription",
         "grant_referral",
@@ -393,11 +395,27 @@ async def finalize(session, claim, result):
                 return
             if observed != expected:
                 payment.reconciliation_status = "mismatch"
-                payment.fulfillment_status = (
-                    "manual_review"
-                    if payment.fulfillment_status != "reversed"
-                    else payment.fulfillment_status
-                )
+                if (
+                    is_balance_topup(payment)
+                    and observed == "succeeded"
+                    and transition.outcome == "applied"
+                    and payment.fulfillment_status
+                    not in {"manual_review", "reversed"}
+                ):
+                    from services.account_topup import settle_succeeded_topup
+
+                    await settle_succeeded_topup(
+                        session,
+                        payment=payment,
+                        source="webhook_status_conflict",
+                    )
+                    payment.reconciliation_status = "mismatch"
+                else:
+                    payment.fulfillment_status = (
+                        "manual_review"
+                        if payment.fulfillment_status != "reversed"
+                        else payment.fulfillment_status
+                    )
                 session.add(
                     PaymentEvent(
                         payment_id=payment.id,
@@ -406,6 +424,19 @@ async def finalize(session, claim, result):
                         reason=f"{claim.event_type}_expected_{expected}",
                         source="webhook_inbox",
                     )
+                )
+            elif (
+                is_balance_topup(payment)
+                and observed == "succeeded"
+                and transition.outcome == "applied"
+                and payment.fulfillment_status not in {"manual_review", "reversed"}
+            ):
+                from services.account_topup import settle_succeeded_topup
+
+                await settle_succeeded_topup(
+                    session,
+                    payment=payment,
+                    source="webhook_inbox",
                 )
             elif transition.grant_allowed:
                 payment.fulfillment_status = "pending"

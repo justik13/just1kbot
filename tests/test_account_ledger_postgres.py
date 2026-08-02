@@ -6,6 +6,7 @@ import unittest
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError
@@ -16,6 +17,8 @@ from database.models import (
     AccountLedgerAllocation,
     AccountLedgerEntry,
     Payment,
+    PaymentFulfillmentOperation,
+    PaymentProviderOperation,
     Tariff,
     TariffQuote,
     TariffVersion,
@@ -30,6 +33,13 @@ from database.repositories.account_ledger_repo import (
     get_payment_refundable_amount,
     reserve_payment_funds,
     resolve_reservation,
+)
+from services.account_topup import (
+    AccountTopupError,
+    create_balance_topup,
+    hide_balance_topup,
+    settle_succeeded_topup,
+    settle_succeeded_topup_by_id,
 )
 from utils.datetime_helpers import now_utc
 
@@ -102,6 +112,18 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
         await session.flush()
         return payment
 
+    def topup_settings(self, **overrides):
+        values = {
+            "BALANCE_MIN_TOPUP_RUB": 10,
+            "BALANCE_MAX_CUSTOM_TOPUP_RUB": 5000,
+            "BALANCE_MAX_AVAILABLE_RUB": 10000,
+            "BALANCE_MAX_UNFINISHED_TOPUPS": 3,
+            "BALANCE_MAX_TOPUP_CREATIONS_24H": 10,
+            "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
     async def quote(self, session, amount: int, operation: str = "purchase"):
         now = now_utc()
         quote = TariffQuote(
@@ -146,6 +168,127 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(count, 1)
             self.assertEqual(snapshot.available, Decimal("100.00"))
             self.assertEqual(snapshot.debt, Decimal("0"))
+
+    async def test_topup_creation_is_durable_and_reuses_visible_intent(self):
+        async with self.sessions.begin() as session:
+            first = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=499,
+                bot_username="balance_bot",
+                context={"operation": "purchase", "quote": "q1"},
+                settings=self.topup_settings(),
+            )
+            repeated = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=500,
+                bot_username="balance_bot",
+                settings=self.topup_settings(),
+            )
+            self.assertTrue(first.created)
+            self.assertFalse(repeated.created)
+            self.assertEqual(first.payment.id, repeated.payment.id)
+            self.assertEqual(first.payment.payment_kind, "balance_topup")
+            self.assertIsNone(first.payment.tariff_id)
+            operation = await session.scalar(
+                select(PaymentProviderOperation).where(
+                    PaymentProviderOperation.payment_id == first.payment.id
+                )
+            )
+            self.assertEqual(operation.operation_type, "create_payment")
+            self.assertEqual(operation.payload["description"], "Пополнение баланса")
+            self.assertEqual(operation.payload["amount"]["value"], "499.00")
+
+    async def test_hidden_topup_can_be_replaced_but_remains_financially_live(self):
+        async with self.sessions.begin() as session:
+            first = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=40,
+                bot_username="bot",
+                settings=self.topup_settings(),
+            )
+            await hide_balance_topup(
+                session, user_id=self.user_id, payment_id=first.payment.id
+            )
+            replacement = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=50,
+                bot_username="bot",
+                settings=self.topup_settings(),
+            )
+            self.assertNotEqual(first.payment.id, replacement.payment.id)
+            self.assertFalse(first.payment.ui_visible)
+            self.assertEqual(first.payment.checkout_status, "active")
+            first.payment.provider_status = "succeeded"
+            first.payment.provider_confirmed_at = now_utc()
+            created, snapshot = await settle_succeeded_topup(
+                session,
+                payment=first.payment,
+                source="late_hidden_test",
+                settings=self.topup_settings(),
+            )
+            self.assertTrue(created)
+            self.assertEqual(snapshot.available, Decimal("40.00"))
+            grants = await session.scalar(
+                select(func.count(PaymentFulfillmentOperation.id)).where(
+                    PaymentFulfillmentOperation.payment_id == first.payment.id
+                )
+            )
+            self.assertEqual(grants, 0)
+
+    async def test_pending_exposure_prevents_late_balance_overflow(self):
+        settings = self.topup_settings(BALANCE_MAX_AVAILABLE_RUB=100)
+        async with self.sessions.begin() as session:
+            first = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=60,
+                bot_username="bot",
+                settings=settings,
+            )
+            await hide_balance_topup(
+                session, user_id=self.user_id, payment_id=first.payment.id
+            )
+            with self.assertRaisesRegex(
+                AccountTopupError, "topup_balance_limit_exceeded"
+            ):
+                await create_balance_topup(
+                    session,
+                    user_id=self.user_id,
+                    amount=50,
+                    bot_username="bot",
+                    settings=settings,
+                )
+
+    async def test_concurrent_topup_recovery_credits_once(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 75)
+            payment_id = payment.id
+
+        async def settle():
+            async with self.sessions.begin() as session:
+                return await settle_succeeded_topup_by_id(
+                    session,
+                    payment_id=payment_id,
+                    source="concurrent_recovery",
+                    settings=self.topup_settings(),
+                )
+
+        results = await asyncio.gather(settle(), settle())
+        self.assertEqual(sum(created for created, _ in results), 1)
+        async with self.sessions() as session:
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.payment_id == payment_id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
+                    )
+                ),
+                1,
+            )
 
     async def test_purchase_allocates_fifo_and_cannot_overdraw(self):
         async with self.sessions.begin() as session:

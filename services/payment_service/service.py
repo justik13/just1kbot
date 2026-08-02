@@ -260,6 +260,15 @@ class PaymentService:
             return False, "not_found"
         if payment.provider_status != "succeeded":
             return False, "provider_not_succeeded"
+        if payment.payment_kind == "balance_topup":
+            if payment.provider_confirmed_at is None:
+                return False, "topup_provider_not_verified"
+            from services.account_topup import settle_succeeded_topup
+
+            await settle_succeeded_topup(
+                session, payment=payment, source="compatibility_success_handler"
+            )
+            return True, "credited"
         from services.payment_kind import is_tariff_change_payment
 
         if await is_tariff_change_payment(session, payment):
@@ -500,6 +509,18 @@ class PaymentService:
         is_change = await is_tariff_change_payment(session, payment)
         if (
             payment.provider_status == "succeeded"
+            and payment.payment_kind == "balance_topup"
+            and payment.provider_confirmed_at is not None
+            and payment.fulfillment_status
+            not in {"succeeded", "reversed", "manual_review"}
+        ):
+            from services.account_topup import settle_succeeded_topup
+
+            await settle_succeeded_topup(
+                session, payment=payment, source="user_refresh_recovery"
+            )
+        elif (
+            payment.provider_status == "succeeded"
             and not is_change
             and payment.fulfillment_status
             not in {"succeeded", "reversed", "manual_review"}
@@ -531,6 +552,13 @@ class PaymentService:
             "canceled",
         }:
             return False
+        if payment.payment_kind == "balance_topup" and source == "user":
+            from services.account_topup import hide_balance_topup
+
+            await hide_balance_topup(
+                session, user_id=payment.user_id, payment_id=payment.id
+            )
+            return True
         payment.checkout_status = "abandoned"
         if source == "user":
             payment.user_cancel_requested_at = now_utc()

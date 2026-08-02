@@ -131,7 +131,21 @@ async def _process_stale_payments(bot: Bot, settings):
                 and payment.fulfillment_status
                 not in {"succeeded", "reversed", "manual_review"}
             ):
-                await ensure_fulfillment(session, payment, "grant_subscription")
+                if (
+                    payment.payment_kind == "balance_topup"
+                    and payment.provider_confirmed_at is not None
+                ):
+                    from services.account_topup import settle_succeeded_topup_by_id
+
+                    await settle_succeeded_topup_by_id(
+                        session,
+                        payment_id=payment.id,
+                        source="stale_worker_recovery",
+                    )
+                elif payment.payment_kind != "balance_topup":
+                    await ensure_fulfillment(
+                        session, payment, "grant_subscription"
+                    )
             if (
                 payment.provider_status == "refunded"
                 and payment.fulfillment_status != "reversed"

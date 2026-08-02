@@ -159,19 +159,21 @@ async def _insert_or_get_entry(
 async def credit_succeeded_topup(
     session: AsyncSession,
     *,
-    payment_id: int,
+    payment_id: int | None = None,
+    locked_payment: Payment | None = None,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
-    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
+    if locked_payment is None and payment_id is None:
+        raise ValueError("payment_id or locked_payment is required")
+    payment = locked_payment or await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
     if payment is None:
         raise LookupError("topup_payment_not_found")
     user = await lock_account_user(session, payment.user_id)
-    # Lock in the global account order.  Callers of this method must not already
-    # hold the Payment row; the first read above only resolves the owner.
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None or payment.user_id != user.id:
+    # Provider and webhook finalizers already own the Payment lock. Keep their
+    # documented Payment -> User order so concurrent confirmations serialize.
+    if payment.user_id != user.id:
         raise AccountLedgerConflictError("topup_owner_changed")
     if payment.payment_kind != "balance_topup":
         raise AccountLedgerConflictError("payment_is_not_balance_topup")

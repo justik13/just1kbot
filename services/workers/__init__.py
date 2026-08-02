@@ -10,6 +10,7 @@ from aiogram import Bot
 
 from config.settings import get_settings
 from .api_operations import api_operations_loop
+from .account_balance import account_balance_notifications_loop
 from .cleanup import cleanup_dangling_peers_loop
 from .heartbeat import heartbeat_loop, set_bot_ref
 from .notifications import subscription_notifications_loop
@@ -64,6 +65,7 @@ def _stale_payments(bot): return stale_payments_checker_loop(bot, shutdown_event
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
+def _account_balance(bot): return account_balance_notifications_loop(bot, shutdown_event)
 def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 
@@ -76,6 +78,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("cleanup", _cleanup, False),
     WorkerDefinition("stale_payments", _stale_payments, False),
     WorkerDefinition("notifications", _notifications, False),
+    WorkerDefinition("account_balance", _account_balance, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("queue_health", _queue_health, False),
     WorkerDefinition("api_operations", _api_operations, True),
