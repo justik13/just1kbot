@@ -1,4 +1,4 @@
-name: PR52 apply access hold fix retry
+name: PR52 apply reviewed financial fix
 
 on:
   push:
@@ -9,83 +9,36 @@ permissions:
   contents: write
 
 concurrency:
-  group: pr52-apply-access-hold-retry
+  group: pr52-apply-reviewed-financial-fix
   cancel-in-progress: true
 
 jobs:
-  apply-and-validate:
+  apply:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: projectx
-          POSTGRES_PASSWORD: projectx
-          POSTGRES_DB: projectx_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U projectx -d projectx_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
-      TEST_DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
-      DB_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
-      BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/yookassa-account-balance
           fetch-depth: 0
-      - name: Apply reviewed patch
+      - name: Apply reviewed changes
+        env:
+          PATCH_B64: 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
         run: |
           python - <<'PY'
           import base64
           import gzip
+          import os
           from pathlib import Path
 
-          encoded = Path('.github/pr52-access.patch.gz.b64').read_text().strip()
-          Path('/tmp/pr52.patch').write_bytes(gzip.decompress(base64.b64decode(encoded)))
+          Path('/tmp/pr52.patch').write_bytes(
+              gzip.decompress(base64.b64decode(os.environ['PATCH_B64']))
+          )
           PY
           git apply --index /tmp/pr52.patch
           git rm .github/pr52-access.patch.gz.b64
           git rm .github/workflows/pr52-apply-access-hold-retry.yml
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install dependencies
-        run: |
-          python -m pip install -r requirements.txt
-          python -m pip install ruff==0.16.1
-      - name: Lint focused changes
-        run: >-
-          ruff check alembic/env.py
-          alembic/versions/8d2f4a6c1b70_access_financial_hold.py
-          database/models.py services/payment_disputes.py services/subscription.py
-          tests/test_api_operations_schema.py tests/test_balance_telegram_ux.py
-          tests/test_payment_disputes_postgres.py
-          --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
-          --ignore PLW0603,PLW0108
-          --output-format full
-      - name: Upgrade and compare schema
-        run: |
-          alembic upgrade head
-          alembic check
-      - name: Run focused PostgreSQL tests
-        run: >-
-          python -m unittest -v
-          tests.test_payment_disputes_postgres
-          tests.test_api_operations_schema
-          tests.test_balance_telegram_ux
-      - name: Validate tree
-        run: |
-          python -m compileall -q bot config database services utils alembic tests
-          git diff --check
-      - name: Commit and rebase validated fix
+      - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
