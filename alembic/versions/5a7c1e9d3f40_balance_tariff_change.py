@@ -19,8 +19,16 @@ def upgrade() -> None:
         "entitlement_entries",
         sa.Column("hours_delta", sa.Integer(), nullable=True),
     )
+    # This is a one-time schema backfill, not an application mutation. The
+    # append-only trigger must remain active before and after the migration.
     op.execute(
-        "UPDATE entitlement_entries SET hours_delta = days_delta * 24"
+        "ALTER TABLE entitlement_entries "
+        "DISABLE TRIGGER entitlement_entries_append_only"
+    )
+    op.execute("UPDATE entitlement_entries SET hours_delta = days_delta * 24")
+    op.execute(
+        "ALTER TABLE entitlement_entries "
+        "ENABLE TRIGGER entitlement_entries_append_only"
     )
     op.drop_constraint(
         "ck_entitlement_entries_type",
@@ -66,7 +74,15 @@ def downgrade() -> None:
         "entitlement_entries",
         type_="check",
     )
+    op.execute(
+        "ALTER TABLE entitlement_entries "
+        "DISABLE TRIGGER entitlement_entries_append_only"
+    )
     op.execute("DELETE FROM entitlement_entries WHERE entry_type='tariff_change'")
+    op.execute(
+        "ALTER TABLE entitlement_entries "
+        "ENABLE TRIGGER entitlement_entries_append_only"
+    )
     op.create_check_constraint(
         "ck_entitlement_entries_type",
         "entitlement_entries",
