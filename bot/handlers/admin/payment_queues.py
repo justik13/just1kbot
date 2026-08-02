@@ -90,6 +90,7 @@ async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
     lines = ["🛠 Админка › 🧰 <b>Платёжные очереди</b>", ""]
     names = {
         "provider_operations": "Provider",
+        "provider_refunds": "Refunds",
         "fulfillment_operations": "Fulfillment",
         "webhook_inbox": "Webhook",
     }
