@@ -24,13 +24,11 @@ jobs:
           bzip2 -dc /tmp/greenfield.patch.bz2 > /tmp/greenfield.patch
           echo 'f03783ff7eb14e62afbf000f4d827215c8e97cb31fd322f74ef5610638b88d2b  /tmp/greenfield.patch' | sha256sum -c -
           git apply --check /tmp/greenfield.patch
-      - name: Apply patch
-        run: git apply --binary /tmp/greenfield.patch
-      - name: Remove transport files
+      - name: Apply code patch
         run: |
-          rm -rf .github/greenfield-patch
-          rm -f .github/workflows/apply-greenfield.yml
-      - name: Commit and push
+          git apply --binary /tmp/greenfield.patch
+          rm -f .github/workflows/baseline-export.yml
+      - name: Commit and push code only
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
