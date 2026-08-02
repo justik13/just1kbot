@@ -132,6 +132,8 @@ def get_yookassa_payment_keyboard(
         text="✅ Я оплатил (проверить)",
         callback_data=f"check_payment:{payment_id}",
     )
+    # A YooKassa auto-capture payment remains payable while it is pending, so
+    # leaving this screen must not pretend that the provider payment was canceled.
     builder.button(
         text="← Вернуться позже",
         callback_data=f"cancel_invoice:{payment_id}:{tariff_id}:{source}",
