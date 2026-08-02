@@ -8,7 +8,9 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Generic, TypeVar
+
 import aiohttp
+
 from config.settings import get_settings
 
 T = TypeVar("T")
@@ -210,6 +212,20 @@ class YooKassaService:
             idempotency_key=idempotency_key,
             ambiguous_on_failure=True,
         )
+
+    @classmethod
+    async def create_refund_result(cls, payload: dict, *, idempotency_key: str):
+        return await cls._request(
+            "POST",
+            "/refunds",
+            payload=payload,
+            idempotency_key=idempotency_key,
+            ambiguous_on_failure=True,
+        )
+
+    @classmethod
+    async def get_refund_result(cls, refund_id: str):
+        return await cls._request("GET", f"/refunds/{refund_id}")
 
     @classmethod
     async def get_payment(cls, payment_id):
