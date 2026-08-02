@@ -106,9 +106,6 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     if user.current_tariff_id is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
 
-    if await get_unfinished_financial_checkout(session, user_id=user_id):
-        return TariffChangeQuoteResult(failure_code="unfinished_checkout_exists")
-
     active = await get_active_financial_quotes_for_update(
         session, user_id=user_id, as_of=as_of)
     if any(q.operation_type in {"purchase", "renew"} for q in active):
