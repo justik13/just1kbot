@@ -113,7 +113,12 @@ class APIOperationSchemaTests(unittest.TestCase):
         }
         self.assertEqual(foreign_keys["server_id"].target_fullname, "servers.id")
         self.assertEqual(foreign_keys["profile_id"].target_fullname, "vpn_profiles.id")
-        self.assertTrue(all(foreign_key.ondelete == "SET NULL" for foreign_key in foreign_keys.values()))
+        self.assertTrue(
+            all(
+                foreign_key.ondelete == "SET NULL"
+                for foreign_key in foreign_keys.values()
+            )
+        )
 
     def test_api_key_snapshot_is_encrypted(self):
         encrypted_type = self.table.c.api_key_snapshot.type
@@ -144,7 +149,10 @@ class APIOperationSchemaTests(unittest.TestCase):
         for name, columns in expected_columns.items():
             self.assertEqual(list(indexes[name].columns.keys()), columns)
         self.assertEqual(
-            str(indexes["ix_api_operations_claim"].dialect_options["postgresql"]["where"]),
+            str(
+                indexes["ix_api_operations_claim"]
+                .dialect_options["postgresql"]["where"]
+            ),
             "status IN ('pending', 'retry')",
         )
         self.assertEqual(
@@ -157,7 +165,7 @@ class APIOperationSchemaTests(unittest.TestCase):
 
     def test_alembic_graph_has_one_head(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["5a7c1e9d3f40"])
+        self.assertEqual(scripts.get_heads(), ["6b8d2f0e4a50"])
 
 
 if __name__ == "__main__":
