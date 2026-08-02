@@ -28,6 +28,10 @@ def get_admin_menu(
         callback_data="admin_payments",
     )
     builder.button(
+        text="⚠️ Споры",
+        callback_data="admin_disputes",
+    )
+    builder.button(
         text="🧰 Платёжные очереди",
         callback_data="aq:home",
     )
@@ -52,7 +56,7 @@ def get_admin_menu(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(2, 2, 2, 1, 1, 1)
+    builder.adjust(2, 2, 2, 2, 1, 1)
     return builder.as_markup()
 
 
