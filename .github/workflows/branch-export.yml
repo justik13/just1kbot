@@ -1,0 +1,25 @@
+name: branch-export
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'agent/greenfield-ui-ux-cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package branch source
+        run: tar --exclude=.git -czf /tmp/projectx-branch.tar.gz .
+      - name: Upload branch source
+        uses: actions/upload-artifact@v4
+        with:
+          name: projectx-branch-${{ github.sha }}
+          path: /tmp/projectx-branch.tar.gz
+          if-no-files-found: error
+          retention-days: 1
