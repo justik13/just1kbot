@@ -56,11 +56,26 @@ jobs:
             '/tmp/pr52-baseline.patch' | sha256sum --check
           git apply --index /tmp/pr52-baseline.patch
 
-          base64 --decode .github/pr52-baseline-test-fix.patch.b64 > /tmp/pr52-baseline-test-fix.patch
-          printf '%s  %s\n' \
-            'f314e9890946d0900981dc815dc5c4aee44db781a7be1657c2872e9d412eab67' \
-            '/tmp/pr52-baseline-test-fix.patch' | sha256sum --check
-          git apply --index /tmp/pr52-baseline-test-fix.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_tariff_change_quote_postgres.py')
+          content = path.read_text()
+          old = '''            await session.execute(\n                text(\n                    "UPDATE payments SET snapshot_amount=snapshot_amount+1 WHERE id=("\n                    "SELECT payment_id FROM paid_value_ledger WHERE user_id=:u AND entry_type='confirmed_payment')"\n                ),\n                {"u": user},\n            )\n'''
+          new = '''            await session.execute(\n                text(\n                    "INSERT INTO paid_value_ledger("\n                    "user_id,source_type,source_id,entry_type,paid_hours_delta,"\n                    "paid_value_rub_delta,currency,tariff_version_id,metadata,created_at"\n                    ") SELECT user_id,'manual',:source,'manual_adjustment',1,1,'RUB',"\n                    "tariff_version_id,'{}',:created_at FROM paid_value_ledger "\n                    "WHERE user_id=:u AND entry_type='account_purchase' LIMIT 1"\n                ),\n                {\n                    "u": user,\n                    "source": uuid.uuid4().hex,\n                    "created_at": as_of + timedelta(seconds=1),\n                },\n            )\n'''
+          if content.count(old) != 1:
+              raise SystemExit('expected obsolete confirmed-payment test block exactly once')
+          path.write_text(content.replace(old, new))
+
+          path = Path('tests/test_tariff_quotes_postgres.py')
+          content = path.read_text()
+          old = '''                    select(EntitlementEntry).where(\n                        EntitlementEntry.source_id == str(payment.id)\n                    )\n'''
+          new = '''                    select(EntitlementEntry).where(\n                        EntitlementEntry.source_type == "payment",\n                        EntitlementEntry.source_id == str(payment.id),\n                        EntitlementEntry.entry_type == "payment_grant",\n                    )\n'''
+          if content.count(old) != 1:
+              raise SystemExit('expected broad entitlement assertion exactly once')
+          path.write_text(content.replace(old, new))
+          PY
+          git add tests/test_tariff_change_quote_postgres.py tests/test_tariff_quotes_postgres.py
 
           git rm .github/pr52-baseline.patch.gz.b64
           git rm .github/pr52-baseline-test-fix.patch.b64
