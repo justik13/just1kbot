@@ -16,6 +16,8 @@ from database.models import (
     AccountBalanceReservation,
     AccountLedgerAllocation,
     AccountLedgerEntry,
+    EntitlementEntry,
+    PaidValueLedgerEntry,
     Payment,
     PaymentFulfillmentOperation,
     PaymentProviderOperation,
@@ -41,6 +43,11 @@ from services.account_topup import (
     settle_succeeded_topup,
     settle_succeeded_topup_by_id,
 )
+from services.account_purchase import (
+    AccountPurchaseError,
+    prepare_account_purchase,
+    settle_account_purchase,
+)
 from utils.datetime_helpers import now_utc
 
 
@@ -57,6 +64,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 text(
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
                     "tariff_quotes, tariff_versions, payments, users, tariffs "
                     "RESTART IDENTITY CASCADE"
                 )
@@ -289,6 +297,136 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 1,
             )
+
+    async def test_balance_purchase_settles_all_local_ledgers_atomically(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            public_id = intent.quote.public_id
+            result = await settle_account_purchase(
+                session,
+                user_id=self.user_id,
+                quote_public_id=public_id,
+            )
+            self.assertTrue(result.created)
+            self.assertEqual(result.balance_after.available, Decimal("0.00"))
+
+        async with self.sessions.begin() as session:
+            repeated = await settle_account_purchase(
+                session,
+                user_id=self.user_id,
+                quote_public_id=public_id,
+            )
+            self.assertFalse(repeated.created)
+            quote = await session.scalar(
+                select(TariffQuote).where(TariffQuote.public_id == public_id)
+            )
+            user = await session.get(User, self.user_id)
+            self.assertEqual(quote.status, "consumed")
+            self.assertEqual(user.current_tariff_id, self.tariff_id)
+            self.assertIsNotNone(user.subscription_end)
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit",
+                        AccountLedgerEntry.quote_id == quote.id,
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(PaidValueLedgerEntry.id)).where(
+                        PaidValueLedgerEntry.entry_type == "account_purchase",
+                        PaidValueLedgerEntry.quote_id == quote.id,
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(EntitlementEntry.id)).where(
+                        EntitlementEntry.entry_type == "account_purchase_grant",
+                        EntitlementEntry.source_id == str(quote.id),
+                    )
+                ),
+                1,
+            )
+
+    async def test_insufficient_balance_never_creates_purchase_side_effects(self):
+        async with self.sessions.begin() as session:
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            with self.assertRaisesRegex(
+                AccountPurchaseError, "insufficient_balance"
+            ):
+                await settle_account_purchase(
+                    session,
+                    user_id=self.user_id,
+                    quote_public_id=intent.quote.public_id,
+                )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                await session.scalar(select(func.count(EntitlementEntry.id))),
+                0,
+            )
+
+    async def test_price_change_is_rejected_before_account_debit(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 200)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            tariff = await session.get(Tariff, self.tariff_id)
+            tariff.price_rub = 120
+            with self.assertRaisesRegex(
+                AccountPurchaseError, "tariff_price_changed"
+            ):
+                await settle_account_purchase(
+                    session,
+                    user_id=self.user_id,
+                    quote_public_id=intent.quote.public_id,
+                )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                0,
+            )
+
+    async def test_two_purchase_confirmations_create_one_debit(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            public_id = intent.quote.public_id
+
+        async def confirm():
+            async with self.sessions.begin() as session:
+                return await settle_account_purchase(
+                    session,
+                    user_id=self.user_id,
+                    quote_public_id=public_id,
+                )
+
+        results = await asyncio.gather(confirm(), confirm())
+        self.assertEqual(sum(result.created for result in results), 1)
 
     async def test_purchase_allocates_fifo_and_cannot_overdraw(self):
         async with self.sessions.begin() as session:

@@ -362,18 +362,26 @@ class TariffQuote(Base):
     source_balance_fingerprint: Mapped[str | None] = mapped_column(String(64))
     source_entitlement_entry_ids: Mapped[list | None] = mapped_column(JSONB)
     source_ledger_entry_ids: Mapped[list | None] = mapped_column(JSONB)
+    purchase_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    referral_processed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class PaidValueLedgerEntry(Base):
     __tablename__ = "paid_value_ledger"
     __table_args__ = (
-        CheckConstraint("entry_type IN ('confirmed_payment','tariff_conversion','payment_reversal','manual_adjustment')", name="ck_paid_value_ledger_entry_type"),
+        CheckConstraint("entry_type IN ('confirmed_payment','account_purchase','tariff_conversion','payment_reversal','manual_adjustment')", name="ck_paid_value_ledger_entry_type"),
         CheckConstraint("currency = 'RUB'", name="ck_paid_value_ledger_currency_rub"),
         CheckConstraint("paid_value_rub_delta <> 'NaN'::numeric", name="ck_paid_value_ledger_finite_value"),
         CheckConstraint("entry_type <> 'confirmed_payment' OR (payment_id IS NOT NULL AND quote_id IS NOT NULL AND reversal_of_id IS NULL AND paid_hours_delta > 0 AND paid_value_rub_delta > 0)", name="ck_paid_value_confirmed_shape"),
+        CheckConstraint("entry_type <> 'account_purchase' OR (payment_id IS NULL AND quote_id IS NOT NULL AND reversal_of_id IS NULL AND paid_hours_delta > 0 AND paid_value_rub_delta > 0)", name="ck_paid_value_account_purchase_shape"),
         CheckConstraint("entry_type <> 'tariff_conversion' OR (quote_id IS NOT NULL AND reversal_of_id IS NULL)", name="ck_paid_value_conversion_shape"),
         CheckConstraint("entry_type <> 'payment_reversal' OR (reversal_of_id IS NOT NULL AND paid_hours_delta <= 0 AND paid_value_rub_delta <= 0 AND reversal_of_id <> id)", name="ck_paid_value_reversal_shape"),
         Index("uq_paid_value_confirmed_payment", "payment_id", unique=True, postgresql_where=text("entry_type='confirmed_payment'")),
+        Index("uq_paid_value_account_purchase", "quote_id", unique=True, postgresql_where=text("entry_type='account_purchase'")),
         Index("uq_paid_value_conversion_quote", "quote_id", unique=True, postgresql_where=text("entry_type='tariff_conversion'")),
         Index("uq_paid_value_reversal", "reversal_of_id", unique=True, postgresql_where=text("entry_type='payment_reversal'")),
     )
@@ -809,9 +817,9 @@ class EntitlementEntry(Base):
     __tablename__ = "entitlement_entries"
     __table_args__ = (
         UniqueConstraint("beneficiary_user_id", "source_type", "source_id", "entry_type", name="uq_entitlement_entries_source"),
-        CheckConstraint("entry_type IN ('payment_grant','referral_user_bonus','referral_referrer_bonus','payment_reversal','referral_reversal','manual_grant')", name="ck_entitlement_entries_type"),
+        CheckConstraint("entry_type IN ('payment_grant','account_purchase_grant','referral_user_bonus','referral_referrer_bonus','payment_reversal','referral_reversal','manual_grant')", name="ck_entitlement_entries_type"),
         CheckConstraint(
-            "(entry_type IN ('payment_grant','referral_user_bonus','referral_referrer_bonus','manual_grant') "
+            "(entry_type IN ('payment_grant','account_purchase_grant','referral_user_bonus','referral_referrer_bonus','manual_grant') "
             "AND days_delta > 0 AND reversed_entry_id IS NULL) OR "
             "(entry_type IN ('payment_reversal','referral_reversal') "
             "AND days_delta < 0 AND reversed_entry_id IS NOT NULL)",
@@ -848,9 +856,20 @@ class PaymentRefund(Base):
 
 class ReferralReward(Base):
     __tablename__ = "referral_rewards"
+    __table_args__ = (
+        CheckConstraint(
+            "(source_payment_id IS NOT NULL) <> (source_quote_id IS NOT NULL)",
+            name="ck_referral_rewards_one_source",
+        ),
+    )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
-    source_payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    source_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, unique=True)
+    source_quote_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"),
+        nullable=True,
+        unique=True,
+    )
     referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     is_first: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -859,10 +878,22 @@ class ReferralReward(Base):
 
 class ReferralEligibility(Base):
     __tablename__ = "referral_eligibilities"
-    __table_args__ = (CheckConstraint("status IN ('claimed','blocked')",name="ck_referral_eligibilities_status"),)
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('claimed','blocked')",
+            name="ck_referral_eligibilities_status",
+        ),
+        CheckConstraint(
+            "source_payment_id IS NULL OR source_quote_id IS NULL",
+            name="ck_referral_eligibilities_one_source",
+        ),
+    )
     referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id",ondelete="RESTRICT"),primary_key=True)
     status: Mapped[str] = mapped_column(String(20),nullable=False)
     source_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id",ondelete="RESTRICT"))
+    source_quote_id: Mapped[int | None] = mapped_column(
+        ForeignKey("tariff_quotes.id", ondelete="RESTRICT")
+    )
     reason: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=now_utc)
 

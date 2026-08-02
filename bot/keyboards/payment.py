@@ -238,3 +238,60 @@ def get_topup_payment_keyboard(
     )
     builder.adjust(1)
     return builder.as_markup()
+
+
+def get_balance_purchase_start_keyboard(
+    quote_public_id: str, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💰 Купить с баланса",
+        callback_data=f"balance_purchase_review:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_balance_purchase_confirm_keyboard(
+    quote_public_id: str, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Подтвердить покупку",
+        callback_data=f"balance_purchase_confirm:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_balance_shortage_keyboard(
+    quote_public_id: str, exact_amount: int, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"Пополнить на {exact_amount} ₽",
+        callback_data=f"balance_shortage_exact:{quote_public_id}",
+    )
+    builder.button(
+        text="Указать другую сумму",
+        callback_data=f"balance_shortage_custom:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    tariff_id = context.get("tariff_id")
+    source = context.get("source")
+    if tariff_id and source in {"showcase", "renew", "change"}:
+        builder.button(
+            text="Вернуться к покупке",
+            callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
+        )
+    builder.button(text="💰 К балансу", callback_data="menu_balance")
+    builder.adjust(1)
+    return builder.as_markup()

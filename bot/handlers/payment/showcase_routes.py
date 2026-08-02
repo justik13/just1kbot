@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
+    get_balance_purchase_start_keyboard,
     get_change_tariff_keyboard,
-    get_payment_method_keyboard,
     get_renew_keyboard,
     get_tariff_duration_keyboard,
 )
@@ -18,6 +18,7 @@ from database.repositories.tariffs_repo import (
     get_tariff_by_id,
 )
 from services.maintenance_service import MaintenanceService
+from services.account_purchase import AccountPurchaseError, prepare_account_purchase
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
@@ -165,18 +166,53 @@ async def select_tariff(
 
     tariff_name = get_tariff_display_name(device_limit)
 
-    text = texts.PAYMENT_CHECKOUT_TEXT.format(
-        tariff_name=tariff_name,
-        duration_days=tariff.duration_days,
-        price_rub=tariff.price_rub,
+    try:
+        intent = await prepare_account_purchase(
+            session, user_id=db_user.id, tariff_id=tariff.id
+        )
+    except AccountPurchaseError as exc:
+        errors = {
+            "financial_hold": "Покупки временно заблокированы из-за открытого финансового спора.",
+            "account_debt": "Покупки недоступны до погашения задолженности.",
+            "tariff_change_required": "Для этого варианта используйте раздел «Сменить тариф».",
+            "active_tariff_change_quote_exists": "Сначала завершите или отмените смену тарифа.",
+            "legacy_checkout_in_progress": "Сначала завершите ранее созданный платёж.",
+        }
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            errors.get(exc.code, "Не удалось подготовить покупку. Попробуйте ещё раз."),
+            get_back_button(back_to),
+        )
+        await callback.answer(show_alert=False)
+        return
+
+    price = int(intent.quote.confirmed_payment_required_rub)
+    balance_before = int(intent.balance.available)
+    balance_after = max(0, balance_before - price)
+    shortage_line = (
+        f"\n⚠️ Не хватает: <b>{int(intent.shortage)} ₽</b>"
+        if intent.shortage > 0
+        else ""
+    )
+    text = (
+        "💳 <b>Оформление заказа</b>\n\n"
+        f"📦 Тариф: <b>{tariff_name}</b>\n"
+        f"⏱ Срок: {tariff.duration_days} дней\n"
+        f"🔌 Устройства: до {device_limit}\n"
+        f"💰 Цена: <b>{price} ₽</b>\n\n"
+        f"Баланс: <b>{balance_before} ₽</b>\n"
+        f"После покупки: <b>{balance_after} ₽</b>"
+        f"{shortage_line}\n\n"
+        "Покупка выполняется только после отдельного подтверждения."
     )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         text,
-        get_payment_method_keyboard(
-            tariff.id, device_limit, source=source
+        get_balance_purchase_start_keyboard(
+            str(intent.quote.public_id), back_to
         ),
     )
 

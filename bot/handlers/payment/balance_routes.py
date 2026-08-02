@@ -220,6 +220,11 @@ async def _create_and_render_topup(
             get_back_button("menu_balance"),
         )
         return
+    if context:
+        result.payment.topup_context = {
+            **(result.payment.topup_context or {}),
+            **context,
+        }
     await _render_topup(
         target.bot, target.chat.id, session, user, result.payment
     )
@@ -320,6 +325,7 @@ async def request_custom_amount(
 ) -> None:
     await callback.answer(show_alert=False)
     await state.set_state(BalanceStates.enter_custom_amount)
+    await state.set_data({})
     await render_hub(
         callback.bot,
         callback.message.chat.id,
@@ -348,8 +354,25 @@ async def accept_custom_amount(
     if db_user is None:
         await state.clear()
         return
+    data = await state.get_data()
+    minimum = int(data.get("balance_minimum") or get_settings().BALANCE_MIN_TOPUP_RUB)
+    amount = int(raw)
+    if amount < minimum:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"Для выбранной операции нужно пополнить минимум на <b>{minimum} ₽</b>.",
+            get_back_button("menu_balance"),
+        )
+        return
     await state.clear()
-    await _create_and_render_topup(message, session, db_user, int(raw))
+    await _create_and_render_topup(
+        message,
+        session,
+        db_user,
+        amount,
+        context=data.get("balance_context"),
+    )
 
 
 @router.callback_query(F.data == "balance_resume_topup")

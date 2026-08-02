@@ -31,6 +31,7 @@ class LedgerEntry:
     tariff_version_id: int
     payment_id: int | None
     reversal_of_id: int | None = None
+    quote_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class TariffVersionSnapshot:
 class ProjectedPaidLot:
     entitlement_entry_id: int
     paid_value_ledger_entry_id: int
-    payment_id: int
+    payment_id: int | None
     tariff_version_id: int
     original_paid_hours: int
     original_paid_value_rub: Decimal
@@ -67,6 +68,7 @@ class ProjectedPaidLot:
     remaining_paid_value_rub: Decimal
     segment_start: datetime
     segment_end: datetime
+    quote_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,7 @@ def project_subscription_balance(
 
     grants_types = {
         "payment_grant",
+        "account_purchase_grant",
         "referral_user_bonus",
         "referral_referrer_bonus",
         "manual_grant",
@@ -170,22 +173,41 @@ def project_subscription_balance(
     ):
         return fail("invalid_entitlement_shape")
     active = subscription_end is not None and subscription_end > as_of
-    confirmed = [x for x in ledger if x.entry_type == "confirmed_payment"]
+    confirmed = [
+        x
+        for x in ledger
+        if x.entry_type in {"confirmed_payment", "account_purchase"}
+    ]
     ledger_reversals = [x for x in ledger if x.entry_type == "payment_reversal"]
     if any(
-        x.entry_type not in {"confirmed_payment", "payment_reversal"}
+        x.entry_type
+        not in {"confirmed_payment", "account_purchase", "payment_reversal"}
         and (x.paid_hours_delta or x.paid_value_rub_delta)
         for x in ledger
     ):
         return fail("unsupported_paid_value_entry")
     grants = [
-        e for e in events if e.entry_type == "payment_grant" and e.hours_delta > 0
+        e
+        for e in events
+        if e.entry_type in {"payment_grant", "account_purchase_grant"}
+        and e.hours_delta > 0
     ]
     for item in confirmed:
         matches = [
             e
             for e in grants
-            if e.source_type == "payment" and e.source_id == str(item.payment_id)
+            if (
+                item.entry_type == "confirmed_payment"
+                and e.entry_type == "payment_grant"
+                and e.source_type == "payment"
+                and e.source_id == str(item.payment_id)
+            )
+            or (
+                item.entry_type == "account_purchase"
+                and e.entry_type == "account_purchase_grant"
+                and e.source_type == "quote"
+                and e.source_id == str(item.quote_id)
+            )
         ]
         if len(matches) != 1:
             return fail("confirmed_payment_without_entitlement_grant")
@@ -205,18 +227,29 @@ def project_subscription_balance(
         if event.hours_delta > 0:
             if event.entry_type not in {
                 "payment_grant",
+                "account_purchase_grant",
                 "referral_user_bonus",
                 "referral_referrer_bonus",
                 "manual_grant",
             }:
                 continue
             match = None
-            if event.entry_type == "payment_grant":
+            if event.entry_type in {"payment_grant", "account_purchase_grant"}:
                 matches = [
                     x
                     for x in confirmed
-                    if event.source_type == "payment"
-                    and str(x.payment_id) == event.source_id
+                    if (
+                        event.entry_type == "payment_grant"
+                        and x.entry_type == "confirmed_payment"
+                        and event.source_type == "payment"
+                        and str(x.payment_id) == event.source_id
+                    )
+                    or (
+                        event.entry_type == "account_purchase_grant"
+                        and x.entry_type == "account_purchase"
+                        and event.source_type == "quote"
+                        and str(x.quote_id) == event.source_id
+                    )
                 ]
                 if len(matches) != 1:
                     legacy_failure = "paid_grant_without_value_ledger"
@@ -227,36 +260,55 @@ def project_subscription_balance(
                             "confirmed_payment_without_entitlement_grant", coverage
                         )
                     used_confirmed.add(match.id)
-                    payment = payments.get(match.payment_id)
                     version = tariff_versions.get(match.tariff_version_id)
-                    ok = (
+                    common_ok = (
                         match.user_id == event.user_id
                         and match.paid_hours_delta == event.hours_delta
                         and match.paid_value_rub_delta > 0
                         and match.currency == "RUB"
-                        and payment is not None
-                        and payment.user_id == event.user_id
-                        and payment.tariff_version_id == match.tariff_version_id
                         and version is not None
-                        and payment.tariff_id == version.tariff_id
-                        and payment.currency
-                        == payment.snapshot_currency
-                        == version.currency
-                        == match.currency
-                        and payment.snapshot_duration_hours
-                        == version.duration_hours
-                        == event.hours_delta
-                        and payment.amount
-                        == payment.snapshot_amount
-                        == version.price_rub
-                        == match.paid_value_rub_delta
+                        and version.currency == match.currency
+                        and version.duration_hours == event.hours_delta
                     )
+                    if match.entry_type == "confirmed_payment":
+                        payment = payments.get(match.payment_id)
+                        ok = (
+                            common_ok
+                            and payment is not None
+                            and payment.user_id == event.user_id
+                            and payment.tariff_version_id
+                            == match.tariff_version_id
+                            and payment.tariff_id == version.tariff_id
+                            and payment.currency
+                            == payment.snapshot_currency
+                            == match.currency
+                            and payment.snapshot_duration_hours
+                            == version.duration_hours
+                            and payment.amount
+                            == payment.snapshot_amount
+                            == version.price_rub
+                            == match.paid_value_rub_delta
+                        )
+                    else:
+                        ok = (
+                            common_ok
+                            and match.payment_id is None
+                            and match.quote_id is not None
+                            and match.paid_value_rub_delta == version.price_rub
+                        )
                     if not ok:
                         legacy_failure = "paid_grant_without_value_ledger"
             start = max(event.created_at, coverage) if coverage else event.created_at
             end = start + timedelta(hours=event.hours_delta)
             segments.append(
-                _Segment(event, start, end, match, event.entry_type == "payment_grant")
+                _Segment(
+                    event,
+                    start,
+                    end,
+                    match,
+                    event.entry_type
+                    in {"payment_grant", "account_purchase_grant"},
+                )
             )
             coverage = end
             continue
@@ -374,6 +426,7 @@ def project_subscription_balance(
                     value,
                     s.start,
                     s.end,
+                    s.ledger.quote_id,
                 )
             )
         else:

@@ -75,6 +75,44 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             (True, 24, Decimal("24")),
         )
 
+    def test_account_purchase_is_a_quote_backed_paid_lot(self):
+        snapshot = project_subscription_balance(
+            as_of=T0,
+            subscription_end=T0 + timedelta(hours=24),
+            entitlement_events=(
+                EntitlementEvent(
+                    1,
+                    1,
+                    "quote",
+                    "55",
+                    "account_purchase_grant",
+                    24,
+                    T0,
+                ),
+            ),
+            ledger_entries=(
+                LedgerEntry(
+                    11,
+                    1,
+                    "account_purchase",
+                    24,
+                    Decimal("49"),
+                    "RUB",
+                    100,
+                    None,
+                    quote_id=55,
+                ),
+            ),
+            tariff_versions={
+                100: TariffVersionSnapshot(100, 7, 24, Decimal("49"), "RUB")
+            },
+            payments={},
+        )
+        self.assertTrue(snapshot.tracked)
+        self.assertEqual(snapshot.remaining_paid_value_rub, Decimal("49"))
+        self.assertEqual(snapshot.paid_lots[0].quote_id, 55)
+        self.assertIsNone(snapshot.paid_lots[0].payment_id)
+
     def test_partially_used_paid_lot(self):
         s = self.paid(as_of=T0 + timedelta(hours=4))
         self.assertEqual(

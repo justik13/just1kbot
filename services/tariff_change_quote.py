@@ -58,6 +58,7 @@ def balance_snapshot_fingerprint(*, user_id: int, subscription_end: datetime, sn
     paid = [{
         "entitlement_id": x.entitlement_entry_id, "ledger_id": x.paid_value_ledger_entry_id,
         "payment_id": x.payment_id, "tariff_version_id": x.tariff_version_id,
+        "quote_id": x.quote_id,
         "remaining_hours": x.remaining_whole_hours,
         "remaining_value": _decimal(x.remaining_paid_value_rub),
         "segment_start": _timestamp(x.segment_start), "segment_end": _timestamp(x.segment_end),

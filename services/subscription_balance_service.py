@@ -22,6 +22,7 @@ async def get_subscription_balance_snapshot(session, *, user_id: int, as_of: dat
         paid_hours_delta=x.paid_hours_delta, paid_value_rub_delta=x.paid_value_rub_delta,
         currency=x.currency, tariff_version_id=x.tariff_version_id,
         payment_id=x.payment_id, reversal_of_id=x.reversal_of_id,
+        quote_id=x.quote_id,
     ) for x in ledger)
     payment_values = {x.id: PaymentSnapshot(
         id=x.id, user_id=x.user_id, tariff_id=x.tariff_id,
