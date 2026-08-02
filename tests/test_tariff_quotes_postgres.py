@@ -334,7 +334,9 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(
                 await session.scalar(
                     select(EntitlementEntry).where(
-                        EntitlementEntry.source_id == str(payment.id)
+                        EntitlementEntry.source_type == "payment",
+                        EntitlementEntry.source_id == str(payment.id),
+                        EntitlementEntry.entry_type == "payment_grant",
                     )
                 )
             )

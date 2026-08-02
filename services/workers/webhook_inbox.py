@@ -15,7 +15,7 @@ from database.models import (
     PaymentRefund,
     WebhookInbox,
 )
-from services.payment_kind import is_balance_topup, is_tariff_change_payment
+from services.payment_kind import is_balance_topup
 from services.payment_lifecycle import project_legacy_status
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
@@ -46,12 +46,6 @@ class InboxClaim:
 
 async def ensure_fulfillment(session, payment, typ):
     if is_balance_topup(payment):
-        return None
-    if typ in {
-        "grant_subscription",
-        "grant_referral",
-        "reverse_payment",
-    } and await is_tariff_change_payment(session, payment):
         return None
     key = {
         "grant_subscription": "payment-grant",
@@ -234,16 +228,7 @@ async def finalize(session, claim, result):
                 )
                 or 0
             )
-            if total == payment.amount and await is_tariff_change_payment(
-                session, payment
-            ):
-                payment.provider_status = "refunded"
-                payment.fulfillment_status = "manual_review"
-                payment.reconciliation_status = "manual_review"
-                payment.manual_review_reason = (
-                    "tariff_change_refund_requires_future_policy"
-                )
-            elif total == payment.amount:
+            if total == payment.amount:
                 payment.provider_status = "refunded"
                 reverse_key = f"payment-reverse:{payment.id}"
                 reverse_op = await session.scalar(
@@ -471,8 +456,6 @@ async def finalize(session, claim, result):
             elif transition.grant_allowed:
                 payment.fulfillment_status = "pending"
                 await ensure_fulfillment(session, payment, "grant_subscription")
-                if await is_tariff_change_payment(session, payment):
-                    payment.fulfillment_status = "not_ready"
             elif transition.reason == "paid_after_cancel":
                 queued = (
                     await session.scalars(

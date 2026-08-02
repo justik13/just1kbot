@@ -30,7 +30,6 @@ from services.payment_lifecycle import project_legacy_status
 from services.payment_queue_timing import FULFILLMENT_LEASE_SECONDS
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from services.payment_kind import is_tariff_change_payment
 
 
 class PaymentFulfillmentOperationOwnershipError(RuntimeError):
@@ -104,14 +103,6 @@ async def grant(session, op):
     user = await session.scalar(
         select(User).where(User.id == payment.user_id).with_for_update()
     )
-    change_quote = payment and await is_tariff_change_payment(session, payment)
-    if change_quote:
-        payment.fulfillment_status = "not_ready"
-        payment.fulfillment_last_error_code = "tariff_change_legacy_grant_blocked"
-        op.status = "dead"
-        op.last_error_code = "tariff_change_legacy_grant_blocked"
-        op.completed_at = now_utc()
-        return
     manual = bool(op.payload.get("manual_without_provider_confirmation"))
     if (
         (payment.provider_status != "succeeded" and not manual)
@@ -317,11 +308,6 @@ async def referral(session, op):
     user = await session.scalar(
         select(User).where(User.id == payment.user_id).with_for_update()
     )
-    if await is_tariff_change_payment(session, payment):
-        op.status = "dead"
-        op.last_error_code = "tariff_change_legacy_grant_blocked"
-        op.completed_at = now_utc()
-        return
     reversal = await session.scalar(
         select(EntitlementEntry.id).where(
             EntitlementEntry.source_type == "payment",
@@ -423,13 +409,6 @@ async def reverse(session, op):
     user = await session.scalar(
         select(User).where(User.id == payment.user_id).with_for_update()
     )
-    if await is_tariff_change_payment(session, payment):
-        payment.fulfillment_status = "manual_review"
-        payment.fulfillment_last_error_code = "tariff_change_legacy_reversal_blocked"
-        op.status = "dead"
-        op.last_error_code = "tariff_change_legacy_reversal_blocked"
-        op.completed_at = now_utc()
-        return
     grant_entry = await session.scalar(
         select(EntitlementEntry).where(
             EntitlementEntry.beneficiary_user_id == payment.user_id,

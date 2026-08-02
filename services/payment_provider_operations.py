@@ -16,7 +16,7 @@ from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
 from services.yookassa_service import YooKassaService, YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
-from services.payment_kind import is_balance_topup, is_tariff_change_payment
+from services.payment_kind import is_balance_topup
 
 
 class PaymentProviderOperationOwnershipError(RuntimeError):
@@ -379,7 +379,6 @@ async def finalize(session, claim, result, transport=YooKassaService):
                     ambiguous=False,
                 )
             topup = is_balance_topup(payment)
-            change_quote = await is_tariff_change_payment(session, payment)
             if (
                 topup
                 and transition.outcome == "applied"
@@ -393,10 +392,6 @@ async def finalize(session, claim, result, transport=YooKassaService):
                     payment=payment,
                     source=provider_transition_source(claim),
                 )
-            elif change_quote and transition.grant_allowed:
-                # Financial evidence is durable, but phase 6 deliberately has no
-                # entitlement/application route.
-                payment.fulfillment_status = "not_ready"
             elif transition.grant_allowed and not topup:
                 payment.fulfillment_status = "pending"
                 await session.execute(

@@ -63,7 +63,7 @@ class AccountLedgerSchemaTests(unittest.TestCase):
             Path(__file__).parents[1]
             / "alembic"
             / "versions"
-            / "2f9c7a6e1b10_account_balance_foundation.py"
+            / "0001_clean_baseline.py"
         ).read_text(encoding="utf-8")
         for required in (
             "account_ledger_append_only",

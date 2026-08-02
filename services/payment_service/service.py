@@ -259,10 +259,6 @@ class PaymentService:
                 session, payment=payment, source="compatibility_success_handler"
             )
             return True, "credited"
-        from services.payment_kind import is_tariff_change_payment
-
-        if await is_tariff_change_payment(session, payment):
-            return False, "tariff_change_legacy_grant_forbidden"
         await ensure_fulfillment(session, payment, "grant_subscription")
         return True, "queued"
 
@@ -281,10 +277,6 @@ class PaymentService:
         payment = await get_payment_by_id_for_update(session, payment_id)
         if not payment:
             return False, "Платёж не найден"
-        from services.payment_kind import is_tariff_change_payment
-
-        if await is_tariff_change_payment(session, payment):
-            return False, "tariff_change_legacy_grant_forbidden"
         operation = await session.scalar(
             select(PaymentFulfillmentOperation)
             .where(
@@ -390,9 +382,6 @@ class PaymentService:
             await ensure_reconcile_payment_operation(
                 session, payment, reason="user_refresh"
             )
-        from services.payment_kind import is_tariff_change_payment
-
-        is_change = await is_tariff_change_payment(session, payment)
         if (
             payment.provider_status == "succeeded"
             and payment.payment_kind == "balance_topup"
@@ -407,7 +396,6 @@ class PaymentService:
             )
         elif (
             payment.provider_status == "succeeded"
-            and not is_change
             and payment.fulfillment_status
             not in {"succeeded", "reversed", "manual_review"}
         ):

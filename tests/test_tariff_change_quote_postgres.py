@@ -11,13 +11,9 @@ from decimal import Decimal
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from alembic.command import downgrade, upgrade
-from alembic.config import Config
-
 from database.models import (
     PaidValueLedgerEntry,
     Payment,
-    PaymentFulfillmentOperation,
     PaymentProviderOperation,
     Tariff,
     TariffQuote,
@@ -31,10 +27,6 @@ from services.account_tariff_change import (
     settle_account_tariff_change,
 )
 from services.tariff_change_quote import create_tariff_change_quote
-from services.tariff_change_payment import (
-    TariffChangePaymentResult,
-    create_tariff_change_payment,
-)
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from database.repositories.tariff_quotes_repo import (
     get_or_create_checkout_quote,
@@ -128,51 +120,27 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                         },
                     )
                 ).scalar_one()
-                payment = (
-                    await session.execute(
-                        text(
-                            "INSERT INTO payments(user_id,tariff_id,tariff_quote_id,tariff_version_id,amount,currency,"
-                            "status,provider_status,fulfillment_status,reconciliation_status,checkout_status,"
-                            "snapshot_duration_days,snapshot_device_limit,snapshot_amount,snapshot_currency,"
-                            "referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at) "
-                            "VALUES(:u,:t,:q,:v,90,'RUB','completed','succeeded','succeeded','ok','abandoned',"
-                            "30,2,90,'RUB',0,0,:n,:n) RETURNING id"
-                        ),
-                        {
-                            "u": user,
-                            "t": source,
-                            "q": consumed,
-                            "v": version,
-                            "n": as_of,
-                        },
-                    )
-                ).scalar_one()
-                await session.execute(
-                    text("UPDATE tariff_quotes SET payment_id=:p WHERE id=:q"),
-                    {"p": payment, "q": consumed},
-                )
                 await session.execute(
                     text(
                         "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,"
                         "paid_value_rub_delta,currency,tariff_version_id,quote_id,payment_id,metadata,created_at) "
-                        "VALUES(:u,'payment',:source,'confirmed_payment',720,90,'RUB',:v,:q,:p,'{}',:n)"
+                        "VALUES(:u,'quote',:source,'account_purchase',720,90,'RUB',:v,:q,NULL,'{}',:n)"
                     ),
                     {
                         "u": user,
-                        "source": str(payment),
+                        "source": str(consumed),
                         "v": version,
                         "q": consumed,
-                        "p": payment,
                         "n": as_of,
                     },
                 )
                 await session.execute(
                     text(
                         "INSERT INTO entitlement_entries(beneficiary_user_id,source_type,source_id,entry_type,"
-                        "days_delta,device_limit_snapshot,tariff_id_snapshot,metadata,created_at) "
-                        "VALUES(:u,'payment',:p,'payment_grant',30,2,:t,'{}',:n)"
+                        "days_delta,hours_delta,device_limit_snapshot,tariff_id_snapshot,metadata,created_at) "
+                        "VALUES(:u,'quote',:q,'account_purchase_grant',30,720,2,:t,'{}',:n)"
                     ),
-                    {"u": user, "p": str(payment), "t": source, "n": as_of},
+                    {"u": user, "q": str(consumed), "t": source, "n": as_of},
                 )
         return user, source, target, as_of
 
@@ -202,192 +170,11 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 quote.source_tariff_version_id, quote.target_tariff_version_id
             )
             self.assertEqual((await session.get(User, user)).subscription_end, before)
-            self.assertEqual(await session.scalar(select(func.count(Payment.id))), 1)
+            self.assertEqual(await session.scalar(select(func.count(Payment.id))), 0)
             self.assertEqual(
                 await session.scalar(select(func.count(PaymentProviderOperation.id))), 0
             )
-            self.assertEqual(
-                await session.scalar(
-                    select(func.count(PaymentFulfillmentOperation.id))
-                ),
-                0,
-            )
 
-    async def test_phase6_positive_intent_is_typed_frozen_and_idempotent(self):
-        user, _, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            quote_result = await create_tariff_change_quote(
-                session, user_id=user, target_tariff_id=target, as_of=as_of
-            )
-            quote_id = quote_result.quote.public_id
-            await session.execute(
-                text("UPDATE tariffs SET price_rub=999999 WHERE id=:t"), {"t": target}
-            )
-            first = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=quote_id,
-                bot_username="bot",
-                as_of=as_of,
-            )
-            again = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=str(quote_id),
-                bot_username="bot",
-                as_of=as_of,
-            )
-            self.assertIsInstance(first, TariffChangePaymentResult)
-            self.assertTrue(first.created)
-            self.assertFalse(again.created)
-            self.assertEqual(first.payment.id, again.payment.id)
-            self.assertEqual(first.provider_operation.id, again.provider_operation.id)
-            self.assertEqual(
-                first.payment.amount, quote_result.quote.confirmed_payment_required_rub
-            )
-            self.assertEqual(first.payment.currency, "RUB")
-            self.assertEqual(
-                first.provider_operation.idempotency_key,
-                first.payment.provider_idempotency_key,
-            )
-            self.assertEqual(
-                first.provider_operation.payload["metadata"],
-                {
-                    "order_id": first.payment.public_order_id,
-                    "local_payment_id": str(first.payment.id),
-                },
-            )
-
-    async def test_phase6_retry_after_expiry_returns_immutable_intent(self):
-        user, _, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            quote = (
-                await create_tariff_change_quote(
-                    session, user_id=user, target_tariff_id=target, as_of=as_of
-                )
-            ).quote
-            first = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=quote.public_id,
-                bot_username="bot",
-                as_of=as_of,
-            )
-            payment_id, operation_id, key = (
-                first.payment.id,
-                first.provider_operation.id,
-                first.payment.provider_idempotency_key,
-            )
-        async with self.sessions.begin() as session:
-            repeated = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=quote.public_id,
-                bot_username="different_bot",
-                as_of=quote.expires_at + timedelta(seconds=1),
-            )
-            self.assertFalse(repeated.created)
-            self.assertEqual(
-                (
-                    repeated.payment.id,
-                    repeated.provider_operation.id,
-                    repeated.payment.provider_idempotency_key,
-                ),
-                (payment_id, operation_id, key),
-            )
-
-    async def test_quote_less_legacy_unknown_payment_blocks_change_quote(self):
-        user, source, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "INSERT INTO payments(user_id,tariff_id,amount,currency,status,provider_status,fulfillment_status,reconciliation_status,checkout_status,referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at,provider_required) VALUES(:u,:t,90,'RUB','pending','unknown','not_ready','required','abandoned',0,0,:n,:n,true)"
-                ),
-                {"u": user, "t": source, "n": as_of},
-            )
-        async with self.sessions.begin() as session:
-            result = await create_tariff_change_quote(
-                session, user_id=user, target_tariff_id=target, as_of=as_of
-            )
-            self.assertEqual(result.failure_code, "unfinished_checkout_exists")
-
-    async def test_phase6_malformed_uuid_and_exact_expiry_fail_closed(self):
-        user, _, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            malformed = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id="not-a-uuid",
-                bot_username="bot",
-                as_of=as_of,
-            )
-            self.assertEqual(malformed.failure_code, "quote_public_id_invalid")
-            quote = (
-                await create_tariff_change_quote(
-                    session, user_id=user, target_tariff_id=target, as_of=as_of
-                )
-            ).quote
-            expired = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=quote.public_id,
-                bot_username="bot",
-                as_of=quote.expires_at,
-            )
-            self.assertEqual(expired.failure_code, "quote_expired")
-            self.assertEqual(await session.scalar(select(func.count(Payment.id))), 1)
-
-    async def test_phase6_abandoned_ambiguous_purchase_still_conflicts(self):
-        user, source, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            change = (
-                await create_tariff_change_quote(
-                    session, user_id=user, target_tariff_id=target, as_of=as_of
-                )
-            ).quote
-            source_version = await session.scalar(
-                text("SELECT id FROM tariff_versions WHERE tariff_id=:t"), {"t": source}
-            )
-            old_quote = (
-                await session.execute(
-                    text(
-                        "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at,consumed_at) VALUES(:x,:u,'renew',:v,0,0,0,90,720,90,0,0,0,'RUB','consumed',:e,:n,:n) RETURNING id"
-                    ),
-                    {
-                        "x": uuid.uuid4(),
-                        "u": user,
-                        "v": source_version,
-                        "e": as_of + timedelta(minutes=15),
-                        "n": as_of,
-                    },
-                )
-            ).scalar_one()
-            payment = (
-                await session.execute(
-                    text(
-                        "INSERT INTO payments(user_id,tariff_id,tariff_quote_id,tariff_version_id,amount,currency,status,provider_status,fulfillment_status,reconciliation_status,checkout_status,snapshot_amount,snapshot_currency,referral_user_bonus_days,referral_referrer_bonus_days,created_at,updated_at,provider_required) VALUES(:u,:t,:q,:v,90,'RUB','pending','unknown','not_ready','required','abandoned',90,'RUB',0,0,:n,:n,true) RETURNING id"
-                    ),
-                    {
-                        "u": user,
-                        "t": source,
-                        "q": old_quote,
-                        "v": source_version,
-                        "n": as_of,
-                    },
-                )
-            ).scalar_one()
-            await session.execute(
-                text("UPDATE tariff_quotes SET payment_id=:p WHERE id=:q"),
-                {"p": payment, "q": old_quote},
-            )
-            result = await create_tariff_change_payment(
-                session,
-                user_id=user,
-                quote_public_id=change.public_id,
-                bot_username="bot",
-                as_of=as_of,
-            )
-            self.assertEqual(result.failure_code, "unfinished_checkout_exists")
 
     async def test_same_target_reuses_frozen_quote_until_source_history_changes(self):
         user, _, target, as_of = await self.seed()
@@ -435,10 +222,18 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             await session.execute(
                 text(
-                    "UPDATE payments SET snapshot_amount=snapshot_amount+1 WHERE id=("
-                    "SELECT payment_id FROM paid_value_ledger WHERE user_id=:u AND entry_type='confirmed_payment')"
+                    "INSERT INTO paid_value_ledger("
+                    "user_id,source_type,source_id,entry_type,paid_hours_delta,"
+                    "paid_value_rub_delta,currency,tariff_version_id,metadata,created_at"
+                    ") SELECT user_id,'manual',:source,'manual_adjustment',1,1,'RUB',"
+                    "tariff_version_id,'{}',:created_at FROM paid_value_ledger "
+                    "WHERE user_id=:u AND entry_type='account_purchase' LIMIT 1"
                 ),
-                {"u": user},
+                {
+                    "u": user,
+                    "source": uuid.uuid4().hex,
+                    "created_at": as_of + timedelta(seconds=1),
+                },
             )
             snapshot = await get_subscription_balance_snapshot(
                 session, user_id=user, as_of=as_of + timedelta(minutes=1)
@@ -465,23 +260,6 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 1,
             )
 
-    async def test_change_quote_cannot_bind_an_unrelated_payment(self):
-        user, _, target, as_of = await self.seed()
-        async with self.sessions.begin() as session:
-            first = await create_tariff_change_quote(
-                session, user_id=user, target_tariff_id=target, as_of=as_of
-            )
-            source_payment_id = await session.scalar(
-                select(PaidValueLedgerEntry.payment_id).where(
-                    PaidValueLedgerEntry.user_id == user,
-                    PaidValueLedgerEntry.entry_type == "confirmed_payment",
-                )
-            )
-            with self.assertRaises(DBAPIError):
-                async with session.begin_nested():
-                    first.quote.payment_id = source_payment_id
-                    await session.flush()
-                    await session.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
 
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()
@@ -823,99 +601,6 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 0,
             )
-
-
-@unittest.skipUnless(DB, "TEST_DATABASE_URL is not configured")
-class TariffChangeQuoteMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
-    def config(self):
-        config = Config("alembic.ini")
-        config.set_main_option("sqlalchemy.url", DB)
-        return config
-
-    async def test_initial_upgrade_quarantines_legacy_change_quote(self):
-        config = self.config()
-        await asyncio.to_thread(downgrade, config, "7a4f19c82d11")
-        engine = create_async_engine(DB)
-        try:
-            now = now_utc().replace(microsecond=0)
-            async with engine.begin() as connection:
-                await connection.execute(
-                    text(
-                        "TRUNCATE paid_value_ledger, tariff_quotes, tariff_versions, entitlement_entries, "
-                        "payments, users, tariffs RESTART IDENTITY CASCADE"
-                    )
-                )
-                tariff = (
-                    await connection.execute(
-                        text(
-                            "INSERT INTO tariffs(name,duration_days,device_limit,price_rub,is_active,sort_order,created_at) "
-                            "VALUES('legacy',30,2,90,true,1,:n) RETURNING id"
-                        ),
-                        {"n": now},
-                    )
-                ).scalar_one()
-                user = (
-                    await connection.execute(
-                        text(
-                            "INSERT INTO users(telegram_id,device_limit,referral_days,is_banned,is_bot_blocked,is_deleted,"
-                            "notification_retry_count,notified_3d,notified_1d,notified_2h,notified_expired,"
-                            "notified_grace_12h,device_creations_today,created_at) "
-                            "VALUES(:tg,2,0,false,false,false,0,false,false,false,false,false,0,:n) RETURNING id"
-                        ),
-                        {"tg": uuid.uuid4().int % 10**12, "n": now},
-                    )
-                ).scalar_one()
-                version = (
-                    await connection.execute(
-                        text(
-                            "INSERT INTO tariff_versions(tariff_id,version_number,name_snapshot,duration_hours,"
-                            "device_limit,price_rub,currency,created_at) VALUES(:t,1,'legacy',720,2,90,'RUB',:n) "
-                            "RETURNING id"
-                        ),
-                        {"t": tariff, "n": now},
-                    )
-                ).scalar_one()
-                quote_id = (
-                    await connection.execute(
-                        text(
-                            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,"
-                            "current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,"
-                            "resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,"
-                            "rounding_loss_value_rub,currency,status,expires_at,created_at) "
-                            "VALUES(:p,:u,'change',:v,0,0,0,0,0,0,0,0,0,'RUB','active',:x,:n) RETURNING id"
-                        ),
-                        {
-                            "p": uuid.uuid4(),
-                            "u": user,
-                            "v": version,
-                            "x": now + timedelta(minutes=15),
-                            "n": now,
-                        },
-                    )
-                ).scalar_one()
-            await engine.dispose()
-            await asyncio.to_thread(upgrade, config, "head")
-            engine = create_async_engine(DB)
-            async with engine.connect() as connection:
-                row = (
-                    await connection.execute(
-                        text(
-                            "SELECT status,manual_review_at,diagnostic_reason,balance_as_of,"
-                            "source_subscription_end,source_balance_fingerprint,source_entitlement_entry_ids,"
-                            "source_ledger_entry_ids FROM tariff_quotes WHERE id=:q"
-                        ),
-                        {"q": quote_id},
-                    )
-                ).one()
-                self.assertEqual(row.status, "manual_review")
-                self.assertIsNotNone(row.manual_review_at)
-                self.assertEqual(
-                    row.diagnostic_reason, "legacy_change_quote_source_snapshot_missing"
-                )
-                self.assertTrue(all(value is None for value in row[3:]))
-        finally:
-            await engine.dispose()
-            await asyncio.to_thread(upgrade, config, "head")
 
 
 if __name__ == "__main__":
