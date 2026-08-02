@@ -4,6 +4,7 @@ import uuid
 from decimal import Decimal
 
 import payment_pipeline_postgres_base as _base
+from services.workers.webhook_inbox import InboxClaim, finalize as finalize_inbox
 
 _base_test_case = [_base.PaymentPipelinePostgresTests]
 _base.PaymentPipelinePostgresTests = None
@@ -50,9 +51,9 @@ class PaymentPipelinePostgresTests(_base_test_case[0]):
         )
         session.add(row)
         await session.flush()
-        await _base.finalize_webhook_failure(
+        await finalize_inbox(
             session,
-            _base.InboxClaim(
+            InboxClaim(
                 row.id,
                 "w",
                 1,
