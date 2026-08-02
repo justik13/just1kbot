@@ -3,15 +3,12 @@ name: PR52 refresh refund fixtures
 on:
   push:
     branches: [feature/yookassa-account-balance]
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.event_name == 'push' || github.head_ref == 'feature/yookassa-account-balance'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +24,11 @@ jobs:
 
           path = Path('tests/test_payment_pipeline_postgres.py')
           source = path.read_text(encoding='utf-8')
-          old = '''        payload = {
+          helper_start = source.index('    async def _finalize_duplicate_refund')
+          helper_end = source.index('\n    async def test_duplicate_full_refund', helper_start)
+          helper = source[helper_start:helper_end]
+
+          old_payload = '''        payload = {
             "object": {
                 "id": refund_id,
                 "payment_id": p.external_id,
@@ -35,7 +36,7 @@ jobs:
             }
         }
 '''
-          new = '''        verified_refund = {
+          new_payload = '''        verified_refund = {
             "id": refund_id,
             "status": "succeeded",
             "payment_id": p.external_id,
@@ -43,9 +44,10 @@ jobs:
         }
         payload = {"object": dict(verified_refund)}
 '''
-          if source.count(old) != 1:
-              raise SystemExit('refund fixture block not found exactly once')
-          source = source.replace(old, new, 1)
+          if helper.count(old_payload) != 1:
+              raise SystemExit('refund fixture payload not found exactly once in helper')
+          helper = helper.replace(old_payload, new_payload, 1)
+
           old_result = '''            None,
         )
         return row
@@ -54,12 +56,10 @@ jobs:
         )
         return row
 '''
-          helper_start = source.index('    async def _finalize_duplicate_refund')
-          helper_end = source.index('\n    async def test_duplicate_full_refund', helper_start)
-          helper = source[helper_start:helper_end]
           if helper.count(old_result) != 1:
-              raise SystemExit('refund result fixture not found exactly once')
+              raise SystemExit('refund provider result not found exactly once in helper')
           helper = helper.replace(old_result, new_result, 1)
+
           source = source[:helper_start] + helper + source[helper_end:]
           path.write_text(source, encoding='utf-8')
           PY
