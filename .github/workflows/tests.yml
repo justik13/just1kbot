@@ -31,6 +31,17 @@ jobs:
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
     steps:
       - uses: actions/checkout@v4
+      - name: Export exact PR source for audit
+        if: github.event_name == 'pull_request'
+        run: git archive --format=zip --output=/tmp/pr52-source-${GITHUB_SHA}.zip HEAD
+      - name: Upload exact PR source for audit
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr52-source-${{ github.sha }}
+          path: /tmp/pr52-source-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 1
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
