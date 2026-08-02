@@ -186,7 +186,7 @@ async def _get_or_create_entitlement(
             hours_delta=version.duration_hours,
             device_limit_snapshot=version.device_limit,
             tariff_id_snapshot=version.tariff_id,
-            metadata={
+            metadata_={
                 "operation_type": quote.operation_type,
                 "account_debit_id": debit_id,
             },
