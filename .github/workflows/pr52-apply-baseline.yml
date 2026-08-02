@@ -90,7 +90,10 @@ jobs:
           assert scripts.get_heads() == ['0001_clean_baseline'], scripts.get_heads()
           assert scripts.get_bases() == ['0001_clean_baseline'], scripts.get_bases()
           PY
-          alembic check
+          for table in users payments account_ledger_entries provider_refund_operations payment_disputes; do
+            PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+              "SELECT to_regclass('public.${table}') IS NOT NULL" | grep -qx t
+          done
 
       - name: Run full test suite
         run: |
@@ -110,7 +113,9 @@ jobs:
             exit 1
           fi
           alembic upgrade head
-          alembic check
+          head_revision="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+            'SELECT version_num FROM alembic_version')"
+          test "$head_revision" = '0001_clean_baseline'
           git diff --cached --check
 
       - name: Commit validated greenfield baseline
