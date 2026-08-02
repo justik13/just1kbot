@@ -1,0 +1,69 @@
+name: PR52 official YooKassa fix
+
+on:
+  push:
+    branches: [feature/yookassa-account-balance]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/yookassa-account-balance
+          fetch-depth: 0
+      - name: Apply verified patch
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base64 -d .github/pr52-official-fix.patch.gz.b64 | gzip -d > /tmp/pr52-official-fix.patch
+          git apply --index /tmp/pr52-official-fix.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.env.example')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace(
+              "# Telegram ID администраторов через запятую.\n# Пример: 111111111,222222222\nADMIN_IDS='111111111'",
+              "# Telegram ID администраторов в JSON-массиве.\nADMIN_IDS='[111111111]'",
+              1,
+          )
+          section = """
+
+          # ------------------------------------------------------------
+          # YooKassa и внутренний баланс
+          # ------------------------------------------------------------
+
+          # Оставьте оба значения пустыми, чтобы отключить платежи.
+          YOOKASSA_SHOP_ID=''
+          YOOKASSA_SECRET_KEY=''
+          YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+          YOOKASSA_WEBHOOK_PORT=8080
+
+          # Лимиты продукта задаются в целых рублях.
+          BALANCE_MIN_TOPUP_RUB=10
+          BALANCE_MAX_CUSTOM_TOPUP_RUB=5000
+          BALANCE_MAX_AVAILABLE_RUB=10000
+          BALANCE_MAX_PRESET_RUB=1000
+          BALANCE_MAX_UNFINISHED_TOPUPS=3
+          BALANCE_MAX_TOPUP_CREATIONS_24H=10
+          BALANCE_MAX_PRESET_OPTIONS=6
+          """
+          anchor = "\n\n# ------------------------------------------------------------\n# Настройки доступа к локальным сетям / SSRF protection\n"
+          if anchor not in source:
+              raise SystemExit('env example anchor missing')
+          source = source.replace(anchor, section + anchor, 1)
+          path.write_text(source, encoding='utf-8')
+          PY
+          rm -f .github/pr52-official-fix.patch.gz.b64 .github/workflows/pr52-official-fix.yml
+          git add -A
+          git diff --cached --check
+          python -m compileall -q bot config database services utils alembic tests
+          bash -n deploy.sh scripts/deploy.sh scripts/lib/deploy_full_legacy.inc
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "fix: verify YooKassa refund webhooks"
+          git push origin HEAD:feature/yookassa-account-balance
