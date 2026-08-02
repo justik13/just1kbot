@@ -75,10 +75,13 @@ def get_change_tariff_keyboard(
     current_limit: int,
     *,
     is_subscription_active: bool = False,
+    current_tariff_id: int | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     grouped: dict[int, list] = {}
     for t in tariffs:
+        if t.id == current_tariff_id:
+            continue
         limit = getattr(t, "device_limit", 2)
         if limit not in grouped:
             grouped[limit] = []
@@ -86,7 +89,7 @@ def get_change_tariff_keyboard(
     for limit in sorted(grouped.keys()):
         group_name = get_tariff_group_name(limit)
         if is_subscription_active and limit < current_limit:
-            group_name = "🔒 " + group_name
+            group_name += " 🔽"
         elif limit == current_limit:
             group_name += " ✅"
         elif limit > current_limit:
@@ -266,6 +269,43 @@ def get_balance_purchase_confirm_keyboard(
     return builder.as_markup()
 
 
+def get_balance_change_start_keyboard(
+    quote_public_id: str, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="💱 Сменить тариф с баланса",
+        callback_data=f"balance_change_review:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_balance_change_confirm_keyboard(
+    quote_public_id: str, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Подтвердить смену тарифа",
+        callback_data=f"balance_change_confirm:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Перейти к продлению",
+        callback_data="payment_quick_renew",
+    )
+    builder.button(text="← Назад", callback_data="payment_change_tariff")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def get_balance_shortage_keyboard(
     quote_public_id: str, exact_amount: int, back_callback: str
 ) -> InlineKeyboardMarkup:
@@ -277,6 +317,23 @@ def get_balance_shortage_keyboard(
     builder.button(
         text="Указать другую сумму",
         callback_data=f"balance_shortage_custom:{quote_public_id}",
+    )
+    builder.button(text="← Назад", callback_data=back_callback)
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_balance_change_shortage_keyboard(
+    quote_public_id: str, exact_amount: int, back_callback: str
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=f"Пополнить на {exact_amount} ₽",
+        callback_data=f"balance_change_shortage_exact:{quote_public_id}",
+    )
+    builder.button(
+        text="Указать другую сумму",
+        callback_data=f"balance_change_shortage_custom:{quote_public_id}",
     )
     builder.button(text="← Назад", callback_data=back_callback)
     builder.adjust(1)

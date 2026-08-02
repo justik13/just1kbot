@@ -86,6 +86,7 @@ async def _entry(session, payment, user_id, typ, days, **kw):
         source_id=str(payment.id),
         entry_type=typ,
         days_delta=days,
+        hours_delta=days * 24,
         device_limit_snapshot=kw.get("limit"),
         tariff_id_snapshot=kw.get("tariff"),
         metadata_=kw.get("metadata", {}),

@@ -7,10 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import (
     get_back_button,
+    get_balance_change_start_keyboard,
     get_balance_purchase_start_keyboard,
     get_change_tariff_keyboard,
     get_renew_keyboard,
     get_tariff_duration_keyboard,
+    get_same_tariff_keyboard,
 )
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
@@ -19,7 +21,10 @@ from database.repositories.tariffs_repo import (
 )
 from services.maintenance_service import MaintenanceService
 from services.account_purchase import AccountPurchaseError, prepare_account_purchase
+from services.account_tariff_change import get_account_tariff_change_intent
+from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
+from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -34,6 +39,11 @@ from .common import (
 )
 
 router = Router()
+
+
+def _hours_text(hours: int) -> str:
+    days, remainder = divmod(hours, 24)
+    return f"{days} дн." + (f" {remainder} ч." if remainder else "")
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(
@@ -142,13 +152,111 @@ async def select_tariff(
 
     tariff = await get_tariff_by_id(session, tariff_id)
 
-    if not tariff or not tariff.is_active:
+    if not tariff:
+        await callback.answer(
+            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
+        )
+        return
+
+    if source == "change" and db_user.current_tariff_id == tariff.id:
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            "У вас уже подключён этот тариф. Для добавления дней "
+            "используйте продление.",
+            get_same_tariff_keyboard(),
+        )
+        await callback.answer(show_alert=False)
+        return
+
+    if not tariff.is_active:
         await callback.answer(
             texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
         )
         return
 
     device_limit = getattr(tariff, "device_limit", 2)
+
+    if source == "change":
+        quote_result = await create_tariff_change_quote(
+            session,
+            user_id=db_user.id,
+            target_tariff_id=tariff.id,
+            as_of=now_utc(),
+        )
+        if quote_result.failure_code:
+            errors = {
+                "target_device_limit_too_small": (
+                    texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                        profiles_count=await get_user_profiles_count(
+                            session, db_user.id
+                        ),
+                        new_limit=device_limit,
+                    )
+                ),
+                "same_tariff_requires_renew": (
+                    "У вас уже подключён этот тариф. Для добавления дней "
+                    "используйте продление."
+                ),
+                "financial_hold": (
+                    "Смена тарифа заблокирована из-за финансового спора."
+                ),
+                "account_debt": (
+                    "Смена тарифа недоступна до погашения задолженности."
+                ),
+                "subscription_balance_untracked": (
+                    "Не удалось надёжно рассчитать остаток подписки. "
+                    "Обратитесь в поддержку."
+                ),
+            }
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                errors.get(
+                    quote_result.failure_code,
+                    "Не удалось подготовить смену тарифа. Попробуйте ещё раз.",
+                ),
+                get_same_tariff_keyboard()
+                if quote_result.failure_code == "same_tariff_requires_renew"
+                else get_back_button("payment_change_tariff"),
+            )
+            await callback.answer(show_alert=False)
+            return
+        intent = await get_account_tariff_change_intent(
+            session,
+            user_id=db_user.id,
+            quote_public_id=quote_result.quote.public_id,
+        )
+        due = int(intent.quote.confirmed_payment_required_rub)
+        before = int(intent.balance.available)
+        after = max(0, before - due)
+        shortage = (
+            f"\n⚠️ Не хватает: <b>{int(intent.shortage)} ₽</b>"
+            if intent.shortage > 0
+            else ""
+        )
+        resulting_hours = (
+            intent.quote.resulting_paid_hours
+            + intent.quote.resulting_bonus_hours
+        )
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            "💱 <b>Смена тарифа</b>\n\n"
+            f"Новый тариф: <b>{get_tariff_display_name(device_limit)}</b>\n"
+            f"Лимит устройств: <b>{device_limit}</b>\n"
+            f"Срок после конвертации: <b>{_hours_text(resulting_hours)}</b>\n"
+            f"Доплата: <b>{due} ₽</b>\n\n"
+            f"Баланс: <b>{before} ₽</b>\n"
+            f"После смены: <b>{after} ₽</b>{shortage}\n\n"
+            "Остаточная стоимость подписки используется только в этом расчёте "
+            "и не зачисляется на свободный баланс.",
+            get_balance_change_start_keyboard(
+                str(intent.quote.public_id), "payment_change_tariff"
+            ),
+        )
+        await callback.answer(show_alert=False)
+        return
 
     error_text = await _check_tariff_change_allowed(
         session, db_user, tariff
@@ -301,7 +409,11 @@ async def show_change_tariff(
         )
         return
 
-    tariffs = await get_active_tariffs(session)
+    tariffs = [
+        tariff
+        for tariff in await get_active_tariffs(session)
+        if tariff.id != getattr(db_user, "current_tariff_id", None)
+    ]
 
     if not tariffs:
         await render_hub(
@@ -322,7 +434,10 @@ async def show_change_tariff(
     )
 
     keyboard = get_change_tariff_keyboard(
-        tariffs, current_limit, is_subscription_active=is_active
+        tariffs,
+        current_limit,
+        is_subscription_active=is_active,
+        current_tariff_id=db_user.current_tariff_id,
     )
 
     await render_hub(
@@ -364,28 +479,6 @@ async def select_tariff_type(
         return
 
     if db_user:
-        is_active = await _is_subscription_active(db_user)
-
-        if is_active:
-            current_limit = await _get_effective_device_limit(
-                session, db_user
-            )
-
-            if device_limit < current_limit:
-                await render_hub(
-                    callback.bot,
-                    callback.message.chat.id,
-                    texts.PAYMENT_DOWNGRADE_BLOCKED.format(
-                        current_limit=current_limit,
-                        new_limit=device_limit,
-                        valid_until=format_datetime(
-                            db_user.subscription_end
-                        ),
-                    ),
-                    get_back_button(back_to),
-                )
-                return
-
         profiles_count = await get_user_profiles_count(
             session, db_user.id
         )
@@ -408,6 +501,10 @@ async def select_tariff_type(
         t
         for t in tariffs
         if getattr(t, "device_limit", 2) == device_limit
+        and not (
+            source == "change"
+            and t.id == getattr(db_user, "current_tariff_id", None)
+        )
     ]
 
     if not type_tariffs:

@@ -4,6 +4,7 @@ import asyncio
 import os
 import unittest
 import uuid
+from unittest.mock import AsyncMock, patch
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
@@ -375,6 +376,40 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                         AccountLedgerEntry.entry_type == "purchase_debit"
                     )
                 ),
+                0,
+            )
+            self.assertEqual(
+                await session.scalar(select(func.count(EntitlementEntry.id))),
+                0,
+            )
+
+    async def test_caught_failure_after_debit_rolls_back_savepoint(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            intent = await prepare_account_purchase(
+                session, user_id=self.user_id, tariff_id=self.tariff_id
+            )
+            with patch(
+                "services.account_purchase.SubscriptionService.extend_subscription",
+                new=AsyncMock(side_effect=AccountPurchaseError("forced_failure")),
+            ):
+                with self.assertRaisesRegex(AccountPurchaseError, "forced_failure"):
+                    await settle_account_purchase(
+                        session,
+                        user_id=self.user_id,
+                        quote_public_id=intent.quote.public_id,
+                    )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                await session.scalar(select(func.count(PaidValueLedgerEntry.id))),
                 0,
             )
             self.assertEqual(

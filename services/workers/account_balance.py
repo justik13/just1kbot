@@ -50,6 +50,7 @@ async def _referral_entitlement(
             source_id=str(quote_id),
             entry_type=entry_type,
             days_delta=days,
+            hours_delta=days * 24,
             metadata={"source_quote_id": quote_id},
         )
         .on_conflict_do_nothing(constraint="uq_entitlement_entries_source")
@@ -180,6 +181,9 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 select(
                     TariffQuote.id,
                     User.telegram_id,
+                    TariffQuote.operation_type,
+                    TariffQuote.resulting_paid_hours,
+                    TariffQuote.resulting_bonus_hours,
                     TariffVersion.duration_hours,
                     TariffVersion.device_limit,
                 )
@@ -190,7 +194,7 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 )
                 .where(
                     TariffQuote.status == "consumed",
-                    TariffQuote.operation_type.in_(("purchase", "renew")),
+                    TariffQuote.operation_type.in_(("purchase", "renew", "change")),
                     TariffQuote.purchase_notified_at.is_(None),
                 )
                 .order_by(TariffQuote.id)
@@ -198,13 +202,35 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
             )
         ).all()
     delivered = 0
-    for quote_id, telegram_id, duration_hours, device_limit in rows:
+    for (
+        quote_id,
+        telegram_id,
+        operation_type,
+        resulting_paid_hours,
+        resulting_bonus_hours,
+        duration_hours,
+        device_limit,
+    ) in rows:
         try:
             await global_send_limiter.acquire()
+            hours = (
+                resulting_paid_hours + resulting_bonus_hours
+                if operation_type == "change"
+                else duration_hours
+            )
+            days, remainder = divmod(hours, 24)
+            duration = f"{days} дней" + (
+                f" {remainder} ч." if remainder else ""
+            )
+            title = (
+                "Смена тарифа с баланса выполнена"
+                if operation_type == "change"
+                else "Покупка с баланса выполнена"
+            )
             await bot.send_message(
                 telegram_id,
-                "✅ <b>Покупка с баланса выполнена</b>\n"
-                f"Срок: <b>{duration_hours // 24} дней</b>\n"
+                f"✅ <b>{title}</b>\n"
+                f"Срок: <b>{duration}</b>\n"
                 f"Устройства: <b>до {device_limit}</b>",
                 parse_mode="HTML",
             )

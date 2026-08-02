@@ -282,11 +282,56 @@ class SubscriptionService:
         return user
 
     @staticmethod
+    async def replace_subscription(
+        session: AsyncSession,
+        user: User,
+        *,
+        subscription_end,
+        device_limit: int,
+        tariff_id: int,
+    ) -> User:
+        """Replace active coverage after an exact paid-value conversion.
+
+        The caller owns the checkout/User lock and the surrounding financial
+        transaction.  Only durable API operations are queued here; no HTTP is
+        performed.
+        """
+        if subscription_end.tzinfo is None or subscription_end.utcoffset() is None:
+            raise ValueError("subscription_end must be timezone-aware")
+        if subscription_end <= now_utc():
+            raise ValueError("converted subscription must remain active")
+        profiles_count = await get_user_profiles_count(session, user.id)
+        if profiles_count > device_limit:
+            raise ValueError(
+                f"Cannot downgrade: {profiles_count} devices > "
+                f"{device_limit} limit. User must delete devices first."
+            )
+        old_device_limit = user.device_limit or 0
+        user.subscription_end = subscription_end
+        user.device_limit = device_limit
+        user.current_tariff_id = tariff_id
+        user.notified_3d = False
+        user.notified_1d = False
+        user.notified_2h = False
+        user.notified_expired = False
+        user.notified_grace_12h = False
+        user.notification_retry_count = 0
+        user.last_notification_attempt = None
+        if device_limit > old_device_limit:
+            user.device_creations_today = 0
+            user.last_creation_date = None
+        await session.flush()
+        invalidate_user_cache(user.telegram_id)
+        await SubscriptionService._sync_access_state(session, user)
+        return user
+
+    @staticmethod
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
         target_active = bool(
             user.subscription_end
             and not is_expired(user.subscription_end)
             and not user.is_banned
+            and not user.financial_hold
         )
         profiles = await get_user_profiles(session, user.id)
         for profile in profiles:

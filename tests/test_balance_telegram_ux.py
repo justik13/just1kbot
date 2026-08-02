@@ -91,7 +91,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["4f2a9d6c1e30"])
+        self.assertEqual(scripts.get_heads(), ["5a7c1e9d3f40"])
 
 
 if __name__ == "__main__":

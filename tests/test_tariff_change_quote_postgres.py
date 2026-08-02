@@ -4,6 +4,7 @@ import asyncio
 import os
 import unittest
 import uuid
+from unittest.mock import AsyncMock, patch
 from datetime import timedelta
 from decimal import Decimal
 
@@ -21,6 +22,13 @@ from database.models import (
     Tariff,
     TariffQuote,
     User,
+    AccountLedgerEntry,
+    EntitlementEntry,
+)
+from database.repositories.account_ledger_repo import create_admin_adjustment
+from services.account_tariff_change import (
+    AccountTariffChangeError,
+    settle_account_tariff_change,
 )
 from services.tariff_change_quote import create_tariff_change_quote
 from services.tariff_change_payment import (
@@ -652,6 +660,167 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             await transaction.rollback()
         async with self.sessions() as session:
             self.assertIsNone(await session.get(TariffQuote, quote_id))
+
+    async def test_balance_settlement_is_atomic_and_idempotent(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=user,
+                signed_amount=90,
+                idempotency_key=f"test-change-funds:{user}",
+                metadata={"test": True},
+            )
+            quote = (
+                await create_tariff_change_quote(
+                    session, user_id=user, target_tariff_id=target, as_of=as_of
+                )
+            ).quote
+            first = await settle_account_tariff_change(
+                session, user_id=user, quote_public_id=quote.public_id
+            )
+            repeated = await settle_account_tariff_change(
+                session, user_id=user, quote_public_id=quote.public_id
+            )
+            self.assertTrue(first.created)
+            self.assertFalse(repeated.created)
+            self.assertEqual(first.debit.amount, Decimal("-90"))
+            self.assertEqual(first.quote.status, "consumed")
+            self.assertEqual(first.entitlement.hours_delta, 720)
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit",
+                        AccountLedgerEntry.quote_id == quote.id,
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(EntitlementEntry.id)).where(
+                        EntitlementEntry.entry_type == "tariff_change",
+                        EntitlementEntry.source_id == str(quote.id),
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                await session.scalar(select(func.count(PaymentProviderOperation.id))),
+                0,
+            )
+
+    async def test_zero_due_change_needs_no_account_debit(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            tariff = await session.get(Tariff, target)
+            tariff.price_rub = 45
+            quote = (
+                await create_tariff_change_quote(
+                    session, user_id=user, target_tariff_id=target, as_of=as_of
+                )
+            ).quote
+            self.assertEqual(quote.confirmed_payment_required_rub, 0)
+            result = await settle_account_tariff_change(
+                session, user_id=user, quote_public_id=quote.public_id
+            )
+            self.assertIsNone(result.debit)
+            self.assertEqual(result.quote.status, "consumed")
+            self.assertEqual(result.balance_after.available, 0)
+
+    async def test_caught_failure_after_change_debit_rolls_back_everything(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=user,
+                signed_amount=90,
+                idempotency_key=f"test-change-rollback-funds:{user}",
+                metadata={"test": True},
+            )
+            quote = (
+                await create_tariff_change_quote(
+                    session, user_id=user, target_tariff_id=target, as_of=as_of
+                )
+            ).quote
+            with patch(
+                "services.account_tariff_change.SubscriptionService.replace_subscription",
+                new=AsyncMock(side_effect=ValueError("forced failure")),
+            ):
+                with self.assertRaisesRegex(
+                    AccountTariffChangeError, "subscription_state_changed"
+                ):
+                    await settle_account_tariff_change(
+                        session, user_id=user, quote_public_id=quote.public_id
+                    )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(PaidValueLedgerEntry.id)).where(
+                        PaidValueLedgerEntry.entry_type == "tariff_conversion"
+                    )
+                ),
+                0,
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(EntitlementEntry.id)).where(
+                        EntitlementEntry.entry_type == "tariff_change"
+                    )
+                ),
+                0,
+            )
+
+    async def test_source_history_change_is_rejected_before_debit(self):
+        user, _, target, as_of = await self.seed()
+        async with self.sessions.begin() as session:
+            await create_admin_adjustment(
+                session,
+                user_id=user,
+                signed_amount=90,
+                idempotency_key=f"test-change-stale-funds:{user}",
+                metadata={"test": True},
+            )
+            quote = (
+                await create_tariff_change_quote(
+                    session, user_id=user, target_tariff_id=target, as_of=as_of
+                )
+            ).quote
+            session.add(
+                EntitlementEntry(
+                    beneficiary_user_id=user,
+                    source_type="manual",
+                    source_id="changed-after-quote",
+                    entry_type="manual_grant",
+                    days_delta=1,
+                    hours_delta=24,
+                    metadata_={},
+                    created_at=as_of + timedelta(seconds=1),
+                )
+            )
+            db_user = await session.get(User, user)
+            db_user.subscription_end += timedelta(days=1)
+            with self.assertRaisesRegex(
+                AccountTariffChangeError, "quote_source_history_changed"
+            ):
+                await settle_account_tariff_change(
+                    session, user_id=user, quote_public_id=quote.public_id
+                )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                0,
+            )
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not configured")

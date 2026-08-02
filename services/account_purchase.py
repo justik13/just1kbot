@@ -183,6 +183,7 @@ async def _get_or_create_entitlement(
             source_id=str(quote.id),
             entry_type="account_purchase_grant",
             days_delta=days,
+            hours_delta=version.duration_hours,
             device_limit_snapshot=version.device_limit,
             tariff_id_snapshot=version.tariff_id,
             metadata={
@@ -241,7 +242,7 @@ async def _settled_state(
     return debit, bool(debit and paid and entitlement)
 
 
-async def settle_account_purchase(
+async def _settle_account_purchase(
     session: AsyncSession,
     *,
     user_id: int,
@@ -382,3 +383,18 @@ async def settle_account_purchase(
     after = await get_account_balance(session, user_id=user.id)
     await session.flush()
     return AccountPurchaseSettlement(quote, debit, before, after, True)
+
+
+async def settle_account_purchase(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    quote_public_id,
+) -> AccountPurchaseSettlement:
+    """Rollback every local side effect when a caught domain error is raised."""
+    async with session.begin_nested():
+        return await _settle_account_purchase(
+            session,
+            user_id=user_id,
+            quote_public_id=quote_public_id,
+        )

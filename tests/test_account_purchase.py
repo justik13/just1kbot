@@ -78,6 +78,7 @@ class AccountPurchaseContractTests(unittest.TestCase):
     def test_financial_settlement_contains_no_provider_http(self):
         source = inspect.getsource(account_purchase)
         self.assertNotIn("YooKassa", source)
+        self.assertIn("session.begin_nested()", source)
         debit = source.index("create_purchase_debit(")
         entitlement = source.index("_get_or_create_entitlement(", debit)
         activation = source.index("SubscriptionService.extend_subscription(", debit)

@@ -283,6 +283,31 @@ async def resume_purchase_after_topup(
         or source not in {"showcase", "renew", "change"}
     ):
         return
+    if source == "change":
+        from services.tariff_change_quote import create_tariff_change_quote
+        from .tariff_change_routes import render_tariff_change_review
+
+        quote_result = await create_tariff_change_quote(
+            session,
+            user_id=db_user.id,
+            target_tariff_id=tariff_id,
+            as_of=now_utc(),
+        )
+        if quote_result.failure_code:
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                "Операция устарела. Выберите тариф заново.",
+                get_back_button("payment_change_tariff"),
+            )
+            return
+        await render_tariff_change_review(
+            callback,
+            session,
+            db_user,
+            quote_result.quote.public_id,
+        )
+        return
     try:
         intent = await prepare_account_purchase(
             session, user_id=db_user.id, tariff_id=tariff_id

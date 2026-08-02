@@ -21,6 +21,7 @@ _ECONOMIC_FIELDS = (
     "paid_value_rub_delta",
     "currency",
     "reversal_of_id",
+    "metadata_",
 )
 
 
@@ -122,6 +123,7 @@ async def get_or_create_conversion_entry(
     tariff_version_id: int,
     paid_hours_delta: int,
     paid_value_rub_delta,
+    metadata: dict,
 ) -> PaidValueLedgerEntry:
     return await _insert_or_get(
         session,
@@ -135,7 +137,9 @@ async def get_or_create_conversion_entry(
             currency="RUB",
             tariff_version_id=tariff_version_id,
             quote_id=quote_id,
-            metadata_={},
+            payment_id=None,
+            reversal_of_id=None,
+            metadata_=metadata,
         ),
         PaidValueLedgerEntry.quote_id,
     )

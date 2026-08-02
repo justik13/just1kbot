@@ -14,8 +14,10 @@ async def get_subscription_balance_snapshot(session, *, user_id: int, as_of: dat
         session, user_id=user_id, for_update=for_update, locked_user=locked_user)
     entitlement_values = tuple(EntitlementEvent(
         id=x.id, user_id=x.beneficiary_user_id, source_type=x.source_type,
-        source_id=x.source_id, entry_type=x.entry_type, hours_delta=x.days_delta * 24,
+        source_id=x.source_id, entry_type=x.entry_type,
+        hours_delta=x.hours_delta if x.hours_delta is not None else x.days_delta * 24,
         created_at=x.created_at, reversed_entry_id=x.reversed_entry_id,
+        metadata=x.metadata_,
     ) for x in entries)
     ledger_values = tuple(LedgerEntry(
         id=x.id, user_id=x.user_id, entry_type=x.entry_type,
@@ -23,6 +25,7 @@ async def get_subscription_balance_snapshot(session, *, user_id: int, as_of: dat
         currency=x.currency, tariff_version_id=x.tariff_version_id,
         payment_id=x.payment_id, reversal_of_id=x.reversal_of_id,
         quote_id=x.quote_id,
+        metadata=x.metadata_, created_at=x.created_at,
     ) for x in ledger)
     payment_values = {x.id: PaymentSnapshot(
         id=x.id, user_id=x.user_id, tariff_id=x.tariff_id,
