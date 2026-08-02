@@ -13,7 +13,6 @@ from bot import texts
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
-from database.connection import session_scope
 from database.repositories.payments_repo import get_payment_by_id
 from database.repositories.users_repo import mark_user_bot_blocked
 from services.payment_service import PaymentService

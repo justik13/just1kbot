@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 from datetime import datetime, timezone
 
-from sqlalchemy import select
 
 from database.connection import session_scope
 from database.models import Server, VPNProfile

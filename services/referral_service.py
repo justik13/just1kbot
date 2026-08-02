@@ -78,7 +78,7 @@ class ReferralService:
             select(User)
             .where(
                 User.telegram_id == referrer_telegram_id,
-                User.is_deleted == False,
+                User.is_deleted.is_(False),
             )
             .with_for_update()
         )
@@ -143,9 +143,7 @@ class ReferralService:
 
                 invalidate_user_cache(referrer_telegram_id)
 
-                new_referral_days = (
-                    (referrer.referral_days or 0) + referrer_bonus
-                )
+                new_referral_days = (referrer.referral_days or 0) + referrer_bonus
 
                 await update_user(
                     session,
@@ -156,8 +154,7 @@ class ReferralService:
                 applied_referrer_bonus = referrer_bonus
 
                 logger.info(
-                    "Referral bonus: referrer %s got +%s days. "
-                    "Total referral_days: %s",
+                    "Referral bonus: referrer %s got +%s days. Total referral_days: %s",
                     referrer_telegram_id,
                     referrer_bonus,
                     new_referral_days,

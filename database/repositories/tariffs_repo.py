@@ -17,7 +17,7 @@ ALLOWED_TARIFF_UPDATE_FIELDS = {
 async def get_active_tariffs(session: AsyncSession) -> List[Tariff]:
     stmt = (
         select(Tariff)
-        .where(Tariff.is_active == True)
+        .where(Tariff.is_active.is_(True))
         .order_by(
             Tariff.device_limit,
             Tariff.sort_order,

@@ -69,14 +69,18 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
             logger.info("Stale payments worker cancelled")
             break
         except Exception as e:
-            logger.error("Критическая ошибка в stale_payments_checker: %s", e, exc_info=True)
+            logger.error(
+                "Критическая ошибка в stale_payments_checker: %s", e, exc_info=True
+            )
             if shutdown_event.is_set():
                 break
             await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
             continue
 
         try:
-            await asyncio.wait_for(shutdown_event.wait(), timeout=STALE_PAYMENT_THRESHOLD)
+            await asyncio.wait_for(
+                shutdown_event.wait(), timeout=STALE_PAYMENT_THRESHOLD
+            )
             break
         except asyncio.TimeoutError:
             continue
@@ -87,20 +91,53 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
 async def _cleanup_orphan_pending_payments():
     """Ensure durable creation commands; never infer provider failure locally."""
     async with session_scope() as session:
-        rows=(await session.scalars(select(Payment).where(Payment.provider_status.in_(("creating","unknown")),Payment.provider_idempotency_key.is_not(None)).limit(100))).all()
+        rows = (
+            await session.scalars(
+                select(Payment)
+                .where(
+                    Payment.provider_status.in_(("creating", "unknown")),
+                    Payment.provider_idempotency_key.is_not(None),
+                )
+                .limit(100)
+            )
+        ).all()
         # create commands are created atomically with new payments; missing legacy rows require review, not failure.
         for payment in rows:
-            if payment.external_id: await ensure_reconcile_payment_operation(session,payment,reason="stale_worker")
+            if payment.external_id:
+                await ensure_reconcile_payment_operation(
+                    session, payment, reason="stale_worker"
+                )
 
 
 async def _process_stale_payments(bot: Bot, settings):
     async with session_scope() as session:
-        rows=(await session.scalars(select(Payment).where(Payment.created_at < now_utc()-timedelta(hours=1)).limit(100))).all()
+        rows = (
+            await session.scalars(
+                select(Payment)
+                .where(Payment.created_at < now_utc() - timedelta(hours=1))
+                .limit(100)
+            )
+        ).all()
         for payment in rows:
-            if payment.external_id and payment.provider_status in {"pending","unknown"}: await ensure_reconcile_payment_operation(session,payment,reason="stale_worker")
-            if payment.provider_status=="succeeded" and payment.fulfillment_status not in {"succeeded","reversed","manual_review"}: await ensure_fulfillment(session,payment,"grant_subscription")
-            if payment.provider_status=="refunded" and payment.fulfillment_status!="reversed": await ensure_fulfillment(session,payment,"reverse_payment")
-    await _alert_new_stale_payments(bot,settings)
+            if payment.external_id and payment.provider_status in {
+                "pending",
+                "unknown",
+            }:
+                await ensure_reconcile_payment_operation(
+                    session, payment, reason="stale_worker"
+                )
+            if (
+                payment.provider_status == "succeeded"
+                and payment.fulfillment_status
+                not in {"succeeded", "reversed", "manual_review"}
+            ):
+                await ensure_fulfillment(session, payment, "grant_subscription")
+            if (
+                payment.provider_status == "refunded"
+                and payment.fulfillment_status != "reversed"
+            ):
+                await ensure_fulfillment(session, payment, "reverse_payment")
+    await _alert_new_stale_payments(bot, settings)
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):
@@ -119,9 +156,13 @@ async def _alert_new_stale_payments(bot: Bot, settings):
             .limit(1000)
         )
         fresh_result = await session.execute(fresh_stmt)
-        fresh_stale = [(payment, telegram_id) for payment, telegram_id in fresh_result.all()]
+        fresh_stale = [
+            (payment, telegram_id) for payment, telegram_id in fresh_result.all()
+        ]
 
-    new_stale_for_alert = [(p, tg) for p, tg in fresh_stale if p.id not in _alerted_stale_payments]
+    new_stale_for_alert = [
+        (p, tg) for p, tg in fresh_stale if p.id not in _alerted_stale_payments
+    ]
 
     if not new_stale_for_alert:
         return

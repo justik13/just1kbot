@@ -24,7 +24,6 @@ from bot.keyboards.admin.broadcast import (
 from bot.states import AdminStates
 from database.connection import session_scope
 from database.models import BroadcastProgress, User
-from database.repositories.users_repo import mark_user_bot_blocked
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
@@ -179,28 +178,43 @@ async def process_broadcast_message(
 async def _send_with_html(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
         await bot.send_photo(
-            uid, media_id, caption=text,
-            parse_mode="HTML", reply_markup=kb,
+            uid,
+            media_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=kb,
         )
     elif content_type == "document" and media_id:
         await bot.send_document(
-            uid, media_id, caption=text,
-            parse_mode="HTML", reply_markup=kb,
+            uid,
+            media_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=kb,
         )
     else:
         await bot.send_message(
-            uid, text, parse_mode="HTML", reply_markup=kb,
+            uid,
+            text,
+            parse_mode="HTML",
+            reply_markup=kb,
         )
 
 
 async def _send_plain(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
         await bot.send_photo(
-            uid, media_id, caption=text, reply_markup=kb,
+            uid,
+            media_id,
+            caption=text,
+            reply_markup=kb,
         )
     elif content_type == "document" and media_id:
         await bot.send_document(
-            uid, media_id, caption=text, reply_markup=kb,
+            uid,
+            media_id,
+            caption=text,
+            reply_markup=kb,
         )
     else:
         await bot.send_message(uid, text, reply_markup=kb)
@@ -211,13 +225,9 @@ async def _dispatch_message(bot, uid, text, media_id, content_type):
     try:
         await _send_with_html(bot, uid, text, media_id, content_type, kb)
     except TelegramBadRequest as e:
-        if (
-            "can't parse entities" in str(e).lower()
-            or "parse" in str(e).lower()
-        ):
+        if "can't parse entities" in str(e).lower() or "parse" in str(e).lower():
             logger.warning(
-                "HTML parse failed for user %s, "
-                "falling back to plain text",
+                "HTML parse failed for user %s, falling back to plain text",
                 uid,
             )
             await _send_plain(bot, uid, text, media_id, content_type, kb)
@@ -231,14 +241,11 @@ async def _get_next_batch(
     last_id: int,
     limit: int = 50,
 ):
-    stmt = (
-        select(User.id, User.telegram_id)
-        .where(
-            User.id > last_id,
-            User.is_deleted == False,
-            User.is_bot_blocked == False,
-            User.is_banned == False,
-        )
+    stmt = select(User.id, User.telegram_id).where(
+        User.id > last_id,
+        User.is_deleted.is_(False),
+        User.is_bot_blocked.is_(False),
+        User.is_banned.is_(False),
     )
     if audience == "active":
         current_time = now_utc()
@@ -270,7 +277,8 @@ async def _send_broadcast_to_users_with_resume(
     try:
         async with session_scope() as session:
             progress = await session.get(
-                BroadcastProgress, progress_id,
+                BroadcastProgress,
+                progress_id,
             )
             if not progress:
                 return
@@ -293,9 +301,10 @@ async def _send_broadcast_to_users_with_resume(
             last_id = progress.last_processed_id
 
         logger.info(
-            "Broadcast resume/start: admin=%s, "
-            "progress_id=%s, starting from id %s",
-            admin_id, progress_id, last_id,
+            "Broadcast resume/start: admin=%s, progress_id=%s, starting from id %s",
+            admin_id,
+            progress_id,
+            last_id,
         )
 
         local_success = 0
@@ -307,7 +316,9 @@ async def _send_broadcast_to_users_with_resume(
 
             async with session_scope() as session:
                 batch = await _get_next_batch(
-                    session, target_audience, last_id,
+                    session,
+                    target_audience,
+                    last_id,
                 )
                 if not batch:
                     break
@@ -318,8 +329,11 @@ async def _send_broadcast_to_users_with_resume(
                     try:
                         await global_send_limiter.acquire()
                         await _dispatch_message(
-                            bot, uid, broadcast_text,
-                            media_id, content_type,
+                            bot,
+                            uid,
+                            broadcast_text,
+                            media_id,
+                            content_type,
                         )
                         local_success += 1
                     except TelegramRetryAfter as e:
@@ -327,8 +341,11 @@ async def _send_broadcast_to_users_with_resume(
                         try:
                             await global_send_limiter.acquire()
                             await _dispatch_message(
-                                bot, uid, broadcast_text,
-                                media_id, content_type,
+                                bot,
+                                uid,
+                                broadcast_text,
+                                media_id,
+                                content_type,
                             )
                             local_success += 1
                         except Exception:
@@ -339,14 +356,16 @@ async def _send_broadcast_to_users_with_resume(
                     except Exception as e:
                         logger.error(
                             "Broadcast error for user %s: %s",
-                            uid, e,
+                            uid,
+                            e,
                         )
                         local_fail += 1
 
                     last_id = internal_id
 
                 progress = await session.get(
-                    BroadcastProgress, progress_id,
+                    BroadcastProgress,
+                    progress_id,
                 )
                 if progress:
                     progress.last_processed_id = last_id
@@ -360,13 +379,13 @@ async def _send_broadcast_to_users_with_resume(
         if should_finalize:
             async with session_scope() as session:
                 progress = await session.get(
-                    BroadcastProgress, progress_id,
+                    BroadcastProgress,
+                    progress_id,
                 )
                 if progress:
                     if (
-                        (stop_event and stop_event.is_set())
-                        or progress.status == "stopping"
-                    ):
+                        stop_event and stop_event.is_set()
+                    ) or progress.status == "stopping":
                         progress.status = "stopped"
                     else:
                         progress.status = "completed"
@@ -377,12 +396,15 @@ async def _send_broadcast_to_users_with_resume(
     except Exception as e:
         logger.error(
             "Broadcast unexpected error (progress_id=%s): %s",
-            progress_id, e, exc_info=True,
+            progress_id,
+            e,
+            exc_info=True,
         )
         try:
             async with session_scope() as session:
                 progress = await session.get(
-                    BroadcastProgress, progress_id,
+                    BroadcastProgress,
+                    progress_id,
                 )
                 if progress and progress.status == "in_progress":
                     progress.status = "stopped"
@@ -391,7 +413,8 @@ async def _send_broadcast_to_users_with_resume(
         except Exception as inner_e:
             logger.error(
                 "Failed to mark broadcast %s as stopped: %s",
-                progress_id, inner_e,
+                progress_id,
+                inner_e,
             )
         # Алерт админу
         try:
@@ -402,7 +425,9 @@ async def _send_broadcast_to_users_with_resume(
                 parse_mode="HTML",
             )
         except Exception as alert_err:
-            logger.warning("Failed to send crash alert to admin %s: %s", admin_id, alert_err)
+            logger.warning(
+                "Failed to send crash alert to admin %s: %s", admin_id, alert_err
+            )
 
     finally:
         if stop_event:
@@ -420,7 +445,11 @@ async def _send_broadcast_to_users_with_resume(
                         .values(is_bot_blocked=True)
                     )
             except Exception as bulk_err:
-                logger.warning("Failed to bulk mark users as bot_blocked: %s", bulk_err, exc_info=True)
+                logger.warning(
+                    "Failed to bulk mark users as bot_blocked: %s",
+                    bulk_err,
+                    exc_info=True,
+                )
 
         if final_progress and admin_id:
             try:
@@ -437,8 +466,9 @@ async def _send_broadcast_to_users_with_resume(
                 )
             except Exception as e:
                 logger.error(
-                    "Failed to send broadcast result "
-                    "to admin %s: %s", admin_id, e,
+                    "Failed to send broadcast result to admin %s: %s",
+                    admin_id,
+                    e,
                 )
 
         try:
@@ -498,19 +528,22 @@ async def resume_pending_broadcasts(bot):
                     .values(status="stopped")
                 )
                 logger.info(
-                    "Marked %s old/duplicate broadcast(s) "
-                    "as stopped", len(stop_ids),
+                    "Marked %s old/duplicate broadcast(s) as stopped",
+                    len(stop_ids),
                 )
 
         for progress_id, admin_id in resume_items:
             logger.info(
-                "Resuming interrupted broadcast ID %s "
-                "for admin %s", progress_id, admin_id,
+                "Resuming interrupted broadcast ID %s for admin %s",
+                progress_id,
+                admin_id,
             )
             _broadcast_in_progress.add(admin_id)
             _start_background_task(
                 _send_broadcast_to_users_with_resume(
-                    bot, progress_id, admin_id,
+                    bot,
+                    progress_id,
+                    admin_id,
                 )
             )
     except Exception as e:
@@ -527,7 +560,8 @@ async def _start_broadcast_process(
 
     if admin_id in _broadcast_in_progress:
         await callback.answer(
-            texts.BROADCAST_ALREADY_RUNNING, show_alert=True,
+            texts.BROADCAST_ALREADY_RUNNING,
+            show_alert=True,
         )
         return
 
@@ -541,19 +575,22 @@ async def _start_broadcast_process(
             )
             if active_count and active_count > 0:
                 await callback.answer(
-                    texts.BROADCAST_ALREADY_RUNNING, show_alert=True,
+                    texts.BROADCAST_ALREADY_RUNNING,
+                    show_alert=True,
                 )
                 return
     except Exception as e:
         logger.warning(
-            "Failed to check DB for active broadcasts: %s", e,
+            "Failed to check DB for active broadcasts: %s",
+            e,
         )
 
     data = await state.get_data()
     broadcast_text = data.get("broadcast_text")
     if not broadcast_text:
         await callback.answer(
-            texts.ERROR_TEXT_EMPTY, show_alert=True,
+            texts.ERROR_TEXT_EMPTY,
+            show_alert=True,
         )
         await state.clear()
         return
@@ -561,13 +598,10 @@ async def _start_broadcast_process(
     media_id = data.get("media_id")
     content_type = data.get("content_type")
 
-    count_stmt = (
-        select(func.count(User.id))
-        .where(
-            User.is_deleted == False,
-            User.is_bot_blocked == False,
-            User.is_banned == False,
-        )
+    count_stmt = select(func.count(User.id)).where(
+        User.is_deleted.is_(False),
+        User.is_bot_blocked.is_(False),
+        User.is_banned.is_(False),
     )
     if audience == "active":
         current_time = now_utc()
@@ -579,7 +613,8 @@ async def _start_broadcast_process(
 
     if not total_count:
         await callback.answer(
-            texts.BROADCAST_NO_RECIPIENTS, show_alert=True,
+            texts.BROADCAST_NO_RECIPIENTS,
+            show_alert=True,
         )
         await state.clear()
         return
@@ -604,7 +639,9 @@ async def _start_broadcast_process(
     _broadcast_in_progress.add(admin_id)
     _start_background_task(
         _send_broadcast_to_users_with_resume(
-            callback.bot, progress_id, admin_id,
+            callback.bot,
+            progress_id,
+            admin_id,
         )
     )
 
@@ -616,7 +653,8 @@ async def _start_broadcast_process(
         )
     except TelegramBadRequest as e:
         logger.debug(
-            "edit_text failed in _start_broadcast_process: %s", e,
+            "edit_text failed in _start_broadcast_process: %s",
+            e,
         )
 
     await state.clear()
@@ -633,7 +671,8 @@ async def broadcast_to_all(
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(
-            texts.ERROR_ACCESS_DENIED, show_alert=True,
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
         )
         return
     await _start_broadcast_process(callback, state, session, "all")
@@ -650,7 +689,8 @@ async def broadcast_to_active(
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(
-            texts.ERROR_ACCESS_DENIED, show_alert=True,
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
         )
         return
     await _start_broadcast_process(callback, state, session, "active")
@@ -660,7 +700,8 @@ async def broadcast_to_active(
 async def stop_broadcast(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(
-            texts.ERROR_ACCESS_DENIED, show_alert=True,
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
         )
         return
     admin_id = callback.from_user.id
@@ -679,12 +720,14 @@ async def stop_broadcast(callback: CallbackQuery):
             )
     except Exception as e:
         logger.error(
-            "Failed to set broadcast status to stopping: %s", e,
+            "Failed to set broadcast status to stopping: %s",
+            e,
         )
     stop_event = _get_stop_event(admin_id)
     stop_event.set()
     await callback.answer(
-        texts.BROADCAST_STOPPING, show_alert=True,
+        texts.BROADCAST_STOPPING,
+        show_alert=True,
     )
 
 
@@ -692,7 +735,8 @@ async def stop_broadcast(callback: CallbackQuery):
 async def dismiss_broadcast_result(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(
-            texts.ERROR_ACCESS_DENIED, show_alert=True,
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
         )
         return
     await callback.answer(show_alert=False)

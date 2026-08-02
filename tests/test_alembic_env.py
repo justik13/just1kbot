@@ -1,4 +1,3 @@
-import asyncio
 import runpy
 import unittest
 from contextlib import contextmanager

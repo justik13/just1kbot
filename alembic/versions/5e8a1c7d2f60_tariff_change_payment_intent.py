@@ -1,4 +1,5 @@
 """Phase 6 tariff-change payment intent invariants."""
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -14,10 +15,18 @@ def _exec_many(sql: str) -> None:
 
 def upgrade():
     # Re-upgrade after downgrade restores semantics from immutable quote amount.
-    op.add_column("payments", sa.Column("provider_required", sa.Boolean(), nullable=True))
-    op.execute("UPDATE payments p SET provider_required = CASE WHEN q.operation_type='change' THEN q.confirmed_payment_required_rub > 0 ELSE true END FROM tariff_quotes q WHERE q.id=p.tariff_quote_id")
-    op.execute("UPDATE payments SET provider_required=true WHERE provider_required IS NULL")
-    op.alter_column("payments", "provider_required", nullable=False, server_default=sa.text("true"))
+    op.add_column(
+        "payments", sa.Column("provider_required", sa.Boolean(), nullable=True)
+    )
+    op.execute(
+        "UPDATE payments p SET provider_required = CASE WHEN q.operation_type='change' THEN q.confirmed_payment_required_rub > 0 ELSE true END FROM tariff_quotes q WHERE q.id=p.tariff_quote_id"
+    )
+    op.execute(
+        "UPDATE payments SET provider_required=true WHERE provider_required IS NULL"
+    )
+    op.alter_column(
+        "payments", "provider_required", nullable=False, server_default=sa.text("true")
+    )
 
     # Refuse ambiguous history before installing constraints; never repair it.
     op.execute(r"""
@@ -57,8 +66,20 @@ def upgrade():
       THEN RAISE EXCEPTION 'conflicting legacy tariff change payment rows'; END IF;
     END $$
     """)
-    op.create_index("uq_tariff_quotes_payment_id", "tariff_quotes", ["payment_id"], unique=True, postgresql_where=sa.text("payment_id IS NOT NULL"))
-    op.create_index("uq_payment_provider_create", "payment_provider_operations", ["payment_id"], unique=True, postgresql_where=sa.text("operation_type='create_payment'"))
+    op.create_index(
+        "uq_tariff_quotes_payment_id",
+        "tariff_quotes",
+        ["payment_id"],
+        unique=True,
+        postgresql_where=sa.text("payment_id IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_payment_provider_create",
+        "payment_provider_operations",
+        ["payment_id"],
+        unique=True,
+        postgresql_where=sa.text("operation_type='create_payment'"),
+    )
 
     _exec_many(r"""
     CREATE FUNCTION phase6_validate_change_payment() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -162,11 +183,19 @@ def upgrade():
 
 def downgrade():
     for statement in (
-        "DROP TRIGGER IF EXISTS phase6_provider_create_guard ON payment_provider_operations", "DROP FUNCTION IF EXISTS phase6_provider_create_guard()",
-        "DROP TRIGGER IF EXISTS phase6_quote_payment_immutable ON tariff_quotes", "DROP FUNCTION IF EXISTS phase6_quote_payment_immutable()",
-        "DROP TRIGGER IF EXISTS phase6_payment_immutable ON payments", "DROP FUNCTION IF EXISTS phase6_immutable_financial_identity()",
-        "DROP TRIGGER IF EXISTS phase6_quote_reciprocal ON tariff_quotes", "DROP TRIGGER IF EXISTS phase6_payment_reciprocal ON payments", "DROP FUNCTION IF EXISTS phase6_validate_change_payment()",
-    ): op.execute(statement)
-    op.drop_index("uq_payment_provider_create", table_name="payment_provider_operations")
+        "DROP TRIGGER IF EXISTS phase6_provider_create_guard ON payment_provider_operations",
+        "DROP FUNCTION IF EXISTS phase6_provider_create_guard()",
+        "DROP TRIGGER IF EXISTS phase6_quote_payment_immutable ON tariff_quotes",
+        "DROP FUNCTION IF EXISTS phase6_quote_payment_immutable()",
+        "DROP TRIGGER IF EXISTS phase6_payment_immutable ON payments",
+        "DROP FUNCTION IF EXISTS phase6_immutable_financial_identity()",
+        "DROP TRIGGER IF EXISTS phase6_quote_reciprocal ON tariff_quotes",
+        "DROP TRIGGER IF EXISTS phase6_payment_reciprocal ON payments",
+        "DROP FUNCTION IF EXISTS phase6_validate_change_payment()",
+    ):
+        op.execute(statement)
+    op.drop_index(
+        "uq_payment_provider_create", table_name="payment_provider_operations"
+    )
     op.drop_index("uq_tariff_quotes_payment_id", table_name="tariff_quotes")
     op.drop_column("payments", "provider_required")

@@ -9,7 +9,11 @@ from cachetools import TTLCache
 from sqlalchemy import or_, select
 
 from bot import texts
-from bot.constants import GRACE_PERIOD_HOURS, NOTIFICATION_INTERVAL, WORKER_ERROR_SLEEP_INTERVAL
+from bot.constants import (
+    GRACE_PERIOD_HOURS,
+    NOTIFICATION_INTERVAL,
+    WORKER_ERROR_SLEEP_INTERVAL,
+)
 from database.connection import session_scope
 from database.models import User
 from utils.datetime_helpers import now_utc
@@ -27,10 +31,11 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
     ttl=86400,
 )
 
+
 def _get_backoff_delay(retry_count: int) -> int:
     capped = min(retry_count, MAX_RETRY_COUNT)
 
-    return BACKOFF_BASE_INTERVAL * (2 ** capped)
+    return BACKOFF_BASE_INTERVAL * (2**capped)
 
 
 def _format_countdown(delta: timedelta) -> str:
@@ -87,9 +92,7 @@ async def subscription_notifications_loop(
             timeout=NOTIFICATION_START_DELAY,
         )
 
-        logger.info(
-            "Notifications worker stopped during start delay (shutdown)"
-        )
+        logger.info("Notifications worker stopped during start delay (shutdown)")
 
         return
 
@@ -152,13 +155,13 @@ async def _send_pre_expiry_notifications(
             .where(
                 User.subscription_end > current_time,
                 User.subscription_end <= current_time + timedelta(days=3),
-                User.is_banned == False,
-                User.is_bot_blocked == False,
-                User.is_deleted == False,
+                User.is_banned.is_(False),
+                User.is_bot_blocked.is_(False),
+                User.is_deleted.is_(False),
                 or_(
-                    User.notified_3d == False,
-                    User.notified_1d == False,
-                    User.notified_2h == False,
+                    User.notified_3d.is_(False),
+                    User.notified_1d.is_(False),
+                    User.notified_2h.is_(False),
                 ),
             )
             .order_by(User.subscription_end.asc())
@@ -173,7 +176,7 @@ async def _send_pre_expiry_notifications(
         return
 
     for i in range(0, len(user_ids), NOTIFICATION_BATCH_SIZE):
-        batch_ids = user_ids[i:i + NOTIFICATION_BATCH_SIZE]
+        batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         async with session_scope() as session:
             users_result = await session.execute(
@@ -186,10 +189,7 @@ async def _send_pre_expiry_notifications(
                 if user.is_banned or user.is_bot_blocked or user.is_deleted:
                     continue
 
-                if (
-                    not user.subscription_end
-                    or user.subscription_end <= current_time
-                ):
+                if not user.subscription_end or user.subscription_end <= current_time:
                     continue
 
                 if user.subscription_end > current_time + timedelta(days=3):
@@ -220,24 +220,15 @@ async def _send_pre_expiry_notifications(
                 msg = None
                 notification_type = None
 
-                if (
-                    time_left <= timedelta(hours=2)
-                    and not user.notified_2h
-                ):
+                if time_left <= timedelta(hours=2) and not user.notified_2h:
                     msg = texts.NOTIFY_2H
                     notification_type = "2h"
 
-                elif (
-                    time_left <= timedelta(days=1)
-                    and not user.notified_1d
-                ):
+                elif time_left <= timedelta(days=1) and not user.notified_1d:
                     msg = texts.NOTIFY_1D
                     notification_type = "1d"
 
-                elif (
-                    time_left <= timedelta(days=3)
-                    and not user.notified_3d
-                ):
+                elif time_left <= timedelta(days=3) and not user.notified_3d:
                     msg = texts.NOTIFY_3D
                     notification_type = "3d"
 
@@ -314,15 +305,15 @@ async def _send_post_expiry_notifications(
         stmt = (
             select(User.id)
             .where(
-                User.subscription_end != None,
+                User.subscription_end.is_not(None),
                 User.subscription_end < current_time,
                 User.subscription_end > grace_start,
-                User.is_banned == False,
-                User.is_bot_blocked == False,
-                User.is_deleted == False,
+                User.is_banned.is_(False),
+                User.is_bot_blocked.is_(False),
+                User.is_deleted.is_(False),
                 or_(
-                    User.notified_expired == False,
-                    User.notified_grace_12h == False,
+                    User.notified_expired.is_(False),
+                    User.notified_grace_12h.is_(False),
                 ),
             )
             .order_by(User.subscription_end.asc())
@@ -337,7 +328,7 @@ async def _send_post_expiry_notifications(
         return
 
     for i in range(0, len(user_ids), NOTIFICATION_BATCH_SIZE):
-        batch_ids = user_ids[i:i + NOTIFICATION_BATCH_SIZE]
+        batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
         async with session_scope() as session:
             users_result = await session.execute(
@@ -347,10 +338,7 @@ async def _send_post_expiry_notifications(
             batch_users = list(users_result.scalars().all())
 
             for user in batch_users:
-                if (
-                    not user.subscription_end
-                    or user.subscription_end >= current_time
-                ):
+                if not user.subscription_end or user.subscription_end >= current_time:
                     continue
 
                 if user.is_banned or user.is_bot_blocked or user.is_deleted:

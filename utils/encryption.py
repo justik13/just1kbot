@@ -46,7 +46,7 @@ class EncryptedString(TypeDecorator):
             return encrypted.decode("utf-8")
         except Exception as e:
             logger.error("Encryption failed: %s", type(e).__name__)
-            raise RuntimeError("Encryption failed")
+            raise RuntimeError("Encryption failed") from e
 
     def process_result_value(self, value, dialect):
         if value is None:
@@ -63,8 +63,7 @@ class EncryptedString(TypeDecorator):
                 )
             else:
                 logger.error(
-                    "DB_ENCRYPTION_KEY is empty during decryption. "
-                    "Returning None."
+                    "DB_ENCRYPTION_KEY is empty during decryption. Returning None."
                 )
             return None
         try:
@@ -84,11 +83,10 @@ class EncryptedString(TypeDecorator):
                     "CRITICAL: Failed to decrypt critical field. "
                     "DB_ENCRYPTION_KEY may have changed or data "
                     "is corrupted. Server cannot operate safely."
-                )
+                ) from None
             else:
                 logger.warning(
-                    "Encrypted field decryption failed: invalid token. "
-                    "Returning None."
+                    "Encrypted field decryption failed: invalid token. Returning None."
                 )
             return None
         except Exception as e:
@@ -99,7 +97,7 @@ class EncryptedString(TypeDecorator):
                 )
                 raise RuntimeError(
                     f"CRITICAL: Decryption error: {type(e).__name__}"
-                )
+                ) from e
             else:
                 logger.error(
                     "Encrypted field decryption failed: %s",
