@@ -116,6 +116,22 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # These rows have no representation before this revision. Remove them before
+    # restoring the older constraints so rollback is deterministic instead of
+    # failing halfway through with a CHECK/NOT NULL violation.
+    op.execute("DELETE FROM referral_rewards WHERE source_quote_id IS NOT NULL")
+    op.execute(
+        "UPDATE referral_eligibilities SET source_quote_id = NULL "
+        "WHERE source_quote_id IS NOT NULL"
+    )
+    op.execute(
+        "DELETE FROM entitlement_entries "
+        "WHERE entry_type = 'account_purchase_grant'"
+    )
+    op.execute(
+        "DELETE FROM paid_value_ledger WHERE entry_type = 'account_purchase'"
+    )
+
     op.drop_constraint(
         "ck_referral_eligibilities_one_source",
         "referral_eligibilities",
