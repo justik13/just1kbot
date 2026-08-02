@@ -15,11 +15,15 @@ from database.models import (
     PaymentRefund,
     WebhookInbox,
 )
-from database.repositories.account_ledger_repo import create_payment_debit
 from services.payment_kind import is_balance_topup, is_tariff_change_payment
 from services.payment_lifecycle import project_legacy_status
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
+from services.provider_refunds import (
+    BalanceRefundError,
+    apply_balance_topup_refund_success,
+    place_financial_hold,
+)
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 
@@ -132,26 +136,21 @@ async def _find_payment(session, claim):
     return payment, None
 
 
-async def _record_balance_refund_debit(
-    session,
-    *,
-    payment: Payment,
-    refund_id: str,
-    amount: Decimal,
-    event_key: str,
-):
-    """Remove a confirmed provider refund from spendable account money once."""
-    return await create_payment_debit(
-        session,
-        payment_id=payment.id,
-        entry_type="refund_debit",
-        amount=amount,
-        idempotency_key=f"provider-refund-debit:{refund_id}",
-        metadata={
-            "provider_refund_id": refund_id,
-            "event_key": event_key,
-            "source": "webhook_inbox",
-        },
+async def _manual_refund_review(session, payment, *, reason):
+    if is_balance_topup(payment):
+        await place_financial_hold(session, payment=payment, reason=reason)
+    else:
+        payment.reconciliation_status = "manual_review"
+        payment.fulfillment_status = "manual_review"
+        payment.manual_review_reason = reason
+    session.add(
+        PaymentEvent(
+            payment_id=payment.id,
+            event_type="refund_manual_review",
+            provider_status=payment.provider_status,
+            reason=reason,
+            source="webhook_inbox",
+        )
     )
 
 
@@ -188,39 +187,29 @@ async def finalize(session, claim, result):
             or (obj.get("payment_id") or obj.get("payment", {}).get("id"))
             != payment.external_id
         ):
-            payment.reconciliation_status = "manual_review"
-            payment.fulfillment_status = "manual_review"
-            session.add(
-                PaymentEvent(
-                    payment_id=payment.id,
-                    event_type="refund_manual_review",
-                    reason="refund_identity_invalid",
-                    source="webhook_inbox",
-                )
+            await _manual_refund_review(
+                session, payment, reason="refund_identity_invalid"
             )
         elif currency != payment.currency or amount <= 0:
-            payment.reconciliation_status = "manual_review"
-            payment.fulfillment_status = "manual_review"
-            session.add(
-                PaymentEvent(
-                    payment_id=payment.id,
-                    event_type="refund_manual_review",
-                    reason="refund_amount_currency_invalid",
-                    source="webhook_inbox",
-                )
+            await _manual_refund_review(
+                session, payment, reason="refund_amount_currency_invalid"
             )
-        elif is_balance_topup(payment) and amount != amount.to_integral_value():
-            payment.reconciliation_status = "manual_review"
-            payment.fulfillment_status = "manual_review"
-            payment.manual_review_reason = "balance_refund_not_whole_rubles"
-            session.add(
-                PaymentEvent(
-                    payment_id=payment.id,
-                    event_type="refund_manual_review",
-                    reason="balance_refund_not_whole_rubles",
-                    source="webhook_inbox",
+        elif is_balance_topup(payment):
+            try:
+                await apply_balance_topup_refund_success(
+                    session,
+                    payment=payment,
+                    provider_refund_id=str(refund_id),
+                    amount=amount,
+                    currency=str(currency),
+                    event_key=claim.event_key,
                 )
-            )
+            except BalanceRefundError as exc:
+                await _manual_refund_review(
+                    session,
+                    payment,
+                    reason=exc.code,
+                )
         else:
             await session.execute(
                 insert(PaymentRefund)
@@ -245,22 +234,7 @@ async def finalize(session, claim, result):
                 )
                 or 0
             )
-            if is_balance_topup(payment) and total <= Decimal(payment.amount):
-                await _record_balance_refund_debit(
-                    session,
-                    payment=payment,
-                    refund_id=str(refund_id),
-                    amount=amount,
-                    event_key=claim.event_key,
-                )
-            if total == payment.amount and is_balance_topup(payment):
-                payment.provider_status = "refunded"
-                payment.fulfillment_status = "reversed"
-                if payment.manual_review_reason == "partial_refund":
-                    payment.reconciliation_status = "ok"
-                    payment.manual_review_reason = None
-                payment.reversed_at = payment.reversed_at or now_utc()
-            elif total == payment.amount and await is_tariff_change_payment(
+            if total == payment.amount and await is_tariff_change_payment(
                 session, payment
             ):
                 payment.provider_status = "refunded"
@@ -368,16 +342,8 @@ async def finalize(session, claim, result):
                     grant_op.status = "cancelled"
                     grant_op.completed_at = now_utc()
             else:
-                payment.reconciliation_status = "manual_review"
-                payment.fulfillment_status = "manual_review"
-                payment.manual_review_reason = "over_refund"
-                session.add(
-                    PaymentEvent(
-                        payment_id=payment.id,
-                        event_type="refund_manual_review",
-                        reason="over_refund",
-                        source="webhook_inbox",
-                    )
+                await _manual_refund_review(
+                    session, payment, reason="over_refund"
                 )
     elif not result or not result.ok:
         dead = row.attempts >= row.max_attempts
@@ -395,8 +361,15 @@ async def finalize(session, claim, result):
             project_legacy_status(payment)
         return
     elif claim.event_type == "payment.refunded":
-        payment.reconciliation_status = "manual_review"
-        payment.fulfillment_status = "manual_review"
+        if is_balance_topup(payment):
+            await place_financial_hold(
+                session,
+                payment=payment,
+                reason="payment_refunded_without_refund_amount",
+            )
+        else:
+            payment.reconciliation_status = "manual_review"
+            payment.fulfillment_status = "manual_review"
         session.add(
             PaymentEvent(
                 payment_id=payment.id,
