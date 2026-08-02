@@ -1,0 +1,46 @@
+name: baseline-export
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.head_ref == 'agent/greenfield-ui-ux-cleanup'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: projectx
+          POSTGRES_PASSWORD: projectx
+          POSTGRES_DB: baseline
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U projectx -d baseline"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/baseline
+      DB_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: python scripts/dev/generate_clean_baseline.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-baseline-${{ github.sha }}
+          path: /tmp/0001_clean_baseline.py
+          if-no-files-found: error
+          retention-days: 1
