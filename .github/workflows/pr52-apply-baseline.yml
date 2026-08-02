@@ -55,7 +55,18 @@ jobs:
             '3664cb57678877521ea4a696be5a9a63d92a7273530d9bf71ce7e0c1998746de' \
             '/tmp/pr52-baseline.patch' | sha256sum --check
           git apply --index /tmp/pr52-baseline.patch
+
+          printf '%s  %s\n' \
+            '57810df5cad0482e873eca27db3af56be51b58870e77a939c659c8d4b86cdea1' \
+            '.github/pr52-baseline-test-fix.patch.b64' | sha256sum --check
+          base64 --decode .github/pr52-baseline-test-fix.patch.b64 > /tmp/pr52-baseline-test-fix.patch
+          printf '%s  %s\n' \
+            'f314e9890946d0900981dc815dc5c4aee44db781a7be1657c2872e9d412eab67' \
+            '/tmp/pr52-baseline-test-fix.patch' | sha256sum --check
+          git apply --index /tmp/pr52-baseline-test-fix.patch
+
           git rm .github/pr52-baseline.patch.gz.b64
+          git rm .github/pr52-baseline-test-fix.patch.b64
           git rm -r .github/pr52-baseline-chunks
           git diff --cached --check
 
