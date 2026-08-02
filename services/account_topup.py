@@ -66,6 +66,26 @@ async def _visible_topup_for_update(
     )
 
 
+async def get_visible_balance_topup(
+    session: AsyncSession, *, user_id: int, for_update: bool = False
+) -> Payment | None:
+    statement = (
+        select(Payment)
+        .where(
+            Payment.user_id == user_id,
+            Payment.payment_kind == "balance_topup",
+            Payment.ui_visible.is_(True),
+            Payment.checkout_status == "active",
+            Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
+        )
+        .order_by(Payment.id.desc())
+        .limit(1)
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    return await session.scalar(statement)
+
+
 async def _pending_topup_exposure(
     session: AsyncSession, user_id: int
 ) -> Decimal:

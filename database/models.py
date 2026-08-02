@@ -512,6 +512,9 @@ class Payment(Base):
     provider_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     credit_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    payment_url_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

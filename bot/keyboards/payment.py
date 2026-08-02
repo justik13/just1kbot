@@ -162,3 +162,79 @@ def get_yookassa_payment_keyboard(
     )
     builder.adjust(1, 1, 1)
     return builder.as_markup()
+
+
+def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    if has_visible_topup:
+        builder.button(
+            text="💳 Продолжить пополнение",
+            callback_data="balance_resume_topup",
+        )
+    else:
+        builder.button(
+            text="➕ Пополнить баланс",
+            callback_data="balance_topup",
+        )
+    builder.button(
+        text="🧾 История операций",
+        callback_data="balance_history",
+    )
+    builder.button(text="← Назад", callback_data="back_to_main_menu")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for amount in amounts:
+        builder.button(
+            text=f"{amount} ₽",
+            callback_data=f"balance_create:{amount}",
+        )
+    builder.button(
+        text="Другая сумма",
+        callback_data="balance_custom_amount",
+    )
+    builder.button(text="← Назад", callback_data="menu_balance")
+    builder.adjust(2, 2, 2, 1, 1)
+    return builder.as_markup()
+
+
+def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔄 Проверить статус",
+        callback_data=f"balance_check:{payment_id}",
+    )
+    builder.button(
+        text="❌ Отменить пополнение",
+        callback_data=f"balance_cancel:{payment_id}",
+    )
+    builder.button(
+        text="Вернуться позже",
+        callback_data=f"balance_later:{payment_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_topup_payment_keyboard(
+    payment_url: str, payment_id: int
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="💳 Перейти к оплате", url=payment_url)
+    builder.button(
+        text="🔄 Проверить статус",
+        callback_data=f"balance_check:{payment_id}",
+    )
+    builder.button(
+        text="❌ Отменить пополнение",
+        callback_data=f"balance_cancel:{payment_id}",
+    )
+    builder.button(
+        text="Вернуться позже",
+        callback_data=f"balance_later:{payment_id}",
+    )
+    builder.adjust(1)
+    return builder.as_markup()

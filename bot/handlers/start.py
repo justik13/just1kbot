@@ -12,6 +12,7 @@ from bot.keyboards.common import get_hub_keyboard
 from bot.middlewares.user_context import invalidate_user_cache
 from config.settings import get_settings
 from database.models import User
+from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
@@ -138,7 +139,8 @@ async def cmd_start(
 
     name = safe(user.first_name or "Пользователь")
 
-    text = texts.HUB_HEADER.format(name=name)
+    balance = await get_account_balance(session, user_id=user.id)
+    text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
 
     kb = get_hub_keyboard(
         is_admin=is_admin,
@@ -203,7 +205,8 @@ async def back_to_main_menu(
 
     name = safe(db_user.first_name or "Пользователь")
 
-    text = texts.HUB_HEADER.format(name=name)
+    balance = await get_account_balance(session, user_id=db_user.id)
+    text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
 
     kb = get_hub_keyboard(
         is_admin=is_admin,

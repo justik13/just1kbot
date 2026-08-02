@@ -9,6 +9,10 @@ from .payment import (
     get_payment_method_keyboard,
     get_payment_success_keyboard,
     get_yookassa_payment_keyboard,
+    get_balance_keyboard,
+    get_balance_amounts_keyboard,
+    get_topup_waiting_keyboard,
+    get_topup_payment_keyboard,
 )
 from .admin.dashboard import (
     get_admin_menu,
@@ -55,6 +59,10 @@ __all__ = [
     "get_payment_method_keyboard",
     "get_payment_success_keyboard",
     "get_yookassa_payment_keyboard",
+    "get_balance_keyboard",
+    "get_balance_amounts_keyboard",
+    "get_topup_waiting_keyboard",
+    "get_topup_payment_keyboard",
     # admin dashboard
     "get_admin_menu",
     "get_audit_keyboard",

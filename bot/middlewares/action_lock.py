@@ -44,6 +44,9 @@ LOCKED_ACTION_PREFIXES = (
     "pay_yookassa:",
     "check_payment:",
     "cancel_invoice:",
+    "balance_create:",
+    "balance_check:",
+    "balance_cancel:",
     # Админские платежи.
     "admin_payment_refund_apply:",
     # Админские действия с подпиской.

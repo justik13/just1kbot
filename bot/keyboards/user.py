@@ -6,6 +6,10 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
+        text="💰 Баланс",
+        callback_data="menu_balance",
+    )
+    builder.button(
         text="🎁 Пригласить друга",
         callback_data="referral",
     )
@@ -18,7 +22,7 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1)
+    builder.adjust(1, 1, 1, 1)
 
     return builder.as_markup()
 

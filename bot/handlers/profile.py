@@ -14,6 +14,7 @@ from bot.keyboards import (
     get_referral_keyboard,
 )
 from database.models import User
+from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.payments_repo import get_user_payments
 from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.tariffs_repo import get_tariff_by_id
@@ -53,6 +54,7 @@ async def _render_profile(
     referrals_count = len(
         await get_user_referrals(session, user.telegram_id)
     )
+    balance = await get_account_balance(session, user_id=user.id)
 
     if has_access:
         device_limit = user.device_limit or 0
@@ -82,6 +84,7 @@ async def _render_profile(
             total_traffic=format_traffic(total_traffic),
             referrals_count=referrals_count,
             referral_days=user.referral_days,
+            balance=int(balance.available),
         )
         kb = get_profile_keyboard()
     else:
@@ -91,12 +94,17 @@ async def _render_profile(
             telegram_id=user.telegram_id,
             referrals_count=referrals_count,
             referral_days=user.referral_days,
+            balance=int(balance.available),
         )
 
         builder = InlineKeyboardBuilder()
         builder.button(
             text="🚀 Купить доступ",
             callback_data="menu_buy",
+        )
+        builder.button(
+            text="💰 Баланс",
+            callback_data="menu_balance",
         )
         builder.button(
             text="🎁 Пригласить друга",
@@ -110,7 +118,7 @@ async def _render_profile(
             text="🏠 В главное меню",
             callback_data="back_to_main_menu",
         )
-        builder.adjust(1, 1, 1, 1)
+        builder.adjust(1, 1, 1, 1, 1)
         kb = builder.as_markup()
 
     await render_hub(
