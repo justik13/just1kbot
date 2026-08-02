@@ -1,0 +1,65 @@
+name: apply-payment-checkout-fix
+
+on:
+  push:
+    branches:
+      - agent/fix-payment-checkout-ux
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-payment-checkout-ux
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Apply deterministic fix
+        run: python scripts/apply_payment_checkout_fix.py
+      - name: Format and validate changed Python files
+        run: |
+          python -m pip install ruff==0.16.1
+          ruff format \
+            bot/keyboards/payment.py \
+            bot/handlers/payment/yookassa_routes.py \
+            services/checkout_conflicts.py \
+            services/payment_service/service.py \
+            services/payment_provider_operations.py \
+            tests/test_payment_checkout_ux.py
+          ruff check \
+            bot/keyboards/payment.py \
+            bot/handlers/payment/yookassa_routes.py \
+            services/checkout_conflicts.py \
+            services/payment_service/service.py \
+            services/payment_provider_operations.py \
+            tests/test_payment_checkout_ux.py \
+            --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100 \
+            --ignore PLW0603,PLW0108
+          python -m compileall -q \
+            bot/keyboards/payment.py \
+            bot/handlers/payment/yookassa_routes.py \
+            services/checkout_conflicts.py \
+            services/payment_service/service.py \
+            services/payment_provider_operations.py \
+            tests/test_payment_checkout_ux.py
+          git diff --check
+      - name: Remove temporary publisher and commit
+        run: |
+          set -Eeuo pipefail
+          git rm scripts/apply_payment_checkout_fix.py
+          git rm .github/workflows/apply-payment-checkout-fix.yml
+          git add \
+            bot/keyboards/payment.py \
+            bot/handlers/payment/yookassa_routes.py \
+            services/checkout_conflicts.py \
+            services/payment_service/service.py \
+            services/payment_provider_operations.py \
+            tests/test_payment_checkout_ux.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "fix: make payment checkout resumable"
+          git push origin HEAD:agent/fix-payment-checkout-ux
