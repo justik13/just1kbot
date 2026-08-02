@@ -9,6 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import (
+    AccountBalanceReservation,
     AccountLedgerEntry,
     Payment,
     PaymentFulfillmentOperation,
@@ -16,10 +17,15 @@ from database.models import (
     User,
     WebhookInbox,
 )
+from database.refund_models import ProviderRefundOperation
 from database.repositories.account_ledger_repo import (
     create_admin_adjustment,
     credit_succeeded_topup,
     get_account_balance,
+)
+from services.provider_refunds import (
+    claim as claim_provider_refund,
+    request_balance_topup_refund,
 )
 from services.workers.webhook_inbox import InboxClaim, finalize
 from utils.datetime_helpers import now_utc
@@ -27,10 +33,10 @@ from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
-    "TRUNCATE webhook_inbox, payment_refunds, "
+    "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
     "payment_fulfillment_operations, account_balance_reservations, "
     "account_ledger_allocations, account_ledger_entries, "
-    "payments, users RESTART IDENTITY CASCADE"
+    "payment_events, audit_logs, payments, users RESTART IDENTITY CASCADE"
 )
 
 
@@ -191,3 +197,38 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(balance.available, Decimal("0"))
             self.assertEqual(balance.debt, Decimal("80.00"))
             self.assertEqual(payment.fulfillment_status, "reversed")
+
+    async def test_webhook_completes_matching_outbox_before_worker_claim(self):
+        async with self.sessions.begin() as session:
+            payment = await self._topup(session, 100)
+            request = await request_balance_topup_refund(
+                session,
+                payment_id=payment.id,
+                requested_by_admin_id=123,
+            )
+            operation_id = request.operation.id
+            reservation_id = request.reservation.id
+            refund_id = "refund_" + uuid.uuid4().hex
+
+            await self._refund(
+                session,
+                payment,
+                refund_id=refund_id,
+                event_key=uuid.uuid4().hex,
+                amount=100,
+            )
+
+            operation = await session.get(ProviderRefundOperation, operation_id)
+            reservation = await session.get(
+                AccountBalanceReservation, reservation_id
+            )
+            self.assertEqual(operation.status, "completed")
+            self.assertEqual(operation.provider_status, "succeeded")
+            self.assertEqual(operation.provider_refund_id, refund_id)
+            self.assertIsNotNone(operation.completed_at)
+            self.assertIsNone(operation.locked_at)
+            self.assertIsNone(operation.locked_by)
+            self.assertEqual(reservation.status, "consumed")
+            self.assertIsNone(
+                await claim_provider_refund(session, "late-refund-worker")
+            )
