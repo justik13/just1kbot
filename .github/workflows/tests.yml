@@ -50,23 +50,6 @@ jobs:
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - run: alembic upgrade head
-      - name: Export migrated PostgreSQL schema for baseline consolidation
-        if: github.event_name == 'pull_request'
-        run: >-
-          pg_dump
-          --schema-only
-          --no-owner
-          --no-privileges
-          postgresql://projectx:projectx@localhost:5432/projectx_test
-          > /tmp/projectx-schema.sql
-      - name: Upload migrated schema
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
-        with:
-          name: migrated-schema-${{ github.sha }}
-          path: /tmp/projectx-schema.sql
-          if-no-files-found: error
-          retention-days: 1
       - name: Run full test suite
         id: unittests
         run: |
@@ -83,7 +66,15 @@ jobs:
           path: /tmp/unittest.log
           if-no-files-found: error
           retention-days: 7
-      - run: alembic downgrade -1
+      - run: alembic downgrade base
+      - name: Verify downgrade leaves no application tables
+        run: |
+          remaining="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version' ORDER BY tablename")"
+          if [ -n "$remaining" ]; then
+            printf 'Application tables remain after downgrade:\n%s\n' "$remaining" >&2
+            exit 1
+          fi
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic tests
