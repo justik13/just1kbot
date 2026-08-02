@@ -9,6 +9,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, or_, select
 
+from database.dispute_models import PaymentDispute
 from database.models import (
     AccountBalanceReservation,
     Payment,
@@ -86,6 +87,14 @@ async def request_balance_topup_refund(
         raise BalanceRefundError("provider_payment_id_missing")
     if payment.currency != "RUB":
         raise BalanceRefundError("refund_currency_invalid")
+    active_dispute = await session.scalar(
+        select(PaymentDispute.id).where(
+            PaymentDispute.payment_id == payment.id,
+            PaymentDispute.status.in_(("open", "manual_review")),
+        )
+    )
+    if active_dispute is not None:
+        raise BalanceRefundError("payment_has_active_dispute")
 
     active = await session.scalar(
         select(ProviderRefundOperation)
