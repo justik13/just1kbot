@@ -3,22 +3,25 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
+
 from database.models import (
     EntitlementEntry,
     Payment,
+    PaymentEvent,
     PaymentFulfillmentOperation,
     PaymentRefund,
     WebhookInbox,
 )
+from database.repositories.account_ledger_repo import create_payment_debit
+from services.payment_kind import is_balance_topup, is_tariff_change_payment
 from services.payment_lifecycle import project_legacy_status
-from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
 from services.payment_provider_state import apply_provider_transition
-from database.models import PaymentEvent
+from services.payment_queue_timing import WEBHOOK_LEASE_SECONDS
 from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
-from services.payment_kind import is_balance_topup, is_tariff_change_payment
 
 
 class WebhookInboxOwnershipError(RuntimeError):
@@ -97,7 +100,8 @@ async def claim(session, worker_id):
 
 
 async def fetch_provider(claim, transport=YooKassaService):
-    # Refund objects are validated from the signed/provider-delivered event; payment state is independently GET-verified for payment events.
+    # Refund objects are validated from the signed/provider-delivered event;
+    # payment state is independently GET-verified for payment events.
     if claim.event_type == "refund.succeeded":
         return None
     return await transport.get_payment_result(claim.payment_external_id)
@@ -126,6 +130,29 @@ async def _find_payment(session, claim):
                 return None, "external_id_conflict"
             payment.external_id = claim.payment_external_id
     return payment, None
+
+
+async def _record_balance_refund_debit(
+    session,
+    *,
+    payment: Payment,
+    refund_id: str,
+    amount: Decimal,
+    event_key: str,
+):
+    """Remove a confirmed provider refund from spendable account money once."""
+    return await create_payment_debit(
+        session,
+        payment_id=payment.id,
+        entry_type="refund_debit",
+        amount=amount,
+        idempotency_key=f"provider-refund-debit:{refund_id}",
+        metadata={
+            "provider_refund_id": refund_id,
+            "event_key": event_key,
+            "source": "webhook_inbox",
+        },
+    )
 
 
 async def finalize(session, claim, result):
@@ -182,6 +209,18 @@ async def finalize(session, claim, result):
                     source="webhook_inbox",
                 )
             )
+        elif is_balance_topup(payment) and amount != amount.to_integral_value():
+            payment.reconciliation_status = "manual_review"
+            payment.fulfillment_status = "manual_review"
+            payment.manual_review_reason = "balance_refund_not_whole_rubles"
+            session.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="refund_manual_review",
+                    reason="balance_refund_not_whole_rubles",
+                    source="webhook_inbox",
+                )
+            )
         else:
             await session.execute(
                 insert(PaymentRefund)
@@ -197,13 +236,31 @@ async def finalize(session, claim, result):
                 .on_conflict_do_nothing(index_elements=["provider_refund_id"])
             )
             await session.flush()
-            total = await session.scalar(
-                select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
-                    PaymentRefund.payment_id == payment.id,
-                    PaymentRefund.provider_status == "succeeded",
+            total = Decimal(
+                await session.scalar(
+                    select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
+                        PaymentRefund.payment_id == payment.id,
+                        PaymentRefund.provider_status == "succeeded",
+                    )
                 )
+                or 0
             )
-            if total == payment.amount and await is_tariff_change_payment(
+            if is_balance_topup(payment) and total <= Decimal(payment.amount):
+                await _record_balance_refund_debit(
+                    session,
+                    payment=payment,
+                    refund_id=str(refund_id),
+                    amount=amount,
+                    event_key=claim.event_key,
+                )
+            if total == payment.amount and is_balance_topup(payment):
+                payment.provider_status = "refunded"
+                payment.fulfillment_status = "reversed"
+                if payment.manual_review_reason == "partial_refund":
+                    payment.reconciliation_status = "ok"
+                    payment.manual_review_reason = None
+                payment.reversed_at = payment.reversed_at or now_utc()
+            elif total == payment.amount and await is_tariff_change_payment(
                 session, payment
             ):
                 payment.provider_status = "refunded"
