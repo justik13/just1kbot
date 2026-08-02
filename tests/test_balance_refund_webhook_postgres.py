@@ -26,6 +26,12 @@ from utils.datetime_helpers import now_utc
 
 
 DB = os.getenv("TEST_DATABASE_URL")
+TRUNCATE_SQL = (
+    "TRUNCATE webhook_inbox, payment_refunds, "
+    "payment_fulfillment_operations, account_balance_reservations, "
+    "account_ledger_allocations, account_ledger_entries, "
+    "payments, users RESTART IDENTITY CASCADE"
+)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
@@ -34,21 +40,18 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE webhook_inbox, payment_refunds, "
-                    "payment_fulfillment_operations, account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "payments, users RESTART IDENTITY CASCADE"
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
             user = User(telegram_id=uuid.uuid4().int % 10**12)
             session.add(user)
             await session.flush()
             self.user_id = user.id
 
     async def asyncTearDown(self):
-        await self.engine.dispose()
+        try:
+            async with self.sessions.begin() as session:
+                await session.execute(text(TRUNCATE_SQL))
+        finally:
+            await self.engine.dispose()
 
     async def _topup(self, session, amount=100):
         external_id = "pay_" + uuid.uuid4().hex
