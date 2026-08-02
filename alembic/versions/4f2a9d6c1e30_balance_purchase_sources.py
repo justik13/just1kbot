@@ -117,19 +117,35 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # These rows have no representation before this revision. Remove them before
-    # restoring the older constraints so rollback is deterministic instead of
-    # failing halfway through with a CHECK/NOT NULL violation.
+    # restoring the older constraints. Application append-only triggers are
+    # disabled only for this transactional rollback and restored immediately.
     op.execute("DELETE FROM referral_rewards WHERE source_quote_id IS NOT NULL")
     op.execute(
         "UPDATE referral_eligibilities SET source_quote_id = NULL "
         "WHERE source_quote_id IS NOT NULL"
     )
     op.execute(
+        "ALTER TABLE entitlement_entries "
+        "DISABLE TRIGGER entitlement_entries_append_only"
+    )
+    op.execute(
         "DELETE FROM entitlement_entries "
         "WHERE entry_type = 'account_purchase_grant'"
     )
     op.execute(
+        "ALTER TABLE entitlement_entries "
+        "ENABLE TRIGGER entitlement_entries_append_only"
+    )
+    op.execute(
+        "ALTER TABLE paid_value_ledger "
+        "DISABLE TRIGGER paid_value_ledger_append_only"
+    )
+    op.execute(
         "DELETE FROM paid_value_ledger WHERE entry_type = 'account_purchase'"
+    )
+    op.execute(
+        "ALTER TABLE paid_value_ledger "
+        "ENABLE TRIGGER paid_value_ledger_append_only"
     )
 
     op.drop_constraint(
