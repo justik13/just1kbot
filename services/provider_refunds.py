@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from database.models import (
     AccountBalanceReservation,
@@ -291,6 +291,36 @@ async def _get_or_create_payment_refund(
     return refund
 
 
+async def _find_matching_active_operation(
+    session,
+    *,
+    payment: Payment,
+    provider_refund_id: str,
+    amount: Decimal,
+    currency: str,
+) -> ProviderRefundOperation | None:
+    operation = await session.scalar(
+        select(ProviderRefundOperation)
+        .where(
+            ProviderRefundOperation.payment_id == payment.id,
+            ProviderRefundOperation.amount == amount,
+            ProviderRefundOperation.currency == currency,
+            ProviderRefundOperation.status.in_(ACTIVE_STATUSES),
+            or_(
+                ProviderRefundOperation.provider_refund_id.is_(None),
+                ProviderRefundOperation.provider_refund_id == provider_refund_id,
+            ),
+        )
+        .order_by(ProviderRefundOperation.id)
+        .with_for_update()
+    )
+    if operation is None:
+        return None
+    if operation.provider_payment_id != payment.external_id:
+        raise BalanceRefundError("active_refund_provider_payment_mismatch")
+    return operation
+
+
 async def _consume_matching_reservation(
     session,
     *,
@@ -367,6 +397,24 @@ async def apply_balance_topup_refund_success(
     amount = whole_rubles(amount)
     if currency != "RUB" or payment.currency != "RUB":
         raise BalanceRefundError("refund_currency_invalid")
+    if operation is None:
+        operation = await _find_matching_active_operation(
+            session,
+            payment=payment,
+            provider_refund_id=provider_refund_id,
+            amount=amount,
+            currency=currency,
+        )
+        if operation is not None:
+            reservation_id = operation.reservation_id
+    elif (
+        operation.payment_id != payment.id
+        or Decimal(operation.amount) != amount
+        or operation.currency != currency
+        or operation.provider_payment_id != payment.external_id
+        or operation.provider_refund_id not in {None, provider_refund_id}
+    ):
+        raise BalanceRefundError("provider_refund_operation_mismatch")
     already = Decimal(
         await session.scalar(
             select(func.coalesce(func.sum(PaymentRefund.amount), 0)).where(
@@ -414,6 +462,8 @@ async def apply_balance_topup_refund_success(
         operation.completed_at = now_utc()
         operation.last_error_code = None
         operation.last_error = None
+        operation.locked_at = None
+        operation.locked_by = None
     session.add(
         PaymentEvent(
             payment_id=payment.id,
