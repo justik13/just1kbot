@@ -14,9 +14,7 @@ def get_tariff_showcase_keyboard(
             text=group_name,
             callback_data=f"select_tariff_type:{limit}:showcase",
         )
-    builder.button(
-        text="🏠 В главное меню", callback_data="back_to_main_menu"
-    )
+    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -34,21 +32,13 @@ def get_tariff_duration_keyboard(
             text += " 🔥"
         elif t.duration_days >= 30:
             text += " 🌟"
-        builder.button(
-            text=text, callback_data=f"select_tariff:{t.id}:{source}"
-        )
+        builder.button(text=text, callback_data=f"select_tariff:{t.id}:{source}")
     if source == "change":
-        builder.button(
-            text="← Назад", callback_data="payment_change_tariff"
-        )
+        builder.button(text="← Назад", callback_data="payment_change_tariff")
     elif source == "renew":
-        builder.button(
-            text="← Назад", callback_data="menu_subscription"
-        )
+        builder.button(text="← Назад", callback_data="menu_subscription")
     else:
-        builder.button(
-            text="← К выбору тарифа", callback_data="payment_showcase"
-        )
+        builder.button(text="← К выбору тарифа", callback_data="payment_showcase")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -62,9 +52,7 @@ def get_renew_keyboard(tariffs: list) -> InlineKeyboardMarkup:
             text += " 🔥"
         elif t.duration_days >= 30:
             text += " 🌟"
-        builder.button(
-            text=text, callback_data=f"select_tariff:{t.id}:renew"
-        )
+        builder.button(text=text, callback_data=f"select_tariff:{t.id}:renew")
     builder.button(text="← Назад", callback_data="menu_subscription")
     builder.adjust(1)
     return builder.as_markup()
@@ -95,9 +83,7 @@ def get_change_tariff_keyboard(
             text=group_name,
             callback_data=f"select_tariff_type:{limit}:change",
         )
-    builder.button(
-        text="← Назад", callback_data="back_to_main_menu"
-    )
+    builder.button(text="← Назад", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -113,33 +99,23 @@ def get_payment_method_keyboard(
         callback_data=f"pay_yookassa:{tariff_id}:{source}",
     )
     if source == "renew":
-        builder.button(
-            text="← Назад", callback_data="payment_quick_renew"
-        )
+        builder.button(text="← Назад", callback_data="payment_quick_renew")
     elif device_limit is not None:
         builder.button(
             text="← Назад",
             callback_data=f"select_tariff_type:{device_limit}:{source}",
         )
     else:
-        builder.button(
-            text="← В главное меню", callback_data="back_to_main_menu"
-        )
+        builder.button(text="← В главное меню", callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_payment_success_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(
-        text="🔌 Подключить устройство", callback_data="menu_connections"
-    )
-    builder.button(
-        text="⏳ К подписке", callback_data="menu_subscription"
-    )
-    builder.button(
-        text="🏠 В главное меню", callback_data="back_to_main_menu"
-    )
+    builder.button(text="🔌 Подключить устройство", callback_data="menu_connections")
+    builder.button(text="⏳ К подписке", callback_data="menu_subscription")
+    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
     builder.adjust(1, 1, 1)
     return builder.as_markup()
 
@@ -157,7 +133,7 @@ def get_yookassa_payment_keyboard(
         callback_data=f"check_payment:{payment_id}",
     )
     builder.button(
-        text="❌ Отменить",
+        text="← Вернуться позже",
         callback_data=f"cancel_invoice:{payment_id}:{tariff_id}:{source}",
     )
     builder.adjust(1, 1, 1)

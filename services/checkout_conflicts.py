@@ -209,7 +209,13 @@ async def get_unfinished_financial_checkout(session, **kwargs):
 async def is_valid_reusable_purchase_intent(
     session, conflict: FinancialCheckoutConflict, *, user_id: int, tariff_id: int
 ) -> bool:
-    """A matching tariff is insufficient; validate the entire frozen intent."""
+    """Validate an in-progress or provider-created purchase intent for reuse.
+
+    A ready provider payment remains the only safe checkout to show again: creating
+    a second payment would leave two independently payable links.  The narrowly
+    defined abandoned state below exists only to recover rows produced by the old
+    misleading user-cancel button.
+    """
     payment = conflict.payment
     if (
         conflict.operation_type not in {"purchase", "renew"}
@@ -234,13 +240,6 @@ async def is_valid_reusable_purchase_intent(
     ):
         return False
     if (
-        quote.status != "active"
-        or quote.diagnostic_reason is not None
-        or quote.manual_review_at is not None
-        or quote.expires_at <= now_utc()
-    ):
-        return False
-    if (
         quote.operation_type != conflict.operation_type
         or quote.target_tariff_version_id != version.id
         or version.tariff_id != tariff_id
@@ -256,10 +255,9 @@ async def is_valid_reusable_purchase_intent(
         or not payment.public_order_id
         or not payment.provider_idempotency_key
         or not payment.provider_required
-        or payment.checkout_status != "active"
         or payment.fulfillment_status != "not_ready"
         or payment.reconciliation_status in {"mismatch", "manual_review"}
-        or payment.provider_status not in {"creating", "pending", "waiting_for_capture"}
+        or quote.manual_review_at is not None
     ):
         return False
     operations = list(
@@ -278,22 +276,8 @@ async def is_valid_reusable_purchase_intent(
     ):
         return False
     operation = operations[0]
-    if (
-        operation.status not in {"pending", "processing", "retry"}
-        or operation.attempts >= operation.max_attempts
-        or now_utc() - operation.created_at >= timedelta(hours=24)
-    ):
-        return False
-    if payment.provider_status == "creating" and (
-        payment.external_id is not None or payment.payment_url is not None
-    ):
-        return False
-    if payment.provider_status in {"pending", "waiting_for_capture"} and (
-        not payment.external_id or not payment.payment_url
-    ):
-        return False
     payload = operation.payload
-    return (
+    payload_valid = (
         isinstance(payload, dict)
         and set(payload)
         == {"amount", "description", "confirmation", "metadata", "capture"}
@@ -309,3 +293,43 @@ async def is_valid_reusable_purchase_intent(
         and payload["confirmation"].get("type") == "redirect"
         and bool(payload["confirmation"].get("return_url"))
     )
+    if not payload_valid:
+        return False
+
+    operation_available = operation.status == "succeeded" or (
+        operation.status in RUNNABLE
+        and operation.attempts < operation.max_attempts
+        and now_utc() - operation.created_at < timedelta(hours=24)
+    )
+    if not operation_available:
+        return False
+
+    creating_intent = (
+        quote.status == "active"
+        and quote.diagnostic_reason is None
+        and quote.expires_at > now_utc()
+        and payment.checkout_status == "active"
+        and payment.provider_status == "creating"
+        and operation.status in RUNNABLE
+        and payment.external_id is None
+        and payment.payment_url is None
+    )
+    ready_provider_payment = (
+        quote.status == "active"
+        and quote.diagnostic_reason is None
+        and quote.expires_at > now_utc()
+        and payment.checkout_status == "active"
+        and payment.provider_status in {"pending", "waiting_for_capture"}
+        and bool(payment.external_id)
+        and bool(payment.payment_url)
+    )
+    recoverable_old_user_cancel = (
+        quote.status == "cancelled"
+        and quote.diagnostic_reason == "checkout_abandoned_by_user"
+        and quote.expires_at > now_utc()
+        and payment.checkout_status == "abandoned"
+        and payment.user_cancel_requested_at is not None
+        and payment.provider_status in {"pending", "waiting_for_capture"}
+        and bool(payment.external_id)
+    )
+    return creating_intent or ready_provider_payment or recoverable_old_user_cancel

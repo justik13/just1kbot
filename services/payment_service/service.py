@@ -369,7 +369,10 @@ class PaymentService:
         """Commit local order and immutable command before any provider HTTP."""
         import uuid
         from config.settings import get_settings
-        from services.payment_provider_operations import enqueue_create
+        from services.payment_provider_operations import (
+            enqueue_create,
+            ensure_reconcile_payment_operation,
+        )
 
         decimal_amount = _to_decimal(amount)
         tariff = await get_tariff_by_id(session, tariff_id)
@@ -390,7 +393,32 @@ class PaymentService:
             if len(conflicts) == 1 and await is_valid_reusable_purchase_intent(
                 session, conflicts[0], user_id=user_id, tariff_id=tariff_id
             ):
-                return conflicts[0].payment, conflicts[0].payment.payment_url
+                existing = conflicts[0].payment
+                if existing.checkout_status == "abandoned":
+                    quote = await session.scalar(
+                        select(TariffQuote)
+                        .where(TariffQuote.id == existing.tariff_quote_id)
+                        .with_for_update()
+                    )
+                    if (
+                        not quote
+                        or quote.status != "cancelled"
+                        or quote.diagnostic_reason != "checkout_abandoned_by_user"
+                        or quote.expires_at <= now_utc()
+                    ):
+                        return None, "unfinished_checkout_exists"
+                    existing.checkout_status = "active"
+                    existing.user_cancel_requested_at = None
+                    quote.status = "active"
+                    quote.diagnostic_reason = None
+                    if existing.external_id and not existing.payment_url:
+                        await ensure_reconcile_payment_operation(
+                            session,
+                            existing,
+                            reason="resume_user_abandoned_checkout",
+                        )
+                    await session.flush()
+                return existing, existing.payment_url
             return None, "unfinished_checkout_exists"
         active = bool(
             user and user.subscription_end and user.subscription_end > now_utc()

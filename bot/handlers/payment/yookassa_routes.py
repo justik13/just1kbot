@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from decimal import Decimal
 
@@ -16,7 +17,7 @@ from bot.keyboards import (
     get_yookassa_payment_keyboard,
 )
 from config.settings import get_settings
-from database.connection import queue_post_commit_task
+from database.connection import queue_post_commit_task, session_scope
 from database.repositories.payments_repo import (
     get_payment_by_id,
     get_payment_by_id_simple,
@@ -42,6 +43,9 @@ from .common import (
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+_PAYMENT_LINK_POLL_SECONDS = 0.5
+_PAYMENT_LINK_WAIT_SECONDS = 20.0
 
 _PAYMENT_ERROR_MESSAGES = {
     "current_tariff_deleted": "Текущий тариф удалён. Обратитесь в поддержку для проверки подписки.",
@@ -78,6 +82,44 @@ async def _send_payment_url_to_user(
         get_yookassa_payment_keyboard(payment_url, payment_id, tariff_id, source),
         parse_mode="HTML",
     )
+
+
+async def _wait_and_show_payment_url(
+    bot,
+    chat_id: int,
+    payment_id: int,
+    tariff_id: int,
+    tariff_price: int,
+    source: str,
+) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _PAYMENT_LINK_WAIT_SECONDS
+
+    while loop.time() < deadline:
+        async with session_scope() as poll_session:
+            payment = await get_payment_by_id_simple(poll_session, payment_id)
+
+        if payment is None:
+            return
+        if payment.payment_url and payment.checkout_status == "active":
+            await _send_payment_url_to_user(
+                bot,
+                chat_id,
+                payment.payment_url,
+                payment.id,
+                tariff_id,
+                tariff_price,
+                source,
+            )
+            return
+        if payment.checkout_status == "abandoned" or payment.provider_status in {
+            "succeeded",
+            "canceled",
+            "refunded",
+            "manual_review",
+        }:
+            return
+        await asyncio.sleep(_PAYMENT_LINK_POLL_SECONDS)
 
 
 async def _create_and_show_payment(
@@ -122,8 +164,18 @@ async def _create_and_show_payment(
         await render_hub(
             target.bot,
             target.chat.id,
-            "⏳ Создаём ссылку на оплату.\nНажмите «Обновить», чтобы проверить готовность.",
+            (
+                "⏳ Создаём ссылку на оплату.\n"
+                "Обычно это занимает несколько секунд — "
+                "страница обновится автоматически."
+            ),
             builder.as_markup(),
+        )
+        queue_post_commit_task(
+            session,
+            lambda b=target.bot, cid=target.chat.id, pid=payment.id, tid=tariff.id, tp=tariff.price_rub, s=source: (
+                _wait_and_show_payment_url(b, cid, pid, tid, tp, s)
+            ),
         )
         return
 
@@ -483,22 +535,31 @@ async def cancel_invoice(
         )
         return
 
-    try:
-        queued = await PaymentService.cancel_payment_via_api(session, payment_id)
-    except (OperationalError, OSError, TimeoutError) as e:
-        logger.warning("Temporary error cancelling payment %s: %s", payment_id, e)
-        await callback.answer("⚠️ Временная ошибка. Попробуйте позже.", show_alert=True)
-        return
-    except Exception as e:
-        logger.warning("Failed to queue cancellation %s: %s", payment_id, e)
-        queued = False
-    await state.clear()
-    await callback.answer(
-        "Запрос на отмену поставлен в очередь"
-        if queued
-        else texts.PAYMENT_ALREADY_PROCESSED,
-        show_alert=not queued,
-    )
+    if payment.provider_status == "pending" and payment.external_id:
+        await state.clear()
+        await callback.answer(
+            ("Платёж сохранён. Вы сможете вернуться к нему через раздел оплаты."),
+            show_alert=False,
+        )
+    else:
+        try:
+            queued = await PaymentService.cancel_payment_via_api(session, payment_id)
+        except (OperationalError, OSError, TimeoutError) as e:
+            logger.warning("Temporary error cancelling payment %s: %s", payment_id, e)
+            await callback.answer(
+                "⚠️ Временная ошибка. Попробуйте позже.", show_alert=True
+            )
+            return
+        except Exception as e:
+            logger.warning("Failed to queue cancellation %s: %s", payment_id, e)
+            queued = False
+        await state.clear()
+        await callback.answer(
+            "Запрос на отмену поставлен в очередь"
+            if queued
+            else texts.PAYMENT_ALREADY_PROCESSED,
+            show_alert=not queued,
+        )
 
     tariff = await get_tariff_by_id(session, tariff_id)
     if tariff and tariff.is_active:

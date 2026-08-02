@@ -314,13 +314,17 @@ async def finalize(session, claim, result, transport=YooKassaService):
         data = result.value or {}
         status = data.get("status")
         invalid_snapshot_code = None
-        if claim.operation_type == "create_payment":
-            confirmation = data.get("confirmation") or {}
-            url = confirmation.get("confirmation_url") or confirmation.get("url")
-            if data.get("id"):
-                payment.external_id = str(data["id"])
-                payment.payment_url = url or payment.payment_url
-                payment.payment_method = "yookassa"
+        confirmation = data.get("confirmation") or {}
+        url = confirmation.get("confirmation_url") or confirmation.get("url")
+        if (
+            url
+            and status in {"pending", "waiting_for_capture"}
+            and claim.operation_type in {"create_payment", "reconcile_payment"}
+        ):
+            payment.payment_url = url
+        if claim.operation_type == "create_payment" and data.get("id"):
+            payment.external_id = str(data["id"])
+            payment.payment_method = "yookassa"
         if status not in VALID_PROVIDER_STATUSES:
             invalid_snapshot_code = (
                 "provider_status_missing"
