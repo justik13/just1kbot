@@ -356,7 +356,7 @@ async def _settle_account_tariff_change(
             ),
             device_limit_snapshot=target.device_limit,
             tariff_id_snapshot=target.tariff_id,
-            metadata=metadata,
+            metadata_=metadata,
             created_at=now,
         )
         .on_conflict_do_nothing(constraint="uq_entitlement_entries_source")
