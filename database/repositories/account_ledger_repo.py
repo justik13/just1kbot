@@ -391,6 +391,11 @@ async def create_purchase_debit(
         ),
     )
     if created:
+        # A committed economic debit must never leave its immutable checkout
+        # quote active. Higher-level settlement runs in the same transaction,
+        # so any later failure rolls this transition back with the debit.
+        quote.status = "consumed"
+        quote.consumed_at = quote.consumed_at or now_utc()
         await _allocate_fifo(
             session, user_id=user.id, debit=debit, amount=amount
         )
