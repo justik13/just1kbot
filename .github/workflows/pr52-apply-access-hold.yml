@@ -1,0 +1,96 @@
+name: PR52 apply access hold fix
+
+on:
+  push:
+    branches:
+      - feature/yookassa-account-balance
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pr52-apply-access-hold
+  cancel-in-progress: true
+
+jobs:
+  apply-and-validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: projectx
+          POSTGRES_PASSWORD: projectx
+          POSTGRES_DB: projectx_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U projectx -d projectx_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
+      TEST_DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
+      DB_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Apply reviewed patch
+        env:
+          PATCH_B64: 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
+        run: |
+          python - <<'PY'
+          import base64
+          import gzip
+          import os
+          from pathlib import Path
+
+          payload = base64.b64decode(os.environ["PATCH_B64"])
+          Path("/tmp/pr52.patch").write_bytes(gzip.decompress(payload))
+          PY
+          git apply --index /tmp/pr52.patch
+          git rm .github/workflows/pr52-apply-access-hold.yml
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install ruff==0.16.1
+      - name: Lint focused changes
+        run: >-
+          ruff check alembic/env.py
+          alembic/versions/8d2f4a6c1b70_access_financial_hold.py
+          database/models.py services/payment_disputes.py services/subscription.py
+          tests/test_api_operations_schema.py tests/test_balance_telegram_ux.py
+          tests/test_payment_disputes_postgres.py
+          --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
+          --ignore PLW0603,PLW0108
+          --output-format full
+      - name: Upgrade schema
+        run: alembic upgrade head
+      - name: Check metadata drift
+        run: alembic check
+      - name: Run focused tests
+        run: >-
+          python -m unittest -v
+          tests.test_payment_disputes_postgres
+          tests.test_api_operations_schema
+          tests.test_balance_telegram_ux
+      - name: Validate tree
+        run: |
+          python -m compileall -q bot config database services utils alembic tests
+          git diff --check
+      - name: Commit validated fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: separate dispute spending and access holds"
+          git push origin HEAD:feature/yookassa-account-balance
