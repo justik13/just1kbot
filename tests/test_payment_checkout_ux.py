@@ -1,6 +1,7 @@
 import os
 import uuid
 import unittest
+from pathlib import Path
 from datetime import timedelta
 from decimal import Decimal
 
@@ -68,6 +69,7 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
         diagnostic_reason=None,
         payment_url="https://yookassa.example/pay",
         user_cancel_requested_at=None,
+        quote_age_minutes=0,
     ):
         tariff = await session.get(Tariff, self.tariff_id)
         version = TariffVersion(
@@ -81,7 +83,7 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         session.add(version)
         await session.flush()
-        created = now_utc()
+        created = now_utc() - timedelta(minutes=quote_age_minutes)
         quote = TariffQuote(
             public_id=uuid.uuid4(),
             user_id=self.user_id,
@@ -180,9 +182,10 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
                 diagnostic_reason="checkout_abandoned_by_user",
                 payment_url=None,
                 user_cancel_requested_at=now_utc(),
+                quote_age_minutes=20,
             )
             payment_id = payment.id
-            quote_id = quote.id
+            old_quote_id = quote.id
 
         async with self.sessions.begin() as session:
             existing, error = await PaymentService.create_yookassa_payment(
@@ -197,9 +200,18 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(error)
             self.assertEqual(existing.checkout_status, "active")
             self.assertIsNone(existing.user_cancel_requested_at)
-            quote = await session.get(TariffQuote, quote_id)
-            self.assertEqual(quote.status, "active")
-            self.assertIsNone(quote.diagnostic_reason)
+            old_quote = await session.get(TariffQuote, old_quote_id)
+            self.assertEqual(old_quote.status, "cancelled")
+            self.assertEqual(old_quote.diagnostic_reason, "checkout_abandoned_by_user")
+            self.assertIsNone(old_quote.payment_id)
+            new_quote = await session.get(TariffQuote, existing.tariff_quote_id)
+            self.assertNotEqual(new_quote.id, old_quote_id)
+            self.assertEqual(new_quote.status, "active")
+            self.assertEqual(new_quote.payment_id, payment_id)
+            self.assertGreater(new_quote.expires_at, now_utc())
+            self.assertEqual(
+                await session.scalar(select(func.count(TariffQuote.id))), 2
+            )
             reconcile = await session.scalar(
                 select(PaymentProviderOperation).where(
                     PaymentProviderOperation.payment_id == payment_id,
@@ -212,6 +224,43 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.scalar(select(func.count(Payment.id))),
                 1,
             )
+
+    async def test_expired_checkout_is_not_reissued_after_tariff_change(self):
+        async with self.sessions.begin() as session:
+            payment, quote, _ = await self._provider_checkout(
+                session,
+                checkout_status="abandoned",
+                quote_status="cancelled",
+                diagnostic_reason="checkout_abandoned_by_user",
+                user_cancel_requested_at=now_utc(),
+                quote_age_minutes=20,
+            )
+            payment_id = payment.id
+            quote_id = quote.id
+            tariff = await session.get(Tariff, self.tariff_id)
+            tariff.price_rub = 120
+
+        async with self.sessions.begin() as session:
+            existing, error = await PaymentService.create_yookassa_payment(
+                session=session,
+                user_id=self.user_id,
+                tariff_id=self.tariff_id,
+                amount=Decimal("120.00"),
+                telegram_id=self.telegram_id,
+                bot_username="test_bot",
+            )
+            self.assertIsNone(existing)
+            self.assertEqual(error, "unfinished_checkout_exists")
+            self.assertEqual(await session.scalar(select(func.count(Payment.id))), 1)
+            self.assertEqual(
+                await session.scalar(select(func.count(TariffQuote.id))), 1
+            )
+            payment = await session.get(Payment, payment_id)
+            quote = await session.get(TariffQuote, quote_id)
+            self.assertEqual(payment.tariff_quote_id, quote_id)
+            self.assertEqual(payment.checkout_status, "abandoned")
+            self.assertEqual(quote.status, "cancelled")
+            self.assertEqual(quote.payment_id, payment_id)
 
     async def test_reconcile_restores_redirect_url(self):
         async with self.sessions.begin() as session:
@@ -273,15 +322,11 @@ class PaymentCheckoutUxPostgresTests(unittest.IsolatedAsyncioTestCase):
 
 class PaymentCheckoutUxContractTests(unittest.TestCase):
     def test_user_facing_checkout_contract(self):
-        root = os.path.dirname(os.path.dirname(__file__))
-        keyboard = open(
-            os.path.join(root, "bot/keyboards/payment.py"),
-            encoding="utf-8",
-        ).read()
-        routes = open(
-            os.path.join(root, "bot/handlers/payment/yookassa_routes.py"),
-            encoding="utf-8",
-        ).read()
+        root = Path(__file__).resolve().parents[1]
+        keyboard = (root / "bot/keyboards/payment.py").read_text(encoding="utf-8")
+        routes = (root / "bot/handlers/payment/yookassa_routes.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn("← Вернуться позже", keyboard)
         self.assertNotIn('text="❌ Отменить"', keyboard)
         self.assertIn("_wait_and_show_payment_url", routes)

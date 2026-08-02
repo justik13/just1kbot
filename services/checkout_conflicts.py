@@ -314,22 +314,23 @@ async def is_valid_reusable_purchase_intent(
         and payment.external_id is None
         and payment.payment_url is None
     )
+    provider_payment_is_recent = now_utc() - payment.created_at < timedelta(hours=24)
     ready_provider_payment = (
-        quote.status == "active"
+        quote.status in {"active", "expired"}
         and quote.diagnostic_reason is None
-        and quote.expires_at > now_utc()
         and payment.checkout_status == "active"
         and payment.provider_status in {"pending", "waiting_for_capture"}
         and bool(payment.external_id)
         and bool(payment.payment_url)
+        and provider_payment_is_recent
     )
     recoverable_old_user_cancel = (
         quote.status == "cancelled"
         and quote.diagnostic_reason == "checkout_abandoned_by_user"
-        and quote.expires_at > now_utc()
         and payment.checkout_status == "abandoned"
         and payment.user_cancel_requested_at is not None
         and payment.provider_status in {"pending", "waiting_for_capture"}
         and bool(payment.external_id)
+        and provider_payment_is_recent
     )
     return creating_intent or ready_provider_payment or recoverable_old_user_cancel

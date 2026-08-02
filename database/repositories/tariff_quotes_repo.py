@@ -7,7 +7,7 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Tariff, TariffQuote, TariffVersion, User
+from database.models import Payment, Tariff, TariffQuote, TariffVersion, User
 from utils.datetime_helpers import now_utc
 
 QUOTE_LIFETIME = timedelta(minutes=15)
@@ -166,3 +166,101 @@ async def get_or_create_checkout_quote(
     session.add(quote)
     await session.flush()
     return quote, version
+
+
+async def reissue_checkout_quote_for_existing_payment(
+    session: AsyncSession,
+    *,
+    quote: TariffQuote,
+    payment: Payment,
+    tariff: Tariff,
+) -> TariffQuote:
+    """Create a fresh immutable quote around the same provider payment.
+
+    The previous quote is retained as history. Reissuing is allowed only for a
+    recent provider-backed purchase/renew payment whose complete frozen economics
+    still match the currently offered tariff.
+    """
+    now = now_utc()
+    version = await session.get(TariffVersion, quote.target_tariff_version_id)
+    if (
+        quote.operation_type not in {"purchase", "renew"}
+        or payment.tariff_quote_id != quote.id
+        or quote.payment_id != payment.id
+        or payment.user_id != quote.user_id
+        or version is None
+        or payment.tariff_version_id != version.id
+        or payment.tariff_id != version.tariff_id
+        or tariff.id != version.tariff_id
+        or Decimal(tariff.price_rub) != version.price_rub
+        or tariff.duration_days * 24 != version.duration_hours
+        or tariff.device_limit != version.device_limit
+        or version.currency != "RUB"
+        or payment.amount != quote.confirmed_payment_required_rub
+        or payment.amount != version.price_rub
+        or payment.snapshot_amount != payment.amount
+        or payment.snapshot_currency != quote.currency
+        or payment.currency != quote.currency
+        or payment.snapshot_duration_days != version.duration_hours // 24
+        or payment.snapshot_device_limit != version.device_limit
+        or payment.external_id is None
+        or payment.provider_status not in {"pending", "waiting_for_capture"}
+        or now - payment.created_at >= timedelta(hours=24)
+    ):
+        raise CheckoutQuoteConflictError("existing_payment_snapshot_changed")
+
+    if quote.status == "active":
+        if quote.expires_at > now:
+            return quote
+        quote.status = "expired"
+    elif quote.status == "expired":
+        pass
+    elif (
+        quote.status == "cancelled"
+        and quote.diagnostic_reason == "checkout_abandoned_by_user"
+        and payment.checkout_status == "abandoned"
+        and payment.user_cancel_requested_at is not None
+    ):
+        pass
+    else:
+        raise CheckoutQuoteConflictError("existing_quote_not_reissuable")
+
+    # Keep the old cancelled/expired quote as immutable history, detach only its
+    # reciprocal pointer, and bind the payment to a newly issued active quote.
+    quote.payment_id = None
+    await session.flush()
+
+    reissued = TariffQuote(
+        public_id=uuid.uuid4(),
+        user_id=quote.user_id,
+        operation_type=quote.operation_type,
+        source_tariff_version_id=quote.source_tariff_version_id,
+        target_tariff_version_id=quote.target_tariff_version_id,
+        current_paid_hours=quote.current_paid_hours,
+        current_paid_value_rub=quote.current_paid_value_rub,
+        bonus_hours=quote.bonus_hours,
+        confirmed_payment_required_rub=quote.confirmed_payment_required_rub,
+        resulting_paid_hours=quote.resulting_paid_hours,
+        resulting_paid_value_rub=quote.resulting_paid_value_rub,
+        resulting_bonus_hours=quote.resulting_bonus_hours,
+        rounding_loss_hours=quote.rounding_loss_hours,
+        rounding_loss_value_rub=quote.rounding_loss_value_rub,
+        currency=quote.currency,
+        status="active",
+        created_at=now,
+        expires_at=now + QUOTE_LIFETIME,
+        balance_as_of=quote.balance_as_of,
+        source_subscription_end=quote.source_subscription_end,
+        source_balance_fingerprint=quote.source_balance_fingerprint,
+        source_entitlement_entry_ids=quote.source_entitlement_entry_ids,
+        source_ledger_entry_ids=quote.source_ledger_entry_ids,
+    )
+    session.add(reissued)
+    await session.flush()
+
+    payment.tariff_quote_id = reissued.id
+    payment.checkout_status = "active"
+    payment.user_cancel_requested_at = None
+    reissued.payment_id = payment.id
+    await session.flush()
+    return reissued
