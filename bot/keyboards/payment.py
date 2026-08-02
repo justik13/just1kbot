@@ -105,33 +105,6 @@ def get_change_tariff_keyboard(
     return builder.as_markup()
 
 
-def get_payment_method_keyboard(
-    tariff_id: int,
-    device_limit: int | None = None,
-    source: str = "showcase",
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="💳 Оплатить",
-        callback_data=f"pay_yookassa:{tariff_id}:{source}",
-    )
-    if source == "renew":
-        builder.button(
-            text="← Назад", callback_data="payment_quick_renew"
-        )
-    elif device_limit is not None:
-        builder.button(
-            text="← Назад",
-            callback_data=f"select_tariff_type:{device_limit}:{source}",
-        )
-    else:
-        builder.button(
-            text="← В главное меню", callback_data="back_to_main_menu"
-        )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def get_payment_success_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -142,26 +115,6 @@ def get_payment_success_keyboard() -> InlineKeyboardMarkup:
     )
     builder.button(
         text="🏠 В главное меню", callback_data="back_to_main_menu"
-    )
-    builder.adjust(1, 1, 1)
-    return builder.as_markup()
-
-
-def get_yookassa_payment_keyboard(
-    payment_url: str,
-    payment_id: int,
-    tariff_id: int,
-    source: str = "showcase",
-) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💳 Открыть страницу оплаты", url=payment_url)
-    builder.button(
-        text="✅ Я оплатил (проверить)",
-        callback_data=f"check_payment:{payment_id}",
-    )
-    builder.button(
-        text="❌ Отменить",
-        callback_data=f"cancel_invoice:{payment_id}:{tariff_id}:{source}",
     )
     builder.adjust(1, 1, 1)
     return builder.as_markup()

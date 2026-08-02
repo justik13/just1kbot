@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
 from alembic.config import Config
@@ -12,6 +13,8 @@ from bot.keyboards.payment import (
     get_topup_waiting_keyboard,
 )
 from bot.texts_data.user_texts import TEXTS
+from services.payment_service import PaymentService
+
 from database.models import Payment
 
 
@@ -93,6 +96,21 @@ class BalanceTelegramUXTests(unittest.TestCase):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         self.assertEqual(scripts.get_heads(), ["7c9e3a1f5b60"])
+
+    def test_direct_tariff_yookassa_route_is_not_registered(self):
+        router_source = (
+            Path(__file__).parents[1]
+            / "bot"
+            / "handlers"
+            / "payment"
+            / "__init__.py"
+        ).read_text(encoding="utf-8")
+        keyboard_source = (
+            Path(__file__).parents[1] / "bot" / "keyboards" / "payment.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("yookassa_routes", router_source)
+        self.assertNotIn("pay_yookassa:", keyboard_source)
+        self.assertFalse(hasattr(PaymentService, "create_yookassa_payment"))
 
 
 if __name__ == "__main__":

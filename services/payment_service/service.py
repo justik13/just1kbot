@@ -1,6 +1,4 @@
 import logging
-from decimal import Decimal
-
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,15 +6,8 @@ from bot.middlewares.user_context import invalidate_user_cache
 from database.connection import queue_post_commit_task, session_scope
 from database.models import Payment, TariffQuote
 from database.repositories.payments_repo import (
-    create_payment,
     get_payment_by_id,
     get_payment_by_id_for_update,
-)
-from database.repositories.tariffs_repo import get_tariff_by_id
-from database.repositories.tariff_quotes_repo import (
-    CheckoutQuoteConflictError,
-    get_or_create_checkout_quote,
-    lock_checkout_user,
 )
 from services.audit_service import AuditService
 from utils.datetime_helpers import now_utc
@@ -29,7 +20,6 @@ from .alerts import (
 )
 from .common import (
     _build_payment_snapshot,
-    _to_decimal,
 )
 
 try:
@@ -365,110 +355,6 @@ class PaymentService:
         )
         await session.flush()
         return True, "Выдача поставлена в очередь"
-
-    @staticmethod
-    async def create_yookassa_payment(
-        session: AsyncSession,
-        user_id: int,
-        tariff_id: int,
-        amount: Decimal,
-        telegram_id: int,
-        bot_username: str,
-    ) -> tuple:
-        """Commit local order and immutable command before any provider HTTP."""
-        import uuid
-        from config.settings import get_settings
-        from services.payment_provider_operations import enqueue_create
-
-        decimal_amount = _to_decimal(amount)
-        tariff = await get_tariff_by_id(session, tariff_id)
-        if decimal_amount is None or not tariff:
-            return None, None
-        user = await lock_checkout_user(session, user_id)
-        if user is None or user.is_deleted:
-            return None, "checkout_user_missing"
-        if user.is_banned:
-            return None, "checkout_user_banned"
-        from services.checkout_conflicts import (
-            get_unfinished_financial_checkouts,
-            is_valid_reusable_purchase_intent,
-        )
-
-        conflicts = await get_unfinished_financial_checkouts(session, user_id=user_id)
-        if conflicts:
-            if len(conflicts) == 1 and await is_valid_reusable_purchase_intent(
-                session, conflicts[0], user_id=user_id, tariff_id=tariff_id
-            ):
-                return conflicts[0].payment, conflicts[0].payment.payment_url
-            return None, "unfinished_checkout_exists"
-        active = bool(
-            user and user.subscription_end and user.subscription_end > now_utc()
-        )
-        if active and user.current_tariff_id is not None:
-            current_tariff = await get_tariff_by_id(session, user.current_tariff_id)
-            if current_tariff is None:
-                # Тариф удалён → явная ошибка вместо молчаливого renew
-                return None, "current_tariff_deleted"
-            current_limit = getattr(current_tariff, "device_limit", 0)
-            new_limit = getattr(tariff, "device_limit", 0)
-            if current_limit != new_limit:
-                # Foundation only: a later PR will consume a confirmed change quote.
-                return None, "active_tariff_change_temporarily_unavailable"
-        operation_type = (
-            "renew" if active and user.current_tariff_id is not None else "purchase"
-        )
-        try:
-            quote, version = await get_or_create_checkout_quote(
-                session,
-                user_id=user_id,
-                tariff=tariff,
-                operation_type=operation_type,
-            )
-        except CheckoutQuoteConflictError as exc:
-            if str(exc) == "active_tariff_change_quote_exists":
-                return None, "active_tariff_change_quote_exists"
-            return None, "active_checkout_quote_conflict"
-        existing = await session.scalar(
-            select(Payment)
-            .where(
-                Payment.tariff_quote_id == quote.id,
-                Payment.checkout_status == "active",
-            )
-            .order_by(Payment.id.desc())
-            .limit(1)
-        )
-        if existing:
-            return existing, existing.payment_url
-        # The caller's amount is intentionally not authoritative.
-        decimal_amount = Decimal(version.price_rub)
-        payment = await create_payment(
-            session,
-            user_id,
-            tariff_id,
-            decimal_amount,
-            "RUB",
-            snapshot_duration_days=version.duration_hours // 24,
-            snapshot_device_limit=version.device_limit,
-            snapshot_amount=version.price_rub,
-            snapshot_currency=version.currency,
-            tariff_quote_id=quote.id,
-            tariff_version_id=version.id,
-        )
-        quote.payment_id = payment.id
-        payment.public_order_id = "pay_" + uuid.uuid4().hex
-        payment.provider_idempotency_key = uuid.uuid4().hex
-        payment.provider_status = "creating"
-        payment.fulfillment_status = "not_ready"
-        payment.reconciliation_status = "ok"
-        settings = get_settings()
-        description = f"Предоставление доступа к вычислительному серверу ({version.name_snapshot}, {version.duration_hours // 24} дн.)"
-        return_url = settings.YOOKASSA_RETURN_URL.format(
-            bot_username=bot_username.lstrip("@")
-        )
-        await enqueue_create(session, payment, description, return_url)
-        await _log_event_safe(session, payment.id, "payment_created", source="yookassa")
-        await session.commit()  # worker performs HTTP after this durability boundary
-        return payment, payment.payment_url
 
     @staticmethod
     async def handle_yookassa_callback(

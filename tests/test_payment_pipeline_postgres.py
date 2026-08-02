@@ -6,9 +6,11 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, patch
+
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import (
+    AccountBalanceReservation,
     AuditLog,
     EntitlementEntry,
     Payment,
@@ -24,6 +26,7 @@ from database.models import (
     User,
     WebhookInbox,
 )
+from database.refund_models import ProviderRefundOperation
 from services.payment_queue_admin import confirm_manual_retry, get_operation_card
 from services.payment_queue_health import get_payment_queue_health_snapshot
 from services.payment_provider_operations import (
@@ -69,6 +72,8 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             for model in (
+                ProviderRefundOperation,
+                AccountBalanceReservation,
                 AuditLog,
                 ReferralEligibility,
                 ReferralReward,
@@ -911,11 +916,49 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
                         last_error="SECRET_CANARY",
                     )
                 )
+                refund_payment = await self.payment(s)
+                reservation = AccountBalanceReservation(
+                    user_id=self.user_id,
+                    payment_id=refund_payment.id,
+                    reservation_type="refund",
+                    amount=Decimal("1"),
+                    currency="RUB",
+                    status="active",
+                    idempotency_key=uuid.uuid4().hex,
+                    metadata_={},
+                )
+                s.add(reservation)
+                await s.flush()
+                refund_status = "failed" if status == "dead" else status
+                s.add(
+                    ProviderRefundOperation(
+                        payment_id=refund_payment.id,
+                        reservation_id=reservation.id,
+                        idempotency_key=uuid.uuid4().hex,
+                        amount=Decimal("1"),
+                        currency="RUB",
+                        provider_payment_id=refund_payment.external_id,
+                        status=refund_status,
+                        attempts=1,
+                        max_attempts=3,
+                        next_attempt_at=next_at,
+                        locked_at=locked_at,
+                        locked_by="worker" if locked_at else None,
+                        last_error_code="safe_code",
+                        last_error="SECRET_CANARY",
+                        completed_at=now if refund_status == "failed" else None,
+                    )
+                )
             await s.flush()
             health = await get_payment_queue_health_snapshot(s, clock=lambda: now)
             self.assertEqual(
                 [q.name for q in health.queues],
-                ["provider_operations", "fulfillment_operations", "webhook_inbox"],
+                [
+                    "provider_operations",
+                    "provider_refunds",
+                    "fulfillment_operations",
+                    "webhook_inbox",
+                ],
             )
             for q in health.queues:
                 self.assertEqual(
@@ -1083,6 +1126,33 @@ class PaymentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
                     next_attempt_at=old,
                     received_at=old,
                     processed_at=terminal,
+                )
+            )
+            reservation = AccountBalanceReservation(
+                user_id=self.user_id,
+                payment_id=p.id,
+                reservation_type="refund",
+                amount=Decimal("1"),
+                currency="RUB",
+                status="active",
+                idempotency_key=uuid.uuid4().hex,
+                metadata_={},
+            )
+            s.add(reservation)
+            await s.flush()
+            s.add(
+                ProviderRefundOperation(
+                    payment_id=p.id,
+                    reservation_id=reservation.id,
+                    idempotency_key=uuid.uuid4().hex,
+                    amount=Decimal("1"),
+                    currency="RUB",
+                    provider_payment_id=p.external_id,
+                    status="failed",
+                    next_attempt_at=old,
+                    created_at=old,
+                    updated_at=old,
+                    completed_at=terminal,
                 )
             )
             await s.flush()

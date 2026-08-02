@@ -41,9 +41,6 @@ LOCKED_ACTION_PREFIXES = (
     "download_conf:",
     "show_config:",
     # Платежи.
-    "pay_yookassa:",
-    "check_payment:",
-    "cancel_invoice:",
     "balance_create:",
     "balance_check:",
     "balance_cancel:",

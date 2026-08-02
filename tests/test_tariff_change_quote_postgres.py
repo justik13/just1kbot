@@ -36,7 +36,6 @@ from services.tariff_change_payment import (
     create_tariff_change_payment,
 )
 from services.subscription_balance_service import get_subscription_balance_snapshot
-from services.payment_service.service import PaymentService
 from database.repositories.tariff_quotes_repo import (
     get_or_create_checkout_quote,
     lock_checkout_user,
@@ -560,7 +559,9 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 1,
             )
 
-    async def test_change_first_blocks_payment_flow_before_side_effects(self):
+    async def test_change_first_blocks_balance_purchase_before_side_effects(self):
+        from services.account_purchase import AccountPurchaseError, prepare_account_purchase
+
         user, source, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
             change = await create_tariff_change_quote(
@@ -568,11 +569,12 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(change.created)
             before_payments = await session.scalar(select(func.count(Payment.id)))
-            payment, failure = await PaymentService.create_yookassa_payment(
-                session, user, source, Decimal("90"), 1, "bot"
-            )
-            self.assertIsNone(payment)
-            self.assertEqual(failure, "active_tariff_change_quote_exists")
+            with self.assertRaisesRegex(
+                AccountPurchaseError, "active_tariff_change_quote_exists"
+            ):
+                await prepare_account_purchase(
+                    session, user_id=user, tariff_id=source
+                )
             self.assertEqual(
                 await session.scalar(select(func.count(Payment.id))), before_payments
             )
