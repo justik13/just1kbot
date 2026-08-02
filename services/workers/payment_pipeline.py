@@ -3,9 +3,11 @@
 import asyncio
 import logging
 import uuid
+
 from database.connection import session_scope
-from services import payment_provider_operations as provider
 from services import payment_fulfillment as fulfillment
+from services import payment_provider_operations as provider
+from services import provider_refunds
 from services.workers import webhook_inbox
 
 logger = logging.getLogger(__name__)
@@ -25,6 +27,10 @@ async def _run_claim(module, claim):
             result = await provider.perform_http(claim)
             async with session_scope() as session:
                 await provider.finalize(session, claim, result)
+        elif module is provider_refunds:
+            result = await provider_refunds.perform_http(claim)
+            async with session_scope() as session:
+                await provider_refunds.finalize(session, claim, result)
         elif module is webhook_inbox:
             result = await webhook_inbox.fetch_provider(claim)
             async with session_scope() as session:
@@ -47,6 +53,10 @@ async def _run_claim(module, claim):
                     await provider.finalize_provider_failure(
                         session, claim, error_code=type(exc).__name__, retryable=True
                     )
+                elif module is provider_refunds:
+                    await provider_refunds.finalize_provider_failure(
+                        session, claim, error_code=type(exc).__name__, retryable=True
+                    )
                 elif module is webhook_inbox:
                     await webhook_inbox.finalize_webhook_failure(
                         session, claim, error_code=type(exc).__name__, retryable=True
@@ -65,7 +75,7 @@ async def _run_claim(module, claim):
 async def payment_pipeline_loop(bot, shutdown_event: asyncio.Event) -> None:
     worker_id = uuid.uuid4().hex
     active: set[asyncio.Task] = set()
-    queues = (provider, webhook_inbox, fulfillment)
+    queues = (provider, provider_refunds, webhook_inbox, fulfillment)
     cursor = 0
     logger.info("Payment pipeline worker started worker=%s", worker_id[:8])
     try:
