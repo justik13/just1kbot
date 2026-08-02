@@ -19,6 +19,7 @@ from database.repositories.account_ledger_repo import (
     whole_rubles,
 )
 from database.repositories.tariff_quotes_repo import lock_checkout_user
+from services.payment_disputes import refresh_user_dispute_hold
 from services.payment_lifecycle import project_legacy_status
 from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
@@ -271,6 +272,7 @@ async def settle_succeeded_topup(
     if payment.reconciliation_status not in {"mismatch", "manual_review"}:
         payment.reconciliation_status = "ok"
     balance = await get_account_balance(session, user_id=payment.user_id)
+    await refresh_user_dispute_hold(session, user_id=payment.user_id)
     cfg = settings or get_settings()
     if balance.accounting_position > Decimal(cfg.BALANCE_MAX_AVAILABLE_RUB):
         user = await lock_checkout_user(session, payment.user_id)
