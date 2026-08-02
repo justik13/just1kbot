@@ -1,6 +1,7 @@
 """Shared timing policy for durable payment queue recovery and monitoring."""
 
 PROVIDER_LEASE_SECONDS = 120
+REFUND_LEASE_SECONDS = 120
 FULFILLMENT_LEASE_SECONDS = 120
 WEBHOOK_LEASE_SECONDS = 120
 
