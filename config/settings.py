@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     YOOKASSA_RETURN_URL: str = "https://t.me/{bot_username}"
     YOOKASSA_WEBHOOK_PORT: int = 8080
 
+    # ── Account balance product limits ──
+    BALANCE_MIN_TOPUP_RUB: int = 10
+    BALANCE_MAX_CUSTOM_TOPUP_RUB: int = 5000
+    BALANCE_MAX_AVAILABLE_RUB: int = 10000
+    BALANCE_MAX_PRESET_RUB: int = 1000
+    BALANCE_MAX_UNFINISHED_TOPUPS: int = 3
+    BALANCE_MAX_TOPUP_CREATIONS_24H: int = 10
+    BALANCE_MAX_PRESET_OPTIONS: int = 6
+
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False

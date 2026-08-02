@@ -1,99 +1,113 @@
 import unittest
-from bot.handlers.webhook import _validate_webhook_object
+from unittest.mock import AsyncMock
+
+from bot.handlers.webhook import (
+    _validate_webhook_object,
+    _validate_webhook_payload,
+)
+from services.workers.webhook_inbox import InboxClaim, fetch_provider
+from services.yookassa_service import YooKassaResult
 
 
 class WebhookObjectValidationTests(unittest.TestCase):
-    def test_valid_payment_object_with_created_at_older_than_24_hours(self):
-        """Test that payment object with valid identifiers and old created_at passes validation."""
-        obj = {
-            "id": "123",
-            "created_at": "2020-01-01T00:00:00Z"
-        }
-        event = "payment.succeeded"
-
-        # Should not raise an exception
-        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
-
-        self.assertEqual(provider_object_id, "123")
-        self.assertEqual(payment_external_id, "123")
-
-    def test_valid_payment_object_without_created_at(self):
-        """Test that payment object with valid identifiers and no created_at passes validation."""
-        obj = {
-            "id": "456"
-        }
-        event = "payment.succeeded"
-
-        # Should not raise an exception
-        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
-
-        self.assertEqual(provider_object_id, "456")
-        self.assertEqual(payment_external_id, "456")
+    def test_valid_payment_object(self):
+        provider_object_id, payment_external_id = _validate_webhook_object(
+            {"id": "payment-1"}, "payment.succeeded"
+        )
+        self.assertEqual(provider_object_id, "payment-1")
+        self.assertEqual(payment_external_id, "payment-1")
 
     def test_missing_provider_object_id_raises_error(self):
-        """Test that missing provider object id raises ValueError."""
-        obj = {
-            "payment_id": "payment_123"
-        }
-        event = "payment.succeeded"
+        with self.assertRaisesRegex(ValueError, "identity"):
+            _validate_webhook_object(
+                {"payment_id": "payment-1"}, "payment.succeeded"
+            )
 
-        with self.assertRaises(ValueError) as context:
-            _validate_webhook_object(obj, event)
-
-        self.assertEqual(str(context.exception), "identity")
-
-    def test_missing_payment_external_id_raises_error(self):
-        """Test that missing payment external id raises ValueError."""
-        obj = {
-            "id": "123"
-        }
-        event = "refund.succeeded"
-
-        with self.assertRaises(ValueError) as context:
-            _validate_webhook_object(obj, event)
-
-        self.assertEqual(str(context.exception), "identity")
-
-    def test_valid_refund_object_with_payment_id(self):
-        """Test that refund object with valid identifiers passes validation."""
-        obj = {
-            "id": "refund-1",
-            "payment_id": "payment-1"
-        }
-        event = "refund.succeeded"
-
-        # Should not raise an exception
-        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
-
+    def test_valid_refund_object_uses_official_payment_id(self):
+        provider_object_id, payment_external_id = _validate_webhook_object(
+            {"id": "refund-1", "payment_id": "payment-1"},
+            "refund.succeeded",
+        )
         self.assertEqual(provider_object_id, "refund-1")
         self.assertEqual(payment_external_id, "payment-1")
 
-    def test_valid_refund_object_with_nested_payment_id(self):
-        """Test that refund object with nested payment id passes validation."""
-        obj = {
-            "id": "refund-2",
-            "payment": {"id": "payment-2"}
+    def test_nested_refund_payment_id_is_not_official_contract(self):
+        with self.assertRaisesRegex(ValueError, "identity"):
+            _validate_webhook_object(
+                {"id": "refund-1", "payment": {"id": "payment-1"}},
+                "refund.succeeded",
+            )
+
+    def test_valid_official_notification_payload(self):
+        payload = {
+            "type": "notification",
+            "event": "refund.succeeded",
+            "object": {
+                "id": "refund-1",
+                "status": "succeeded",
+                "payment_id": "payment-1",
+                "amount": {"value": "10.00", "currency": "RUB"},
+            },
         }
-        event = "refund.succeeded"
+        event, obj, provider_id, payment_id = _validate_webhook_payload(payload)
+        self.assertEqual(event, "refund.succeeded")
+        self.assertIs(obj, payload["object"])
+        self.assertEqual(provider_id, "refund-1")
+        self.assertEqual(payment_id, "payment-1")
 
-        # Should not raise an exception
-        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
+    def test_notification_type_is_required(self):
+        with self.assertRaisesRegex(ValueError, "notification_type"):
+            _validate_webhook_payload(
+                {
+                    "event": "payment.succeeded",
+                    "object": {"id": "payment-1"},
+                }
+            )
 
-        self.assertEqual(provider_object_id, "refund-2")
-        self.assertEqual(payment_external_id, "payment-2")
+    def test_legacy_payment_refunded_event_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unsupported_event"):
+            _validate_webhook_payload(
+                {
+                    "type": "notification",
+                    "event": "payment.refunded",
+                    "object": {"id": "payment-1"},
+                }
+            )
 
-    def test_refund_object_with_invalid_payment_type_raises_error(self):
-        """Test that refund object with invalid payment type raises ValueError."""
-        obj = {
-            "id": "refund-invalid",
-            "payment": "not-a-dict",
-        }
-        event = "refund.succeeded"
 
-        with self.assertRaises(ValueError) as context:
-            _validate_webhook_object(obj, event)
+class WebhookProviderVerificationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_refund_webhook_gets_current_refund_object(self):
+        result = YooKassaResult(
+            True,
+            value={
+                "id": "refund-1",
+                "status": "succeeded",
+                "payment_id": "payment-1",
+                "amount": {"value": "10.00", "currency": "RUB"},
+            },
+        )
+        transport = type(
+            "Transport",
+            (),
+            {
+                "get_refund_result": AsyncMock(return_value=result),
+                "get_payment_result": AsyncMock(),
+            },
+        )
+        claim = InboxClaim(
+            1,
+            "worker",
+            1,
+            "refund.succeeded",
+            "payment-1",
+            None,
+            {"object": {"id": "refund-1"}},
+            "event-key",
+        )
 
-        self.assertEqual(str(context.exception), "identity")
+        self.assertIs(await fetch_provider(claim, transport), result)
+        transport.get_refund_result.assert_awaited_once_with("refund-1")
+        transport.get_payment_result.assert_not_awaited()
 
 
 if __name__ == "__main__":

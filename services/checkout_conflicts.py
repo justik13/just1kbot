@@ -42,6 +42,7 @@ async def get_unfinished_financial_checkouts(
                 select(Payment)
                 .where(
                     Payment.user_id == user_id,
+                    Payment.payment_kind != "balance_topup",
                     Payment.id != exclude_payment_id
                     if exclude_payment_id is not None
                     else True,

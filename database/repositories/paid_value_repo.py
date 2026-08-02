@@ -21,6 +21,7 @@ _ECONOMIC_FIELDS = (
     "paid_value_rub_delta",
     "currency",
     "reversal_of_id",
+    "metadata_",
 )
 
 
@@ -86,6 +87,34 @@ async def get_or_create_confirmed_payment_entry(
     )
 
 
+async def get_or_create_account_purchase_entry(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    quote_id: int,
+    tariff_version_id: int,
+    paid_hours: int,
+    paid_value_rub,
+) -> PaidValueLedgerEntry:
+    return await _insert_or_get(
+        session,
+        dict(
+            user_id=user_id,
+            source_type="quote",
+            source_id=str(quote_id),
+            entry_type="account_purchase",
+            paid_hours_delta=paid_hours,
+            paid_value_rub_delta=paid_value_rub,
+            currency="RUB",
+            tariff_version_id=tariff_version_id,
+            quote_id=quote_id,
+            payment_id=None,
+            metadata_={},
+        ),
+        PaidValueLedgerEntry.quote_id,
+    )
+
+
 async def get_or_create_conversion_entry(
     session: AsyncSession,
     *,
@@ -94,6 +123,7 @@ async def get_or_create_conversion_entry(
     tariff_version_id: int,
     paid_hours_delta: int,
     paid_value_rub_delta,
+    metadata: dict,
 ) -> PaidValueLedgerEntry:
     return await _insert_or_get(
         session,
@@ -107,7 +137,9 @@ async def get_or_create_conversion_entry(
             currency="RUB",
             tariff_version_id=tariff_version_id,
             quote_id=quote_id,
-            metadata_={},
+            payment_id=None,
+            reversal_of_id=None,
+            metadata_=metadata,
         ),
         PaidValueLedgerEntry.quote_id,
     )

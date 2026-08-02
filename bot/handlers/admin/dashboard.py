@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.handlers.admin.disputes import router as disputes_router
 from bot.keyboards import (
     get_admin_menu,
     get_audit_keyboard,
@@ -23,6 +24,7 @@ from utils.telegram import safe
 from utils.text_limits import truncate_details
 
 router = Router()
+router.include_router(disputes_router)
 logger = logging.getLogger(__name__)
 
 

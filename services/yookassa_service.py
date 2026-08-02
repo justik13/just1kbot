@@ -8,7 +8,9 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 from typing import Generic, TypeVar
+
 import aiohttp
+
 from config.settings import get_settings
 
 T = TypeVar("T")
@@ -212,19 +214,23 @@ class YooKassaService:
         )
 
     @classmethod
+    async def create_refund_result(cls, payload: dict, *, idempotency_key: str):
+        return await cls._request(
+            "POST",
+            "/refunds",
+            payload=payload,
+            idempotency_key=idempotency_key,
+            ambiguous_on_failure=True,
+        )
+
+    @classmethod
+    async def get_refund_result(cls, refund_id: str):
+        return await cls._request("GET", f"/refunds/{refund_id}")
+
+    @classmethod
     async def get_payment(cls, payment_id):
         result = await cls.get_payment_result(payment_id)
         return result.value if result.ok else None
-
-    @staticmethod
-    def normalize_webhook_event(event: str) -> str:
-        return {
-            "payment.succeeded": "CONFIRMED",
-            "payment.canceled": "CANCELED",
-            "payment.refunded": "CHARGEBACKED",
-            "refund.succeeded": "CHARGEBACKED",
-            "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
-        }.get(event, event.upper())
 
 
 async def close_yookassa_client():

@@ -25,6 +25,11 @@ def get_hub_keyboard(
     )
 
     builder.button(
+        text="💰 Баланс",
+        callback_data="menu_balance",
+    )
+
+    builder.button(
         text="👤 Профиль",
         callback_data="menu_profile",
     )

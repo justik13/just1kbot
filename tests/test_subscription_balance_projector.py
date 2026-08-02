@@ -75,6 +75,118 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             (True, 24, Decimal("24")),
         )
 
+    def test_account_purchase_is_a_quote_backed_paid_lot(self):
+        snapshot = project_subscription_balance(
+            as_of=T0,
+            subscription_end=T0 + timedelta(hours=24),
+            entitlement_events=(
+                EntitlementEvent(
+                    1,
+                    1,
+                    "quote",
+                    "55",
+                    "account_purchase_grant",
+                    24,
+                    T0,
+                ),
+            ),
+            ledger_entries=(
+                LedgerEntry(
+                    11,
+                    1,
+                    "account_purchase",
+                    24,
+                    Decimal("49"),
+                    "RUB",
+                    100,
+                    None,
+                    quote_id=55,
+                ),
+            ),
+            tariff_versions={
+                100: TariffVersionSnapshot(100, 7, 24, Decimal("49"), "RUB")
+            },
+            payments={},
+        )
+        self.assertTrue(snapshot.tracked)
+        self.assertEqual(snapshot.remaining_paid_value_rub, Decimal("49"))
+        self.assertEqual(snapshot.paid_lots[0].quote_id, 55)
+        self.assertIsNone(snapshot.paid_lots[0].payment_id)
+
+    def test_tariff_change_replaces_remaining_lots_at_hour_precision(self):
+        metadata = {
+            "operation_type": "change",
+            "balance_as_of": "2026-01-01T00:00:00.000000Z",
+            "source_subscription_end": "2026-01-02T00:00:00.000000Z",
+            "source_balance_fingerprint": "a" * 64,
+            "source_entitlement_entry_ids": [1],
+            "source_ledger_entry_ids": [11],
+            "current_paid_hours": 24,
+            "current_paid_value_rub": "24",
+            "current_bonus_hours": 0,
+            "resulting_paid_hours": 47,
+            "resulting_paid_value_rub": "47",
+            "resulting_bonus_hours": 2,
+            "account_debit_id": 9,
+        }
+        snapshot = project_subscription_balance(
+            as_of=T0,
+            subscription_end=T0 + timedelta(hours=49),
+            entitlement_events=(
+                EntitlementEvent(1, 1, "payment", "10", "payment_grant", 24, T0),
+                EntitlementEvent(
+                    2,
+                    1,
+                    "quote",
+                    "55",
+                    "tariff_change",
+                    49,
+                    T0 + timedelta(minutes=1),
+                    metadata=metadata,
+                ),
+            ),
+            ledger_entries=(
+                LedgerEntry(
+                    11,
+                    1,
+                    "confirmed_payment",
+                    24,
+                    Decimal("24"),
+                    "RUB",
+                    100,
+                    10,
+                ),
+                LedgerEntry(
+                    12,
+                    1,
+                    "tariff_conversion",
+                    23,
+                    Decimal("23"),
+                    "RUB",
+                    200,
+                    None,
+                    quote_id=55,
+                    metadata=metadata,
+                    created_at=T0 + timedelta(minutes=1),
+                ),
+            ),
+            tariff_versions={
+                100: TariffVersionSnapshot(100, 100, 24, Decimal("24"), "RUB"),
+                200: TariffVersionSnapshot(200, 200, 48, Decimal("48"), "RUB"),
+            },
+            payments={
+                10: PaymentSnapshot(
+                    10, 1, 100, 100, Decimal("24"), "RUB", 24, Decimal("24"), "RUB"
+                )
+            },
+        )
+        self.assertTrue(snapshot.tracked, snapshot.failure_code)
+        self.assertEqual(snapshot.remaining_paid_hours, 47)
+        self.assertEqual(snapshot.remaining_paid_value_rub, Decimal("47"))
+        self.assertEqual(snapshot.remaining_bonus_hours, 2)
+        self.assertEqual(snapshot.paid_lots[0].tariff_version_id, 200)
+        self.assertEqual(snapshot.coverage_end, T0 + timedelta(hours=49))
+
     def test_partially_used_paid_lot(self):
         s = self.paid(as_of=T0 + timedelta(hours=4))
         self.assertEqual(

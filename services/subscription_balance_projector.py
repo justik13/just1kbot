@@ -18,6 +18,7 @@ class EntitlementEvent:
     hours_delta: int
     created_at: datetime
     reversed_entry_id: int | None = None
+    metadata: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,9 @@ class LedgerEntry:
     tariff_version_id: int
     payment_id: int | None
     reversal_of_id: int | None = None
+    quote_id: int | None = None
+    metadata: Mapping[str, object] | None = None
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -59,7 +63,7 @@ class TariffVersionSnapshot:
 class ProjectedPaidLot:
     entitlement_entry_id: int
     paid_value_ledger_entry_id: int
-    payment_id: int
+    payment_id: int | None
     tariff_version_id: int
     original_paid_hours: int
     original_paid_value_rub: Decimal
@@ -67,6 +71,7 @@ class ProjectedPaidLot:
     remaining_paid_value_rub: Decimal
     segment_start: datetime
     segment_end: datetime
+    quote_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +110,8 @@ class _Segment:
     end: datetime
     ledger: LedgerEntry | None
     is_paid: bool
+    original_paid_hours: int | None = None
+    original_paid_value_rub: Decimal | None = None
 
 
 def _failed(
@@ -130,6 +137,46 @@ def _failed(
     )
 
 
+def _metadata_int(metadata: Mapping[str, object], key: str) -> int:
+    value = metadata.get(key)
+    if isinstance(value, bool):
+        raise ValueError(key)
+    result = int(value)
+    if result < 0 or str(result) != str(value):
+        raise ValueError(key)
+    return result
+
+
+def _metadata_decimal(metadata: Mapping[str, object], key: str) -> Decimal:
+    result = Decimal(str(metadata.get(key)))
+    if not result.is_finite() or result < 0:
+        raise ValueError(key)
+    return result
+
+
+def _metadata_datetime(metadata: Mapping[str, object], key: str) -> datetime:
+    raw = metadata.get(key)
+    if not isinstance(raw, str):
+        raise ValueError(key)
+    result = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if result.tzinfo is None or result.utcoffset() is None:
+        raise ValueError(key)
+    return result
+
+
+def _metadata_ids(metadata: Mapping[str, object], key: str) -> set[int]:
+    values = metadata.get(key)
+    if not isinstance(values, list) or any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in values
+    ):
+        raise ValueError(key)
+    result = set(values)
+    if len(result) != len(values):
+        raise ValueError(key)
+    return result
+
+
 def project_subscription_balance(
     *,
     as_of: datetime,
@@ -148,9 +195,11 @@ def project_subscription_balance(
 
     grants_types = {
         "payment_grant",
+        "account_purchase_grant",
         "referral_user_bonus",
         "referral_referrer_bonus",
         "manual_grant",
+        "tariff_change",
     }
     reversal_types = {"payment_reversal", "referral_reversal"}
     if any(
@@ -170,22 +219,45 @@ def project_subscription_balance(
     ):
         return fail("invalid_entitlement_shape")
     active = subscription_end is not None and subscription_end > as_of
-    confirmed = [x for x in ledger if x.entry_type == "confirmed_payment"]
+    confirmed = [
+        x for x in ledger if x.entry_type in {"confirmed_payment", "account_purchase"}
+    ]
+    conversions = [x for x in ledger if x.entry_type == "tariff_conversion"]
     ledger_reversals = [x for x in ledger if x.entry_type == "payment_reversal"]
     if any(
-        x.entry_type not in {"confirmed_payment", "payment_reversal"}
+        x.entry_type
+        not in {
+            "confirmed_payment",
+            "account_purchase",
+            "tariff_conversion",
+            "payment_reversal",
+        }
         and (x.paid_hours_delta or x.paid_value_rub_delta)
         for x in ledger
     ):
         return fail("unsupported_paid_value_entry")
     grants = [
-        e for e in events if e.entry_type == "payment_grant" and e.hours_delta > 0
+        e
+        for e in events
+        if e.entry_type in {"payment_grant", "account_purchase_grant"}
+        and e.hours_delta > 0
     ]
     for item in confirmed:
         matches = [
             e
             for e in grants
-            if e.source_type == "payment" and e.source_id == str(item.payment_id)
+            if (
+                item.entry_type == "confirmed_payment"
+                and e.entry_type == "payment_grant"
+                and e.source_type == "payment"
+                and e.source_id == str(item.payment_id)
+            )
+            or (
+                item.entry_type == "account_purchase"
+                and e.entry_type == "account_purchase_grant"
+                and e.source_type == "quote"
+                and e.source_id == str(item.quote_id)
+            )
         ]
         if len(matches) != 1:
             return fail("confirmed_payment_without_entitlement_grant")
@@ -201,22 +273,163 @@ def project_subscription_balance(
     processed = set()
     reversed_confirmed = set()
     used_ledger_reversals = set()
+    used_conversions = set()
     for event in events:
+        if event.entry_type == "tariff_change":
+            metadata = event.metadata or {}
+            matches = [
+                row
+                for row in conversions
+                if row.user_id == event.user_id
+                and row.quote_id is not None
+                and event.source_type == "quote"
+                and str(row.quote_id) == event.source_id
+            ]
+            if len(matches) != 1 or matches[0].id in used_conversions:
+                return fail("tariff_change_conversion_missing", coverage)
+            conversion = matches[0]
+            try:
+                current_paid_hours = _metadata_int(metadata, "current_paid_hours")
+                current_paid_value = _metadata_decimal(
+                    metadata, "current_paid_value_rub"
+                )
+                resulting_paid_hours = _metadata_int(metadata, "resulting_paid_hours")
+                resulting_paid_value = _metadata_decimal(
+                    metadata, "resulting_paid_value_rub"
+                )
+                resulting_bonus_hours = _metadata_int(metadata, "resulting_bonus_hours")
+                current_bonus_hours = _metadata_int(metadata, "current_bonus_hours")
+                anchor = _metadata_datetime(metadata, "balance_as_of")
+                source_entitlement_ids = _metadata_ids(
+                    metadata, "source_entitlement_entry_ids"
+                )
+                source_ledger_ids = _metadata_ids(
+                    metadata, "source_ledger_entry_ids"
+                )
+            except (KeyError, TypeError, ValueError, ArithmeticError):
+                return fail("tariff_change_metadata_invalid", coverage)
+            if (
+                conversion.metadata != metadata
+                or conversion.payment_id is not None
+                or conversion.reversal_of_id is not None
+                or conversion.tariff_version_id not in tariff_versions
+                or conversion.paid_hours_delta
+                != resulting_paid_hours - current_paid_hours
+                or conversion.paid_value_rub_delta
+                != resulting_paid_value - current_paid_value
+                or event.hours_delta != resulting_paid_hours + resulting_bonus_hours
+                or event.reversed_entry_id is not None
+                or event.id in source_entitlement_ids
+                or conversion.id in source_ledger_ids
+                or not source_entitlement_ids.issubset(by_id)
+                or not source_ledger_ids.issubset({row.id for row in ledger})
+                or anchor > event.created_at
+            ):
+                return fail("tariff_change_metadata_mismatch", coverage)
+            source_paid_hours = 0
+            source_paid_value = Decimal(0)
+            source_bonus_hours = 0
+            for segment in segments:
+                whole, _ = _remaining(segment.start, segment.end, anchor)
+                if segment.is_paid:
+                    original_hours = (
+                        segment.original_paid_hours
+                        if segment.original_paid_hours is not None
+                        else segment.ledger.paid_hours_delta
+                    )
+                    original_value = (
+                        segment.original_paid_value_rub
+                        if segment.original_paid_value_rub is not None
+                        else segment.ledger.paid_value_rub_delta
+                    )
+                    if original_hours <= 0 or original_value < 0:
+                        return fail("tariff_change_source_invalid", coverage)
+                    source_paid_hours += whole
+                    source_paid_value += (
+                        original_value * Decimal(whole) / Decimal(original_hours)
+                    )
+                else:
+                    source_bonus_hours += whole
+            if (
+                source_paid_hours != current_paid_hours
+                or source_paid_value != current_paid_value
+                or source_bonus_hours != current_bonus_hours
+            ):
+                return fail("tariff_change_source_mismatch", coverage)
+            segments = []
+            paid_event = EntitlementEvent(
+                event.id,
+                event.user_id,
+                event.source_type,
+                event.source_id,
+                "tariff_change_paid",
+                resulting_paid_hours,
+                anchor,
+                metadata=metadata,
+            )
+            paid_end = anchor + timedelta(hours=resulting_paid_hours)
+            if resulting_paid_hours:
+                segments.append(
+                    _Segment(
+                        paid_event,
+                        anchor,
+                        paid_end,
+                        conversion,
+                        True,
+                        resulting_paid_hours,
+                        resulting_paid_value,
+                    )
+                )
+            coverage = paid_end
+            if resulting_bonus_hours:
+                bonus_event = EntitlementEvent(
+                    event.id,
+                    event.user_id,
+                    event.source_type,
+                    event.source_id,
+                    "tariff_change_bonus",
+                    resulting_bonus_hours,
+                    paid_end,
+                    metadata=metadata,
+                )
+                coverage = paid_end + timedelta(hours=resulting_bonus_hours)
+                segments.append(
+                    _Segment(
+                        bonus_event,
+                        paid_end,
+                        coverage,
+                        None,
+                        False,
+                    )
+                )
+            used_conversions.add(conversion.id)
+            continue
         if event.hours_delta > 0:
             if event.entry_type not in {
                 "payment_grant",
+                "account_purchase_grant",
                 "referral_user_bonus",
                 "referral_referrer_bonus",
                 "manual_grant",
             }:
                 continue
             match = None
-            if event.entry_type == "payment_grant":
+            if event.entry_type in {"payment_grant", "account_purchase_grant"}:
                 matches = [
                     x
                     for x in confirmed
-                    if event.source_type == "payment"
-                    and str(x.payment_id) == event.source_id
+                    if (
+                        event.entry_type == "payment_grant"
+                        and x.entry_type == "confirmed_payment"
+                        and event.source_type == "payment"
+                        and str(x.payment_id) == event.source_id
+                    )
+                    or (
+                        event.entry_type == "account_purchase_grant"
+                        and x.entry_type == "account_purchase"
+                        and event.source_type == "quote"
+                        and str(x.quote_id) == event.source_id
+                    )
                 ]
                 if len(matches) != 1:
                     legacy_failure = "paid_grant_without_value_ledger"
@@ -227,36 +440,53 @@ def project_subscription_balance(
                             "confirmed_payment_without_entitlement_grant", coverage
                         )
                     used_confirmed.add(match.id)
-                    payment = payments.get(match.payment_id)
                     version = tariff_versions.get(match.tariff_version_id)
-                    ok = (
+                    common_ok = (
                         match.user_id == event.user_id
                         and match.paid_hours_delta == event.hours_delta
                         and match.paid_value_rub_delta > 0
                         and match.currency == "RUB"
-                        and payment is not None
-                        and payment.user_id == event.user_id
-                        and payment.tariff_version_id == match.tariff_version_id
                         and version is not None
-                        and payment.tariff_id == version.tariff_id
-                        and payment.currency
-                        == payment.snapshot_currency
-                        == version.currency
-                        == match.currency
-                        and payment.snapshot_duration_hours
-                        == version.duration_hours
-                        == event.hours_delta
-                        and payment.amount
-                        == payment.snapshot_amount
-                        == version.price_rub
-                        == match.paid_value_rub_delta
+                        and version.currency == match.currency
+                        and version.duration_hours == event.hours_delta
                     )
+                    if match.entry_type == "confirmed_payment":
+                        payment = payments.get(match.payment_id)
+                        ok = (
+                            common_ok
+                            and payment is not None
+                            and payment.user_id == event.user_id
+                            and payment.tariff_version_id == match.tariff_version_id
+                            and payment.tariff_id == version.tariff_id
+                            and payment.currency
+                            == payment.snapshot_currency
+                            == match.currency
+                            and payment.snapshot_duration_hours
+                            == version.duration_hours
+                            and payment.amount
+                            == payment.snapshot_amount
+                            == version.price_rub
+                            == match.paid_value_rub_delta
+                        )
+                    else:
+                        ok = (
+                            common_ok
+                            and match.payment_id is None
+                            and match.quote_id is not None
+                            and match.paid_value_rub_delta == version.price_rub
+                        )
                     if not ok:
                         legacy_failure = "paid_grant_without_value_ledger"
             start = max(event.created_at, coverage) if coverage else event.created_at
             end = start + timedelta(hours=event.hours_delta)
             segments.append(
-                _Segment(event, start, end, match, event.entry_type == "payment_grant")
+                _Segment(
+                    event,
+                    start,
+                    end,
+                    match,
+                    event.entry_type in {"payment_grant", "account_purchase_grant"},
+                )
             )
             coverage = end
             continue
@@ -344,6 +574,8 @@ def project_subscription_balance(
         coverage = segments[-1].end if segments else batch_time
     if any(x.id not in used_ledger_reversals for x in ledger_reversals):
         return fail("ledger_reversal_without_entitlement_reversal", coverage)
+    if any(x.id not in used_conversions for x in conversions):
+        return fail("tariff_conversion_without_entitlement", coverage)
     paid = []
     bonus = []
     loss = Decimal(0)
@@ -355,25 +587,34 @@ def project_subscription_balance(
             if s.ledger is None:
                 untracked += whole
                 continue
+            original_hours = (
+                s.original_paid_hours
+                if s.original_paid_hours is not None
+                else s.ledger.paid_hours_delta
+            )
+            original_value = (
+                s.original_paid_value_rub
+                if s.original_paid_value_rub is not None
+                else s.ledger.paid_value_rub_delta
+            )
+            if original_hours <= 0 or original_value < 0:
+                return fail("paid_lot_value_invalid", coverage)
             with localcontext() as ctx:
                 ctx.prec = 38
-                value = (
-                    s.ledger.paid_value_rub_delta
-                    * Decimal(whole)
-                    / Decimal(s.ledger.paid_hours_delta)
-                )
+                value = original_value * Decimal(whole) / Decimal(original_hours)
             paid.append(
                 ProjectedPaidLot(
                     s.event.id,
                     s.ledger.id,
                     s.ledger.payment_id,
                     s.ledger.tariff_version_id,
-                    s.ledger.paid_hours_delta,
-                    s.ledger.paid_value_rub_delta,
+                    original_hours,
+                    original_value,
                     whole,
                     value,
                     s.start,
                     s.end,
+                    s.ledger.quote_id,
                 )
             )
         else:
@@ -422,7 +663,7 @@ def project_subscription_balance(
     ceiling = sum(
         (x.paid_value_rub_delta for x in confirmed if x.id not in reversed_confirmed),
         Decimal(0),
-    )
+    ) + sum((x.paid_value_rub_delta for x in conversions), Decimal(0))
     if not 0 <= value <= ceiling:
         return fail("reversed_paid_lot_still_remaining", coverage)
     return SubscriptionBalanceSnapshot(

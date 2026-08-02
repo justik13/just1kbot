@@ -122,16 +122,15 @@ async def _show_hub(
     )
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🔄 Продлить доступ", callback_data="payment_quick_renew"
+        text="🔄 Продлить подписку", callback_data="payment_quick_renew"
     )
     builder.button(
         text="⚙️ Сменить тариф", callback_data="payment_change_tariff"
     )
-    builder.button(text="👤 Профиль", callback_data="menu_profile")
     builder.button(
         text="🏠 В главное меню", callback_data="back_to_main_menu"
     )
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 1, 1)
     await render_hub(
         callback.bot, callback.message.chat.id, text, builder.as_markup()
     )

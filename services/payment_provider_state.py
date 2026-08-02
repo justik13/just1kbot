@@ -46,12 +46,15 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
         # A successful provider snapshot is authoritative financial evidence.  Record
         # it before identity validation so a bad command correlation cannot erase the
         # fact that money was received.
-        if payment.tariff_quote_id and source == "provider_create_payment_post":
+        requires_verified_capture = bool(
+            payment.tariff_quote_id or payment.payment_kind == "balance_topup"
+        )
+        if requires_verified_capture and source == "provider_create_payment_post":
             return ProviderTransition(
                 "retry", observed, reason="captured_at_requires_verified_get"
             )
         payment.paid_at = payment.paid_at or now_utc()
-        if payment.tariff_quote_id:
+        if requires_verified_capture:
             try:
                 captured_at = parse_provider_captured_at(data.get("captured_at"))
             except ValueError as exc:
@@ -59,10 +62,14 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                 payment.reconciliation_status = "manual_review"
                 payment.fulfillment_status = "manual_review"
                 payment.fulfillment_last_error_code = str(exc)
-                quote = await session.scalar(
-                    select(TariffQuote)
-                    .where(TariffQuote.id == payment.tariff_quote_id)
-                    .with_for_update()
+                quote = (
+                    await session.scalar(
+                        select(TariffQuote)
+                        .where(TariffQuote.id == payment.tariff_quote_id)
+                        .with_for_update()
+                    )
+                    if payment.tariff_quote_id
+                    else None
                 )
                 if quote:
                     quote.status = "manual_review"
@@ -86,10 +93,14 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                 payment.reconciliation_status = "manual_review"
                 payment.fulfillment_status = "manual_review"
                 payment.fulfillment_last_error_code = "captured_at_changed"
-                quote = await session.scalar(
-                    select(TariffQuote)
-                    .where(TariffQuote.id == payment.tariff_quote_id)
-                    .with_for_update()
+                quote = (
+                    await session.scalar(
+                        select(TariffQuote)
+                        .where(TariffQuote.id == payment.tariff_quote_id)
+                        .with_for_update()
+                    )
+                    if payment.tariff_quote_id
+                    else None
                 )
                 if quote:
                     quote.status = "manual_review"
@@ -220,6 +231,8 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
     if observed == "canceled":
         payment.checkout_status = "abandoned"
         payment.payment_url = None
+        if payment.payment_kind == "balance_topup":
+            payment.ui_visible = False
         if payment.tariff_quote_id:
             quote = await session.scalar(
                 select(TariffQuote)

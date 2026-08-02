@@ -20,6 +20,7 @@ from services.tariff_value_calculator import (
     TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
 )
 from services.checkout_conflicts import get_unfinished_financial_checkout
+from database.repositories.account_ledger_repo import get_account_balance
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,7 @@ def balance_snapshot_fingerprint(*, user_id: int, subscription_end: datetime, sn
     paid = [{
         "entitlement_id": x.entitlement_entry_id, "ledger_id": x.paid_value_ledger_entry_id,
         "payment_id": x.payment_id, "tariff_version_id": x.tariff_version_id,
+        "quote_id": x.quote_id,
         "remaining_hours": x.remaining_whole_hours,
         "remaining_value": _decimal(x.remaining_paid_value_rub),
         "segment_start": _timestamp(x.segment_start), "segment_end": _timestamp(x.segment_end),
@@ -93,6 +95,13 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="user_not_found")
     if user.is_deleted or user.is_banned or user.is_bot_blocked:
         return TariffChangeQuoteResult(failure_code="user_ineligible")
+    if user.financial_hold:
+        return TariffChangeQuoteResult(failure_code="financial_hold")
+    account = await get_account_balance(
+        session, user_id=user.id, locked_user=user
+    )
+    if account.debt > 0:
+        return TariffChangeQuoteResult(failure_code="account_debt")
     if user.subscription_end is None or user.subscription_end <= as_of:
         return TariffChangeQuoteResult(failure_code="subscription_inactive")
     if user.current_tariff_id is None:

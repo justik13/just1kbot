@@ -59,14 +59,25 @@ jobs:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
       - name: Upload failing unittest log
-        if: steps.unittests.outcome == 'failure'
+        if: failure() && steps.unittests.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: unittest-log-${{ github.sha }}
           path: /tmp/unittest.log
           if-no-files-found: error
           retention-days: 7
-      - run: alembic downgrade -1
+      - run: alembic downgrade base
+      - name: Verify downgrade leaves no application tables
+        run: |
+          # The real backup rehearsal intentionally creates this test-only sentinel.
+          PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test \
+            -v ON_ERROR_STOP=1 -c 'DROP TABLE IF EXISTS backup_rehearsal_data'
+          remaining="$(PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test -Atc \
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename <> 'alembic_version' ORDER BY tablename")"
+          if [ -n "$remaining" ]; then
+            printf 'Application tables remain after downgrade:\n%s\n' "$remaining" >&2
+            exit 1
+          fi
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic tests

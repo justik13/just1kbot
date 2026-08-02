@@ -196,8 +196,16 @@ PY
     db_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
     redis_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
 
+    local support_username=${SUPPORT_USERNAME:-support}
+    support_username=${support_username#@}
+    if [[ ! "$support_username" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]]; then
+        error "SUPPORT_USERNAME имеет неверный формат"
+        return 1
+    fi
+
     write_env_var BOT_TOKEN "$BOT_TOKEN"
     write_env_var ADMIN_IDS "$(normalize_admin_ids_json "$ADMIN_IDS")"
+    write_env_var SUPPORT_USERNAME "$support_username"
     write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_encoded}@127.0.0.1:${PG_PORT}/just1kbot_bot"
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
     write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
