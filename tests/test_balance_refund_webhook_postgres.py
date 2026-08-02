@@ -28,6 +28,7 @@ from services.provider_refunds import (
     request_balance_topup_refund,
 )
 from services.workers.webhook_inbox import InboxClaim, finalize
+from services.yookassa_service import YooKassaResult
 from utils.datetime_helpers import now_utc
 
 
@@ -85,10 +86,21 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
         await credit_succeeded_topup(session, locked_payment=payment)
         return payment
 
-    async def _refund(self, session, payment, *, refund_id, event_key, amount):
+    async def _refund(
+        self,
+        session,
+        payment,
+        *,
+        refund_id,
+        event_key,
+        amount,
+        provider_status="succeeded",
+        provider_amount=None,
+    ):
         payload = {
             "object": {
                 "id": refund_id,
+                "status": "succeeded",
                 "payment_id": payment.external_id,
                 "amount": {"value": f"{Decimal(amount):.2f}", "currency": "RUB"},
             }
@@ -120,7 +132,20 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             payload,
             event_key,
         )
-        await finalize(session, claim, None)
+        verified_amount = amount if provider_amount is None else provider_amount
+        provider_result = YooKassaResult(
+            True,
+            value={
+                "id": refund_id,
+                "status": provider_status,
+                "payment_id": payment.external_id,
+                "amount": {
+                    "value": f"{Decimal(verified_amount):.2f}",
+                    "currency": "RUB",
+                },
+            },
+        )
+        await finalize(session, claim, provider_result)
         return row
 
     async def test_full_topup_refund_debits_balance_exactly_once(self):
@@ -231,4 +256,56 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reservation.status, "consumed")
             self.assertIsNone(
                 await claim_provider_refund(session, "late-refund-worker")
+            )
+
+    async def test_pending_provider_refund_retries_without_debit(self):
+        async with self.sessions.begin() as session:
+            payment = await self._topup(session, 100)
+            row = await self._refund(
+                session,
+                payment,
+                refund_id="refund_" + uuid.uuid4().hex,
+                event_key=uuid.uuid4().hex,
+                amount=100,
+                provider_status="pending",
+            )
+
+            self.assertEqual(row.status, "retry")
+            self.assertEqual(row.last_error_code, "refund_provider_status_not_ready")
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.payment_id == payment.id,
+                        AccountLedgerEntry.entry_type == "refund_debit",
+                    )
+                ),
+                0,
+            )
+
+    async def test_provider_amount_mismatch_sets_hold_without_debit(self):
+        async with self.sessions.begin() as session:
+            payment = await self._topup(session, 100)
+            row = await self._refund(
+                session,
+                payment,
+                refund_id="refund_" + uuid.uuid4().hex,
+                event_key=uuid.uuid4().hex,
+                amount=100,
+                provider_amount=90,
+            )
+            user = await session.get(User, self.user_id)
+
+            self.assertEqual(row.status, "succeeded")
+            self.assertTrue(user.financial_hold)
+            self.assertEqual(
+                payment.manual_review_reason, "refund_amount_currency_mismatch"
+            )
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.payment_id == payment.id,
+                        AccountLedgerEntry.entry_type == "refund_debit",
+                    )
+                ),
+                0,
             )

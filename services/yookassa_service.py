@@ -232,16 +232,6 @@ class YooKassaService:
         result = await cls.get_payment_result(payment_id)
         return result.value if result.ok else None
 
-    @staticmethod
-    def normalize_webhook_event(event: str) -> str:
-        return {
-            "payment.succeeded": "CONFIRMED",
-            "payment.canceled": "CANCELED",
-            "payment.refunded": "CHARGEBACKED",
-            "refund.succeeded": "CHARGEBACKED",
-            "payment.waiting_for_capture": "WAITING_FOR_CAPTURE",
-        }.get(event, event.upper())
-
 
 async def close_yookassa_client():
     global _client_session, _client_session_factory

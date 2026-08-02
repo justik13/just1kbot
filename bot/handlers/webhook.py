@@ -3,9 +3,6 @@ import ipaddress
 import json
 import logging
 import uuid
-from decimal import Decimal, InvalidOperation
-from typing import Optional
-
 from aiohttp import web
 import redis.asyncio as aioredis
 from sqlalchemy import text
@@ -15,7 +12,6 @@ from bot.middlewares.correlation import set_request_id
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import WebhookInbox
-from services.yookassa_service import YooKassaService
 
 logger = logging.getLogger(__name__)
 _healthcheck_redis = None
@@ -36,27 +32,36 @@ OFFICIAL_YOOKASSA_EVENTS = {
     "payment.canceled",
     "refund.succeeded",
 }
-LEGACY_UNSUPPORTED_EVENTS = {"payment.refunded"}
-REFUND_EVENTS = {"refund.succeeded", "payment.refunded"}
+REFUND_EVENTS = {"refund.succeeded"}
 
 
 def _validate_webhook_object(obj: dict, event: str) -> tuple[str, str]:
-    if event in REFUND_EVENTS:
-        provider_object_id = obj.get("id")
-        payment_external_id = obj.get("payment_id")
-
-        if not payment_external_id:
-            payment = obj.get("payment")
-            if isinstance(payment, dict):
-                payment_external_id = payment.get("id")
-    else:
-        provider_object_id = obj.get("id")
-        payment_external_id = provider_object_id
+    provider_object_id = obj.get("id")
+    payment_external_id = (
+        obj.get("payment_id") if event in REFUND_EVENTS else provider_object_id
+    )
 
     if not provider_object_id or not payment_external_id:
         raise ValueError("identity")
 
     return str(provider_object_id), str(payment_external_id)
+
+
+def _validate_webhook_payload(payload: object) -> tuple[str, dict, str, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("structure")
+    if payload.get("type") != "notification":
+        raise ValueError("notification_type")
+
+    event = payload.get("event")
+    obj = payload.get("object")
+    if event not in OFFICIAL_YOOKASSA_EVENTS:
+        raise ValueError("unsupported_event")
+    if not isinstance(event, str) or not isinstance(obj, dict):
+        raise ValueError("structure")
+
+    provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
+    return event, obj, provider_object_id, payment_external_id
 
 
 def _is_yookassa_ip(ip: str) -> bool:
@@ -85,132 +90,6 @@ def _get_real_ip(request: web.Request) -> str:
     return remote
 
 
-def _safe_decimal(value: Optional[str]) -> Optional[Decimal]:
-    if value is None:
-        return None
-    try:
-        return Decimal(value)
-    except (InvalidOperation, ValueError, TypeError):
-        return None
-
-
-async def _verify_stale_webhook_via_api(
-    webhook_object: dict,
-    normalized_status: str,
-    transaction_id: str,
-) -> tuple[bool, Optional[dict]]:
-    api_data = await YooKassaService.get_payment(transaction_id)
-    if not api_data:
-        return False, None
-
-    api_status_raw = api_data.get("status", "")
-    api_status_map = {
-        "succeeded": "CONFIRMED",
-        "canceled": "CANCELED",
-        "pending": "PENDING",
-        "processing": "PROCESSING",
-        "waiting_for_capture": "WAITING_FOR_CAPTURE",
-        "refunded": "REFUNDED",
-    }
-    api_status = api_status_map.get(
-        api_status_raw,
-        api_status_raw.upper(),
-    )
-
-    if normalized_status == "CHARGEBACKED":
-        if api_status not in {"REFUNDED", "CANCELED", "CHARGEBACKED"}:
-            logger.warning(
-                "Stale webhook chargeback status mismatch: "
-                "callback=%s, api=%s, payment=%s",
-                normalized_status,
-                api_status,
-                transaction_id,
-            )
-            return False, None
-
-        # Проверка суммы для chargeback
-        callback_amount_str = None
-        amount_obj = webhook_object.get("amount")
-        if isinstance(amount_obj, dict):
-            callback_amount_str = amount_obj.get("value")
-        api_amount = api_data.get("amount", {})
-        api_amount_str = (
-            api_amount.get("value") if isinstance(api_amount, dict) else None
-        )
-        if callback_amount_str and api_amount_str:
-            cb_decimal = _safe_decimal(callback_amount_str)
-            api_decimal = _safe_decimal(api_amount_str)
-            if cb_decimal is not None and api_decimal is not None:
-                if cb_decimal != api_decimal:
-                    logger.warning(
-                        "Stale webhook chargeback amount mismatch: "
-                        "callback=%s, api=%s, payment=%s",
-                        callback_amount_str,
-                        api_amount_str,
-                        transaction_id,
-                    )
-                    return False, None
-
-        # Проверка payload для chargeback
-        callback_metadata = webhook_object.get("metadata") or {}
-        callback_payload = callback_metadata.get("payload", "")
-        api_metadata = api_data.get("metadata") or {}
-        api_payload = api_metadata.get("payload", "")
-        if callback_payload != api_payload:
-            logger.warning(
-                "Stale webhook chargeback payload mismatch: "
-                "callback=%s, api=%s, payment=%s",
-                callback_payload,
-                api_payload,
-                transaction_id,
-            )
-            return False, None
-
-        return True, api_data
-
-    if api_status != normalized_status:
-        logger.warning(
-            "Stale webhook status mismatch: callback=%s, api=%s, payment=%s",
-            normalized_status,
-            api_status,
-            transaction_id,
-        )
-        return False, None
-
-    callback_amount_str = None
-    amount_obj = webhook_object.get("amount")
-    if isinstance(amount_obj, dict):
-        callback_amount_str = amount_obj.get("value")
-    api_amount = api_data.get("amount", {})
-    api_amount_str = api_amount.get("value") if isinstance(api_amount, dict) else None
-    if callback_amount_str and api_amount_str:
-        cb_decimal = _safe_decimal(callback_amount_str)
-        api_decimal = _safe_decimal(api_amount_str)
-        if cb_decimal is not None and api_decimal is not None:
-            if cb_decimal != api_decimal:
-                logger.warning(
-                    "Stale webhook amount mismatch: callback=%s, api=%s, payment=%s",
-                    callback_amount_str,
-                    api_amount_str,
-                    transaction_id,
-                )
-                return False, None
-
-    callback_metadata = webhook_object.get("metadata") or {}
-    callback_payload = callback_metadata.get("payload", "")
-    api_metadata = api_data.get("metadata") or {}
-    api_payload = api_metadata.get("payload", "")
-    if callback_payload != api_payload:
-        logger.warning(
-            "Stale webhook payload mismatch: callback=%s, api=%s, payment=%s",
-            callback_payload,
-            api_payload,
-            transaction_id,
-        )
-        return False, None
-
-    return True, api_data
-
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     """Authenticate, validate and durably persist only; workers own all effects."""
@@ -223,15 +102,9 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
         return web.Response(status=413, text="Payload too large")
     try:
         payload = await request.json()
-        event = payload.get("event")
-        if event not in OFFICIAL_YOOKASSA_EVENTS | LEGACY_UNSUPPORTED_EVENTS:
-            raise ValueError("unsupported_event")
-        obj = payload.get("object")
-        if not isinstance(event, str) or not isinstance(obj, dict):
-            raise ValueError("structure")
-
-        # Validate webhook object identifiers
-        provider_object_id, payment_external_id = _validate_webhook_object(obj, event)
+        event, obj, provider_object_id, payment_external_id = (
+            _validate_webhook_payload(payload)
+        )
 
         metadata = obj.get("metadata") or {}
         public_order_id = metadata.get("order_id")
