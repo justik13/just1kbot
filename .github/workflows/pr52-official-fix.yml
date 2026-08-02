@@ -1,6 +1,8 @@
 name: PR52 official YooKassa fix
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [feature/yookassa-account-balance]
 
@@ -9,6 +11,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event_name == 'pull_request' && github.head_ref == 'feature/yookassa-account-balance'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
