@@ -45,18 +45,17 @@ async def _build_servers_list_text_and_kb(
     servers, page: int, total_pages: int, total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        f"🛠 Админка › 🌍 <b>Серверы</b>\n"
-        f"(стр. {page}/{total_pages}) · Всего: {total}\n"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L48_1.format(value_0=page, value_1=total_pages, value_2=total)
     )
     builder = InlineKeyboardBuilder()
     if not servers:
-        rendered += "<i>Серверов пока нет</i>\n"
+        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L53_1
     else:
         for server in servers:
-            flag = server.country_flag or "🌍"
-            status = "🟢" if server.is_active else "🔴"
+            flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L56_1
+            status = texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L57_1 if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                f"{status} {flag} {server.name} · {server.protocol}"
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L59_1.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
             )
             builder.button(
                 text=button_text,
@@ -64,16 +63,16 @@ async def _build_servers_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text="⬅️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L67_1,
             callback_data=f"admin_servers_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text="➡️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L72_1,
             callback_data=f"admin_servers_page:{page + 1}",
         )
-    builder.button(text="➕ Добавить сервер", callback_data="admin_server_add")
-    builder.button(text="← В админку", callback_data="admin_menu")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L75_1, callback_data="admin_server_add")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L76_1, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -102,8 +101,8 @@ async def _show_servers_list(
 async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server,
 ):
-    flag = server.country_flag or "🌍"
-    status = "🟢 Активен" if server.is_active else "🔴 Отключен"
+    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L105_1
+    status = texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L106_1 if server.is_active else texts.SERVER_DISABLED_LABEL
     rendered = texts.ADMIN_SERVER_CARD.format(
         flag=flag,
         name=safe(server.name),

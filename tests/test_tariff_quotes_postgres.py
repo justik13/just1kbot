@@ -109,7 +109,7 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
         return (
             await self.connection.execute(
                 text(
-                    "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at"
+                    "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,amount_due_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at"
                     + change_columns
                     + ") "
                     "VALUES(:public,:uid,:operation,:version,0,0,24,300,720,300,24,0,0,'RUB','active',:expires,:created"
@@ -161,7 +161,7 @@ class TariffQuotesPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(IntegrityError):
             await self.connection.execute(
                 text(
-                    "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at) VALUES(:p,:u,'purchase',:v,0,0,100,0,1,1,100,0,0,'RUB','active',:e,:c)"
+                    "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,amount_due_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at) VALUES(:p,:u,'purchase',:v,0,0,100,0,1,1,100,0,0,'RUB','active',:e,:c)"
                 ),
                 {
                     "p": uuid.uuid4(),

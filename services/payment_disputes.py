@@ -124,7 +124,7 @@ async def open_payment_dispute(
     )
     if payment is None:
         raise PaymentDisputeError("payment_not_found")
-    if payment.payment_kind != "balance_topup" or payment.currency != "RUB":
+    if payment.currency != "RUB":
         raise PaymentDisputeError("dispute_requires_balance_topup")
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise PaymentDisputeError("payment_not_settled")

@@ -12,15 +12,12 @@ from sqlalchemy import case, func, or_, select
 from database.models import (
     AuditLog,
     Payment,
-    PaymentFulfillmentOperation,
     PaymentProviderOperation,
     WebhookInbox,
 )
-from services.payment_fulfillment import retry_dead_fulfillment_operation
 from services.payment_provider_operations import retry_dead_provider_operation
 from services.payment_queue_timing import (
     BACKLOG_GRACE_SECONDS,
-    FULFILLMENT_LEASE_SECONDS,
     HEALTH_LEASE_GRACE_SECONDS,
     PROVIDER_LEASE_SECONDS,
     WEBHOOK_LEASE_SECONDS,
@@ -28,7 +25,7 @@ from services.payment_queue_timing import (
 from services.workers.webhook_inbox import retry_dead_webhook_operation
 from utils.logging_security import sanitize_short
 
-QUEUE_TYPES = ("provider", "fulfillment", "webhook")
+QUEUE_TYPES = ("provider", "webhook")
 PAGE_SIZE = 10
 
 
@@ -86,11 +83,6 @@ def _spec(queue: str):
                 PaymentProviderOperation.created_at, PaymentProviderOperation.updated_at,
                 PaymentProviderOperation.completed_at, PaymentProviderOperation.payment_id,
                 PROVIDER_LEASE_SECONDS)
-    if queue == "fulfillment":
-        return (PaymentFulfillmentOperation, PaymentFulfillmentOperation.operation_type,
-                PaymentFulfillmentOperation.created_at, PaymentFulfillmentOperation.updated_at,
-                PaymentFulfillmentOperation.completed_at, PaymentFulfillmentOperation.payment_id,
-                FULFILLMENT_LEASE_SECONDS)
     if queue == "webhook":
         return (WebhookInbox, WebhookInbox.event_type, WebhookInbox.received_at,
                 WebhookInbox.received_at, WebhookInbox.processed_at, None,
@@ -292,10 +284,6 @@ async def confirm_manual_retry(session, *, admin_id: int, queue: str,
             session, operation_id, reset_attempts=True, reason=reason)
         outcome = "retry_scheduled" if decision.accepted else "rejected"
         rejection = None if decision.accepted else sanitize_short(decision.reason, 100)
-    elif queue == "fulfillment":
-        await retry_dead_fulfillment_operation(
-            session, operation_id, reset_attempts=True, reason=reason)
-        outcome = "retry_scheduled"
     else:
         await retry_dead_webhook_operation(
             session, operation_id, reset_attempts=True, reason=reason)

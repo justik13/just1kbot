@@ -15,27 +15,27 @@ def _support_keyboard(username: str):
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=f"💬 Написать @{username}",
+        text=texts.UI_BOT_HANDLERS_SUPPORT_L18_1.format(value_0=username),
         url=f"https://t.me/{username}",
     )
 
     builder.button(
-        text="❓ Частые вопросы",
+        text=texts.UI_BOT_HANDLERS_SUPPORT_L23_1,
         callback_data="faq",
     )
 
     builder.button(
-        text="📄 Условия сервиса",
+        text=texts.UI_BOT_HANDLERS_SUPPORT_L28_1,
         url=texts.TOS_AGREEMENT_URL,
     )
 
     builder.button(
-        text="🔒 Политика",
+        text=texts.UI_BOT_HANDLERS_SUPPORT_L33_1,
         url=texts.PRIVACY_POLICY_URL,
     )
 
     builder.button(
-        text="← В главное меню",
+        text=texts.UI_BOT_HANDLERS_SUPPORT_L38_1,
         callback_data="back_to_main_menu",
     )
 

@@ -1021,7 +1021,7 @@ EOF_HEALTH_TIMER
 
     systemctl daemon-reload
 
-    # Remove only legacy healthcheck cron; preserve every unrelated root cron line.
+    # Remove the obsolete healthcheck cron; preserve every unrelated root cron line.
     if command -v crontab >/dev/null 2>&1; then
         local current filtered
         current=$(mktemp)

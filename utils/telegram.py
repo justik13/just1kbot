@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import re
 import time
 from typing import Optional, List
 
@@ -225,53 +226,86 @@ async def render_hub(
     reply_markup: InlineKeyboardMarkup,
     parse_mode: str = "HTML",
 ) -> int:
+    """Render a single navigable hub, editing the current text message first."""
     _maybe_cleanup_cache()
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
+        text_parts = split_text_by_lines(text, limit=4096) or ["—"]
 
-        text_parts = split_text_by_lines(text, limit=4096)
-
-        if not text_parts:
-            text_parts = ["—"]
-
-        sent_ids = []
-        for i, part in enumerate(text_parts):
-            is_last = (i == len(text_parts) - 1)
-            kb = reply_markup if is_last else None
-            
+        # Most bot screens fit in one Telegram message. Editing the existing hub
+        # avoids visible flicker, preserves scroll position, and removes stale
+        # payment buttons immediately. Media/multipart screens fall back to send.
+        if len(text_parts) == 1 and old_ids:
+            current_id = old_ids[-1]
             try:
-                msg = await bot.send_message(
+                await bot.edit_message_text(
                     chat_id=chat_id,
-                    text=part,
-                    reply_markup=kb,
+                    message_id=current_id,
+                    text=text_parts[0],
+                    reply_markup=reply_markup,
                     parse_mode=parse_mode,
                 )
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "parse" in err_str or "entities" in err_str:
-                    logger.warning(
-                        "HTML parse failed in render_hub for chat %s, fallback to plain text: %s",
-                        chat_id,
-                        e,
-                    )
-                    msg = await bot.send_message(
-                        chat_id=chat_id,
-                        text=part,
-                        reply_markup=kb,
-                    )
+            except TelegramBadRequest as exc:
+                error = str(exc).lower()
+                if "message is not modified" in error:
+                    pass
                 else:
+                    logger.debug(
+                        "Hub edit unavailable for chat %s message %s: %s",
+                        chat_id,
+                        current_id,
+                        exc,
+                    )
+                    current_id = 0
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected hub edit failure for chat %s message %s: %s",
+                    chat_id,
+                    current_id,
+                    type(exc).__name__,
+                )
+                current_id = 0
+
+            if current_id:
+                stale_ids = [message_id for message_id in old_ids if message_id != current_id]
+                if stale_ids:
+                    await _delete_hub_messages(bot, chat_id, stale_ids)
+                _hub_cache[chat_id] = {"ids": [current_id]}
+                return current_id
+
+        sent_ids: list[int] = []
+        for index, part in enumerate(text_parts):
+            is_last = index == len(text_parts) - 1
+            markup = reply_markup if is_last else None
+            try:
+                message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    reply_markup=markup,
+                    parse_mode=parse_mode,
+                )
+            except TelegramBadRequest as exc:
+                error = str(exc).lower()
+                if "parse" not in error and "entities" not in error:
                     raise
-            
-            sent_ids.append(msg.message_id)
+                logger.warning(
+                    "HTML parse failed in render_hub for chat %s; using plain text",
+                    chat_id,
+                )
+                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=plain,
+                    reply_markup=markup,
+                )
+            sent_ids.append(message.message_id)
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
-
-        for mid in sent_ids:
-            await _store_hub_id_in_db(chat_id, mid)
-
+        for message_id in sent_ids:
+            await _store_hub_id_in_db(chat_id, message_id)
         return sent_ids[-1]
 
 

@@ -86,7 +86,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
                 quote = (
                     await s.execute(
                         text(
-                            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at,consumed_at) VALUES(:pub,:u,:op,:v,0,0,0,:price,720,:price,0,0,0,'RUB','consumed',:x,:n,:n) RETURNING id"
+                            "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,current_paid_hours,current_paid_value_rub,bonus_hours,amount_due_rub,resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,rounding_loss_value_rub,currency,status,expires_at,created_at,consumed_at) VALUES(:pub,:u,:op,:v,0,0,0,:price,720,:price,0,0,0,'RUB','consumed',:x,:n,:n) RETURNING id"
                         ),
                         {
                             "pub": uuid.uuid4(),
@@ -195,7 +195,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
             current_paid_hours=0,
             current_paid_value_rub=0,
             bonus_hours=0,
-            confirmed_payment_required_rub=price,
+            amount_due_rub=price,
             resulting_paid_hours=720,
             resulting_paid_value_rub=price,
             resulting_bonus_hours=0,

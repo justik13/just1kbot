@@ -1,3 +1,4 @@
+from bot import texts
 import asyncio
 import logging
 from datetime import datetime, timezone
@@ -63,8 +64,7 @@ async def traffic_sync_loop(shutdown_event: asyncio.Event):
                 TRAFFIC_MAX_BACKOFF,
             )
             logger.error(
-                "Критическая ошибка в цикле трафика "
-                "(crash #%s, next retry in %ss): %s",
+                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L67_1,
                 _consecutive_crashes,
                 backoff,
                 e,
@@ -124,7 +124,7 @@ async def _traffic_sync_once():
             }
         except Exception as e:
             logger.error(
-                "Ошибка трафика с %s: %s", server_info["name"], e
+                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L128_1, server_info["name"], e
             )
             return server_info["id"], None
 
@@ -300,23 +300,14 @@ async def _send_quota_alert(
 
         tib = total_bytes / (1024**4)
         msg = (
-            f"⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>\n"
-            f"{'─' * 20}\n"
-            f"👤 <b>Пользователь:</b> <code>{telegram_id}</code>\n"
-            f"🌍 <b>Сервер:</b> {server_name}\n"
-            f"📊 <b>Использовано:</b> <b>{tib:.2f} TiB</b>\n"
-            f"🆔 <b>Profile ID:</b> <code>{profile_id}</code>\n"
-            f"{'─' * 20}\n"
-            f"<i>Пользователь скачал более 1 TiB трафика.\n"
-            f"Рекомендуется связаться с ним или принять меры.\n"
-            f"Доступ НЕ отключён автоматически (Fair Usage Policy).</i>"
+            texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L304_1.format(value_0=texts.SEPARATOR_LINE * 20, value_1=telegram_id, value_2=server_name, value_3=tib, value_4=profile_id, value_5=texts.SEPARATOR_LINE * 20)
         )
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text="👤 Профиль пользователя",
+            text=texts.UI_SERVICES_WORKERS_TRAFFIC_L319_1,
             callback_data=f"admin_user_card:{telegram_id}",
         )
         builder.adjust(1)

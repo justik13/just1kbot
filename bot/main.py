@@ -155,7 +155,7 @@ async def global_error_handler(
 
 async def setup_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="🚀 Запустить бота"),
+        BotCommand(command="start", description=texts.BOT_START_DESCRIPTION),
     ]
     await bot.set_my_commands(
         commands, scope=BotCommandScopeDefault()
@@ -438,14 +438,6 @@ async def main():
             await close_device_redis()
         except Exception as e:
             logger.error("Failed to close device Redis: %s", e)
-
-        try:
-            from services.payment_service import (
-                close_redis as close_payment_redis,
-            )
-            await close_payment_redis()
-        except Exception as e:
-            logger.error("Failed to close payment Redis: %s", e)
 
         try:
             await close_db()

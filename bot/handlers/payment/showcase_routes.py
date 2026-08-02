@@ -43,11 +43,11 @@ router = Router()
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return f"{days} дн." + (f" {remainder} ч." if remainder else "")
+    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L46_1.format(value_0=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(
-    text="🚀 Начать", callback_data="back_to_main_menu"
+    text=texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L50_1, callback_data="back_to_main_menu"
 )
 _START_KEYBOARD_BUILDER.adjust(1)
 _START_KEYBOARD = _START_KEYBOARD_BUILDER.as_markup()
@@ -116,13 +116,13 @@ async def select_tariff(
     parts = parse_callback_parts(callback.data, 2)
 
     if parts is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L119_1, show_alert=True)
         return
 
     tariff_id = parse_callback_id(callback.data, 1)
 
     if tariff_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L125_1, show_alert=True)
         return
 
     source = parts[2] if len(parts) > 2 else "showcase"
@@ -162,8 +162,7 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            "У вас уже подключён этот тариф. Для добавления дней "
-            "используйте продление.",
+            texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1,
             get_same_tariff_keyboard(),
         )
         await callback.answer(show_alert=False)
@@ -195,18 +194,16 @@ async def select_tariff(
                     )
                 ),
                 "same_tariff_requires_renew": (
-                    "У вас уже подключён этот тариф. Для добавления дней "
-                    "используйте продление."
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L197_1
                 ),
                 "financial_hold": (
-                    "Смена тарифа заблокирована из-за финансового спора."
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L201_1
                 ),
                 "account_debt": (
-                    "Смена тарифа недоступна до погашения задолженности."
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L204_1
                 ),
                 "subscription_balance_untracked": (
-                    "Не удалось надёжно рассчитать остаток подписки. "
-                    "Обратитесь в поддержку."
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
                 ),
             }
             await render_hub(
@@ -214,7 +211,7 @@ async def select_tariff(
                 callback.message.chat.id,
                 errors.get(
                     quote_result.failure_code,
-                    "Не удалось подготовить смену тарифа. Попробуйте ещё раз.",
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L216_1,
                 ),
                 get_same_tariff_keyboard()
                 if quote_result.failure_code == "same_tariff_requires_renew"
@@ -227,11 +224,11 @@ async def select_tariff(
             user_id=db_user.id,
             quote_public_id=quote_result.quote.public_id,
         )
-        due = int(intent.quote.confirmed_payment_required_rub)
+        due = int(intent.quote.amount_due_rub)
         before = int(intent.balance.available)
         after = max(0, before - due)
         shortage = (
-            f"\n⚠️ Не хватает: <b>{int(intent.shortage)} ₽</b>"
+            texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L233_1.format(value_0=int(intent.shortage))
             if intent.shortage > 0
             else ""
         )
@@ -242,15 +239,7 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            "💱 <b>Смена тарифа</b>\n\n"
-            f"Новый тариф: <b>{get_tariff_display_name(device_limit)}</b>\n"
-            f"Лимит устройств: <b>{device_limit}</b>\n"
-            f"Срок после конвертации: <b>{_hours_text(resulting_hours)}</b>\n"
-            f"Доплата: <b>{due} ₽</b>\n\n"
-            f"Баланс: <b>{before} ₽</b>\n"
-            f"После смены: <b>{after} ₽</b>{shortage}\n\n"
-            "Остаточная стоимость подписки используется только в этом расчёте "
-            "и не зачисляется на свободный баланс.",
+            texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L245_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit, value_2=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
             get_balance_change_start_keyboard(
                 str(intent.quote.public_id), "payment_change_tariff"
             ),
@@ -280,39 +269,30 @@ async def select_tariff(
         )
     except AccountPurchaseError as exc:
         errors = {
-            "financial_hold": "Покупки временно заблокированы из-за открытого финансового спора.",
-            "account_debt": "Покупки недоступны до погашения задолженности.",
-            "tariff_change_required": "Для этого варианта используйте раздел «Сменить тариф».",
-            "active_tariff_change_quote_exists": "Сначала завершите или отмените смену тарифа.",
-            "legacy_checkout_in_progress": "Сначала завершите ранее созданный платёж.",
+            "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L274_1,
+            "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L275_1,
+            "tariff_change_required": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L276_1,
+            "active_tariff_change_quote_exists": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L277_1,
         }
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            errors.get(exc.code, "Не удалось подготовить покупку. Попробуйте ещё раз."),
+            errors.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L282_1),
             get_back_button(back_to),
         )
         await callback.answer(show_alert=False)
         return
 
-    price = int(intent.quote.confirmed_payment_required_rub)
+    price = int(intent.quote.amount_due_rub)
     balance_before = int(intent.balance.available)
     balance_after = max(0, balance_before - price)
     shortage_line = (
-        f"\n⚠️ Не хватает: <b>{int(intent.shortage)} ₽</b>"
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L292_1.format(value_0=int(intent.shortage))
         if intent.shortage > 0
         else ""
     )
     text = (
-        "💳 <b>Оформление заказа</b>\n\n"
-        f"📦 Тариф: <b>{tariff_name}</b>\n"
-        f"⏱ Срок: {tariff.duration_days} дней\n"
-        f"🔌 Устройства: до {device_limit}\n"
-        f"💰 Цена: <b>{price} ₽</b>\n\n"
-        f"Баланс: <b>{balance_before} ₽</b>\n"
-        f"После покупки: <b>{balance_after} ₽</b>"
-        f"{shortage_line}\n\n"
-        "Покупка выполняется только после отдельного подтверждения."
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L297_1.format(value_0=tariff_name, value_1=tariff.duration_days, value_2=device_limit, value_3=price, value_4=balance_before, value_5=balance_after, value_6=shortage_line)
     )
 
     await render_hub(
@@ -456,13 +436,13 @@ async def select_tariff_type(
     parts = parse_callback_parts(callback.data, 2)
 
     if parts is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L458_1, show_alert=True)
         return
 
     device_limit = parse_callback_id(callback.data, 1)
 
     if device_limit is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L464_1, show_alert=True)
         return
 
     source = parts[2] if len(parts) > 2 else "showcase"

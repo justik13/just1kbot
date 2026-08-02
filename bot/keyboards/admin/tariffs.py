@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -17,21 +18,21 @@ def get_admin_tariff_card_keyboard(
     #   • вкл / выкл (видимость на витрине).
     # ──────────────────────────────────────────────────
     builder.button(
-        text="✏️ Изменить цену ₽",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_TARIFFS_L20_1,
         callback_data=f"admin_tariff_edit_rub:{tariff_id}",
     )
 
     if is_active:
-        status_text = "🔴 Выключить"
+        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_TARIFFS_L26_1
     else:
-        status_text = "🟢 Включить"
+        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_TARIFFS_L28_1
     builder.button(
         text=status_text,
         callback_data=f"admin_tariff_toggle:{tariff_id}",
     )
 
     builder.button(
-        text="← К списку тарифов",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_TARIFFS_L34_1,
         callback_data="admin_tariffs",
     )
     builder.adjust(1)

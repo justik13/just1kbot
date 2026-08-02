@@ -37,10 +37,10 @@ require_safe_script() {
 # Preserve the existing test/library contract without changing normal execution.
 # Only an explicitly sourced DEPLOY_FUNCTIONS_ONLY=1 session loads definitions.
 if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" == 1 ]]; then
-    legacy="$SCRIPTS_DIR/deploy_full.sh"
-    require_safe_script "$legacy"
+    library="$SCRIPTS_DIR/deploy_full.sh"
+    require_safe_script "$library"
     # shellcheck source=scripts/deploy_full.sh
-    source "$legacy"
+    source "$library"
     return 0 2>/dev/null || exit 0
 fi
 

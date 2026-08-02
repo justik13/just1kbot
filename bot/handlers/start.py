@@ -137,7 +137,7 @@ async def cmd_start(
 
     is_admin = user.telegram_id in get_settings().ADMIN_IDS
 
-    name = safe(user.first_name or "Пользователь")
+    name = safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L140_1)
 
     balance = await get_account_balance(session, user_id=user.id)
     text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
@@ -203,7 +203,7 @@ async def back_to_main_menu(
 
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
 
-    name = safe(db_user.first_name or "Пользователь")
+    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
 
     balance = await get_account_balance(session, user_id=db_user.id)
     text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))

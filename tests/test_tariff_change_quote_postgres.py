@@ -106,7 +106,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                     await session.execute(
                         text(
                             "INSERT INTO tariff_quotes(public_id,user_id,operation_type,target_tariff_version_id,"
-                            "current_paid_hours,current_paid_value_rub,bonus_hours,confirmed_payment_required_rub,"
+                            "current_paid_hours,current_paid_value_rub,bonus_hours,amount_due_rub,"
                             "resulting_paid_hours,resulting_paid_value_rub,resulting_bonus_hours,rounding_loss_hours,"
                             "rounding_loss_value_rub,currency,status,expires_at,created_at,consumed_at) "
                             "VALUES(:p,:u,'purchase',:v,0,0,0,90,720,90,0,0,0,'RUB','consumed',:x,:n,:n) RETURNING id"
@@ -162,7 +162,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 (720, Decimal("90")),
             )
             self.assertEqual(
-                (quote.confirmed_payment_required_rub, quote.resulting_bonus_hours),
+                (quote.amount_due_rub, quote.resulting_bonus_hours),
                 (Decimal("90"), 0),
             )
             self.assertIsNotNone(quote.source_tariff_version_id)
@@ -500,7 +500,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                     session, user_id=user, target_tariff_id=target, as_of=as_of
                 )
             ).quote
-            self.assertEqual(quote.confirmed_payment_required_rub, 0)
+            self.assertEqual(quote.amount_due_rub, 0)
             result = await settle_account_tariff_change(
                 session, user_id=user, quote_public_id=quote.public_id
             )

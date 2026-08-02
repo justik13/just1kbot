@@ -196,7 +196,7 @@ class ActionLockMiddleware(BaseMiddleware):
         if not _validate_callback_params(callback_data):
             try:
                 await event.answer(
-                    "Некорректный запрос",
+                    texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L199_1,
                     show_alert=True,
                 )
             except Exception:
@@ -214,7 +214,7 @@ class ActionLockMiddleware(BaseMiddleware):
         if _is_stale_action(callback_data) and _is_stale_callback(event):
             try:
                 await event.answer(
-                    "Сессия подтверждения истекла",
+                    texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L217_1,
                     show_alert=True,
                 )
             except Exception:
@@ -234,7 +234,7 @@ class ActionLockMiddleware(BaseMiddleware):
 
                 try:
                     await event.answer(
-                        "Некорректный запрос",
+                        texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L237_1,
                         show_alert=True,
                     )
                 except Exception:
@@ -273,7 +273,7 @@ class ActionLockMiddleware(BaseMiddleware):
 
                 try:
                     await event.answer(
-                        "Некорректный запрос",
+                        texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L276_1,
                         show_alert=True,
                     )
                 except Exception:

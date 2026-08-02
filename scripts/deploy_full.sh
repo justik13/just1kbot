@@ -1,5 +1,5 @@
 #!/bin/bash
-# Source-only compatibility wrapper for the legacy deploy function library.
+# Source-only source-only wrapper for the deploy function library.
 # Production operators must use repository deploy.sh or scripts/deploy.sh so
 # PostgreSQL discovery, root-owned releases, and operational rollback overrides
 # are always installed.
@@ -30,7 +30,7 @@ mode=$(stat -c '%a' "$LIBRARY")
 # shellcheck source=deploy_full_library.sh
 source "$LIBRARY"
 
-# The retained legacy library used one cleanup function for EXIT and signals.
+# The deploy function library used one cleanup function for EXIT and signals.
 # Preserve its cleanup ownership while restoring conventional signal statuses.
 trap cleanup_temp_files EXIT
 trap 'exit 130' INT

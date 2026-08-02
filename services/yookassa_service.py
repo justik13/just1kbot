@@ -204,16 +204,6 @@ class YooKassaService:
         return await cls._request("GET", f"/payments/{payment_id}")
 
     @classmethod
-    async def cancel_payment_result(cls, payment_id: str, *, idempotency_key: str):
-        return await cls._request(
-            "POST",
-            f"/payments/{payment_id}/cancel",
-            payload={},
-            idempotency_key=idempotency_key,
-            ambiguous_on_failure=True,
-        )
-
-    @classmethod
     async def create_refund_result(cls, payload: dict, *, idempotency_key: str):
         return await cls._request(
             "POST",

@@ -39,7 +39,7 @@ async def request_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L42_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -68,7 +68,7 @@ async def cancel_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L71_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -97,7 +97,7 @@ async def confirm_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L100_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)

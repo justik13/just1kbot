@@ -19,7 +19,6 @@ from services.subscription_balance_service import get_subscription_balance_snaps
 from services.tariff_value_calculator import (
     TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
 )
-from services.checkout_conflicts import get_unfinished_financial_checkout
 from database.repositories.account_ledger_repo import get_account_balance
 
 
@@ -58,7 +57,7 @@ def balance_snapshot_fingerprint(*, user_id: int, subscription_end: datetime, sn
     """SHA-256 of stable JSON: UTC timestamps, fixed decimals and sorted lots/IDs."""
     paid = [{
         "entitlement_id": x.entitlement_entry_id, "ledger_id": x.paid_value_ledger_entry_id,
-        "payment_id": x.payment_id, "tariff_version_id": x.tariff_version_id,
+"tariff_version_id": x.tariff_version_id,
         "quote_id": x.quote_id,
         "remaining_hours": x.remaining_whole_hours,
         "remaining_value": _decimal(x.remaining_paid_value_rub),
@@ -141,12 +140,6 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         session, user_id=user_id, as_of=as_of, locked_user=user)
     if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
         if existing_change is not None:
-            if existing_change.payment_id is not None:
-                existing_change.status = "manual_review"
-                existing_change.manual_review_at = as_of
-                existing_change.diagnostic_reason = "source_balance_untracked"
-                await session.flush()
-                return TariffChangeQuoteResult(failure_code="active_change_quote_stale")
             existing_change.status = "cancelled"
             existing_change.diagnostic_reason = "source_balance_untracked"
             await session.flush()
@@ -173,12 +166,6 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         if existing_change.target_tariff_version_id == target_version.id and same_history:
             return TariffChangeQuoteResult(existing_change, False, None)
         if existing_change.target_tariff_version_id == target_version.id and not same_history:
-            if existing_change.payment_id is not None:
-                existing_change.status = "manual_review"
-                existing_change.manual_review_at = as_of
-                existing_change.diagnostic_reason = "source_balance_changed"
-                await session.flush()
-                return TariffChangeQuoteResult(failure_code="active_change_quote_stale")
             existing_change.status = "cancelled"
             existing_change.diagnostic_reason = "source_balance_changed"
             await session.flush()
@@ -206,7 +193,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         source_tariff_version_id=source_version.id, target_tariff_version_id=target_version.id,
         current_paid_hours=snapshot.remaining_paid_hours,
         current_paid_value_rub=snapshot.remaining_paid_value_rub,
-        bonus_hours=snapshot.remaining_bonus_hours, confirmed_payment_required_rub=required,
+        bonus_hours=snapshot.remaining_bonus_hours, amount_due_rub=required,
         resulting_paid_hours=calculation.resulting_paid_hours,
         resulting_paid_value_rub=calculation.paid_value_after_rub,
         resulting_bonus_hours=calculation.retained_bonus_hours,
@@ -216,7 +203,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         balance_as_of=as_of, source_subscription_end=user.subscription_end,
         source_balance_fingerprint=fingerprint,
         source_entitlement_entry_ids=sorted(snapshot.source_entitlement_entry_ids),
-        source_ledger_entry_ids=sorted(snapshot.source_ledger_entry_ids), payment_id=None)
+        source_ledger_entry_ids=sorted(snapshot.source_ledger_entry_ids) )
     session.add(quote)
     await session.flush()
     return TariffChangeQuoteResult(quote, True, None)

@@ -94,7 +94,7 @@ async def users_pagination(
 
     if page is None or page < 1:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L97_1,
             show_alert=True,
         )
         return
@@ -201,7 +201,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"❌ Пользователь с ID {telegram_id} не найден.",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L204_1.format(value_0=telegram_id),
             get_back_button("admin_users"),
         )
 
@@ -231,7 +231,7 @@ async def show_user_card(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L234_1,
             show_alert=True,
         )
         return

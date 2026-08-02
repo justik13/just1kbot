@@ -1,82 +1,75 @@
+"""Periodic recovery and alerting for stalled balance top-ups."""
+
 import asyncio
 import logging
 from datetime import timedelta
 
 from aiogram import Bot
 from cachetools import TTLCache
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
+from bot import texts
 from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
+from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
-from services.workers.webhook_inbox import ensure_fulfillment
+from services.payment_status import payment_display_status
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
-
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
-
 PAYMENTS_START_DELAY = 60.0
 
-ORPHAN_PENDING_THRESHOLD_HOURS = 1
+
+def _needs_attention():
+    return or_(
+        Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
+        Payment.reconciliation_status.in_(("required", "mismatch", "manual_review")),
+        Payment.fulfillment_status.in_(("failed", "manual_review")),
+    )
 
 
 async def _preload_alerted_stale_payments():
     try:
         async with session_scope() as session:
             threshold = now_utc() - timedelta(hours=1)
-            stmt = (
+            ids = await session.scalars(
                 select(Payment.id)
-                .where(
-                    Payment.status.in_(["pending", "requires_manual_review"]),
-                    Payment.created_at < threshold,
-                )
+                .where(_needs_attention(), Payment.created_at < threshold)
                 .order_by(Payment.created_at.desc())
                 .limit(10000)
             )
-            result = await session.execute(stmt)
-            for (payment_id,) in result.all():
+            for payment_id in ids:
                 _alerted_stale_payments[payment_id] = True
-
-        if _alerted_stale_payments:
-            logger.info(
-                "Preloaded %s existing stale payment IDs to suppress duplicate alerts after restart",
-                len(_alerted_stale_payments),
-            )
-    except Exception as e:
-        logger.warning("Failed to preload stale payment IDs: %s", e)
+    except Exception as exc:
+        logger.warning("Failed to preload stale payment IDs: %s", exc)
 
 
 async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
     settings = get_settings()
-
     try:
         await asyncio.wait_for(shutdown_event.wait(), timeout=PAYMENTS_START_DELAY)
-        logger.info("Stale payments worker stopped during start delay (shutdown)")
         return
     except asyncio.TimeoutError:
         pass
-
     await _preload_alerted_stale_payments()
-
     while not shutdown_event.is_set():
         try:
-            await _cleanup_orphan_pending_payments()
-            await _process_stale_payments(bot, settings)
+            await _recover_stale_topups()
+            await _alert_new_stale_payments(bot, settings)
         except asyncio.CancelledError:
-            logger.info("Stale payments worker cancelled")
             break
-        except Exception as e:
-            logger.error(
-                "Критическая ошибка в stale_payments_checker: %s", e, exc_info=True
-            )
-            if shutdown_event.is_set():
+        except Exception:
+            logger.exception("Stale top-up worker failed")
+            try:
+                await asyncio.wait_for(
+                    shutdown_event.wait(), timeout=WORKER_ERROR_SLEEP_INTERVAL
+                )
                 break
-            await asyncio.sleep(WORKER_ERROR_SLEEP_INTERVAL)
-            continue
-
+            except asyncio.TimeoutError:
+                continue
         try:
             await asyncio.wait_for(
                 shutdown_event.wait(), timeout=STALE_PAYMENT_THRESHOLD
@@ -85,126 +78,87 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
         except asyncio.TimeoutError:
             continue
 
-    logger.info("Stale payments worker stopped gracefully")
 
-
-async def _cleanup_orphan_pending_payments():
-    """Ensure durable creation commands; never infer provider failure locally."""
+async def _recover_stale_topups():
     async with session_scope() as session:
-        rows = (
+        payments = (
             await session.scalars(
                 select(Payment)
-                .where(
-                    Payment.provider_status.in_(("creating", "unknown")),
-                    Payment.provider_idempotency_key.is_not(None),
-                )
+                .where(Payment.created_at < now_utc() - timedelta(minutes=5))
+                .order_by(Payment.id)
                 .limit(100)
             )
         ).all()
-        # create commands are created atomically with new payments; missing legacy rows require review, not failure.
-        for payment in rows:
-            if payment.external_id:
-                await ensure_reconcile_payment_operation(
-                    session, payment, reason="stale_worker"
-                )
-
-
-async def _process_stale_payments(bot: Bot, settings):
-    async with session_scope() as session:
-        rows = (
-            await session.scalars(
-                select(Payment)
-                .where(Payment.created_at < now_utc() - timedelta(hours=1))
-                .limit(100)
-            )
-        ).all()
-        for payment in rows:
+        for payment in payments:
             if payment.external_id and payment.provider_status in {
+                "creating",
                 "pending",
+                "waiting_for_capture",
                 "unknown",
             }:
                 await ensure_reconcile_payment_operation(
-                    session, payment, reason="stale_worker"
+                    session, payment, reason="stale_topup_worker"
                 )
             if (
                 payment.provider_status == "succeeded"
+                and payment.provider_confirmed_at is not None
                 and payment.fulfillment_status
                 not in {"succeeded", "reversed", "manual_review"}
             ):
-                if (
-                    payment.payment_kind == "balance_topup"
-                    and payment.provider_confirmed_at is not None
-                ):
-                    from services.account_topup import settle_succeeded_topup_by_id
-
-                    await settle_succeeded_topup_by_id(
-                        session,
-                        payment_id=payment.id,
-                        source="stale_worker_recovery",
-                    )
-                elif payment.payment_kind != "balance_topup":
-                    await ensure_fulfillment(
-                        session, payment, "grant_subscription"
-                    )
-            if (
-                payment.provider_status == "refunded"
-                and payment.fulfillment_status != "reversed"
-            ):
-                await ensure_fulfillment(session, payment, "reverse_payment")
-    await _alert_new_stale_payments(bot, settings)
+                await settle_succeeded_topup_by_id(
+                    session,
+                    payment_id=payment.id,
+                    source="stale_topup_recovery",
+                )
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):
-    current_time = now_utc()
-    threshold = current_time - timedelta(hours=1)
-
+    threshold = now_utc() - timedelta(hours=1)
     async with session_scope() as session:
-        fresh_stmt = (
-            select(Payment, User.telegram_id)
-            .join(User, Payment.user_id == User.id)
-            .where(
-                Payment.status.in_(["pending", "requires_manual_review"]),
-                Payment.created_at < threshold,
+        rows = (
+            await session.execute(
+                select(Payment, User.telegram_id)
+                .join(User, Payment.user_id == User.id)
+                .where(_needs_attention(), Payment.created_at < threshold)
+                .order_by(Payment.created_at.desc())
+                .limit(1000)
             )
-            .order_by(Payment.created_at.desc())
-            .limit(1000)
-        )
-        fresh_result = await session.execute(fresh_stmt)
-        fresh_stale = [
-            (payment, telegram_id) for payment, telegram_id in fresh_result.all()
-        ]
-
-    new_stale_for_alert = [
-        (p, tg) for p, tg in fresh_stale if p.id not in _alerted_stale_payments
+        ).all()
+    new_rows = [
+        (payment, telegram_id)
+        for payment, telegram_id in rows
+        if payment.id not in _alerted_stale_payments
     ]
-
-    if not new_stale_for_alert:
+    if not new_rows:
         return
-
-    msg = (
-        "⚠️ <b>Новые зависшие платежи (pending/review > 1ч)</b>\n"
-        "────────────────────\n"
-        f"Количество: <b>{len(new_stale_for_alert)}</b>\n"
-    )
-
-    for payment, telegram_id in new_stale_for_alert[:10]:
-        method = payment.payment_method or "—"
-        status_icon = "🧪" if payment.status == "requires_manual_review" else "⏳"
-        msg += (
-            f"{status_icon} ID: <code>{payment.id}</code> · "
-            f"User: <code>{telegram_id}</code> · "
-            f"{payment.amount} {payment.currency} · "
-            f"{method}\n"
+    details = []
+    for payment, telegram_id in new_rows[:10]:
+        details.append(
+            texts.STALE_TOPUP_ALERT_ROW.format(
+                icon=(
+                    texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L139_1
+                    if payment_display_status(payment) == "requires_manual_review"
+                    else texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L141_1
+                ),
+                payment_id=payment.id,
+                telegram_id=telegram_id,
+                amount=payment.amount,
+                currency=payment.currency,
+                method=payment.payment_method or texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L147_1,
+            )
         )
-
-    if len(new_stale_for_alert) > 10:
-        msg += f"\n<i>... и ещё {len(new_stale_for_alert) - 10}</i>"
-
+    if len(new_rows) > 10:
+        details.append(
+            texts.STALE_TOPUP_ALERT_MORE.format(count=len(new_rows) - 10)
+        )
+    message = texts.STALE_TOPUP_ALERT.format(
+        count=len(new_rows),
+        details="".join(details),
+    )
     for admin_id in settings.ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, msg, parse_mode="HTML")
-        except Exception as e:
-            logger.error("Stale alert failed to %s: %s", admin_id, e)
-
-    for payment, _ in new_stale_for_alert:
+            await bot.send_message(admin_id, message, parse_mode="HTML")
+        except Exception as exc:
+            logger.error("Stale alert failed to %s: %s", admin_id, exc)
+    for payment, _ in new_rows:
         _alerted_stale_payments[payment.id] = True

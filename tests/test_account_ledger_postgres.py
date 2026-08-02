@@ -143,7 +143,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             current_paid_hours=0,
             current_paid_value_rub=0,
             bonus_hours=0,
-            confirmed_payment_required_rub=Decimal(amount),
+            amount_due_rub=Decimal(amount),
             resulting_paid_hours=720,
             resulting_paid_value_rub=Decimal(amount),
             resulting_bonus_hours=0,

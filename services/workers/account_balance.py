@@ -1,4 +1,5 @@
 """Durable, retryable user notifications for credited top-ups."""
+from bot import texts
 
 import asyncio
 import logging
@@ -219,19 +220,17 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 else duration_hours
             )
             days, remainder = divmod(hours, 24)
-            duration = f"{days} дней" + (
-                f" {remainder} ч." if remainder else ""
+            duration = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L223_1.format(value_0=days) + (
+                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L224_1.format(value_0=remainder) if remainder else ""
             )
             title = (
-                "Смена тарифа с баланса выполнена"
+                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L227_1
                 if operation_type == "change"
-                else "Покупка с баланса выполнена"
+                else texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L229_1
             )
             await bot.send_message(
                 telegram_id,
-                f"✅ <b>{title}</b>\n"
-                f"Срок: <b>{duration}</b>\n"
-                f"Устройства: <b>до {device_limit}</b>",
+                texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(value_0=title, value_1=duration, value_2=device_limit),
                 parse_mode="HTML",
             )
         except TelegramForbiddenError:
@@ -261,7 +260,6 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                 await session.scalars(
                     select(Payment.id)
                     .where(
-                        Payment.payment_kind == "balance_topup",
                         Payment.payment_url.is_not(None),
                         Payment.payment_url_notified_at.is_(None),
                         Payment.ui_visible.is_(True),
@@ -293,9 +291,7 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                 await render_hub(
                     bot,
                     chat_id,
-                    "💳 <b>Ссылка на пополнение готова</b>\n\n"
-                    f"Сумма: <b>{int(payment.amount)} ₽</b>\n\n"
-                    "Перейдите на защищённую страницу ЮKassa.",
+                    texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(value_0=int(payment.amount)),
                     get_topup_payment_keyboard(payment.payment_url, payment.id),
                 )
             except TelegramForbiddenError:
@@ -318,7 +314,6 @@ async def process_balance_notifications(bot: Bot) -> int:
                 select(Payment.id, User.telegram_id)
                 .join(User, User.id == Payment.user_id)
                 .where(
-                    Payment.payment_kind == "balance_topup",
                     Payment.credited_at.is_not(None),
                     Payment.credit_notified_at.is_(None),
                 )
@@ -342,33 +337,27 @@ async def process_balance_notifications(bot: Bot) -> int:
             )
             resume = bool((payment.topup_context or {}).get("operation"))
             suffix = (
-                "\n\nТариф готов к покупке. Подтвердите покупку с баланса."
+                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1
                 if resume
                 else ""
             )
             message = (
-                f"✅ <b>Баланс пополнен на {int(payment.amount)} ₽</b>\n"
-                f"Доступно: <b>{int(balance.available)} ₽</b>{suffix}"
+                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(value_0=int(payment.amount), value_1=int(balance.available), value_2=suffix)
             )
             try:
                 await global_send_limiter.acquire()
-                await bot.send_message(
+                await render_hub(
+                    bot,
                     telegram_id,
                     message,
-                    parse_mode="HTML",
-                    reply_markup=get_topup_credit_keyboard(
-                        payment.topup_context or {}
-                    ),
+                    get_topup_credit_keyboard(payment.topup_context or {}),
                 )
                 if (
                     balance.accounting_position
                     > get_settings().BALANCE_MAX_AVAILABLE_RUB
                 ):
                     diagnostic = (
-                        "⚠️ Поздняя оплата превысила лимит баланса\n"
-                        f"Payment: <code>{payment.id}</code>\n"
-                        f"User: <code>{telegram_id}</code>\n"
-                        f"Баланс: <b>{int(balance.accounting_position)} ₽</b>"
+                        texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(value_0=payment.id, value_1=telegram_id, value_2=int(balance.accounting_position))
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()

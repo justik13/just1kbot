@@ -33,7 +33,7 @@ async def rename_device_start(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_RENAME_ROUTES_L36_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)

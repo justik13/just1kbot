@@ -9,14 +9,12 @@ from typing import Callable
 from sqlalchemy import case, func, literal, or_, select
 
 from database.models import (
-    PaymentFulfillmentOperation,
     PaymentProviderOperation,
     WebhookInbox,
 )
 from database.refund_models import ProviderRefundOperation
 from services.payment_queue_timing import (
     BACKLOG_GRACE_SECONDS,
-    FULFILLMENT_LEASE_SECONDS,
     HEALTH_LEASE_GRACE_SECONDS,
     PROVIDER_LEASE_SECONDS,
     REFUND_LEASE_SECONDS,
@@ -206,18 +204,6 @@ async def get_payment_queue_health_snapshot(
             payment_column=ProviderRefundOperation.payment_id,
             lease_seconds=REFUND_LEASE_SECONDS,
             terminal_status="failed",
-            now=now,
-        ),
-        await _snapshot_queue(
-            session,
-            name="fulfillment_operations",
-            model=PaymentFulfillmentOperation,
-            created_column=PaymentFulfillmentOperation.created_at,
-            updated_column=PaymentFulfillmentOperation.updated_at,
-            terminal_column=PaymentFulfillmentOperation.completed_at,
-            type_column=PaymentFulfillmentOperation.operation_type,
-            payment_column=PaymentFulfillmentOperation.payment_id,
-            lease_seconds=FULFILLMENT_LEASE_SECONDS,
             now=now,
         ),
         await _snapshot_queue(

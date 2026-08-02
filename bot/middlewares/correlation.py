@@ -53,13 +53,10 @@ def _message_log_summary(message: Message) -> str:
     Вместо этого логируем только безопасные метаданные:
     - тип контента;
     - длину текста, если текст есть;
-    - наличие successful_payment.
 
     Это защищает секреты, которые админ может вводить в FSM-состояниях:
     API-ключи, секреты, токены, пароли и т.д.
     """
-    if message.successful_payment:
-        return "content_type=successful_payment"
 
     content_type = message.content_type or "unknown"
 

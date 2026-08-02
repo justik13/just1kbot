@@ -28,12 +28,11 @@ from utils.telegram import safe
 router = Router()
 logger = logging.getLogger(__name__)
 
-QUEUE_ALIASES = {"p": "provider", "f": "fulfillment", "w": "webhook"}
+QUEUE_ALIASES = {"p": "provider", "w": "webhook"}
 QUEUE_CODES = {value: key for key, value in QUEUE_ALIASES.items()}
 QUEUE_LABELS = {
-    "provider": "Provider operations",
-    "fulfillment": "Fulfillment operations",
-    "webhook": "Webhook inbox",
+    "provider": texts.ADMIN_QUEUE_PROVIDER_LABEL,
+    "webhook": texts.ADMIN_QUEUE_WEBHOOK_LABEL,
 }
 
 
@@ -55,25 +54,25 @@ async def _deny(event) -> None:
 
 def _duration(seconds: int | None) -> str:
     if seconds is None:
-        return "—"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L57_1
     if seconds >= 86400:
-        return f"{seconds // 86400}д"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L59_1.format(value_0=seconds // 86400)
     if seconds >= 3600:
-        return f"{seconds // 3600}ч"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L61_1.format(value_0=seconds // 3600)
     if seconds >= 60:
-        return f"{seconds // 60}м"
-    return f"{seconds}с"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L63_1.format(value_0=seconds // 60)
+    return texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L64_1.format(value_0=seconds)
 
 
 def diagnostics_keyboard():
     b = InlineKeyboardBuilder()
     for queue in QUEUE_TYPES:
         b.button(
-            text=f"Открыть {QUEUE_LABELS[queue]}",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L71_1.format(value_0=QUEUE_LABELS[queue]),
             callback_data=f"aq:l:{QUEUE_CODES[queue]}:1",
         )
-    b.button(text="🔄 Обновить", callback_data="aq:home")
-    b.button(text="← В админку", callback_data="admin_menu")
+    b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L74_1, callback_data="aq:home")
+    b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L75_1, callback_data="admin_menu")
     b.adjust(1)
     return b.as_markup()
 
@@ -87,12 +86,11 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
 
 async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
     snapshot = await get_payment_queue_health_snapshot(session)
-    lines = ["🛠 Админка › 🧰 <b>Платёжные очереди</b>", ""]
+    lines = [texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L89_1, ""]
     names = {
-        "provider_operations": "Provider",
-        "provider_refunds": "Refunds",
-        "fulfillment_operations": "Fulfillment",
-        "webhook_inbox": "Webhook",
+        "provider_operations": texts.ADMIN_QUEUE_PROVIDER_SHORT,
+        "provider_refunds": texts.ADMIN_QUEUE_REFUNDS_SHORT,
+        "webhook_inbox": texts.ADMIN_QUEUE_WEBHOOK_SHORT,
     }
     for q in snapshot.queues:
         active_ages = (
@@ -103,10 +101,10 @@ async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
         oldest = max((v for v in active_ages if v is not None), default=None)
         lines.extend(
             (
-                f"<b>{names[q.name]}</b>",
-                f"pending={q.pending} · retry={q.retry} · due={q.due} · overdue={q.overdue}",
-                f"processing={q.processing} · stale={q.stale_processing} · dead={q.dead}",
-                f"Старейшая проблема: {_duration(oldest)}",
+                texts.ADMIN_QUEUE_NAME.format(name=names[q.name]),
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L105_1.format(value_0=q.pending, value_1=q.retry, value_2=q.due, value_3=q.overdue),
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L106_1.format(value_0=q.processing, value_1=q.stale_processing, value_2=q.dead),
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L107_1.format(value_0=_duration(oldest)),
                 "",
             )
         )
@@ -125,28 +123,26 @@ async def _show_list(
 ):
     result = await list_problem_operations(session, queue, page)
     lines = [
-        f"🧰 <b>{QUEUE_LABELS[queue]}</b>",
-        f"Проблемные операции · стр. {page}/{result.total_pages} · всего {result.total}",
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L126_1.format(value_0=QUEUE_LABELS[queue]),
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L127_1.format(value_0=page, value_1=result.total_pages, value_2=result.total),
         "",
     ]
     b = InlineKeyboardBuilder()
     if not result.rows:
-        lines.append("Проблемных операций нет.")
+        lines.append(texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L132_1)
     for row in result.rows:
         lines.append(
-            f"#{row.operation_id} · {safe(row.operation_type)} · {safe(row.status)} · "
-            f"{row.attempts}/{row.max_attempts} · error={safe(row.last_error_code or '—')} · "
-            f"возраст {_duration(row.age_seconds)}"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L135_1.format(value_0=row.operation_id, value_1=safe(row.operation_type), value_2=safe(row.status), value_3=row.attempts, value_4=row.max_attempts, value_5=safe(row.last_error_code or texts.PLACEHOLDER_DASH), value_6=_duration(row.age_seconds))
         )
         b.button(
-            text=f"#{row.operation_id} · {row.status} · {row.operation_type}"[:60],
+            text=texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L140_1.format(value_0=row.operation_id, value_1=row.status, value_2=row.operation_type)[:60],
             callback_data=f"aq:c:{QUEUE_CODES[queue]}:{row.operation_id}",
         )
     if page > 1:
-        b.button(text="⬅️", callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page - 1}")
+        b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L144_1, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page - 1}")
     if page < result.total_pages:
-        b.button(text="➡️", callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page + 1}")
-    b.button(text="← Диагностика", callback_data="aq:home")
+        b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L146_1, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page + 1}")
+    b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L147_1, callback_data="aq:home")
     b.adjust(1)
     await _edit(callback, "\n".join(lines), b.as_markup())
 
@@ -154,19 +150,19 @@ async def _show_list(
 def _card_text(row) -> str:
     return "\n".join(
         (
-            f"🧰 <b>{QUEUE_LABELS[row.queue]}</b>",
-            f"ID: <code>{row.operation_id}</code>",
-            f"Payment ID: {row.payment_id or '—'}",
-            f"Тип: {safe(row.operation_type)}",
-            f"Статус: {safe(row.status)}",
-            f"Попытки: {row.attempts}/{row.max_attempts}",
-            f"Error code: {safe(row.last_error_code or '—')}",
-            f"Создано: {format_datetime(row.created_at)}",
-            f"Обновлено: {format_datetime(row.updated_at)}",
-            f"Завершено/обработано: {format_datetime(row.terminal_at)}",
-            f"Lock timestamp: {format_datetime(row.locked_at)}",
-            f"Lease: {row.lease_status}",
-            f"Ручной retry: {'доступен' if row.retry_allowed else 'недоступен'}",
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L155_1.format(value_0=QUEUE_LABELS[row.queue]),
+            texts.ADMIN_QUEUE_CARD_ID.format(operation_id=row.operation_id),
+            texts.ADMIN_QUEUE_CARD_PAYMENT.format(payment_id=row.payment_id or texts.PLACEHOLDER_DASH),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L158_1.format(value_0=safe(row.operation_type)),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L159_1.format(value_0=safe(row.status)),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L160_1.format(value_0=row.attempts, value_1=row.max_attempts),
+            texts.ADMIN_QUEUE_CARD_ERROR.format(error_code=safe(row.last_error_code or texts.PLACEHOLDER_DASH)),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L162_1.format(value_0=format_datetime(row.created_at)),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L163_1.format(value_0=format_datetime(row.updated_at)),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L164_1.format(value_0=format_datetime(row.terminal_at)),
+            texts.ADMIN_QUEUE_CARD_LOCK.format(locked_at=format_datetime(row.locked_at)),
+            texts.ADMIN_QUEUE_CARD_LEASE.format(lease=row.lease_status),
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L167_1.format(value_0=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
         )
     )
 
@@ -180,10 +176,10 @@ async def _show_card(
     b = InlineKeyboardBuilder()
     if row.retry_allowed:
         b.button(
-            text="Подготовить retry",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L181_1,
             callback_data=f"aq:r:{QUEUE_CODES[queue]}:{operation_id}",
         )
-    b.button(text="← К очереди", callback_data=f"aq:l:{QUEUE_CODES[queue]}:1")
+    b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L184_1, callback_data=f"aq:l:{QUEUE_CODES[queue]}:1")
     b.adjust(1)
     await _edit(callback, _card_text(row), b.as_markup())
     return True
@@ -204,15 +200,15 @@ async def queue_list(callback: CallbackQuery, state: FSMContext, session: AsyncS
         return await _deny(callback)
     parsed = _parse(callback.data, "l")
     if not parsed or len(parsed[1]) != 4:
-        return await callback.answer("Некорректный запрос", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L205_1, show_alert=True)
     try:
         page = int(parsed[1][3])
     except (TypeError, ValueError):
-        return await callback.answer("Некорректная страница", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L209_1, show_alert=True)
     try:
         await _show_list(callback, session, parsed[0], page)
     except ValueError:
-        return await callback.answer("Некорректная страница", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L213_1, show_alert=True)
     await state.clear()
     await callback.answer()
 
@@ -227,10 +223,10 @@ async def queue_card(callback: CallbackQuery, state: FSMContext, session: AsyncS
     except (TypeError, ValueError):
         operation_id = 0
     if operation_id < 1:
-        return await callback.answer("Некорректный ID", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L228_1, show_alert=True)
     await state.clear()
     found = await _show_card(callback, session, parsed[0], operation_id)
-    await callback.answer("" if found else "Операция не найдена", show_alert=not found)
+    await callback.answer("" if found else texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L231_1, show_alert=not found)
 
 
 @router.callback_query(F.data.startswith("aq:r:"))
@@ -245,11 +241,11 @@ async def prepare_retry(
     except (TypeError, ValueError):
         operation_id = 0
     if operation_id < 1:
-        return await callback.answer("Некорректный ID", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L246_1, show_alert=True)
     row = await get_operation_card(session, parsed[0], operation_id)
     if not row or not row.retry_allowed:
         await state.clear()
-        return await callback.answer("Состояние уже изменилось", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L250_1, show_alert=True)
     await state.set_state(QueueRetry.reason)
     await state.set_data(
         {
@@ -259,7 +255,7 @@ async def prepare_retry(
             "action": "manual_retry",
         }
     )
-    await callback.message.answer("Укажите причину ручного retry (3–200 символов).")
+    await callback.message.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L260_1)
     await callback.answer()
 
 
@@ -279,28 +275,28 @@ async def receive_retry_reason(
         or not isinstance(data.get("operation_id"), int)
     ):
         await state.clear()
-        return await message.answer("Подтверждение устарело.")
+        return await message.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L280_1)
     if not 3 <= len(reason) <= 200:
         return await message.answer(
-            "Причина обязательна и должна содержать 3–200 символов."
+            texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L283_1
         )
     row = await get_operation_card(session, data["queue"], data["operation_id"])
     if not row or not row.retry_allowed:
         await state.clear()
-        return await message.answer("Состояние уже изменилось")
+        return await message.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L288_1)
     await state.update_data(
         reason=reason, confirmation_version=row.confirmation_version
     )
     await state.set_state(QueueRetry.confirmation)
     b = InlineKeyboardBuilder()
     b.button(
-        text="Подтвердить retry",
+        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L295_1,
         callback_data=f"aq:x:{QUEUE_CODES[row.queue]}:{row.operation_id}",
     )
-    b.button(text="Отмена", callback_data="aq:no")
+    b.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L298_1, callback_data="aq:no")
     b.adjust(1)
     await message.answer(
-        _card_text(row) + "\n\n⚠️ Операция может быть обработана повторно.",
+        texts.ADMIN_QUEUE_RETRY_CONFIRMATION.format(card=_card_text(row)),
         reply_markup=b.as_markup(),
         parse_mode="HTML",
     )
@@ -333,7 +329,7 @@ async def apply_retry(
         or len(version) != 64
     ):
         await state.clear()
-        return await callback.answer("Подтверждение устарело", show_alert=True)
+        return await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L334_1, show_alert=True)
     try:
         result = await confirm_manual_retry(
             session,
@@ -357,14 +353,14 @@ async def apply_retry(
         return await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
     await state.clear()
     messages = {
-        "retry_scheduled": "Операция поставлена в retry. Исполнение выполнит фоновый worker.",
-        "rejected": f"Retry отклонён: {result.rejection_code or 'safety_policy'}",
-        "not_found": "Операция не найдена",
-        "already_changed": "Состояние уже изменилось",
+        "retry_scheduled": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L358_1,
+        "rejected": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L359_1.format(value_0=result.rejection_code or 'safety_policy'),
+        "not_found": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L360_1,
+        "already_changed": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L361_1,
     }
     await _show_card(callback, session, parsed[0], operation_id)
     await callback.answer(
-        messages.get(result.outcome, "Состояние уже изменилось"), show_alert=True
+        messages.get(result.outcome, texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L365_1), show_alert=True
     )
 
 
@@ -382,5 +378,5 @@ async def cancel_retry(
     if queue in QUEUE_TYPES and isinstance(operation_id, int):
         found = await _show_card(callback, session, queue, operation_id)
     await callback.answer(
-        "Отменено" if found else "Операция не найдена", show_alert=not found
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L383_1 if found else texts.QUEUE_OPERATION_NOT_FOUND, show_alert=not found
     )

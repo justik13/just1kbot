@@ -1,6 +1,6 @@
 #!/bin/bash
-# Safe adapter around the existing audited deploy implementation.
-# It keeps the old behavior while fixing PostgreSQL cluster/port discovery,
+# Production adapter around the audited deploy implementation.
+# It adds PostgreSQL cluster/port discovery,
 # release ownership, runtime isolation, and transactional operational rollback.
 
 set -Eeuo pipefail
@@ -9,11 +9,11 @@ umask 027
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
-LEGACY_DEPLOY="$SCRIPT_DIR/deploy_full.sh"
+BASE_DEPLOY="$SCRIPT_DIR/deploy_full.sh"
 POSTGRES_LIBRARY="$SCRIPT_DIR/lib/postgresql.sh"
 OPERATIONAL_LIBRARY="$SCRIPT_DIR/lib/operational_transaction.sh"
 
-[[ -f "$LEGACY_DEPLOY" && ! -L "$LEGACY_DEPLOY" ]] || {
+[[ -f "$BASE_DEPLOY" && ! -L "$BASE_DEPLOY" ]] || {
     printf 'Отсутствует scripts/deploy_full.sh\n' >&2
     exit 1
 }
@@ -28,7 +28,7 @@ OPERATIONAL_LIBRARY="$SCRIPT_DIR/lib/operational_transaction.sh"
 
 DEPLOY_FUNCTIONS_ONLY=1
 # shellcheck source=deploy_full.sh
-source "$LEGACY_DEPLOY"
+source "$BASE_DEPLOY"
 unset DEPLOY_FUNCTIONS_ONLY
 
 SOURCE_DIR="$ROOT_DIR"
@@ -47,9 +47,9 @@ clone_function() {
     eval "$definition"
 }
 
-clone_function install_backup_tooling legacy_install_backup_tooling
-clone_function setup_firewall_initial legacy_setup_firewall_initial
-clone_function show_status legacy_show_status
+clone_function install_backup_tooling base_install_backup_tooling
+clone_function setup_firewall_initial base_setup_firewall_initial
+clone_function show_status base_show_status
 
 validate_env_file_safety() {
     if [[ -L "$ENV_FILE" || ! -f "$ENV_FILE" ]]; then
@@ -66,8 +66,7 @@ validate_env_file_safety() {
         return 0
     fi
 
-    # Transitional compatibility with installations made by the previous
-    # deploy. The file is converted to root:just1kbot 0640 before migrations.
+    # Accept the service-owned file only long enough to normalize permissions.
     if [[ "$owner" == "$BOT_USER" && "$group" == "$BOT_USER" && "$mode" == 600 ]]; then
         return 0
     fi
@@ -297,7 +296,7 @@ harden_live_tree() {
     log "Запрет записи service user в live-код и virtualenv"
 
     if [[ -L "$PROJECT_DIR/.heartbeat" || -L "$PROJECT_DIR/.heartbeat.tmp" ]]; then
-        error "Legacy heartbeat path является symlink; требуется ручная проверка"
+        error "Obsolete heartbeat path является symlink; требуется ручная проверка"
         return 1
     fi
     rm -f -- "$PROJECT_DIR/.heartbeat" "$PROJECT_DIR/.heartbeat.tmp"
@@ -341,7 +340,7 @@ patch_postgresql_unit_dependency() {
 install_backup_tooling() {
     local saved_source=$SOURCE_DIR
     SOURCE_DIR="$SCRIPT_DIR"
-    legacy_install_backup_tooling
+    base_install_backup_tooling
     SOURCE_DIR=$saved_source
 
     patch_postgresql_unit_dependency /etc/systemd/system/just1kbot-backup.service
@@ -419,7 +418,6 @@ SERVICE=just1kbot
 PROJECT_DIR=/opt/just1kbot
 VENV_DIR="$PROJECT_DIR/venv"
 HEARTBEAT_FILE=/run/just1kbot/heartbeat
-LEGACY_HEARTBEAT_FILE=/opt/just1kbot/.heartbeat
 DEPLOY_LOCK=/run/lock/just1kbot-deploy.lock
 LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
 MAX_HEARTBEAT_AGE=180
@@ -448,11 +446,6 @@ if ! systemctl is-active --quiet "$SERVICE"; then
     exit 1
 fi
 
-# Transitional fallback keeps a previous release observable if this stage
-# rolls back to the old unit. A successful stage-3 deploy deletes this file.
-if [[ ! -f "$HEARTBEAT_FILE" && -f "$LEGACY_HEARTBEAT_FILE" && ! -L "$LEGACY_HEARTBEAT_FILE" ]]; then
-    HEARTBEAT_FILE=$LEGACY_HEARTBEAT_FILE
-fi
 if [[ ! -f "$HEARTBEAT_FILE" || -L "$HEARTBEAT_FILE" ]]; then
     echo "healthcheck: heartbeat is missing or unsafe" >&2
     exit 2
@@ -545,7 +538,7 @@ EOF_HEALTH_TIMER
 
     systemctl daemon-reload
 
-    # Remove only legacy healthcheck cron; preserve every unrelated root cron line.
+    # Remove the obsolete healthcheck cron; preserve every unrelated root cron line.
     if command -v crontab >/dev/null 2>&1; then
         local current filtered
         current=$(mktemp)
@@ -560,14 +553,14 @@ EOF_HEALTH_TIMER
 }
 
 setup_firewall_initial() {
-    legacy_setup_firewall_initial
+    base_setup_firewall_initial
     if [[ "$PG_PORT" != 5432 ]]; then
         ufw deny "${PG_PORT}/tcp" >/dev/null
     fi
 }
 
 show_status() {
-    legacy_show_status
+    base_show_status
     if [[ -n "$PG_UNIT" ]]; then
         printf 'PostgreSQL cluster: %s (%s), port=%s\n' \
             "${PG_VERSION}/${PG_CLUSTER}" \
@@ -697,7 +690,7 @@ install_rollback_override() {
             chown "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
             chmod 0750 "$PROJECT_DIR"
             HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
-            deploy_log 'rollback_heartbeat=legacy project_root_writable=true'
+            deploy_log 'rollback_heartbeat=obsolete project_root_writable=true'
         fi
 
         # No systemd unit in the snapshot means there was no previous installed

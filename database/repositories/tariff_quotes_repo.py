@@ -136,7 +136,7 @@ async def get_or_create_checkout_quote(
     if existing:
         if (
             existing.operation_type != operation_type
-            or existing.confirmed_payment_required_rub != version.price_rub
+            or existing.amount_due_rub != version.price_rub
             or existing.resulting_paid_hours != version.duration_hours
             or existing.resulting_paid_value_rub != version.price_rub
             or existing.currency != version.currency
@@ -152,7 +152,7 @@ async def get_or_create_checkout_quote(
         current_paid_hours=0,
         current_paid_value_rub=Decimal("0"),
         bonus_hours=0,
-        confirmed_payment_required_rub=version.price_rub,
+        amount_due_rub=version.price_rub,
         resulting_paid_hours=version.duration_hours,
         resulting_paid_value_rub=version.price_rub,
         resulting_bonus_hours=0,

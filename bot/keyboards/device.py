@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -6,26 +7,26 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✏️ Изменить имя",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L9_1,
         callback_data=f"rename_device:{profile_id}",
     )
 
     if config_ready:
-        builder.button(text="🔑 Показать ключ", callback_data=f"show_config:{profile_id}")
-        builder.button(text="📥 Скачать .conf", callback_data=f"download_conf:{profile_id}")
+        builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L14_1, callback_data=f"show_config:{profile_id}")
+        builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L15_1, callback_data=f"download_conf:{profile_id}")
 
     builder.button(
-        text="🗑 Удалить устройство",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
         callback_data=f"request_delete_device:{profile_id}",
     )
 
     builder.button(
-        text="← К списку устройств",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L23_1,
         callback_data="back_to_connections",
     )
 
     builder.button(
-        text="🏠 В главное меню",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L28_1,
         callback_data="back_to_main_menu",
     )
 
@@ -40,12 +41,12 @@ def get_device_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✅ Да, удалить",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L43_1,
         callback_data=f"confirm_delete_device:{profile_id}",
     )
 
     builder.button(
-        text="❌ Отмена",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_L48_1,
         callback_data=f"cancel_delete_device:{profile_id}",
     )
 

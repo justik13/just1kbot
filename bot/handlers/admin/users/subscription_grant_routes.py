@@ -61,7 +61,7 @@ async def admin_sub_grant(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L64_1,
             show_alert=True,
         )
         return
@@ -126,7 +126,7 @@ async def admin_sub_grant_group(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L129_1,
             show_alert=True,
         )
         return
@@ -136,7 +136,7 @@ async def admin_sub_grant_group(
 
     if telegram_id is None or device_limit is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L139_1,
             show_alert=True,
         )
         return
@@ -193,7 +193,7 @@ async def admin_sub_grant_confirm(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L196_1,
             show_alert=True,
         )
         return
@@ -210,7 +210,7 @@ async def admin_sub_grant_confirm(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            "Некорректное количество дней",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L213_1,
             show_alert=True,
         )
         return
@@ -237,7 +237,7 @@ async def admin_sub_grant_confirm(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else f"{days} дн."
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L240_1.format(value_0=days)
     )
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
@@ -287,7 +287,7 @@ async def admin_sub_grant_custom_start(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L290_1,
             show_alert=True,
         )
         return
@@ -297,7 +297,7 @@ async def admin_sub_grant_custom_start(
 
     if telegram_id is None or tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L300_1,
             show_alert=True,
         )
         return
@@ -400,7 +400,7 @@ async def admin_sub_grant_custom_process(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else f"{days} дн."
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L403_1.format(value_0=days)
     )
 
     tariff_name = get_tariff_group_name(tariff.device_limit)
@@ -445,7 +445,7 @@ async def admin_sub_grant_apply(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L448_1,
             show_alert=True,
         )
         return
@@ -462,7 +462,7 @@ async def admin_sub_grant_apply(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            "Некорректное количество дней",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L465_1,
             show_alert=True,
         )
         return
@@ -518,7 +518,7 @@ async def admin_sub_grant_apply(
         days_text = (
             texts.ADMIN_SUB_PERMANENT_LABEL
             if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else f"{days} дн."
+            else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L521_1.format(value_0=days)
         )
 
         tariff_name = get_tariff_group_name(tariff.device_limit)
@@ -540,7 +540,7 @@ async def admin_sub_grant_apply(
         new_end_str = (
             format_datetime(user.subscription_end)
             if user and user.subscription_end
-            else "—"
+            else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_GRANT_ROUTES_L543_1
         )
 
         text = texts.ADMIN_SUB_GRANT_SUCCESS.format(

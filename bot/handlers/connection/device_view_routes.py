@@ -48,7 +48,7 @@ async def manage_device(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L51_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -57,8 +57,8 @@ async def manage_device(
         return
 
     server = await get_server_by_id(session, profile.server_id)
-    flag = server.country_flag if server else "🌍"
-    server_name = server.name if server else "Неизвестно"
+    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
+    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
     protocol = _format_protocol(server.protocol if server else None)
 
     rendered = texts.DEVICE_MANAGE_HEADER.format(
@@ -70,7 +70,7 @@ async def manage_device(
         last_connected=(
             format_datetime(profile.last_connected)
             if profile.last_connected
-            else "Нет данных"
+            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L73_1
         ),
     )
 
@@ -84,15 +84,13 @@ async def manage_device(
         )
     else:
         rendered += (
-            "\n⚠️ <b>Доступ неактивен</b>\n"
-            "Ключ и файлы конфигурации недоступны.\n"
-            "Устройство можно удалить.\n"
+            texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
         )
 
         builder = InlineKeyboardBuilder()
-        builder.button(text="🗑 Удалить устройство", callback_data=f"request_delete_device:{profile.id}")
-        builder.button(text="← К списку устройств", callback_data="back_to_connections")
-        builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
         builder.adjust(1)
         keyboard = builder.as_markup()
 
@@ -111,7 +109,7 @@ async def show_config(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L114_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -173,7 +171,7 @@ async def download_conf(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L176_1, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)

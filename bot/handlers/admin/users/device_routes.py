@@ -43,7 +43,7 @@ async def admin_user_devices(
     telegram_id = parse_callback_id(callback.data, 1)
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L46_1,
             show_alert=True,
         )
         return
@@ -74,9 +74,9 @@ async def admin_user_devices(
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
-                or f"Устройство #{profile.id}"
+                or texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L77_1.format(value_0=profile.id)
             )
-            text += f"\n• {safe(name)}"
+            text += texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L79_1.format(value_0=safe(name))
 
     try:
         await callback.message.edit_text(
@@ -106,7 +106,7 @@ async def admin_delete_device_confirm(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L109_1,
             show_alert=True,
         )
         return
@@ -116,7 +116,7 @@ async def admin_delete_device_confirm(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L119_1,
             show_alert=True,
         )
         return
@@ -132,8 +132,8 @@ async def admin_delete_device_confirm(
         return
 
     server = await get_server_by_id(session, profile.server_id)
-    flag = server.country_flag if server else "🌍"
-    server_name = server.name if server else "Неизвестно"
+    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L135_1
+    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L136_1
 
     text = texts.ADMIN_DELETE_DEVICE_CONFIRM.format(
         telegram_id=telegram_id,
@@ -177,7 +177,7 @@ async def admin_delete_device_apply(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L180_1,
             show_alert=True,
         )
         return
@@ -187,7 +187,7 @@ async def admin_delete_device_apply(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L190_1,
             show_alert=True,
         )
         return

@@ -42,21 +42,18 @@ async def _build_tariffs_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        f"🛠 Админка › 💰 <b>Тарифы</b>\n"
-        f"(стр. {page}/{total_pages}) · Всего: {total}\n"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L45_1.format(value_0=page, value_1=total_pages, value_2=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not tariffs:
-        rendered += "<i>Тарифов пока нет</i>\n"
+        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L52_1
     else:
         for tariff in tariffs:
-            status = "🟢" if tariff.is_active else "🔴"
+            status = texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L55_1 if tariff.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                f"{status} {tariff.name} · "
-                f"{tariff.duration_days} дн. · "
-                f"{tariff.price_rub}₽"
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L57_1.format(value_0=status, value_1=tariff.name, value_2=tariff.duration_days, value_3=tariff.price_rub)
             )
             builder.button(
                 text=button_text,
@@ -65,17 +62,17 @@ async def _build_tariffs_list_text_and_kb(
 
     if page > 1:
         builder.button(
-            text="⬅️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L68_1,
             callback_data=f"admin_tariffs_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text="➡️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L73_1,
             callback_data=f"admin_tariffs_page:{page + 1}",
         )
 
     builder.button(
-        text="← В админку",
+        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L78_1,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -173,7 +170,7 @@ async def tariffs_pagination(
     page = parse_callback_id(callback.data, 1)
     if page is None or page < 1:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L176_1,
             show_alert=True,
         )
         return
@@ -188,41 +185,34 @@ async def _show_tariff_card(
     tariff,
 ):
     status = (
-        "🟢 Активен"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L191_1
         if tariff.is_active
-        else "🔴 Отключён"
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L193_1
     )
 
     rendered = (
-        f"🛠 Админка › 💰 Тарифы › <b>Тариф</b>\n"
-        f"<b>ID:</b> {tariff.id}\n"
-        f"<b>Название:</b> {safe(tariff.name)}\n"
-        f"<b>Описание:</b> {safe(tariff.description or '—')}\n"
-        f"<b>Дней:</b> {tariff.duration_days}\n"
-        f"<b>Устройств:</b> {tariff.device_limit}\n"
-        f"<b>Цена ₽:</b> {tariff.price_rub}\n"
-        f"<b>Статус:</b> {status}"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L197_1.format(value_0=tariff.id, value_1=safe(tariff.name), value_2=safe(tariff.description or texts.PLACEHOLDER_DASH), value_3=tariff.duration_days, value_4=tariff.device_limit, value_5=tariff.price_rub, value_6=status)
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✏️ Изменить цену ₽",
+        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L209_1,
         callback_data=f"admin_tariff_edit_rub:{tariff.id}",
     )
 
     if tariff.is_active:
         builder.button(
-            text="🔴 Выключить",
+            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L215_1,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
     else:
         builder.button(
-            text="🟢 Включить",
+            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L220_1,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
 
     builder.button(
-        text="← К списку тарифов",
+        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L225_1,
         callback_data="admin_tariffs",
     )
     builder.adjust(1)
@@ -255,7 +245,7 @@ async def show_tariff_card(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L258_1,
             show_alert=True,
         )
         return
@@ -290,7 +280,7 @@ async def toggle_tariff_confirm(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L293_1,
             show_alert=True,
         )
         return
@@ -309,25 +299,11 @@ async def toggle_tariff_confirm(
 
     if new_status:
         text = (
-            f"⚠️ <b>Подтверждение включения тарифа</b>\n"
-            f"Тариф: <b>{safe(tariff.name)} "
-            f"({tariff.duration_days} дн. / "
-            f"{tariff.device_limit} устр.)</b>\n"
-            f"Тариф снова будет доступен пользователям\n"
-            f"при покупке доступа.\n"
-            f"<i>Уже купленные подписки продолжат "
-            f"работать.</i>"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L312_1.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
         )
     else:
         text = (
-            f"⚠️ <b>Подтверждение отключения тарифа</b>\n"
-            f"Тариф: <b>{safe(tariff.name)} "
-            f"({tariff.duration_days} дн. / "
-            f"{tariff.device_limit} устр.)</b>\n"
-            f"Тариф будет скрыт из списка доступных\n"
-            f"при покупке доступа.\n"
-            f"<i>Уже купленные подписки продолжат "
-            f"работать.</i>"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L323_1.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
         )
 
     try:
@@ -369,7 +345,7 @@ async def toggle_tariff_apply(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L372_1,
             show_alert=True,
         )
         return
@@ -447,7 +423,7 @@ async def start_edit_tariff_rub(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L450_1,
             show_alert=True,
         )
         return
@@ -513,7 +489,7 @@ async def process_edit_tariff_rub(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"⚠️ Цена должна быть от 1 до {MAX_TARIFF_PRICE} ₽.",
+            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L516_1.format(value_0=MAX_TARIFF_PRICE),
             get_back_button("admin_tariffs"),
         )
         return
