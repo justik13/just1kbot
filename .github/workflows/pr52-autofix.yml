@@ -1,4 +1,4 @@
-name: PR 52 autofix
+name: PR 52 workspace audit
 
 on:
   push:
@@ -6,131 +6,23 @@ on:
       - feature/yookassa-account-balance
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  fix-and-validate:
+  export-workspace:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: projectx
-          POSTGRES_PASSWORD: projectx
-          POSTGRES_DB: projectx_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U projectx -d projectx_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
-      TEST_DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
-      DB_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
-      BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/yookassa-account-balance
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - name: Export exact source tree
+        run: git archive --format=zip --output=pr52-source-${GITHUB_SHA}.zip HEAD
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
         with:
-          python-version: "3.13"
-          cache: pip
-      - name: Install dependencies
-        run: |
-          python -m pip install -r requirements.txt
-          python -m pip install ruff==0.16.1
-      - name: Apply focused fixes
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              file = Path(path)
-              text = file.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{path}: expected one match, found {count}")
-              file.write_text(text.replace(old, new, 1))
-
-          for path in (
-              "services/account_purchase.py",
-              "services/account_tariff_change.py",
-          ):
-              replace_once(
-                  path,
-                  "        insert(EntitlementEntry)\n        .values(",
-                  "        insert(EntitlementEntry.__table__)\n        .values(",
-              )
-              replace_once(
-                  path,
-                  "        .returning(EntitlementEntry.id)\n",
-                  "        .returning(EntitlementEntry.__table__.c.id)\n",
-              )
-
-          replace_once(
-              "tests/test_account_ledger_postgres.py",
-              "    async def asyncTearDown(self):\n        await self.engine.dispose()\n",
-              "    async def asyncTearDown(self):\n"
-              "        async with self.sessions.begin() as session:\n"
-              "            await session.execute(\n"
-              "                text(\n"
-              "                    \"TRUNCATE account_balance_reservations, \"\n"
-              "                    \"account_ledger_allocations, account_ledger_entries, \"\n"
-              "                    \"entitlement_entries, paid_value_ledger, \"\n"
-              "                    \"tariff_quotes, tariff_versions, payments, users, tariffs \"\n"
-              "                    \"RESTART IDENTITY CASCADE\"\n"
-              "                )\n"
-              "            )\n"
-              "        await self.engine.dispose()\n",
-          )
-          replace_once(
-              "tests/test_account_ledger_postgres.py",
-              "            self.assertEqual(\n"
-              "                (await get_account_balance(session, user_id=self.user_id)).available,\n"
-              "                Decimal(\"30.00\"),\n"
-              "            )\n\n"
-              "        async with self.sessions.begin() as session:\n",
-              "            self.assertEqual(\n"
-              "                (await get_account_balance(session, user_id=self.user_id)).available,\n"
-              "                Decimal(\"30.00\"),\n"
-              "            )\n"
-              "            quote.status = \"consumed\"\n\n"
-              "        async with self.sessions.begin() as session:\n",
-          )
-          PY
-      - name: Lint focused changes
-        run: >-
-          ruff check services/account_purchase.py
-          services/account_tariff_change.py
-          tests/test_account_ledger_postgres.py
-          --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
-          --ignore PLW0603,PLW0108
-          --output-format full
-      - name: Upgrade database
-        run: alembic upgrade head
-      - name: Run full test suite
-        run: python -m unittest discover -s tests -v
-        env:
-          RUN_BACKUP_INTEGRATION: "1"
-          BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
-      - name: Validate latest migration downgrade and upgrade
-        run: |
-          alembic downgrade -1
-          alembic upgrade head
-      - name: Validate source tree
-        run: |
-          python -m compileall -q bot config database services utils alembic tests
-          git diff --check
-      - name: Commit validated fixes
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add services/account_purchase.py services/account_tariff_change.py tests/test_account_ledger_postgres.py
-          git diff --cached --quiet && exit 0
-          git commit -m "fix: stabilize balance settlement tests"
-          git push origin HEAD:feature/yookassa-account-balance
+          name: pr52-source-${{ github.sha }}
+          path: pr52-source-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 1
