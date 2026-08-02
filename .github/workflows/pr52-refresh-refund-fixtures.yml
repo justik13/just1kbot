@@ -1,0 +1,71 @@
+name: PR52 refresh refund fixtures
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'feature/yookassa-account-balance'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/yookassa-account-balance
+          fetch-depth: 0
+      - name: Update stale refund fixtures
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_payment_pipeline_postgres.py')
+          source = path.read_text(encoding='utf-8')
+          old = '''        payload = {
+            "object": {
+                "id": refund_id,
+                "payment_id": p.external_id,
+                "amount": {"value": "90.00", "currency": "RUB"},
+            }
+        }
+'''
+          new = '''        verified_refund = {
+            "id": refund_id,
+            "status": "succeeded",
+            "payment_id": p.external_id,
+            "amount": {"value": "90.00", "currency": "RUB"},
+        }
+        payload = {"object": dict(verified_refund)}
+'''
+          if source.count(old) != 1:
+              raise SystemExit('refund fixture block not found exactly once')
+          source = source.replace(old, new, 1)
+          old_result = '''            None,
+        )
+        return row
+'''
+          new_result = '''            YooKassaResult(True, value=verified_refund),
+        )
+        return row
+'''
+          helper_start = source.index('    async def _finalize_duplicate_refund')
+          helper_end = source.index('\n    async def test_duplicate_full_refund', helper_start)
+          helper = source[helper_start:helper_end]
+          if helper.count(old_result) != 1:
+              raise SystemExit('refund result fixture not found exactly once')
+          helper = helper.replace(old_result, new_result, 1)
+          source = source[:helper_start] + helper + source[helper_end:]
+          path.write_text(source, encoding='utf-8')
+          PY
+          rm -f .github/workflows/pr52-refresh-refund-fixtures.yml
+          git add -A
+          git diff --cached --check
+          python -m compileall -q tests/test_payment_pipeline_postgres.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "test: verify duplicate refund fixtures"
+          git push origin HEAD:feature/yookassa-account-balance
