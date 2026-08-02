@@ -31,13 +31,14 @@ class BalanceTelegramUXTests(unittest.TestCase):
             SimpleNamespace(price_rub=149, is_active=True),
             SimpleNamespace(price_rub=499, is_active=True),
             SimpleNamespace(price_rub=1001, is_active=True),
-            SimpleNamespace(price_rub=299, is_active=False),
+            SimpleNamespace(price_rub=299, is_active=True),
             SimpleNamespace(price_rub=799, is_active=True),
             SimpleNamespace(price_rub=999, is_active=True),
             SimpleNamespace(price_rub=399, is_active=True),
             SimpleNamespace(price_rub=599, is_active=True),
             SimpleNamespace(price_rub=699, is_active=True),
         ]
+        tariffs[4].is_active = False
         settings = SimpleNamespace(
             BALANCE_MAX_PRESET_RUB=1000,
             BALANCE_MAX_PRESET_OPTIONS=6,
@@ -91,7 +92,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["6b8d2f0e4a50"])
+        self.assertEqual(scripts.get_heads(), ["7c9e3a1f5b60"])
 
 
 if __name__ == "__main__":
