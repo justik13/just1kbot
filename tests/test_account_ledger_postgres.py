@@ -1,0 +1,372 @@
+"""PostgreSQL contracts for account balance, FIFO lots and reservations."""
+
+import asyncio
+import os
+import unittest
+import uuid
+from datetime import timedelta
+from decimal import Decimal
+
+from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from database.models import (
+    AccountBalanceReservation,
+    AccountLedgerAllocation,
+    AccountLedgerEntry,
+    Payment,
+    Tariff,
+    TariffQuote,
+    TariffVersion,
+    User,
+)
+from database.repositories.account_ledger_repo import (
+    InsufficientAccountBalanceError,
+    create_payment_debit,
+    create_purchase_debit,
+    credit_succeeded_topup,
+    get_account_balance,
+    get_payment_refundable_amount,
+    reserve_payment_funds,
+    resolve_reservation,
+)
+from utils.datetime_helpers import now_utc
+
+
+DB = os.getenv("TEST_DATABASE_URL")
+
+
+@unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
+class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine(DB)
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.sessions.begin() as session:
+            await session.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "tariff_quotes, tariff_versions, payments, users, tariffs "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+            user = User(telegram_id=uuid.uuid4().int % 10**12)
+            tariff = Tariff(
+                name="Account test",
+                duration_days=30,
+                device_limit=2,
+                price_rub=100,
+                is_active=True,
+            )
+            session.add_all((user, tariff))
+            await session.flush()
+            version = TariffVersion(
+                tariff_id=tariff.id,
+                version_number=1,
+                name_snapshot=tariff.name,
+                duration_hours=720,
+                device_limit=2,
+                price_rub=Decimal("100"),
+                currency="RUB",
+            )
+            session.add(version)
+            await session.flush()
+            self.user_id = user.id
+            self.tariff_id = tariff.id
+            self.version_id = version.id
+
+    async def asyncTearDown(self):
+        await self.engine.dispose()
+
+    async def topup(self, session, amount: int) -> Payment:
+        payment = Payment(
+            user_id=self.user_id,
+            tariff_id=None,
+            payment_kind="balance_topup",
+            amount=Decimal(amount),
+            currency="RUB",
+            status="paid_processing",
+            public_order_id="topup_" + uuid.uuid4().hex,
+            provider_idempotency_key=uuid.uuid4().hex,
+            provider_status="succeeded",
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+            checkout_status="active",
+            ui_visible=True,
+            snapshot_amount=Decimal(amount),
+            snapshot_currency="RUB",
+            provider_confirmed_at=now_utc(),
+        )
+        session.add(payment)
+        await session.flush()
+        return payment
+
+    async def quote(self, session, amount: int, operation: str = "purchase"):
+        now = now_utc()
+        quote = TariffQuote(
+            public_id=uuid.uuid4(),
+            user_id=self.user_id,
+            operation_type=operation,
+            target_tariff_version_id=self.version_id,
+            current_paid_hours=0,
+            current_paid_value_rub=0,
+            bonus_hours=0,
+            confirmed_payment_required_rub=Decimal(amount),
+            resulting_paid_hours=720,
+            resulting_paid_value_rub=Decimal(amount),
+            resulting_bonus_hours=0,
+            rounding_loss_hours=0,
+            rounding_loss_value_rub=0,
+            currency="RUB",
+            status="active",
+            created_at=now,
+            expires_at=now + timedelta(minutes=15),
+        )
+        session.add(quote)
+        await session.flush()
+        return quote
+
+    async def test_topup_is_credited_exactly_once(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            first, created = await credit_succeeded_topup(
+                session, payment_id=payment.id
+            )
+            again, created_again = await credit_succeeded_topup(
+                session, payment_id=payment.id
+            )
+            self.assertTrue(created)
+            self.assertFalse(created_again)
+            self.assertEqual(first.id, again.id)
+
+        async with self.sessions() as session:
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            count = await session.scalar(select(func.count(AccountLedgerEntry.id)))
+            self.assertEqual(count, 1)
+            self.assertEqual(snapshot.available, Decimal("100.00"))
+            self.assertEqual(snapshot.debt, Decimal("0"))
+
+    async def test_purchase_allocates_fifo_and_cannot_overdraw(self):
+        async with self.sessions.begin() as session:
+            first = await self.topup(session, 40)
+            await credit_succeeded_topup(session, payment_id=first.id)
+            second = await self.topup(session, 60)
+            await credit_succeeded_topup(session, payment_id=second.id)
+            quote = await self.quote(session, 70)
+            debit, created = await create_purchase_debit(
+                session,
+                user_id=self.user_id,
+                quote_id=quote.id,
+                amount=70,
+            )
+            self.assertTrue(created)
+            allocations = list(
+                (
+                    await session.scalars(
+                        select(AccountLedgerAllocation)
+                        .where(AccountLedgerAllocation.debit_entry_id == debit.id)
+                        .order_by(AccountLedgerAllocation.id)
+                    )
+                ).all()
+            )
+            self.assertEqual(
+                [item.amount for item in allocations],
+                [Decimal("40.00"), Decimal("30.00")],
+            )
+            self.assertEqual(
+                (await get_account_balance(session, user_id=self.user_id)).available,
+                Decimal("30.00"),
+            )
+
+        async with self.sessions.begin() as session:
+            another = await self.quote(session, 31, operation="renew")
+            with self.assertRaises(InsufficientAccountBalanceError):
+                await create_purchase_debit(
+                    session,
+                    user_id=self.user_id,
+                    quote_id=another.id,
+                    amount=31,
+                )
+
+    async def test_concurrent_duplicate_confirmation_creates_one_debit(self):
+        async with self.sessions.begin() as session:
+            topup = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=topup.id)
+            quote = await self.quote(session, 100)
+            quote_id = quote.id
+
+        async def confirm():
+            async with self.sessions.begin() as session:
+                return await create_purchase_debit(
+                    session,
+                    user_id=self.user_id,
+                    quote_id=quote_id,
+                    amount=100,
+                )
+
+        results = await asyncio.gather(confirm(), confirm())
+        self.assertEqual(sum(created for _, created in results), 1)
+        async with self.sessions() as session:
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.entry_type == "purchase_debit"
+                    )
+                ),
+                1,
+            )
+            self.assertEqual(
+                await session.scalar(select(func.count(AccountLedgerAllocation.id))),
+                1,
+            )
+
+    async def test_reservation_is_unspendable_and_release_restores_balance(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            reservation, created = await reserve_payment_funds(
+                session,
+                payment_id=payment.id,
+                reservation_type="refund",
+                amount=60,
+                idempotency_key=f"refund-reserve:{payment.id}:60",
+            )
+            self.assertTrue(created)
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(snapshot.available, Decimal("40.00"))
+            self.assertEqual(snapshot.reserved, Decimal("60.00"))
+            quote = await self.quote(session, 41)
+            with self.assertRaises(InsufficientAccountBalanceError):
+                await create_purchase_debit(
+                    session,
+                    user_id=self.user_id,
+                    quote_id=quote.id,
+                    amount=41,
+                )
+            await resolve_reservation(
+                session, reservation_id=reservation.id, outcome="released"
+            )
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(snapshot.available, Decimal("100.00"))
+            self.assertEqual(snapshot.reserved, Decimal("0"))
+
+    async def test_chargeback_debt_is_repaid_before_new_money_is_available(self):
+        async with self.sessions.begin() as session:
+            disputed = await self.topup(session, 50)
+            await credit_succeeded_topup(session, payment_id=disputed.id)
+            quote = await self.quote(session, 30)
+            await create_purchase_debit(
+                session,
+                user_id=self.user_id,
+                quote_id=quote.id,
+                amount=30,
+            )
+            await create_payment_debit(
+                session,
+                payment_id=disputed.id,
+                entry_type="chargeback_debit",
+                amount=50,
+                idempotency_key=f"chargeback:{disputed.id}",
+            )
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(snapshot.available, Decimal("0"))
+            self.assertEqual(snapshot.debt, Decimal("30.00"))
+            repayment = await self.topup(session, 40)
+            credit, _ = await credit_succeeded_topup(
+                session, payment_id=repayment.id
+            )
+            self.assertEqual(credit.metadata_["debt_offset_rub"], "30.00")
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            self.assertEqual(snapshot.debt, Decimal("0"))
+            self.assertEqual(snapshot.available, Decimal("10.00"))
+
+    async def test_refundable_amount_tracks_allocations_and_reservations(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            quote = await self.quote(session, 35)
+            await create_purchase_debit(
+                session,
+                user_id=self.user_id,
+                quote_id=quote.id,
+                amount=35,
+            )
+            self.assertEqual(
+                await get_payment_refundable_amount(
+                    session, payment_id=payment.id
+                ),
+                Decimal("65.00"),
+            )
+            await reserve_payment_funds(
+                session,
+                payment_id=payment.id,
+                reservation_type="refund",
+                amount=20,
+                idempotency_key=f"refund-reserve:{payment.id}:20",
+            )
+            self.assertEqual(
+                await get_payment_refundable_amount(
+                    session, payment_id=payment.id
+                ),
+                Decimal("45.00"),
+            )
+
+    async def test_ledger_and_allocations_reject_update_and_delete(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            credit, _ = await credit_succeeded_topup(
+                session, payment_id=payment.id
+            )
+            quote = await self.quote(session, 50)
+            debit, _ = await create_purchase_debit(
+                session,
+                user_id=self.user_id,
+                quote_id=quote.id,
+                amount=50,
+            )
+            allocation_id = await session.scalar(
+                select(AccountLedgerAllocation.id).where(
+                    AccountLedgerAllocation.debit_entry_id == debit.id
+                )
+            )
+            credit_id = credit.id
+
+        with self.assertRaises(DBAPIError):
+            async with self.sessions.begin() as session:
+                await session.execute(
+                    update(AccountLedgerEntry)
+                    .where(AccountLedgerEntry.id == credit_id)
+                    .values(amount=Decimal("101"))
+                )
+        with self.assertRaises(DBAPIError):
+            async with self.sessions.begin() as session:
+                await session.execute(
+                    delete(AccountLedgerAllocation).where(
+                        AccountLedgerAllocation.id == allocation_id
+                    )
+                )
+
+    async def test_reservation_identity_is_immutable(self):
+        async with self.sessions.begin() as session:
+            payment = await self.topup(session, 100)
+            await credit_succeeded_topup(session, payment_id=payment.id)
+            reservation, _ = await reserve_payment_funds(
+                session,
+                payment_id=payment.id,
+                reservation_type="dispute",
+                amount=20,
+                idempotency_key=f"dispute:{payment.id}",
+            )
+            reservation_id = reservation.id
+        with self.assertRaises(DBAPIError):
+            async with self.sessions.begin() as session:
+                await session.execute(
+                    update(AccountBalanceReservation)
+                    .where(AccountBalanceReservation.id == reservation_id)
+                    .values(amount=Decimal("21"))
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
