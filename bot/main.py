@@ -297,7 +297,6 @@ async def main():
             return
 
         logger.info("Инициализация БД...")
-        logger.info("Инициализация БД...")
         await init_db()
 
         logger.info(
