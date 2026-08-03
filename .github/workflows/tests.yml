@@ -29,6 +29,7 @@ jobs:
       DB_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
       # Deliberately invalid test-only value; this is not a production secret.
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
+      SUPPORT_USERNAME: "test_support_bot"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
