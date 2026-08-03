@@ -50,7 +50,8 @@ setup_user_and_dirs(){
     if ! id "$BOT_USER" >/dev/null 2>&1; then useradd -r -m -d "$BOT_HOME" -s "$shell" "$BOT_USER"; fresh=true; else home=$(getent passwd "$BOT_USER"|cut -d: -f6); current_shell=$(getent passwd "$BOT_USER"|cut -d: -f7); [[ "$home" == "$BOT_HOME" ]] || { error "Service user home mismatch: $home"; return 1; }; case "$current_shell" in /usr/sbin/nologin|/sbin/nologin) :;; /bin/bash) usermod -s "$shell" "$BOT_USER";; *) error "Service user shell mismatch: $current_shell"; return 1;; esac; fi
     [[ ! -L "$BOT_HOME" && ! -L "$PROJECT_DIR" && ! -L "$STATE_ROOT" ]] || { error 'Reserved directory является symlink'; return 1; }
     install -d -o root -g "$BOT_USER" -m 0750 "$PROJECT_DIR"
-    install -d -o root -g root -m 0700 "$BACKUP_DIR" "$SNAPSHOT_DIR" "$STATE_ROOT" "$INSTALL_STATE_DIR"
+    install -d -o root -g root -m 0711 "$STATE_ROOT"
+    install -d -o root -g root -m 0700 "$BACKUP_DIR" "$SNAPSHOT_DIR" "$INSTALL_STATE_DIR"
     install -d -o "$BOT_USER" -g "$BOT_USER" -m 0750 /var/log/just1kbot "$RUNTIME_DIR"
     foundation_manifest_add "service-user:$BOT_USER"; foundation_manifest_add "path:$BOT_HOME"; foundation_manifest_add "path:$PROJECT_DIR"; foundation_manifest_add "path:$STATE_ROOT"; foundation_manifest_add "path:$BACKUP_DIR"; foundation_manifest_add "path:$SNAPSHOT_DIR"
     [[ "$fresh" == false ]] || foundation_journal_add_created "service-user:$BOT_USER"

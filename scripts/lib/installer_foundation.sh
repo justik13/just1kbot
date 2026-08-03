@@ -582,8 +582,10 @@ foundation_setup_state_dirs() {
     foundation_secure_parent_chain "$STATE_ROOT"
     if foundation_path_exists "$STATE_ROOT"; then
         foundation_assert_directory "$STATE_ROOT"
+        # fix perms if they were 0700
+        chmod 0711 "$STATE_ROOT"
     else
-        install -d -o root -g root -m 0700 "$STATE_ROOT"
+        install -d -o root -g root -m 0711 "$STATE_ROOT"
         foundation_journal_add_created_resource "path:$STATE_ROOT"
     fi
     install -d -o root -g root -m 0700 "$INSTALL_STATE_DIR"
@@ -686,20 +688,49 @@ EOF_UNIT
 
     systemctl daemon-reload
     systemctl enable "$REDIS_SERVICE" >/dev/null
+
+    # Pre-flight path check
+    sudo -u redis test -d "$REDIS_DATA_DIR" || {
+        foundation_fail \
+            REDIS_DATA_UNREACHABLE \
+            'Redis не может получить доступ к своему каталогу данных' \
+            "Пользователь redis не может прочитать $REDIS_DATA_DIR" \
+            "Проверьте права доступа на родительские каталоги (например, $STATE_ROOT)."
+    }
+
     systemctl restart "$REDIS_SERVICE"
-    local deadline=$(( $(date +%s) + 30 ))
-    while (( $(date +%s) <= deadline )); do
+
+    # Exponential backoff with retry for Redis PING
+    local max_retries=16
+    local base_delay=1
+    local retries=0
+    local success=false
+
+    while (( retries < max_retries )); do
         if REDISCLI_AUTH="$password" redis-cli -h 127.0.0.1 -p "$REDIS_PORT" -n 0 PING 2>/dev/null | grep -qx PONG; then
-            return 0
+            success=true
+            break
         fi
-        sleep 1
+        sleep "$base_delay"
+        base_delay=$(( base_delay * 2 > 10 ? 10 : base_delay * 2 ))
+        retries=$(( retries + 1 ))
     done
-    journalctl -u "$REDIS_SERVICE" -n 80 --no-pager >&2 2>/dev/null || true
-    foundation_fail \
-        REDIS_START_FAILED \
-        'dedicated Redis не прошёл PING' \
-        "$REDIS_SERVICE не отвечает на 127.0.0.1:$REDIS_PORT" \
-        "Проверьте journalctl -u $REDIS_SERVICE и свободное место в $REDIS_DATA_DIR."
+
+    if [[ "$success" == false ]]; then
+        journalctl -u "$REDIS_SERVICE" -n 80 --no-pager >&2 2>/dev/null || true
+        # Attempt to parse stderr for readable permission error
+        local redis_logs
+        redis_logs=$(journalctl -u "$REDIS_SERVICE" -n 20 --no-pager 2>/dev/null)
+        if echo "$redis_logs" | grep -qi "Permission denied"; then
+             printf "\n>>> Redis (uid=$(id -u redis)) не может открыть $REDIS_DATA_DIR: Permission denied на родительском каталоге <<<\n" >&2
+        fi
+
+        foundation_fail \
+            REDIS_START_FAILED \
+            'dedicated Redis не прошёл PING' \
+            "$REDIS_SERVICE не отвечает на 127.0.0.1:$REDIS_PORT" \
+            "Проверьте journalctl -u $REDIS_SERVICE и свободное место в $REDIS_DATA_DIR."
+    fi
 }
 
 foundation_update_redis_env() {
