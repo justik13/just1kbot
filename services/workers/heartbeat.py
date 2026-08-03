@@ -21,9 +21,6 @@ def get_heartbeat_file() -> Path:
     explicit_file = os.environ.get("JUST1KBOT_HEARTBEAT_FILE")
     if explicit_file:
         return Path(explicit_file)
-    project_dir = os.environ.get("JUST1KBOT_DIR") or os.environ.get("just1kbot_DIR")
-    if project_dir:
-        return Path(project_dir) / ".heartbeat"
     return PRODUCTION_HEARTBEAT_FILE
 
 
@@ -118,6 +115,7 @@ async def _check_circuit_breakers():
 
 def set_bot_ref(bot):
     global _bot_ref
+
     _bot_ref = bot
 
 
