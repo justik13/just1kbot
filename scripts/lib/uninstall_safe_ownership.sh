@@ -12,17 +12,49 @@ clone_uninstall_function() {
 }
 
 clone_uninstall_function prepare_postgres ownership_base_prepare_postgres
+clone_uninstall_function purge_postgres ownership_base_purge_postgres
 clone_uninstall_function remove_certificate ownership_base_remove_certificate
 clone_uninstall_function remove_files ownership_base_remove_files
 clone_uninstall_function post_verify ownership_base_post_verify
+
+POSTGRES_RESOURCES_OWNED=false
 
 postgres_expected_marker() {
     printf 'managed-by=just1kbot;installation-id=%s' "$(foundation_manifest_id)"
 }
 
+postgres_manifest_state() {
+    local database_marker role_marker
+    database_marker="postgresql:${PG_VERSION}/${PG_CLUSTER}:database:$PG_DATABASE"
+    role_marker="postgresql:${PG_VERSION}/${PG_CLUSTER}:role:$PG_ROLE"
+    local has_database=false has_role=false
+    foundation_manifest_has "$database_marker" && has_database=true
+    foundation_manifest_has "$role_marker" && has_role=true
+    if [[ "$has_database" == true && "$has_role" == true ]]; then
+        POSTGRES_RESOURCES_OWNED=true
+        return 0
+    fi
+    if [[ "$has_database" == false && "$has_role" == false && "$INCOMPLETE_INSTALL" == true ]]; then
+        POSTGRES_RESOURCES_OWNED=false
+        return 0
+    fi
+    fail \
+        'PostgreSQL ownership markers неполны' \
+        "database_marker=$has_database role_marker=$has_role" \
+        'Сохраните manifest и выполните ручной аудит; partial ownership нельзя удалять автоматически.'
+}
+
 prepare_postgres() {
-    ownership_base_prepare_postgres
     [[ "$MODE" == purge ]] || return 0
+
+    # Select the cluster first so exact manifest resource names can be checked.
+    pg_select_cluster || fail 'не удалось выбрать PostgreSQL cluster'
+    if [[ "$PG_STATUS" != online ]]; then
+        pg_start_cluster || fail 'не удалось проверить PostgreSQL cluster'
+    fi
+    postgres_manifest_state
+    [[ "$POSTGRES_RESOURCES_OWNED" == true ]] || return 0
+
     local expected database_comment role_comment
     expected=$(postgres_expected_marker)
     database_comment=$(pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
@@ -41,6 +73,11 @@ SQL
         fail 'database ownership COMMENT не совпадает с manifest installation ID'
     [[ "$role_comment" == "$expected" ]] ||
         fail 'role ownership COMMENT не совпадает с manifest installation ID'
+}
+
+purge_postgres() {
+    [[ "$MODE" == purge && "$POSTGRES_RESOURCES_OWNED" == true ]] || return 0
+    ownership_base_purge_postgres
 }
 
 remove_certificate() {
@@ -63,7 +100,7 @@ remove_files() {
 }
 
 verify_postgres_absent() {
-    [[ "$MODE" == purge ]] || return 0
+    [[ "$MODE" == purge && "$POSTGRES_RESOURCES_OWNED" == true ]] || return 0
     local database_exists role_exists
     database_exists=$(pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
 SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db');
