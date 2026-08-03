@@ -65,7 +65,6 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             user_id=self.user_id,
             amount=Decimal(amount),
             currency="RUB",
-            status="completed",
             public_order_id="topup_" + uuid.uuid4().hex,
             provider_idempotency_key=uuid.uuid4().hex,
             provider_status="succeeded",
