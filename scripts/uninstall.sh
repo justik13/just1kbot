@@ -4,7 +4,6 @@ IFS=$'\n\t'
 umask 077
 
 BOT_USER=just1kbot
-BOT_HOME=/home/just1kbot
 PROJECT_DIR=/opt/just1kbot
 BACKUP_DIR=/root/backups/just1kbot
 BACKUP_CONF=/etc/just1kbot-backup.conf
@@ -16,6 +15,7 @@ RESTORE_JOURNAL_STATE=$RESTORE_STATE_DIR/cutover-journal.env
 LOCK_FILE=/run/lock/just1kbot-deploy.lock
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 PG_LIB=$SCRIPT_DIR/lib/postgresql.sh
+PREFLIGHT_RESOURCES=$SCRIPT_DIR/preflight_uninstall_resources.sh
 MODE=
 WEBHOOK_DOMAIN=
 WEBHOOK_PORT=8080
@@ -137,6 +137,15 @@ acquire_uninstall_lock() {
         'Дождитесь завершения активной операции и повторите команду.'
 }
 
+run_resource_preflight() {
+    [[ -f "$PREFLIGHT_RESOURCES" && ! -L "$PREFLIGHT_RESOURCES" ]] ||
+        fail 'resource preflight отсутствует или небезопасен' "$PREFLIGHT_RESOURCES"
+    bash "$PREFLIGHT_RESOURCES" || fail \
+        'ownership удаляемых ресурсов не подтверждён' \
+        'read-only resource preflight завершился ошибкой' \
+        'Прочитайте точный конфликт выше. Чужой ресурс автоматически изменён не будет.'
+}
+
 pause_operational_work() {
     local timer
     for timer in just1kbot-backup.timer just1kbot-healthcheck.timer; do
@@ -238,8 +247,8 @@ read_webhook_config() {
     [[ -f "$PROJECT_DIR/.env" && ! -L "$PROJECT_DIR/.env" ]] || return 0
     local output
     output=$(ENV_FILE_PATH="$PROJECT_DIR/.env" python3 - <<'PY'
-import re
 import os
+import re
 from pathlib import Path
 
 values = {}
@@ -473,21 +482,8 @@ SQL
     [[ "$role_remaining" == 0 ]] || fail 'PostgreSQL role осталась' "$PG_ROLE"
 }
 
-assert_managed_unit_file() {
-    local path=$1
-    [[ -e "$path" || -L "$path" ]] || return 0
-    [[ -f "$path" && ! -L "$path" ]] ||
-        fail 'systemd resource имеет небезопасный тип' "$path"
-    grep -Eq 'Just1kBot|/opt/just1kbot|/usr/local/bin/just1kbot' "$path" ||
-        fail \
-            'systemd resource не содержит ожидаемых ownership markers' \
-            "$path" \
-            'Проверьте файл вручную; uninstall не будет удалять его как чужой.'
-}
-
 remove_systemd_resources() {
-    local path
-    for path in \
+    rm -f -- \
         /etc/systemd/system/just1kbot.service \
         /etc/systemd/system/just1kbot-backup.service \
         /etc/systemd/system/just1kbot-healthcheck.service \
@@ -497,61 +493,20 @@ remove_systemd_resources() {
         /etc/systemd/system/just1kbot-notifications.service \
         /etc/systemd/system/just1kbot-cleanup.service \
         /etc/systemd/system/just1kbot-stale-payments.service \
-        /etc/systemd/system/just1kbot-heartbeat.service; do
-        assert_managed_unit_file "$path"
-    done
-    for path in \
-        /etc/systemd/system/just1kbot.service \
-        /etc/systemd/system/just1kbot-backup.service \
-        /etc/systemd/system/just1kbot-healthcheck.service \
-        /etc/systemd/system/just1kbot-backup.timer \
-        /etc/systemd/system/just1kbot-healthcheck.timer \
-        /etc/systemd/system/just1kbot-traffic.service \
-        /etc/systemd/system/just1kbot-notifications.service \
-        /etc/systemd/system/just1kbot-cleanup.service \
-        /etc/systemd/system/just1kbot-stale-payments.service \
-        /etc/systemd/system/just1kbot-heartbeat.service; do
-        rm -f -- "$path"
-    done
+        /etc/systemd/system/just1kbot-heartbeat.service
     systemctl daemon-reload
     systemctl reset-failed >/dev/null 2>&1 || true
 }
 
-assert_root_tool() {
-    local path=$1
-    [[ -e "$path" || -L "$path" ]] || return 0
-    [[ -f "$path" && ! -L "$path" ]] ||
-        fail 'установленный tool имеет небезопасный тип' "$path"
-    local owner group mode
-    read -r owner group mode < <(stat -c '%U %G %a' "$path")
-    [[ "$owner" == root && "$group" == root ]] ||
-        fail 'установленный tool имеет неожиданного владельца' "$path owner=$owner:$group"
-    (( (8#$mode & 8#022) == 0 )) ||
-        fail 'установленный tool writable для group/other' "$path mode=$mode"
-}
-
 remove_installed_tools() {
-    local path
-    for path in \
+    rm -f -- \
         /usr/local/bin/just1kbot-backup.sh \
         /usr/local/bin/just1kbot-restore.sh \
         /usr/local/bin/just1kbot-healthcheck.sh \
         /usr/local/bin/verify_backup.sh \
         /usr/local/bin/restore_rehearsal.sh \
         /usr/local/sbin/just1kbot \
-        /usr/local/bin/just1kbot; do
-        assert_root_tool "$path"
-    done
-    for path in \
-        /usr/local/bin/just1kbot-backup.sh \
-        /usr/local/bin/just1kbot-restore.sh \
-        /usr/local/bin/just1kbot-healthcheck.sh \
-        /usr/local/bin/verify_backup.sh \
-        /usr/local/bin/restore_rehearsal.sh \
-        /usr/local/sbin/just1kbot \
-        /usr/local/bin/just1kbot; do
-        rm -f -- "$path"
-    done
+        /usr/local/bin/just1kbot
 }
 
 nginx_site_has_expected_markers() {
@@ -638,11 +593,12 @@ main() {
     parse "$@"
     [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'uninstall требует root' "uid=$(id -u)"
 
-    set_step 'Проверка production paths'
+    set_step 'Проверка production paths и ownership ресурсов'
     safe_project_path
     acquire_uninstall_lock
     preflight_restore_state
     read_webhook_config
+    run_resource_preflight
 
     if [[ "$MODE" == purge ]]; then
         confirm_purge
