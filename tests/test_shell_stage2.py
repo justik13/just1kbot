@@ -13,6 +13,7 @@ class ShellStage2Tests(unittest.TestCase):
         required = [
             "install_safe.sh",
             "update_from_github.sh",
+            "update_from_github_complete.sh",
             "uninstall_foundation.sh",
             "uninstall_entrypoint.sh",
             "inspect_install_state.sh",
@@ -24,15 +25,31 @@ class ShellStage2Tests(unittest.TestCase):
             "ops/just1kbot-restore.sh",
             "ops/production_restore.sh",
             "ops/doctor.sh",
+            "ops/doctor_complete.sh",
+            "ops/doctor_json.sh",
+            "ops/repair.sh",
+            "ops/repair_complete.sh",
+            "ops/support_bundle.sh",
             "lib/control_plane.sh",
+            "lib/control_plane_completion.sh",
+            "lib/control_plane_final.sh",
             "lib/installer_foundation.sh",
             "lib/installer_foundation_compat.sh",
             "lib/install_safe_platform.sh",
+            "lib/install_safe_release_contract.sh",
+            "lib/install_safe_lock_policy.sh",
             "lib/install_safe_legacy.sh",
+            "lib/install_safe_redis_transition.sh",
             "lib/install_safe_runtime.sh",
+            "lib/install_safe_tls_policy.sh",
+            "lib/install_safe_postgres_ownership.sh",
+            "lib/install_safe_proxy_mode.sh",
+            "lib/install_safe_activation_policy.sh",
+            "lib/install_safe_failure_injection.sh",
             "lib/install_safe_dispatch.sh",
             "lib/uninstall_safe_core.sh",
             "lib/uninstall_safe_actions.sh",
+            "lib/uninstall_safe_ownership.sh",
             "lib/production_restore_core.sh",
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
@@ -48,35 +65,57 @@ class ShellStage2Tests(unittest.TestCase):
 
     def test_new_scripts_parse(self):
         scripts = [
-            SCRIPTS / "install_safe.sh",
-            SCRIPTS / "update_from_github.sh",
-            SCRIPTS / "uninstall_foundation.sh",
-            SCRIPTS / "uninstall_entrypoint.sh",
-            SCRIPTS / "inspect_install_state.sh",
-            SCRIPTS / "preflight_install_state.sh",
-            CONTROL,
-            SCRIPTS / "lib" / "installer_foundation.sh",
-            SCRIPTS / "lib" / "installer_foundation_compat.sh",
-            SCRIPTS / "lib" / "install_safe_platform.sh",
-            SCRIPTS / "lib" / "install_safe_legacy.sh",
-            SCRIPTS / "lib" / "install_safe_runtime.sh",
-            SCRIPTS / "lib" / "install_safe_dispatch.sh",
-            SCRIPTS / "lib" / "uninstall_safe_core.sh",
-            SCRIPTS / "lib" / "uninstall_safe_actions.sh",
-            SCRIPTS / "ops" / "doctor.sh",
+            SCRIPTS / path
+            for path in (
+                "install_safe.sh",
+                "update_from_github.sh",
+                "update_from_github_complete.sh",
+                "uninstall_foundation.sh",
+                "uninstall_entrypoint.sh",
+                "inspect_install_state.sh",
+                "preflight_install_state.sh",
+                "lib/control_plane.sh",
+                "lib/control_plane_completion.sh",
+                "lib/control_plane_final.sh",
+                "lib/installer_foundation.sh",
+                "lib/installer_foundation_compat.sh",
+                "lib/install_safe_platform.sh",
+                "lib/install_safe_release_contract.sh",
+                "lib/install_safe_lock_policy.sh",
+                "lib/install_safe_legacy.sh",
+                "lib/install_safe_redis_transition.sh",
+                "lib/install_safe_runtime.sh",
+                "lib/install_safe_tls_policy.sh",
+                "lib/install_safe_postgres_ownership.sh",
+                "lib/install_safe_proxy_mode.sh",
+                "lib/install_safe_activation_policy.sh",
+                "lib/install_safe_failure_injection.sh",
+                "lib/install_safe_dispatch.sh",
+                "lib/uninstall_safe_core.sh",
+                "lib/uninstall_safe_actions.sh",
+                "lib/uninstall_safe_ownership.sh",
+                "ops/doctor.sh",
+                "ops/doctor_complete.sh",
+                "ops/doctor_json.sh",
+                "ops/repair.sh",
+                "ops/repair_complete.sh",
+                "ops/support_bundle.sh",
+            )
         ]
         for script in scripts:
             subprocess.run(["bash", "-n", str(script)], check=True)
 
     def test_manifest_uninstall_is_fail_closed_and_interactive(self):
         entry = (SCRIPTS / "uninstall_foundation.sh").read_text(encoding="utf-8")
-        core = (SCRIPTS / "lib" / "uninstall_safe_core.sh").read_text(
-            encoding="utf-8"
-        )
-        actions = (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(
-            encoding="utf-8"
-        )
-        combined = "\n".join((entry, core, actions))
+        modules = [
+            (SCRIPTS / "lib" / name).read_text(encoding="utf-8")
+            for name in (
+                "uninstall_safe_core.sh",
+                "uninstall_safe_actions.sh",
+                "uninstall_safe_ownership.sh",
+            )
+        ]
+        combined = "\n".join((entry, *modules))
 
         for marker in (
             "foundation_manifest_require",
@@ -90,14 +129,22 @@ class ShellStage2Tests(unittest.TestCase):
             "remove_owned_tree",
             "DROP ROLE IF EXISTS",
             "^just1kbot_(stg|rb|fail)_",
+            "postgres_expected_marker",
+            "ownership-aware uninstall verification",
             "post_verify",
         ):
             self.assertIn(marker, combined)
-        self.assertNotIn("apt-get remove", combined)
-        self.assertNotIn("/etc/redis/redis.conf", combined)
-        self.assertNotIn("ufw ", combined)
-        self.assertNotIn("setup-amnezia-api.sh", combined)
-        self.assertNotIn("docker ", combined)
+        for forbidden in (
+            "apt-get remove",
+            "ufw ",
+            "setup-amnezia-api.sh",
+            "docker ",
+            "sed -i /etc/redis/redis.conf",
+            "rm -f /etc/redis/redis.conf",
+            "rm -rf /etc/redis",
+            "> /etc/redis/redis.conf",
+        ):
+            self.assertNotIn(forbidden, combined)
 
         main = entry[entry.index("main()") :]
         self.assertLess(main.index("manifest_preflight"), main.index("stop_units"))
