@@ -51,11 +51,12 @@ run_management_action() {
 print_dry_run() {
     cat <<'EOF_DRY'
 DRY RUN:
-- exact Ubuntu 24.04, source tree, ownership, path, port, PostgreSQL and Nginx checks run before apt;
+- exact Ubuntu 24.04, source tree, ownership, path, port, PostgreSQL and Nginx checks completed before apt;
 - dedicated Redis is 127.0.0.1:6380 with separate config/data/unit;
 - UFW, nftables, iptables, /etc/redis/redis.conf, Nginx default site, Docker and VPN are not changed;
 - dependencies install only from requirements.lock with exact versions and SHA-256 hashes;
 - every mutating phase is recorded in a durable root-only journal.
+No server state was changed by this dry run.
 EOF_DRY
 }
 
@@ -70,6 +71,25 @@ begin_installer_transaction() {
     foundation_journal_begin "$operation" preflight
 }
 
+run_initial_read_only_preflight() {
+    collect_initial_input
+    validate_initial_input
+    preflight_before_packages
+}
+
+run_existing_read_only_preflight() {
+    DOMAIN=$(read_env_value DOMAIN)
+    SSL_EMAIL=$(read_env_value SSL_EMAIL)
+    YOOKASSA_WEBHOOK_PORT=$(read_env_value YOOKASSA_WEBHOOK_PORT)
+    REDIS_PASSWORD=$(read_env_value REDIS_PASSWORD)
+    [[ -n "$DOMAIN" && -n "$SSL_EMAIL" && -n "$YOOKASSA_WEBHOOK_PORT" ]] || {
+        error 'Существующий production .env не содержит обязательные DOMAIN/SSL_EMAIL/YOOKASSA_WEBHOOK_PORT.'
+        return 1
+    }
+    foundation_preflight_static_resources
+    foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
+}
+
 run_deploy() {
     require_root
     init_logging
@@ -78,15 +98,18 @@ run_deploy() {
     determine_install_kind
     validate_source_tree
 
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        run_initial_read_only_preflight
+    else
+        run_existing_read_only_preflight
+    fi
+
     if [[ "$DRY_RUN" == true ]]; then
         print_dry_run
         return 0
     fi
 
     if [[ "$INITIAL_INSTALL" == true ]]; then
-        collect_initial_input
-        validate_initial_input
-        preflight_before_packages
         install_dependencies
     fi
 
@@ -102,12 +125,6 @@ run_deploy() {
     else
         pg_prepare update
         record_existing_postgres
-        DOMAIN=$(read_env_value DOMAIN)
-        SSL_EMAIL=$(read_env_value SSL_EMAIL)
-        YOOKASSA_WEBHOOK_PORT=$(read_env_value YOOKASSA_WEBHOOK_PORT)
-        REDIS_PASSWORD=$(read_env_value REDIS_PASSWORD)
-        foundation_preflight_static_resources
-        foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
         record_legacy_redis_transition
     fi
 
