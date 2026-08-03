@@ -263,6 +263,8 @@ deploy_repo() {
   [[ -d "$src_dir/scripts" ]] && cp -a "$src_dir/scripts" "$INSTALL_DIR/"
   [[ -f "$src_dir/deploy.sh" ]] && cp "$src_dir/deploy.sh" "$INSTALL_DIR/"
   [[ -f "$src_dir/install.sh" ]] && cp "$src_dir/install.sh" "$INSTALL_DIR/"
+  [[ -f "$src_dir/requirements.txt" ]] && cp "$src_dir/requirements.txt" "$INSTALL_DIR/"
+  [[ -f "$src_dir/requirements.lock" ]] && cp "$src_dir/requirements.lock" "$INSTALL_DIR/"
 
   return 0
 }
