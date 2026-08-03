@@ -8,6 +8,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 DEPLOY_RUNTIME = SCRIPTS / "lib" / "install_safe_runtime.sh"
+DEPLOY_ACTIVATION = SCRIPTS / "lib" / "install_safe_activation_policy.sh"
 DEPLOY_DISPATCH = SCRIPTS / "lib" / "install_safe_dispatch.sh"
 OPERATIONAL = SCRIPTS / "lib" / "operational_transaction.sh"
 
@@ -16,6 +17,7 @@ class ShellStage4Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.runtime = DEPLOY_RUNTIME.read_text(encoding="utf-8")
+        cls.activation = DEPLOY_ACTIVATION.read_text(encoding="utf-8")
         cls.dispatch = DEPLOY_DISPATCH.read_text(encoding="utf-8")
         cls.operational = OPERATIONAL.read_text(encoding="utf-8")
 
@@ -36,14 +38,12 @@ class ShellStage4Tests(unittest.TestCase):
             "BACKUP_COMMAND=(pause_and_backup)",
             "BACKUP_COMMAND=(pause_operational_timers)",
             "install_operational_transaction_overrides",
+            "run_application_transaction",
         ):
             self.assertIn(marker, self.dispatch)
 
-        activation = self.runtime[
-            self.runtime.index("activate_release_bundle()") :
-            self.runtime.index("pause_and_backup()")
-        ]
         for marker in (
+            "foundation_setup_dedicated_redis",
             "install_backup_tooling",
             "install_healthcheck",
             "setup_logrotate",
@@ -52,17 +52,21 @@ class ShellStage4Tests(unittest.TestCase):
             "setup_systemd",
             "foundation_install_cli",
         ):
-            self.assertIn(marker, activation)
+            self.assertIn(marker, self.activation)
 
-        run_deploy = self.dispatch[self.dispatch.index("run_deploy()") :]
-        transaction = run_deploy.index("run_application_transaction")
+        mutations = self.dispatch[
+            self.dispatch.index("perform_deploy_mutations()") :
+            self.dispatch.index("rollback_empty_pre_manifest_journal()")
+        ]
+        transaction = mutations.index("run_application_transaction")
         for marker in (
             "install_backup_tooling",
             "install_healthcheck",
             "setup_logrotate",
+            "foundation_setup_dedicated_redis",
         ):
-            self.assertNotIn(marker, run_deploy[:transaction])
-        self.assertNotIn("resume_operational_timers || true", run_deploy)
+            self.assertNotIn(marker, mutations[:transaction])
+        self.assertNotIn("resume_operational_timers || true", mutations)
 
     def test_safe_runtime_excludes_nginx_default_from_snapshot(self):
         configure = self.runtime[
