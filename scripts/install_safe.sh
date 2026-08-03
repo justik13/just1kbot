@@ -53,6 +53,7 @@ REQUIREMENTS_LOCK="$ROOT_DIR/requirements.lock"
 
 for module in \
     "$SCRIPT_DIR/lib/install_safe_platform.sh" \
+    "$SCRIPT_DIR/lib/install_safe_release_contract.sh" \
     "$SCRIPT_DIR/lib/install_safe_lock_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
     "$SCRIPT_DIR/lib/install_safe_redis_transition.sh" \
