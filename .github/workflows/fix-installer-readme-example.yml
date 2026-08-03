@@ -1,3 +1,4 @@
+# Registered workflow; this synchronization applies the README correction.
 name: Fix installer README example
 
 on:
