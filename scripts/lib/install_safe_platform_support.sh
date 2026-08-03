@@ -53,11 +53,13 @@ unset platform_manifest_definition
 
 foundation_manifest_create() {
     platform_base_manifest_create
-    local platform support
-    platform=$(platform_identifier)
+    local detected support
+    detected=$(platform_identifier)
     support=compatible
-    [[ "$platform" == ubuntu-24.04 ]] && support=primary-tested
-    foundation_manifest_set_metadata platform "$platform"
+    [[ "$detected" == ubuntu-24.04 ]] && support=primary-tested
+    # Keep metadata.platform for schema/backward compatibility. The actual
+    # host is recorded independently and does not pretend to be Ubuntu 24.04.
+    foundation_manifest_set_metadata detected_platform "$detected"
     foundation_manifest_set_metadata platform_support "$support"
 }
 
