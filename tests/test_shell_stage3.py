@@ -3,7 +3,7 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CORE = ROOT / "scripts" / "lib" / "deploy_core.inc"
+LOADER = ROOT / "scripts" / "install_safe.sh"
 PLATFORM = ROOT / "scripts" / "lib" / "install_safe_platform.sh"
 RUNTIME = ROOT / "scripts" / "lib" / "install_safe_runtime.sh"
 
@@ -11,9 +11,10 @@ RUNTIME = ROOT / "scripts" / "lib" / "install_safe_runtime.sh"
 class ShellStage3Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.deploy = "\n".join(
-            path.read_text(encoding="utf-8") for path in (CORE, PLATFORM, RUNTIME)
-        )
+        cls.loader = LOADER.read_text(encoding="utf-8")
+        cls.platform = PLATFORM.read_text(encoding="utf-8")
+        cls.runtime = RUNTIME.read_text(encoding="utf-8")
+        cls.deploy = "\n".join((cls.platform, cls.runtime))
         cls.workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(
             encoding="utf-8"
         )
@@ -33,14 +34,15 @@ class ShellStage3Tests(unittest.TestCase):
         self.assertIn("предыдущий восстановлен", self.deploy)
 
     def test_heartbeat_uses_systemd_runtime_directory(self):
+        self.assertIn("RUNTIME_DIR=/run/just1kbot", self.loader)
+        self.assertIn('HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"', self.loader)
         for marker in (
-            "RUNTIME_DIR=/run/just1kbot",
-            'HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"',
             "RuntimeDirectory=just1kbot",
             "RuntimeDirectoryMode=0750",
             "JUST1KBOT_HEARTBEAT_FILE=$HEARTBEAT_FILE",
+            "/run/just1kbot/heartbeat",
         ):
-            self.assertIn(marker, self.deploy)
+            self.assertIn(marker, self.runtime)
 
     def test_healthcheck_is_bounded_and_lock_contention_fails(self):
         for marker in (
@@ -52,10 +54,10 @@ class ShellStage3Tests(unittest.TestCase):
             "socket_connect_timeout=5",
             "socket_timeout=5",
         ):
-            self.assertIn(marker, self.deploy)
-        self.assertNotIn("flock -n 9 || exit 0", self.deploy)
-        self.assertNotIn("rollback_heartbeat=obsolete", self.deploy)
-        self.assertNotIn('HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"', self.deploy)
+            self.assertIn(marker, self.runtime)
+        self.assertNotIn("flock -n 9 || exit 0", self.runtime)
+        self.assertNotIn("rollback_heartbeat=obsolete", self.runtime)
+        self.assertNotIn('HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"', self.runtime)
 
     def test_ci_runs_shellcheck_for_repository_scripts(self):
         self.assertIn("shellcheck", self.workflow)
