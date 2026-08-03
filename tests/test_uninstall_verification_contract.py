@@ -24,12 +24,14 @@ class UninstallVerificationContractTests(unittest.TestCase):
     def test_official_entrypoint_checks_ownership_and_verifies_result(self):
         source = ENTRYPOINT.read_text(encoding="utf-8")
         state_check = 'bash "$INSPECT_STATE" --operation uninstall --require-safe'
+        prepare_check = "verify_uninstall_prepare"
         self.assertIn("INSPECT_STATE", source)
         self.assertIn(state_check, source)
         self.assertIn("PREFLIGHT_RESOURCES", source)
         self.assertIn('bash "$PREFLIGHT_RESOURCES"', source)
         self.assertIn("VERIFY_UNINSTALL", source)
         self.assertIn('source "$VERIFY_UNINSTALL"', source)
+        self.assertIn(prepare_check, source)
         self.assertIn('verify_uninstall_main "$VERIFY_MODE"', source)
         self.assertLess(
             source.index(state_check),
@@ -37,6 +39,10 @@ class UninstallVerificationContractTests(unittest.TestCase):
         )
         self.assertLess(
             source.index('bash "$PREFLIGHT_RESOURCES"'),
+            source.index(prepare_check, source.index('bash "$PREFLIGHT_RESOURCES"')),
+        )
+        self.assertLess(
+            source.index(prepare_check, source.index('bash "$PREFLIGHT_RESOURCES"')),
             source.index('bash "$UNINSTALL" "$@"'),
         )
         self.assertLess(
@@ -106,7 +112,14 @@ class UninstallVerificationContractTests(unittest.TestCase):
         self.assertIn("check_no_running_processes", source)
         self.assertIn("service_user:$BOT_USER", source)
         self.assertIn("VERIFY_UNINSTALL_SOURCE_ONLY", source)
+        self.assertIn("verify_uninstall_prepare", source)
+        self.assertIn("VERIFY_NGINX_DOMAIN", source)
         self.assertIn("verify_uninstall_main", source)
+
+    def test_verifier_process_scan_targets_application_not_controller(self):
+        source = VERIFIER.read_text(encoding="utf-8")
+        self.assertIn("/opt\\/just1kbot\\/(venv|\\.venv)\\/bin\\/python", source)
+        self.assertNotIn("pgrep -f '/opt/just1kbot|just1kbot.service'", source)
 
     def test_verifier_is_read_only(self):
         source = VERIFIER.read_text(encoding="utf-8")
