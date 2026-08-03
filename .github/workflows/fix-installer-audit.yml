@@ -1,0 +1,521 @@
+name: Fix installer audit
+
+on:
+  push:
+    branches:
+      - agent/greenfield-ui-ux-cleanup
+    paths:
+      - .github/workflows/fix-installer-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Apply audited installer fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_between(text: str, start: str, end: str, replacement: str) -> str:
+              start_index = text.index(start)
+              end_index = text.index(end, start_index)
+              return text[:start_index] + replacement + text[end_index:]
+
+          core_path = Path("scripts/lib/deploy_core.inc")
+          core = core_path.read_text(encoding="utf-8")
+
+          core = replace_between(
+              core,
+              "validate_env_file() {\n",
+              "determine_install_kind() {\n",
+              r'''validate_env_file() {
+              validate_env_file_safety || return 1
+
+              local required value
+              for required in BOT_TOKEN ADMIN_IDS SUPPORT_USERNAME DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
+                  value=$(read_env_value "$required")
+                  if [[ -z "$value" ]]; then
+                      error "В production .env отсутствует обязательный параметр: $required"
+                      return 1
+                  fi
+              done
+
+              local bot_token support_username admin_ids encryption_key
+              local shop_id secret_key domain
+
+              bot_token=$(read_env_value BOT_TOKEN)
+              if [[ ! "$bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                  error "BOT_TOKEN в production .env имеет неверный формат"
+                  return 1
+              fi
+
+              support_username=$(read_env_value SUPPORT_USERNAME)
+              support_username=${support_username#@}
+              if [[ ! "$support_username" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
+                 [[ "${support_username,,}" == support ]] ||
+                 [[ "${support_username,,}" == change_me_support_username ]]; then
+                  error "SUPPORT_USERNAME в production .env должен быть реальным Telegram username"
+                  return 1
+              fi
+
+              admin_ids=$(read_env_value ADMIN_IDS)
+              ADMIN_IDS_JSON="$admin_ids" python3 - <<'PY_ADMIN_IDS'
+          import json
+          import os
+
+          value = json.loads(os.environ["ADMIN_IDS_JSON"])
+          if not isinstance(value, list) or not value:
+              raise SystemExit("ADMIN_IDS must be a non-empty JSON array")
+          if any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in value):
+              raise SystemExit("ADMIN_IDS must contain positive integers")
+          PY_ADMIN_IDS
+
+              encryption_key=$(read_env_value DB_ENCRYPTION_KEY)
+              DB_KEY="$encryption_key" python3 - <<'PY_DB_KEY'
+          import base64
+          import os
+
+          key = os.environ["DB_KEY"].encode("ascii")
+          try:
+              decoded = base64.urlsafe_b64decode(key)
+          except Exception as exc:
+              raise SystemExit(f"invalid DB_ENCRYPTION_KEY: {type(exc).__name__}")
+          if len(decoded) != 32:
+              raise SystemExit("invalid DB_ENCRYPTION_KEY length")
+          PY_DB_KEY
+
+              shop_id=$(read_env_value YOOKASSA_SHOP_ID)
+              secret_key=$(read_env_value YOOKASSA_SECRET_KEY)
+              if [[ -n "$shop_id" && -z "$secret_key" ]] ||
+                 [[ -z "$shop_id" && -n "$secret_key" ]]; then
+                  error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в production .env задаются только вместе"
+                  return 1
+              fi
+
+              domain=$(read_env_value DOMAIN)
+              if [[ -n "$domain" ]]; then
+                  if ! normalize_domain "$domain" >/dev/null; then
+                      error "DOMAIN в production .env имеет неверный формат"
+                      return 1
+                  fi
+                  if [[ -z "$shop_id" ]]; then
+                      error "DOMAIN в production .env требует настроенную YooKassa"
+                      return 1
+                  fi
+              fi
+          }
+
+          '''
+          )
+
+          core = replace_between(
+              core,
+              "check_os() {\n",
+              "validate_source_tree() {\n",
+              r'''validate_supported_os() {
+              local os_id=${1:-}
+              local version_id=${2:-}
+              local version_major=${version_id%%.*}
+
+              if [[ ! "$version_major" =~ ^[0-9]+$ ]]; then
+                  error "Не удалось определить поддерживаемую версию ОС: ${os_id:-unknown} ${version_id:-unknown}"
+                  return 1
+              fi
+
+              case "$os_id" in
+                  ubuntu)
+                      if (( version_major < 24 )); then
+                          error "Поддерживается Ubuntu 24.04 или новее; обнаружено: $version_id"
+                          return 1
+                      fi
+                      ;;
+                  debian)
+                      if (( version_major < 12 )); then
+                          error "Поддерживается Debian 12 или новее; обнаружено: $version_id"
+                          return 1
+                      fi
+                      ;;
+                  *)
+                      error "Поддерживаются только Ubuntu 24.04+ и Debian 12+; обнаружено: ${os_id:-unknown}"
+                      return 1
+                      ;;
+              esac
+          }
+
+          check_os() {
+              if [[ ! -f /etc/os-release ]]; then
+                  error "Не удалось определить операционную систему"
+                  return 1
+              fi
+
+              # shellcheck disable=SC1091
+              . /etc/os-release
+              validate_supported_os "${ID:-}" "${VERSION_ID:-}"
+          }
+
+          '''
+          )
+
+          core = replace_between(
+              core,
+              "collect_initial_input() {\n",
+              "normalize_domain() {\n",
+              r'''collect_initial_input() {
+              if [[ "$NON_INTERACTIVE" == true ]]; then
+                  BOT_TOKEN=${BOT_TOKEN:?BOT_TOKEN не задан}
+                  DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD не задан}
+                  REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD не задан}
+                  ADMIN_IDS=${ADMIN_IDS:?ADMIN_IDS не задан}
+                  SUPPORT_USERNAME=${SUPPORT_USERNAME:?SUPPORT_USERNAME не задан}
+                  DOMAIN=${DOMAIN:-}
+                  SSL_EMAIL=${SSL_EMAIL:-}
+                  YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:-}
+                  YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:-}
+                  DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
+                  return
+              fi
+
+              info "=== Первичная конфигурация ==="
+              read_bot_token
+              read_db_password 'Пароль PostgreSQL: ' DB_PASSWORD
+              read_db_password 'Пароль Redis: ' REDIS_PASSWORD
+              read_admin_ids
+              read_support_username
+
+              read_optional 'YooKassa Shop ID; Enter — отключено' YOOKASSA_SHOP_ID ''
+              if [[ -n "$YOOKASSA_SHOP_ID" ]]; then
+                  while [[ -z "${YOOKASSA_SECRET_KEY:-}" ]]; do
+                      read_optional_secret 'YooKassa Secret Key' YOOKASSA_SECRET_KEY ''
+                      [[ -n "$YOOKASSA_SECRET_KEY" ]] || printf 'Secret Key обязателен, если указан Shop ID.\n'
+                  done
+                  read_optional 'Домен для YooKassa webhook/health; Enter — настроить позже' DOMAIN ''
+                  if [[ -n "$DOMAIN" ]]; then
+                      while true; do
+                          read_optional "Email Let's Encrypt" SSL_EMAIL ''
+                          if validate_email "$SSL_EMAIL"; then
+                              break
+                          fi
+                          printf 'Укажите реальный email для Let's Encrypt.\n'
+                      done
+                  fi
+              else
+                  YOOKASSA_SECRET_KEY=""
+                  DOMAIN=""
+                  SSL_EMAIL=""
+                  info "YooKassa отключена. Amnezia-серверы добавляются позже через Telegram-админку."
+              fi
+          }
+
+          '''
+          )
+
+          core = replace_between(
+              core,
+              "validate_amnezia_api_url() {\n",
+              "validate_initial_input() {\n",
+              r'''validate_email() {
+              EMAIL_VALUE="$1" python3 - <<'PY_EMAIL'
+          import os
+          import re
+
+          value = os.environ["EMAIL_VALUE"].strip()
+          if not value or len(value) > 254 or any(character.isspace() for character in value):
+              raise SystemExit(1)
+          if value.lower() in {"admin@example.com", "change_me@example.com"}:
+              raise SystemExit(1)
+          if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", value) is None:
+              raise SystemExit(1)
+          PY_EMAIL
+          }
+
+          '''
+          )
+
+          core = replace_between(
+              core,
+              "validate_initial_input() {\n",
+              "install_dependencies() {\n",
+              r'''validate_initial_input() {
+              if [[ ! "$BOT_TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+                  error "BOT_TOKEN имеет неверный формат"
+                  return 1
+              fi
+              if [[ ! "$DB_PASSWORD" =~ ^[A-Za-z0-9_@%*+=-]{8,}$ ]]; then
+                  error "DB_PASSWORD имеет неверный формат"
+                  return 1
+              fi
+              if [[ ! "$REDIS_PASSWORD" =~ ^[A-Za-z0-9_@%*+=-]{8,}$ ]]; then
+                  error "REDIS_PASSWORD имеет неверный формат"
+                  return 1
+              fi
+              if [[ ! "$ADMIN_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+                  error "ADMIN_IDS имеет неверный формат"
+                  return 1
+              fi
+
+              SUPPORT_USERNAME=${SUPPORT_USERNAME#@}
+              if [[ ! "$SUPPORT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
+                 [[ "${SUPPORT_USERNAME,,}" == support ]] ||
+                 [[ "${SUPPORT_USERNAME,,}" == change_me_support_username ]]; then
+                  error "SUPPORT_USERNAME должен быть реальным Telegram username"
+                  return 1
+              fi
+
+              if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] ||
+                 [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
+                  error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются только вместе"
+                  return 1
+              fi
+
+              if [[ -n "$DOMAIN" ]]; then
+                  local normalized_domain
+                  if ! normalized_domain=$(normalize_domain "$DOMAIN"); then
+                      error "DOMAIN имеет неверный формат"
+                      return 1
+                  fi
+                  DOMAIN=$normalized_domain
+
+                  if [[ -z "$YOOKASSA_SHOP_ID" ]]; then
+                      error "DOMAIN используется для YooKassa webhook и требует настроенную YooKassa"
+                      return 1
+                  fi
+                  if ! validate_email "$SSL_EMAIL"; then
+                      error "SSL_EMAIL должен быть реальным email для Let's Encrypt"
+                      return 1
+                  fi
+              elif [[ -n "$YOOKASSA_SHOP_ID" ]]; then
+                  warn "YooKassa включена без DOMAIN: публичный webhook не будет настроен до добавления домена"
+              fi
+          }
+
+          '''
+          )
+
+          for obsolete in (
+              '    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"\n',
+              '    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"\n',
+              '        write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook/yookassa"\n',
+          ):
+              if obsolete not in core:
+                  raise SystemExit(f"missing expected core snippet: {obsolete!r}")
+              core = core.replace(obsolete, "")
+
+          core_path.write_text(core, encoding="utf-8")
+
+          adapter_path = Path("scripts/deploy.sh")
+          adapter = adapter_path.read_text(encoding="utf-8")
+          for obsolete in (
+              '    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"\n',
+              '    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"\n',
+              '        write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook/yookassa"\n',
+          ):
+              if obsolete not in adapter:
+                  raise SystemExit(f"missing expected adapter snippet: {obsolete!r}")
+              adapter = adapter.replace(obsolete, "")
+          adapter_path.write_text(adapter, encoding="utf-8")
+
+          root_path = Path("deploy.sh")
+          root = root_path.read_text(encoding="utf-8")
+          root = root.replace(
+              "14. Настроить Amnezia API\n",
+              "14. Проверить/опубликовать локальный Amnezia API (опционально)\n",
+          )
+          anchor = "После успешных update/deploy/restart запускается read-only doctor: service,\nheartbeat, permissions, Alembic, PostgreSQL, Redis, Telegram и backup contract.\n"
+          addition = anchor + "\nКоманда amnezia не привязывает VPN-сервер к боту и не нужна для его\nпервичной установки. Она только проверяет или публикует HTTPS reverse proxy\nдля уже запущенного локального Amnezia API. Сервер добавляется через\nTelegram-админку бота.\n"
+          if anchor not in root:
+              raise SystemExit("root help anchor missing")
+          root = root.replace(anchor, addition, 1)
+          root_path.write_text(root, encoding="utf-8")
+
+          readme_path = Path("README.md")
+          readme = readme_path.read_text(encoding="utf-8")
+          readme = readme.replace(
+              "Запускать из отдельного checkout репозитория на Ubuntu или Debian:\n",
+              "Запускать из отдельного checkout репозитория на Ubuntu 24.04+ или Debian 12+:\n",
+          )
+          support_anchor = "`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic. `SUPPORT_USERNAME` обязателен и должен содержать реальный Telegram username поддержки без `@`.\n"
+          support_addition = support_anchor + "\nAmnezia API URL и ключ при установке бота не запрашиваются. Каждый VPN-сервер добавляется после запуска через Telegram-админку, а его API key хранится в PostgreSQL в зашифрованном виде. Если указан `DOMAIN`, требуется реальный `SSL_EMAIL`; placeholder `admin@example.com` не принимается.\n"
+          if support_anchor not in readme:
+              raise SystemExit("README support anchor missing")
+          readme = readme.replace(support_anchor, support_addition, 1)
+
+          old_amnezia = '''# Amnezia API
+
+Бот работает с протоколом `amneziawg2`.
+
+Настройка API-сервера запускается через единственную корневую точку входа:
+
+```bash
+sudo bash deploy.sh amnezia
+```
+
+После настройки сервер добавляется через Telegram-админку.
+'''
+          new_amnezia = '''# Amnezia API
+
+Бот работает с протоколом `amneziawg2`. При первичной установке бота глобальные `AMNEZIA_API_URL` и `AMNEZIA_API_KEY` не нужны и не запрашиваются.
+
+После запуска откройте Telegram-админку и добавьте каждый VPN-сервер отдельно: имя, флаг, API URL и API key. Бот проверит доступность API и поддержку `amneziawg2`, после чего сохранит ключ сервера в PostgreSQL в зашифрованном виде.
+
+Опциональная команда:
+
+```bash
+sudo bash deploy.sh amnezia
+```
+
+не устанавливает Amnezia API и не добавляет сервер в бот. Она предназначена только для проверки или публикации HTTPS reverse proxy на узле, где локальный API уже работает на `127.0.0.1:4001`.
+'''
+          if old_amnezia not in readme:
+              raise SystemExit("README Amnezia section missing")
+          readme = readme.replace(old_amnezia, new_amnezia, 1)
+          readme_path.write_text(readme, encoding="utf-8")
+
+          rollback_path = Path("tests/test_deploy_rollback.py")
+          rollback = rollback_path.read_text(encoding="utf-8")
+          old_command = 'BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; AMNEZIA_API_URL=x; AMNEZIA_API_KEY=; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
+          new_command = 'BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
+          if old_command not in rollback:
+              raise SystemExit("rollback env command missing")
+          rollback = rollback.replace(old_command, new_command, 1)
+          rollback_path.write_text(rollback, encoding="utf-8")
+
+          contract = r'''import os
+          import subprocess
+          import tempfile
+          import textwrap
+          import unittest
+          from pathlib import Path
+
+
+          ROOT = Path(__file__).resolve().parents[1]
+          ROOT_DEPLOY = ROOT / "deploy.sh"
+          CORE = ROOT / "scripts" / "lib" / "deploy_core.inc"
+          ADAPTER = ROOT / "scripts" / "deploy.sh"
+
+
+          class InstallerInputContractTests(unittest.TestCase):
+              def run_function(self, script: str):
+                  env = os.environ.copy()
+                  env.update({"DEPLOY_FUNCTIONS_ONLY": "1", "DEPLOY_TEST_MODE": "1"})
+                  command = textwrap.dedent(
+                      f"""
+                      set -Eeuo pipefail
+                      source {str(ROOT_DEPLOY)!r}
+                      LOG_FILE=/tmp/just1kbot-installer-contract.log
+                      {script}
+                      """
+                  )
+                  return subprocess.run(
+                      ["bash", "-c", command],
+                      env=env,
+                      text=True,
+                      capture_output=True,
+                      check=False,
+                  )
+
+              def test_initial_install_has_no_global_amnezia_credentials(self):
+                  source = CORE.read_text(encoding="utf-8")
+                  adapter = ADAPTER.read_text(encoding="utf-8")
+                  self.assertNotIn("Amnezia API URL", source)
+                  self.assertNotIn("AMNEZIA_API_URL=${", source)
+                  self.assertNotIn("AMNEZIA_API_KEY=${", source)
+                  self.assertNotIn("write_env_var AMNEZIA_API_URL", source + adapter)
+                  self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + adapter)
+                  self.assertNotIn("write_env_var WEBHOOK_URL", source + adapter)
+
+              def test_valid_install_input_does_not_need_amnezia_values(self):
+                  result = self.run_function(
+                      "BOT_TOKEN='123456:TEST_TOKEN'; "
+                      "DB_PASSWORD='password1'; REDIS_PASSWORD='password2'; "
+                      "ADMIN_IDS='123'; SUPPORT_USERNAME='test_support_bot'; "
+                      "YOOKASSA_SHOP_ID=''; YOOKASSA_SECRET_KEY=''; "
+                      "DOMAIN=''; SSL_EMAIL=''; validate_initial_input"
+                  )
+                  self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+              def test_domain_rejects_placeholder_certbot_email(self):
+                  result = self.run_function(
+                      "BOT_TOKEN='123456:TEST_TOKEN'; "
+                      "DB_PASSWORD='password1'; REDIS_PASSWORD='password2'; "
+                      "ADMIN_IDS='123'; SUPPORT_USERNAME='test_support_bot'; "
+                      "YOOKASSA_SHOP_ID='shop'; YOOKASSA_SECRET_KEY='secret'; "
+                      "DOMAIN='vpn.example.com'; SSL_EMAIL='admin@example.com'; "
+                      "validate_initial_input"
+                  )
+                  self.assertNotEqual(result.returncode, 0)
+                  self.assertIn("SSL_EMAIL", result.stderr)
+
+              def test_existing_env_requires_support_username(self):
+                  with tempfile.TemporaryDirectory() as directory:
+                      env_file = Path(directory) / ".env"
+                      env_file.write_text(
+                          'BOT_TOKEN="123456:TEST_TOKEN"\n'
+                          'ADMIN_IDS="[123]"\n'
+                          'DATABASE_URL="postgresql+asyncpg://u:p@127.0.0.1:5432/db"\n'
+                          'REDIS_URL="redis://127.0.0.1:6379/0"\n'
+                          'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\n',
+                          encoding="utf-8",
+                      )
+                      env_file.chmod(0o600)
+                      result = self.run_function(
+                          f"BOT_USER=$(id -un); ENV_FILE={str(env_file)!r}; validate_env_file"
+                      )
+                  self.assertNotEqual(result.returncode, 0)
+                  self.assertIn("SUPPORT_USERNAME", result.stderr)
+
+              def test_supported_os_boundaries(self):
+                  for os_id, version in (("ubuntu", "24.04"), ("debian", "12")):
+                      with self.subTest(os_id=os_id, version=version):
+                          result = self.run_function(
+                              f"validate_supported_os {os_id!r} {version!r}"
+                          )
+                          self.assertEqual(result.returncode, 0, result.stderr)
+                  for os_id, version in (("ubuntu", "22.04"), ("debian", "11")):
+                      with self.subTest(os_id=os_id, version=version):
+                          result = self.run_function(
+                              f"validate_supported_os {os_id!r} {version!r}"
+                          )
+                          self.assertNotEqual(result.returncode, 0)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          '''
+          contract = textwrap.dedent(contract)
+          Path("tests/test_installer_input_contract.py").write_text(contract, encoding="utf-8")
+          PY
+
+      - name: Run targeted installer checks
+        shell: bash
+        env:
+          SUPPORT_USERNAME: test_support_bot
+        run: |
+          set -euo pipefail
+          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc scripts/setup-amnezia-api.sh
+          python -m unittest \
+            tests.test_installer_input_contract \
+            tests.test_shell_layout \
+            tests.test_shell_stage3 \
+            tests.test_deploy_rollback -v
+          git diff --check
+
+      - name: Commit installer audit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy.sh README.md scripts/deploy.sh scripts/lib/deploy_core.inc tests/test_deploy_rollback.py tests/test_installer_input_contract.py
+          git commit -m 'fix: align installer with current server configuration'
+          git pull --rebase origin agent/greenfield-ui-ux-cleanup
+          git push origin HEAD:agent/greenfield-ui-ux-cleanup
