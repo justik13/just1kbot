@@ -8,11 +8,12 @@ ENTRYPOINT = ROOT / "scripts" / "uninstall_entrypoint.sh"
 UNINSTALL = ROOT / "scripts" / "uninstall_foundation.sh"
 CORE = ROOT / "scripts" / "lib" / "uninstall_safe_core.sh"
 ACTIONS = ROOT / "scripts" / "lib" / "uninstall_safe_actions.sh"
+OWNERSHIP = ROOT / "scripts" / "lib" / "uninstall_safe_ownership.sh"
 
 
 class UninstallVerificationContractTests(unittest.TestCase):
     def test_scripts_parse(self):
-        for script in (ENTRYPOINT, UNINSTALL, CORE, ACTIONS):
+        for script in (ENTRYPOINT, UNINSTALL, CORE, ACTIONS, OWNERSHIP):
             result = subprocess.run(
                 ["bash", "-n", str(script)],
                 text=True,
@@ -55,6 +56,7 @@ class UninstallVerificationContractTests(unittest.TestCase):
 
     def test_every_removed_path_requires_manifest_ownership(self):
         source = ACTIONS.read_text(encoding="utf-8")
+        ownership = OWNERSHIP.read_text(encoding="utf-8")
         for marker in (
             "require_owned_path",
             "remove_owned_file",
@@ -72,14 +74,15 @@ class UninstallVerificationContractTests(unittest.TestCase):
             'remove_owned_file "$REDIS_UNIT" "systemd:$REDIS_SERVICE"',
             source,
         )
+        self.assertIn("owned_nginx_site", ownership)
+        self.assertIn("owned_certificate", ownership)
 
-    def test_uninstall_does_not_touch_global_or_node_state(self):
+    def test_uninstall_does_not_mutate_global_or_node_state(self):
         combined = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in (UNINSTALL, CORE, ACTIONS)
+            for path in (UNINSTALL, CORE, ACTIONS, OWNERSHIP)
         )
         for forbidden in (
-            "/etc/redis/redis.conf",
             "setup-amnezia-api.sh",
             "just1kbot-amnezia",
             "/etc/just1kbot-amnezia.conf",
@@ -87,25 +90,36 @@ class UninstallVerificationContractTests(unittest.TestCase):
             "iptables ",
             "nft ",
             "docker ",
+            "sed -i /etc/redis/redis.conf",
+            "rm -f /etc/redis/redis.conf",
+            "rm -rf /etc/redis",
+            "> /etc/redis/redis.conf",
+            ">> /etc/redis/redis.conf",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, combined)
         self.assertIn("Firewall", UNINSTALL.read_text(encoding="utf-8"))
 
-    def test_purge_postgresql_is_name_and_manifest_bounded(self):
-        source = ACTIONS.read_text(encoding="utf-8")
-        self.assertIn(
-            'foundation_manifest_has "postgresql:${PG_VERSION}/${PG_CLUSTER}:database:$PG_DATABASE"',
-            source,
-        )
-        self.assertIn("^just1kbot_(stg|rb|fail)_", source)
-        self.assertIn("DROP ROLE IF EXISTS", source)
-        self.assertNotIn("DROP OWNED", source)
-        self.assertNotIn("DROP DATABASE postgres", source)
+    def test_purge_postgresql_is_name_manifest_and_comment_bounded(self):
+        actions = ACTIONS.read_text(encoding="utf-8")
+        ownership = OWNERSHIP.read_text(encoding="utf-8")
+        self.assertIn("^just1kbot_(stg|rb|fail)_", actions)
+        self.assertIn("DROP ROLE IF EXISTS", actions)
+        self.assertNotIn("DROP OWNED", actions)
+        self.assertNotIn("DROP DATABASE postgres", actions)
+        for marker in (
+            "postgres_manifest_state",
+            "postgres_expected_marker",
+            "database ownership COMMENT",
+            "role ownership COMMENT",
+            "installation-id=%s",
+        ):
+            self.assertIn(marker, ownership)
 
-    def test_post_verify_reports_all_primary_leftovers(self):
-        source = ACTIONS.read_text(encoding="utf-8")
-        function = source[source.index("post_verify()") :]
+    def test_post_verify_reports_all_managed_leftovers(self):
+        actions = ACTIONS.read_text(encoding="utf-8")
+        ownership = OWNERSHIP.read_text(encoding="utf-8")
+        base = actions[actions.index("post_verify()") :]
         for marker in (
             "$PROJECT_DIR",
             "$REDIS_CONFIG",
@@ -116,7 +130,15 @@ class UninstallVerificationContractTests(unittest.TestCase):
             "active:$unit",
             "uninstall оставил resources",
         ):
-            self.assertIn(marker, function)
+            self.assertIn(marker, base)
+        for marker in (
+            "nginx-site:$DOMAIN",
+            "nginx-enabled:$DOMAIN",
+            "certbot:$DOMAIN",
+            "verify_postgres_absent",
+            "ownership-aware uninstall verification found leftovers",
+        ):
+            self.assertIn(marker, ownership)
 
 
 if __name__ == "__main__":
