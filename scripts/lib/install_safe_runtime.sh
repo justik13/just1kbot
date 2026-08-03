@@ -1,3 +1,4 @@
+clone_function install_backup_tooling base_install_backup_tooling
 install_backup_tooling() {
     local saved_source=$SOURCE_DIR
     SOURCE_DIR="$SCRIPT_DIR"
@@ -175,6 +176,7 @@ refresh_existing_nginx() {
         "$DOMAIN" "$SSL_EMAIL" "$YOOKASSA_WEBHOOK_PORT"
 }
 
+clone_function setup_logrotate base_setup_logrotate
 setup_logrotate() {
     base_setup_logrotate 2>/dev/null || {
         foundation_atomic_write /etc/logrotate.d/just1kbot root root 0644 <<'EOF_LOGROTATE'
@@ -210,6 +212,7 @@ pause_and_backup() {
     create_pre_migration_backup
 }
 
+clone_function show_status base_show_status
 show_status() {
     base_show_status
     printf 'Dedicated Redis: %s, port=%s\n' \

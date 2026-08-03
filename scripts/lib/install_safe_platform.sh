@@ -1,7 +1,4 @@
 clone_function(){ local source=$1 target=$2 definition; definition=$(declare -f "$source") || return 1; definition=${definition/#"$source ()"/"$target ()"}; eval "$definition"; }
-clone_function install_backup_tooling base_install_backup_tooling
-clone_function setup_logrotate base_setup_logrotate
-clone_function show_status base_show_status
 
 validate_supported_os(){ [[ "${1:-}" == ubuntu && "${2:-}" == 24.04 ]] || { error "Поддерживается только Ubuntu 24.04 LTS; обнаружено ${1:-unknown} ${2:-unknown}"; return 1; }; }
 install_dependencies(){
