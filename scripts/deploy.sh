@@ -215,9 +215,8 @@ PY
     write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
     write_env_var YOOKASSA_RETURN_URL 'https://t.me/{bot_username}'
     write_env_var YOOKASSA_WEBHOOK_PORT '8080'
-    if [[ -n "$DOMAIN" ]]; then
-        write_env_var DOMAIN "$DOMAIN"
-    fi
+    write_env_var DOMAIN "$DOMAIN"
+    write_env_var SSL_EMAIL "$SSL_EMAIL"
 
     ensure_env_permissions
 }

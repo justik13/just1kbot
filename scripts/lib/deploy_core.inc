@@ -260,7 +260,11 @@ validate_env_file() {
     validate_env_file_safety || return 1
 
     local required value
-    for required in BOT_TOKEN ADMIN_IDS SUPPORT_USERNAME DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
+    for required in \
+        BOT_TOKEN ADMIN_IDS SUPPORT_USERNAME DATABASE_URL \
+        REDIS_URL REDIS_PASSWORD DB_ENCRYPTION_KEY \
+        YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY \
+        YOOKASSA_RETURN_URL YOOKASSA_WEBHOOK_PORT DOMAIN SSL_EMAIL; do
         value=$(read_env_value "$required")
         if [[ -z "$value" ]]; then
             error "В production .env отсутствует обязательный параметр: $required"
@@ -269,7 +273,7 @@ validate_env_file() {
     done
 
     local bot_token support_username admin_ids encryption_key
-    local shop_id secret_key domain
+    local shop_id secret_key domain ssl_email webhook_port
 
     bot_token=$(read_env_value BOT_TOKEN)
     if [[ ! "$bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
@@ -314,22 +318,27 @@ PY_DB_KEY
 
     shop_id=$(read_env_value YOOKASSA_SHOP_ID)
     secret_key=$(read_env_value YOOKASSA_SECRET_KEY)
-    if [[ -n "$shop_id" && -z "$secret_key" ]] ||
-       [[ -z "$shop_id" && -n "$secret_key" ]]; then
-        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в production .env задаются только вместе"
+    if [[ "${shop_id,,}" == *change_me* || "${secret_key,,}" == *change_me* ]]; then
+        error "YooKassa credentials в production .env содержат placeholder"
         return 1
     fi
 
     domain=$(read_env_value DOMAIN)
-    if [[ -n "$domain" ]]; then
-        if ! normalize_domain "$domain" >/dev/null; then
-            error "DOMAIN в production .env имеет неверный формат"
-            return 1
-        fi
-        if [[ -z "$shop_id" ]]; then
-            error "DOMAIN в production .env требует настроенную YooKassa"
-            return 1
-        fi
+    if ! normalize_domain "$domain" >/dev/null; then
+        error "DOMAIN в production .env имеет неверный формат"
+        return 1
+    fi
+
+    ssl_email=$(read_env_value SSL_EMAIL)
+    if ! validate_email "$ssl_email"; then
+        error "SSL_EMAIL в production .env должен быть реальным email"
+        return 1
+    fi
+
+    webhook_port=$(read_env_value YOOKASSA_WEBHOOK_PORT)
+    if [[ ! "$webhook_port" =~ ^[1-9][0-9]{0,4}$ ]] || (( webhook_port > 65535 )); then
+        error "YOOKASSA_WEBHOOK_PORT в production .env имеет неверный формат"
+        return 1
     fi
 }
 
@@ -496,10 +505,12 @@ collect_initial_input() {
         REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD не задан}
         ADMIN_IDS=${ADMIN_IDS:?ADMIN_IDS не задан}
         SUPPORT_USERNAME=${SUPPORT_USERNAME:?SUPPORT_USERNAME не задан}
-        DOMAIN=${DOMAIN:-}
-        SSL_EMAIL=${SSL_EMAIL:-}
-        YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:-}
-        YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:-}
+        YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:?YOOKASSA_SHOP_ID не задан}
+        YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:?YOOKASSA_SECRET_KEY не задан}
+        YOOKASSA_RETURN_URL=${YOOKASSA_RETURN_URL:-https://t.me/{bot_username}}
+        YOOKASSA_WEBHOOK_PORT=${YOOKASSA_WEBHOOK_PORT:-8080}
+        DOMAIN=${DOMAIN:?DOMAIN не задан}
+        SSL_EMAIL=${SSL_EMAIL:?SSL_EMAIL не задан}
         DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
         return
     fi
@@ -511,28 +522,32 @@ collect_initial_input() {
     read_admin_ids
     read_support_username
 
-    read_optional 'YooKassa Shop ID; Enter — отключено' YOOKASSA_SHOP_ID ''
-    if [[ -n "$YOOKASSA_SHOP_ID" ]]; then
-        while [[ -z "${YOOKASSA_SECRET_KEY:-}" ]]; do
-            read_optional_secret 'YooKassa Secret Key' YOOKASSA_SECRET_KEY ''
-            [[ -n "$YOOKASSA_SECRET_KEY" ]] || printf 'Secret Key обязателен, если указан Shop ID.\n'
-        done
-        read_optional 'Домен для YooKassa webhook/health; Enter — настроить позже' DOMAIN ''
-        if [[ -n "$DOMAIN" ]]; then
-            while true; do
-                read_optional "Email Let's Encrypt" SSL_EMAIL ''
-                if validate_email "$SSL_EMAIL"; then
-                    break
-                fi
-                printf 'Укажите реальный email для сертификата.\n'
-            done
+    while [[ -z "${YOOKASSA_SHOP_ID:-}" ]]; do
+        read_optional 'YooKassa Shop ID' YOOKASSA_SHOP_ID ''
+        [[ -n "$YOOKASSA_SHOP_ID" ]] || printf 'YooKassa Shop ID обязателен.\n'
+    done
+    while [[ -z "${YOOKASSA_SECRET_KEY:-}" ]]; do
+        read_optional_secret 'YooKassa Secret Key' YOOKASSA_SECRET_KEY ''
+        [[ -n "$YOOKASSA_SECRET_KEY" ]] || printf 'YooKassa Secret Key обязателен.\n'
+    done
+    YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+    YOOKASSA_WEBHOOK_PORT=8080
+
+    while true; do
+        read_optional 'Публичный домен для YooKassa webhook/health' DOMAIN ''
+        if normalized_domain=$(normalize_domain "$DOMAIN"); then
+            DOMAIN=$normalized_domain
+            break
         fi
-    else
-        YOOKASSA_SECRET_KEY=""
-        DOMAIN=""
-        SSL_EMAIL=""
-        info "YooKassa отключена. Amnezia-серверы добавляются позже через Telegram-админку."
-    fi
+        printf 'Укажите корректный публичный домен.\n'
+    done
+    while true; do
+        read_optional 'Email для сертификата Let’s Encrypt' SSL_EMAIL ''
+        if validate_email "$SSL_EMAIL"; then
+            break
+        fi
+        printf 'Укажите реальный email для сертификата.\n'
+    done
 }
 
 normalize_domain() {
@@ -597,30 +612,31 @@ validate_initial_input() {
         return 1
     fi
 
-    if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] ||
-       [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
-        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются только вместе"
+    if [[ -z "$YOOKASSA_SHOP_ID" || -z "$YOOKASSA_SECRET_KEY" ]]; then
+        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY обязательны"
+        return 1
+    fi
+    if [[ "${YOOKASSA_SHOP_ID,,}" == *change_me* || "${YOOKASSA_SECRET_KEY,,}" == *change_me* ]]; then
+        error "YooKassa credentials не должны содержать placeholder"
         return 1
     fi
 
-    if [[ -n "$DOMAIN" ]]; then
-        local normalized_domain
-        if ! normalized_domain=$(normalize_domain "$DOMAIN"); then
-            error "DOMAIN имеет неверный формат"
-            return 1
-        fi
-        DOMAIN=$normalized_domain
+    local normalized_domain
+    if ! normalized_domain=$(normalize_domain "$DOMAIN"); then
+        error "DOMAIN обязателен и должен быть корректным публичным доменом"
+        return 1
+    fi
+    DOMAIN=$normalized_domain
 
-        if [[ -z "$YOOKASSA_SHOP_ID" ]]; then
-            error "DOMAIN используется для YooKassa webhook и требует настроенную YooKassa"
-            return 1
-        fi
-        if ! validate_email "$SSL_EMAIL"; then
-            error "SSL_EMAIL должен быть реальным email для Let's Encrypt"
-            return 1
-        fi
-    elif [[ -n "$YOOKASSA_SHOP_ID" ]]; then
-        warn "YooKassa включена без DOMAIN: публичный webhook не будет настроен до добавления домена"
+    if ! validate_email "$SSL_EMAIL"; then
+        error "SSL_EMAIL обязателен и должен быть реальным email для Let's Encrypt"
+        return 1
+    fi
+
+    if [[ ! "$YOOKASSA_WEBHOOK_PORT" =~ ^[1-9][0-9]{0,4}$ ]] ||
+       (( YOOKASSA_WEBHOOK_PORT > 65535 )); then
+        error "YOOKASSA_WEBHOOK_PORT имеет неверный формат"
+        return 1
     fi
 }
 
@@ -833,9 +849,8 @@ PY
     write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
     write_env_var YOOKASSA_RETURN_URL 'https://t.me/{bot_username}'
     write_env_var YOOKASSA_WEBHOOK_PORT '8080'
-    if [[ -n "$DOMAIN" ]]; then
-        write_env_var DOMAIN "$DOMAIN"
-    fi
+    write_env_var DOMAIN "$DOMAIN"
+    write_env_var SSL_EMAIL "$SSL_EMAIL"
 
     chown "$BOT_USER:$BOT_USER" "$ENV_FILE"
     chmod 0600 "$ENV_FILE"

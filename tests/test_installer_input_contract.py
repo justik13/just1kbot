@@ -42,15 +42,44 @@ class InstallerInputContractTests(unittest.TestCase):
         self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + adapter)
         self.assertNotIn("write_env_var WEBHOOK_URL", source + adapter)
 
-    def test_valid_install_input_does_not_need_amnezia_values(self):
+    def test_valid_install_input_requires_payment_contract_but_not_amnezia(self):
         result = self.run_function(
             "BOT_TOKEN='123456:TEST_TOKEN'; "
             "DB_PASSWORD='password1'; REDIS_PASSWORD='password2'; "
             "ADMIN_IDS='123'; SUPPORT_USERNAME='test_support_bot'; "
-            "YOOKASSA_SHOP_ID=''; YOOKASSA_SECRET_KEY=''; "
-            "DOMAIN=''; SSL_EMAIL=''; validate_initial_input"
+            "YOOKASSA_SHOP_ID='123456'; YOOKASSA_SECRET_KEY='secret'; "
+            "YOOKASSA_RETURN_URL='https://t.me/{bot_username}'; "
+            "YOOKASSA_WEBHOOK_PORT='8080'; "
+            "DOMAIN='vpn.example.test'; SSL_EMAIL='owner@example.test'; "
+            "validate_initial_input"
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        source = CORE.read_text(encoding="utf-8")
+        self.assertNotIn("Enter — отключено", source)
+        self.assertNotIn("YooKassa отключена", source)
+
+        for missing_assignment, expected in (
+            ("YOOKASSA_SHOP_ID='';", "YOOKASSA"),
+            ("YOOKASSA_SECRET_KEY='';", "YOOKASSA"),
+            ("DOMAIN='';", "DOMAIN"),
+            ("SSL_EMAIL='';", "SSL_EMAIL"),
+        ):
+            with self.subTest(missing_assignment=missing_assignment):
+                command = (
+                    "BOT_TOKEN='123456:TEST_TOKEN'; "
+                    "DB_PASSWORD='password1'; REDIS_PASSWORD='password2'; "
+                    "ADMIN_IDS='123'; SUPPORT_USERNAME='test_support_bot'; "
+                    "YOOKASSA_SHOP_ID='123456'; YOOKASSA_SECRET_KEY='secret'; "
+                    "YOOKASSA_RETURN_URL='https://t.me/{bot_username}'; "
+                    "YOOKASSA_WEBHOOK_PORT='8080'; "
+                    "DOMAIN='vpn.example.test'; SSL_EMAIL='owner@example.test'; "
+                    + missing_assignment
+                    + " validate_initial_input"
+                )
+                missing_result = self.run_function(command)
+                self.assertNotEqual(missing_result.returncode, 0)
+                self.assertIn(expected, missing_result.stderr)
 
     def test_domain_rejects_placeholder_certbot_email(self):
         result = self.run_function(
@@ -72,7 +101,14 @@ class InstallerInputContractTests(unittest.TestCase):
                 'ADMIN_IDS="[123]"\n'
                 'DATABASE_URL="postgresql+asyncpg://u:p@127.0.0.1:5432/db"\n'
                 'REDIS_URL="redis://127.0.0.1:6379/0"\n'
-                'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\n',
+                'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\n'
+                'REDIS_PASSWORD="password2"\n'
+                'YOOKASSA_SHOP_ID="123456"\n'
+                'YOOKASSA_SECRET_KEY="secret"\n'
+                'YOOKASSA_RETURN_URL="https://t.me/test_bot"\n'
+                'YOOKASSA_WEBHOOK_PORT="8080"\n'
+                'DOMAIN="vpn.example.test"\n'
+                'SSL_EMAIL="owner@example.test"\n',
                 encoding="utf-8",
             )
             env_file.chmod(0o600)

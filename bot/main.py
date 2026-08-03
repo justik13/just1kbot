@@ -296,24 +296,7 @@ async def main():
             )
             return
 
-        if settings.YOOKASSA_SHOP_ID and not settings.YOOKASSA_SECRET_KEY:
-            logger.critical(
-                "❌ YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY пуст!"
-            )
-            return
-
-        if settings.YOOKASSA_SECRET_KEY and not settings.YOOKASSA_SHOP_ID:
-            logger.critical(
-                "❌ YOOKASSA_SECRET_KEY задан, но YOOKASSA_SHOP_ID пуст!"
-            )
-            return
-
-        if not settings.ADMIN_IDS:
-            logger.warning(
-                "⚠️ ADMIN_IDS пуст! Алерты и уведомления "
-                "не будут отправляться администраторам."
-            )
-
+        logger.info("Инициализация БД...")
         logger.info("Инициализация БД...")
         await init_db()
 
@@ -325,10 +308,9 @@ async def main():
         bot, dp = await setup_bot()
         set_bot_ref(bot)
 
-        if settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY:
-            webhook_runner = await start_webhook_server(
-                settings.YOOKASSA_WEBHOOK_PORT
-            )
+        webhook_runner = await start_webhook_server(
+            settings.YOOKASSA_WEBHOOK_PORT
+        )
 
         await resume_pending_broadcasts(bot)
         logger.info("Pending broadcasts resumed (if any)")
@@ -381,6 +363,7 @@ async def main():
 
     except Exception as e:
         logger.critical("Fatal error in main: %s", e, exc_info=True)
+        raise
 
     finally:
         logger.info("Stopping background workers...")

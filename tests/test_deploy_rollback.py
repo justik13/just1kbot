@@ -374,7 +374,7 @@ class DeployRollbackTests(unittest.TestCase):
 
     def test_initial_install_env_is_mode_0600(self):
         envfile = self.tmp / "initial.env"
-        command = f'ENV_FILE="{envfile}"; BOT_TOKEN=123456:TEST_TOKEN; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
+        command = f'ENV_FILE="{envfile}"; BOT_TOKEN=123456:TEST_TOKEN; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot; YOOKASSA_SHOP_ID=123456; YOOKASSA_SECRET_KEY=test_secret; YOOKASSA_RETURN_URL=https://t.me/test_bot; YOOKASSA_WEBHOOK_PORT=8080; DOMAIN=vpn.example.test; SSL_EMAIL=owner@example.test; create_env_if_missing'
         r = self.run_deploy_function(command)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stat_result = envfile.stat()
