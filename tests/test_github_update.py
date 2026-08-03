@@ -5,14 +5,14 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 UPDATER = ROOT / "scripts" / "update_from_github.sh"
-MENU = ROOT / "deploy.sh"
+CONTROL_PLANE = ROOT / "scripts" / "lib" / "control_plane.sh"
 
 
 class GithubUpdateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.updater = UPDATER.read_text(encoding="utf-8")
-        cls.menu = MENU.read_text(encoding="utf-8")
+        cls.control = CONTROL_PLANE.read_text(encoding="utf-8")
 
     def test_help_is_non_destructive_and_available_without_root(self):
         result = subprocess.run(
@@ -108,15 +108,15 @@ class GithubUpdateTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.updater)
 
-    def test_root_menu_exposes_update_without_holding_nested_lock(self):
-        update_case = self.menu[
-            self.menu.index("        update)") : self.menu.index("        deploy)")
+    def test_control_plane_exposes_update_without_nested_lock(self):
+        update_case = self.control[
+            self.control.index("        update)") : self.control.index("        deploy)")
         ]
         self.assertIn('call_script update_from_github.sh "$@"', update_case)
-        self.assertIn("post_operation_smokecheck", update_case)
+        self.assertIn("smoke", update_case)
         self.assertNotIn("run_locked_script", update_case)
-        self.assertIn("Обновить код из GitHub (main)", self.menu)
-        self.assertIn("sudo bash /opt/just1kbot/deploy.sh update", self.menu)
+        self.assertIn("Update from GitHub", self.control)
+        self.assertIn("sudo bash deploy.sh update", self.control)
 
 
 if __name__ == "__main__":
