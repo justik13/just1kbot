@@ -22,14 +22,18 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          import textwrap
 
           source = Path('.github/workflows/fix-installer-audit.yml').read_text(encoding='utf-8')
           start_marker = "          python - <<'PY'\n"
           end_marker = "\n          PY\n\n      - name: Run targeted installer checks"
           start = source.index(start_marker) + len(start_marker)
           end = source.index(end_marker, start)
-          script = "import textwrap\n" + textwrap.dedent(source[start:end])
+          body = source[start:end]
+          body = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in body.splitlines()
+          )
+          script = "import textwrap\n" + body + "\n"
           Path('/tmp/fix_installer.py').write_text(script, encoding='utf-8')
           PY
           python /tmp/fix_installer.py
