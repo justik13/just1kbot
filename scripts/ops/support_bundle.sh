@@ -8,7 +8,7 @@ export PATH
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 ROOT_DIR=$(cd -- "$SCRIPT_DIR/../.." && pwd -P)
-OUTPUT_DIR=/var/lib/just1kbot/support-bundles
+OUTPUT_DIR=/root/just1kbot-support-bundles
 DEPLOY_LOCK=/run/lock/just1kbot-deploy.lock
 LIMIT=300
 
@@ -16,9 +16,10 @@ usage() {
     cat <<'EOF'
 Usage: sudo just1kbot support-bundle [--output DIR]
 
-Creates a root-only tar.gz with redacted state, doctor output, unit metadata,
-selected journal tails and host capacity. It never includes .env, database dumps,
-backup archives, API keys, bot tokens or age identities.
+Creates a root-only diagnostic tar.gz outside managed installation state.
+It never includes .env, database dumps, backup archives, API keys, bot tokens
+or age identities. The archive is an explicit operator artifact and is not
+removed automatically by uninstall.
 EOF
 }
 
@@ -36,8 +37,9 @@ while (( $# > 0 )); do
 done
 
 (( EUID == 0 )) || { printf 'support-bundle must run as root\n' >&2; exit 1; }
-[[ "$OUTPUT_DIR" == /* && ! -L "$OUTPUT_DIR" ]] || {
+[[ "$OUTPUT_DIR" == /* && "$OUTPUT_DIR" != /var/lib/just1kbot* && ! -L "$OUTPUT_DIR" ]] || {
     printf 'Unsafe output directory: %s\n' "$OUTPUT_DIR" >&2
+    printf 'Choose an absolute root-owned directory outside /var/lib/just1kbot.\n' >&2
     exit 1
 }
 install -d -o root -g root -m 0700 "$OUTPUT_DIR"
@@ -64,7 +66,7 @@ capture() {
 }
 
 capture state.json bash "$ROOT_DIR/scripts/inspect_install_state.sh" --json
-capture doctor.txt bash "$SCRIPT_DIR/doctor.sh"
+capture doctor.txt bash "$SCRIPT_DIR/doctor_complete.sh"
 capture os-release.txt cat /etc/os-release
 capture disk.txt df -hT
 capture memory.txt free -h
