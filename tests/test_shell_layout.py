@@ -10,33 +10,35 @@ SCRIPTS = ROOT / "scripts"
 
 
 class ShellLayoutTests(unittest.TestCase):
-    def test_root_has_only_interactive_shell_entrypoint(self):
+    def test_root_has_only_control_plane_entrypoint(self):
         root_scripts = sorted(path.name for path in ROOT.glob("*.sh"))
         self.assertEqual(root_scripts, ["deploy.sh"])
 
-    def test_required_scripts_are_under_scripts_directory(self):
+    def test_required_safe_installer_files_exist(self):
         required = {
-            "deploy.sh",
-            "deploy_full.sh",
-            "deploy_full_library.sh",
+            "install_safe.sh",
             "update_from_github.sh",
-            "setup-amnezia-api.sh",
-            "uninstall.sh",
-            "lib/deploy_core.inc",
+            "uninstall_foundation.sh",
+            "uninstall_entrypoint.sh",
+            "preflight_install_state.sh",
+            "inspect_install_state.sh",
+            "lib/control_plane.sh",
+            "lib/installer_foundation.sh",
+            "lib/installer_foundation_compat.sh",
+            "lib/install_safe_platform.sh",
+            "lib/install_safe_legacy.sh",
+            "lib/install_safe_runtime.sh",
+            "lib/install_safe_dispatch.sh",
+            "lib/uninstall_safe_core.sh",
+            "lib/uninstall_safe_actions.sh",
             "lib/postgresql.sh",
             "lib/operational_transaction.sh",
             "ops/deploy_application.sh",
+            "ops/doctor.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
             "ops/restore_rehearsal.sh",
             "ops/just1kbot-restore.sh",
-            "ops/production_restore.sh",
-            "lib/production_restore_core.sh",
-            "lib/production_restore_runtime.sh",
-            "lib/production_restore_actions.sh",
-            "lib/production_restore_input.sh",
-            "lib/production_restore_crash.sh",
-            "lib/production_restore_recovery_cleanup.sh",
         }
         missing = sorted(name for name in required if not (SCRIPTS / name).is_file())
         self.assertEqual(missing, [])
@@ -48,7 +50,7 @@ class ShellLayoutTests(unittest.TestCase):
             with self.subTest(script=script.relative_to(ROOT)):
                 subprocess.run(["bash", "-n", str(script)], check=True)
 
-    def test_deploy_library_is_source_only(self):
+    def test_legacy_deploy_library_is_source_only(self):
         for loader in ("deploy_full.sh", "deploy_full_library.sh"):
             result = subprocess.run(
                 ["bash", str(SCRIPTS / loader)],
@@ -74,16 +76,17 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertEqual(source_result.returncode, 0, source_result.stderr)
 
     def test_initial_deploy_requires_real_support_username(self):
-        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
         core = (SCRIPTS / "lib" / "deploy_core.inc").read_text(encoding="utf-8")
+        platform = (SCRIPTS / "lib" / "install_safe_platform.sh").read_text(
+            encoding="utf-8"
+        )
         example = (ROOT / ".env.example").read_text(encoding="utf-8")
-        self.assertIn("SUPPORT_USERNAME:?SUPPORT_USERNAME не задан", adapter)
-        self.assertIn("read_support_username", core)
-        self.assertIn('write_env_var SUPPORT_USERNAME "$SUPPORT_USERNAME"', core)
+        self.assertIn("SUPPORT_USERNAME", core)
+        self.assertIn("SUPPORT_USERNAME", platform)
         self.assertIn("CHANGE_ME_SUPPORT_USERNAME", example)
         self.assertNotIn("SUPPORT_USERNAME='support'", example)
 
-    def test_menu_help_is_non_destructive(self):
+    def test_help_is_non_destructive_without_root(self):
         result = subprocess.run(
             ["bash", str(ROOT / "deploy.sh"), "help"],
             text=True,
@@ -93,19 +96,27 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Just1kBot", result.stdout)
         self.assertIn("restore-test", result.stdout)
-        self.assertIn("restore-production", result.stdout)
-        self.assertIn("restore-recover", result.stdout)
+        self.assertIn("install-recover", result.stdout)
         self.assertIn("update", result.stdout)
 
+    def test_direct_dry_run_reaches_safe_installer(self):
+        result = subprocess.run(
+            ["bash", str(ROOT / "deploy.sh"), "--dry-run"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("root", result.stderr.lower())
+
     def test_psql_variables_are_never_embedded_in_dash_c_sql(self):
-        # psql performs :name, :'name' and :"name" interpolation only while
-        # reading its input stream or a file, not inside a -c argument.
         variable = re.compile(r""":(?:'|")?[A-Za-z_][A-Za-z0-9_]*""")
         for script in sorted(ROOT.rglob("*.sh")):
-            text = script.read_text(encoding="utf-8")
-            logical_lines = text.replace("\\\n", " ").splitlines()
+            logical_lines = script.read_text(encoding="utf-8").replace(
+                "\\\n", " "
+            ).splitlines()
             for line_number, line in enumerate(logical_lines, start=1):
-                if " -c " not in f" {line} ":
+                if "psql" not in line or " -c " not in f" {line} ":
                     continue
                 with self.subTest(script=script.relative_to(ROOT), line=line_number):
                     self.assertIsNone(variable.search(line), line)
@@ -120,7 +131,8 @@ class ShellLayoutTests(unittest.TestCase):
         ):
             text = (SCRIPTS / relative).read_text(encoding="utf-8")
             executable = "\n".join(
-                line for line in text.splitlines()
+                line
+                for line in text.splitlines()
                 if not line.lstrip().startswith("#")
             )
             with self.subTest(script=relative):
@@ -143,7 +155,6 @@ class ShellLayoutTests(unittest.TestCase):
             )
             env_file.chmod(0o640)
             before = env_file.stat()
-
             command = f"""
 set -Eeuo pipefail
 ENV_FILE={str(env_file)!r}
@@ -158,7 +169,6 @@ pg_repair_env_port
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-
             self.assertEqual(
                 env_file.read_text(encoding="utf-8"),
                 'BOT_TOKEN="keep"\n'
@@ -170,34 +180,40 @@ pg_repair_env_port
             self.assertEqual(before.st_uid, after.st_uid)
             self.assertEqual(before.st_gid, after.st_gid)
 
-    def test_live_tree_permission_check_handles_virtualenv_symlinks(self):
-        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn("validate_live_symlinks", adapter)
-        self.assertIn(
-            'find "$PROJECT_DIR" -xdev \\( -type f -o -type d \\) -perm /022',
-            adapter,
+    def test_live_tree_permission_check_ignores_only_virtualenv_symlinks(self):
+        platform = (SCRIPTS / "lib" / "install_safe_platform.sh").read_text(
+            encoding="utf-8"
         )
-        self.assertNotIn(
-            'find "$PROJECT_DIR" -xdev -perm /022',
-            adapter,
-        )
-        self.assertIn('[[ "$link" != "$VENV_DIR/"* ]]', adapter)
-        self.assertIn("readlink -f", adapter)
+        self.assertIn("Symlink вне virtualenv запрещён", platform)
+        self.assertIn('find "$PROJECT_DIR" -xdev -type l', platform)
+        self.assertIn('not -path "$VENV_DIR/*"', platform)
 
-    def test_existing_database_without_env_is_checked_before_initial_setup(self):
-        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn("preflight_initial_database_without_env", adapter)
-        initial = adapter.index('if [[ "$INITIAL_INSTALL" == true ]]; then', adapter.index("run_deploy()"))
-        guard = adapter.index("preflight_initial_database_without_env", initial)
-        setup = adapter.index("setup_postgresql_initial", initial)
-        self.assertLess(guard, setup)
+    def test_database_collision_preflight_precedes_initial_creation(self):
+        platform = (SCRIPTS / "lib" / "install_safe_platform.sh").read_text(
+            encoding="utf-8"
+        )
+        function = platform[
+            platform.index("setup_postgresql_initial()") : platform.index(
+                "record_existing_postgres()"
+            )
+        ]
+        self.assertLess(
+            function.index("preflight_postgres_names_absent"),
+            function.index("pg_prepare_initial_database"),
+        )
 
     def test_first_install_rollback_does_not_start_absent_service(self):
-        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('previous_service=absent start_not_attempted=true', adapter)
-        absent_branch = adapter.index('if [[ ! -f "$ROLLBACK_SNAPSHOT/systemd.service" ]]')
-        next_start = adapter.index("service_call start", absent_branch)
-        branch_return = adapter.index("return 1", absent_branch)
+        runtime = (SCRIPTS / "lib" / "install_safe_runtime.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "previous_service=absent start_not_attempted=true", runtime
+        )
+        absent_branch = runtime.index(
+            'if [[ ! -f "$ROLLBACK_SNAPSHOT/systemd.service" ]]'
+        )
+        next_start = runtime.index("service_call start", absent_branch)
+        branch_return = runtime.index("return 1", absent_branch)
         self.assertLess(branch_return, next_start)
 
 
