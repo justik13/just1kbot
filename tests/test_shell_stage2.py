@@ -26,6 +26,10 @@ class ShellStage2Tests(unittest.TestCase):
             "setup-amnezia-api.sh",
             "uninstall.sh",
             "uninstall_entrypoint.sh",
+            "preflight_uninstall_resources.sh",
+            "verify_uninstall_state.sh",
+            "inspect_install_state.sh",
+            "lib/installer_diagnostics.sh",
             "preflight_install_state.sh",
         ]
         self.assertEqual(
@@ -38,8 +42,12 @@ class ShellStage2Tests(unittest.TestCase):
             SCRIPTS / "setup-amnezia-api.sh",
             SCRIPTS / "uninstall.sh",
             SCRIPTS / "uninstall_entrypoint.sh",
+            SCRIPTS / "preflight_uninstall_resources.sh",
+            SCRIPTS / "verify_uninstall_state.sh",
+            SCRIPTS / "inspect_install_state.sh",
+            SCRIPTS / "lib" / "installer_diagnostics.sh",
             SCRIPTS / "preflight_install_state.sh",
-            SCRIPTS / "ops/production_restore.sh",
+            SCRIPTS / "ops" / "production_restore.sh",
         ):
             subprocess.run(["bash", "-n", str(script)], check=True)
 
@@ -63,19 +71,25 @@ class ShellStage2Tests(unittest.TestCase):
             "pause_operational_work",
             "preflight_purge",
             "PURGE_REDIS_CONNECTION",
+            "run_resource_preflight",
+            "nginx_site_has_expected_markers",
+            "site автоматически восстановлен",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("--force", text)
         self.assertNotIn("apt-get remove", text)
         self.assertNotIn("/root/.just1kbot-snapshots", text)
         self.assertNotIn("mapfile -t connection < <(redis_connection)", text)
-        self.assertIn("if ! output=$(redis_connection); then", text)
+        self.assertNotIn("setup-amnezia-api.sh", text)
+        self.assertNotIn("ufw ", text)
+        self.assertNotIn("certbot delete", text)
 
-        main = text[text.index("main(){"):]
+        main = text[text.index("main() {") :]
+        self.assertLess(main.index("run_resource_preflight"), main.index("preflight_purge"))
         self.assertLess(main.index("preflight_purge"), main.index("pause_operational_work"))
         self.assertLess(main.index("pause_operational_work"), main.index("stop_units"))
 
-    def test_amnezia_is_explicit_interactive_and_transactional(self):
+    def test_amnezia_script_remains_standalone_and_transactional(self):
         text = (SCRIPTS / "setup-amnezia-api.sh").read_text(
             encoding="utf-8"
         )
@@ -106,9 +120,11 @@ class ShellStage2Tests(unittest.TestCase):
         self.assertIn("begin", text[text.index("unpublish(){"):])
         self.assertIn("ufw delete allow 80/tcp", text[text.index("unpublish(){"):])
 
-    def test_root_menu_targets_interactive_and_locked_operations(self):
+    def test_root_menu_excludes_standalone_amnezia_utility(self):
         menu = (ROOT / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn("run_script setup-amnezia-api.sh", menu)
+        self.assertNotIn("run_script setup-amnezia-api.sh", menu)
+        self.assertNotIn("amnezia)", menu)
+        self.assertIn("Standalone setup-amnezia-api.sh", menu)
         self.assertIn("run_script uninstall_entrypoint.sh", menu)
         self.assertIn("run_locked_script deploy.sh --backup", menu)
         self.assertIn(
@@ -124,6 +140,7 @@ class ShellStage2Tests(unittest.TestCase):
             menu,
         )
         self.assertIn('DEPLOY_FUNCTIONS_ONLY:-0}', menu)
+        self.assertIn("inspect_deploy_state --require-safe", menu)
 
 
 if __name__ == "__main__":
