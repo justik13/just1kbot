@@ -1,0 +1,56 @@
+name: Fix PR 53 test fixtures
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-pr53-test-fixtures
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.ref == 'agent/greenfield-ui-ux-cleanup' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+      - name: Remove retired Payment.status fixture arguments
+        shell: bash
+        env:
+          BRANCH: agent/greenfield-ui-ux-cleanup
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = (
+              Path('tests/test_balance_refund_webhook_postgres.py'),
+              Path('tests/test_payment_disputes_postgres.py'),
+              Path('tests/test_provider_refunds_postgres.py'),
+          )
+          for path in paths:
+              text = path.read_text()
+              updated = text.replace('            status="completed",\n', '')
+              if updated == text:
+                  print(f'{path}: already current')
+              else:
+                  path.write_text(updated)
+                  print(f'{path}: updated')
+          PY
+          if git diff --quiet -- tests/test_balance_refund_webhook_postgres.py tests/test_payment_disputes_postgres.py tests/test_provider_refunds_postgres.py; then
+            echo 'Fixtures already current'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/test_balance_refund_webhook_postgres.py tests/test_payment_disputes_postgres.py tests/test_provider_refunds_postgres.py
+          git commit -m 'test: align refund fixtures with top-up payment model'
+          git pull --rebase origin "$BRANCH"
+          git push origin "HEAD:$BRANCH"
