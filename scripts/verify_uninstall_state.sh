@@ -12,6 +12,7 @@ LOG_DIR=/var/log/just1kbot
 BACKUP_DIR=/root/backups/just1kbot
 BACKUP_CONF=/etc/just1kbot-backup.conf
 BACKUP_IDENTITY=/root/.config/just1kbot/backup.agekey
+BACKUP_IDENTITY_DIR=/root/.config/just1kbot
 SNAPSHOT_DIR=/var/lib/just1kbot/rollback-releases
 RESTORE_STATE_DIR=/var/lib/just1kbot/restore-transactions
 CLI_SBIN=/usr/local/sbin/just1kbot
@@ -39,6 +40,7 @@ check_common_filesystem() {
         "$PROJECT_DIR" \
         "$STATE_ROOT" \
         "$LOG_DIR" \
+        "$BOT_HOME" \
         "$CLI_SBIN" \
         "$CLI_BIN" \
         /etc/logrotate.d/just1kbot \
@@ -53,6 +55,8 @@ check_common_filesystem() {
         /usr/local/bin/restore_rehearsal.sh; do
         check_absent_path "$path"
     done
+
+    id "$BOT_USER" >/dev/null 2>&1 && add_leftover "service_user:$BOT_USER" || true
 
     for path in \
         /etc/systemd/system/just1kbot.service \
@@ -71,34 +75,46 @@ check_common_filesystem() {
     while IFS= read -r path; do
         [[ -n "$path" ]] && add_leftover "nginx:$path"
     done < <(find /etc/nginx/sites-available /etc/nginx/sites-enabled \
-        -maxdepth 1 -type f -name 'just1kbot-*' -print 2>/dev/null || true)
+        -maxdepth 1 \( -type f -o -type l \) -name 'just1kbot-*' -print 2>/dev/null || true)
 }
 
 check_no_running_processes() {
-    id "$BOT_USER" >/dev/null 2>&1 || return 0
+    command -v pgrep >/dev/null 2>&1 || {
+        add_leftover 'verification:pgrep command missing'
+        return 0
+    }
     local pids
-    pids=$(pgrep -u "$BOT_USER" 2>/dev/null || true)
-    [[ -z "$pids" ]] || add_leftover "processes:user=$BOT_USER pids=$(tr '\n' ',' <<<"$pids" | sed 's/,$//')"
+    pids=$(pgrep -f '/opt/just1kbot|just1kbot.service' 2>/dev/null || true)
+    [[ -z "$pids" ]] || add_leftover "processes:just1kbot pids=$(tr '\n' ',' <<<"$pids" | sed 's/,$//')"
 }
 
 check_purge_filesystem() {
     check_absent_path "$BACKUP_DIR"
     check_absent_path "$BACKUP_CONF"
     check_absent_path "$BACKUP_IDENTITY"
+    check_absent_path "$BACKUP_IDENTITY_DIR"
     check_absent_path "$SNAPSHOT_DIR"
     check_absent_path "$RESTORE_STATE_DIR"
-    check_absent_path "$BOT_HOME"
-    id "$BOT_USER" >/dev/null 2>&1 && add_leftover "service_user:$BOT_USER" || true
 }
 
 check_postgresql_purge() {
-    command -v pg_lsclusters >/dev/null 2>&1 || return 0
-    command -v psql >/dev/null 2>&1 || return 0
-    command -v runuser >/dev/null 2>&1 || return 0
+    command -v pg_lsclusters >/dev/null 2>&1 || {
+        add_leftover 'verification:pg_lsclusters command missing'
+        return 0
+    }
+    command -v psql >/dev/null 2>&1 || {
+        add_leftover 'verification:psql command missing'
+        return 0
+    }
+    command -v runuser >/dev/null 2>&1 || {
+        add_leftover 'verification:runuser command missing'
+        return 0
+    }
 
-    local version cluster port status role_count database_count
+    local version cluster port status role_count database_count online_seen=0
     while IFS=' ' read -r version cluster port status _; do
         [[ "$status" == online ]] || continue
+        online_seen=1
         role_count=$(runuser -u postgres -- psql -XAtq -v ON_ERROR_STOP=1 \
             -h /var/run/postgresql -p "$port" -d postgres \
             -v role_name="$PG_ROLE" <<'SQL' 2>/dev/null || printf 'check-failed'
@@ -117,6 +133,8 @@ SQL
         [[ "$role_count" == 0 ]] || add_leftover "postgresql:${version}/${cluster}:role=$PG_ROLE count=$role_count"
         [[ "$database_count" == 0 ]] || add_leftover "postgresql:${version}/${cluster}:databases count=$database_count"
     done < <(pg_lsclusters --no-header 2>/dev/null || true)
+
+    (( online_seen == 1 )) || add_leftover 'verification:no online PostgreSQL cluster available'
 }
 
 print_result() {
@@ -127,13 +145,14 @@ print_result() {
 
     printf 'ОШИБКА проверки удаления: найдены остаточные объекты Just1kBot.\n' >&2
     printf 'Удаление не считается завершённым.\n' >&2
-    printf 'Остатки:\n' >&2
+    printf 'Остатки или непроверенные области:\n' >&2
     printf '  - %s\n' "${LEFTOVERS[@]}" >&2
     printf 'Следующее действие: проверьте каждый объект; не удаляйте его вслепую, если ownership не подтверждён.\n' >&2
     return 1
 }
 
 verify_uninstall_main() {
+    LEFTOVERS=()
     case ${1:-} in
         --keep-data) MODE=keep ;;
         --purge-data) MODE=purge ;;
@@ -151,7 +170,7 @@ verify_uninstall_main() {
     check_common_filesystem
     check_no_running_processes
 
-    if [[ "$MODE" == purge ]] || { [[ "$MODE" == auto ]] && ! id "$BOT_USER" >/dev/null 2>&1; }; then
+    if [[ "$MODE" == purge ]]; then
         check_purge_filesystem
         check_postgresql_purge
     fi
