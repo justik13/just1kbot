@@ -4,13 +4,14 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+UNINSTALL = ROOT / "scripts" / "uninstall.sh"
 ENTRYPOINT = ROOT / "scripts" / "uninstall_entrypoint.sh"
 VERIFIER = ROOT / "scripts" / "verify_uninstall_state.sh"
 
 
 class UninstallVerificationContractTests(unittest.TestCase):
     def test_scripts_parse(self):
-        for script in (ENTRYPOINT, VERIFIER):
+        for script in (UNINSTALL, ENTRYPOINT, VERIFIER):
             result = subprocess.run(
                 ["bash", "-n", str(script)],
                 text=True,
@@ -19,11 +20,17 @@ class UninstallVerificationContractTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_official_entrypoint_always_runs_post_uninstall_verifier(self):
+    def test_official_entrypoint_checks_ownership_and_verifies_result(self):
         source = ENTRYPOINT.read_text(encoding="utf-8")
+        self.assertIn("INSPECT_STATE", source)
+        self.assertIn('bash "$INSPECT_STATE" --require-safe', source)
         self.assertIn("VERIFY_UNINSTALL", source)
         self.assertIn('source "$VERIFY_UNINSTALL"', source)
         self.assertIn('verify_uninstall_main "$VERIFY_MODE"', source)
+        self.assertLess(
+            source.index('bash "$INSPECT_STATE" --require-safe'),
+            source.index('bash "$UNINSTALL" "$@"'),
+        )
         self.assertLess(
             source.index('source "$VERIFY_UNINSTALL"'),
             source.index('bash "$UNINSTALL" "$@"'),
@@ -33,6 +40,31 @@ class UninstallVerificationContractTests(unittest.TestCase):
             source.index('verify_uninstall_main "$VERIFY_MODE"'),
         )
 
+    def test_uninstall_does_not_touch_node_or_global_firewall_state(self):
+        source = UNINSTALL.read_text(encoding="utf-8")
+        for forbidden in (
+            "setup-amnezia-api.sh",
+            "just1kbot-amnezia",
+            "/etc/just1kbot-amnezia.conf",
+            "ufw ",
+            "certbot delete",
+            "docker ",
+            " awg ",
+            " wg ",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+        self.assertIn("Удаление не изменяет firewall", source)
+        self.assertIn("nginx_site_has_expected_markers", source)
+        self.assertIn("site автоматически восстановлен", source)
+
+    def test_uninstall_removes_service_account_in_both_modes(self):
+        source = UNINSTALL.read_text(encoding="utf-8")
+        self.assertIn("remove_service_user", source)
+        main = source[source.index("main() {") :]
+        self.assertIn("remove_service_user", main)
+        self.assertNotIn('[[ "$MODE" == purge ]] && remove_service_user', main)
+
     def test_verifier_reports_all_leftovers_in_one_run(self):
         source = VERIFIER.read_text(encoding="utf-8")
         self.assertIn("LEFTOVERS=()", source)
@@ -40,6 +72,7 @@ class UninstallVerificationContractTests(unittest.TestCase):
         self.assertIn("Удаление не считается завершённым", source)
         self.assertIn("check_postgresql_purge", source)
         self.assertIn("check_no_running_processes", source)
+        self.assertIn("service_user:$BOT_USER", source)
         self.assertIn("VERIFY_UNINSTALL_SOURCE_ONLY", source)
         self.assertIn("verify_uninstall_main", source)
 
