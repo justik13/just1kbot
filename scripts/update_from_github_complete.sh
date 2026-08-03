@@ -37,6 +37,7 @@ fail() {
 usage() {
     cat <<'EOF_USAGE'
 Just1kBot — exact-SHA update from fixed GitHub main
+Repository: https://github.com/justik13/projectx
 
 Usage:
   sudo bash deploy.sh update --check
@@ -175,6 +176,8 @@ scripts/lib/installer_diagnostics.sh
 scripts/lib/installer_foundation.sh
 scripts/lib/installer_foundation_compat.sh
 scripts/lib/install_safe_platform.sh
+scripts/lib/install_safe_platform_support.sh
+scripts/lib/install_safe_release_contract.sh
 scripts/lib/install_safe_lock_policy.sh
 scripts/lib/install_safe_legacy.sh
 scripts/lib/install_safe_redis_transition.sh
@@ -182,6 +185,7 @@ scripts/lib/install_safe_runtime.sh
 scripts/lib/install_safe_tls_policy.sh
 scripts/lib/install_safe_postgres_ownership.sh
 scripts/lib/install_safe_proxy_mode.sh
+scripts/lib/install_safe_package_policy.sh
 scripts/lib/install_safe_activation_policy.sh
 scripts/lib/install_safe_failure_injection.sh
 scripts/lib/install_safe_dispatch.sh
