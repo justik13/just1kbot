@@ -5,6 +5,7 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy.sh"
+CONTROL = ROOT / "scripts" / "lib" / "control_plane.sh"
 DOCTOR = ROOT / "scripts" / "ops" / "doctor.sh"
 
 
@@ -12,14 +13,16 @@ class BotDoctorContractTests(unittest.TestCase):
     def test_doctor_script_parses(self):
         subprocess.run(["bash", "-n", str(DOCTOR)], check=True)
 
-    def test_root_entrypoint_exposes_doctor_and_post_operation_gate(self):
-        text = DEPLOY.read_text(encoding="utf-8")
+    def test_control_plane_exposes_doctor_and_post_operation_gate(self):
+        loader = DEPLOY.read_text(encoding="utf-8")
+        text = CONTROL.read_text(encoding="utf-8")
+        self.assertIn('source "$module"', loader)
         self.assertIn("sudo bash deploy.sh doctor", text)
-        self.assertIn("run_script ops/doctor.sh", text)
-        self.assertIn("post_operation_smokecheck", text)
+        self.assertIn("call_script ops/doctor.sh", text)
+        self.assertIn("smoke()", text)
         self.assertIn("call_script ops/doctor.sh --smoke", text)
-        self.assertIn("is_read_only_deploy_request", text)
-        self.assertIn("--check|--dry-run", text)
+        self.assertIn("--check", text)
+        self.assertIn("--dry-run", text)
         self.assertIn("автоматический rollback на этом этапе не выполнялся", text)
 
     def test_doctor_checks_bot_runtime_contract(self):
