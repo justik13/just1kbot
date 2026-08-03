@@ -93,12 +93,16 @@ validate_runtime_commands() {
     for command in "${commands[@]}"; do
         command_required "$command"
     done
-    python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,12) else 1)' || {
-        error 'Требуется Python 3.12 или новее'
+    python3 -c 'import sys; raise SystemExit(0 if sys.version_info[:2] == (3,12) else 1)' || {
+        error 'Требуется Python 3.12: requirements.lock сгенерирован и проверен именно для этой minor-версии'
         return 1
     }
     command -v systemd-run >/dev/null 2>&1 || {
         error 'systemd-run отсутствует: systemd capability не подтверждена'
+        return 1
+    }
+    [[ -d /run/systemd/system ]] || {
+        error 'systemd не запущен как системный service manager'
         return 1
     }
 }
