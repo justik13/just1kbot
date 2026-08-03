@@ -14,7 +14,6 @@ clone_uninstall_function() {
 clone_uninstall_function prepare_postgres ownership_base_prepare_postgres
 clone_uninstall_function remove_certificate ownership_base_remove_certificate
 clone_uninstall_function remove_files ownership_base_remove_files
-clone_uninstall_function purge_saved ownership_base_purge_saved
 clone_uninstall_function post_verify ownership_base_post_verify
 
 postgres_expected_marker() {
@@ -63,15 +62,6 @@ remove_files() {
     ownership_base_remove_files
 }
 
-purge_saved() {
-    ownership_base_purge_saved
-    [[ "$MODE" == purge ]] || return 0
-    local support_dir=/var/lib/just1kbot/support-bundles
-    if [[ -e "$support_dir" || -L "$support_dir" ]]; then
-        remove_owned_tree "$support_dir"
-    fi
-}
-
 verify_postgres_absent() {
     [[ "$MODE" == purge ]] || return 0
     local database_exists role_exists
@@ -87,6 +77,11 @@ SQL
 }
 
 post_verify() {
+    local owned_nginx_site=false owned_nginx_enabled=false owned_certificate=false
+    [[ -n "$DOMAIN" ]] && foundation_manifest_has "nginx-site:$DOMAIN" && owned_nginx_site=true
+    [[ -n "$DOMAIN" ]] && foundation_manifest_has "nginx-enabled:$DOMAIN" && owned_nginx_enabled=true
+    [[ -n "$DOMAIN" ]] && foundation_manifest_has "certbot:$DOMAIN" && owned_certificate=true
+
     ownership_base_post_verify
     local leftovers=() path unit
 
@@ -113,12 +108,16 @@ post_verify() {
         systemctl is-active --quiet "$unit" 2>/dev/null && leftovers+=("active:$unit")
     done
 
-    if [[ -n "$DOMAIN" ]]; then
+    if [[ "$owned_nginx_site" == true ]]; then
         [[ ! -e "/etc/nginx/sites-available/$DOMAIN" && ! -L "/etc/nginx/sites-available/$DOMAIN" ]] || leftovers+=("nginx-site:$DOMAIN")
+    fi
+    if [[ "$owned_nginx_enabled" == true ]]; then
         [[ ! -e "/etc/nginx/sites-enabled/$DOMAIN" && ! -L "/etc/nginx/sites-enabled/$DOMAIN" ]] || leftovers+=("nginx-enabled:$DOMAIN")
-        if foundation_manifest_has "certbot:$DOMAIN" && certbot certificates --cert-name "$DOMAIN" >/dev/null 2>&1; then
-            leftovers+=("certbot:$DOMAIN")
-        fi
+    fi
+    if [[ "$owned_certificate" == true ]] &&
+       command -v certbot >/dev/null 2>&1 &&
+       certbot certificates --cert-name "$DOMAIN" >/dev/null 2>&1; then
+        leftovers+=("certbot:$DOMAIN")
     fi
 
     if [[ "$MODE" == purge ]]; then
@@ -129,8 +128,7 @@ post_verify() {
             /root/.config/just1kbot/backup.agekey \
             /var/lib/just1kbot/rollback-releases \
             /var/lib/just1kbot/restore-transactions \
-            /var/lib/just1kbot/source-releases \
-            /var/lib/just1kbot/support-bundles; do
+            /var/lib/just1kbot/source-releases; do
             [[ ! -e "$path" && ! -L "$path" ]] || leftovers+=("$path")
         done
     fi
