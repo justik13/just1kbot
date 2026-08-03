@@ -51,7 +51,7 @@ jobs:
           test_path = Path('tests/test_deploy_rollback.py')
           test = test_path.read_text(encoding='utf-8')
           old_token = 'BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot;'
-          new_token = "BOT_TOKEN='123456:TEST_TOKEN'; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot;"
+          new_token = "BOT_TOKEN=123456:TEST_TOKEN; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot;"
           if old_token not in test:
               raise SystemExit('legacy invalid token fixture not found')
           test_path.write_text(test.replace(old_token, new_token, 1), encoding='utf-8')
