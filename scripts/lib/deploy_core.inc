@@ -260,7 +260,7 @@ validate_env_file() {
     validate_env_file_safety || return 1
 
     local required value
-    for required in BOT_TOKEN ADMIN_IDS DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
+    for required in BOT_TOKEN ADMIN_IDS SUPPORT_USERNAME DATABASE_URL REDIS_URL DB_ENCRYPTION_KEY; do
         value=$(read_env_value "$required")
         if [[ -z "$value" ]]; then
             error "В production .env отсутствует обязательный параметр: $required"
@@ -268,9 +268,26 @@ validate_env_file() {
         fi
     done
 
-    local admin_ids
+    local bot_token support_username admin_ids encryption_key
+    local shop_id secret_key domain
+
+    bot_token=$(read_env_value BOT_TOKEN)
+    if [[ ! "$bot_token" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        error "BOT_TOKEN в production .env имеет неверный формат"
+        return 1
+    fi
+
+    support_username=$(read_env_value SUPPORT_USERNAME)
+    support_username=${support_username#@}
+    if [[ ! "$support_username" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
+       [[ "${support_username,,}" == support ]] ||
+       [[ "${support_username,,}" == change_me_support_username ]]; then
+        error "SUPPORT_USERNAME в production .env должен быть реальным Telegram username"
+        return 1
+    fi
+
     admin_ids=$(read_env_value ADMIN_IDS)
-    ADMIN_IDS_JSON="$admin_ids" python3 - <<'PY'
+    ADMIN_IDS_JSON="$admin_ids" python3 - <<'PY_ADMIN_IDS'
 import json
 import os
 
@@ -279,11 +296,10 @@ if not isinstance(value, list) or not value:
     raise SystemExit("ADMIN_IDS must be a non-empty JSON array")
 if any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in value):
     raise SystemExit("ADMIN_IDS must contain positive integers")
-PY
+PY_ADMIN_IDS
 
-    local encryption_key
     encryption_key=$(read_env_value DB_ENCRYPTION_KEY)
-    DB_KEY="$encryption_key" python3 - <<'PY'
+    DB_KEY="$encryption_key" python3 - <<'PY_DB_KEY'
 import base64
 import os
 
@@ -294,7 +310,27 @@ except Exception as exc:
     raise SystemExit(f"invalid DB_ENCRYPTION_KEY: {type(exc).__name__}")
 if len(decoded) != 32:
     raise SystemExit("invalid DB_ENCRYPTION_KEY length")
-PY
+PY_DB_KEY
+
+    shop_id=$(read_env_value YOOKASSA_SHOP_ID)
+    secret_key=$(read_env_value YOOKASSA_SECRET_KEY)
+    if [[ -n "$shop_id" && -z "$secret_key" ]] ||
+       [[ -z "$shop_id" && -n "$secret_key" ]]; then
+        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в production .env задаются только вместе"
+        return 1
+    fi
+
+    domain=$(read_env_value DOMAIN)
+    if [[ -n "$domain" ]]; then
+        if ! normalize_domain "$domain" >/dev/null; then
+            error "DOMAIN в production .env имеет неверный формат"
+            return 1
+        fi
+        if [[ -z "$shop_id" ]]; then
+            error "DOMAIN в production .env требует настроенную YooKassa"
+            return 1
+        fi
+    fi
 }
 
 determine_install_kind() {
@@ -312,6 +348,36 @@ determine_install_kind() {
     fi
 }
 
+validate_supported_os() {
+    local os_id=${1:-}
+    local version_id=${2:-}
+    local version_major=${version_id%%.*}
+
+    if [[ ! "$version_major" =~ ^[0-9]+$ ]]; then
+        error "Не удалось определить поддерживаемую версию ОС: ${os_id:-unknown} ${version_id:-unknown}"
+        return 1
+    fi
+
+    case "$os_id" in
+        ubuntu)
+            if (( version_major < 24 )); then
+                error "Поддерживается Ubuntu 24.04 или новее; обнаружено: $version_id"
+                return 1
+            fi
+            ;;
+        debian)
+            if (( version_major < 12 )); then
+                error "Поддерживается Debian 12 или новее; обнаружено: $version_id"
+                return 1
+            fi
+            ;;
+        *)
+            error "Поддерживаются только Ubuntu 24.04+ и Debian 12+; обнаружено: ${os_id:-unknown}"
+            return 1
+            ;;
+    esac
+}
+
 check_os() {
     if [[ ! -f /etc/os-release ]]; then
         error "Не удалось определить операционную систему"
@@ -320,10 +386,7 @@ check_os() {
 
     # shellcheck disable=SC1091
     . /etc/os-release
-    if [[ "${ID:-}" != ubuntu && "${ID:-}" != debian ]]; then
-        error "Поддерживаются только Ubuntu и Debian; обнаружено: ${ID:-unknown}"
-        return 1
-    fi
+    validate_supported_os "${ID:-}" "${VERSION_ID:-}"
 }
 
 validate_source_tree() {
@@ -434,9 +497,7 @@ collect_initial_input() {
         ADMIN_IDS=${ADMIN_IDS:?ADMIN_IDS не задан}
         SUPPORT_USERNAME=${SUPPORT_USERNAME:?SUPPORT_USERNAME не задан}
         DOMAIN=${DOMAIN:-}
-        SSL_EMAIL=${SSL_EMAIL:-admin@example.com}
-        AMNEZIA_API_URL=${AMNEZIA_API_URL:-http://127.0.0.1:4001}
-        AMNEZIA_API_KEY=${AMNEZIA_API_KEY:-}
+        SSL_EMAIL=${SSL_EMAIL:-}
         YOOKASSA_SHOP_ID=${YOOKASSA_SHOP_ID:-}
         YOOKASSA_SECRET_KEY=${YOOKASSA_SECRET_KEY:-}
         DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY:-}
@@ -449,14 +510,29 @@ collect_initial_input() {
     read_db_password 'Пароль Redis: ' REDIS_PASSWORD
     read_admin_ids
     read_support_username
-    read_optional 'Домен для webhook/health; Enter — без HTTPS' DOMAIN ''
-    if [[ -n "$DOMAIN" ]]; then
-        read_optional "Email Let's Encrypt" SSL_EMAIL 'admin@example.com'
-    fi
-    read_optional 'Amnezia API URL' AMNEZIA_API_URL 'http://127.0.0.1:4001'
-    read_optional_secret 'Amnezia API Key; Enter — пусто' AMNEZIA_API_KEY ''
+
     read_optional 'YooKassa Shop ID; Enter — отключено' YOOKASSA_SHOP_ID ''
-    read_optional_secret 'YooKassa Secret Key; Enter — отключено' YOOKASSA_SECRET_KEY ''
+    if [[ -n "$YOOKASSA_SHOP_ID" ]]; then
+        while [[ -z "${YOOKASSA_SECRET_KEY:-}" ]]; do
+            read_optional_secret 'YooKassa Secret Key' YOOKASSA_SECRET_KEY ''
+            [[ -n "$YOOKASSA_SECRET_KEY" ]] || printf 'Secret Key обязателен, если указан Shop ID.\n'
+        done
+        read_optional 'Домен для YooKassa webhook/health; Enter — настроить позже' DOMAIN ''
+        if [[ -n "$DOMAIN" ]]; then
+            while true; do
+                read_optional "Email Let's Encrypt" SSL_EMAIL ''
+                if validate_email "$SSL_EMAIL"; then
+                    break
+                fi
+                printf 'Укажите реальный email для сертификата.\n'
+            done
+        fi
+    else
+        YOOKASSA_SECRET_KEY=""
+        DOMAIN=""
+        SSL_EMAIL=""
+        info "YooKassa отключена. Amnezia-серверы добавляются позже через Telegram-админку."
+    fi
 }
 
 normalize_domain() {
@@ -480,27 +556,19 @@ print(raw)
 PY_DOMAIN
 }
 
-validate_amnezia_api_url() {
-    AMNEZIA_API_URL_VALUE="$1" python3 - <<'PY'
+validate_email() {
+    EMAIL_VALUE="$1" python3 - <<'PY_EMAIL'
 import os
-from urllib.parse import urlsplit
+import re
 
-raw = os.environ["AMNEZIA_API_URL_VALUE"].strip()
-if not raw or any(character.isspace() for character in raw):
+value = os.environ["EMAIL_VALUE"].strip()
+if not value or len(value) > 254 or any(character.isspace() for character in value):
     raise SystemExit(1)
-
-parsed = urlsplit(raw)
-if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+if value.lower() in {"admin@example.com", "change_me@example.com"}:
     raise SystemExit(1)
-if parsed.username is not None or parsed.password is not None:
+if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", value) is None:
     raise SystemExit(1)
-if parsed.query or parsed.fragment:
-    raise SystemExit(1)
-try:
-    parsed.port
-except ValueError:
-    raise SystemExit(1)
-PY
+PY_EMAIL
 }
 
 validate_initial_input() {
@@ -520,6 +588,7 @@ validate_initial_input() {
         error "ADMIN_IDS имеет неверный формат"
         return 1
     fi
+
     SUPPORT_USERNAME=${SUPPORT_USERNAME#@}
     if [[ ! "$SUPPORT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
        [[ "${SUPPORT_USERNAME,,}" == support ]] ||
@@ -527,10 +596,13 @@ validate_initial_input() {
         error "SUPPORT_USERNAME должен быть реальным Telegram username"
         return 1
     fi
-    if ! validate_amnezia_api_url "$AMNEZIA_API_URL"; then
-        error "AMNEZIA_API_URL должен быть полным http:// или https:// URL без логина, query и fragment"
+
+    if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] ||
+       [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
+        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются только вместе"
         return 1
     fi
+
     if [[ -n "$DOMAIN" ]]; then
         local normalized_domain
         if ! normalized_domain=$(normalize_domain "$DOMAIN"); then
@@ -538,15 +610,17 @@ validate_initial_input() {
             return 1
         fi
         DOMAIN=$normalized_domain
-    fi
-    if [[ -n "$YOOKASSA_SHOP_ID" && -z "$YOOKASSA_SECRET_KEY" ]] || \
-       [[ -z "$YOOKASSA_SHOP_ID" && -n "$YOOKASSA_SECRET_KEY" ]]; then
-        error "YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY задаются только вместе"
-        return 1
-    fi
-    if [[ -n "$DOMAIN" && -z "$YOOKASSA_SHOP_ID" ]]; then
-        error "DOMAIN используется для YooKassa webhook и требует настроенную YooKassa"
-        return 1
+
+        if [[ -z "$YOOKASSA_SHOP_ID" ]]; then
+            error "DOMAIN используется для YooKassa webhook и требует настроенную YooKassa"
+            return 1
+        fi
+        if ! validate_email "$SSL_EMAIL"; then
+            error "SSL_EMAIL должен быть реальным email для Let's Encrypt"
+            return 1
+        fi
+    elif [[ -n "$YOOKASSA_SHOP_ID" ]]; then
+        warn "YooKassa включена без DOMAIN: публичный webhook не будет настроен до добавления домена"
     fi
 }
 
@@ -755,15 +829,12 @@ PY
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
     write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
     write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
-    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
-    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
     write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
     write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
     write_env_var YOOKASSA_RETURN_URL 'https://t.me/{bot_username}'
     write_env_var YOOKASSA_WEBHOOK_PORT '8080'
     if [[ -n "$DOMAIN" ]]; then
         write_env_var DOMAIN "$DOMAIN"
-        write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook/yookassa"
     fi
 
     chown "$BOT_USER:$BOT_USER" "$ENV_FILE"

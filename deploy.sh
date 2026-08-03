@@ -126,6 +126,11 @@ backup tooling, service account, permissions и systemd ProtectHome runtime.
 После успешных update/deploy/restart запускается read-only doctor: service,
 heartbeat, permissions, Alembic, PostgreSQL, Redis, Telegram и backup contract.
 
+Команда amnezia не привязывает VPN-сервер к боту и не нужна для его
+первичной установки. Она только проверяет или публикует HTTPS reverse proxy
+для уже запущенного локального Amnezia API. Сервер добавляется через
+Telegram-админку бота.
+
 Production restore сначала создаёт и проверяет staging database. Во время
 короткого cutover текущая database сохраняется под rollback-именем и не удаляется
 до отдельной команды restore-finalize. Если сервер аварийно выключился во время
@@ -256,7 +261,7 @@ Just1kBot — управление сервером
 11. Восстановиться после аварийно прерванного restore
 12. Откатить последний production restore
 13. Завершить restore и удалить сохранённую БД
-14. Настроить Amnezia API
+14. Проверить/опубликовать локальный Amnezia API (опционально)
 15. Удалить бота
 0. Выход
 EOF_MENU

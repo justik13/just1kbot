@@ -374,7 +374,7 @@ class DeployRollbackTests(unittest.TestCase):
 
     def test_initial_install_env_is_mode_0600(self):
         envfile = self.tmp / "initial.env"
-        command = f'ENV_FILE="{envfile}"; BOT_TOKEN=x; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; AMNEZIA_API_URL=x; AMNEZIA_API_KEY=; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
+        command = f'ENV_FILE="{envfile}"; BOT_TOKEN=123456:TEST_TOKEN; DB_PASSWORD=password1; REDIS_PASSWORD=password2; ADMIN_IDS=1; SUPPORT_USERNAME=test_support_bot; YOOKASSA_SHOP_ID=; YOOKASSA_SECRET_KEY=; DOMAIN=; create_env_if_missing'
         r = self.run_deploy_function(command)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         stat_result = envfile.stat()

@@ -211,15 +211,12 @@ PY
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
     write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
     write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
-    write_env_var AMNEZIA_API_URL "$AMNEZIA_API_URL"
-    write_env_var AMNEZIA_API_KEY "$AMNEZIA_API_KEY"
     write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
     write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
     write_env_var YOOKASSA_RETURN_URL 'https://t.me/{bot_username}'
     write_env_var YOOKASSA_WEBHOOK_PORT '8080'
     if [[ -n "$DOMAIN" ]]; then
         write_env_var DOMAIN "$DOMAIN"
-        write_env_var WEBHOOK_URL "https://${DOMAIN}/webhook/yookassa"
     fi
 
     ensure_env_permissions
