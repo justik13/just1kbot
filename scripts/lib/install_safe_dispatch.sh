@@ -49,13 +49,16 @@ run_management_action() {
 }
 
 print_dry_run() {
-    cat <<'EOF_DRY'
+    resolve_proxy_mode
+    cat <<EOF_DRY
 DRY RUN:
-- exact Ubuntu 24.04, source tree, ownership, path, port, PostgreSQL and Nginx checks completed before apt;
+- exact Ubuntu 24.04, source tree, ownership, path, port, PostgreSQL and proxy checks completed before apt;
+- proxy mode: ${PROXY_MODE};
 - dedicated Redis is 127.0.0.1:6380 with separate config/data/unit;
 - UFW, nftables, iptables, /etc/redis/redis.conf, Nginx default site, Docker and VPN are not changed;
 - dependencies install only from requirements.lock with exact versions and SHA-256 hashes;
-- every mutating phase is recorded in a durable root-only journal.
+- every mutating phase is recorded in a durable root-only journal;
+- failed first install runs manifest-driven rollback automatically.
 No server state was changed by this dry run.
 EOF_DRY
 }
@@ -91,12 +94,91 @@ run_existing_read_only_preflight() {
         foundation_preflight_static_resources
         foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
     else
-        # A complete legacy installation has no manifest yet. It is accepted
-        # only by exact project/unit/account/Nginx/certificate markers. New
-        # dedicated Redis and CLI resources must remain absent and port 6380
-        # must be free.
         legacy_read_only_preflight
     fi
+}
+
+perform_deploy_mutations() {
+    begin_installer_transaction
+    installer_failpoint after-journal
+
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        foundation_journal_update package-install
+        install_dependencies
+        installer_failpoint after-packages
+        validate_runtime_commands
+        # Close the apt TOCTOU window before the first managed resource is
+        # created. Input values remain unchanged; all checks are read-only.
+        preflight_before_packages
+    else
+        validate_runtime_commands
+    fi
+
+    foundation_journal_update ownership-manifest
+    ensure_manifest
+    installer_failpoint after-manifest
+
+    setup_user_and_dirs
+    installer_failpoint after-service-user
+
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        pg_select_cluster
+        pg_start_cluster
+        setup_postgresql_initial
+    else
+        pg_prepare update
+        record_existing_postgres
+        record_legacy_redis_transition
+    fi
+    installer_failpoint after-postgresql
+
+    configure_operational_transaction
+    # shellcheck source=ops/deploy_application.sh
+    source "$SCRIPT_DIR/ops/deploy_application.sh"
+    install_operational_transaction_overrides
+    install_rollback_override
+
+    SOURCE_DIR="$ROOT_DIR"
+    PREPARE_COMMAND=(prepare_release_runtime)
+    MIGRATION_COMMAND=(init_database)
+    ACTIVATION_COMMAND=(activate_release_bundle)
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        BACKUP_COMMAND=(pause_operational_timers)
+    else
+        BACKUP_COMMAND=(pause_and_backup)
+    fi
+
+    foundation_journal_update application-transaction
+    installer_failpoint before-application-transaction
+    run_application_transaction
+    installer_failpoint after-application-transaction
+
+    resume_operational_timers
+    foundation_manifest_update_source \
+        "${JUST1KBOT_SOURCE_REPOSITORY:-local-checkout}" \
+        "${JUST1KBOT_SOURCE_REF:-local}" \
+        "${JUST1KBOT_SOURCE_COMMIT:-unknown}"
+    foundation_journal_update completed
+    foundation_journal_clear
+}
+
+automatic_initial_rollback() {
+    local original_rc=$1 rollback_rc=0
+    printf 'Первичная установка завершилась ошибкой rc=%s; выполняется автоматический manifest-driven rollback.\n' \
+        "$original_rc" >&2
+    flock -u 200 2>/dev/null || true
+    set +e
+    bash "$SCRIPT_DIR/uninstall_foundation.sh" \
+        --purge-data --yes --incomplete-install
+    rollback_rc=$?
+    set -e
+    if (( rollback_rc == 0 )); then
+        printf 'Автоматический rollback первичной установки завершён.\n' >&2
+        return 0
+    fi
+    printf 'ОШИБКА: automatic rollback failed rc=%s. Journal/manifest сохранены для install-recover.\n' \
+        "$rollback_rc" >&2
+    return "$rollback_rc"
 }
 
 run_deploy() {
@@ -118,67 +200,30 @@ run_deploy() {
         return 0
     fi
 
-    # The durable journal is the first mutation. If apt or any later step
-    # fails, state/doctor can explain that installation is incomplete.
-    begin_installer_transaction
+    local rc
+    set +e
+    (
+        set -Eeuo pipefail
+        perform_deploy_mutations
+    )
+    rc=$?
+    set -e
 
-    if [[ "$INITIAL_INSTALL" == true ]]; then
-        foundation_journal_update package-install
-        install_dependencies
-    fi
-
-    validate_runtime_commands
-    foundation_journal_update ownership-manifest
-    ensure_manifest
-    setup_user_and_dirs
-
-    if [[ "$INITIAL_INSTALL" == true ]]; then
-        pg_select_cluster
-        pg_start_cluster
-        setup_postgresql_initial
-    else
-        pg_prepare update
-        record_existing_postgres
-        record_legacy_redis_transition
-    fi
-
-    foundation_journal_update dedicated-redis
-    foundation_setup_dedicated_redis "$REDIS_PASSWORD"
-    setup_firewall_initial
-
-    configure_operational_transaction
-    # shellcheck source=ops/deploy_application.sh
-    source "$SCRIPT_DIR/ops/deploy_application.sh"
-    install_operational_transaction_overrides
-    install_rollback_override
-
-    SOURCE_DIR="$ROOT_DIR"
-    PREPARE_COMMAND=(prepare_release_runtime)
-    MIGRATION_COMMAND=(init_database)
-    ACTIVATION_COMMAND=(activate_release_bundle)
-    if [[ "$INITIAL_INSTALL" == true ]]; then
-        BACKUP_COMMAND=(pause_operational_timers)
-    else
-        BACKUP_COMMAND=(pause_and_backup)
-    fi
-
-    foundation_journal_update application-transaction
-    if run_application_transaction; then
-        resume_operational_timers
-        foundation_manifest_update_source \
-            "${JUST1KBOT_SOURCE_REPOSITORY:-local-checkout}" \
-            "${JUST1KBOT_SOURCE_REF:-local}" \
-            "${JUST1KBOT_SOURCE_COMMIT:-unknown}"
-        foundation_journal_update completed
-        foundation_journal_clear
+    if (( rc == 0 )); then
         show_status
         print_result
-    else
-        local rc=$?
-        foundation_journal_update failed "application transaction rc=$rc" || true
-        error "Deploy failed rc=$rc; journal сохранён. Используйте install-recover."
-        return "$rc"
+        return 0
     fi
+
+    if foundation_journal_validate >/dev/null 2>&1; then
+        foundation_journal_update failed "deploy mutation rc=$rc" || true
+    fi
+    if [[ "$INITIAL_INSTALL" == true ]]; then
+        automatic_initial_rollback "$rc" || true
+    else
+        error "Update failed rc=$rc; application rollback выполнен, journal сохранён для install-recover."
+    fi
+    return "$rc"
 }
 
 recover_install() {
@@ -193,7 +238,11 @@ recover_install() {
         foundation_journal_update completed
         foundation_journal_clear
         printf 'Healthy installation подтверждена; journal удалён.\n'
+        return 0
     fi
+    error 'Installation ещё не healthy; journal сохранён.'
+    error 'Запустите doctor/support-bundle и устраните указанную первичную причину.'
+    return 1
 }
 
 rollback_empty_pre_manifest_journal() {
@@ -226,6 +275,7 @@ rollback_incomplete() {
         error 'Manifest отсутствует или повреждён, а journal содержит resources; automatic deletion запрещён.'
         return 1
     }
+    flock -u 200 2>/dev/null || true
     exec bash "$SCRIPT_DIR/uninstall_foundation.sh" \
         --purge-data --yes --incomplete-install
 }
