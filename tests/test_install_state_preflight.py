@@ -3,94 +3,97 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-ENTRYPOINT = (ROOT / "deploy.sh").read_text(encoding="utf-8")
+CONTROL = (ROOT / "scripts" / "lib" / "control_plane.sh").read_text(
+    encoding="utf-8"
+)
 PREFLIGHT = (ROOT / "scripts" / "preflight_install_state.sh").read_text(
     encoding="utf-8"
 )
 UNINSTALL_ENTRYPOINT = (ROOT / "scripts" / "uninstall_entrypoint.sh").read_text(
     encoding="utf-8"
 )
+RUNTIME = (ROOT / "scripts" / "lib" / "install_safe_runtime.sh").read_text(
+    encoding="utf-8"
+)
 SETTINGS = (ROOT / "config" / "settings.py").read_text(encoding="utf-8")
 
 
 class InstallStatePreflightTests(unittest.TestCase):
-    def test_official_update_and_deploy_run_preflight_first(self):
-        update_case = ENTRYPOINT[ENTRYPOINT.index("        update)") :]
-        update_case = update_case[: update_case.index("            ;;")]
-        self.assertLess(
-            update_case.index("preflight_deploy_state"),
-            update_case.index('call_script update_from_github.sh'),
-        )
-        self.assertLess(
-            update_case.index('call_script update_from_github.sh'),
-            update_case.index("post_operation_smokecheck"),
-        )
-        self.assertIn('preflight_deploy_state "$@"', update_case)
+    def test_official_update_and_deploy_run_read_only_preflight_first(self):
+        for command, next_command in (("update", "deploy"), ("deploy", "install-recover")):
+            case = CONTROL[
+                CONTROL.index(f"        {command})") : CONTROL.index(
+                    f"        {next_command})"
+                )
+            ]
+            self.assertLess(case.index("preflight"), case.index("call_script"))
 
-        deploy_case = ENTRYPOINT[ENTRYPOINT.index("        deploy)") :]
-        deploy_case = deploy_case[: deploy_case.index("            ;;")]
+        preflight_function = CONTROL[
+            CONTROL.index("preflight()") : CONTROL.index("smoke()")
+        ]
         self.assertLess(
-            deploy_case.index("preflight_deploy_state"),
-            deploy_case.index('call_script deploy.sh'),
+            preflight_function.index("state --operation deploy --require-safe"),
+            preflight_function.index("preflight_install_state.sh"),
         )
-        self.assertLess(
-            deploy_case.index('call_script deploy.sh'),
-            deploy_case.index("post_operation_smokecheck"),
+
+    def test_preflight_is_strictly_read_only(self):
+        mutating_prefixes = (
+            "rm ",
+            "mv ",
+            "chown ",
+            "chmod ",
+            "install ",
+            "useradd ",
+            "usermod ",
+            "systemctl start ",
+            "systemctl enable ",
+            "systemctl restart ",
+            "apt-get ",
         )
-        self.assertIn('preflight_deploy_state "$@"', deploy_case)
+        executable_lines = [
+            line.lstrip()
+            for line in PREFLIGHT.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        for prefix in mutating_prefixes:
+            with self.subTest(prefix=prefix):
+                self.assertFalse(
+                    any(line.startswith(prefix) for line in executable_lines),
+                    prefix,
+                )
+        self.assertIn("read-only checks пройдены; сервер не изменён", PREFLIGHT)
 
-    def test_fresh_install_is_not_forced_to_have_installed_dependencies(self):
-        main = PREFLIGHT[PREFLIGHT.index("main() {") :]
-        self.assertLess(
-            main.index("признаков предыдущей установки нет"),
-            main.index("pg_lsclusters"),
-        )
-        self.assertIn("--check|--dry-run", main)
-
-    def test_postgresql_cluster_parser_overrides_strict_global_ifs(self):
-        self.assertIn("while IFS=' ' read -r version cluster cluster_port status _", PREFLIGHT)
-
-    def test_incomplete_install_repairs_only_required_operational_state(self):
+    def test_preflight_checks_platform_manifest_journal_postgres_and_redis(self):
         for marker in (
-            "обнаружена незавершённая установка",
-            "validate_database_revision",
-            "install_recovery_backup_tooling",
-            "EnvironmentFile=${BACKUP_CONF}",
-            "Requires=${PG_UNIT}",
-            "обязательный backup выполнит основной transactional deploy",
+            "foundation_assert_ubuntu_2404",
+            "foundation_preflight_static_resources",
+            "foundation_manifest_validate",
+            "foundation_journal_validate",
+            "install-recover",
+            "install-rollback",
+            "pg_select_cluster",
+            "pg_assert_existing_database",
+            "redis-cli",
+            "Redis PING failed",
         ):
             self.assertIn(marker, PREFLIGHT)
 
-    def test_complete_install_fails_closed_when_backup_contract_is_broken(self):
+    def test_runtime_has_protected_home_and_hard_redis_dependency(self):
         for marker in (
-            "validate_complete_install",
-            '"$UNIT_FILE" "$BACKUP_SERVICE" "$BACKUP_SCRIPT" "$BACKUP_CONF"',
-            "установленный backup script не является исполняемым",
-            "systemd не видит installed backup service",
+            "ProtectHome=true",
+            "Environment=HOME=$RUNTIME_DIR",
+            "Requires=$PG_UNIT $REDIS_SERVICE",
+            "Requires=just1kbot-redis.service",
+            "systemctl is-active --quiet just1kbot-redis.service",
         ):
-            self.assertIn(marker, PREFLIGHT)
-
-    def test_permissions_and_protected_home_are_validated(self):
-        for marker in (
-            'BOT_HOME=/home/just1kbot',
-            'chown root:"$BOT_USER" "$PROJECT_DIR" "$ENV_FILE"',
-            'chmod 0750 "$PROJECT_DIR"',
-            'chmod 0640 "$ENV_FILE"',
-            'runuser -u "$BOT_USER" -- test -r "$ENV_FILE"',
-            "--property=ProtectHome=true",
-            '/usr/bin/env HOME="$RUNTIME_DIR"',
-            "runtime HOME не работает внутри ProtectHome=true sandbox",
-        ):
-            self.assertIn(marker, PREFLIGHT)
-
+            self.assertIn(marker, RUNTIME)
         self.assertIn('_SERVICE_RUNTIME_HOME = "/run/just1kbot"', SETTINGS)
         self.assertIn('os.environ["HOME"] = _SERVICE_RUNTIME_HOME', SETTINGS)
 
-    def test_official_uninstall_removes_orphan_home_only_after_user_is_gone(self):
-        self.assertIn("run_script uninstall_entrypoint.sh", ENTRYPOINT)
-        self.assertIn('id "$BOT_USER" >/dev/null 2>&1 && return 0', UNINSTALL_ENTRYPOINT)
-        self.assertIn('rm -rf --one-file-system -- "$BOT_HOME"', UNINSTALL_ENTRYPOINT)
-        self.assertIn("service home остался после purge", UNINSTALL_ENTRYPOINT)
+    def test_official_uninstall_is_manifest_driven(self):
+        self.assertIn("uninstall_foundation.sh", UNINSTALL_ENTRYPOINT)
+        self.assertIn('exec /bin/bash "$TARGET" "$@"', UNINSTALL_ENTRYPOINT)
+        self.assertNotIn("rm -rf", UNINSTALL_ENTRYPOINT)
 
 
 if __name__ == "__main__":
