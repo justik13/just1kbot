@@ -84,9 +84,11 @@ class BotDoctorContractTests(unittest.TestCase):
         support = SUPPORT_BUNDLE.read_text(encoding="utf-8")
         for marker in (
             "<redacted-telegram-token>",
+            "<redacted>@",
             "AGE-SECRET-KEY",
             "url_credentials",
             "secret_key",
+            "assignment",
             "BOT_TOKEN",
             "DATABASE_URL",
             "REDIS_URL",
@@ -94,8 +96,6 @@ class BotDoctorContractTests(unittest.TestCase):
             self.assertIn(marker, support)
         self.assertNotIn('cp -- /opt/just1kbot/.env', support)
         self.assertNotIn("pg_dump", support)
-        self.assertIn("postgresql(\\+asyncpg)?://", combined)
-        self.assertIn("redis://", combined)
 
 
 if __name__ == "__main__":
