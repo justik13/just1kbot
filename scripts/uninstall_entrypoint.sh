@@ -33,7 +33,7 @@ safe_remove_orphan_home() {
         rm -rf --one-file-system -- "$BOT_HOME"
     fi
 
-    [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] || fail 'service home остался после uninstall'
+    [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] || fail 'service home остался после purge/uninstall'
 }
 
 select_verify_mode() {
