@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - requirements.txt
+      - requirements.lock
       - .github/workflows/requirements-lock.yml
 
 permissions:
@@ -17,23 +18,31 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
           cache: pip
       - name: Generate hash-locked dependencies
         run: |
-          python -m pip install --upgrade pip pip-tools
+          python -m pip install 'pip==25.3' 'pip-tools==7.5.2'
           python -m piptools compile \
             --resolver=backtracking \
             --generate-hashes \
             --allow-unsafe \
-            --output-file requirements.lock \
+            --strip-extras \
+            --output-file /tmp/requirements.lock \
             requirements.txt
+      - name: Verify committed lock is current
+        run: |
+          if [ -f requirements.lock ]; then
+            diff -u requirements.lock /tmp/requirements.lock
+          fi
       - name: Verify locked installation
         run: |
           python -m venv /tmp/lock-check
-          /tmp/lock-check/bin/python -m pip install --require-hashes -r requirements.lock
+          /tmp/lock-check/bin/python -m pip install 'pip==25.3'
+          /tmp/lock-check/bin/python -m pip install --require-hashes -r /tmp/requirements.lock
       - uses: actions/upload-artifact@v4
         with:
           name: requirements-lock-${{ github.sha }}
-          path: requirements.lock
+          path: /tmp/requirements.lock
           if-no-files-found: error
+          retention-days: 7
