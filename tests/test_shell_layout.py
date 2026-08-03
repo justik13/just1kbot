@@ -18,23 +18,40 @@ class ShellLayoutTests(unittest.TestCase):
         required = {
             "install_safe.sh",
             "update_from_github.sh",
+            "update_from_github_complete.sh",
             "uninstall_foundation.sh",
             "uninstall_entrypoint.sh",
             "preflight_install_state.sh",
             "inspect_install_state.sh",
             "lib/control_plane.sh",
+            "lib/control_plane_completion.sh",
+            "lib/control_plane_final.sh",
             "lib/installer_foundation.sh",
             "lib/installer_foundation_compat.sh",
             "lib/install_safe_platform.sh",
+            "lib/install_safe_release_contract.sh",
+            "lib/install_safe_lock_policy.sh",
             "lib/install_safe_legacy.sh",
+            "lib/install_safe_redis_transition.sh",
             "lib/install_safe_runtime.sh",
+            "lib/install_safe_tls_policy.sh",
+            "lib/install_safe_postgres_ownership.sh",
+            "lib/install_safe_proxy_mode.sh",
+            "lib/install_safe_activation_policy.sh",
+            "lib/install_safe_failure_injection.sh",
             "lib/install_safe_dispatch.sh",
             "lib/uninstall_safe_core.sh",
             "lib/uninstall_safe_actions.sh",
+            "lib/uninstall_safe_ownership.sh",
             "lib/postgresql.sh",
             "lib/operational_transaction.sh",
             "ops/deploy_application.sh",
             "ops/doctor.sh",
+            "ops/doctor_complete.sh",
+            "ops/doctor_json.sh",
+            "ops/repair.sh",
+            "ops/repair_complete.sh",
+            "ops/support_bundle.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
             "ops/restore_rehearsal.sh",
@@ -98,6 +115,8 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertIn("restore-test", result.stdout)
         self.assertIn("install-recover", result.stdout)
         self.assertIn("update", result.stdout)
+        self.assertIn("repair", result.stdout)
+        self.assertIn("support-bundle", result.stdout)
 
     def test_direct_dry_run_reaches_safe_installer(self):
         result = subprocess.run(
@@ -126,7 +145,7 @@ class ShellLayoutTests(unittest.TestCase):
             "deploy_full.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
-            "update_from_github.sh",
+            "update_from_github_complete.sh",
             "setup-amnezia-api.sh",
         ):
             text = (SCRIPTS / relative).read_text(encoding="utf-8")
