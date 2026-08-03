@@ -14,7 +14,8 @@ OPS_LIB="$SCRIPT_DIR/lib/operational_transaction.sh"
 FOUNDATION="$SCRIPT_DIR/lib/installer_foundation.sh"
 FOUNDATION_COMPAT="$SCRIPT_DIR/lib/installer_foundation_compat.sh"
 DIAGNOSTICS="$SCRIPT_DIR/lib/installer_diagnostics.sh"
-for file in "$BASE" "$PG_LIB" "$OPS_LIB" "$FOUNDATION" "$FOUNDATION_COMPAT" "$DIAGNOSTICS"; do
+INSPECTOR="$SCRIPT_DIR/inspect_install_state.sh"
+for file in "$BASE" "$PG_LIB" "$OPS_LIB" "$FOUNDATION" "$FOUNDATION_COMPAT" "$DIAGNOSTICS" "$INSPECTOR"; do
     [[ -f "$file" && ! -L "$file" ]] || {
         printf 'ОШИБКА: отсутствует безопасный library %s\n' "$file" >&2
         exit 1
@@ -56,6 +57,11 @@ for module in \
     "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
     "$SCRIPT_DIR/lib/install_safe_redis_transition.sh" \
     "$SCRIPT_DIR/lib/install_safe_runtime.sh" \
+    "$SCRIPT_DIR/lib/install_safe_tls_policy.sh" \
+    "$SCRIPT_DIR/lib/install_safe_postgres_ownership.sh" \
+    "$SCRIPT_DIR/lib/install_safe_proxy_mode.sh" \
+    "$SCRIPT_DIR/lib/install_safe_activation_policy.sh" \
+    "$SCRIPT_DIR/lib/install_safe_failure_injection.sh" \
     "$SCRIPT_DIR/lib/install_safe_dispatch.sh"; do
     [[ -f "$module" && ! -L "$module" ]] || {
         printf 'ОШИБКА: installer module отсутствует или небезопасен: %s\n' "$module" >&2
@@ -64,6 +70,10 @@ for module in \
     # shellcheck source=/dev/null
     source "$module"
 done
+
+run_direct_deploy_state_gate() {
+    bash "$INSPECTOR" --operation deploy --require-safe
+}
 
 case ${1:-} in
     --recover)
@@ -76,7 +86,11 @@ case ${1:-} in
         (( $# == 0 )) || exit 2
         rollback_incomplete
         ;;
+    --status|--logs|--restart|--backup|--restore|--help|-h)
+        main "$@"
+        ;;
     *)
+        run_direct_deploy_state_gate
         main "$@"
         ;;
 esac
