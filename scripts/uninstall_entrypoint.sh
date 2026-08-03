@@ -9,6 +9,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 UNINSTALL=$SCRIPT_DIR/uninstall.sh
 VERIFY_UNINSTALL=$SCRIPT_DIR/verify_uninstall_state.sh
 INSPECT_STATE=$SCRIPT_DIR/inspect_install_state.sh
+PREFLIGHT_RESOURCES=$SCRIPT_DIR/preflight_uninstall_resources.sh
 DIAGNOSTICS=$SCRIPT_DIR/lib/installer_diagnostics.sh
 VERIFY_MODE=--auto
 
@@ -48,6 +49,7 @@ main() {
     [[ -f "$UNINSTALL" && ! -L "$UNINSTALL" ]] || fail 'основной uninstall script отсутствует или небезопасен'
     [[ -f "$VERIFY_UNINSTALL" && ! -L "$VERIFY_UNINSTALL" ]] || fail 'post-uninstall verifier отсутствует или небезопасен'
     [[ -f "$INSPECT_STATE" && ! -L "$INSPECT_STATE" ]] || fail 'install-state inspector отсутствует или небезопасен'
+    [[ -f "$PREFLIGHT_RESOURCES" && ! -L "$PREFLIGHT_RESOURCES" ]] || fail 'uninstall resource preflight отсутствует или небезопасен'
     [[ -f "$DIAGNOSTICS" && ! -L "$DIAGNOSTICS" ]] || fail 'installer diagnostics отсутствует или небезопасен'
 
     # shellcheck source=scripts/lib/installer_diagnostics.sh
@@ -66,6 +68,9 @@ main() {
 
     installer_set_step 'Проверка ownership перед удалением' 'Foreign collision, symlink или повреждённый manifest блокируют destructive operation.'
     bash "$INSPECT_STATE" --require-safe
+
+    installer_set_step 'Проверка каждого удаляемого ресурса' 'До stop/disable/rm проверяются все systemd units, operational tools и основной Nginx site.'
+    bash "$PREFLIGHT_RESOURCES"
 
     installer_set_step 'Основное удаление' 'После destructive этапа обязательно выполняется независимая проверка остатков.'
     select_verify_mode "${1:-}"
