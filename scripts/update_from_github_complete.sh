@@ -107,7 +107,8 @@ validate_secure_directory() {
 
 prepare_release_root() {
     [[ ! -L /var/lib/just1kbot && ! -L "$RELEASE_ROOT" ]] || fail 'release root содержит symlink'
-    install -d -o root -g root -m 0700 /var/lib/just1kbot "$RELEASE_ROOT"
+    install -d -o root -g root -m 0711 /var/lib/just1kbot
+    install -d -o root -g root -m 0700 "$RELEASE_ROOT"
     validate_secure_directory /var/lib/just1kbot || fail '/var/lib/just1kbot имеет unsafe owner/mode'
     validate_secure_directory "$RELEASE_ROOT" || fail "$RELEASE_ROOT имеет unsafe owner/mode"
 }
