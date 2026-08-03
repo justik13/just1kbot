@@ -56,8 +56,6 @@ for module in \
     "$SCRIPT_DIR/lib/install_safe_platform_support.sh" \
     "$SCRIPT_DIR/lib/install_safe_release_contract.sh" \
     "$SCRIPT_DIR/lib/install_safe_lock_policy.sh" \
-    "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
-    "$SCRIPT_DIR/lib/install_safe_redis_transition.sh" \
     "$SCRIPT_DIR/lib/install_safe_runtime.sh" \
     "$SCRIPT_DIR/lib/install_safe_tls_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_postgres_ownership.sh" \

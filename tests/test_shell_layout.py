@@ -31,8 +31,6 @@ class ShellLayoutTests(unittest.TestCase):
             "lib/install_safe_platform.sh",
             "lib/install_safe_release_contract.sh",
             "lib/install_safe_lock_policy.sh",
-            "lib/install_safe_legacy.sh",
-            "lib/install_safe_redis_transition.sh",
             "lib/install_safe_runtime.sh",
             "lib/install_safe_tls_policy.sh",
             "lib/install_safe_postgres_ownership.sh",
