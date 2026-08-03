@@ -10,4 +10,5 @@ if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" == 1 ]]; then library="$SCRIPTS_DIR/deploy_f
 diagnostics="$SCRIPTS_DIR/lib/installer_diagnostics.sh"; require_safe_script "$diagnostics"; source "$diagnostics"; installer_set_operation control-plane; installer_set_step initialization 'Проверка control-plane modules.'; installer_set_log_file /var/log/just1kbot-deploy.log; installer_enable_diagnostics
 module="$SCRIPTS_DIR/lib/control_plane.sh"; require_safe_script "$module"; source "$module"
 completion="$SCRIPTS_DIR/lib/control_plane_completion.sh"; require_safe_script "$completion"; source "$completion"
+final="$SCRIPTS_DIR/lib/control_plane_final.sh"; require_safe_script "$final"; source "$final"
 dispatch "$@"
