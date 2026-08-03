@@ -19,6 +19,7 @@ CLI_SBIN=/usr/local/sbin/just1kbot
 CLI_BIN=/usr/local/bin/just1kbot
 PG_ROLE=just1kbot
 PG_DATABASE=just1kbot_bot
+VERIFY_NGINX_DOMAIN=
 LEFTOVERS=()
 
 add_leftover() {
@@ -32,6 +33,44 @@ path_exists() {
 check_absent_path() {
     local path=$1
     path_exists "$path" && add_leftover "filesystem:$path" || true
+}
+
+verify_uninstall_prepare() {
+    local env_file="$PROJECT_DIR/.env"
+    VERIFY_NGINX_DOMAIN=
+    [[ -f "$env_file" && ! -L "$env_file" ]] || return 0
+
+    VERIFY_NGINX_DOMAIN=$(ENV_FILE_PATH="$env_file" python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+values = {}
+counts = {}
+for raw in Path(os.environ["ENV_FILE_PATH"]).read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in line:
+        continue
+    key, value = line.split("=", 1)
+    key = key.strip()
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    counts[key] = counts.get(key, 0) + 1
+    values[key] = value.strip()
+
+if counts.get("DOMAIN", 0) > 1:
+    raise SystemExit("duplicate DOMAIN")
+domain = values.get("DOMAIN", "").lower().rstrip(".")
+if domain:
+    label = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    if len(domain) > 253 or len(domain.split(".")) < 2 or any(
+        not label.fullmatch(part) for part in domain.split(".")
+    ):
+        raise SystemExit("unsafe DOMAIN")
+print(domain)
+PY
+) || return 1
 }
 
 check_common_filesystem() {
@@ -56,6 +95,11 @@ check_common_filesystem() {
         check_absent_path "$path"
     done
 
+    if [[ -n "$VERIFY_NGINX_DOMAIN" ]]; then
+        check_absent_path "/etc/nginx/sites-available/$VERIFY_NGINX_DOMAIN"
+        check_absent_path "/etc/nginx/sites-enabled/$VERIFY_NGINX_DOMAIN"
+    fi
+
     id "$BOT_USER" >/dev/null 2>&1 && add_leftover "service_user:$BOT_USER" || true
 
     for path in \
@@ -79,13 +123,20 @@ check_common_filesystem() {
 }
 
 check_no_running_processes() {
-    command -v pgrep >/dev/null 2>&1 || {
-        add_leftover 'verification:pgrep command missing'
+    command -v ps >/dev/null 2>&1 || {
+        add_leftover 'verification:ps command missing'
         return 0
     }
-    local pids
-    pids=$(pgrep -f '/opt/just1kbot|just1kbot.service' 2>/dev/null || true)
-    [[ -z "$pids" ]] || add_leftover "processes:just1kbot pids=$(tr '\n' ',' <<<"$pids" | sed 's/,$//')"
+
+    local process_rows
+    process_rows=$(ps -eo pid=,args= 2>/dev/null | awk '
+        $0 ~ /\/opt\/just1kbot\/(venv|\.venv)\/bin\/python/ ||
+        $0 ~ /python[^ ]*[[:space:]]+-m[[:space:]]+bot\.main([[:space:]]|$)/ ||
+        $0 ~ /\/opt\/just1kbot\/bot\/main\.py([[:space:]]|$)/ {
+            print
+        }
+    ' || true)
+    [[ -z "$process_rows" ]] || add_leftover "processes:just1kbot $(tr '\n' ';' <<<"$process_rows" | sed 's/;$//')"
 }
 
 check_purge_filesystem() {
@@ -182,4 +233,8 @@ if [[ "${VERIFY_UNINSTALL_SOURCE_ONLY:-0}" == 1 ]]; then
     return 0 2>/dev/null || exit 0
 fi
 
+verify_uninstall_prepare || {
+    printf 'Не удалось безопасно подготовить post-uninstall verification context.\n' >&2
+    exit 1
+}
 verify_uninstall_main "$@"
