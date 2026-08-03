@@ -4,32 +4,41 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-UPDATER = ROOT / "scripts" / "update_from_github.sh"
+UPDATER_WRAPPER = ROOT / "scripts" / "update_from_github.sh"
+UPDATER = ROOT / "scripts" / "update_from_github_complete.sh"
 CONTROL_PLANE = ROOT / "scripts" / "lib" / "control_plane.sh"
 
 
 class GithubUpdateTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.wrapper = UPDATER_WRAPPER.read_text(encoding="utf-8")
         cls.updater = UPDATER.read_text(encoding="utf-8")
         cls.control = CONTROL_PLANE.read_text(encoding="utf-8")
 
+    def test_wrapper_is_safe_and_only_delegates(self):
+        self.assertIn('TARGET="$SCRIPT_DIR/update_from_github_complete.sh"', self.wrapper)
+        self.assertIn('exec /bin/bash "$TARGET" "$@"', self.wrapper)
+        self.assertIn("(8#$mode & 8#022) == 0", self.wrapper)
+        for forbidden in ("git fetch", "rm -rf", "systemctl", "apt-get"):
+            self.assertNotIn(forbidden, self.wrapper)
+
     def test_help_is_non_destructive_and_available_without_root(self):
         result = subprocess.run(
-            ["bash", str(UPDATER), "--help"],
+            ["bash", str(UPDATER_WRAPPER), "--help"],
             text=True,
             capture_output=True,
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("https://github.com/justik13/projectx", result.stdout)
+        self.assertIn("fixed GitHub main", result.stdout)
         self.assertIn("--check", result.stdout)
         self.assertIn("--dry-run", result.stdout)
         self.assertIn("--sha", result.stdout)
 
     def test_unknown_argument_fails_before_any_update(self):
         result = subprocess.run(
-            ["bash", str(UPDATER), "--wrong-option"],
+            ["bash", str(UPDATER_WRAPPER), "--wrong-option"],
             text=True,
             capture_output=True,
             check=False,
@@ -39,7 +48,7 @@ class GithubUpdateTests(unittest.TestCase):
 
     def test_unattended_update_requires_full_expected_sha(self):
         result = subprocess.run(
-            ["bash", str(UPDATER), "--yes"],
+            ["bash", str(UPDATER_WRAPPER), "--yes"],
             text=True,
             capture_output=True,
             check=False,
@@ -48,13 +57,13 @@ class GithubUpdateTests(unittest.TestCase):
         self.assertIn("--yes requires --sha", result.stderr)
 
         invalid = subprocess.run(
-            ["bash", str(UPDATER), "--sha", "abc", "--yes"],
+            ["bash", str(UPDATER_WRAPPER), "--sha", "abc", "--yes"],
             text=True,
             capture_output=True,
             check=False,
         )
         self.assertEqual(invalid.returncode, 2)
-        self.assertIn("полным hex commit SHA", invalid.stderr)
+        self.assertIn("полным 40-hex commit SHA", invalid.stderr)
 
     def test_source_and_ref_are_fixed_and_live_is_not_a_checkout(self):
         for marker in (
@@ -94,11 +103,11 @@ class GithubUpdateTests(unittest.TestCase):
         checkout_index = self.updater.index(
             'run_git checkout --quiet --detach --force "$TARGET_SHA"'
         )
-        publish_index = self.updater.index("harden_and_publish_release()")
+        publish_call_index = self.updater.index("harden_and_publish_release", checkout_index)
         self.assertLess(compare_index, checkout_index)
-        self.assertLess(compare_index, publish_index)
+        self.assertLess(compare_index, publish_call_index)
         self.assertIn("expected=$EXPECTED_SHA fetched=$TARGET_SHA", self.updater)
-        self.assertIn("введите полный SHA", self.updater)
+        self.assertIn("Enter the complete SHA", self.updater)
 
     def test_installed_sha_requires_trusted_metadata(self):
         for marker in (
@@ -112,7 +121,7 @@ class GithubUpdateTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.updater)
 
-    def test_checkout_rejects_active_content_features(self):
+    def test_checkout_rejects_active_content_and_incomplete_safety_releases(self):
         for marker in (
             'mode in {b"120000", b"160000"}',
             ".gitmodules",
@@ -120,7 +129,10 @@ class GithubUpdateTests(unittest.TestCase):
             "control character in tracked path",
             "requirements.lock",
             "scripts/install_safe.sh",
-            "scripts/ops/deploy_application.sh",
+            "scripts/lib/install_safe_postgres_ownership.sh",
+            "scripts/lib/uninstall_safe_ownership.sh",
+            "scripts/ops/repair_complete.sh",
+            "scripts/ops/support_bundle.sh",
         ):
             self.assertIn(marker, self.updater)
 
