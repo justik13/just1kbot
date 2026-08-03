@@ -22,10 +22,15 @@ class UninstallVerificationContractTests(unittest.TestCase):
     def test_official_entrypoint_always_runs_post_uninstall_verifier(self):
         source = ENTRYPOINT.read_text(encoding="utf-8")
         self.assertIn("VERIFY_UNINSTALL", source)
-        self.assertIn('bash "$VERIFY_UNINSTALL" "$VERIFY_MODE"', source)
+        self.assertIn('source "$VERIFY_UNINSTALL"', source)
+        self.assertIn('verify_uninstall_main "$VERIFY_MODE"', source)
+        self.assertLess(
+            source.index('source "$VERIFY_UNINSTALL"'),
+            source.index('bash "$UNINSTALL" "$@"'),
+        )
         self.assertLess(
             source.index('bash "$UNINSTALL" "$@"'),
-            source.index('bash "$VERIFY_UNINSTALL" "$VERIFY_MODE"'),
+            source.index('verify_uninstall_main "$VERIFY_MODE"'),
         )
 
     def test_verifier_reports_all_leftovers_in_one_run(self):
@@ -35,6 +40,8 @@ class UninstallVerificationContractTests(unittest.TestCase):
         self.assertIn("Удаление не считается завершённым", source)
         self.assertIn("check_postgresql_purge", source)
         self.assertIn("check_no_running_processes", source)
+        self.assertIn("VERIFY_UNINSTALL_SOURCE_ONLY", source)
+        self.assertIn("verify_uninstall_main", source)
 
     def test_verifier_is_read_only(self):
         source = VERIFIER.read_text(encoding="utf-8")
