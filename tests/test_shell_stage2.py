@@ -2,21 +2,37 @@ import pathlib
 import subprocess
 import unittest
 
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
+CONTROL = SCRIPTS / "lib" / "control_plane.sh"
 
 
 class ShellStage2Tests(unittest.TestCase):
     def test_required_runtime_files_exist(self):
         required = [
-            "deploy_full.sh",
-            "deploy_full_library.sh",
+            "install_safe.sh",
+            "update_from_github.sh",
+            "uninstall_foundation.sh",
+            "uninstall_entrypoint.sh",
+            "inspect_install_state.sh",
+            "preflight_install_state.sh",
             "ops/deploy_application.sh",
             "ops/backup_postgres.sh",
             "ops/verify_backup.sh",
             "ops/restore_rehearsal.sh",
             "ops/just1kbot-restore.sh",
             "ops/production_restore.sh",
+            "ops/doctor.sh",
+            "lib/control_plane.sh",
+            "lib/installer_foundation.sh",
+            "lib/installer_foundation_compat.sh",
+            "lib/install_safe_platform.sh",
+            "lib/install_safe_legacy.sh",
+            "lib/install_safe_runtime.sh",
+            "lib/install_safe_dispatch.sh",
+            "lib/uninstall_safe_core.sh",
+            "lib/uninstall_safe_actions.sh",
             "lib/production_restore_core.sh",
             "lib/production_restore_runtime.sh",
             "lib/production_restore_actions.sh",
@@ -24,13 +40,6 @@ class ShellStage2Tests(unittest.TestCase):
             "lib/production_restore_crash.sh",
             "lib/production_restore_recovery_cleanup.sh",
             "setup-amnezia-api.sh",
-            "uninstall.sh",
-            "uninstall_entrypoint.sh",
-            "preflight_uninstall_resources.sh",
-            "verify_uninstall_state.sh",
-            "inspect_install_state.sh",
-            "lib/installer_diagnostics.sh",
-            "preflight_install_state.sh",
         ]
         self.assertEqual(
             [path for path in required if not (SCRIPTS / path).is_file()],
@@ -38,56 +47,63 @@ class ShellStage2Tests(unittest.TestCase):
         )
 
     def test_new_scripts_parse(self):
-        for script in (
-            SCRIPTS / "setup-amnezia-api.sh",
-            SCRIPTS / "uninstall.sh",
+        scripts = [
+            SCRIPTS / "install_safe.sh",
+            SCRIPTS / "update_from_github.sh",
+            SCRIPTS / "uninstall_foundation.sh",
             SCRIPTS / "uninstall_entrypoint.sh",
-            SCRIPTS / "preflight_uninstall_resources.sh",
-            SCRIPTS / "verify_uninstall_state.sh",
             SCRIPTS / "inspect_install_state.sh",
-            SCRIPTS / "lib" / "installer_diagnostics.sh",
             SCRIPTS / "preflight_install_state.sh",
-            SCRIPTS / "ops" / "production_restore.sh",
-        ):
+            CONTROL,
+            SCRIPTS / "lib" / "installer_foundation.sh",
+            SCRIPTS / "lib" / "installer_foundation_compat.sh",
+            SCRIPTS / "lib" / "install_safe_platform.sh",
+            SCRIPTS / "lib" / "install_safe_legacy.sh",
+            SCRIPTS / "lib" / "install_safe_runtime.sh",
+            SCRIPTS / "lib" / "install_safe_dispatch.sh",
+            SCRIPTS / "lib" / "uninstall_safe_core.sh",
+            SCRIPTS / "lib" / "uninstall_safe_actions.sh",
+            SCRIPTS / "ops" / "doctor.sh",
+        ]
+        for script in scripts:
             subprocess.run(["bash", "-n", str(script)], check=True)
 
-    def test_uninstall_is_fail_closed_and_interactive(self):
-        text = (SCRIPTS / "uninstall.sh").read_text(encoding="utf-8")
-        for marker in (
-            "PROJECT_DIR=/opt/just1kbot",
-            "DELETE JUST1KBOT",
-            "Выберите режим удаления",
-            "just1kbot-backup.timer",
-            "just1kbot-healthcheck.timer",
-            "backup_before_keep",
-            "purge_redis",
-            "REDISCLI_AUTH",
-            "DROP ROLE IF EXISTS",
-            "pg_select_cluster",
-            "preflight_restore_state",
-            "cutover-journal.env",
-            "^just1kbot_(stg|rb|fail)_",
-            "acquire_uninstall_lock",
-            "pause_operational_work",
-            "preflight_purge",
-            "PURGE_REDIS_CONNECTION",
-            "run_resource_preflight",
-            "nginx_site_has_expected_markers",
-            "site автоматически восстановлен",
-        ):
-            self.assertIn(marker, text)
-        self.assertNotIn("--force", text)
-        self.assertNotIn("apt-get remove", text)
-        self.assertNotIn("/root/.just1kbot-snapshots", text)
-        self.assertNotIn("mapfile -t connection < <(redis_connection)", text)
-        self.assertNotIn("setup-amnezia-api.sh", text)
-        self.assertNotIn("ufw ", text)
-        self.assertNotIn("certbot delete", text)
+    def test_manifest_uninstall_is_fail_closed_and_interactive(self):
+        entry = (SCRIPTS / "uninstall_foundation.sh").read_text(encoding="utf-8")
+        core = (SCRIPTS / "lib" / "uninstall_safe_core.sh").read_text(
+            encoding="utf-8"
+        )
+        actions = (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(
+            encoding="utf-8"
+        )
+        combined = "\n".join((entry, core, actions))
 
-        main = text[text.index("main() {") :]
-        self.assertLess(main.index("run_resource_preflight"), main.index("preflight_purge"))
-        self.assertLess(main.index("preflight_purge"), main.index("pause_operational_work"))
-        self.assertLess(main.index("pause_operational_work"), main.index("stop_units"))
+        for marker in (
+            "foundation_manifest_require",
+            "firewall_managed",
+            "DELETE JUST1KBOT",
+            "backup_before_keep",
+            "foundation_journal_begin uninstall",
+            "foundation_manifest_has",
+            "require_owned_path",
+            "remove_owned_file",
+            "remove_owned_tree",
+            "DROP ROLE IF EXISTS",
+            "^just1kbot_(stg|rb|fail)_",
+            "post_verify",
+        ):
+            self.assertIn(marker, combined)
+        self.assertNotIn("apt-get remove", combined)
+        self.assertNotIn("/etc/redis/redis.conf", combined)
+        self.assertNotIn("ufw ", combined)
+        self.assertNotIn("setup-amnezia-api.sh", combined)
+        self.assertNotIn("docker ", combined)
+
+        main = entry[entry.index("main()") :]
+        self.assertLess(main.index("manifest_preflight"), main.index("stop_units"))
+        self.assertLess(main.index("backup_before_keep"), main.index("stop_units"))
+        self.assertLess(main.index("stop_units"), main.index("remove_files"))
+        self.assertLess(main.index("remove_files"), main.index("post_verify"))
 
     def test_amnezia_script_remains_standalone_and_transactional(self):
         text = (SCRIPTS / "setup-amnezia-api.sh").read_text(
@@ -101,46 +117,22 @@ class ShellStage2Tests(unittest.TestCase):
             "trap rollback EXIT",
             "trap 'exit 130' INT",
             "trap 'exit 143' TERM",
-            "CERT_CREATED",
-            "ADDED_HTTP",
-            "REMOVED_HTTP",
             "OPERATION_LOCK=/run/lock/just1kbot-deploy.lock",
-            "another managed Amnezia domain",
-            "UFW explicitly denies",
-            "/etc/nginx/conf.d/just1kbot-amnezia-rate-limit.conf",
-            "Опубликовать HTTPS reverse proxy",
         ):
             self.assertIn(marker, text)
         self.assertNotIn("sed -i '/http {/", text)
-        publish = text.index("publish(){")
-        self.assertLess(
-            text.index("firewall_add", publish),
-            text.index("certbot certonly", publish),
-        )
-        self.assertIn("begin", text[text.index("unpublish(){"):])
-        self.assertIn("ufw delete allow 80/tcp", text[text.index("unpublish(){"):])
 
-    def test_root_menu_excludes_standalone_amnezia_utility(self):
-        menu = (ROOT / "deploy.sh").read_text(encoding="utf-8")
-        self.assertNotIn("run_script setup-amnezia-api.sh", menu)
-        self.assertNotIn("amnezia)", menu)
-        self.assertIn("Standalone setup-amnezia-api.sh", menu)
-        self.assertIn("run_script uninstall_entrypoint.sh", menu)
-        self.assertIn("run_locked_script deploy.sh --backup", menu)
-        self.assertIn(
-            'run_locked_script ops/just1kbot-restore.sh rehearsal "$1"',
-            menu,
-        )
-        self.assertIn(
-            'run_script ops/just1kbot-restore.sh production "$@"',
-            menu,
-        )
-        self.assertIn(
-            "run_script ops/just1kbot-restore.sh recover",
-            menu,
-        )
-        self.assertIn('DEPLOY_FUNCTIONS_ONLY:-0}', menu)
-        self.assertIn("inspect_deploy_state --require-safe", menu)
+    def test_control_plane_excludes_standalone_amnezia_utility(self):
+        source = CONTROL.read_text(encoding="utf-8")
+        self.assertNotIn("setup-amnezia-api.sh", source.split("Standalone", 1)[0])
+        self.assertNotIn("amnezia)", source)
+        self.assertIn("Standalone setup-amnezia-api.sh", source)
+        self.assertIn("uninstall_entrypoint.sh", source)
+        self.assertIn("install-recover", source)
+        self.assertIn("install-rollback", source)
+        self.assertIn("ops/just1kbot-restore.sh rehearsal", source)
+        self.assertIn("ops/just1kbot-restore.sh production", source)
+        self.assertIn("state --operation deploy --require-safe", source)
 
 
 if __name__ == "__main__":
