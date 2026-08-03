@@ -7,14 +7,16 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
-DEPLOY = SCRIPTS / "deploy.sh"
+DEPLOY_RUNTIME = SCRIPTS / "lib" / "install_safe_runtime.sh"
+DEPLOY_DISPATCH = SCRIPTS / "lib" / "install_safe_dispatch.sh"
 OPERATIONAL = SCRIPTS / "lib" / "operational_transaction.sh"
 
 
 class ShellStage4Tests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.deploy = DEPLOY.read_text(encoding="utf-8")
+        cls.runtime = DEPLOY_RUNTIME.read_text(encoding="utf-8")
+        cls.dispatch = DEPLOY_DISPATCH.read_text(encoding="utf-8")
         cls.operational = OPERATIONAL.read_text(encoding="utf-8")
 
     def test_root_ops_duplicate_is_removed(self):
@@ -31,31 +33,46 @@ class ShellStage4Tests(unittest.TestCase):
     def test_operational_mutations_run_only_in_activation(self):
         for marker in (
             "ACTIVATION_COMMAND=(activate_release_bundle)",
-            "BACKUP_COMMAND=(pause_and_create_pre_migration_backup)",
+            "BACKUP_COMMAND=(pause_and_backup)",
             "BACKUP_COMMAND=(pause_operational_timers)",
             "install_operational_transaction_overrides",
         ):
-            self.assertIn(marker, self.deploy)
+            self.assertIn(marker, self.dispatch)
 
-        activation = self.deploy[
-            self.deploy.index("activate_release_bundle()") :
-            self.deploy.index("pause_and_create_pre_migration_backup()")
+        activation = self.runtime[
+            self.runtime.index("activate_release_bundle()") :
+            self.runtime.index("pause_and_backup()")
         ]
         for marker in (
             "install_backup_tooling",
             "install_healthcheck",
             "setup_logrotate",
             "setup_nginx_initial",
-            "refresh_configured_nginx",
+            "refresh_existing_nginx",
             "setup_systemd",
+            "foundation_install_cli",
         ):
             self.assertIn(marker, activation)
 
-        run_deploy = self.deploy[self.deploy.index("run_deploy()") :]
+        run_deploy = self.dispatch[self.dispatch.index("run_deploy()") :]
         transaction = run_deploy.index("run_application_transaction")
-        for marker in ("install_backup_tooling", "install_healthcheck", "setup_logrotate"):
+        for marker in (
+            "install_backup_tooling",
+            "install_healthcheck",
+            "setup_logrotate",
+        ):
             self.assertNotIn(marker, run_deploy[:transaction])
         self.assertNotIn("resume_operational_timers || true", run_deploy)
+
+    def test_safe_runtime_excludes_nginx_default_from_snapshot(self):
+        configure = self.runtime[
+            self.runtime.index("configure_operational_transaction()") :
+            self.runtime.index("install_rollback_override()")
+        ]
+        self.assertNotIn("sites-enabled/default", configure)
+        self.assertIn("OPERATIONAL_NGINX=false", configure)
+        self.assertIn('"$REDIS_CONFIG"', configure)
+        self.assertIn('"$REDIS_UNIT"', configure)
 
     def test_snapshot_tracks_present_absent_files_and_unit_state(self):
         for marker in (
@@ -232,8 +249,12 @@ restore_operational_units {str(snapshot)!r}
             )
             for unit in ("beta.timer", "gamma.service", "epsilon.service"):
                 self.assertNotIn(f"start {unit}", lines)
-            first_start = min(i for i, line in enumerate(lines) if line.startswith("start "))
-            last_stop = max(i for i, line in enumerate(lines) if line.startswith("stop "))
+            first_start = min(
+                index for index, line in enumerate(lines) if line.startswith("start ")
+            )
+            last_stop = max(
+                index for index, line in enumerate(lines) if line.startswith("stop ")
+            )
             self.assertLess(last_stop, first_start)
 
 
