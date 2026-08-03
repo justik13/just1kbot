@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_DEPLOY = ROOT / "deploy.sh"
 CORE = ROOT / "scripts" / "lib" / "deploy_core.inc"
-ADAPTER = ROOT / "scripts" / "deploy.sh"
+PLATFORM = ROOT / "scripts" / "lib" / "install_safe_platform.sh"
 
 
 class InstallerInputContractTests(unittest.TestCase):
@@ -20,6 +20,7 @@ class InstallerInputContractTests(unittest.TestCase):
             f"""
             set -Eeuo pipefail
             source {str(ROOT_DEPLOY)!r}
+            source {str(PLATFORM)!r}
             LOG_FILE=/tmp/just1kbot-installer-contract.log
             {script}
             """
@@ -34,13 +35,13 @@ class InstallerInputContractTests(unittest.TestCase):
 
     def test_initial_install_has_no_global_amnezia_credentials(self):
         source = CORE.read_text(encoding="utf-8")
-        adapter = ADAPTER.read_text(encoding="utf-8")
+        platform = PLATFORM.read_text(encoding="utf-8")
         self.assertNotIn("Amnezia API URL", source)
         self.assertNotIn("AMNEZIA_API_URL=${", source)
         self.assertNotIn("AMNEZIA_API_KEY=${", source)
-        self.assertNotIn("write_env_var AMNEZIA_API_URL", source + adapter)
-        self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + adapter)
-        self.assertNotIn("write_env_var WEBHOOK_URL", source + adapter)
+        self.assertNotIn("write_env_var AMNEZIA_API_URL", source + platform)
+        self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + platform)
+        self.assertNotIn("write_env_var WEBHOOK_URL", source + platform)
 
     def test_valid_install_input_requires_payment_contract_but_not_amnezia(self):
         result = self.run_function(
@@ -143,19 +144,22 @@ class InstallerInputContractTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(key, result.stderr)
 
-    def test_supported_os_boundaries(self):
-        for os_id, version in (("ubuntu", "24.04"), ("debian", "12")):
-            with self.subTest(os_id=os_id, version=version):
-                result = self.run_function(
-                    f"validate_supported_os {os_id!r} {version!r}"
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-        for os_id, version in (("ubuntu", "22.04"), ("debian", "11")):
+    def test_supported_os_boundary_is_exact_ubuntu_2404(self):
+        accepted = self.run_function("validate_supported_os 'ubuntu' '24.04'")
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        for os_id, version in (
+            ("ubuntu", "22.04"),
+            ("ubuntu", "24.10"),
+            ("debian", "12"),
+            ("debian", "13"),
+        ):
             with self.subTest(os_id=os_id, version=version):
                 result = self.run_function(
                     f"validate_supported_os {os_id!r} {version!r}"
                 )
                 self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Ubuntu 24.04", result.stderr)
 
 
 if __name__ == "__main__":
