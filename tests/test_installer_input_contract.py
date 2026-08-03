@@ -9,7 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_DEPLOY = ROOT / "deploy.sh"
 CORE = ROOT / "scripts" / "lib" / "deploy_core.inc"
-ADAPTER = ROOT / "scripts" / "deploy.sh"
+PLATFORM = ROOT / "scripts" / "lib" / "install_safe_platform.sh"
+PLATFORM_SUPPORT = ROOT / "scripts" / "lib" / "install_safe_platform_support.sh"
+PACKAGE_POLICY = ROOT / "scripts" / "lib" / "install_safe_package_policy.sh"
 
 
 class InstallerInputContractTests(unittest.TestCase):
@@ -20,6 +22,18 @@ class InstallerInputContractTests(unittest.TestCase):
             f"""
             set -Eeuo pipefail
             source {str(ROOT_DEPLOY)!r}
+            source {str(PLATFORM)!r}
+            foundation_warn() {{ :; }}
+            foundation_fail() {{ printf '%s\\n' "$*" >&2; return 1; }}
+            foundation_manifest_create() {{ :; }}
+            foundation_manifest_set_metadata() {{ :; }}
+            source {str(PLATFORM_SUPPORT)!r}
+            # Unit tests below validate required/forbidden .env keys. Production
+            # owner/mode enforcement has separate installer safety tests and
+            # cannot be reproduced by an unprivileged CI runner.
+            validate_env_file_safety() {{
+                [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]]
+            }}
             LOG_FILE=/tmp/just1kbot-installer-contract.log
             {script}
             """
@@ -34,13 +48,13 @@ class InstallerInputContractTests(unittest.TestCase):
 
     def test_initial_install_has_no_global_amnezia_credentials(self):
         source = CORE.read_text(encoding="utf-8")
-        adapter = ADAPTER.read_text(encoding="utf-8")
+        platform = PLATFORM.read_text(encoding="utf-8")
         self.assertNotIn("Amnezia API URL", source)
         self.assertNotIn("AMNEZIA_API_URL=${", source)
         self.assertNotIn("AMNEZIA_API_KEY=${", source)
-        self.assertNotIn("write_env_var AMNEZIA_API_URL", source + adapter)
-        self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + adapter)
-        self.assertNotIn("write_env_var WEBHOOK_URL", source + adapter)
+        self.assertNotIn("write_env_var AMNEZIA_API_URL", source + platform)
+        self.assertNotIn("write_env_var AMNEZIA_API_KEY", source + platform)
+        self.assertNotIn("write_env_var WEBHOOK_URL", source + platform)
 
     def test_valid_install_input_requires_payment_contract_but_not_amnezia(self):
         result = self.run_function(
@@ -143,19 +157,40 @@ class InstallerInputContractTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(key, result.stderr)
 
-    def test_supported_os_boundaries(self):
-        for os_id, version in (("ubuntu", "24.04"), ("debian", "12")):
+    def test_supported_os_policy_allows_compatible_ubuntu_and_debian(self):
+        for os_id, version in (
+            ("ubuntu", "24.04"),
+            ("ubuntu", "22.04"),
+            ("ubuntu", "24.10"),
+            ("debian", "12"),
+            ("debian", "13"),
+        ):
             with self.subTest(os_id=os_id, version=version):
                 result = self.run_function(
                     f"validate_supported_os {os_id!r} {version!r}"
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-        for os_id, version in (("ubuntu", "22.04"), ("debian", "11")):
+
+    def test_supported_os_policy_rejects_unknown_or_incomplete_platform(self):
+        for os_id, version in (
+            ("alpine", "3.21"),
+            ("fedora", "42"),
+            ("ubuntu", ""),
+            ("", "24.04"),
+        ):
             with self.subTest(os_id=os_id, version=version):
                 result = self.run_function(
                     f"validate_supported_os {os_id!r} {version!r}"
                 )
                 self.assertNotEqual(result.returncode, 0)
+
+    def test_runtime_capabilities_keep_python_312_reproducibility(self):
+        package_policy = PACKAGE_POLICY.read_text(encoding="utf-8")
+        self.assertIn("systemd-run", package_policy)
+        self.assertIn("apt-get", package_policy)
+        self.assertIn("dpkg-query", package_policy)
+        self.assertIn("sys.version_info[:2]", package_policy)
+        self.assertIn("Python 3.12", package_policy)
 
 
 if __name__ == "__main__":
