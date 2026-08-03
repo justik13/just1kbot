@@ -1,12 +1,8 @@
-# Triggered after workflow registration.
 name: Run installer audit fix
 
 on:
-  push:
-    branches:
-      - agent/greenfield-ui-ux-cleanup
-    paths:
-      - .github/workflows/run-installer-audit-fix.yml
+  pull_request:
+    types: [synchronize]
 
 permissions:
   contents: write
