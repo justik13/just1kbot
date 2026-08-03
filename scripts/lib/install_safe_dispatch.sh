@@ -109,12 +109,17 @@ run_deploy() {
         return 0
     fi
 
+    # The durable journal is the first mutation. If apt or any later step
+    # fails, state/doctor can explain that installation is incomplete.
+    begin_installer_transaction
+
     if [[ "$INITIAL_INSTALL" == true ]]; then
+        foundation_journal_update package-install
         install_dependencies
     fi
 
     validate_runtime_commands
-    begin_installer_transaction
+    foundation_journal_update ownership-manifest
     ensure_manifest
     setup_user_and_dirs
 
