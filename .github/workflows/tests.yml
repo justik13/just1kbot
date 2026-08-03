@@ -30,6 +30,15 @@ jobs:
       # Deliberately invalid test-only value; this is not a production secret.
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
       SUPPORT_USERNAME: "test_support_bot"
+      ADMIN_IDS: "[123456789]"
+      REDIS_URL: "redis://:ci_redis_password@localhost:6379/0"
+      REDIS_PASSWORD: "ci_redis_password"
+      YOOKASSA_SHOP_ID: "123456"
+      YOOKASSA_SECRET_KEY: "ci_test_secret"
+      YOOKASSA_RETURN_URL: "https://t.me/{bot_username}"
+      YOOKASSA_WEBHOOK_PORT: "8080"
+      DOMAIN: "vpn.example.test"
+      SSL_EMAIL: "ci@example.test"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
