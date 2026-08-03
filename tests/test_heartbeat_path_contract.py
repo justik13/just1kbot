@@ -20,7 +20,7 @@ class HeartbeatPathContractTests(unittest.TestCase):
         self.assertIn("HEARTBEAT_FILE=/run/just1kbot/heartbeat", deploy)
         self.assertNotIn('HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"', deploy)
 
-    def test_local_path_can_be_overridden(self):
+    def test_local_file_can_be_overridden_explicitly(self):
         with patch.dict(
             os.environ,
             {"JUST1KBOT_HEARTBEAT_FILE": "/local/test-heartbeat"},
@@ -30,12 +30,20 @@ class HeartbeatPathContractTests(unittest.TestCase):
                 Path("/local/test-heartbeat"), heartbeat.get_heartbeat_file()
             )
 
-    def test_project_directory_compatibility_override(self):
+    def test_project_directory_does_not_override_runtime_path(self):
         with patch.dict(
             os.environ,
-            {"JUST1KBOT_DIR": "/local/project"},
+            {
+                "JUST1KBOT_DIR": "/local/project",
+                "just1kbot_DIR": "/local/other-project",
+            },
             clear=True,
         ):
             self.assertEqual(
-                Path("/local/project/.heartbeat"), heartbeat.get_heartbeat_file()
+                Path("/run/just1kbot/heartbeat"),
+                heartbeat.get_heartbeat_file(),
             )
+
+
+if __name__ == "__main__":
+    unittest.main()
