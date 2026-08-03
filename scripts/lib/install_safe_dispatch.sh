@@ -86,8 +86,17 @@ run_existing_read_only_preflight() {
         error 'Существующий production .env не содержит обязательные DOMAIN/SSL_EMAIL/YOOKASSA_WEBHOOK_PORT.'
         return 1
     }
-    foundation_preflight_static_resources
-    foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
+
+    if foundation_manifest_validate; then
+        foundation_preflight_static_resources
+        foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
+    else
+        # A complete legacy installation has no manifest yet. It is accepted
+        # only by exact project/unit/account/Nginx/certificate markers. New
+        # dedicated Redis and CLI resources must remain absent and port 6380
+        # must be free.
+        legacy_read_only_preflight
+    fi
 }
 
 run_deploy() {
