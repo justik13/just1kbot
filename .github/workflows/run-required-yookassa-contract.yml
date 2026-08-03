@@ -94,6 +94,23 @@ jobs:
           Path('/tmp/apply_required_yookassa.py').write_text(body, encoding='utf-8')
           PY
           python /tmp/apply_required_yookassa.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_installer_input_contract.py')
+          text = path.read_text(encoding='utf-8')
+          old = (
+              '                \'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\\n\',\n'
+              '                \'REDIS_PASSWORD="password2"\\n\''
+          )
+          new = (
+              '                \'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\\n\'\n'
+              '                \'REDIS_PASSWORD="password2"\\n\''
+          )
+          if old not in text:
+              raise SystemExit('generated existing-env fixture separator not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Run targeted checks
         shell: bash
