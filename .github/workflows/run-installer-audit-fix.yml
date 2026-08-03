@@ -44,7 +44,19 @@ jobs:
           SUPPORT_USERNAME: test_support_bot
         run: |
           set -euo pipefail
-          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc scripts/setup-amnezia-api.sh
+          for script in \
+            deploy.sh \
+            scripts/deploy.sh \
+            scripts/deploy_full.sh \
+            scripts/deploy_full_library.sh \
+            scripts/lib/deploy_core.inc \
+            scripts/setup-amnezia-api.sh; do
+            if ! bash -n "$script"; then
+              printf 'Syntax failure in %s\n' "$script" >&2
+              nl -ba "$script" | sed -n '750,820p' >&2
+              exit 1
+            fi
+          done
           for pattern in \
             test_installer_input_contract.py \
             test_shell_layout.py \
