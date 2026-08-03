@@ -4,7 +4,7 @@ import pwd
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     DOMAIN: str
     SSL_EMAIL: str
 
+    # Removed greenfield settings are declared only so stale .env files fail.
+    AMNEZIA_API_URL: str | None = None
+    AMNEZIA_API_KEY: str | None = None
+    WEBHOOK_URL: str | None = None
+
     # ── Account balance product limits ──
     BALANCE_MIN_TOPUP_RUB: int = 10
     BALANCE_MAX_CUSTOM_TOPUP_RUB: int = 5000
@@ -73,6 +78,18 @@ class Settings(BaseSettings):
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
 
+    @model_validator(mode="after")
+    def reject_removed_settings(self):
+        removed = {
+            "AMNEZIA_API_URL": self.AMNEZIA_API_URL,
+            "AMNEZIA_API_KEY": self.AMNEZIA_API_KEY,
+            "WEBHOOK_URL": self.WEBHOOK_URL,
+        }
+        configured = [name for name, value in removed.items() if value]
+        if configured:
+            names = ", ".join(sorted(configured))
+            raise ValueError(f"removed settings are not supported: {names}")
+        return self
 
     @field_validator("BOT_TOKEN")
     @classmethod
