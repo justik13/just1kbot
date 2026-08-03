@@ -46,7 +46,6 @@ async def _get_client_session() -> aiohttp.ClientSession:
 
 
 class YooKassaErrorKind(str, Enum):
-    CONFIGURATION = "configuration"
     AUTH_FAILED = "auth_failed"
     VALIDATION_FAILED = "validation_failed"
     NOT_FOUND = "not_found"
@@ -82,11 +81,9 @@ class YooKassaService:
         idempotency_key: str | None = None,
         ambiguous_on_failure=False,
     ) -> YooKassaResult[dict]:
-        s = get_settings()
-        shop = getattr(s, "YOOKASSA_SHOP_ID", None)
-        secret = getattr(s, "YOOKASSA_SECRET_KEY", None)
-        if not shop or not secret:
-            return YooKassaResult(False, error_kind=YooKassaErrorKind.CONFIGURATION)
+        settings = get_settings()
+        shop = settings.YOOKASSA_SHOP_ID
+        secret = settings.YOOKASSA_SECRET_KEY
         headers = {"Accept": "application/json"}
         if idempotency_key:
             if len(idempotency_key) > 64:
@@ -96,7 +93,7 @@ class YooKassaService:
             headers["Idempotence-Key"] = idempotency_key
         try:
             client = await _get_client_session()
-            auth = aiohttp.BasicAuth(str(shop), str(secret))
+            auth = aiohttp.BasicAuth(shop, secret)
             async with client.request(
                 method, cls.API + path, json=payload, headers=headers, auth=auth
             ) as response:
