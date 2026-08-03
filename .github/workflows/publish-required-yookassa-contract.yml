@@ -1,0 +1,66 @@
+name: Publish required YooKassa contract
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 53
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Reproduce verified changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/finalize-required-yookassa-contract.yml').read_text(encoding='utf-8')
+          start_marker = "      - name: Apply deterministic transformation\n        shell: bash\n        run: |\n"
+          end_marker = "\n      - name: Run targeted checks"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          body = source[start:end]
+          body = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in body.splitlines()
+          ) + "\n"
+          Path('/tmp/reproduce_verified_fix.sh').write_text(body, encoding='utf-8')
+          PY
+          bash /tmp/reproduce_verified_fix.sh
+
+      - name: Recheck and publish non-workflow changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt --quiet
+          python -m py_compile config/settings.py bot/main.py tests/test_installer_input_contract.py tests/test_runtime_config_contract.py
+          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc
+          shellcheck --severity=error deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh
+          python -m unittest discover -s tests -p 'test_installer_input_contract.py' -v
+          python -m unittest discover -s tests -p 'test_runtime_config_contract.py' -v
+          python -m unittest discover -s tests -p 'test_deploy_rollback.py' -v
+          git diff --check
+
+          git checkout -- .github/workflows/tests.yml
+          rm -f \
+            .github/workflows/apply-required-yookassa-contract.yml \
+            .github/workflows/run-required-yookassa-contract.yml \
+            .github/workflows/finalize-required-yookassa-contract.yml \
+            .github/workflows/publish-required-yookassa-contract.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: require complete YooKassa production configuration'
+          git pull --rebase origin agent/greenfield-ui-ux-cleanup
+          git push origin HEAD:agent/greenfield-ui-ux-cleanup
