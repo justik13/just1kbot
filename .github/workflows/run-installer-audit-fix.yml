@@ -1,0 +1,65 @@
+name: Run installer audit fix
+
+on:
+  push:
+    branches:
+      - agent/greenfield-ui-ux-cleanup
+    paths:
+      - .github/workflows/run-installer-audit-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Apply installer corrections
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/fix-installer-audit.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Run targeted installer checks"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          script = "import textwrap\n" + textwrap.dedent(source[start:end])
+          Path('/tmp/fix_installer.py').write_text(script, encoding='utf-8')
+          PY
+          python /tmp/fix_installer.py
+
+      - name: Run targeted checks
+        shell: bash
+        env:
+          SUPPORT_USERNAME: test_support_bot
+        run: |
+          set -euo pipefail
+          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc scripts/setup-amnezia-api.sh
+          for pattern in \
+            test_installer_input_contract.py \
+            test_shell_layout.py \
+            test_shell_stage3.py \
+            test_deploy_rollback.py; do
+            python -m unittest discover -s tests -p "$pattern" -v
+          done
+          git diff --check
+
+      - name: Commit installer fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy.sh README.md scripts/deploy.sh scripts/lib/deploy_core.inc tests/test_deploy_rollback.py tests/test_installer_input_contract.py
+          git commit -m 'fix: align installer with current server configuration'
+          git pull --rebase origin agent/greenfield-ui-ux-cleanup
+          git push origin HEAD:agent/greenfield-ui-ux-cleanup
