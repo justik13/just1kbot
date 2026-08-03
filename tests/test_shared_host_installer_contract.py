@@ -3,6 +3,7 @@ import os
 import pathlib
 import subprocess
 import tempfile
+import textwrap
 import unittest
 
 
@@ -14,6 +15,8 @@ FOUNDATION = (SCRIPTS / "lib" / "installer_foundation.sh").read_text(
 PLATFORM = (SCRIPTS / "lib" / "install_safe_platform.sh").read_text(
     encoding="utf-8"
 )
+LOCK_POLICY_PATH = SCRIPTS / "lib" / "install_safe_lock_policy.sh"
+LOCK_POLICY = LOCK_POLICY_PATH.read_text(encoding="utf-8")
 RUNTIME = (SCRIPTS / "lib" / "install_safe_runtime.sh").read_text(
     encoding="utf-8"
 )
@@ -76,7 +79,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             DISPATCH.index('if [[ "$INITIAL_INSTALL" == true ]]') :
         ]
         self.assertLess(
-            initial.index("preflight_before_packages"),
+            initial.index("run_initial_read_only_preflight"),
             initial.index("install_dependencies"),
         )
         preflight = DISPATCH[
@@ -90,6 +93,18 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             "preflight_postgres_names_absent",
         ):
             self.assertIn(marker, preflight)
+
+    def test_durable_journal_is_first_mutation_before_apt(self):
+        deploy = DISPATCH[DISPATCH.index("run_deploy()") :]
+        self.assertLess(
+            deploy.index("begin_installer_transaction"),
+            deploy.index("install_dependencies"),
+        )
+        self.assertLess(
+            deploy.index("install_dependencies"),
+            deploy.index("ensure_manifest"),
+        )
+        self.assertIn("foundation_journal_update package-install", deploy)
 
     def test_nginx_default_site_is_out_of_scope(self):
         self.assertNotIn("sites-enabled/default", RUNTIME)
@@ -125,6 +140,58 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             "/usr/sbin/nologin",
         ):
             self.assertIn(marker, PLATFORM)
+        for forbidden in (
+            "--index-url",
+            "--extra-index-url",
+            "--trusted-host",
+            "--find-links",
+            "git+",
+            "file:",
+            "https://",
+            " @ ",
+        ):
+            self.assertIn(forbidden, LOCK_POLICY)
+        self.assertIn("--hash=sha256:", LOCK_POLICY)
+
+    def _run_lock_validation(self, lock_path: pathlib.Path) -> subprocess.CompletedProcess[str]:
+        command = textwrap.dedent(
+            f"""
+            set -Eeuo pipefail
+            error() {{ printf '%s\\n' "$*" >&2; }}
+            INSTALL_SAFE_LOCK_POLICY_SOURCE_ONLY=1
+            source {str(LOCK_POLICY_PATH)!r}
+            REQUIREMENTS_LOCK={str(lock_path)!r}
+            validate_lock
+            """
+        )
+        return subprocess.run(
+            ["bash", "-c", command],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def test_committed_lock_passes_strict_runtime_validator(self):
+        result = self._run_lock_validation(ROOT / "requirements.lock")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_lock_validator_rejects_alternate_sources_and_direct_urls(self):
+        sha = "a" * 64
+        samples = (
+            f"--extra-index-url https://evil.example/simple\npkg==1.0 --hash=sha256:{sha}\n",
+            f"--trusted-host evil.example\npkg==1.0 --hash=sha256:{sha}\n",
+            f"pkg @ https://evil.example/pkg.whl --hash=sha256:{sha}\n",
+            f"pkg==1.0 --find-links https://evil.example --hash=sha256:{sha}\n",
+            f"pkg==1.0 git+https://evil.example/repo --hash=sha256:{sha}\n",
+        )
+        for content in samples:
+            with self.subTest(content=content.splitlines()[0]):
+                with tempfile.TemporaryDirectory() as directory:
+                    path = pathlib.Path(directory) / "requirements.lock"
+                    path.write_text(content, encoding="utf-8")
+                    result = self._run_lock_validation(path)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("requirements.lock", result.stderr)
 
     def test_uninstall_is_manifest_bounded(self):
         for marker in (
@@ -201,6 +268,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
         self.assertNotIn("deploy:partial_install", deploy_cases)
         self.assertIn("*:partial_install) return 23", deploy_cases)
         self.assertIn("install-recover или install-rollback", source)
+        self.assertIn("pre-manifest journal", source)
 
 
 if __name__ == "__main__":
