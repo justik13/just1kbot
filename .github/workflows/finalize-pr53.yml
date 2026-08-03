@@ -1,9 +1,9 @@
 name: Finalize PR 53
 
 on:
-  push:
-    branches:
-      - agent/greenfield-ui-ux-cleanup
+  pull_request:
+    types: [synchronize]
+    branches: [main]
     paths:
       - .github/greenfield-followup/**
       - .github/workflows/finalize-pr53.yml
@@ -17,6 +17,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.ref == 'agent/greenfield-ui-ux-cleanup' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
