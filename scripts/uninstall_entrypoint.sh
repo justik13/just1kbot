@@ -67,7 +67,7 @@ main() {
     installer_enable_diagnostics
 
     installer_set_step 'Проверка ownership перед удалением' 'Foreign collision, symlink или повреждённый manifest блокируют destructive operation.'
-    bash "$INSPECT_STATE" --require-safe
+    bash "$INSPECT_STATE" --operation uninstall --require-safe
 
     installer_set_step 'Проверка каждого удаляемого ресурса' 'До stop/disable/rm проверяются все systemd units, operational tools и основной Nginx site.'
     bash "$PREFLIGHT_RESOURCES"
