@@ -1,5 +1,5 @@
 #!/bin/bash
-# Activation ordering for resources that must be covered by operational rollback.
+# Activation ordering for resources covered by operational rollback.
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
@@ -8,17 +8,25 @@ activate_release_bundle() {
     foundation_journal_update dedicated-redis
     foundation_setup_dedicated_redis "$REDIS_PASSWORD"
     setup_firewall_initial
+    installer_failpoint after-dedicated-redis
 
     install_backup_tooling
     install_healthcheck
     setup_logrotate
+    installer_failpoint after-operational-tooling
+
     if [[ "$INITIAL_INSTALL" == true ]]; then
         setup_nginx_initial
     else
         refresh_existing_nginx
     fi
+    installer_failpoint after-proxy-activation
+
     setup_systemd
+    installer_failpoint after-systemd
+
     foundation_install_cli
+    installer_failpoint after-cli
 }
 
 if [[ "${INSTALL_SAFE_ACTIVATION_POLICY_SOURCE_ONLY:-0}" != 1 &&
