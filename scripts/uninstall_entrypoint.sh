@@ -8,6 +8,7 @@ BOT_HOME=/home/just1kbot
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 UNINSTALL=$SCRIPT_DIR/uninstall.sh
 VERIFY_UNINSTALL=$SCRIPT_DIR/verify_uninstall_state.sh
+INSPECT_STATE=$SCRIPT_DIR/inspect_install_state.sh
 DIAGNOSTICS=$SCRIPT_DIR/lib/installer_diagnostics.sh
 VERIFY_MODE=--auto
 
@@ -31,7 +32,7 @@ safe_remove_orphan_home() {
         rm -rf --one-file-system -- "$BOT_HOME"
     fi
 
-    [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] || fail 'service home остался после purge'
+    [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] || fail 'service home остался после uninstall'
 }
 
 select_verify_mode() {
@@ -46,6 +47,7 @@ main() {
     [[ ${EUID:-$(id -u)} -eq 0 ]] || fail 'запустите от root'
     [[ -f "$UNINSTALL" && ! -L "$UNINSTALL" ]] || fail 'основной uninstall script отсутствует или небезопасен'
     [[ -f "$VERIFY_UNINSTALL" && ! -L "$VERIFY_UNINSTALL" ]] || fail 'post-uninstall verifier отсутствует или небезопасен'
+    [[ -f "$INSPECT_STATE" && ! -L "$INSPECT_STATE" ]] || fail 'install-state inspector отсутствует или небезопасен'
     [[ -f "$DIAGNOSTICS" && ! -L "$DIAGNOSTICS" ]] || fail 'installer diagnostics отсутствует или небезопасен'
 
     # shellcheck source=scripts/lib/installer_diagnostics.sh
@@ -59,17 +61,20 @@ main() {
     declare -F verify_uninstall_main >/dev/null 2>&1 || fail 'post-uninstall verifier function не загружена'
 
     installer_set_operation uninstall
-    installer_set_step 'Основное удаление' 'После destructive этапа обязательно выполняется независимая проверка остатков.'
     installer_set_log_file /var/log/just1kbot-deploy.log
     installer_enable_diagnostics
 
+    installer_set_step 'Проверка ownership перед удалением' 'Foreign collision, symlink или повреждённый manifest блокируют destructive operation.'
+    bash "$INSPECT_STATE" --require-safe
+
+    installer_set_step 'Основное удаление' 'После destructive этапа обязательно выполняется независимая проверка остатков.'
     select_verify_mode "${1:-}"
     bash "$UNINSTALL" "$@"
 
     installer_set_step 'Очистка service home' 'Домашний каталог удаляется только после подтверждённого удаления service user.'
     safe_remove_orphan_home
 
-    installer_set_step 'Проверка отсутствия остатков' 'Успех разрешён только если filesystem, units, processes и purge-data PostgreSQL state очищены.'
+    installer_set_step 'Проверка отсутствия остатков' 'Успех разрешён только если filesystem, units, service user, processes и purge-data PostgreSQL state очищены.'
     verify_uninstall_main "$VERIFY_MODE"
 }
 
