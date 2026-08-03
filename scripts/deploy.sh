@@ -66,10 +66,6 @@ validate_env_file_safety() {
         return 0
     fi
 
-    # Accept the service-owned file only long enough to normalize permissions.
-    if [[ "$owner" == "$BOT_USER" && "$group" == "$BOT_USER" && "$mode" == 600 ]]; then
-        return 0
-    fi
 
     error "Production .env должен быть root:${BOT_USER} 0640"
     error "Текущее состояние: owner=${owner} group=${group} mode=${mode}"
@@ -681,15 +677,6 @@ install_rollback_override() {
         deploy_log 'database_downgrade=not_performed'
         restore_snapshot || return 2
 
-        # A pre-stage-3 unit writes heartbeat inside the project directory.
-        # Restore its original write boundary only for rollback compatibility.
-        if [[ -f "$UNIT_FILE" ]] &&
-            ! grep -Fq "JUST1KBOT_HEARTBEAT_FILE=${RUNTIME_DIR}/heartbeat" "$UNIT_FILE"; then
-            chown "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
-            chmod 0750 "$PROJECT_DIR"
-            HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
-            deploy_log 'rollback_heartbeat=obsolete project_root_writable=true'
-        fi
 
         # No systemd unit in the snapshot means there was no previous installed
         # service. A failed first/incomplete install must not try to start it.

@@ -283,18 +283,12 @@ async def main():
     try:
         settings = get_settings()
 
-        if not settings.DB_ENCRYPTION_KEY:
-            logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
-            return
-
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
-        except Exception as e:
-            logger.critical(
-                "❌ DB_ENCRYPTION_KEY невалиден: %s",
-                type(e).__name__,
-            )
-            return
+        except Exception as exc:
+            raise RuntimeError(
+                "DB_ENCRYPTION_KEY is not a valid Fernet key"
+            ) from exc
 
         logger.info("Инициализация БД...")
         await init_db()
@@ -346,15 +340,12 @@ async def main():
             except asyncio.CancelledError:
                 pass
         else:
-            for task in done:
-                exc = (
-                    task.exception() if not task.cancelled() else None
-                )
-                if exc:
-                    logger.critical(
-                        "Fatal error in main task: %s",
-                        type(exc).__name__,
-                    )
+            if polling_task.cancelled():
+                raise RuntimeError("Telegram polling was cancelled unexpectedly")
+            polling_error = polling_task.exception()
+            if polling_error is not None:
+                raise polling_error
+            raise RuntimeError("Telegram polling stopped unexpectedly")
 
         for task in pending:
             task.cancel()

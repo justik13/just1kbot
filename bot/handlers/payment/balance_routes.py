@@ -190,15 +190,6 @@ async def _create_and_render_topup(
     *,
     context: dict | None = None,
 ) -> None:
-    settings = get_settings()
-    if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
-        await render_hub(
-            target.bot,
-            target.chat.id,
-            texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L205_1,
-            get_back_button("menu_balance"),
-        )
-        return
     bot_info = await target.bot.get_me()
     try:
         result = await create_balance_topup(
