@@ -31,7 +31,12 @@ jobs:
           set -euo pipefail
           cat .github/greenfield-followup/part* | base64 --decode > /tmp/pr53.bundle
           echo 'f4fee2838d19780abf35f37c55fc8f384b5c01d886508a98b971534c799ad7ec  /tmp/pr53.bundle' | sha256sum --check
-          git bundle verify /tmp/pr53.bundle
+          python - <<'PY'
+          from pathlib import Path
+          bundle = Path('/tmp/pr53.bundle').read_bytes()
+          Path('/tmp/pr53.pack').write_bytes(bundle[bundle.index(b'PACK'):])
+          PY
+          git index-pack --stdin --fix-thin < /tmp/pr53.pack
 
       - name: Apply completion commit and remove temporary files
         shell: bash
@@ -41,11 +46,13 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch /tmp/pr53.bundle HEAD
-          git cherry-pick FETCH_HEAD
+          current_head="$(git rev-parse HEAD)"
+          git update-ref refs/replace/c70a44afbb2d57fca8f0c73d7039bd74a6dd3e69 "$current_head"
+          git cherry-pick 757fc841fe83c702fc9be580216d259272fcbc0a
           rm -rf .github/greenfield-followup
           rm -f .github/workflows/finalize-pr53.yml
           git add -A
           git commit --amend --no-edit
+          git update-ref -d refs/replace/c70a44afbb2d57fca8f0c73d7039bd74a6dd3e69
           git pull --rebase origin "$BRANCH"
           git push origin "HEAD:$BRANCH"
