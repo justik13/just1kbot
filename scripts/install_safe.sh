@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared-server-safe Just1kBot installer. Ubuntu 24.04 only.
+# Shared-server-safe Just1kBot installer. Ubuntu 24.04 is the primary CI target.
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
@@ -53,6 +53,7 @@ REQUIREMENTS_LOCK="$ROOT_DIR/requirements.lock"
 
 for module in \
     "$SCRIPT_DIR/lib/install_safe_platform.sh" \
+    "$SCRIPT_DIR/lib/install_safe_platform_support.sh" \
     "$SCRIPT_DIR/lib/install_safe_release_contract.sh" \
     "$SCRIPT_DIR/lib/install_safe_lock_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
@@ -61,6 +62,7 @@ for module in \
     "$SCRIPT_DIR/lib/install_safe_tls_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_postgres_ownership.sh" \
     "$SCRIPT_DIR/lib/install_safe_proxy_mode.sh" \
+    "$SCRIPT_DIR/lib/install_safe_package_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_activation_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_failure_injection.sh" \
     "$SCRIPT_DIR/lib/install_safe_dispatch.sh"; do
