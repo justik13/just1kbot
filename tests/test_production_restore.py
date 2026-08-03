@@ -14,7 +14,7 @@ RESTORE_LIBRARIES = (
     ROOT / "scripts" / "lib" / "production_restore_actions.sh",
 )
 VERIFY = ROOT / "scripts" / "ops" / "verify_backup.sh"
-MENU = ROOT / "deploy.sh"
+CONTROL = ROOT / "scripts" / "lib" / "control_plane.sh"
 
 
 class ProductionRestoreContractTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ProductionRestoreContractTests(unittest.TestCase):
             + [path.read_text(encoding="utf-8") for path in RESTORE_LIBRARIES]
         )
         cls.verify = VERIFY.read_text(encoding="utf-8")
-        cls.menu = MENU.read_text(encoding="utf-8")
+        cls.control = CONTROL.read_text(encoding="utf-8")
 
     def test_help_is_non_destructive_without_root(self):
         result = subprocess.run(
@@ -59,7 +59,10 @@ class ProductionRestoreContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.restore)
         self.assertNotIn('source "$ENV_FILE"', self.restore)
-        self.assertNotIn('dropdb --force --if-exists --maintenance-db=postgres "$LIVE_DATABASE"', self.restore)
+        self.assertNotIn(
+            'dropdb --force --if-exists --maintenance-db=postgres "$LIVE_DATABASE"',
+            self.restore,
+        )
 
     def test_staging_precedes_writer_stop_and_cutover(self):
         staging = self.restore.index("restore_staging_database")
@@ -76,7 +79,10 @@ class ProductionRestoreContractTests(unittest.TestCase):
 
     def test_previous_database_requires_separate_finalize(self):
         self.assertIn('rename_database "$LIVE_DATABASE" "$ROLLBACK_DB"', self.restore)
-        self.assertIn("run 'just1kbot-restore.sh status', then choose rollback or finalize", self.restore)
+        self.assertIn(
+            "run 'just1kbot-restore.sh status', then choose rollback or finalize",
+            self.restore,
+        )
         self.assertIn('admin_dropdb "$preserved"', self.restore)
         self.assertIn('[[ "$preserved" != "$LIVE_DATABASE" ]]', self.restore)
 
@@ -88,27 +94,38 @@ class ProductionRestoreContractTests(unittest.TestCase):
             '"$POSTGRES_WORK_DIR/dump.custom"',
         ):
             self.assertIn(marker, self.restore)
-        rehearsal = (ROOT / "scripts" / "ops" / "restore_rehearsal.sh").read_text(encoding="utf-8")
+        rehearsal = (
+            ROOT / "scripts" / "ops" / "restore_rehearsal.sh"
+        ).read_text(encoding="utf-8")
         self.assertIn("/var/lib/postgresql/just1kbot-rehearsal.", rehearsal)
         self.assertIn('restore_dump="$postgres_work/dump.custom"', rehearsal)
 
     def test_verifier_extracts_config_only_to_private_extract_dir(self):
         self.assertIn('mkdir -m 700 "$extract_dir"', self.verify)
-        self.assertIn('install -m 600 "$tmpdir/extracted/config.env" "$extract_dir/config.env"', self.verify)
+        self.assertIn(
+            'install -m 600 "$tmpdir/extracted/config.env" "$extract_dir/config.env"',
+            self.verify,
+        )
 
-    def test_menu_exposes_full_restore_lifecycle(self):
+    def test_control_plane_exposes_full_restore_lifecycle(self):
         for marker in (
             "restore-production",
             "restore-status",
+            "restore-recover",
             "restore-rollback",
             "restore-finalize",
-            "Восстановить production БД из backup",
+            "Restore production",
         ):
-            self.assertIn(marker, self.menu)
-        production_case = self.menu[
-            self.menu.index("        restore-production)") : self.menu.index("        restore-status)")
+            self.assertIn(marker, self.control)
+        production_case = self.control[
+            self.control.index("        restore-production)") : self.control.index(
+                "        restore-status)"
+            )
         ]
-        self.assertIn('run_script ops/just1kbot-restore.sh production "$@"', production_case)
+        self.assertIn(
+            'call_script ops/just1kbot-restore.sh production "$@"',
+            production_case,
+        )
         self.assertNotIn("run_locked_script", production_case)
 
     def _run_function_test(self, body: str) -> subprocess.CompletedProcess[str]:
