@@ -162,18 +162,41 @@ perform_deploy_mutations() {
     foundation_journal_clear
 }
 
+rollback_empty_pre_manifest_journal() {
+    foundation_journal_validate || return 1
+    foundation_exists "$INSTALL_MANIFEST" && return 1
+    local created
+    created=$(foundation_journal_created)
+    [[ -z "$created" ]] || return 1
+    foundation_journal_clear
+    rmdir "$INSTALL_STATE_DIR" 2>/dev/null || true
+    rmdir "$STATE_ROOT" 2>/dev/null || true
+    printf 'Пустая transaction до создания manifest безопасно удалена. Установленные apt packages намеренно не удаляются.\n'
+}
+
 automatic_initial_rollback() {
     local original_rc=$1 rollback_rc=0
-    printf 'Первичная установка завершилась ошибкой rc=%s; выполняется автоматический manifest-driven rollback.\n' \
+    printf 'Первичная установка завершилась ошибкой rc=%s; выполняется автоматический rollback.\n' \
         "$original_rc" >&2
     flock -u 200 2>/dev/null || true
+
+    if rollback_empty_pre_manifest_journal; then
+        printf 'Автоматический pre-manifest rollback завершён.\n' >&2
+        return 0
+    fi
+
+    foundation_manifest_validate || {
+        printf 'ОШИБКА: manifest отсутствует или повреждён, но journal содержит resources; automatic deletion заблокирован.\n' >&2
+        return 1
+    }
+
     set +e
     bash "$SCRIPT_DIR/uninstall_foundation.sh" \
         --purge-data --yes --incomplete-install
     rollback_rc=$?
     set -e
     if (( rollback_rc == 0 )); then
-        printf 'Автоматический rollback первичной установки завершён.\n' >&2
+        printf 'Автоматический manifest-driven rollback первичной установки завершён.\n' >&2
         return 0
     fi
     printf 'ОШИБКА: automatic rollback failed rc=%s. Journal/manifest сохранены для install-recover.\n' \
@@ -234,7 +257,7 @@ recover_install() {
        foundation_manifest_validate &&
        systemctl is-active --quiet just1kbot.service &&
        systemctl is-active --quiet "$REDIS_SERVICE" &&
-       "$SCRIPT_DIR/ops/doctor.sh" --smoke; then
+       "$SCRIPT_DIR/ops/doctor_complete.sh" --smoke; then
         foundation_journal_update completed
         foundation_journal_clear
         printf 'Healthy installation подтверждена; journal удалён.\n'
@@ -243,18 +266,6 @@ recover_install() {
     error 'Installation ещё не healthy; journal сохранён.'
     error 'Запустите doctor/support-bundle и устраните указанную первичную причину.'
     return 1
-}
-
-rollback_empty_pre_manifest_journal() {
-    foundation_journal_validate || return 1
-    foundation_exists "$INSTALL_MANIFEST" && return 1
-    local created
-    created=$(foundation_journal_created)
-    [[ -z "$created" ]] || return 1
-    foundation_journal_clear
-    rmdir "$INSTALL_STATE_DIR" 2>/dev/null || true
-    rmdir "$STATE_ROOT" 2>/dev/null || true
-    printf 'Пустая transaction до создания manifest безопасно удалена.\n'
 }
 
 rollback_incomplete() {
