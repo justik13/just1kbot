@@ -1,0 +1,50 @@
+name: Finalize PR 53
+
+on:
+  push:
+    branches:
+      - agent/greenfield-ui-ux-cleanup
+    paths:
+      - .github/greenfield-followup/**
+      - .github/workflows/finalize-pr53.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-pr53
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Reconstruct and verify bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .github/greenfield-followup/part* | base64 --decode > /tmp/pr53.bundle
+          echo 'f4fee2838d19780abf35f37c55fc8f384b5c01d886508a98b971534c799ad7ec  /tmp/pr53.bundle' | sha256sum --check
+          git bundle verify /tmp/pr53.bundle
+
+      - name: Apply completion commit and remove temporary files
+        shell: bash
+        env:
+          BRANCH: agent/greenfield-ui-ux-cleanup
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch /tmp/pr53.bundle HEAD
+          git cherry-pick FETCH_HEAD
+          rm -rf .github/greenfield-followup
+          rm -f .github/workflows/finalize-pr53.yml
+          git add -A
+          git commit --amend --no-edit
+          git pull --rebase origin "$BRANCH"
+          git push origin "HEAD:$BRANCH"
