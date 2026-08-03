@@ -13,6 +13,7 @@ clone_control_function() {
 
 clone_control_function usage completion_base_usage
 clone_control_function dispatch completion_base_dispatch
+clone_control_function smoke completion_base_smoke
 
 usage() {
     completion_base_usage
@@ -28,6 +29,15 @@ Additional safe operations:
 Without arguments the global CLI renders a menu based on the detected install
 state. Foreign collisions and corrupted state expose diagnostics only.
 EOF
+}
+
+smoke() {
+    if ! call_script ops/doctor_complete.sh --smoke; then
+        die \
+            'итоговая complete diagnostics не пройдена' \
+            'production health/ownership checks вернули ошибку; поздний smoke сам не выполняет rollback' \
+            'Запустите doctor, support-bundle и documented recovery.'
+    fi
 }
 
 read_install_state() {
@@ -74,23 +84,27 @@ dispatch() {
     local command=${1:-}
     shift || true
     case "$command" in
+        status)
+            call_script install_safe.sh --status "$@"
+            call_script ops/doctor_complete.sh
+            ;;
         doctor)
             if [[ "${1:-}" == --json ]]; then
                 shift
                 (( $# == 0 )) || die 'doctor --json не принимает дополнительные аргументы'
                 call_script ops/doctor_json.sh
             else
-                completion_base_dispatch doctor "$@"
+                call_script ops/doctor_complete.sh "$@"
             fi
             ;;
         repair)
             if (( $# == 0 )); then
                 set -- --check
             fi
-            run_locked_script ops/repair.sh "$@"
+            call_script ops/repair.sh "$@"
             ;;
         support-bundle)
-            run_locked_script ops/support_bundle.sh "$@"
+            call_script ops/support_bundle.sh "$@"
             ;;
         proxy-config)
             (( $# == 0 )) || die 'proxy-config не принимает аргументы'
