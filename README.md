@@ -1,117 +1,146 @@
 # Just1kBot
 
 Telegram-бот для продажи VPN-доступа на базе **AmneziaWG 2.0**.
-
-Пользователь покупает подписку, создаёт устройства и получает конфигурации для подключения. Администратор управляет серверами, тарифами, пользователями, платежами и рассылками непосредственно из Telegram.
+Пользователь покупает подписку, создаёт устройства и получает конфигурации,
+а администратор управляет серверами, тарифами, пользователями, платежами и
+рассылками из Telegram.
 
 ## Возможности
 
 ### Пользователь
 
-- пополнение внутреннего баланса через YooKassa и отдельная покупка, продление или смена тарифа с баланса;
+- пополнение внутреннего баланса через YooKassa;
+- покупка, продление и смена тарифа с баланса;
 - создание, переименование и удаление VPN-устройств;
 - получение `.vpn` и `.conf` конфигураций;
-- история операций баланса и профиль подписки;
-- реферальная программа;
-- уведомления об окончании подписки;
-- раздел поддержки.
+- история операций, профиль подписки и реферальная программа;
+- уведомления об окончании подписки и раздел поддержки.
 
 ### Администратор
 
 - статистика пользователей, подписок и серверов;
-- управление пользователями, банами и подписками;
-- управление Amnezia-серверами и тарифами;
+- управление пользователями, банами, тарифами и подписками;
+- управление отдельными Amnezia-серверами;
 - просмотр и ручная обработка платежей;
 - рассылки с сохранением прогресса;
-- аудит административных действий;
-- режим технических работ.
+- аудит административных действий и режим технических работ.
 
 ## Стек
 
 | Компонент | Технология |
 |---|---|
-| Язык | Python 3.11+ |
+| Python | 3.12 |
 | Telegram | aiogram 3 |
 | ORM | SQLAlchemy 2 async |
-| База данных | PostgreSQL |
-| Очереди и FSM | Redis |
+| База данных | PostgreSQL 16 |
+| FSM | отдельный Redis 7 |
+| HTTP | aiohttp + Nginx |
 | Платежи | YooKassa |
-| VPN API | Amnezia API, `amneziawg2` |
-| HTTP | aiohttp |
-| Шифрование | Fernet |
+| VPN | Amnezia API, `amneziawg2` |
 | Миграции | Alembic |
+| Backup | `pg_dump` + `age` |
 
-## Структура
+# Production installer
+
+## Поддерживаемая платформа
+
+Автоматический installer поддерживает **только Ubuntu 24.04 LTS** с системным
+Python 3.12. На другой ОС он завершается до установки пакетов и ничего не
+изменяет.
+
+Installer рассчитан на сервер, где уже могут работать другие приложения. Он:
+
+- проверяет зарезервированные пути, symlink, units, порты, PostgreSQL и Nginx
+  до `apt-get`;
+- не изменяет UFW, nftables или iptables;
+- не изменяет `/etc/redis/redis.conf`;
+- не удаляет и не отключает Nginx default site;
+- не трогает Docker, WireGuard, AmneziaWG и другие VPN-приложения;
+- отказывается перезаписывать существующий ресурс без доказанного ownership;
+- выводит операцию, этап, проблему, причину и конкретное следующее действие.
+
+## Изоляция Redis
+
+Just1kBot использует отдельный systemd-сервис:
 
 ```text
-bot/                         Telegram handlers, middlewares и webhook
-config/                      настройки приложения
-database/                    модели, repositories и подключение к PostgreSQL
-services/                    платежи, Amnezia, подписки и workers
-scripts/                     deploy, backup, restore, uninstall и Amnezia tooling
-scripts/ops/                 canonical backup/restore/deployment transaction scripts
-scripts/lib/                 PostgreSQL и operational rollback libraries
-alembic/                     миграции PostgreSQL
-deploy.sh                    единственная корневая shell-точка входа и меню
+just1kbot-redis.service
+127.0.0.1:6380
+/etc/just1kbot/redis.conf
+/var/lib/just1kbot/redis/
 ```
 
-## Локальный запуск
+Общий Redis на `6379` не перенастраивается и не очищается. При переходе со
+старой установки ephemeral FSM-состояния не копируются: стандартный namespace
+Aiogram `fsm:*` не доказывает принадлежность конкретному боту. Старый Redis
+остаётся без изменений.
+
+## Ownership manifest и durable journal
+
+Все управляемые ресурсы записываются в root-only manifest:
+
+```text
+/var/lib/just1kbot/install-state/manifest.json
+```
+
+Текущая изменяющая операция записывается в:
+
+```text
+/var/lib/just1kbot/install-state/transaction.json
+```
+
+Manifest содержит installation ID, платформу, режим Redis и список конкретных
+paths, systemd units, PostgreSQL objects, Nginx sites и сертификатов. Uninstall
+не удаляет ресурс, которого нет в manifest.
+
+Если процесс был прерван или сервер перезагрузился, обычный deploy блокируется:
 
 ```bash
-git clone <repo-url>
-cd projectx
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python -m bot.main
+sudo bash deploy.sh state
+sudo bash deploy.sh install-recover
+sudo bash deploy.sh install-rollback
 ```
 
-Минимальный `.env`:
+`install-rollback` автоматически удаляет только ресурсы, созданные незавершённой
+первичной установкой. Для update используется application rollback и затем
+`install-recover` подтверждает healthy state.
 
-```env
-BOT_TOKEN=123456:ABC-DEF
-ADMIN_IDS=[123456789]
-SUPPORT_USERNAME=my_support_username
-DATABASE_URL=postgresql+asyncpg://user:password@127.0.0.1:5432/database
-DB_ENCRYPTION_KEY=<Fernet key>
-REDIS_URL=redis://:password@127.0.0.1:6379/0
-REDIS_PASSWORD=password
+## Зависимости
 
-YOOKASSA_SHOP_ID=<shop id>
-YOOKASSA_SECRET_KEY=<secret key>
-YOOKASSA_RETURN_URL=https://t.me/{bot_username}
-YOOKASSA_WEBHOOK_PORT=8080
-DOMAIN=vpn.example.com
-SSL_EMAIL=owner@example.com
-```
-
-Генерация `DB_ENCRYPTION_KEY`:
+`requirements.txt` задаёт допустимый диапазон для разработки.
+Production virtualenv устанавливается только из `requirements.lock`:
 
 ```bash
-python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+python -m pip install --no-deps --require-hashes -r requirements.lock
 ```
 
-`DB_ENCRYPTION_KEY` нельзя менять или терять. Им зашифрованы конфигурации VPN и секреты Amnezia в PostgreSQL.
+Lock генерируется и проверяется на Ubuntu 24.04 / Python 3.12 с зафиксированным
+toolchain `pip==25.3`, `pip-tools==7.5.2`. CI требует byte-for-byte совпадения
+повторной генерации и проверяет установку всех hash-locked пакетов.
 
-# Production deployment
+# Установка
 
-## Первичная установка
-
-Запускать из отдельного checkout репозитория на Ubuntu 24.04+ или Debian 12+:
+Запускать из отдельного checkout репозитория:
 
 ```bash
-sudo bash deploy.sh
+sudo bash deploy.sh deploy
 ```
 
-Неинтерактивный вариант с обязательной YooKassa и публичным HTTPS-доменом:
+Старый совместимый запуск также направляется в safe installer:
+
+```bash
+sudo bash deploy.sh --yes
+```
+
+Неинтерактивный пример:
 
 ```bash
 sudo env \
   BOT_TOKEN='...' \
   DB_PASSWORD='...' \
   REDIS_PASSWORD='...' \
-  ADMIN_IDS='123456789' \
-  SUPPORT_USERNAME='my_support_username' \
+  ADMIN_IDS='123456789,987654321' \
+  SUPPORT_USERNAME='support_username' \
   DOMAIN='vpn.example.com' \
   SSL_EMAIL='owner@example.com' \
   YOOKASSA_SHOP_ID='...' \
@@ -119,238 +148,194 @@ sudo env \
   bash deploy.sh --yes
 ```
 
-`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic. `SUPPORT_USERNAME` обязателен и должен содержать реальный Telegram username поддержки без `@`.
+Обязательны реальные значения YooKassa, публичный домен и email для Certbot.
+`SUPPORT_USERNAME` передаётся без `@`.
 
-Amnezia API URL и ключ при установке бота не запрашиваются. Каждый VPN-сервер добавляется после запуска через Telegram-админку, а его API key хранится в PostgreSQL в зашифрованном виде.
-
-`YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `DOMAIN` и `SSL_EMAIL` обязательны. Без любого из этих значений установщик и приложение завершаются ошибкой; режима работы без платежей нет. Nginx публикует только:
-
-- `POST /webhook/yookassa`;
-- `GET /health`.
-
-Остальные HTTP-маршруты возвращают `404`. Порт приложения `8080`, PostgreSQL и Redis закрываются UFW для внешнего доступа.
-
-## Безопасное обновление
-
-Новый код должен находиться в отдельном checkout или release-каталоге. Нельзя сначала заменять файлы непосредственно в `/opt/just1kbot`, иначе rollback не сможет сохранить предыдущую версию.
+Перед изменениями можно выполнить:
 
 ```bash
-cd /root/releases/projectx-new
-sudo bash deploy.sh
+sudo bash deploy.sh state
+sudo bash deploy.sh deploy --dry-run
 ```
 
-При существующем `/opt/just1kbot/.env` скрипт автоматически выбирает режим обновления:
+Dry run описывает план и не изменяет сервер.
 
-1. проверяет `.env`, production secrets, PostgreSQL cluster и Redis;
-2. нормализует `DOMAIN`, прежде чем использовать его в root-owned Nginx paths;
-3. атомарно сохраняет предыдущий код, virtualenv, основной systemd unit и operational state;
-4. snapshot включает backup/restore/health scripts, timers, logrotate, backup config/key и текущий Nginx site;
-5. останавливает старый процесс и подтверждает завершение прежнего PID;
-6. останавливает operational timers и ждёт завершения уже запущенного backup;
-7. создаёт обязательный encrypted PostgreSQL backup старым проверенным tooling;
-8. копирует новый release и создаёт новый root-owned virtualenv;
-9. запускает `alembic upgrade head`;
-10. устанавливает новые operational scripts, units, Nginx и основной application unit;
-11. запускает новую версию и ожидает два обновления heartbeat;
-12. проверяет PostgreSQL и Redis с ограниченными таймаутами;
-13. при ошибке возвращает application release, operational files, timer states и Nginx configuration.
+## Что публикует Nginx
 
-Автоматический downgrade PostgreSQL при rollback **не выполняется**. Если новая миграция несовместима со старым кодом, требуется ручное решение администратора.
+Для указанного домена создаётся только manifest-owned site. Публикуются:
 
-## Dry run
+```text
+POST /webhook/yookassa
+GET  /health
+```
+
+Остальные маршруты возвращают `404`. Приложение слушает только
+`127.0.0.1:8080`. Существующий Nginx default site не удаляется.
+
+Если `nginx -t` после изменения не проходит, предыдущий site автоматически
+восстанавливается.
+
+# Обновление из GitHub
+
+Источник и ref зафиксированы:
+
+```text
+https://github.com/justik13/projectx.git
+refs/heads/main
+```
+
+Проверить доступную версию:
 
 ```bash
-sudo bash deploy.sh --dry-run
+sudo bash deploy.sh update --check
 ```
 
-Команда только показывает план и ничего не изменяет.
-
-## Эксплуатационные команды
+Интерактивное обновление показывает fetched commit и требует ввести полный SHA:
 
 ```bash
-sudo bash deploy.sh status
-sudo bash deploy.sh logs
-sudo bash deploy.sh restart
-sudo bash deploy.sh backup
+sudo bash deploy.sh update
 ```
 
-Старые совместимые флаги `--status`, `--logs`, `--restart` и `--backup` также поддерживаются. Неизвестная команда завершается с кодом `2` и никогда не запускает deployment.
-
-### Статус
+Для автоматизации ожидаемый commit обязателен:
 
 ```bash
-sudo bash deploy.sh status
+sudo bash deploy.sh update \
+  --sha 0123456789abcdef0123456789abcdef01234567 \
+  --yes
 ```
 
-Показывает:
+Updater:
 
-- состояние приложения, PostgreSQL, Redis и Nginx;
-- состояние backup и healthcheck timers;
-- `MainPID` и число systemd-рестартов;
-- возраст heartbeat;
-- результат проверки PostgreSQL и Redis.
+- загружает только фиксированный `main`;
+- сравнивает fetched commit с ожидаемым SHA до публикации release;
+- запрещает symlink, submodule и control characters в tracked paths;
+- проверяет `git fsck`, clean checkout и обязательные installer files;
+- сохраняет exact SHA в `.release-version` и manifest metadata;
+- разворачивает код через transactional application deploy;
+- при ошибке сохраняет проверенный release и понятную диагностику.
 
-### Логи
+# Операционные команды
+
+После установки доступна команда:
 
 ```bash
-sudo bash deploy.sh logs
+sudo just1kbot state
+sudo just1kbot status
+sudo just1kbot doctor
+sudo just1kbot logs
+sudo just1kbot restart
+sudo just1kbot backup
 ```
 
-Открывает `journalctl -u just1kbot -f`.
-
-### Перезапуск
+Эквивалент через checkout или live control plane:
 
 ```bash
-sudo bash deploy.sh restart
+sudo bash deploy.sh <command>
 ```
 
-Команда ждёт готовность приложения. Успех возвращается только после появления свежего heartbeat и успешной проверки PostgreSQL с Redis.
+`doctor` выполняет read-only проверки:
 
-# Backup и восстановление
+- Ubuntu 24.04;
+- manifest и отсутствие незавершённого journal;
+- application и dedicated Redis services;
+- systemd sandbox, runtime HOME и permissions;
+- heartbeat;
+- PostgreSQL/Alembic, Redis и Telegram API;
+- Nginx configuration;
+- backup timers, возраст и SHA-256 последнего backup.
 
-## Автоматический backup
+# Backup и restore
 
-После deployment устанавливается systemd timer:
-
-```bash
-systemctl status just1kbot-backup.timer
-```
-
-Backup создаётся ежедневно около `03:00 UTC` и сохраняется в:
+Автоматический encrypted PostgreSQL backup создаётся timer-ом и хранится в:
 
 ```text
 /root/backups/just1kbot/
 ```
 
-Артефакт содержит:
-
-- PostgreSQL custom-format dump;
-- зашифрованную копию production `.env`;
-- Alembic revision;
-- manifest и checksums.
-
-Архив шифруется `age`. При первичной установке без готовой backup-конфигурации создаются:
+Локальный age identity:
 
 ```text
-/etc/just1kbot-backup.conf
 /root/.config/just1kbot/backup.agekey
 ```
 
-Закрытый ключ `/root/.config/just1kbot/backup.agekey` необходимо скопировать в защищённое место вне production-сервера. Потеря этого ключа делает backup нечитаемым.
+Ключ необходимо сохранить вне production-сервера. Без него backup нельзя
+расшифровать.
 
-Ручной backup:
-
-```bash
-sudo bash deploy.sh backup
-```
-
-## Проверка восстановления
-
-`restore-test` не заменяет рабочую production-БД. Команда расшифровывает backup, создаёт временную PostgreSQL database, восстанавливает данные, проверяет Alembic revision и критические таблицы, затем удаляет временную database.
+Команды:
 
 ```bash
-sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
-  bash deploy.sh restore-test \
-  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
+sudo just1kbot backup
+sudo just1kbot verify-backup /path/backup.tar.age
+sudo just1kbot restore-test /path/backup.tar.age
+sudo just1kbot restore-production /path/backup.tar.age
+sudo just1kbot restore-status
+sudo just1kbot restore-recover
+sudo just1kbot restore-rollback
+sudo just1kbot restore-finalize
 ```
 
-Production restore/cutover выполняется только вручную после успешного rehearsal, полной остановки writers и отдельного подтверждённого плана восстановления.
+Production restore сначала восстанавливает staging database, проверяет её,
+создаёт свежий pre-cutover backup и только затем выполняет короткий cutover.
+Предыдущая database сохраняется до отдельного `restore-finalize`.
 
-# Rollback deployment
+# Удаление
 
-Перед обновлением snapshots сохраняются в:
+Официальный uninstall manifest-driven и требует явный режим.
 
-```text
-/var/lib/just1kbot/rollback-releases/
-```
-
-Хранятся последние три полностью готовых `release-*`. Незавершённый operational snapshot остаётся под скрытым `.incomplete-operational-*` и никогда не считается готовым release snapshot.
-
-Snapshot не копирует production `.env`, PostgreSQL data, Redis data и encrypted backup artifacts. Он сохраняет:
-
-- предыдущий application code и virtualenv;
-- основной systemd unit;
-- установленные backup/restore/health scripts;
-- backup и healthcheck units/timers вместе с enabled/active state;
-- logrotate configuration;
-- backup config и локальный age identity, если они существовали;
-- текущий domain-specific Nginx site и symlink state.
-
-При неудачном запуске новой версии deployment transaction:
-
-- останавливает неуспешный процесс;
-- возвращает предыдущий application release;
-- сохраняет текущий production `.env`;
-- восстанавливает operational files и отсутствовавшие до deploy paths;
-- возвращает persistent/runtime enable, mask и active state units;
-- проверяет восстановленную Nginx configuration до запуска Nginx;
-- запускает предыдущую версию и повторяет readiness gate.
-
-Схема PostgreSQL автоматически назад не откатывается. UFW и Let's Encrypt account/certificate storage не входят в automatic rollback snapshot.
-
-# Healthcheck
-
-Systemd timer запускает healthcheck каждые две минуты:
+Удалить приложение, dedicated Redis и runtime, сохранив PostgreSQL и backups:
 
 ```bash
-systemctl status just1kbot-healthcheck.timer
-journalctl -u just1kbot-healthcheck.service
+sudo just1kbot uninstall --keep-data
 ```
 
-Проверяются:
+Перед остановкой сервисов создаётся новый backup и выполняется его строгая
+verification.
 
-- активность systemd-сервиса;
-- heartbeat `/run/just1kbot/heartbeat` и возраст не более 180 секунд;
-- `SELECT 1` в PostgreSQL;
-- `PING` в Redis;
-- загрузка production `.env` из `/opt/just1kbot`.
+Удалить все manifest-owned данные:
 
-Healthcheck имеет отдельный lock, shared deploy-operation lock, process timeout и сетевые таймауты. Конфликт lock возвращает ошибку, а не ложный healthy status.
+```bash
+sudo just1kbot uninstall --purge-data
+```
 
-# YooKassa
-
-YooKassa является обязательной частью продукта: без Shop ID, Secret Key, публичного домена и email сертификата бот не запускается.
-
-YooKassa используется только для пополнения внутреннего рублёвого баланса. Подтверждённый `payment.succeeded` зачисляется в append-only ledger ровно один раз; тариф не активируется webhook-ом. Покупка, продление и смена тарифа выполняются отдельным подтверждением и атомарным списанием с баланса.
-
-Публичный webhook:
+Для purge требуется TTY и точная фраза:
 
 ```text
-POST https://<DOMAIN>/webhook/yookassa
+DELETE JUST1KBOT
 ```
 
-Публичный health endpoint:
+Uninstall:
 
-```text
-GET https://<DOMAIN>/health
-```
+- проверяет ownership каждого удаляемого path/unit/user/database/certificate;
+- не изменяет firewall;
+- не трогает global Redis;
+- не удаляет чужие Nginx sites или сертификаты;
+- не вызывает Docker или VPN tooling;
+- после удаления собирает все остатки и не выводит success, пока они существуют.
 
-Webhook должен быть настроен в кабинете YooKassa только после успешного deployment и проверки HTTPS.
+Старые `scripts/deploy.sh` и `scripts/uninstall.sh` являются только совместимыми
+wrappers и не позволяют обойти safe control plane.
 
 # Amnezia API
 
-Бот работает с протоколом `amneziawg2`. При первичной установке бота глобальные `AMNEZIA_API_URL` и `AMNEZIA_API_KEY` не нужны и не запрашиваются.
+Бот не требует глобальные `AMNEZIA_API_URL` и `AMNEZIA_API_KEY`. Каждый
+VPN-сервер добавляется через Telegram-админку, а API key сохраняется в
+PostgreSQL в зашифрованном виде.
 
-После запуска откройте Telegram-админку и добавьте каждый VPN-сервер отдельно: имя, флаг, API URL и API key. Бот проверит доступность API и поддержку `amneziawg2`, после чего сохранит ключ сервера в PostgreSQL в зашифрованном виде.
+`scripts/setup-amnezia-api.sh` — отдельная standalone-утилита для VPN-ноды. Она
+не вызывается installer, update, repair, menu или uninstall. Запускать её нужно
+только вручную на соответствующей ноде после отдельного review.
 
-Опциональная команда:
+# CI
 
-```bash
-sudo bash deploy.sh amnezia
-```
+Основной workflow работает на Ubuntu 24.04 / Python 3.12 и выполняет:
 
-не устанавливает Amnezia API и не добавляет сервер в бот. Она предназначена только для проверки или публикации HTTPS reverse proxy на узле, где локальный API уже работает на `127.0.0.1:4001`.
-
-# Безопасность
-
-- Amnezia API keys и VPN configs шифруются в PostgreSQL;
-- секреты фильтруются из traceback и логов;
-- webhook имеет ограничение размера request body;
-- Redis, PostgreSQL и внутренний webhook port не публикуются наружу;
-- systemd unit работает от отдельного пользователя;
-- live code и virtualenv принадлежат root и доступны service user только для чтения;
-- release rollback не перезаписывает `.env`;
-- обновление запрещено из live-каталога;
-- migrations выполняются только после обязательного encrypted backup;
-- operational tooling меняется только внутри rollback transaction;
-- restore по команде является только изолированным rehearsal.
+- повторную генерацию и проверку `requirements.lock`;
+- установку зависимостей через `--require-hashes`;
+- Python static analysis;
+- ShellCheck всех shell scripts;
+- полный unittest suite;
+- shared-host installer regression tests;
+- Alembic upgrade, downgrade до base и повторный upgrade;
+- проверку отсутствия application tables после downgrade;
+- компиляцию всех Python trees;
+- `git diff --check`.
