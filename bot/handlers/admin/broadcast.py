@@ -113,8 +113,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Текст рассылки слишком длинный. "
-            f"Максимум {TELEGRAM_MESSAGE_LIMIT} символов.",
+            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L116_1.format(value_0=TELEGRAM_MESSAGE_LIMIT),
             get_back_button("admin_menu"),
         )
         return
@@ -122,8 +121,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Подпись к медиа слишком длинная. "
-            f"Максимум {TELEGRAM_CAPTION_LIMIT} символов.",
+            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L125_1.format(value_0=TELEGRAM_CAPTION_LIMIT),
             get_back_button("admin_menu"),
         )
         return
@@ -420,8 +418,7 @@ async def _send_broadcast_to_users_with_resume(
         try:
             await bot.send_message(
                 admin_id,
-                f"🚨 <b>Рассылка остановлена из-за ошибки</b>\n"
-                f"<code>{html.escape(type(e).__name__ + ': ' + str(e)[:200])}</code>",
+                texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L423_1.format(value_0=html.escape(type(e).__name__ + ': ' + str(e)[:200])),
                 parse_mode="HTML",
             )
         except Exception as alert_err:
@@ -628,7 +625,7 @@ async def _start_broadcast_process(
             broadcast_text=broadcast_text,
             media_id=media_id,
             content_type=content_type,
-            label="Всего" if audience == "all" else "Активных",
+            label=texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1 if audience == "all" else texts.BROADCAST_ACTIVE_LABEL,
             status="in_progress",
         )
         sess.add(progress)
@@ -706,7 +703,7 @@ async def stop_broadcast(callback: CallbackQuery):
         return
     admin_id = callback.from_user.id
     if admin_id not in _broadcast_in_progress:
-        await callback.answer("Рассылка не запущена", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L709_1, show_alert=True)
         return
     try:
         async with session_scope() as session:

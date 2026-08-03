@@ -79,8 +79,6 @@ async def request_balance_topup_refund(
     )
     if payment is None:
         raise BalanceRefundError("payment_not_found")
-    if payment.payment_kind != "balance_topup":
-        raise BalanceRefundError("refund_requires_balance_topup")
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise BalanceRefundError("payment_not_refundable")
     if not payment.external_id:
@@ -401,8 +399,6 @@ async def apply_balance_topup_refund_success(
     operation: ProviderRefundOperation | None = None,
 ) -> PaymentRefund:
     """Apply provider truth once; webhook and outbox finalizers share this path."""
-    if payment.payment_kind != "balance_topup":
-        raise BalanceRefundError("refund_requires_balance_topup")
     amount = whole_rubles(amount)
     if currency != "RUB" or payment.currency != "RUB":
         raise BalanceRefundError("refund_currency_invalid")

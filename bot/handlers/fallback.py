@@ -30,19 +30,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
-    if message.successful_payment:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            "✅ Оплата получена!",
-            get_back_button("menu_subscription"),
-        )
-        return
-
     if not message.text:
-        return
-
-    if message.text.startswith("/"):
         return
 
     await state.clear()
@@ -74,7 +62,7 @@ async def stale_callback_fallback(
 
     try:
         await callback.answer(
-            "Сессия устарела. Вернитесь в меню.",
+            texts.FALLBACK_STALE_CALLBACK,
             show_alert=True,
         )
     except Exception:

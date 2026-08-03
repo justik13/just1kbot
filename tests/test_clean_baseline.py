@@ -33,8 +33,12 @@ class CleanBaselineTests(unittest.TestCase):
             "payment_disputes",
         ):
             self.assertIn(required, source)
-        self.assertNotIn("phase6_", source)
-        self.assertNotIn("legacy_change_quote_source_snapshot_missing", source)
+        for removed in (
+            "phase6_",
+            "legacy_change_quote_source_snapshot_missing",
+            "payment_fulfillment_operations",
+        ):
+            self.assertNotIn(removed, source)
 
 
 if __name__ == "__main__":

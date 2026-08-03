@@ -1,24 +1,26 @@
 from aiogram.types import InlineKeyboardMarkup, CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot import texts
+
 
 def get_profile_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="💰 Баланс",
+        text=texts.BUTTON_BALANCE,
         callback_data="menu_balance",
     )
     builder.button(
-        text="🎁 Пригласить друга",
+        text=texts.BUTTON_INVITE,
         callback_data="referral",
     )
     builder.button(
-        text="🧾 История оплат",
+        text=texts.BUTTON_TOPUP_HISTORY,
         callback_data="user_history",
     )
     builder.button(
-        text="🏠 В главное меню",
+        text=texts.BUTTON_MAIN_MENU,
         callback_data="back_to_main_menu",
     )
 
@@ -31,11 +33,11 @@ def get_history_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="← К профилю",
+        text=texts.BUTTON_PROFILE,
         callback_data="back_to_profile",
     )
     builder.button(
-        text="🏠 В главное меню",
+        text=texts.BUTTON_MAIN_MENU,
         callback_data="back_to_main_menu",
     )
 
@@ -50,19 +52,19 @@ def get_referral_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="📋 Скопировать ссылку",
+        text=texts.BUTTON_COPY_REFERRAL,
         copy_text=CopyTextButton(text=referral_link),
     )
     builder.button(
-        text="👥 Список рефералов",
+        text=texts.BUTTON_REFERRAL_LIST,
         callback_data="referrals_list",
     )
     builder.button(
-        text="← К профилю",
+        text=texts.BUTTON_PROFILE,
         callback_data="back_to_profile",
     )
     builder.button(
-        text="🏠 В главное меню",
+        text=texts.BUTTON_MAIN_MENU,
         callback_data="back_to_main_menu",
     )
 

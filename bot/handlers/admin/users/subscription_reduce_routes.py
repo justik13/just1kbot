@@ -50,7 +50,7 @@ async def admin_sub_reduce_start(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_REDUCE_ROUTES_L53_1,
             show_alert=True,
         )
         return
@@ -172,7 +172,7 @@ async def admin_sub_apply_reduce(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_REDUCE_ROUTES_L175_1,
             show_alert=True,
         )
         return
@@ -187,7 +187,7 @@ async def admin_sub_apply_reduce(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            "Некорректное количество дней",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_REDUCE_ROUTES_L190_1,
             show_alert=True,
         )
         return

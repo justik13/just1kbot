@@ -137,7 +137,7 @@ async def cmd_start(
 
     is_admin = user.telegram_id in get_settings().ADMIN_IDS
 
-    name = safe(user.first_name or "Пользователь")
+    name = safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L140_1)
 
     balance = await get_account_balance(session, user_id=user.id)
     text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
@@ -162,7 +162,6 @@ async def back_to_main_menu(
     db_user: User | None = None,
     session: AsyncSession = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
@@ -190,6 +189,8 @@ async def back_to_main_menu(
         )
         return
 
+    await callback.answer(show_alert=False)
+
     if session is not None:
         await _ensure_bot_unblocked(
             session,
@@ -203,7 +204,7 @@ async def back_to_main_menu(
 
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
 
-    name = safe(db_user.first_name or "Пользователь")
+    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
 
     balance = await get_account_balance(session, user_id=db_user.id)
     text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))

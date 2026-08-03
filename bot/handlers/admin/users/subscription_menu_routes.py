@@ -40,7 +40,7 @@ async def admin_subscription_menu(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L43_1,
             show_alert=True,
         )
         return
@@ -62,7 +62,7 @@ async def admin_subscription_menu(
         user.id,
     )
 
-    tariff_name = "—"
+    tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L65_1
     device_limit = user.device_limit or 0
 
     if user.current_tariff_id:
@@ -75,8 +75,7 @@ async def admin_subscription_menu(
             device_limit = tariff.device_limit
 
             tariff_name = (
-                f"{get_tariff_display_name(device_limit)} "
-                f"({device_limit} устр.)"
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L78_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
             )
 
     if has_active:

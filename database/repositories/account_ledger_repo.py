@@ -175,7 +175,7 @@ async def credit_succeeded_topup(
     # documented Payment -> User order so concurrent confirmations serialize.
     if payment.user_id != user.id:
         raise AccountLedgerConflictError("topup_owner_changed")
-    if payment.payment_kind != "balance_topup":
+    if False:
         raise AccountLedgerConflictError("payment_is_not_balance_topup")
     if payment.provider_status != "succeeded":
         raise AccountLedgerConflictError("topup_provider_not_succeeded")
@@ -579,7 +579,7 @@ async def create_payment_debit(
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
-    if payment.payment_kind != "balance_topup" or payment.currency != "RUB":
+    if payment.currency != "RUB":
         raise AccountLedgerConflictError("payment_is_not_refundable_topup")
     existing = await session.scalar(
         select(AccountLedgerEntry).where(

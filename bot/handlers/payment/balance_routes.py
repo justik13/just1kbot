@@ -7,6 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import texts
 from bot.keyboards import (
     get_back_button,
     get_balance_amounts_keyboard,
@@ -27,8 +28,8 @@ from services.account_topup import (
     create_balance_topup,
     get_visible_balance_topup,
     hide_balance_topup,
+    request_topup_status_refresh,
 )
-from services.payment_service import PaymentService
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
@@ -39,25 +40,27 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
-TOPUP_ERRORS = {
-    "topup_amount_must_be_whole_rubles": "Введите сумму целыми рублями без копеек.",
-    "topup_below_minimum": "Минимальная сумма пополнения — 10 ₽.",
-    "topup_above_maximum": "Максимальная сумма одного пополнения — 5000 ₽.",
-    "topup_balance_limit_exceeded": "Сумма превышает допустимый лимит баланса с учётом активных ссылок.",
-    "too_many_unfinished_topups": "У вас уже есть три незавершённых платежа. Проверьте их статус или дождитесь отмены.",
-    "topup_creation_rate_limited": "Достигнут лимит создания ссылок за 24 часа. Попробуйте позже.",
-    "topup_blocked": "Новые пополнения временно заблокированы. Обратитесь в поддержку.",
-    "topup_user_banned": "Пополнение недоступно для этого аккаунта.",
-}
+def _topup_errors(settings=None) -> dict[str, str]:
+    cfg = settings or get_settings()
+    return {
+        "topup_amount_must_be_whole_rubles": texts.TOPUP_ERROR_WHOLE_RUBLES,
+        "topup_below_minimum": texts.TOPUP_ERROR_MINIMUM.format(
+            minimum=cfg.BALANCE_MIN_TOPUP_RUB
+        ),
+        "topup_above_maximum": texts.TOPUP_ERROR_MAXIMUM.format(
+            maximum=cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB
+        ),
+        "topup_balance_limit_exceeded": texts.TOPUP_ERROR_BALANCE_LIMIT,
+        "too_many_unfinished_topups": texts.TOPUP_ERROR_UNFINISHED.format(
+            limit=cfg.BALANCE_MAX_UNFINISHED_TOPUPS
+        ),
+        "topup_creation_rate_limited": texts.TOPUP_ERROR_RATE_LIMIT,
+        "topup_blocked": texts.TOPUP_ERROR_BLOCKED,
+        "topup_user_banned": texts.TOPUP_ERROR_BANNED,
+    }
 
-HISTORY_LABELS = {
-    "payment_credit": "Пополнение",
-    "purchase_debit": "Покупка тарифа",
-    "purchase_reversal": "Возврат покупки",
-    "refund_debit": "Возврат через ЮKassa",
-    "chargeback_debit": "Банковский спор",
-    "admin_adjustment": "Корректировка",
-}
+
+HISTORY_LABELS = texts.BALANCE_ENTRY_LABELS
 
 
 def topup_presets(tariffs: list, settings=None) -> list[int]:
@@ -74,15 +77,14 @@ def topup_presets(tariffs: list, settings=None) -> list[int]:
 
 def _history_lines(entries: list) -> str:
     if not entries:
-        return "<i>Операций пока нет.</i>"
+        return texts.BALANCE_HISTORY_EMPTY
     lines = []
     for entry in entries:
-        label = HISTORY_LABELS.get(entry.entry_type, "Операция")
-        sign = "+" if entry.amount > 0 else "−"
+        label = HISTORY_LABELS.get(entry.entry_type, texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L83_1)
+        sign = "+" if entry.amount > 0 else texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L84_1
         amount = abs(int(entry.amount))
         lines.append(
-            f"• {format_datetime(entry.created_at)} · {label}: "
-            f"<b>{sign}{amount} ₽</b>"
+            texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L87_1.format(value_0=format_datetime(entry.created_at), value_1=label, value_2=sign, value_3=amount)
         )
     return "\n".join(lines)
 
@@ -98,16 +100,16 @@ async def _render_balance(
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
     visible = await get_visible_balance_topup(session, user_id=user.id)
-    details = [f"Доступно: <b>{int(snapshot.available)} ₽</b>"]
+    details = [texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L104_1.format(value_0=int(snapshot.available))]
     if snapshot.reserved > 0:
-        details.append(f"Зарезервировано: <b>{int(snapshot.reserved)} ₽</b>")
+        details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L106_1.format(value_0=int(snapshot.reserved)))
     if snapshot.debt > 0:
-        details.append(f"Задолженность: <b>{int(snapshot.debt)} ₽</b>")
+        details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L108_1.format(value_0=int(snapshot.debt)))
     prefix = f"{notice}\n\n" if notice else ""
     text = (
-        f"{prefix}💰 <b>Баланс</b>\n\n"
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L111_1.format(value_0=prefix)
         + "\n".join(details)
-        + "\n\n<b>Последние операции</b>\n"
+        + texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L113_1
         + _history_lines(history)
     )
     await render_hub(
@@ -145,10 +147,7 @@ async def _render_topup(
     balance = await get_account_balance(session, user_id=user.id)
     if payment.payment_url:
         text = (
-            "💳 <b>Пополнение баланса</b>\n\n"
-            f"Сумма: <b>{int(payment.amount)} ₽</b>\n"
-            f"Текущий баланс: <b>{int(balance.available)} ₽</b>\n\n"
-            "Ссылка ведёт на защищённую страницу ЮKassa."
+            texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L151_1.format(value_0=int(payment.amount), value_1=int(balance.available))
         )
         message_id = await render_hub(
             bot,
@@ -166,10 +165,7 @@ async def _render_topup(
         )
         return
     text = (
-        "⏳ <b>Создаём ссылку на пополнение</b>\n\n"
-        f"Сумма: <b>{int(payment.amount)} ₽</b>\n"
-        f"Текущий баланс: <b>{int(balance.available)} ₽</b>\n\n"
-        "Ссылка появится здесь автоматически. Ручная проверка остаётся доступна."
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L172_1.format(value_0=int(payment.amount), value_1=int(balance.available))
     )
     message_id = await render_hub(
         bot,
@@ -194,15 +190,6 @@ async def _create_and_render_topup(
     *,
     context: dict | None = None,
 ) -> None:
-    settings = get_settings()
-    if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
-        await render_hub(
-            target.bot,
-            target.chat.id,
-            "Сервис пополнения временно недоступен.",
-            get_back_button("menu_balance"),
-        )
-        return
     bot_info = await target.bot.get_me()
     try:
         result = await create_balance_topup(
@@ -216,7 +203,7 @@ async def _create_and_render_topup(
         await render_hub(
             target.bot,
             target.chat.id,
-            TOPUP_ERRORS.get(exc.code, "Не удалось создать пополнение."),
+            _topup_errors().get(exc.code, texts.ERROR_PAYMENT_SERVICE),
             get_back_button("menu_balance"),
         )
         return
@@ -240,7 +227,7 @@ async def show_balance(
     await callback.answer(show_alert=False)
     await state.clear()
     if db_user is None:
-        await callback.answer("Аккаунт не найден", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L246_1, show_alert=True)
         return
     await _render_balance(callback.bot, callback.message.chat.id, session, db_user)
 
@@ -258,7 +245,7 @@ async def show_balance_history(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        "🧾 <b>История операций</b>\n\n" + _history_lines(entries),
+        texts.BALANCE_HISTORY_TITLE.format(history=_history_lines(entries)),
         get_back_button("menu_balance"),
     )
 
@@ -278,7 +265,7 @@ async def choose_topup_amount(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            TOPUP_ERRORS["topup_blocked"],
+            _topup_errors()["topup_blocked"],
             get_back_button("menu_balance"),
         )
         return
@@ -298,9 +285,7 @@ async def choose_topup_amount(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        "➕ <b>Пополнение баланса</b>\n\n"
-        f"Текущий баланс: <b>{int(balance.available)} ₽</b>\n"
-        "Выберите сумму или укажите другую целую сумму в рублях.",
+        texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L304_1.format(value_0=int(balance.available)),
         get_balance_amounts_keyboard(amounts),
     )
 
@@ -311,7 +296,7 @@ async def create_preset_topup(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Создаём ссылку…", show_alert=False)
+    await callback.answer(texts.TOPUP_CREATING_ALERT, show_alert=False)
     amount = parse_callback_id(callback.data, 1)
     if db_user is None or amount is None:
         return
@@ -329,8 +314,10 @@ async def request_custom_amount(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        "Введите сумму пополнения целым числом от 10 до 5000 ₽.\n"
-        "Например: <code>499</code>",
+        texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
+            minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
+            maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
+        ),
         get_back_button("menu_balance"),
     )
 
@@ -347,7 +334,7 @@ async def accept_custom_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            "Введите целую сумму без копеек, пробелов и знаков. Например: <code>499</code>",
+            texts.TOPUP_INVALID_AMOUNT,
             get_back_button("menu_balance"),
         )
         return
@@ -361,7 +348,7 @@ async def accept_custom_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"Для выбранной операции нужно пополнить минимум на <b>{minimum} ₽</b>.",
+            texts.TOPUP_OPERATION_MINIMUM.format(minimum=minimum),
             get_back_button("menu_balance"),
         )
         return
@@ -391,7 +378,7 @@ async def resume_topup(
             callback.message.chat.id,
             session,
             db_user,
-            notice="Активная ссылка пополнения не найдена.",
+            notice=texts.TOPUP_MISSING_NOTICE,
         )
         return
     await _render_topup(
@@ -410,7 +397,6 @@ async def _owned_topup(
     if (
         payment is None
         or payment.user_id != user.id
-        or payment.payment_kind != "balance_topup"
     ):
         return None
     return payment
@@ -422,30 +408,34 @@ async def check_topup(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Проверяем…", show_alert=False)
+    await callback.answer(texts.TOPUP_CHECKING_ALERT, show_alert=False)
     payment_id = parse_callback_id(callback.data, 1)
     if db_user is None or payment_id is None:
         return
     payment = await _owned_topup(session, db_user, payment_id)
     if payment is None:
-        await callback.answer("Пополнение не найдено", show_alert=True)
+        await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
         return
-    await PaymentService.check_yookassa_payment(
-        session, payment.id, notify_user=False
-    )
+    try:
+        payment = await request_topup_status_refresh(
+            session, payment_id=payment.id
+        )
+    except AccountTopupError:
+        await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
+        return
     if payment.fulfillment_status == "succeeded":
         await _render_balance(
             callback.bot,
             callback.message.chat.id,
             session,
             db_user,
-            notice="✅ Баланс пополнен.",
+            notice=texts.TOPUP_CREDITED_NOTICE,
         )
     elif payment.provider_status == "succeeded":
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            "✅ Оплата подтверждена. Зачисляем деньги на баланс.",
+            texts.TOPUP_CONFIRMED_NOTICE,
             get_topup_waiting_keyboard(payment.id),
         )
     elif payment.provider_status == "canceled":
@@ -454,7 +444,7 @@ async def check_topup(
             callback.message.chat.id,
             session,
             db_user,
-            notice="Пополнение отменено платёжным провайдером.",
+            notice=texts.TOPUP_PROVIDER_CANCELLED_NOTICE,
         )
     else:
         await _render_topup(
@@ -483,17 +473,14 @@ async def cancel_topup_ui(
             session, user_id=db_user.id, payment_id=payment_id
         )
     except AccountTopupError:
-        await callback.answer("Пополнение уже завершено", show_alert=True)
+        await callback.answer(texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True)
         return
     await _render_balance(
         callback.bot,
         callback.message.chat.id,
         session,
         db_user,
-        notice=(
-            "Пополнение отменено. Ссылка скрыта. Если оплата уже завершена, "
-            "деньги всё равно поступят на баланс."
-        ),
+        notice=texts.TOPUP_HIDE_NOTICE,
     )
 
 
@@ -518,5 +505,5 @@ async def return_later(
         callback.message.chat.id,
         session,
         db_user,
-        notice="Ссылка сохранена. Вы можете вернуться к пополнению позже.",
+        notice=texts.TOPUP_SAVED_NOTICE,
     )

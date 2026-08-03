@@ -22,6 +22,7 @@ from database.repositories.users_repo import (
     get_user_referrals,
     get_user_with_referrals,
 )
+from services.payment_status import payment_display_status
 from services.subscription import SubscriptionService
 from utils.formatters import (
     format_datetime,
@@ -59,9 +60,8 @@ async def _render_profile(
     if has_access:
         device_limit = user.device_limit or 0
         tariff_name = (
-            f"{get_tariff_display_name(device_limit)} "
-            f"({device_limit} устр.)"
-        ) if device_limit else "—"
+            texts.RUNTIME_BOT_HANDLERS_PROFILE_L63_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
+        ) if device_limit else texts.RUNTIME_BOT_HANDLERS_PROFILE_L65_1
 
         if user.current_tariff_id:
             tariff = await get_tariff_by_id(
@@ -71,13 +71,12 @@ async def _render_profile(
             if tariff:
                 device_limit = tariff.device_limit
                 tariff_name = (
-                    f"{get_tariff_display_name(device_limit)} "
-                    f"({device_limit} устр.)"
+                    texts.RUNTIME_BOT_HANDLERS_PROFILE_L75_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
                 )
 
         rendered = texts.PROFILE_TEXT_ACTIVE.format(
-            name=safe(user.first_name or "Пользователь"),
-            username=safe(user.username or "—"),
+            name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L80_1),
+            username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
             tariff_name=tariff_name,
             devices_count=profiles_count,
@@ -89,8 +88,8 @@ async def _render_profile(
         kb = get_profile_keyboard()
     else:
         rendered = texts.PROFILE_TEXT_INACTIVE.format(
-            name=safe(user.first_name or "Пользователь"),
-            username=safe(user.username or "—"),
+            name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L93_1),
+            username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
             referrals_count=referrals_count,
             referral_days=user.referral_days,
@@ -99,23 +98,23 @@ async def _render_profile(
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text="🚀 Купить доступ",
+            text=texts.UI_BOT_HANDLERS_PROFILE_L103_1,
             callback_data="menu_buy",
         )
         builder.button(
-            text="💰 Баланс",
+            text=texts.UI_BOT_HANDLERS_PROFILE_L107_1,
             callback_data="menu_balance",
         )
         builder.button(
-            text="🎁 Пригласить друга",
+            text=texts.UI_BOT_HANDLERS_PROFILE_L111_1,
             callback_data="referral",
         )
         builder.button(
-            text="🧾 История оплат",
+            text=texts.UI_BOT_HANDLERS_PROFILE_L115_1,
             callback_data="user_history",
         )
         builder.button(
-            text="🏠 В главное меню",
+            text=texts.UI_BOT_HANDLERS_PROFILE_L119_1,
             callback_data="back_to_main_menu",
         )
         builder.adjust(1, 1, 1, 1, 1)
@@ -201,14 +200,15 @@ async def show_history(
     else:
         rendered = texts.HISTORY_HEADER
         for payment in payments[:10]:
+            display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                payment.status,
-                "⏳",
+                display_status,
+                texts.RUNTIME_BOT_HANDLERS_PROFILE_L208_1,
             )
             date = format_datetime(
                 payment.paid_at or payment.created_at
             )
-            currency = "₽"
+            currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
             rendered += (
                 f"{status_icon} {date} | "
                 f"{payment.amount} {currency}\n"
@@ -299,14 +299,13 @@ async def show_referrals_list(
             safe_user = (
                 f"@{safe(referral.username)}"
                 if referral.username
-                else f"ID: {referral.telegram_id}"
+                else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             )
-            rendered += f"• {safe_user}\n"
+            rendered += texts.RUNTIME_BOT_HANDLERS_PROFILE_L306_1.format(value_0=safe_user)
 
         if len(referrals) > 20:
             rendered += (
-                f"\n<i>... и ещё {len(referrals) - 20} "
-                f"рефералов</i>"
+                texts.RUNTIME_BOT_HANDLERS_PROFILE_L310_1.format(value_0=len(referrals) - 20)
             )
 
         rendered += texts.REFERRAL_LIST_FOOTER.format(

@@ -54,7 +54,7 @@ async def admin_sub_extend(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L57_1,
             show_alert=True,
         )
         return
@@ -105,7 +105,7 @@ async def admin_sub_confirm_extend(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L108_1,
             show_alert=True,
         )
         return
@@ -120,7 +120,7 @@ async def admin_sub_confirm_extend(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            "Некорректное количество дней",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L123_1,
             show_alert=True,
         )
         return
@@ -155,7 +155,7 @@ async def admin_sub_confirm_extend(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else f"{days} дн."
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L158_1.format(value_0=days)
     )
 
     text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
@@ -201,7 +201,7 @@ async def admin_sub_apply_extend(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L204_1,
             show_alert=True,
         )
         return
@@ -216,7 +216,7 @@ async def admin_sub_apply_extend(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            "Некорректное количество дней",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L219_1,
             show_alert=True,
         )
         return
@@ -253,7 +253,7 @@ async def admin_sub_apply_extend(
         days_text = (
             texts.ADMIN_SUB_PERMANENT_LABEL
             if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else f"{days} дн."
+            else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L256_1.format(value_0=days)
         )
 
         await AuditService.log_action(
@@ -268,7 +268,7 @@ async def admin_sub_apply_extend(
         new_end_str = (
             format_datetime(user.subscription_end)
             if user and user.subscription_end
-            else "—"
+            else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L271_1
         )
 
         text = texts.ADMIN_SUB_EXTEND_SUCCESS.format(
@@ -320,7 +320,7 @@ async def admin_sub_extend_custom_start(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L323_1,
             show_alert=True,
         )
         return
@@ -412,7 +412,7 @@ async def admin_sub_extend_custom_process(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else f"{days} дн."
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_EXTEND_ROUTES_L415_1.format(value_0=days)
     )
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(

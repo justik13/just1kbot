@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -8,51 +9,51 @@ def get_admin_menu(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="👥 Пользователи",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L11_1,
         callback_data="admin_users",
     )
     builder.button(
-        text="📢 Рассылка",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L15_1,
         callback_data="admin_broadcast",
     )
     builder.button(
-        text="🌐 Серверы",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L19_1,
         callback_data="admin_servers",
     )
     builder.button(
-        text="💰 Тарифы",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L23_1,
         callback_data="admin_tariffs",
     )
     builder.button(
-        text="💳 Платежи",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L27_1,
         callback_data="admin_payments",
     )
     builder.button(
-        text="⚠️ Споры",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L31_1,
         callback_data="admin_disputes",
     )
     builder.button(
-        text="🧰 Платёжные очереди",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L35_1,
         callback_data="aq:home",
     )
     builder.button(
-        text="📜 Аудит-лог",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L39_1,
         callback_data="admin_audit",
     )
 
     if maintenance_enabled:
         builder.button(
-            text="🛠 Техработы: ВКЛ",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L45_1,
             callback_data="admin_maintenance",
         )
     else:
         builder.button(
-            text="🛠 Техработы: ВЫКЛ",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L50_1,
             callback_data="admin_maintenance",
         )
 
     builder.button(
-        text="← В главное меню",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L55_1,
         callback_data="back_to_main_menu",
     )
 
@@ -63,11 +64,11 @@ def get_admin_menu(
 def get_audit_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🔄 Обновить",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L66_1,
         callback_data="admin_audit",
     )
     builder.button(
-        text="← В админку",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L70_1,
         callback_data="admin_menu",
     )
     builder.adjust(1, 1)
@@ -77,11 +78,11 @@ def get_audit_keyboard() -> InlineKeyboardMarkup:
 def get_maintenance_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✅ Подтвердить",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L80_1,
         callback_data="admin_maintenance_toggle_apply",
     )
     builder.button(
-        text="❌ Отмена",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L84_1,
         callback_data="admin_menu",
     )
     builder.adjust(2)

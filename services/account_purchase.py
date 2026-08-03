@@ -117,8 +117,6 @@ async def prepare_account_purchase(
             )
         )
         if target_tariff_id != tariff.id:
-            if active_quote.payment_id is not None:
-                raise AccountPurchaseError("legacy_checkout_in_progress")
             active_quote.status = "cancelled"
             active_quote.diagnostic_reason = "replaced_by_new_balance_quote"
 
@@ -131,8 +129,6 @@ async def prepare_account_purchase(
         )
     except CheckoutQuoteConflictError as exc:
         raise AccountPurchaseError(str(exc)) from exc
-    if quote.payment_id is not None:
-        raise AccountPurchaseError("legacy_checkout_in_progress")
     price = whole_rubles(version.price_rub)
     shortage = max(Decimal(0), price - balance.available)
     return AccountPurchaseIntent(quote, version, tariff, balance, shortage)
@@ -157,7 +153,7 @@ async def get_account_purchase_intent(
     if version is None or tariff is None:
         raise AccountPurchaseError("tariff_unavailable")
     balance = await get_account_balance(session, user_id=user_id)
-    price = whole_rubles(quote.confirmed_payment_required_rub, allow_zero=True)
+    price = whole_rubles(quote.amount_due_rub, allow_zero=True)
     return AccountPurchaseIntent(
         quote,
         version,
@@ -277,8 +273,6 @@ async def _settle_account_purchase(
         raise AccountPurchaseError("quote_expired")
     if quote.operation_type not in {"purchase", "renew"}:
         raise AccountPurchaseError("quote_operation_mismatch")
-    if quote.payment_id is not None:
-        raise AccountPurchaseError("quote_has_legacy_payment")
     if user.financial_hold:
         raise AccountPurchaseError("financial_hold")
 
@@ -295,7 +289,7 @@ async def _settle_account_purchase(
     current_version = await get_or_create_current_version(session, tariff)
     if current_version.id != version.id:
         raise AccountPurchaseError("tariff_price_changed")
-    amount = whole_rubles(quote.confirmed_payment_required_rub)
+    amount = whole_rubles(quote.amount_due_rub)
     if (
         amount != whole_rubles(version.price_rub)
         or quote.currency != "RUB"

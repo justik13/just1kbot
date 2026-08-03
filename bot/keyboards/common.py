@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -10,38 +11,38 @@ def get_hub_keyboard(
 
     if is_active:
         builder.button(
-            text="⏳ Моя подписка",
+            text=texts.UI_BOT_KEYBOARDS_COMMON_L13_1,
             callback_data="menu_subscription",
         )
     else:
         builder.button(
-            text="🚀 Купить доступ",
+            text=texts.UI_BOT_KEYBOARDS_COMMON_L18_1,
             callback_data="menu_buy",
         )
 
     builder.button(
-        text="🔌 Подключения",
+        text=texts.UI_BOT_KEYBOARDS_COMMON_L23_1,
         callback_data="menu_connections",
     )
 
     builder.button(
-        text="💰 Баланс",
+        text=texts.UI_BOT_KEYBOARDS_COMMON_L28_1,
         callback_data="menu_balance",
     )
 
     builder.button(
-        text="👤 Профиль",
+        text=texts.UI_BOT_KEYBOARDS_COMMON_L33_1,
         callback_data="menu_profile",
     )
 
     builder.button(
-        text="💬 Поддержка",
+        text=texts.UI_BOT_KEYBOARDS_COMMON_L38_1,
         callback_data="menu_support",
     )
 
     if is_admin:
         builder.button(
-            text="🛠 Админка",
+            text=texts.UI_BOT_KEYBOARDS_COMMON_L44_1,
             callback_data="menu_admin",
         )
 
@@ -59,9 +60,9 @@ def get_back_button(
     builder = InlineKeyboardBuilder()
 
     if callback_data == "back_to_main_menu":
-        text = "← В главное меню"
+        text = texts.RUNTIME_BOT_KEYBOARDS_COMMON_L63_1
     else:
-        text = "← Назад"
+        text = texts.RUNTIME_BOT_KEYBOARDS_COMMON_L65_1
 
     builder.button(text=text, callback_data=callback_data)
 

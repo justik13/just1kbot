@@ -1,14 +1,9 @@
-"""The single monotonic provider-state transition boundary.
-
-Lock order for payment pipeline transactions is always Payment, then queue row,
-then User/entitlement rows. Callers that initially claim a queue row must release
-that claim transaction before entering this transition/finalization transaction.
-"""
+"""Monotonic provider-state transitions for YooKassa balance top-ups."""
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from sqlalchemy import select
-from database.models import PaymentEvent, PaymentFulfillmentOperation, TariffQuote
+
+from database.models import PaymentEvent
 from services.payment_provider_validation import validate_provider_payment
 from utils.datetime_helpers import now_utc
 
@@ -17,12 +12,10 @@ from utils.datetime_helpers import now_utc
 class ProviderTransition:
     outcome: str  # applied, conflict, retry
     observed_status: str
-    grant_allowed: bool = False
     reason: str | None = None
 
 
 def parse_provider_captured_at(value) -> datetime:
-    """Parse a provider ISO-8601 instant without assuming a missing timezone."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("captured_at_missing")
     candidate = value.strip()
@@ -37,116 +30,51 @@ def parse_provider_captured_at(value) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _manual_review(session, payment, reason: str, source: str, observed: str):
+    payment.reconciliation_status = "manual_review"
+    payment.fulfillment_status = "manual_review"
+    payment.manual_review_reason = reason
+    payment.fulfillment_last_error_code = reason
+    session.add(
+        PaymentEvent(
+            payment_id=payment.id,
+            event_type="provider_transition_manual_review",
+            provider_status=observed,
+            reason=reason,
+            source=source,
+        )
+    )
+
+
 async def apply_provider_transition(session, payment, data, *, source, event_type=None):
     observed = str((data or {}).get("status") or "unknown")
     current = payment.provider_status
     if observed not in {"pending", "waiting_for_capture", "succeeded", "canceled"}:
-        return ProviderTransition("retry", observed, reason="unknown_provider_status")
+        return ProviderTransition("retry", observed, "unknown_provider_status")
+
     if observed == "succeeded":
-        # A successful provider snapshot is authoritative financial evidence.  Record
-        # it before identity validation so a bad command correlation cannot erase the
-        # fact that money was received.
-        requires_verified_capture = bool(
-            payment.tariff_quote_id or payment.payment_kind == "balance_topup"
-        )
-        if requires_verified_capture and source == "provider_create_payment_post":
-            return ProviderTransition(
-                "retry", observed, reason="captured_at_requires_verified_get"
-            )
-        payment.paid_at = payment.paid_at or now_utc()
-        if requires_verified_capture:
-            try:
-                captured_at = parse_provider_captured_at(data.get("captured_at"))
-            except ValueError as exc:
-                payment.provider_status = "succeeded"
-                payment.reconciliation_status = "manual_review"
-                payment.fulfillment_status = "manual_review"
-                payment.fulfillment_last_error_code = str(exc)
-                quote = (
-                    await session.scalar(
-                        select(TariffQuote)
-                        .where(TariffQuote.id == payment.tariff_quote_id)
-                        .with_for_update()
-                    )
-                    if payment.tariff_quote_id
-                    else None
-                )
-                if quote:
-                    quote.status = "manual_review"
-                    quote.manual_review_at = quote.manual_review_at or now_utc()
-                    quote.diagnostic_reason = str(exc)
-                session.add(
-                    PaymentEvent(
-                        payment_id=payment.id,
-                        event_type="provider_captured_at_invalid",
-                        provider_status=observed,
-                        reason=str(exc),
-                        source=source,
-                    )
-                )
-                return ProviderTransition("conflict", observed, reason=str(exc))
-            if (
-                payment.provider_confirmed_at
-                and payment.provider_confirmed_at != captured_at
-            ):
-                payment.provider_status = "succeeded"
-                payment.reconciliation_status = "manual_review"
-                payment.fulfillment_status = "manual_review"
-                payment.fulfillment_last_error_code = "captured_at_changed"
-                quote = (
-                    await session.scalar(
-                        select(TariffQuote)
-                        .where(TariffQuote.id == payment.tariff_quote_id)
-                        .with_for_update()
-                    )
-                    if payment.tariff_quote_id
-                    else None
-                )
-                if quote:
-                    quote.status = "manual_review"
-                    quote.manual_review_at = quote.manual_review_at or now_utc()
-                    quote.diagnostic_reason = "captured_at_changed"
-                session.add(
-                    PaymentEvent(
-                        payment_id=payment.id,
-                        event_type="provider_captured_at_conflict",
-                        provider_status=observed,
-                        reason="captured_at_changed",
-                        source=source,
-                    )
-                )
-                return ProviderTransition(
-                    "conflict", observed, reason="captured_at_changed"
-                )
-            payment.provider_confirmed_at = captured_at
-        else:
-            payment.provider_confirmed_at = payment.provider_confirmed_at or now_utc()
-        terminal_reversal = (
-            current == "refunded" or payment.fulfillment_status == "reversed"
-        )
-        if not terminal_reversal:
+        if source == "provider_create_payment_post":
+            return ProviderTransition("retry", observed, "captured_at_requires_verified_get")
+        try:
+            captured_at = parse_provider_captured_at(data.get("captured_at"))
+        except ValueError as exc:
             payment.provider_status = "succeeded"
+            payment.paid_at = payment.paid_at or now_utc()
+            _manual_review(session, payment, str(exc), source, observed)
+            return ProviderTransition("conflict", observed, str(exc))
+        if payment.provider_confirmed_at and payment.provider_confirmed_at != captured_at:
+            payment.provider_status = "succeeded"
+            payment.paid_at = payment.paid_at or now_utc()
+            _manual_review(session, payment, "captured_at_changed", source, observed)
+            return ProviderTransition("conflict", observed, "captured_at_changed")
+        payment.provider_confirmed_at = captured_at
+        payment.paid_at = payment.paid_at or captured_at
         mismatch = validate_provider_payment(payment, data)
         if mismatch:
+            payment.provider_status = "succeeded"
             payment.reconciliation_status = "mismatch"
-            if not terminal_reversal:
-                payment.fulfillment_status = "manual_review"
-            queued = (
-                await session.scalars(
-                    select(PaymentFulfillmentOperation)
-                    .where(
-                        PaymentFulfillmentOperation.payment_id == payment.id,
-                        PaymentFulfillmentOperation.operation_type.in_(
-                            ("grant_subscription", "grant_referral")
-                        ),
-                        PaymentFulfillmentOperation.status.in_(("pending", "retry")),
-                    )
-                    .with_for_update()
-                )
-            ).all()
-            for operation in queued:
-                operation.status = "cancelled"
-                operation.completed_at = now_utc()
+            payment.fulfillment_status = "manual_review"
+            payment.manual_review_reason = mismatch
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -156,8 +84,8 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                     source=source,
                 )
             )
-            return ProviderTransition("conflict", observed, reason=mismatch)
-        if terminal_reversal:
+            return ProviderTransition("conflict", observed, mismatch)
+        if current == "refunded" or payment.fulfillment_status == "reversed":
             payment.reconciliation_status = "mismatch"
             session.add(
                 PaymentEvent(
@@ -168,40 +96,26 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                     source=source,
                 )
             )
-            return ProviderTransition(
-                "conflict", observed, reason="succeeded_after_refund"
-            )
-        if (
-            current == "canceled"
-            or payment.checkout_status == "abandoned"
-            or source == "provider_cancel_payment"
-        ):
+            return ProviderTransition("conflict", observed, "succeeded_after_refund")
+        payment.provider_status = "succeeded"
+        if payment.checkout_status == "abandoned":
             payment.reconciliation_status = "mismatch"
-            payment.fulfillment_status = "manual_review"
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
-                    event_type="paid_after_cancel",
+                    event_type="paid_after_checkout_closed",
                     provider_status=observed,
-                    reason=f"{current}_to_succeeded",
+                    reason="late_success_after_hidden_checkout",
                     source=source,
                 )
             )
-            return ProviderTransition("conflict", observed, reason="paid_after_cancel")
-        return ProviderTransition(
-            "applied",
-            observed,
-            grant_allowed=payment.fulfillment_status
-            not in {"succeeded", "reversed", "manual_review"},
-        )
+        return ProviderTransition("applied", observed)
+
     if current in {"succeeded", "refunded"} or payment.fulfillment_status == "reversed":
         if observed != current:
             payment.reconciliation_status = "mismatch"
-            payment.fulfillment_status = (
-                "manual_review"
-                if payment.fulfillment_status != "reversed"
-                else payment.fulfillment_status
-            )
+            if payment.fulfillment_status != "reversed":
+                payment.fulfillment_status = "manual_review"
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -211,35 +125,16 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                     source=source,
                 )
             )
-            return ProviderTransition(
-                "conflict", observed, reason="terminal_regression"
-            )
+            return ProviderTransition("conflict", observed, "terminal_regression")
         return ProviderTransition("applied", observed)
-    if current == "canceled" and observed in {"pending", "waiting_for_capture"}:
+
+    if current == "canceled" and observed != "canceled":
         payment.reconciliation_status = "mismatch"
-        session.add(
-            PaymentEvent(
-                payment_id=payment.id,
-                event_type="provider_transition_conflict",
-                provider_status=observed,
-                reason=f"canceled_to_{observed}",
-                source=source,
-            )
-        )
-        return ProviderTransition("conflict", observed, reason="terminal_regression")
+        return ProviderTransition("conflict", observed, "terminal_regression")
+
     payment.provider_status = observed
     if observed == "canceled":
         payment.checkout_status = "abandoned"
+        payment.ui_visible = False
         payment.payment_url = None
-        if payment.payment_kind == "balance_topup":
-            payment.ui_visible = False
-        if payment.tariff_quote_id:
-            quote = await session.scalar(
-                select(TariffQuote)
-                .where(TariffQuote.id == payment.tariff_quote_id)
-                .with_for_update()
-            )
-            if quote and quote.status == "active":
-                quote.status = "cancelled"
-                quote.diagnostic_reason = "provider_canceled"
     return ProviderTransition("applied", observed)

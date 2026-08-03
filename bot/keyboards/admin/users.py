@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -12,28 +13,28 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="📅 Подписка",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L15_1,
         callback_data=f"admin_subscription:{user_id}",
     )
 
     builder.button(
-        text="🔧 Устройства",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L20_1,
         callback_data=f"admin_user_devices:{user_id}",
     )
 
     if is_banned:
         builder.button(
-            text="✅ Разбанить",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L26_1,
             callback_data=f"admin_unban:{user_id}",
         )
     else:
         builder.button(
-            text="🚫 Забанить",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L31_1,
             callback_data=f"admin_ban:{user_id}",
         )
 
     builder.button(
-        text="← К списку пользователей",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L36_1,
         callback_data="admin_users",
     )
 
@@ -50,27 +51,27 @@ def get_admin_subscription_keyboard(
 
     if has_active_sub:
         builder.button(
-            text="💎 Сменить тариф",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L53_1,
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
 
         builder.button(
-            text="➕ Продлить доступ",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L58_1,
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
 
         builder.button(
-            text="➖ Уменьшить дни",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L63_1,
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
     else:
         builder.button(
-            text="🎫 Выдать доступ",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L68_1,
             callback_data=f"admin_sub_grant:{telegram_id}",
         )
 
     builder.button(
-        text="← К карточке",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 
@@ -99,7 +100,7 @@ def get_admin_change_tariff_keyboard(
         label = get_tariff_group_name(device_limit)
 
         if device_limit == current_device_limit:
-            label += " ✅"
+            label += texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L103_1
 
         builder.button(
             text=truncate_button_text(label),
@@ -109,7 +110,7 @@ def get_admin_change_tariff_keyboard(
         )
 
     builder.button(
-        text="← Назад",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L112_1,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -135,7 +136,7 @@ def get_admin_grant_tariff_keyboard(
         )
 
     builder.button(
-        text="← Назад",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L138_1,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -152,7 +153,7 @@ def get_admin_grant_days_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=f"{days} дней",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L155_1.format(value_0=days),
             callback_data=(
                 f"admin_sub_grant_confirm:"
                 f"{telegram_id}:{tariff_id}:{days}"
@@ -160,7 +161,7 @@ def get_admin_grant_days_keyboard(
         )
 
     builder.button(
-        text="∞ Навсегда",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L163_1,
         callback_data=(
             f"admin_sub_grant_confirm:"
             f"{telegram_id}:{tariff_id}:36500"
@@ -168,14 +169,14 @@ def get_admin_grant_days_keyboard(
     )
 
     builder.button(
-        text="⌨️ Ввести вручную",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L171_1,
         callback_data=(
             f"admin_sub_grant_custom:{telegram_id}:{tariff_id}"
         ),
     )
 
     builder.button(
-        text="← Назад",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L178_1,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -191,26 +192,26 @@ def get_admin_extend_days_new_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=f"{days} дней",
+            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L194_1.format(value_0=days),
             callback_data=(
                 f"admin_sub_confirm_extend:{telegram_id}:{days}"
             ),
         )
 
     builder.button(
-        text="∞ Навсегда",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L201_1,
         callback_data=(
             f"admin_sub_confirm_extend:{telegram_id}:36500"
         ),
     )
 
     builder.button(
-        text="⌨️ Ввести вручную",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L208_1,
         callback_data=f"admin_sub_extend_custom:{telegram_id}",
     )
 
     builder.button(
-        text="← Назад",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L213_1,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -226,12 +227,12 @@ def get_admin_confirm_action_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✅ Подтвердить",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L229_1,
         callback_data=confirm_callback,
     )
 
     builder.button(
-        text="❌ Отмена",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L234_1,
         callback_data=cancel_callback,
     )
 
@@ -249,18 +250,18 @@ def get_admin_user_devices_keyboard(
     for profile in profiles:
         name = (
             getattr(profile, "device_name", None)
-            or f"Устройство #{profile.id}"
+            or texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L253_1.format(value_0=profile.id)
         )
 
         builder.button(
-            text=truncate_button_text(f"🗑 {name}"),
+            text=truncate_button_text(texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L257_1.format(value_0=name)),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),
         )
 
     builder.button(
-        text="← К карточке",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L263_1,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 

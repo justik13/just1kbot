@@ -111,7 +111,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                "⚠️ Флаг слишком длинный (макс. 10 символов).",
+                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L114_1,
                 get_back_button("admin_servers"),
             )
             return
@@ -154,9 +154,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                "⚠️ <b>URL запрещён правилами безопасности</b>\n"
-                "Использование приватных IP-адресов, loopback и "
-                "metadata endpoints запрещено.",
+                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L157_1,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -253,7 +251,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
                     protocols=safe(
-                        ", ".join(protocols) if protocols else "неизвестно"
+                        ", ".join(protocols) if protocols else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L254_1
                     ),
                 ),
                 get_back_button("admin_servers"),

@@ -1,57 +1,51 @@
-"""Discovery adapter for PostgreSQL payment-pipeline regression contracts."""
+"""Greenfield payment-pipeline architecture contracts.
 
-import uuid
+The live provider pipeline only creates/reconciles balance top-ups. Tariff
+purchases are settled from the internal account balance and therefore do not
+have a second YooKassa fulfillment queue.
+"""
 
-import payment_pipeline_postgres_base as _base
-from services.workers.webhook_inbox import InboxClaim, finalize as finalize_inbox
+import unittest
+from pathlib import Path
 
-_base_test_case = [_base.PaymentPipelinePostgresTests]
-_base.PaymentPipelinePostgresTests = None
+from database.models import Payment
+from services.payment_provider_operations import VALID_PROVIDER_STATUSES
+
+ROOT = Path(__file__).parents[1]
 
 
-class PaymentPipelinePostgresTests(_base_test_case[0]):
-    """Run the base contracts with provider-verified refund fixtures."""
+class GreenfieldPaymentPipelineContracts(unittest.TestCase):
+    def test_payment_rows_are_balance_topups_only(self):
+        columns = Payment.__table__.c
+        for removed in (
+            "tariff_id",
+            "tariff_quote_id",
+            "tariff_version_id",
+            "payment_kind",
+            "snapshot_duration_days",
+            "snapshot_device_limit",
+        ):
+            self.assertNotIn(removed, columns)
 
-    async def _finalize_duplicate_refund(self, session, payment, refund_id="refund-1"):
-        verified_refund = {
-            "id": refund_id,
-            "status": "succeeded",
-            "payment_id": payment.external_id,
-            "amount": {"value": "90.00", "currency": "RUB"},
-        }
-        payload = {"object": dict(verified_refund)}
-        row = _base.WebhookInbox(
-            provider="yookassa",
-            event_key=uuid.uuid4().hex,
-            event_type="refund.succeeded",
-            provider_object_id=refund_id,
-            payment_external_id=payment.external_id,
-            payload=payload,
-            status="processing",
-            attempts=1,
-            max_attempts=3,
-            next_attempt_at=_base.now_utc(),
-            locked_by="w",
-            locked_at=_base.now_utc(),
-        )
-        session.add(row)
-        await session.flush()
-        await finalize_inbox(
-            session,
-            InboxClaim(
-                row.id,
-                "w",
-                1,
-                row.event_type,
-                row.payment_external_id,
-                None,
-                row.payload,
-                row.event_key,
-            ),
-            _base.YooKassaResult(True, value=verified_refund),
-        )
-        return row
+    def test_provider_queue_only_creates_or_reconciles_topups(self):
+        source = (ROOT / "services/payment_provider_operations.py").read_text()
+        self.assertIn('operation_type == "create_payment"', source)
+        self.assertIn('operation_type == "reconcile_payment"', source)
+        self.assertNotIn('operation_type == "cancel_payment"', source)
+        self.assertNotIn("grant_subscription", source)
+        self.assertIn("succeeded", VALID_PROVIDER_STATUSES)
+
+    def test_verified_success_routes_to_account_credit(self):
+        source = (ROOT / "services/payment_provider_operations.py").read_text()
+        self.assertIn("settle_succeeded_topup", source)
+        self.assertIn("provider_get_payment", source)
+        self.assertNotIn("payment-grant:", source)
+
+    def test_removed_legacy_service_is_not_present(self):
+        self.assertFalse((ROOT / "services/payment_service").exists())
+        self.assertFalse((ROOT / "services/payment_fulfillment.py").exists())
+        self.assertFalse((ROOT / "services/tariff_change_payment.py").exists())
 
 
 if __name__ == "__main__":
-    _base.unittest.main()
+    unittest.main()

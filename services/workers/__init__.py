@@ -1,4 +1,5 @@
 """Lifecycle supervision and in-memory health for background workers."""
+from bot import texts
 
 import asyncio
 import logging
@@ -70,7 +71,7 @@ def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 
 
-# Queue fulfillment workers are critical. The remaining workers provide periodic
+# Durable API and financial workers are critical. The remaining workers provide periodic
 # maintenance/notifications/telemetry and may stop after exhausting their budget
 # without pretending that a durable customer operation is still being processed.
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -116,10 +117,7 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
     message = (
-        f"🚨 <b>{title}</b>\n"
-        f"🧩 <b>Воркер:</b> <code>{worker}</code>\n"
-        f"🔁 <b>Падений:</b> {failure_count}\n"
-        f"⚠️ <b>Тип ошибки:</b> <code>{error_type}</code>"
+        texts.RUNTIME_SERVICES_WORKERS_INIT_L119_1.format(value_0=title, value_1=worker, value_2=failure_count, value_3=error_type)
     )
     try:
         for admin_id in get_settings().ADMIN_IDS:
@@ -171,7 +169,7 @@ def _fatal(bot: Bot, worker: str, count: int, error_type: str) -> None:
     shutdown_event.set()
     logger.critical("Fatal background failure: worker=%s failures=%s type=%s",
                     worker, count, error_type)
-    _schedule_alert(bot, "fatal", "Критическая остановка фоновых задач",
+    _schedule_alert(bot, "fatal", texts.RUNTIME_SERVICES_WORKERS_INIT_L174_1,
                     worker, count, error_type)
 
 
@@ -230,7 +228,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
             count = health.consecutive_failures
             logger.critical("Worker %s died unexpectedly: %s (failure %s)",
                             name, error_type, count)
-            _schedule_alert(bot, f"crash:{name}", "Фоновый воркер упал",
+            _schedule_alert(bot, f"crash:{name}", texts.RUNTIME_SERVICES_WORKERS_INIT_L233_1,
                             name, count, error_type)
 
             if count > definition.max_consecutive_failures:

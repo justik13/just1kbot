@@ -37,7 +37,7 @@ async def admin_ban_confirm(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L40_1,
             show_alert=True,
         )
         return
@@ -84,7 +84,7 @@ async def admin_ban_apply(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L87_1,
             show_alert=True,
         )
         return
@@ -140,7 +140,7 @@ async def admin_unban_confirm(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L143_1,
             show_alert=True,
         )
         return
@@ -178,7 +178,7 @@ async def admin_unban_apply(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L181_1,
             show_alert=True,
         )
         return

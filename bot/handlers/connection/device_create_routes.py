@@ -48,16 +48,16 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
 
 def _get_no_subscription_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="🚀 Купить доступ", callback_data="menu_buy")
-    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
+    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L51_1, callback_data="menu_buy")
+    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L52_1, callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def _get_device_limit_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text="⚙️ Сменить тариф", callback_data="payment_change_tariff")
-    builder.button(text="← К списку устройств", callback_data="back_to_connections")
+    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L59_1, callback_data="payment_change_tariff")
+    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L60_1, callback_data="back_to_connections")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -145,13 +145,13 @@ async def start_add_device(
     builder = InlineKeyboardBuilder()
 
     for server in servers:
-        flag = server.country_flag or "🌍"
+        flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L148_1
         builder.button(
-            text=f"{flag} {server.name}",
+            text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L150_1.format(value_0=flag, value_1=server.name),
             callback_data=f"select_server:{server.id}",
         )
 
-    builder.button(text="← Назад", callback_data="back_to_connections")
+    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L154_1, callback_data="back_to_connections")
     builder.adjust(1)
 
     await render_hub(
@@ -204,7 +204,7 @@ async def select_server(
     server_id = parse_callback_id(callback.data, 1)
 
     if server_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L207_1, show_alert=True)
         _creating_devices.pop(callback.from_user.id, None)
         await state.clear()
         return
@@ -231,7 +231,7 @@ async def select_server(
     await state.update_data(server_id=server_id)
     await state.set_state(DeviceCreationStates.enter_device_name)
 
-    flag = server.country_flag or "🌍"
+    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L234_1
 
     _creating_devices.pop(callback.from_user.id, None)
 
@@ -415,7 +415,7 @@ async def enter_device_name(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⏳ Устройство создаётся.\nОбновите список через несколько секунд.",
+            texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L418_1,
             get_back_button("back_to_connections"),
         )
 

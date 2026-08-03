@@ -50,7 +50,7 @@ async def admin_sub_change_tariff(
 
     if telegram_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L53_1,
             show_alert=True,
         )
         return
@@ -73,7 +73,7 @@ async def admin_sub_change_tariff(
         else 0
     )
 
-    current_tariff_name = "—"
+    current_tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L76_1
 
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(
@@ -124,7 +124,7 @@ async def admin_sub_select_group(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L127_1,
             show_alert=True,
         )
         return
@@ -134,7 +134,7 @@ async def admin_sub_select_group(
 
     if telegram_id is None or device_limit is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L137_1,
             show_alert=True,
         )
         return
@@ -199,7 +199,7 @@ async def admin_sub_select_group(
         )
         return
 
-    old_tariff_name = "—"
+    old_tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L202_1
 
     if user.current_tariff_id:
         old_tariff = await get_tariff_by_id(
@@ -258,7 +258,7 @@ async def admin_sub_apply_tariff(
 
     if parts is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L261_1,
             show_alert=True,
         )
         return
@@ -268,7 +268,7 @@ async def admin_sub_apply_tariff(
 
     if telegram_id is None or tariff_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L271_1,
             show_alert=True,
         )
         return

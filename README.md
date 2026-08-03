@@ -71,15 +71,18 @@ python -m bot.main
 ```env
 BOT_TOKEN=123456:ABC-DEF
 ADMIN_IDS=[123456789]
+SUPPORT_USERNAME=my_support_username
 DATABASE_URL=postgresql+asyncpg://user:password@127.0.0.1:5432/database
 DB_ENCRYPTION_KEY=<Fernet key>
 REDIS_URL=redis://:password@127.0.0.1:6379/0
 REDIS_PASSWORD=password
 
-YOOKASSA_SHOP_ID=
-YOOKASSA_SECRET_KEY=
+YOOKASSA_SHOP_ID=<shop id>
+YOOKASSA_SECRET_KEY=<secret key>
 YOOKASSA_RETURN_URL=https://t.me/{bot_username}
 YOOKASSA_WEBHOOK_PORT=8080
+DOMAIN=vpn.example.com
+SSL_EMAIL=owner@example.com
 ```
 
 Генерация `DB_ENCRYPTION_KEY`:
@@ -94,13 +97,13 @@ python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_
 
 ## Первичная установка
 
-Запускать из отдельного checkout репозитория на Ubuntu или Debian:
+Запускать из отдельного checkout репозитория на Ubuntu 24.04+ или Debian 12+:
 
 ```bash
 sudo bash deploy.sh
 ```
 
-Неинтерактивный вариант:
+Неинтерактивный вариант с обязательной YooKassa и публичным HTTPS-доменом:
 
 ```bash
 sudo env \
@@ -108,16 +111,19 @@ sudo env \
   DB_PASSWORD='...' \
   REDIS_PASSWORD='...' \
   ADMIN_IDS='123456789' \
+  SUPPORT_USERNAME='my_support_username' \
   DOMAIN='vpn.example.com' \
-  SSL_EMAIL='admin@example.com' \
+  SSL_EMAIL='owner@example.com' \
   YOOKASSA_SHOP_ID='...' \
   YOOKASSA_SECRET_KEY='...' \
   bash deploy.sh --yes
 ```
 
-`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic.
+`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic. `SUPPORT_USERNAME` обязателен и должен содержать реальный Telegram username поддержки без `@`.
 
-`DOMAIN` имеет смысл только вместе с YooKassa. Nginx публикует только:
+Amnezia API URL и ключ при установке бота не запрашиваются. Каждый VPN-сервер добавляется после запуска через Telegram-админку, а его API key хранится в PostgreSQL в зашифрованном виде.
+
+`YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `DOMAIN` и `SSL_EMAIL` обязательны. Без любого из этих значений установщик и приложение завершаются ошибкой; режима работы без платежей нет. Nginx публикует только:
 
 - `POST /webhook/yookassa`;
 - `GET /health`.
@@ -303,6 +309,8 @@ Healthcheck имеет отдельный lock, shared deploy-operation lock, pr
 
 # YooKassa
 
+YooKassa является обязательной частью продукта: без Shop ID, Secret Key, публичного домена и email сертификата бот не запускается.
+
 YooKassa используется только для пополнения внутреннего рублёвого баланса. Подтверждённый `payment.succeeded` зачисляется в append-only ledger ровно один раз; тариф не активируется webhook-ом. Покупка, продление и смена тарифа выполняются отдельным подтверждением и атомарным списанием с баланса.
 
 Публичный webhook:
@@ -321,15 +329,17 @@ Webhook должен быть настроен в кабинете YooKassa то
 
 # Amnezia API
 
-Бот работает с протоколом `amneziawg2`.
+Бот работает с протоколом `amneziawg2`. При первичной установке бота глобальные `AMNEZIA_API_URL` и `AMNEZIA_API_KEY` не нужны и не запрашиваются.
 
-Настройка API-сервера запускается через единственную корневую точку входа:
+После запуска откройте Telegram-админку и добавьте каждый VPN-сервер отдельно: имя, флаг, API URL и API key. Бот проверит доступность API и поддержку `amneziawg2`, после чего сохранит ключ сервера в PostgreSQL в зашифрованном виде.
+
+Опциональная команда:
 
 ```bash
 sudo bash deploy.sh amnezia
 ```
 
-После настройки сервер добавляется через Telegram-админку.
+не устанавливает Amnezia API и не добавляет сервер в бот. Она предназначена только для проверки или публикации HTTPS reverse proxy на узле, где локальный API уже работает на `127.0.0.1:4001`.
 
 # Безопасность
 

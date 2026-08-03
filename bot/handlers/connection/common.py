@@ -34,7 +34,7 @@ _PROTOCOL_DISPLAY = {
 
 def _format_protocol(raw_protocol: str | None) -> str:
     if not raw_protocol:
-        return "—"
+        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L37_1
     return _PROTOCOL_DISPLAY.get(raw_protocol, raw_protocol)
 
 
@@ -66,22 +66,22 @@ def _get_grace_deletion_time(user: User):
 
 def _format_grace_countdown(deletion_time) -> str:
     if not deletion_time:
-        return "в ближайшее время"
+        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L69_1
 
     current_time = now_utc()
     delta = deletion_time - current_time
 
     if delta.total_seconds() <= 0:
-        return "в ближайшее время"
+        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L75_1
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return f"{days} дн. {hours} ч."
+        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L81_1.format(value_0=days, value_1=hours)
 
     minutes = (delta.seconds % 3600) // 60
-    return f"{hours} ч. {minutes} мин."
+    return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L84_1.format(value_0=hours, value_1=minutes)
 
 
 async def _render_maintenance(
@@ -137,17 +137,17 @@ async def _build_connections_screen(
         for profile in profiles:
             server = profile.server
 
-            flag = server.country_flag if server else "🌍"
-            server_name = server.name if server else "Неизвестно"
+            flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L140_1
+            server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L141_1
 
             if read_only:
                 builder.button(
-                    text=f"🔒 {safe(profile.device_name)}",
+                    text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L145_1.format(value_0=safe(profile.device_name)),
                     callback_data=f"manage_device:{profile.id}",
                 )
             else:
                 builder.button(
-                    text=f"⚙️ {safe(profile.device_name)}",
+                    text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L150_1.format(value_0=safe(profile.device_name)),
                     callback_data=f"manage_device:{profile.id}",
                 )
 
@@ -168,17 +168,17 @@ async def _build_connections_screen(
                 last_connected_text,
             )
             labels = {
-                "pending_create": "создаётся", "pending_update": "обновляется",
-                "deleting": "удаляется", "create_failed": "ошибка создания",
-                "create_cleanup_pending": "очистка после ошибки создания",
-                "update_failed": "ошибка обновления", "delete_failed": "ошибка удаления",
+                "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
+                "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,
+                "create_cleanup_pending": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L173_1,
+                "update_failed": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L174_1, "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
-                rendered += f"\n⏳ Статус: {labels[profile.provisioning_status]}\n"
+                rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
 
     if not read_only and profiles_count < device_limit:
         builder.button(
-            text="➕ Добавить устройство",
+            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
             callback_data="add_device",
         )
 
@@ -220,11 +220,11 @@ async def _render_connections(
             )
 
             builder.button(
-                text="🚀 Купить доступ",
+                text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L223_1,
                 callback_data="menu_buy",
             )
             builder.button(
-                text="🏠 В главное меню",
+                text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L227_1,
                 callback_data="back_to_main_menu",
             )
             builder.adjust(1)
@@ -239,11 +239,11 @@ async def _render_connections(
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text="🚀 Купить доступ",
+            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L242_1,
             callback_data="menu_buy",
         )
         builder.button(
-            text="🏠 В главное меню",
+            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L246_1,
             callback_data="back_to_main_menu",
         )
         builder.adjust(1)
@@ -263,7 +263,7 @@ async def _render_connections(
     )
 
     builder.button(
-        text="🏠 В главное меню",
+        text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L266_1,
         callback_data="back_to_main_menu",
     )
     builder.adjust(1)

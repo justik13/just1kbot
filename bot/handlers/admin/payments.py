@@ -14,6 +14,7 @@ from bot import texts
 from database.models import Payment
 from database.repositories.account_ledger_repo import get_payment_refundable_amount
 from database.repositories.payments_repo import get_payment_by_id
+from services.payment_status import payment_display_status
 from services.provider_refunds import (
     BalanceRefundError,
     request_balance_topup_refund,
@@ -32,8 +33,7 @@ PAYMENTS_PER_PAGE = 20
 
 def _refund_available(payment: Payment) -> bool:
     return bool(
-        payment.payment_kind == "balance_topup"
-        and payment.provider_status == "succeeded"
+        payment.provider_status == "succeeded"
         and payment.external_id
         and payment.currency == "RUB"
     )
@@ -45,26 +45,20 @@ def _get_payment_card_keyboard(
 ) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
 
-    if payment.status == "requires_manual_review":
-        builder.button(
-            text="✅ Выдать подписку",
-            callback_data=f"admin_manual_grant:{payment.id}",
-        )
-
     if _refund_available(payment):
         builder.button(
-            text="↩️ Вернуть доступный остаток",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L50_1,
             callback_data=f"admin_payment_refund:{payment.id}",
         )
 
     if user_telegram_id:
         builder.button(
-            text="👤 Профиль клиента",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L56_1,
             callback_data=f"admin_user_card:{user_telegram_id}",
         )
 
     builder.button(
-        text="← К списку платежей",
+        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L61_1,
         callback_data="admin_payments",
     )
     builder.adjust(1)
@@ -78,28 +72,26 @@ async def _build_payments_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        f"🛠 Админка › 💳 <b>Платежи</b>\n"
-        f"(стр. {page}/{total_pages}) · Всего: {total}\n"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L75_1.format(value_0=page, value_1=total_pages, value_2=total)
     )
     builder = InlineKeyboardBuilder()
     if not payments:
-        rendered += "<i>Платежей пока нет</i>\n"
+        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L80_1
     else:
         for payment in payments:
+            display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                payment.status,
-                "❓",
+                display_status,
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L86_1,
             )
             if payment.user and payment.user.username:
                 user_label = f"@{payment.user.username}"
             elif payment.user:
-                user_label = f"ID:{payment.user.telegram_id}"
+                user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
             else:
-                user_label = "—"
+                user_label = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L93_1
             button_text = truncate_button_text(
-                f"{status_icon} #{payment.id} · "
-                f"{user_label} · "
-                f"{payment.amount}₽"
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L95_1.format(value_0=status_icon, value_1=payment.id, value_2=user_label, value_3=payment.amount)
             )
             builder.button(
                 text=button_text,
@@ -107,15 +99,15 @@ async def _build_payments_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text="⬅️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L105_1,
             callback_data=f"admin_payments_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text="➡️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L110_1,
             callback_data=f"admin_payments_page:{page + 1}",
         )
-    builder.button(text="← В админку", callback_data="admin_menu")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L113_1, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -139,7 +131,6 @@ async def _show_payments_list(
         select(Payment)
         .options(
             selectinload(Payment.user),
-            selectinload(Payment.tariff),
         )
         .order_by(Payment.created_at.desc())
         .offset(offset)
@@ -195,7 +186,7 @@ async def payments_pagination(
     page = parse_callback_id(callback.data, 1)
     if page is None or page < 1:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L192_1,
             show_alert=True,
         )
         return
@@ -219,7 +210,7 @@ async def show_payment_card(
     payment_id = parse_callback_id(callback.data, 1)
     if payment_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L216_1,
             show_alert=True,
         )
         return
@@ -227,49 +218,41 @@ async def show_payment_card(
     payment = await get_payment_by_id(session, payment_id)
     if not payment:
         await callback.answer(
-            "Платёж не найден",
+            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L224_1,
             show_alert=True,
         )
         return
 
     if payment.user and payment.user.username:
-        user_label = (
-            f"@{safe(payment.user.username)} "
-            f"(ID: <code>{payment.user.telegram_id}</code>)"
+        user_label = texts.ADMIN_PAYMENT_USER_WITH_ID.format(
+            username=safe(payment.user.username),
+            user_id=payment.user.telegram_id,
         )
         user_telegram_id = payment.user.telegram_id
     elif payment.user:
-        user_label = f"ID: <code>{payment.user.telegram_id}</code>"
+        user_label = texts.ADMIN_PAYMENT_USER_ID.format(user_id=payment.user.telegram_id)
         user_telegram_id = payment.user.telegram_id
     else:
-        user_label = "—"
+        user_label = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L239_1
         user_telegram_id = None
 
+    display_status = payment_display_status(payment)
     status_name = texts.PAYMENT_STATUS_NAMES.get(
-        payment.status,
-        payment.status,
+        display_status,
+        display_status,
     )
     status_icon = texts.PAYMENT_STATUS_ICONS.get(
-        payment.status,
-        "❓",
+        display_status,
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L249_1,
     )
-
-    if payment.tariff:
-        tariff_label = (
-            f"{payment.tariff.duration_days} дн. / "
-            f"{payment.tariff.device_limit} устр."
-        )
-    else:
-        tariff_label = "—"
 
     reason_line = ""
     if (
-        payment.status == "requires_manual_review"
+        display_status == "requires_manual_review"
         and payment.manual_review_reason
     ):
         reason_line = (
-            f"\n<b>Причина:</b> "
-            f"{safe(payment.manual_review_reason)}"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L258_1.format(value_0=safe(payment.manual_review_reason))
         )
 
     refundable_line = ""
@@ -278,25 +261,10 @@ async def show_payment_card(
             session,
             payment_id=payment.id,
         )
-        refundable_line = f"\n<b>Можно вернуть:</b> {int(refundable)} RUB"
+        refundable_line = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L268_1.format(value_0=int(refundable))
 
     rendered = (
-        f"🛠 Админка › 💳 Платежи › "
-        f"<b>Платёж #{payment.id}</b>\n"
-        f"<b>ID:</b> {payment.id}\n"
-        f"<b>Пользователь:</b> {user_label}\n"
-        f"<b>Сумма:</b> {payment.amount} {payment.currency}\n"
-        f"<b>Статус:</b> {status_icon} {status_name}\n"
-        f"<b>Provider:</b> {safe(payment.provider_status)}\n"
-        f"<b>Исполнение:</b> {safe(payment.fulfillment_status)}\n"
-        f"<b>Тип:</b> {safe(payment.payment_kind)}\n"
-        f"<b>Тариф:</b> {tariff_label}\n"
-        f"<b>Создан:</b> {format_datetime(payment.created_at)}\n"
-        f"<b>Оплачен:</b> {format_datetime(payment.paid_at)}\n"
-        f"<b>External ID:</b> "
-        f"<code>{safe(payment.external_id or '—')}</code>"
-        f"{refundable_line}"
-        f"{reason_line}"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L271_1.format(value_0=payment.id, value_1=payment.id, value_2=user_label, value_3=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
     )
 
     kb = _get_payment_card_keyboard(
@@ -331,33 +299,28 @@ async def confirm_payment_refund(
         else None
     )
     if payment is None or not _refund_available(payment):
-        await callback.answer("Платёж недоступен для возврата", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L319_1, show_alert=True)
         return
     refundable = await get_payment_refundable_amount(
         session,
         payment_id=payment.id,
     )
     if refundable <= 0:
-        await callback.answer("Возвращаемого остатка уже нет", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L326_1, show_alert=True)
         return
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=f"✅ Подтвердить возврат {int(refundable)} ₽",
+        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L331_1.format(value_0=int(refundable)),
         callback_data=f"admin_payment_refund_confirm:{payment.id}",
     )
     builder.button(
-        text="← Назад к платежу",
+        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L335_1,
         callback_data=f"admin_payment_card:{payment.id}",
     )
     builder.adjust(1)
     await callback.message.edit_text(
-        "⚠️ <b>Подтверждение возврата</b>\n\n"
-        f"Платёж: <code>#{payment.id}</code>\n"
-        f"YooKassa ID: <code>{safe(payment.external_id)}</code>\n"
-        f"Будет возвращено: <b>{int(refundable)} RUB</b>\n\n"
-        "Сумма сначала будет заморожена на внутреннем балансе, "
-        "затем durable worker отправит идемпотентный запрос в YooKassa.",
+        texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L340_1.format(value_0=payment.id, value_1=safe(payment.external_id), value_2=int(refundable)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -375,7 +338,7 @@ async def enqueue_payment_refund(
         return
     payment_id = parse_callback_id(callback.data, 1)
     if payment_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L363_1, show_alert=True)
         return
     try:
         request = await request_balance_topup_refund(
@@ -385,15 +348,15 @@ async def enqueue_payment_refund(
         )
     except BalanceRefundError as exc:
         messages = {
-            "payment_not_found": "Платёж не найден",
-            "refund_requires_balance_topup": "Можно вернуть только пополнение баланса",
-            "payment_not_refundable": "Платёж ещё не подтверждён или уже возвращён",
-            "provider_payment_id_missing": "У платежа нет YooKassa ID",
-            "no_refundable_balance": "Возвращаемого остатка уже нет",
-            "active_refund_reservation_missing": "Возврат требует ручной проверки",
+            "payment_not_found": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L368_1,
+            "refund_requires_balance_topup": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L369_1,
+            "payment_not_refundable": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L370_1,
+            "provider_payment_id_missing": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L371_1,
+            "no_refundable_balance": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L372_1,
+            "active_refund_reservation_missing": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L373_1,
         }
         await callback.answer(
-            messages.get(exc.code, "Не удалось поставить возврат в очередь"),
+            messages.get(exc.code, texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L376_1),
             show_alert=True,
         )
         return
@@ -401,24 +364,18 @@ async def enqueue_payment_refund(
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="← Назад к платежу",
+        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L389_1,
         callback_data=f"admin_payment_card:{payment_id}",
     )
-    builder.button(text="💳 К списку платежей", callback_data="admin_payments")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L392_1, callback_data="admin_payments")
     builder.adjust(1)
     status_text = (
-        "Возврат поставлен в durable-очередь."
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L390_1
         if request.created
-        else "Этот возврат уже находится в durable-очереди."
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L392_1
     )
     await callback.message.edit_text(
-        "✅ <b>Возврат принят</b>\n\n"
-        f"{status_text}\n"
-        f"Сумма: <b>{int(request.operation.amount)} RUB</b>\n"
-        f"Operation: <code>{request.operation.operation_id}</code>\n"
-        f"Статус: <code>{safe(request.operation.status)}</code>\n\n"
-        "Зарезервированная сумма недоступна для новых покупок до "
-        "подтверждения или безопасного завершения операции.",
+        texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L400_1.format(value_0=status_text, value_1=int(request.operation.amount), value_2=request.operation.operation_id, value_3=safe(request.operation.status)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

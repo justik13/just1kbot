@@ -108,7 +108,7 @@ async def get_account_tariff_change_intent(
         raise AccountTariffChangeError("tariff_unavailable")
     balance = await get_account_balance(session, user_id=user_id)
     amount = whole_rubles(
-        quote.confirmed_payment_required_rub, allow_zero=True
+        quote.amount_due_rub, allow_zero=True
     )
     return AccountTariffChangeIntent(
         quote,
@@ -172,7 +172,7 @@ async def _settle_account_tariff_change(
         raise AccountTariffChangeError("quote_operation_mismatch")
     try:
         amount = whole_rubles(
-            quote.confirmed_payment_required_rub, allow_zero=True
+            quote.amount_due_rub, allow_zero=True
         )
     except ValueError as exc:
         raise AccountTariffChangeError("quote_amount_invalid") from exc
@@ -198,8 +198,6 @@ async def _settle_account_tariff_change(
     if quote.expires_at is None or now >= quote.expires_at:
         quote.status = "expired"
         raise AccountTariffChangeError("quote_expired")
-    if quote.payment_id is not None:
-        raise AccountTariffChangeError("quote_has_legacy_payment")
     if user.financial_hold:
         raise AccountTariffChangeError("financial_hold")
     if user.subscription_end is None or user.subscription_end <= now:

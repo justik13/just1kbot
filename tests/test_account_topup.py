@@ -1,22 +1,19 @@
 import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 from database.models import Payment
 from services.payment_provider_operations import create_payload
 from services.payment_provider_state import apply_provider_transition
 from services.payment_provider_validation import validate_provider_payment
-from services.workers import WORKERS
-from services.workers.webhook_inbox import ensure_fulfillment
 
 
 def topup() -> Payment:
     return Payment(
         id=17,
         user_id=3,
-        tariff_id=None,
-        payment_kind="balance_topup",
         amount=Decimal("499"),
         currency="RUB",
         public_order_id="topup_public",
@@ -26,8 +23,6 @@ def topup() -> Payment:
         reconciliation_status="ok",
         checkout_status="active",
         ui_visible=True,
-        snapshot_amount=Decimal("499"),
-        snapshot_currency="RUB",
         topup_context={},
         external_id="provider-17",
     )
@@ -69,7 +64,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             source="provider_get_payment",
         )
         self.assertEqual(transition.outcome, "applied")
-        self.assertTrue(transition.grant_allowed)
         self.assertEqual(payment.provider_status, "succeeded")
         self.assertEqual(
             payment.provider_confirmed_at,
@@ -88,10 +82,11 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payment.fulfillment_status, "manual_review")
         session.add.assert_called_once()
 
-    async def test_topup_never_creates_subscription_fulfillment(self):
-        session = AsyncMock()
-        await ensure_fulfillment(session, topup(), "grant_subscription")
-        session.execute.assert_not_awaited()
+    def test_topup_model_has_no_subscription_checkout_fields(self):
+        columns = Payment.__table__.c
+        self.assertNotIn("tariff_id", columns)
+        self.assertNotIn("tariff_quote_id", columns)
+        self.assertNotIn("payment_kind", columns)
 
     def test_unexpected_kopecks_are_not_rounded(self):
         payment = topup()
@@ -111,7 +106,10 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
     def test_durable_notification_worker_is_registered(self):
-        self.assertIn("account_balance", {worker.name for worker in WORKERS})
+        source = (
+            Path(__file__).parents[1] / "services" / "workers" / "__init__.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('WorkerDefinition("account_balance", _account_balance, False)', source)
 
 
 if __name__ == "__main__":

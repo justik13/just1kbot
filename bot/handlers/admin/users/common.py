@@ -52,7 +52,7 @@ def _is_subscription_active(user: User) -> bool:
 
 def _format_time_left(subscription_end) -> str:
     if not subscription_end:
-        return "—"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L55_1
 
     if subscription_end.year >= 2100:
         return texts.ADMIN_SUB_PERMANENT_LABEL
@@ -61,7 +61,7 @@ def _format_time_left(subscription_end) -> str:
     delta = subscription_end - current_time
 
     if delta.total_seconds() <= 0:
-        return "истекла"
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L64_1
 
     days = delta.days
     hours = delta.seconds // 3600
@@ -70,11 +70,11 @@ def _format_time_left(subscription_end) -> str:
         return texts.ADMIN_SUB_PERMANENT_LABEL
 
     if days > 0:
-        return f"{days} дн. {hours} ч."
+        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L73_1.format(value_0=days, value_1=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return f"{hours} ч. {minutes} мин."
+    return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L77_1.format(value_0=hours, value_1=minutes)
 
 
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
@@ -146,15 +146,15 @@ async def _build_users_list_text_and_kb(
 
         for user in users:
             status = (
-                "🟢"
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L149_1
                 if user.subscription_end and user.subscription_end > current_time
-                else "🔴"
+                else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L151_1
             )
 
-            ban = "🚫" if user.is_banned else ""
+            ban = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L154_1 if user.is_banned else ""
 
             username = (
-                f"@{user.username}" if user.username else f"ID:{user.telegram_id}"
+                f"@{user.username}" if user.username else texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=user.telegram_id)
             )
 
             days = format_days_left(user.subscription_end)
@@ -162,7 +162,7 @@ async def _build_users_list_text_and_kb(
             profiles_count = len(user.profiles) if user.profiles else 0
 
             button_text = truncate_button_text(
-                f"{status}{ban} {username} · {days} · {profiles_count} устр."
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L165_1.format(value_0=status, value_1=ban, value_2=username, value_3=days, value_4=profiles_count)
             )
 
             builder.button(
@@ -172,23 +172,23 @@ async def _build_users_list_text_and_kb(
 
     if page > 1:
         builder.button(
-            text="⬅️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L175_1,
             callback_data=f"admin_users_page:{page - 1}",
         )
 
     if page < total_pages:
         builder.button(
-            text="➡️",
+            text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L181_1,
             callback_data=f"admin_users_page:{page + 1}",
         )
 
     builder.button(
-        text="🔍 Поиск по ID",
+        text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L186_1,
         callback_data="admin_users_search",
     )
 
     builder.button(
-        text="← В админку",
+        text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L191_1,
         callback_data="admin_menu",
     )
 

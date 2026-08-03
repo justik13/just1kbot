@@ -155,7 +155,7 @@ async def global_error_handler(
 
 async def setup_bot_commands(bot: Bot):
     commands = [
-        BotCommand(command="start", description="🚀 Запустить бота"),
+        BotCommand(command="start", description=texts.BOT_START_DESCRIPTION),
     ]
     await bot.set_my_commands(
         commands, scope=BotCommandScopeDefault()
@@ -283,36 +283,12 @@ async def main():
     try:
         settings = get_settings()
 
-        if not settings.DB_ENCRYPTION_KEY:
-            logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
-            return
-
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
-        except Exception as e:
-            logger.critical(
-                "❌ DB_ENCRYPTION_KEY невалиден: %s",
-                type(e).__name__,
-            )
-            return
-
-        if settings.YOOKASSA_SHOP_ID and not settings.YOOKASSA_SECRET_KEY:
-            logger.critical(
-                "❌ YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY пуст!"
-            )
-            return
-
-        if settings.YOOKASSA_SECRET_KEY and not settings.YOOKASSA_SHOP_ID:
-            logger.critical(
-                "❌ YOOKASSA_SECRET_KEY задан, но YOOKASSA_SHOP_ID пуст!"
-            )
-            return
-
-        if not settings.ADMIN_IDS:
-            logger.warning(
-                "⚠️ ADMIN_IDS пуст! Алерты и уведомления "
-                "не будут отправляться администраторам."
-            )
+        except Exception as exc:
+            raise RuntimeError(
+                "DB_ENCRYPTION_KEY is not a valid Fernet key"
+            ) from exc
 
         logger.info("Инициализация БД...")
         await init_db()
@@ -325,10 +301,9 @@ async def main():
         bot, dp = await setup_bot()
         set_bot_ref(bot)
 
-        if settings.YOOKASSA_SHOP_ID and settings.YOOKASSA_SECRET_KEY:
-            webhook_runner = await start_webhook_server(
-                settings.YOOKASSA_WEBHOOK_PORT
-            )
+        webhook_runner = await start_webhook_server(
+            settings.YOOKASSA_WEBHOOK_PORT
+        )
 
         await resume_pending_broadcasts(bot)
         logger.info("Pending broadcasts resumed (if any)")
@@ -365,15 +340,12 @@ async def main():
             except asyncio.CancelledError:
                 pass
         else:
-            for task in done:
-                exc = (
-                    task.exception() if not task.cancelled() else None
-                )
-                if exc:
-                    logger.critical(
-                        "Fatal error in main task: %s",
-                        type(exc).__name__,
-                    )
+            if polling_task.cancelled():
+                raise RuntimeError("Telegram polling was cancelled unexpectedly")
+            polling_error = polling_task.exception()
+            if polling_error is not None:
+                raise polling_error
+            raise RuntimeError("Telegram polling stopped unexpectedly")
 
         for task in pending:
             task.cancel()
@@ -381,6 +353,7 @@ async def main():
 
     except Exception as e:
         logger.critical("Fatal error in main: %s", e, exc_info=True)
+        raise
 
     finally:
         logger.info("Stopping background workers...")
@@ -438,14 +411,6 @@ async def main():
             await close_device_redis()
         except Exception as e:
             logger.error("Failed to close device Redis: %s", e)
-
-        try:
-            from services.payment_service import (
-                close_redis as close_payment_redis,
-            )
-            await close_payment_redis()
-        except Exception as e:
-            logger.error("Failed to close payment Redis: %s", e)
 
         try:
             await close_db()

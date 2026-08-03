@@ -22,7 +22,7 @@ class ShellLayoutTests(unittest.TestCase):
             "update_from_github.sh",
             "setup-amnezia-api.sh",
             "uninstall.sh",
-            "lib/deploy_full_legacy.inc",
+            "lib/deploy_core.inc",
             "lib/postgresql.sh",
             "lib/operational_transaction.sh",
             "ops/deploy_application.sh",
@@ -42,14 +42,13 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertEqual(missing, [])
 
     def test_all_repository_shell_scripts_parse(self):
-        scripts = sorted(ROOT.rglob("*.sh"))
-        scripts.append(SCRIPTS / "lib" / "deploy_full_legacy.inc")
+        scripts = sorted(ROOT.rglob("*.sh")) + sorted(ROOT.rglob("*.inc"))
         self.assertTrue(scripts)
         for script in scripts:
             with self.subTest(script=script.relative_to(ROOT)):
                 subprocess.run(["bash", "-n", str(script)], check=True)
 
-    def test_legacy_deploy_is_source_only(self):
+    def test_deploy_library_is_source_only(self):
         for loader in ("deploy_full.sh", "deploy_full_library.sh"):
             result = subprocess.run(
                 ["bash", str(SCRIPTS / loader)],
@@ -73,6 +72,16 @@ class ShellLayoutTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(source_result.returncode, 0, source_result.stderr)
+
+    def test_initial_deploy_requires_real_support_username(self):
+        adapter = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
+        core = (SCRIPTS / "lib" / "deploy_core.inc").read_text(encoding="utf-8")
+        example = (ROOT / ".env.example").read_text(encoding="utf-8")
+        self.assertIn("SUPPORT_USERNAME:?SUPPORT_USERNAME не задан", adapter)
+        self.assertIn("read_support_username", core)
+        self.assertIn('write_env_var SUPPORT_USERNAME "$SUPPORT_USERNAME"', core)
+        self.assertIn("CHANGE_ME_SUPPORT_USERNAME", example)
+        self.assertNotIn("SUPPORT_USERNAME='support'", example)
 
     def test_menu_help_is_non_destructive(self):
         result = subprocess.run(

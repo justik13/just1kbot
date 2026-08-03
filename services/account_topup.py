@@ -20,7 +20,6 @@ from database.repositories.account_ledger_repo import (
 )
 from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.payment_disputes import refresh_user_dispute_hold
-from services.payment_lifecycle import project_legacy_status
 from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
 
@@ -56,7 +55,6 @@ async def _visible_topup_for_update(
         select(Payment)
         .where(
             Payment.user_id == user_id,
-            Payment.payment_kind == "balance_topup",
             Payment.ui_visible.is_(True),
             Payment.checkout_status == "active",
             Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
@@ -74,7 +72,6 @@ async def get_visible_balance_topup(
         select(Payment)
         .where(
             Payment.user_id == user_id,
-            Payment.payment_kind == "balance_topup",
             Payment.ui_visible.is_(True),
             Payment.checkout_status == "active",
             Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
@@ -93,7 +90,6 @@ async def _pending_topup_exposure(
     amount = await session.scalar(
         select(func.coalesce(func.sum(Payment.amount), 0)).where(
             Payment.user_id == user_id,
-            Payment.payment_kind == "balance_topup",
             Payment.credited_at.is_(None),
             Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
         )
@@ -140,8 +136,7 @@ async def create_balance_topup(
         await session.scalar(
             select(func.count(Payment.id)).where(
                 Payment.user_id == user.id,
-                Payment.payment_kind == "balance_topup",
-                Payment.credited_at.is_(None),
+                    Payment.credited_at.is_(None),
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
         )
@@ -155,8 +150,7 @@ async def create_balance_topup(
         await session.scalar(
             select(func.count(Payment.id)).where(
                 Payment.user_id == user.id,
-                Payment.payment_kind == "balance_topup",
-                Payment.created_at >= created_since,
+                    Payment.created_at >= created_since,
             )
         )
         or 0
@@ -173,26 +167,16 @@ async def create_balance_topup(
 
     payment = Payment(
         user_id=user.id,
-        tariff_id=None,
-        tariff_quote_id=None,
-        tariff_version_id=None,
         amount=rubles,
         currency="RUB",
-        payment_kind="balance_topup",
-        status="pending",
         public_order_id="topup_" + uuid.uuid4().hex,
         provider_idempotency_key=uuid.uuid4().hex,
-        provider_required=True,
         provider_status="creating",
         fulfillment_status="not_ready",
         reconciliation_status="ok",
         checkout_status="active",
         ui_visible=True,
         topup_context=dict(context or {}),
-        snapshot_amount=rubles,
-        snapshot_currency="RUB",
-        referral_user_bonus_days=0,
-        referral_referrer_bonus_days=0,
     )
     session.add(payment)
     await session.flush()
@@ -227,7 +211,6 @@ async def hide_balance_topup(
     if (
         payment is None
         or payment.user_id != user_id
-        or payment.payment_kind != "balance_topup"
     ):
         raise AccountTopupError("topup_not_found")
     await lock_checkout_user(session, user_id)
@@ -255,8 +238,6 @@ async def settle_succeeded_topup(
     settings=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
     """Credit a verified top-up and close its non-subscription lifecycle."""
-    if payment.payment_kind != "balance_topup":
-        raise AccountTopupError("payment_is_not_balance_topup")
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
     entry, created = await credit_succeeded_topup(
@@ -297,7 +278,6 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
-    project_legacy_status(payment)
     await session.flush()
     return created, balance
 
@@ -317,3 +297,41 @@ async def settle_succeeded_topup_by_id(
     return await settle_succeeded_topup(
         session, payment=payment, source=source, settings=settings
     )
+
+
+async def request_topup_status_refresh(
+    session: AsyncSession,
+    *,
+    payment_id: int,
+    source: str = "user_refresh",
+) -> Payment:
+    """Queue provider reconciliation and recover a verified but uncredited top-up."""
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
+    if payment is None:
+        raise AccountTopupError("topup_not_found")
+    if payment.external_id and payment.provider_status not in {
+        "refunded",
+        "canceled",
+    }:
+        from services.payment_provider_operations import (
+            ensure_reconcile_payment_operation,
+        )
+
+        await ensure_reconcile_payment_operation(
+            session,
+            payment,
+            reason=source,
+        )
+    if (
+        payment.provider_status == "succeeded"
+        and payment.provider_confirmed_at is not None
+        and payment.fulfillment_status not in {"succeeded", "reversed", "manual_review"}
+    ):
+        await settle_succeeded_topup(
+            session,
+            payment=payment,
+            source=f"{source}_recovery",
+        )
+    return payment

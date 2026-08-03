@@ -1,24 +1,18 @@
 import logging
 
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.middlewares.user_context import invalidate_user_cache
-from database.models import (
-    Payment,
-    PaymentFulfillmentOperation,
-    TariffQuote,
-    User,
-)
+from database.models import Payment, User
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
 from services.audit_service import AuditService
-from services.payment_lifecycle import project_legacy_status
-from services.payment_service import PaymentService
 from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
+from services.payment_provider_operations import ensure_reconcile_payment_operation
 
 logger = logging.getLogger(__name__)
 
@@ -99,98 +93,29 @@ class BanService:
         if locked_user is None or locked_user.is_deleted:
             return False, "Пользователь не найден"
 
-        payments_abandoned = 0
+        payments_closed = 0
+        reconciliations_queued = 0
+        current_time = now_utc()
 
         for payment_id in payment_ids:
-            abandoned = await PaymentService.cancel_payment_via_api(
-                session,
-                payment_id,
-                source="ban",
-            )
-            if abandoned:
-                payments_abandoned += 1
-                payment = await session.get(Payment, payment_id)
-                if payment is not None:
-                    project_legacy_status(payment)
-
-        current_time = now_utc()
-        fulfillment_cancelled = 0
-
-        if payment_ids:
-            # Терминальные provider-платежи helper не меняет, поэтому отдельно
-            # закрываем оставшиеся активные checkout без подмены provider_status.
-            close_result = await session.execute(
-                update(Payment)
-                .where(
-                    Payment.id.in_(payment_ids),
-                    Payment.checkout_status == "active",
+            payment = await session.get(Payment, payment_id)
+            if payment is None:
+                continue
+            if payment.provider_status not in {"succeeded", "canceled", "refunded"}:
+                if payment.checkout_status != "abandoned" or payment.ui_visible:
+                    payments_closed += 1
+                payment.checkout_status = "abandoned"
+                payment.ui_visible = False
+                payment.payment_url = None
+                payment.user_cancel_requested_at = (
+                    payment.user_cancel_requested_at or current_time
                 )
-                .values(
-                    checkout_status="abandoned",
-                    payment_url=None,
-                )
-            )
-            payments_abandoned += close_result.rowcount or 0
-
-            await session.execute(
-                update(TariffQuote)
-                .where(
-                    TariffQuote.payment_id.in_(payment_ids),
-                    TariffQuote.status == "active",
-                )
-                .values(
-                    status="cancelled",
-                    diagnostic_reason="checkout_abandoned_by_ban",
-                )
-            )
-
-            # Отменяем только ещё не захваченные grant-операции.
-            # processing не трогаем: worker уже владеет такой операцией.
-            result = await session.execute(
-                update(PaymentFulfillmentOperation)
-                .where(
-                    PaymentFulfillmentOperation.payment_id.in_(payment_ids),
-                    PaymentFulfillmentOperation.operation_type.in_(
-                        ("grant_subscription", "grant_referral")
-                    ),
-                    PaymentFulfillmentOperation.status.in_(
-                        ("pending", "retry")
-                    ),
-                )
-                .values(
-                    status="cancelled",
-                    completed_at=current_time,
-                    last_error_code="user_banned",
-                    last_error="user banned before fulfillment",
-                    locked_at=None,
-                    locked_by=None,
-                )
-            )
-            fulfillment_cancelled = result.rowcount or 0
-
-            # Провайдер уже подтвердил оплату, но доступ ещё не выдан.
-            # Сохраняем provider_status=succeeded и переводим выдачу в review.
-            await session.execute(
-                update(Payment)
-                .where(
-                    Payment.id.in_(payment_ids),
-                    Payment.provider_status == "succeeded",
-                    Payment.fulfillment_status.in_(
-                        ("not_ready", "pending", "processing", "failed")
-                    ),
-                )
-                .values(
-                    status="requires_manual_review",
-                    checkout_status="abandoned",
-                    fulfillment_status="manual_review",
-                    reconciliation_status="manual_review",
-                    manual_review_reason=(
-                        "user_banned_before_fulfillment"
-                    ),
-                    fulfillment_last_error_code="user_banned",
-                    payment_url=None,
-                )
-            )
+                if payment.external_id:
+                    operation = await ensure_reconcile_payment_operation(
+                        session, payment, reason="user_banned"
+                    )
+                    if operation is not None:
+                        reconciliations_queued += 1
 
         await update_user(
             session,
@@ -216,8 +141,8 @@ class BanService:
             telegram_id,
             (
                 f"profiles_deleted={deleted_profiles}, "
-                f"payments_abandoned={payments_abandoned}, "
-                f"fulfillment_cancelled={fulfillment_cancelled}"
+                f"payments_closed={payments_closed}, "
+                f"reconciliations_queued={reconciliations_queued}"
             ),
         )
 
@@ -225,13 +150,13 @@ class BanService:
 
         logger.info(
             "User %s banned by admin %s. "
-            "Deleted profiles: %s, abandoned payments: %s, "
-            "cancelled fulfillment operations: %s",
+            "Deleted profiles: %s, closed top-ups: %s, "
+            "queued reconciliations: %s",
             telegram_id,
             admin_id,
             deleted_profiles,
-            payments_abandoned,
-            fulfillment_cancelled,
+            payments_closed,
+            reconciliations_queued,
         )
 
         return True, "забанен"

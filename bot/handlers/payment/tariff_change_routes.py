@@ -1,4 +1,5 @@
 """Two-step tariff-change confirmation and balance-shortage recovery."""
+from bot import texts
 
 import uuid
 
@@ -32,19 +33,19 @@ router = Router()
 
 
 CHANGE_ERRORS = {
-    "quote_not_found": "Котировка не найдена. Выберите тариф ещё раз.",
-    "quote_expired": "Расчёт устарел. Выберите тариф ещё раз.",
-    "quote_not_active": "Эта смена тарифа больше не активна.",
-    "tariff_unavailable": "Выбранный тариф больше недоступен.",
-    "tariff_price_changed": "Цена тарифа изменилась. Проверьте новый расчёт.",
-    "quote_source_history_changed": "Подписка изменилась. Создайте новый расчёт.",
-    "quote_economics_changed": "Экономика подписки изменилась. Создайте новый расчёт.",
-    "subscription_state_changed": "Состояние подписки изменилось. Начните заново.",
-    "subscription_balance_untracked": "Не удалось надёжно рассчитать остаток подписки.",
-    "insufficient_balance": "На балансе недостаточно средств.",
-    "financial_hold": "Смена тарифа заблокирована из-за финансового спора.",
-    "account_debt": "Смена тарифа недоступна до погашения задолженности.",
-    "too_many_devices": "Сначала удалите лишние устройства.",
+    "quote_not_found": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L36_1,
+    "quote_expired": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L37_1,
+    "quote_not_active": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
+    "tariff_unavailable": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L39_1,
+    "tariff_price_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L40_1,
+    "quote_source_history_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L41_1,
+    "quote_economics_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L42_1,
+    "subscription_state_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L43_1,
+    "subscription_balance_untracked": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L44_1,
+    "insufficient_balance": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L45_1,
+    "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L46_1,
+    "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L47_1,
+    "too_many_devices": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L48_1,
 }
 
 
@@ -57,7 +58,7 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return f"{days} дн." + (f" {remainder} ч." if remainder else "")
+    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L61_1.format(value_0=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
 
 
 async def render_tariff_change_review(
@@ -76,23 +77,17 @@ async def render_tariff_change_review(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            CHANGE_ERRORS.get(exc.code, "Не удалось открыть смену тарифа."),
+            CHANGE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L80_1),
             get_back_button("payment_change_tariff"),
         )
         return
     quote = intent.quote
-    due = int(quote.confirmed_payment_required_rub)
+    due = int(quote.amount_due_rub)
     before = int(intent.balance.available)
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
     text = (
-        "✅ <b>Подтверждение смены тарифа</b>\n\n"
-        f"Новый тариф: <b>{get_tariff_display_name(intent.target_version.device_limit)}</b>\n"
-        f"Лимит устройств: <b>{intent.target_version.device_limit}</b>\n"
-        f"Срок после конвертации: <b>{_hours_text(quote.resulting_paid_hours + quote.resulting_bonus_hours)}</b>\n"
-        f"Доплата: <b>{due} ₽</b>\n\n"
-        f"Баланс до операции: <b>{before} ₽</b>\n"
-        f"Баланс после операции: <b>{after} ₽</b>"
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L90_1.format(value_0=get_tariff_display_name(intent.target_version.device_limit), value_1=intent.target_version.device_limit, value_2=_hours_text(quote.resulting_paid_hours + quote.resulting_bonus_hours), value_3=due, value_4=before, value_5=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -100,12 +95,10 @@ async def render_tariff_change_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += (
-                f"\n\nНе хватает {int(intent.shortage)} ₽. "
-                f"Минимальное пополнение — {minimum} ₽; "
-                f"после смены останется {remainder} ₽."
+                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L104_1.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
             )
         else:
-            text += f"\n\nНе хватает: <b>{int(intent.shortage)} ₽</b>."
+            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L109_1.format(value_0=int(intent.shortage))
         keyboard = get_balance_change_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -130,7 +123,7 @@ async def review_tariff_change(
     await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
-        await callback.answer("Некорректная операция", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L133_1, show_alert=True)
         return
     await render_tariff_change_review(callback, session, db_user, quote_id)
 
@@ -142,7 +135,7 @@ async def confirm_tariff_change(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Меняем тариф…", show_alert=False)
+    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L145_1, show_alert=False)
     await state.clear()
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -163,7 +156,7 @@ async def confirm_tariff_change(
             callback.bot,
             callback.message.chat.id,
             CHANGE_ERRORS.get(
-                exc.code, "Смена тарифа не выполнена. Деньги не списаны."
+                exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L167_1
             ),
             get_back_button("payment_change_tariff"),
         )
@@ -177,11 +170,7 @@ async def confirm_tariff_change(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        "🎉 <b>Тариф изменён</b>\n\n"
-        f"Новый тариф: <b>{get_tariff_display_name(intent.target_version.device_limit)}</b>\n"
-        f"Срок: {_hours_text(result.quote.resulting_paid_hours + result.quote.resulting_bonus_hours)}\n"
-        f"Списано: <b>{charged} ₽</b>\n"
-        f"Баланс: <b>{int(result.balance_after.available)} ₽</b>",
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1.format(value_0=get_tariff_display_name(intent.target_version.device_limit), value_1=_hours_text(result.quote.resulting_paid_hours + result.quote.resulting_bonus_hours), value_2=charged, value_3=int(result.balance_after.available)),
         get_payment_success_keyboard(),
     )
     result.quote.purchase_notified_at = (
@@ -207,7 +196,7 @@ async def topup_exact_change_shortage(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Создаём ссылку…", show_alert=False)
+    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L210_1, show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
@@ -216,7 +205,7 @@ async def topup_exact_change_shortage(
             session, db_user, quote_id
         )
     except AccountTariffChangeError:
-        await callback.answer("Котировка устарела", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L219_1, show_alert=True)
         return
     if intent.shortage <= 0:
         await render_tariff_change_review(
@@ -249,7 +238,7 @@ async def topup_custom_change_shortage(
             session, db_user, quote_id
         )
     except AccountTariffChangeError:
-        await callback.answer("Котировка устарела", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L252_1, show_alert=True)
         return
     minimum = max(
         int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
@@ -261,6 +250,6 @@ async def topup_custom_change_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        f"Введите целую сумму от <b>{minimum} ₽</b> до 5000 ₽.",
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L264_1.format(value_0=minimum),
         get_back_button(f"balance_change_review:{intent.quote.public_id}"),
     )

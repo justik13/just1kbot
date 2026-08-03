@@ -5,7 +5,6 @@ import logging
 import uuid
 
 from database.connection import session_scope
-from services import payment_fulfillment as fulfillment
 from services import payment_provider_operations as provider
 from services import provider_refunds
 from services.workers import webhook_inbox
@@ -35,9 +34,6 @@ async def _run_claim(module, claim):
             result = await webhook_inbox.fetch_provider(claim)
             async with session_scope() as session:
                 await webhook_inbox.finalize(session, claim, result)
-        else:
-            async with session_scope() as session:
-                await fulfillment.execute(session, claim)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -61,10 +57,6 @@ async def _run_claim(module, claim):
                     await webhook_inbox.finalize_webhook_failure(
                         session, claim, error_code=type(exc).__name__, retryable=True
                     )
-                else:
-                    await fulfillment.finalize_fulfillment_failure(
-                        session, claim, error_code=type(exc).__name__, retryable=True
-                    )
         except Exception:
             logger.error(
                 "Payment failure finalizer rejected stale ownership queue=%s",
@@ -75,7 +67,7 @@ async def _run_claim(module, claim):
 async def payment_pipeline_loop(bot, shutdown_event: asyncio.Event) -> None:
     worker_id = uuid.uuid4().hex
     active: set[asyncio.Task] = set()
-    queues = (provider, provider_refunds, webhook_inbox, fulfillment)
+    queues = (provider, provider_refunds, webhook_inbox)
     cursor = 0
     logger.info("Payment pipeline worker started worker=%s", worker_id[:8])
     try:

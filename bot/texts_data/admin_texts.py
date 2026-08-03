@@ -592,6 +592,7 @@ Worker Cleanup подчистит позже.""",
 
     "PAYMENT_STATUS_NAMES": {
         "pending": "⏳ Ожидает",
+        "paid_processing": "🔄 Зачисляется",
         "completed": "✅ Завершён",
         "cancelled": "❌ Отменён",
         "failed": "⚠️ Ошибка",
@@ -763,3 +764,9 @@ Worker Cleanup подчистит позже.""",
 
 <i>Требуется ручное вмешательство. Воркеры могут больше не перезапускаться.</i>""",
 }
+
+TEXTS.update({
+    "ADMIN_QUEUE_RETRY_CONFIRMATION": "{card}\n\n⚠️ Операция может быть обработана повторно.",
+    "ADMIN_DISPUTE_CREATED_PREFIX": "Создан новый спор.\n\n",
+    "ADMIN_DISPUTE_EXISTING_PREFIX": "Спор уже существовал.\n\n",
+})

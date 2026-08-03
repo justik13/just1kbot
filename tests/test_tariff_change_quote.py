@@ -13,12 +13,41 @@ T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def snapshot():
-    paid = ProjectedPaidLot(2, 20, 200, 100, 720, Decimal("90"), 300,
-                           Decimal("37.500000"), T0, T0 + timedelta(hours=720))
-    bonus = ProjectedBonusLot(3, "payment", "201", "referral_user_bonus", 24, 24,
-                              T0 + timedelta(hours=720), T0 + timedelta(hours=744))
-    return SubscriptionBalanceSnapshot(T0, True, None, T0 + timedelta(hours=744), 300,
-        Decimal("37.500000"), 24, Decimal("0.25"), (paid,), (bonus,), (20,), (3, 2))
+    paid = ProjectedPaidLot(
+        entitlement_entry_id=2,
+        paid_value_ledger_entry_id=20,
+        tariff_version_id=200,
+        original_paid_hours=720,
+        original_paid_value_rub=Decimal("90"),
+        remaining_whole_hours=300,
+        remaining_paid_value_rub=Decimal("37.500000"),
+        segment_start=T0,
+        segment_end=T0 + timedelta(hours=720),
+    )
+    bonus = ProjectedBonusLot(
+        entitlement_entry_id=3,
+        source_type="quote",
+        source_id="201",
+        bonus_type="referral_user_bonus",
+        original_hours=24,
+        remaining_whole_hours=24,
+        segment_start=T0 + timedelta(hours=720),
+        segment_end=T0 + timedelta(hours=744),
+    )
+    return SubscriptionBalanceSnapshot(
+        as_of=T0,
+        tracked=True,
+        failure_code=None,
+        coverage_end=T0 + timedelta(hours=744),
+        remaining_paid_hours=300,
+        remaining_paid_value_rub=Decimal("37.500000"),
+        remaining_bonus_hours=24,
+        rounding_loss_hours=Decimal("0.25"),
+        paid_lots=(paid,),
+        bonus_lots=(bonus,),
+        source_ledger_entry_ids=(20,),
+        source_entitlement_entry_ids=(3, 2),
+    )
 
 
 class TariffChangeQuoteTests(unittest.TestCase):

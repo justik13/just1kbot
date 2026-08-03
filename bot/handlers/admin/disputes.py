@@ -32,41 +32,41 @@ class DisputeEntry(StatesGroup):
 
 
 STATUS_LABELS = {
-    "open": "открыт",
-    "manual_review": "ручная проверка",
-    "won_by_merchant": "выигран продавцом",
-    "lost_by_merchant": "проигран продавцом",
+    "open": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L35_1,
+    "manual_review": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L36_1,
+    "won_by_merchant": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L37_1,
+    "lost_by_merchant": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L38_1,
 }
 
 
 def _error_text(code: str) -> str:
     return {
-        "provider_payment_id_required": "Нужен YooKassa payment ID",
-        "provider_case_id_required": "Нужен ID спора банка/провайдера",
-        "dispute_amount_invalid": "Сумма должна быть целым числом рублей",
-        "disputed_at_timezone_required": "Некорректная дата спора",
-        "payment_not_found": "Платёж с таким YooKassa ID не найден",
+        "provider_payment_id_required": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L44_1,
+        "provider_case_id_required": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L45_1,
+        "dispute_amount_invalid": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L46_1,
+        "disputed_at_timezone_required": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L47_1,
+        "payment_not_found": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L48_1,
         "dispute_requires_balance_topup": (
-            "Спор поддерживается только для пополнения баланса"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L50_1
         ),
-        "payment_not_settled": "Платёж ещё не подтверждён",
-        "payment_not_credited": "Пополнение ещё не зачислено в ledger",
-        "provider_case_id_conflict": "Этот case ID уже связан с другими данными",
-        "payment_has_active_dispute": "По платежу уже открыт спор",
-        "refund_in_progress": "Сначала завершите активный refund",
+        "payment_not_settled": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L52_1,
+        "payment_not_credited": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L53_1,
+        "provider_case_id_conflict": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L54_1,
+        "payment_has_active_dispute": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L55_1,
+        "refund_in_progress": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L56_1,
         "dispute_exceeds_payment_exposure": (
-            "Сумма превышает остаток платёжного риска"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L58_1
         ),
-        "dispute_not_found": "Спор не найден",
-        "dispute_already_resolved": "Спор уже завершён другим исходом",
-    }.get(code, "Операция со спором отклонена финансовыми инвариантами")
+        "dispute_not_found": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L60_1,
+        "dispute_already_resolved": texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L61_1,
+    }.get(code, texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L62_1)
 
 
 def _list_keyboard() -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-    builder.button(text="➕ Зарегистрировать спор", callback_data="admin_dispute_new")
-    builder.button(text="🔄 Обновить", callback_data="admin_disputes")
-    builder.button(text="← В админку", callback_data="admin_menu")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L67_1, callback_data="admin_dispute_new")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L68_1, callback_data="admin_disputes")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L69_1, callback_data="admin_menu")
     builder.adjust(1)
     return builder
 
@@ -75,19 +75,19 @@ def _card_keyboard(dispute: PaymentDispute) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     if dispute.status in {"open", "manual_review"}:
         builder.button(
-            text="✅ Продавец выиграл",
+            text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L78_1,
             callback_data=f"admin_dispute_resolve:won_by_merchant:{dispute.id}",
         )
         builder.button(
-            text="❌ Продавец проиграл",
+            text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L82_1,
             callback_data=f"admin_dispute_resolve:lost_by_merchant:{dispute.id}",
         )
         if dispute.status == "open":
             builder.button(
-                text="🛑 Ручная проверка",
+                text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L87_1,
                 callback_data=f"admin_dispute_review:{dispute.id}",
             )
-    builder.button(text="← К спорам", callback_data="admin_disputes")
+    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L90_1, callback_data="admin_disputes")
     builder.adjust(1)
     return builder
 
@@ -106,17 +106,7 @@ async def _render_card(
         else None
     )
     text = (
-        f"⚠️ <b>Спор #{dispute.id}</b>\n"
-        f"Статус: <b>{STATUS_LABELS.get(dispute.status, safe(dispute.status))}</b>\n"
-        f"Case ID: <code>{safe(dispute.provider_case_id)}</code>\n"
-        f"YooKassa payment: "
-        f"<code>{safe(payment.external_id if payment else '—')}</code>\n"
-        f"Сумма: <b>{int(dispute.amount)} RUB</b>\n"
-        f"Дата спора: <code>{dispute.disputed_at.date().isoformat()}</code>\n"
-        f"Reservation: <code>{reservation.id if reservation else '—'}</code> "
-        f"({safe(reservation.status) if reservation else 'нет'})\n"
-        f"Chargeback entry: <code>{dispute.chargeback_entry_id or '—'}</code>\n"
-        f"Заметка: {safe(dispute.note or '—')}"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L109_1.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, safe(dispute.status)), value_2=safe(dispute.provider_case_id), value_3=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH), value_4=int(dispute.amount), value_5=dispute.disputed_at.date().isoformat(), value_6=reservation.id if reservation else texts.PLACEHOLDER_DASH, value_7=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING, value_8=dispute.chargeback_entry_id or texts.PLACEHOLDER_DASH, value_9=safe(dispute.note or texts.PLACEHOLDER_DASH))
     )
     return text, _card_keyboard(dispute).as_markup()
 
@@ -140,22 +130,20 @@ async def show_disputes(
             )
         ).all()
     )
-    lines = ["🛠 Админка › ⚠️ <b>Платёжные споры</b>", ""]
+    lines = [texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L143_1, ""]
     builder = _list_keyboard()
     for dispute in rows:
         lines.append(
-            f"#{dispute.id} · {STATUS_LABELS.get(dispute.status, dispute.status)} · "
-            f"{int(dispute.amount)} ₽ · case={safe(dispute.provider_case_id)}"
+            texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L147_1.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, dispute.status), value_2=int(dispute.amount), value_3=safe(dispute.provider_case_id))
         )
         builder.button(
             text=(
-                f"#{dispute.id} · "
-                f"{STATUS_LABELS.get(dispute.status, dispute.status)}"
+                texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L152_1.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, dispute.status))
             ),
             callback_data=f"admin_dispute_card:{dispute.id}",
         )
     if not rows:
-        lines.append("Споров пока нет.")
+        lines.append(texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L157_1)
     builder.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines),
@@ -172,12 +160,7 @@ async def start_dispute_entry(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(DisputeEntry.details)
     await callback.message.answer(
-        "Отправьте одной строкой:\n"
-        "<code>YooKassa_payment_ID | case_ID | сумма | YYYY-MM-DD | "
-        "open/manual_review/won_by_merchant/lost_by_merchant | заметка</code>\n\n"
-        "Пример:\n"
-        "<code>2f... | bank-case-17 | 499 | 2026-08-02 | open | "
-        "ожидаем документы</code>",
+        texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L175_1,
         parse_mode="HTML",
     )
     await callback.answer()
@@ -195,18 +178,18 @@ async def receive_dispute_entry(
         return
     parts = [part.strip() for part in (message.text or "").split("|", 5)]
     if len(parts) != 6:
-        await message.answer("Нужно ровно 6 полей, разделённых символом |")
+        await message.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L198_1)
         return
     provider_payment_id, case_id, amount, date_text, status, note = parts
     if status not in STATUS_LABELS:
-        await message.answer("Некорректный статус спора")
+        await message.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L202_1)
         return
     try:
         disputed_at = datetime.strptime(date_text, "%Y-%m-%d").replace(
             tzinfo=timezone.utc
         )
     except ValueError:
-        await message.answer("Дата должна быть в формате YYYY-MM-DD")
+        await message.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L209_1)
         return
     try:
         result = await open_payment_dispute(
@@ -239,7 +222,11 @@ async def receive_dispute_entry(
         return
     await state.clear()
     rendered = await _render_card(session, dispute.id)
-    prefix = "Создан новый спор.\n\n" if result.created else "Спор уже существовал.\n\n"
+    prefix = (
+        texts.ADMIN_DISPUTE_CREATED_PREFIX
+        if result.created
+        else texts.ADMIN_DISPUTE_EXISTING_PREFIX
+    )
     await message.answer(
         prefix + rendered[0],
         reply_markup=rendered[1],
@@ -255,11 +242,11 @@ async def show_dispute_card(callback: CallbackQuery, session: AsyncSession):
     try:
         dispute_id = int(callback.data.rsplit(":", 1)[1])
     except (TypeError, ValueError):
-        await callback.answer("Некорректный ID", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L258_1, show_alert=True)
         return
     rendered = await _render_card(session, dispute_id)
     if rendered is None:
-        await callback.answer("Спор не найден", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L262_1, show_alert=True)
         return
     await callback.message.edit_text(
         rendered[0],
@@ -283,7 +270,7 @@ async def mark_dispute_review(callback: CallbackQuery, session: AsyncSession):
             note="marked for manual review in Telegram admin",
         )
     except (TypeError, ValueError):
-        await callback.answer("Некорректный ID", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L286_1, show_alert=True)
         return
     except PaymentDisputeError as exc:
         await callback.answer(_error_text(exc.code), show_alert=True)
@@ -294,7 +281,7 @@ async def mark_dispute_review(callback: CallbackQuery, session: AsyncSession):
         reply_markup=rendered[1],
         parse_mode="HTML",
     )
-    await callback.answer("Переведено на ручную проверку", show_alert=True)
+    await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L297_1, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("admin_dispute_resolve:"))
@@ -310,37 +297,34 @@ async def confirm_dispute_resolution(
         "won_by_merchant",
         "lost_by_merchant",
     }:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L313_1, show_alert=True)
         return
     try:
         dispute_id = int(parts[2])
     except ValueError:
-        await callback.answer("Некорректный ID", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L318_1, show_alert=True)
         return
     dispute = await session.get(PaymentDispute, dispute_id)
     if dispute is None or dispute.status not in {"open", "manual_review"}:
-        await callback.answer("Состояние спора уже изменилось", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L322_1, show_alert=True)
         return
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="✅ Подтвердить",
+        text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L326_1,
         callback_data=f"admin_dispute_apply:{parts[1]}:{dispute.id}",
     )
     builder.button(
-        text="Отмена",
+        text=texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L330_1,
         callback_data=f"admin_dispute_card:{dispute.id}",
     )
     builder.adjust(1)
     effect = (
-        "reservation будет освобождена"
+        texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L333_1
         if parts[1] == "won_by_merchant"
-        else "будет создан exactly-once chargeback debit; возможен долг"
+        else texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L335_1
     )
     await callback.message.edit_text(
-        "⚠️ <b>Подтвердите исход спора</b>\n\n"
-        f"Спор: <code>#{dispute.id}</code>\n"
-        f"Исход: <b>{STATUS_LABELS[parts[1]]}</b>\n"
-        f"Эффект: {effect}.",
+        texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L340_1.format(value_0=dispute.id, value_1=STATUS_LABELS[parts[1]], value_2=effect),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -357,7 +341,7 @@ async def apply_dispute_resolution(
         return
     parts = callback.data.split(":")
     if len(parts) != 3:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L360_1, show_alert=True)
         return
     try:
         dispute = await resolve_payment_dispute(
@@ -367,7 +351,7 @@ async def apply_dispute_resolution(
             admin_id=callback.from_user.id,
         )
     except (TypeError, ValueError):
-        await callback.answer("Некорректный ID", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L370_1, show_alert=True)
         return
     except PaymentDisputeError as exc:
         await callback.answer(_error_text(exc.code), show_alert=True)
@@ -378,4 +362,4 @@ async def apply_dispute_resolution(
         reply_markup=rendered[1],
         parse_mode="HTML",
     )
-    await callback.answer("Исход спора зафиксирован", show_alert=True)
+    await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L381_1, show_alert=True)

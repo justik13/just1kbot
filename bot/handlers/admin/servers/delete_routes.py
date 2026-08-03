@@ -65,7 +65,7 @@ async def request_delete_server(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L68_1,
             show_alert=True,
         )
         return
@@ -89,7 +89,7 @@ async def request_delete_server(
 
     profiles_count = len(result.all())
 
-    flag = server.country_flag or "🌍"
+    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L92_1
 
     await state.update_data(delete_server_id=server_id)
     await state.set_state(AdminStates.confirming_server_delete)
@@ -122,7 +122,7 @@ async def confirm_delete_server(
 
     if current_state != AdminStates.confirming_server_delete:
         await callback.answer(
-            "⚠️ Сессия подтверждения истекла",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L125_1,
             show_alert=True,
         )
         return
@@ -131,7 +131,7 @@ async def confirm_delete_server(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L134_1,
             show_alert=True,
         )
         return
@@ -174,8 +174,7 @@ async def confirm_delete_server(
     if _has_unfinished_create_cleanup(profiles, operations) or processing_update:
         await session.rollback()
         await callback.answer(
-            "На сервере есть незавершённое создание VPN-клиента. "
-            "Дождитесь reconciliation и повторите удаление.",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L177_1,
             show_alert=True,
         )
         return
@@ -213,7 +212,7 @@ async def confirm_delete_server(
     )
 
     await callback.answer(
-        f"✅ Сервер {server_name} удалён ({deleted_profiles} устр.)",
+        texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L216_1.format(value_0=server_name, value_1=deleted_profiles),
         show_alert=True,
     )
 

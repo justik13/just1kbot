@@ -37,7 +37,7 @@ TEXTS = {
     # ============================================================
     "PROFILE_TEXT_ACTIVE": """👤 <b>Профиль</b>
 
-{name} (@{username})
+{name}{username_line}
 ID: <code>{telegram_id}</code>
 
 💎 <b>Тариф:</b> {tariff_name}
@@ -50,7 +50,7 @@ ID: <code>{telegram_id}</code>
 
     "PROFILE_TEXT_INACTIVE": """👤 <b>Профиль</b>
 
-{name} (@{username})
+{name}{username_line}
 ID: <code>{telegram_id}</code>
 
 🔴 <b>Статус:</b> Нет активной подписки
@@ -61,9 +61,9 @@ ID: <code>{telegram_id}</code>
 
 🎁 <b>Рефералов:</b> {referrals_count}  ·  Получено дней: +{referral_days}""",
 
-    "HISTORY_HEADER": "🧾 <b>История оплат</b>\n",
-    "HISTORY_EMPTY": "<i>История пуста. У вас пока не было оплат.</i>",
-    "HISTORY_LIMIT_NOTE": "\n<i>Показаны последние 10 из {count} оплат</i>",
+    "HISTORY_HEADER": "🧾 <b>История пополнений</b>\n",
+    "HISTORY_EMPTY": "<i>История пуста. У вас пока не было пополнений.</i>",
+    "HISTORY_LIMIT_NOTE": "\n<i>Показаны последние 10 из {count} пополнений</i>",
 
     # ============================================================
     # REFERRAL
@@ -397,6 +397,7 @@ ID: <code>{telegram_id}</code>
         "refunded": "↩️",
         "requires_manual_review": "🧪",
         "pending": "⏳",
+        "paid_processing": "🔄",
     },
 
     # ============================================================
@@ -616,3 +617,57 @@ URL должен начинаться с <code>http://</code> или <code>https
 
 Все ваши созданные устройства продолжают работать в обычном режиме. Лимит генераций обновится в 00:00. Если у вас возникли трудности с настройкой, пожалуйста, обратитесь в <b>💬 Поддержку</b>.""",
 }
+
+
+# Centralized Telegram UI labels and account-balance messages.
+TEXTS.update({
+    "BOT_START_DESCRIPTION": "🚀 Запустить бота",
+    "BUTTON_MAIN_MENU": "🏠 В главное меню",
+    "BUTTON_BACK": "← Назад",
+    "BUTTON_PROFILE": "← К профилю",
+    "BUTTON_BALANCE": "💰 Баланс",
+    "BUTTON_INVITE": "🎁 Пригласить друга",
+    "BUTTON_TOPUP_HISTORY": "🧾 История пополнений",
+    "BUTTON_COPY_REFERRAL": "📋 Скопировать ссылку",
+    "BUTTON_REFERRAL_LIST": "👥 Список рефералов",
+    "BUTTON_TOPUP": "➕ Пополнить баланс",
+    "BUTTON_RESUME_TOPUP": "💳 Продолжить пополнение",
+    "BUTTON_BALANCE_HISTORY": "🧾 История операций",
+    "BUTTON_CUSTOM_AMOUNT": "Другая сумма",
+    "BUTTON_CHECK_TOPUP": "🔄 Проверить статус",
+    "BUTTON_CLOSE_TOPUP": "🗂 Закрыть эту ссылку",
+    "BUTTON_RETURN_LATER": "Вернуться позже",
+    "BUTTON_OPEN_PAYMENT": "💳 Перейти к оплате",
+    "TOPUP_ERROR_WHOLE_RUBLES": "Введите сумму целыми рублями без копеек.",
+    "TOPUP_ERROR_MINIMUM": "Минимальная сумма пополнения — {minimum} ₽.",
+    "TOPUP_ERROR_MAXIMUM": "Максимальная сумма одного пополнения — {maximum} ₽.",
+    "TOPUP_ERROR_BALANCE_LIMIT": "Сумма превышает допустимый лимит баланса с учётом активных ссылок.",
+    "TOPUP_ERROR_UNFINISHED": "У вас уже есть {limit} незавершённых пополнения. Проверьте их статус или закройте ненужную ссылку.",
+    "TOPUP_ERROR_RATE_LIMIT": "Достигнут лимит создания ссылок за 24 часа. Попробуйте позже.",
+    "TOPUP_ERROR_BLOCKED": "Новые пополнения временно заблокированы. Обратитесь в поддержку.",
+    "TOPUP_ERROR_BANNED": "Пополнение недоступно для этого аккаунта.",
+    "TOPUP_NOT_FOUND_ALERT": "Пополнение не найдено",
+    "TOPUP_ALREADY_FINISHED_ALERT": "Пополнение уже завершено",
+    "TOPUP_CHECKING_ALERT": "Проверяем…",
+    "TOPUP_CREATING_ALERT": "Создаём ссылку…",
+    "TOPUP_CUSTOM_AMOUNT_PROMPT": "Введите сумму пополнения целым числом от {minimum} до {maximum} ₽.\nНапример: <code>499</code>",
+    "TOPUP_INVALID_AMOUNT": "Введите целую сумму без копеек, пробелов и знаков. Например: <code>499</code>",
+    "TOPUP_OPERATION_MINIMUM": "Для выбранной операции нужно пополнить минимум на <b>{minimum} ₽</b>.",
+    "TOPUP_HIDE_NOTICE": "Ссылка закрыта и больше не показывается. Если платёж уже завершён, деньги всё равно поступят на баланс.",
+    "TOPUP_SAVED_NOTICE": "Ссылка сохранена. Вы можете вернуться к пополнению позже.",
+    "TOPUP_MISSING_NOTICE": "Активная ссылка пополнения не найдена.",
+    "TOPUP_CREDITED_NOTICE": "✅ Баланс пополнен.",
+    "TOPUP_CONFIRMED_NOTICE": "✅ Оплата подтверждена. Зачисляем деньги на баланс.",
+    "TOPUP_PROVIDER_CANCELLED_NOTICE": "Пополнение отменено платёжным провайдером.",
+    "BALANCE_HISTORY_EMPTY": "<i>Операций пока нет.</i>",
+    "BALANCE_HISTORY_TITLE": "🧾 <b>История операций</b>\n\n{history}",
+    "BALANCE_ENTRY_LABELS": {
+        "payment_credit": "Пополнение",
+        "purchase_debit": "Покупка тарифа",
+        "purchase_reversal": "Возврат покупки",
+        "refund_debit": "Возврат через ЮKassa",
+        "chargeback_debit": "Банковский спор",
+        "admin_adjustment": "Корректировка",
+    },
+    "FALLBACK_STALE_CALLBACK": "Сессия устарела. Вернитесь в меню.",
+})

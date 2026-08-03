@@ -108,7 +108,7 @@ async def show_admin_audit(
 
             target = ""
             if log.target_type:
-                target = f" · {safe(log.target_type)}"
+                target = texts.RUNTIME_BOT_HANDLERS_ADMIN_DASHBOARD_L111_1.format(value_0=safe(log.target_type))
                 if log.target_id:
                     target += f" #{log.target_id}"
 

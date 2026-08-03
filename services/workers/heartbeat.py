@@ -1,3 +1,4 @@
+from bot import texts
 import asyncio
 import logging
 import os
@@ -20,9 +21,6 @@ def get_heartbeat_file() -> Path:
     explicit_file = os.environ.get("JUST1KBOT_HEARTBEAT_FILE")
     if explicit_file:
         return Path(explicit_file)
-    project_dir = os.environ.get("JUST1KBOT_DIR") or os.environ.get("just1kbot_DIR")
-    if project_dir:
-        return Path(project_dir) / ".heartbeat"
     return PRODUCTION_HEARTBEAT_FILE
 
 
@@ -96,12 +94,7 @@ async def _check_circuit_breakers():
             pass
 
         alert_msg = (
-            f"⚠️ <b>Сервер Amnezia недоступен!</b>\n"
-            f"🌍 <b>{server_name}</b>\n"
-            f"🔗 <code>{safe_target}</code>\n"
-            f"❌ CircuitBreaker перешёл в OPEN\n"
-            f"🔄 Попытки восстановления каждые {cb.recovery_timeout:.0f}с\n"
-            f"💡 Проверьте сервер вручную"
+            texts.RUNTIME_SERVICES_WORKERS_HEARTBEAT_L99_1.format(value_0=server_name, value_1=safe_target, value_2=cb.recovery_timeout)
         )
 
         if _bot_ref is not None:
@@ -122,6 +115,7 @@ async def _check_circuit_breakers():
 
 def set_bot_ref(bot):
     global _bot_ref
+
     _bot_ref = bot
 
 

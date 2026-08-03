@@ -3,13 +3,13 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from database.models import PendingAPIDeletion, VPNProfile
+from database.models import VPNProfile
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
@@ -47,7 +47,7 @@ async def start_edit_server_name(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L50_1,
             show_alert=True,
         )
         return
@@ -179,7 +179,7 @@ async def start_edit_server_flag(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L182_1,
             show_alert=True,
         )
         return
@@ -196,7 +196,7 @@ async def start_edit_server_flag(
         )
         return
 
-    current_flag = server.country_flag or "🌍"
+    current_flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L199_1
 
     await state.update_data(
         server_id=server_id,
@@ -321,7 +321,7 @@ async def start_edit_server_url(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L324_1,
             show_alert=True,
         )
         return
@@ -473,7 +473,7 @@ async def process_edit_server_url(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else "неизвестно"
+                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
                 ),
             ),
             get_back_button("admin_servers"),
@@ -489,22 +489,6 @@ async def process_edit_server_url(
     await update_server(session, server, api_url=new_url)
 
     cleanup_server_circuit_breakers(old_url)
-
-    try:
-        await session.execute(
-            update(PendingAPIDeletion)
-            .where(
-                PendingAPIDeletion.server_name == server.name,
-                PendingAPIDeletion.api_url == old_url,
-            )
-            .values(api_url=new_url)
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to update pending deletions URL "
-            "for server %s: %s",
-            server.name, e,
-        )
 
     await AuditService.log_action(
         session,
@@ -550,7 +534,7 @@ async def start_edit_server_key(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L537_1,
             show_alert=True,
         )
         return
@@ -665,7 +649,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else "неизвестно"
+                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L652_1
                 ),
             ),
             get_back_button("admin_servers"),
@@ -677,21 +661,6 @@ async def process_edit_server_key(
         return
 
     await update_server(session, server, api_key=new_key)
-
-    try:
-        await session.execute(
-            update(PendingAPIDeletion)
-            .where(
-                PendingAPIDeletion.server_name == server.name,
-            )
-            .values(api_key=new_key)
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to update pending deletions key "
-            "for server %s: %s",
-            server.name, e,
-        )
 
     await AuditService.log_action(
         session,
@@ -735,7 +704,7 @@ async def start_edit_server_max_clients(
 
     if server_id is None:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L707_1,
             show_alert=True,
         )
         return

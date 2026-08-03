@@ -1,6 +1,6 @@
 #!/bin/bash
 # Production-safe PostgreSQL restore/cutover engine for Just1kBot.
-# This file never handles legacy rehearsal invocation.
+# This file never handles obsolete rehearsal invocation.
 
 set -Eeuo pipefail
 IFS=$'\n\t'

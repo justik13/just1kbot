@@ -1,3 +1,4 @@
+from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -6,17 +7,17 @@ def get_broadcast_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✅ Отправить всем",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L9_1,
         callback_data="broadcast_send_all",
     )
 
     builder.button(
-        text="✅ Только активным",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L14_1,
         callback_data="broadcast_send_active",
     )
 
     builder.button(
-        text="❌ Отмена",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L19_1,
         callback_data="admin_menu",
     )
 
@@ -29,7 +30,7 @@ def get_broadcast_result_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✅ Ок (Убрать)",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L32_1,
         callback_data="broadcast_dismiss",
     )
 
@@ -42,7 +43,7 @@ def get_broadcast_close_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="✅ Прочитано (убрать)",
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L45_1,
         callback_data="dismiss_broadcast",
     )
 

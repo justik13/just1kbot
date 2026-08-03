@@ -1,5 +1,6 @@
 """Periodic non-blocking alerts for unhealthy durable payment queues."""
 from __future__ import annotations
+from bot import texts
 
 import asyncio
 import html
@@ -207,34 +208,40 @@ class QueueHealthMonitor:
     def _unhealthy_message(queue: QueueSnapshot) -> str:
         problems = []
         if queue.dead:
-            problems.append(f"dead={queue.dead} oldest={queue.oldest_dead_age_seconds}s")
+            problems.append(texts.QUEUE_HEALTH_PROBLEM_DEAD.format(count=queue.dead, age=queue.oldest_dead_age_seconds))
         if queue.overdue:
-            problems.append(f"overdue={queue.overdue} oldest={queue.oldest_due_age_seconds}s")
+            problems.append(texts.QUEUE_HEALTH_PROBLEM_OVERDUE.format(count=queue.overdue, age=queue.oldest_due_age_seconds))
         if queue.stale_processing:
             problems.append(
-                f"stale_processing={queue.stale_processing} "
-                f"oldest={queue.oldest_stale_age_seconds}s"
+                texts.QUEUE_HEALTH_PROBLEM_STALE.format(
+                count=queue.stale_processing,
+                age=queue.oldest_stale_age_seconds,
+            )
             )
         examples = []
         for item in queue.examples:
-            payment = f" payment={item.payment_id}" if item.payment_id is not None else ""
-            code = f" code={html.escape(item.last_error_code)}" if item.last_error_code else ""
+            payment = texts.QUEUE_HEALTH_PAYMENT_FRAGMENT.format(payment_id=item.payment_id) if item.payment_id is not None else ""
+            code = texts.QUEUE_HEALTH_CODE_FRAGMENT.format(code=html.escape(item.last_error_code)) if item.last_error_code else ""
             examples.append(
-                f"<code>id={item.operation_id}{payment} "
-                f"type={html.escape(item.operation_type)} status={item.status} "
-                f"attempts={item.attempts}/{item.max_attempts} "
-                f"age={item.age_seconds}s{code}</code>"
+                texts.QUEUE_HEALTH_EXAMPLE.format(
+                    operation_id=item.operation_id,
+                    payment=payment,
+                    operation_type=html.escape(item.operation_type),
+                    status=item.status,
+                    attempts=item.attempts,
+                    max_attempts=item.max_attempts,
+                    age=item.age_seconds,
+                    code=code,
+                )
             )
         suffix = "\n" + "\n".join(examples) if examples else ""
         return (
-            f"🚨 <b>Durable queue unhealthy</b>\n"
-            f"Queue: <code>{queue.name}</code>\n"
-            f"Problems: {', '.join(problems)}{suffix}"
+            texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L230_1.format(value_0=queue.name, value_1=', '.join(problems), value_2=suffix)
         )
 
     @staticmethod
     def _recovery_message(queue: QueueSnapshot) -> str:
-        return f"✅ <b>Durable queue recovered</b>\nQueue: <code>{queue.name}</code>"
+        return texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L237_1.format(value_0=queue.name)
 
     async def close(self) -> None:
         tasks = list(self.alert_tasks)

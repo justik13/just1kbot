@@ -48,7 +48,7 @@ async def servers_pagination(
 
     if page is None or page < 1:
         await callback.answer(
-            "Некорректный запрос",
+            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_LIST_ROUTES_L51_1,
             show_alert=True,
         )
         return

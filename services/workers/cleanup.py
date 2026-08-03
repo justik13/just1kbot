@@ -1,3 +1,4 @@
+from bot import texts
 import asyncio
 import logging
 import time
@@ -10,7 +11,6 @@ from database.connection import session_scope
 from database.models import (
     BroadcastProgress,
     HubMessage,
-    PendingAPIDeletion,
     Server,
     User,
     VPNProfile,
@@ -33,7 +33,6 @@ AUDIT_LOG_RETENTION_DAYS = 180
 
 _last_old_cleanup: float = 0.0
 
-QUARANTINE_ERROR_PREFIX = "QUARANTINED_UNSAFE_DELETE_REASON"
 
 EXECUTABLE_DELETE_REASONS = frozenset(
     {
@@ -77,7 +76,6 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
         try:
             await _cleanup_expired_profiles_grace()
             await _cleanup_dangling_peers()
-            await _process_pending_deletions()
 
             now = time.monotonic()
             if now - _last_old_cleanup > OLD_RECORDS_INTERVAL:
@@ -89,7 +87,7 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
             break
         except Exception as e:
             logger.error(
-                "Критическая ошибка в цикле очистки: %s",
+                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L90_1,
                 e,
                 exc_info=True,
             )
@@ -184,8 +182,7 @@ async def _cleanup_expired_profiles_grace():
                         if bot:
                             await bot.send_message(
                                 user.telegram_id,
-                                "⚠️ Ваши устройства были удалены из-за истечения подписки. "
-                                "Продлите доступ, чтобы создать новые.",
+                                texts.UI_SERVICES_WORKERS_CLEANUP_L184_1,
                             )
                     except TelegramForbiddenError:
                         user.is_bot_blocked = True
@@ -255,7 +252,7 @@ async def _cleanup_dangling_peers():
             return server_info, api_clients_list
         except Exception as e:
             logger.error(
-                "Ошибка получения списка пиров на %s: %s",
+                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1,
                 server_info["name"],
                 e,
             )
@@ -321,30 +318,6 @@ async def _cleanup_dangling_peers():
         logger.warning(
             "Unmanaged VPN peers detected: %s; automatic deletion disabled",
             unmanaged_count,
-        )
-
-
-async def _process_pending_deletions():
-    """Legacy queue is quarantine/report-only after durable migration."""
-    async with session_scope() as session:
-        rows = (
-            (
-                await session.execute(
-                    select(PendingAPIDeletion).where(PendingAPIDeletion.attempts >= 0)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not rows:
-            return
-        for row in rows:
-            row.attempts = -1
-            row.last_attempt_at = now_utc()
-            row.last_error = f"{QUARANTINE_ERROR_PREFIX}: legacy worker disabled"
-        logger.warning(
-            "Quarantined %s legacy pending deletions; no API writes performed",
-            len(rows),
         )
 
 

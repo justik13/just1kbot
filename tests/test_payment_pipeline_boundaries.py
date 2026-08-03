@@ -87,40 +87,30 @@ class PaymentBoundaries(unittest.TestCase):
                                 ):
                                     self.fail(str(path))
 
-    def test_payment_context_has_no_direct_legacy_effects(self):
-        for path in list((ROOT / "services/payment_service").rglob("*.py")) + [
-            ROOT / "services/workers/payments.py",
+    def test_topup_pipeline_has_no_subscription_side_effects(self):
+        for path in [
+            ROOT / "services/account_topup.py",
+            ROOT / "services/payment_provider_operations.py",
+            ROOT / "services/workers/webhook_inbox.py",
             ROOT / "bot/handlers/webhook.py",
         ]:
             body = path.read_text()
             for forbidden in (
                 "SubscriptionService.extend_subscription",
                 "ReferralService.process_bonus",
-                "PaymentService.handle_successful_payment(",
-            ):
-                self.assertNotIn(forbidden, body, str(path))
-
-    def test_no_payment_side_effects_outside_fulfillment(self):
-        for path in [
-            ROOT / "services/payment_service/service.py",
-            ROOT / "services/workers/webhook_inbox.py",
-            ROOT / "services/workers/payments.py",
-        ]:
-            body = path.read_text()
-            for forbidden in (
-                "subscription_end =",
-                "referral_days =",
                 "ProfileDeletionService",
-                "extend_subscription(",
+                "payment_grant",
             ):
                 self.assertNotIn(forbidden, body, str(path))
 
-    def test_repeatable_reconcile_and_atomic_grant_are_present(self):
+    def test_repeatable_reconcile_and_idempotent_credit_are_present(self):
         provider = (ROOT / "services/payment_provider_operations.py").read_text()
+        models = (ROOT / "database/models.py").read_text()
+        topup = (ROOT / "services/account_topup.py").read_text()
         self.assertIn("ensure_reconcile_payment_operation", provider)
         self.assertIn("uuid.uuid4().hex", provider)
-        self.assertIn("payment-grant:", provider)
-        self.assertIn("on_conflict_do_nothing", provider)
+        self.assertIn("uq_account_ledger_payment_credit", models)
+        self.assertIn("credit_succeeded_topup", topup)
 
     def test_create_calls_require_idempotency_key(self):
         for path in (ROOT / "services").rglob("*.py"):

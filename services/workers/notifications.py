@@ -40,17 +40,17 @@ def _get_backoff_delay(retry_count: int) -> int:
 
 def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
-        return "в ближайшее время"
+        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L43_1
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return f"{days} дн. {hours} ч."
+        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L49_1.format(value_0=days, value_1=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return f"{hours} ч. {minutes} мин."
+    return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L53_1.format(value_0=hours, value_1=minutes)
 
 
 def _maybe_reset_retry_on_type_change(
@@ -119,7 +119,7 @@ async def subscription_notifications_loop(
 
         except Exception as e:
             logger.error(
-                "Критическая ошибка в цикле уведомлений: %s",
+                texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L122_1,
                 e,
                 exc_info=True,
             )
@@ -248,12 +248,12 @@ async def _send_pre_expiry_notifications(
                     builder = InlineKeyboardBuilder()
 
                     builder.button(
-                        text="💳 Продлить доступ",
+                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L251_1,
                         callback_data="menu_subscription",
                     )
 
                     builder.button(
-                        text="✅ Прочитано (убрать)",
+                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L256_1,
                         callback_data="dismiss_notification",
                     )
 
@@ -407,17 +407,17 @@ async def _send_post_expiry_notifications(
                     builder = InlineKeyboardBuilder()
 
                     builder.button(
-                        text="🚀 Купить доступ",
+                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L410_1,
                         callback_data="menu_buy",
                     )
 
                     builder.button(
-                        text="💬 Поддержка",
+                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L415_1,
                         callback_data="menu_support",
                     )
 
                     builder.button(
-                        text="✅ Прочитано (убрать)",
+                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L420_1,
                         callback_data="dismiss_notification",
                     )
 

@@ -5,6 +5,8 @@
 # Все тексты хранятся в:
 # - bot/texts_data/user_texts.py
 # - bot/texts_data/admin_texts.py
+# - bot/texts_data/ui_texts.py
+# - bot/texts_data/runtime_texts.py
 # - bot/texts_data/overrides.py
 #
 # Этот файл:
@@ -20,6 +22,8 @@ from typing import Any
 
 from bot.texts_data import admin_texts as _admin_texts_module
 from bot.texts_data import user_texts as _user_texts_module
+from bot.texts_data import ui_texts as _ui_texts_module
+from bot.texts_data import runtime_texts as _runtime_texts_module
 from bot.texts_data import overrides as _overrides_module
 
 logger = logging.getLogger(__name__)
@@ -38,23 +42,15 @@ def _validate_key(key: Any) -> None:
 
 
 def _merge_texts() -> dict[str, Any]:
-    user_texts = dict(_user_texts_module.TEXTS)
-    admin_texts = dict(_admin_texts_module.TEXTS)
-
-    duplicates = sorted(set(user_texts.keys()) & set(admin_texts.keys()))
-
-    if duplicates:
-        raise RuntimeError(
-            "Duplicate text keys between user_texts and admin_texts: "
-            f"{duplicates}"
-        )
-
+    sources = (
+        ("user_texts", dict(_user_texts_module.TEXTS)),
+        ("admin_texts", dict(_admin_texts_module.TEXTS)),
+        ("ui_texts", dict(_ui_texts_module.TEXTS)),
+        ("runtime_texts", dict(_runtime_texts_module.TEXTS)),
+    )
     merged: dict[str, Any] = {}
 
-    for source_name, source in (
-        ("user_texts", user_texts),
-        ("admin_texts", admin_texts),
-    ):
+    for source_name, source in sources:
         for key, value in source.items():
             _validate_key(key)
 
@@ -108,6 +104,8 @@ def reload_texts() -> None:
 
     reload(_user_texts_module)
     reload(_admin_texts_module)
+    reload(_ui_texts_module)
+    reload(_runtime_texts_module)
     reload(_overrides_module)
 
     _TEXTS = _merge_texts()

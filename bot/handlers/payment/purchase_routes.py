@@ -1,4 +1,5 @@
 """Two-step confirmation and shortage recovery for balance purchases."""
+from bot import texts
 
 import uuid
 
@@ -34,17 +35,17 @@ router = Router()
 
 
 PURCHASE_ERRORS = {
-    "quote_not_found": "Котировка не найдена. Выберите тариф ещё раз.",
-    "quote_expired": "Цена устарела. Выберите тариф ещё раз.",
-    "quote_not_active": "Эта покупка больше не активна.",
-    "tariff_unavailable": "Тариф больше недоступен.",
-    "tariff_price_changed": "Цена тарифа изменилась. Проверьте новую цену.",
-    "quote_price_mismatch": "Цена изменилась. Выберите тариф ещё раз.",
-    "subscription_state_changed": "Состояние подписки изменилось. Начните операцию заново.",
-    "insufficient_balance": "На балансе недостаточно средств.",
-    "financial_hold": "Покупки временно заблокированы из-за финансового спора.",
-    "account_debt": "Покупки недоступны до погашения задолженности.",
-    "too_many_devices": "Сначала удалите лишние устройства.",
+    "quote_not_found": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L38_1,
+    "quote_expired": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L39_1,
+    "quote_not_active": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
+    "tariff_unavailable": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
+    "tariff_price_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L42_1,
+    "quote_price_mismatch": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L43_1,
+    "subscription_state_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
+    "insufficient_balance": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L45_1,
+    "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L46_1,
+    "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L47_1,
+    "too_many_devices": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L48_1,
 }
 
 
@@ -75,26 +76,20 @@ async def _render_purchase_review(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            PURCHASE_ERRORS.get(exc.code, "Не удалось открыть покупку."),
+            PURCHASE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L79_1),
             get_back_button("menu_subscription"),
         )
         return
     quote = intent.quote
     source = _source(quote.operation_type)
     back = f"select_tariff:{intent.tariff.id}:{source}"
-    price = int(quote.confirmed_payment_required_rub)
+    price = int(quote.amount_due_rub)
     before = int(intent.balance.available)
     after = max(0, before - price)
     tariff_name = get_tariff_display_name(intent.version.device_limit)
-    operation = "Продление" if quote.operation_type == "renew" else "Покупка"
+    operation = texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L90_1 if quote.operation_type == "renew" else texts.WORD_PURCHASE
     text = (
-        f"✅ <b>Подтверждение: {operation.lower()}</b>\n\n"
-        f"Тариф: <b>{tariff_name}</b>\n"
-        f"Срок: <b>{intent.version.duration_hours // 24} дней</b>\n"
-        f"Лимит устройств: <b>{intent.version.device_limit}</b>\n"
-        f"Цена: <b>{price} ₽</b>\n\n"
-        f"Баланс до покупки: <b>{before} ₽</b>\n"
-        f"Баланс после покупки: <b>{after} ₽</b>"
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L92_1.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -102,12 +97,10 @@ async def _render_purchase_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += (
-                f"\n\nНе хватает {int(intent.shortage)} ₽. "
-                f"Минимальное пополнение — {minimum} ₽; "
-                f"после покупки останется {remainder} ₽."
+                texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L106_1.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
             )
         else:
-            text += f"\n\nНе хватает: <b>{int(intent.shortage)} ₽</b>."
+            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L111_1.format(value_0=int(intent.shortage))
         keyboard = get_balance_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -132,7 +125,7 @@ async def review_purchase(
     await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
-        await callback.answer("Некорректная покупка", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
         return
     await _render_purchase_review(callback, session, db_user, quote_id)
 
@@ -144,7 +137,7 @@ async def confirm_purchase(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Проводим покупку…", show_alert=False)
+    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L147_1, show_alert=False)
     await state.clear()
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -163,7 +156,7 @@ async def confirm_purchase(
             callback.bot,
             callback.message.chat.id,
             PURCHASE_ERRORS.get(
-                exc.code, "Покупка не выполнена. Деньги не списаны."
+                exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L167_1
             ),
             get_back_button("menu_subscription"),
         )
@@ -172,16 +165,12 @@ async def confirm_purchase(
         session, user_id=db_user.id, quote_public_id=quote_id
     )
     operation = (
-        "Продление выполнено" if result.quote.operation_type == "renew" else "Тариф куплен"
+        texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L176_1 if result.quote.operation_type == "renew" else texts.PURCHASE_COMPLETED
     )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        f"🎉 <b>{operation}</b>\n\n"
-        f"Тариф: <b>{get_tariff_display_name(intent.version.device_limit)}</b>\n"
-        f"Срок: {intent.version.duration_hours // 24} дней\n"
-        f"Списано: <b>{abs(int(result.debit.amount))} ₽</b>\n"
-        f"Баланс: <b>{int(result.balance_after.available)} ₽</b>",
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(value_0=operation, value_1=get_tariff_display_name(intent.version.device_limit), value_2=intent.version.duration_hours // 24, value_3=abs(int(result.debit.amount)), value_4=int(result.balance_after.available)),
         get_payment_success_keyboard(),
     )
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()
@@ -206,7 +195,7 @@ async def topup_exact_shortage(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer("Создаём ссылку…", show_alert=False)
+    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L209_1, show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
@@ -215,7 +204,7 @@ async def topup_exact_shortage(
             session, db_user, quote_id
         )
     except AccountPurchaseError:
-        await callback.answer("Котировка устарела", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L218_1, show_alert=True)
         return
     if intent.shortage <= 0:
         await _render_purchase_review(callback, session, db_user, quote_id)
@@ -248,7 +237,7 @@ async def topup_custom_shortage(
             session, db_user, quote_id
         )
     except AccountPurchaseError:
-        await callback.answer("Котировка устарела", show_alert=True)
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L251_1, show_alert=True)
         return
     minimum = max(
         int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
@@ -260,7 +249,7 @@ async def topup_custom_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        f"Введите целую сумму от <b>{minimum} ₽</b> до 5000 ₽.",
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L263_1.format(value_0=minimum),
         get_back_button(
             f"balance_purchase_review:{intent.quote.public_id}"
         ),
@@ -297,7 +286,7 @@ async def resume_purchase_after_topup(
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                "Операция устарела. Выберите тариф заново.",
+                texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L300_1,
                 get_back_button("payment_change_tariff"),
             )
             return
@@ -316,7 +305,7 @@ async def resume_purchase_after_topup(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            PURCHASE_ERRORS.get(exc.code, "Операция устарела. Выберите тариф заново."),
+            PURCHASE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L316_1),
             get_back_button("menu_subscription"),
         )
         return
