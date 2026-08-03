@@ -1,0 +1,220 @@
+name: Apply greenfield runtime cleanup
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 53
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Remove unused compatibility paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"missing expected snippet: {label}")
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "bot/handlers/payment/balance_routes.py",
+              '''    settings = get_settings()
+              if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
+                  await render_hub(
+                      target.bot,
+                      target.chat.id,
+                      texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L205_1,
+                      get_back_button("menu_balance"),
+                  )
+                  return
+              bot_info = await target.bot.get_me()
+          ''',
+              '''    bot_info = await target.bot.get_me()
+          ''',
+              "optional YooKassa UI branch",
+          )
+
+          replace_once(
+              "bot/main.py",
+              '''        if not settings.DB_ENCRYPTION_KEY:
+                      logger.critical("❌ DB_ENCRYPTION_KEY пуст!")
+                      return
+
+                  try:
+                      Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
+                  except Exception as e:
+                      logger.critical(
+                          "❌ DB_ENCRYPTION_KEY невалиден: %s",
+                          type(e).__name__,
+                      )
+                      return
+          ''',
+              '''        try:
+                      Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
+                  except Exception as exc:
+                      raise RuntimeError(
+                          "DB_ENCRYPTION_KEY is not a valid Fernet key"
+                      ) from exc
+          ''',
+              "Fernet fail-closed startup",
+          )
+
+          replace_once(
+              "bot/main.py",
+              '''        else:
+                      for task in done:
+                          exc = (
+                              task.exception() if not task.cancelled() else None
+                          )
+                          if exc:
+                              logger.critical(
+                                  "Fatal error in main task: %s",
+                                  type(exc).__name__,
+                              )
+          ''',
+              '''        else:
+                      if polling_task.cancelled():
+                          raise RuntimeError("Telegram polling was cancelled unexpectedly")
+                      polling_error = polling_task.exception()
+                      if polling_error is not None:
+                          raise polling_error
+                      raise RuntimeError("Telegram polling stopped unexpectedly")
+          ''',
+              "polling fail-closed startup",
+          )
+
+          replace_once(
+              "scripts/deploy.sh",
+              '''    # Accept the service-owned file only long enough to normalize permissions.
+                  if [[ "$owner" == "$BOT_USER" && "$group" == "$BOT_USER" && "$mode" == 600 ]]; then
+                      return 0
+                  fi
+
+          ''',
+              "",
+              "old env ownership compatibility",
+          )
+
+          replace_once(
+              "scripts/deploy.sh",
+              '''        # A pre-stage-3 unit writes heartbeat inside the project directory.
+                      # Restore its original write boundary only for rollback compatibility.
+                      if [[ -f "$UNIT_FILE" ]] &&
+                          ! grep -Fq "JUST1KBOT_HEARTBEAT_FILE=${RUNTIME_DIR}/heartbeat" "$UNIT_FILE"; then
+                          chown "$BOT_USER:$BOT_USER" "$PROJECT_DIR"
+                          chmod 0750 "$PROJECT_DIR"
+                          HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"
+                          deploy_log 'rollback_heartbeat=obsolete project_root_writable=true'
+                      fi
+
+          ''',
+              "",
+              "old heartbeat rollback compatibility",
+          )
+
+          Path("tests/test_greenfield_contract.py").write_text(
+              textwrap.dedent('''\
+              import unittest
+              from pathlib import Path
+
+
+              ROOT = Path(__file__).resolve().parents[1]
+
+
+              class GreenfieldContractTests(unittest.TestCase):
+                  def read(self, relative: str) -> str:
+                      return (ROOT / relative).read_text(encoding="utf-8")
+
+                  def test_yookassa_cannot_be_disabled_after_settings_load(self):
+                      service = self.read("services/yookassa_service.py")
+                      balance = self.read("bot/handlers/payment/balance_routes.py")
+
+                      self.assertNotIn("CONFIGURATION =", service)
+                      self.assertNotIn('getattr(s, "YOOKASSA_SHOP_ID"', service)
+                      self.assertNotIn('getattr(s, "YOOKASSA_SECRET_KEY"', service)
+                      self.assertIn("settings.YOOKASSA_SHOP_ID", service)
+                      self.assertIn("settings.YOOKASSA_SECRET_KEY", service)
+                      self.assertNotIn(
+                          "if not settings.YOOKASSA_SHOP_ID",
+                          balance,
+                      )
+
+                  def test_runtime_failures_exit_nonzero(self):
+                      source = self.read("bot/main.py")
+
+                      self.assertNotIn("DB_ENCRYPTION_KEY пуст", source)
+                      self.assertIn(
+                          "DB_ENCRYPTION_KEY is not a valid Fernet key",
+                          source,
+                      )
+                      self.assertIn("raise polling_error", source)
+                      self.assertIn(
+                          "Telegram polling stopped unexpectedly",
+                          source,
+                      )
+
+                  def test_deploy_has_no_nonexistent_install_compatibility(self):
+                      source = self.read("scripts/deploy.sh")
+
+                      self.assertNotIn(
+                          '"$owner" == "$BOT_USER" && "$group" == "$BOT_USER"',
+                          source,
+                      )
+                      self.assertNotIn("rollback_heartbeat=obsolete", source)
+                      self.assertNotIn(
+                          'HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"',
+                          source,
+                      )
+
+
+              if __name__ == "__main__":
+                  unittest.main()
+              '''),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Run targeted checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt --quiet
+          python -m py_compile \
+            bot/main.py \
+            bot/handlers/payment/balance_routes.py \
+            services/yookassa_service.py \
+            tests/test_greenfield_contract.py
+          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc
+          shellcheck --severity=error deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh
+          python -m unittest discover -s tests -p 'test_greenfield_contract.py' -v
+          python -m unittest discover -s tests -p 'test_runtime_config_contract.py' -v
+          python -m unittest discover -s tests -p 'test_deploy_rollback.py' -v
+          git diff --check
+
+      - name: Commit verified cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/apply-greenfield-runtime-cleanup.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: remove nonexistent production compatibility paths'
+          git pull --rebase origin agent/greenfield-ui-ux-cleanup
+          git push origin HEAD:agent/greenfield-ui-ux-cleanup
