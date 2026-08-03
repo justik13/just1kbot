@@ -34,6 +34,8 @@ assert_root_tool() {
         fail "operational tool имеет неожиданного владельца: $path owner=$owner:$group"
     (( (8#$mode & 8#022) == 0 )) ||
         fail "operational tool writable для group/other: $path mode=$mode"
+    grep -Eiq 'Just1kBot|just1kbot' "$path" ||
+        fail "operational tool не содержит ownership marker Just1kBot: $path"
 }
 
 read_webhook_config() {
