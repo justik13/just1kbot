@@ -1,13 +1,13 @@
 #!/bin/bash
-# JSON adapter for the read-only Just1kBot doctor.
+# JSON adapter for the complete read-only Just1kBot doctor.
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-DOCTOR="$SCRIPT_DIR/doctor.sh"
+DOCTOR="$SCRIPT_DIR/doctor_complete.sh"
 [[ -f "$DOCTOR" && ! -L "$DOCTOR" ]] || {
-    printf '{"error":"doctor script missing or unsafe"}\n' >&2
+    printf '{"error":"complete doctor script missing or unsafe"}\n' >&2
     exit 1
 }
 
@@ -44,14 +44,14 @@ from pathlib import Path
 
 path = Path(os.environ["DOCTOR_OUTPUT"])
 checks = []
-summary = ""
+summaries = []
 for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
     line = raw.strip()
     match = re.match(r"^\[(OK|WARN|FAIL)\]\s+(.*)$", line)
     if match:
         checks.append({"status": match.group(1).lower(), "message": match.group(2)})
-    elif line.startswith("Doctor result:"):
-        summary = line
+    elif line.startswith("Doctor result:") or line.startswith("Complete doctor result:"):
+        summaries.append(line)
 payload = {
     "schema_version": 1,
     "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -60,7 +60,7 @@ payload = {
     "failures": sum(item["status"] == "fail" for item in checks),
     "warnings": sum(item["status"] == "warn" for item in checks),
     "checks": checks,
-    "summary": summary,
+    "summaries": summaries,
 }
 print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 PY
