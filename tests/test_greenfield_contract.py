@@ -51,6 +51,7 @@ class GreenfieldContractTests(unittest.TestCase):
 
     def test_deploy_has_no_nonexistent_install_compatibility(self):
         source = self.read("scripts/deploy.sh")
+        heartbeat = self.read("services/workers/heartbeat.py")
 
         self.assertNotIn(
             '"$owner" == "$BOT_USER" && "$group" == "$BOT_USER"',
@@ -61,6 +62,8 @@ class GreenfieldContractTests(unittest.TestCase):
             'HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"',
             source,
         )
+        self.assertNotIn('os.environ.get("JUST1KBOT_DIR")', heartbeat)
+        self.assertNotIn('os.environ.get("just1kbot_DIR")', heartbeat)
 
 
 if __name__ == "__main__":
