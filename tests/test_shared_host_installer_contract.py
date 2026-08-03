@@ -20,6 +20,9 @@ LOCK_POLICY = LOCK_POLICY_PATH.read_text(encoding="utf-8")
 RUNTIME = (SCRIPTS / "lib" / "install_safe_runtime.sh").read_text(
     encoding="utf-8"
 )
+ACTIVATION = (SCRIPTS / "lib" / "install_safe_activation_policy.sh").read_text(
+    encoding="utf-8"
+)
 DISPATCH = (SCRIPTS / "lib" / "install_safe_dispatch.sh").read_text(
     encoding="utf-8"
 )
@@ -32,6 +35,9 @@ UNINSTALL = "\n".join(
         (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(
             encoding="utf-8"
         ),
+        (SCRIPTS / "lib" / "uninstall_safe_ownership.sh").read_text(
+            encoding="utf-8"
+        ),
     ]
 )
 INSPECTOR = SCRIPTS / "inspect_install_state.sh"
@@ -39,15 +45,21 @@ INSPECTOR = SCRIPTS / "inspect_install_state.sh"
 
 class SharedHostInstallerContractTests(unittest.TestCase):
     def test_global_firewall_and_redis_are_never_mutated(self):
-        safe_installer = "\n".join((FOUNDATION, PLATFORM, RUNTIME, DISPATCH))
+        safe_installer = "\n".join(
+            (FOUNDATION, PLATFORM, RUNTIME, ACTIVATION, DISPATCH)
+        )
         for forbidden in (
-            "/etc/redis/redis.conf",
             "ufw --force enable",
             "ufw default",
             "ufw allow",
             "ufw deny",
             "iptables ",
             "nft ",
+            "sed -i /etc/redis/redis.conf",
+            "rm -f /etc/redis/redis.conf",
+            "rm -rf /etc/redis",
+            "> /etc/redis/redis.conf",
+            ">> /etc/redis/redis.conf",
         ):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, safe_installer)
@@ -55,6 +67,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
         self.assertIn("foundation_firewall_noop", FOUNDATION)
         self.assertIn("Firewall не изменяется", FOUNDATION)
         self.assertIn("firewall_managed", FOUNDATION)
+        self.assertIn("REDIS_CONFIG:=/etc/just1kbot/redis.conf", FOUNDATION)
 
     def test_redis_is_a_dedicated_local_service(self):
         for marker in (
@@ -73,14 +86,27 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             self.assertIn(marker, FOUNDATION)
         self.assertIn("Requires=$PG_UNIT $REDIS_SERVICE", RUNTIME)
         self.assertIn("Requires=just1kbot-redis.service", RUNTIME)
+        self.assertIn("foundation_setup_dedicated_redis", ACTIVATION)
+        self.assertNotIn("foundation_setup_dedicated_redis", DISPATCH)
 
     def test_preflight_happens_before_package_install(self):
-        initial = DISPATCH[
-            DISPATCH.index('if [[ "$INITIAL_INSTALL" == true ]]') :
+        run_deploy = DISPATCH[DISPATCH.index("run_deploy()") :]
+        self.assertLess(
+            run_deploy.index("run_initial_read_only_preflight"),
+            run_deploy.index("perform_deploy_mutations"),
+        )
+        mutations = DISPATCH[
+            DISPATCH.index("perform_deploy_mutations()") : DISPATCH.index(
+                "rollback_empty_pre_manifest_journal()"
+            )
         ]
         self.assertLess(
-            initial.index("run_initial_read_only_preflight"),
-            initial.index("install_dependencies"),
+            mutations.index("begin_installer_transaction"),
+            mutations.index("install_dependencies"),
+        )
+        self.assertLess(
+            mutations.index("install_dependencies"),
+            mutations.index("ensure_manifest"),
         )
         preflight = DISPATCH[
             DISPATCH.index("preflight_before_packages()") : DISPATCH.index(
@@ -95,16 +121,21 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             self.assertIn(marker, preflight)
 
     def test_durable_journal_is_first_mutation_before_apt(self):
-        deploy = DISPATCH[DISPATCH.index("run_deploy()") :]
+        mutations = DISPATCH[
+            DISPATCH.index("perform_deploy_mutations()") : DISPATCH.index(
+                "rollback_empty_pre_manifest_journal()"
+            )
+        ]
         self.assertLess(
-            deploy.index("begin_installer_transaction"),
-            deploy.index("install_dependencies"),
+            mutations.index("begin_installer_transaction"),
+            mutations.index("install_dependencies"),
         )
         self.assertLess(
-            deploy.index("install_dependencies"),
-            deploy.index("ensure_manifest"),
+            mutations.index("install_dependencies"),
+            mutations.index("ensure_manifest"),
         )
-        self.assertIn("foundation_journal_update package-install", deploy)
+        self.assertIn("foundation_journal_update package-install", mutations)
+        self.assertIn("automatic_initial_rollback", DISPATCH)
 
     def test_nginx_default_site_is_out_of_scope(self):
         self.assertNotIn("sites-enabled/default", RUNTIME)
@@ -153,7 +184,9 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             self.assertIn(forbidden, LOCK_POLICY)
         self.assertIn("--hash=sha256:", LOCK_POLICY)
 
-    def _run_lock_validation(self, lock_path: pathlib.Path) -> subprocess.CompletedProcess[str]:
+    def _run_lock_validation(
+        self, lock_path: pathlib.Path
+    ) -> subprocess.CompletedProcess[str]:
         command = textwrap.dedent(
             f"""
             set -Eeuo pipefail
@@ -201,6 +234,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
             "remove_owned_tree",
             "service user ownership отсутствует",
             "post_verify",
+            "postgres_expected_marker",
         ):
             self.assertIn(marker, UNINSTALL)
         self.assertNotIn("rm -rf -- /etc", UNINSTALL)
