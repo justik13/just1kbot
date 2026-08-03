@@ -21,13 +21,15 @@ DISPATCH = (SCRIPTS / "lib" / "install_safe_dispatch.sh").read_text(
     encoding="utf-8"
 )
 UNINSTALL = "\n".join(
-    (SCRIPTS / "uninstall_foundation.sh").read_text(encoding="utf-8"),
-)
-UNINSTALL += (SCRIPTS / "lib" / "uninstall_safe_core.sh").read_text(
-    encoding="utf-8"
-)
-UNINSTALL += (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(
-    encoding="utf-8"
+    [
+        (SCRIPTS / "uninstall_foundation.sh").read_text(encoding="utf-8"),
+        (SCRIPTS / "lib" / "uninstall_safe_core.sh").read_text(
+            encoding="utf-8"
+        ),
+        (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(
+            encoding="utf-8"
+        ),
+    ]
 )
 INSPECTOR = SCRIPTS / "inspect_install_state.sh"
 
@@ -95,7 +97,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
         self.assertNotIn("sites-enabled/default", UNINSTALL)
         self.assertIn("# Managed by Just1kBot ownership manifest", FOUNDATION)
         self.assertIn("nginx -t", FOUNDATION)
-        self.assertIn("предыдущее состояние восстановлено", FOUNDATION)
+        self.assertIn("Предыдущее состояние восстановлено", FOUNDATION)
 
     def test_manifest_and_journal_are_durable_and_fail_closed(self):
         for marker in (
@@ -198,7 +200,7 @@ class SharedHostInstallerContractTests(unittest.TestCase):
         deploy_cases = source[source.index("state_exit_code()") :]
         self.assertNotIn("deploy:partial_install", deploy_cases)
         self.assertIn("*:partial_install) return 23", deploy_cases)
-        self.assertIn("install-recover or install-rollback", source)
+        self.assertIn("install-recover или install-rollback", source)
 
 
 if __name__ == "__main__":
