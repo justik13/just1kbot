@@ -93,30 +93,55 @@ class InstallerInputContractTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("SSL_EMAIL", result.stderr)
 
+    def write_complete_env(self, env_file: Path, extra: str = "") -> None:
+        env_file.write_text(
+            'BOT_TOKEN="123456:TEST_TOKEN"\n'
+            'ADMIN_IDS="[123]"\n'
+            'SUPPORT_USERNAME="test_support_bot"\n'
+            'DATABASE_URL="postgresql+asyncpg://u:p@127.0.0.1:5432/db"\n'
+            'REDIS_URL="redis://:password2@127.0.0.1:6379/0"\n'
+            'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\n'
+            'REDIS_PASSWORD="password2"\n'
+            'YOOKASSA_SHOP_ID="123456"\n'
+            'YOOKASSA_SECRET_KEY="secret"\n'
+            'YOOKASSA_RETURN_URL="https://t.me/test_bot"\n'
+            'YOOKASSA_WEBHOOK_PORT="8080"\n'
+            'DOMAIN="vpn.example.test"\n'
+            'SSL_EMAIL="owner@example.test"\n'
+            + extra,
+            encoding="utf-8",
+        )
+        env_file.chmod(0o600)
+
     def test_existing_env_requires_support_username(self):
         with tempfile.TemporaryDirectory() as directory:
             env_file = Path(directory) / ".env"
+            self.write_complete_env(env_file)
+            text = env_file.read_text(encoding="utf-8")
             env_file.write_text(
-                'BOT_TOKEN="123456:TEST_TOKEN"\n'
-                'ADMIN_IDS="[123]"\n'
-                'DATABASE_URL="postgresql+asyncpg://u:p@127.0.0.1:5432/db"\n'
-                'REDIS_URL="redis://127.0.0.1:6379/0"\n'
-                'DB_ENCRYPTION_KEY="MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="\n'
-                'REDIS_PASSWORD="password2"\n'
-                'YOOKASSA_SHOP_ID="123456"\n'
-                'YOOKASSA_SECRET_KEY="secret"\n'
-                'YOOKASSA_RETURN_URL="https://t.me/test_bot"\n'
-                'YOOKASSA_WEBHOOK_PORT="8080"\n'
-                'DOMAIN="vpn.example.test"\n'
-                'SSL_EMAIL="owner@example.test"\n',
+                text.replace('SUPPORT_USERNAME="test_support_bot"\n', ""),
                 encoding="utf-8",
             )
-            env_file.chmod(0o600)
             result = self.run_function(
                 f"BOT_USER=$(id -un); ENV_FILE={str(env_file)!r}; validate_env_file"
             )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("SUPPORT_USERNAME", result.stderr)
+
+    def test_existing_env_rejects_removed_settings(self):
+        for key, value in (
+            ("AMNEZIA_API_URL", "http://127.0.0.1:4001"),
+            ("AMNEZIA_API_KEY", "old-global-key"),
+            ("WEBHOOK_URL", "https://vpn.example.test/webhook/yookassa"),
+        ):
+            with self.subTest(key=key), tempfile.TemporaryDirectory() as directory:
+                env_file = Path(directory) / ".env"
+                self.write_complete_env(env_file, f'{key}="{value}"\n')
+                result = self.run_function(
+                    f"BOT_USER=$(id -un); ENV_FILE={str(env_file)!r}; validate_env_file"
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(key, result.stderr)
 
     def test_supported_os_boundaries(self):
         for os_id, version in (("ubuntu", "24.04"), ("debian", "12")):
