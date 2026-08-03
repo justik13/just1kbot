@@ -14,7 +14,12 @@ OPS_LIB="$SCRIPT_DIR/lib/operational_transaction.sh"
 FOUNDATION="$SCRIPT_DIR/lib/installer_foundation.sh"
 FOUNDATION_COMPAT="$SCRIPT_DIR/lib/installer_foundation_compat.sh"
 DIAGNOSTICS="$SCRIPT_DIR/lib/installer_diagnostics.sh"
-for file in "$BASE" "$PG_LIB" "$OPS_LIB" "$FOUNDATION" "$FOUNDATION_COMPAT" "$DIAGNOSTICS"; do [[ -f "$file" && ! -L "$file" ]] || { echo "ОШИБКА: отсутствует безопасный library $file" >&2; exit 1; }; done
+for file in "$BASE" "$PG_LIB" "$OPS_LIB" "$FOUNDATION" "$FOUNDATION_COMPAT" "$DIAGNOSTICS"; do
+    [[ -f "$file" && ! -L "$file" ]] || {
+        printf 'ОШИБКА: отсутствует безопасный library %s\n' "$file" >&2
+        exit 1
+    }
+done
 # shellcheck source=lib/installer_diagnostics.sh
 source "$DIAGNOSTICS"
 installer_set_operation installer
@@ -47,15 +52,29 @@ REQUIREMENTS_LOCK="$ROOT_DIR/requirements.lock"
 
 for module in \
     "$SCRIPT_DIR/lib/install_safe_platform.sh" \
+    "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
     "$SCRIPT_DIR/lib/install_safe_runtime.sh" \
     "$SCRIPT_DIR/lib/install_safe_dispatch.sh"; do
-    [[ -f "$module" && ! -L "$module" ]] || { printf 'ОШИБКА: installer module отсутствует или небезопасен: %s\n' "$module" >&2; exit 1; }
+    [[ -f "$module" && ! -L "$module" ]] || {
+        printf 'ОШИБКА: installer module отсутствует или небезопасен: %s\n' "$module" >&2
+        exit 1
+    }
     # shellcheck source=/dev/null
     source "$module"
 done
 
 case ${1:-} in
-    --recover) shift; (( $# == 0 )) || exit 2; recover_install ;;
-    --rollback-incomplete) shift; (( $# == 0 )) || exit 2; rollback_incomplete ;;
-    *) main "$@" ;;
+    --recover)
+        shift
+        (( $# == 0 )) || exit 2
+        recover_install
+        ;;
+    --rollback-incomplete)
+        shift
+        (( $# == 0 )) || exit 2
+        rollback_incomplete
+        ;;
+    *)
+        main "$@"
+        ;;
 esac
