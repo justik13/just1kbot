@@ -50,6 +50,14 @@ main() {
 
     # shellcheck source=scripts/lib/installer_diagnostics.sh
     source "$DIAGNOSTICS"
+    # Load the read-only verifier before uninstall removes /opt/just1kbot.
+    VERIFY_UNINSTALL_SOURCE_ONLY=1
+    export VERIFY_UNINSTALL_SOURCE_ONLY
+    # shellcheck source=scripts/verify_uninstall_state.sh
+    source "$VERIFY_UNINSTALL"
+    unset VERIFY_UNINSTALL_SOURCE_ONLY
+    declare -F verify_uninstall_main >/dev/null 2>&1 || fail 'post-uninstall verifier function не загружена'
+
     installer_set_operation uninstall
     installer_set_step 'Основное удаление' 'После destructive этапа обязательно выполняется независимая проверка остатков.'
     installer_set_log_file /var/log/just1kbot-deploy.log
@@ -62,7 +70,7 @@ main() {
     safe_remove_orphan_home
 
     installer_set_step 'Проверка отсутствия остатков' 'Успех разрешён только если filesystem, units, processes и purge-data PostgreSQL state очищены.'
-    bash "$VERIFY_UNINSTALL" "$VERIFY_MODE"
+    verify_uninstall_main "$VERIFY_MODE"
 }
 
 main "$@"
