@@ -1,5 +1,5 @@
 #!/bin/bash
-# Complete doctor: existing runtime checks plus ownership/proxy invariants.
+# Complete doctor: runtime checks plus ownership/proxy invariants.
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 027
@@ -12,7 +12,9 @@ BASE_DOCTOR="$SCRIPT_DIR/doctor.sh"
 FOUNDATION="$ROOT_DIR/scripts/lib/installer_foundation.sh"
 COMPAT="$ROOT_DIR/scripts/lib/installer_foundation_compat.sh"
 PG_LIB="$ROOT_DIR/scripts/lib/postgresql.sh"
+MANIFEST=/var/lib/just1kbot/install-state/manifest.json
 MODE=summary
+PROXY_MODE=managed
 EXTRA_FAILURES=0
 
 while (( $# > 0 )); do
@@ -35,12 +37,55 @@ for file in "$BASE_DOCTOR" "$FOUNDATION" "$COMPAT" "$PG_LIB"; do
     }
 done
 
+if [[ -f "$MANIFEST" && ! -L "$MANIFEST" ]]; then
+    PROXY_MODE=$(MANIFEST_PATH="$MANIFEST" python3 - <<'PY' 2>/dev/null || printf unknown
+import json
+import os
+from pathlib import Path
+x = json.loads(Path(os.environ["MANIFEST_PATH"]).read_text(encoding="utf-8"))
+print(x.get("metadata", {}).get("proxy_mode", "managed"))
+PY
+)
+fi
+
 arguments=()
 [[ "$MODE" == smoke ]] && arguments+=(--smoke)
+base_output=$(mktemp /run/just1kbot-doctor-base.XXXXXX)
+trap 'rm -f -- "$base_output"' EXIT INT TERM
 set +e
-bash "$BASE_DOCTOR" "${arguments[@]}"
+bash "$BASE_DOCTOR" "${arguments[@]}" >"$base_output" 2>&1
 base_rc=$?
 set -e
+
+if [[ "$PROXY_MODE" == external ]]; then
+    filtered=$(mktemp /run/just1kbot-doctor-filtered.XXXXXX)
+    trap 'rm -f -- "$base_output" "$filtered"' EXIT INT TERM
+    BASE_OUTPUT="$base_output" FILTERED_OUTPUT="$filtered" python3 - <<'PY'
+import os
+from pathlib import Path
+source = Path(os.environ["BASE_OUTPUT"])
+target = Path(os.environ["FILTERED_OUTPUT"])
+skip = {
+    "[OK] Nginx configuration valid",
+    "[FAIL] nginx binary отсутствует",
+    "[FAIL] nginx -t failed",
+}
+lines = []
+for raw in source.read_text(encoding="utf-8", errors="replace").splitlines():
+    if raw in skip or raw.startswith("Doctor result:"):
+        continue
+    lines.append(raw)
+target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+PY
+    cat "$filtered"
+    remaining_base_failures=$(grep -c '^\[FAIL\]' "$filtered" 2>/dev/null || true)
+    remaining_base_warnings=$(grep -c '^\[WARN\]' "$filtered" 2>/dev/null || true)
+    printf '\nBase doctor result after external-proxy filtering: failures=%s warnings=%s mode=%s\n' \
+        "$remaining_base_failures" "$remaining_base_warnings" "$MODE"
+    (( remaining_base_failures == 0 )) && base_rc=0 || base_rc=1
+else
+    cat "$base_output"
+fi
 
 INSTALLER_FOUNDATION_SOURCE_ONLY=1
 # shellcheck source=../lib/installer_foundation.sh
@@ -142,6 +187,6 @@ else
     extra_fail 'Complete doctor cannot verify invalid ownership manifest'
 fi
 
-printf '\nComplete doctor result: base_rc=%s extra_failures=%s mode=%s\n' \
-    "$base_rc" "$EXTRA_FAILURES" "$MODE"
+printf '\nComplete doctor result: base_rc=%s extra_failures=%s mode=%s proxy=%s\n' \
+    "$base_rc" "$EXTRA_FAILURES" "$MODE" "$PROXY_MODE"
 (( base_rc == 0 && EXTRA_FAILURES == 0 ))
