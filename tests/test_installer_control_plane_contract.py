@@ -69,7 +69,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         ):
             self.assertIn(state, source)
         self.assertIn("--require-safe", source)
-        self.assertIn("Installer не будет выполнять rm, chown, chmod", source)
+        self.assertIn("Installer не выполнит rm, chown, chmod", source)
 
 
 if __name__ == "__main__":
