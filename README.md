@@ -101,7 +101,7 @@ python3 -c "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_
 sudo bash deploy.sh
 ```
 
-Неинтерактивный вариант:
+Неинтерактивный вариант без необязательных платежей и публичного домена:
 
 ```bash
 sudo env \
