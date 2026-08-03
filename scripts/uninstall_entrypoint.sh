@@ -61,6 +61,7 @@ main() {
     source "$VERIFY_UNINSTALL"
     unset VERIFY_UNINSTALL_SOURCE_ONLY
     declare -F verify_uninstall_main >/dev/null 2>&1 || fail 'post-uninstall verifier function не загружена'
+    declare -F verify_uninstall_prepare >/dev/null 2>&1 || fail 'post-uninstall verifier prepare function не загружена'
 
     installer_set_operation uninstall
     installer_set_log_file /var/log/just1kbot-deploy.log
@@ -71,6 +72,9 @@ main() {
 
     installer_set_step 'Проверка каждого удаляемого ресурса' 'До stop/disable/rm проверяются все systemd units, operational tools и основной Nginx site.'
     bash "$PREFLIGHT_RESOURCES"
+
+    installer_set_step 'Подготовка проверки результата' 'До удаления production .env запоминается подтверждённый домен Nginx для последующего residual scan.'
+    verify_uninstall_prepare || fail 'не удалось подготовить post-uninstall verification context'
 
     installer_set_step 'Основное удаление' 'После destructive этапа обязательно выполняется независимая проверка остатков.'
     select_verify_mode "${1:-}"
