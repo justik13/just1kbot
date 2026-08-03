@@ -1,7 +1,4 @@
 clone_function(){ local source=$1 target=$2 definition; definition=$(declare -f "$source") || return 1; definition=${definition/#"$source ()"/"$target ()"}; eval "$definition"; }
-clone_function install_backup_tooling base_install_backup_tooling
-clone_function setup_logrotate base_setup_logrotate
-clone_function show_status base_show_status
 
 validate_supported_os(){ [[ "${1:-}" == ubuntu && "${2:-}" == 24.04 ]] || { error "Поддерживается только Ubuntu 24.04 LTS; обнаружено ${1:-unknown} ${2:-unknown}"; return 1; }; }
 install_dependencies(){
@@ -58,20 +55,14 @@ setup_user_and_dirs(){
     foundation_manifest_add "service-user:$BOT_USER"; foundation_manifest_add "path:$BOT_HOME"; foundation_manifest_add "path:$PROJECT_DIR"; foundation_manifest_add "path:$STATE_ROOT"; foundation_manifest_add "path:$BACKUP_DIR"; foundation_manifest_add "path:$SNAPSHOT_DIR"
     [[ "$fresh" == false ]] || foundation_journal_add_created "service-user:$BOT_USER"
 }
-legacy_install_valid(){
-    [[ -d "$PROJECT_DIR" && ! -L "$PROJECT_DIR" && -f "$ENV_FILE" && ! -L "$ENV_FILE" && -f "$UNIT_FILE" && ! -L "$UNIT_FILE" ]] || return 1
-    grep -Fq 'Description=Just1kBot' "$UNIT_FILE" && grep -Fq 'ExecStart=/opt/just1kbot/venv/bin/python -m bot.main' "$UNIT_FILE" && grep -Fq 'Just1kBot' "$PROJECT_DIR/deploy.sh"
-}
 ensure_manifest(){
     if foundation_manifest_validate; then return 0; fi
     if foundation_exists "$INSTALL_MANIFEST"; then foundation_fail MANIFEST_INVALID 'manifest повреждён' "$INSTALL_MANIFEST" 'Запустите state/doctor.'; return 1; fi
-    if [[ "$INITIAL_INSTALL" == false ]]; then legacy_install_valid || { error 'Legacy installation ownership не доказан; manifest автоматически не создаётся.'; return 1; }; fi
-    foundation_manifest_create
     if [[ "$INITIAL_INSTALL" == false ]]; then
-        foundation_manifest_add "path:$PROJECT_DIR"; foundation_manifest_add "path:$BOT_HOME"; foundation_manifest_add systemd:just1kbot.service
-        local item
-        for item in /usr/local/bin/just1kbot-backup.sh /usr/local/bin/just1kbot-restore.sh /usr/local/bin/just1kbot-healthcheck.sh /usr/local/bin/verify_backup.sh /usr/local/bin/restore_rehearsal.sh /etc/systemd/system/just1kbot-backup.service /etc/systemd/system/just1kbot-backup.timer /etc/systemd/system/just1kbot-healthcheck.service /etc/systemd/system/just1kbot-healthcheck.timer /etc/logrotate.d/just1kbot; do [[ ! -e "$item" ]] || foundation_manifest_add "path:$item"; done
+        error 'Update без ownership manifest невозможен. Выполните чистую установку или восстановите manifest из backup.'
+        return 1
     fi
+    foundation_manifest_create
 }
 preflight_postgres_names_absent(){
     if pg_role_exists || pg_database_exists; then error "PostgreSQL role=$PG_ROLE или database=$PG_DATABASE уже существует без manifest ownership"; error 'Первичная установка не изменяет и не принимает существующие объекты.'; return 1; fi

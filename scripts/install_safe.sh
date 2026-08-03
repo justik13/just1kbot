@@ -56,16 +56,14 @@ for module in \
     "$SCRIPT_DIR/lib/install_safe_platform_support.sh" \
     "$SCRIPT_DIR/lib/install_safe_release_contract.sh" \
     "$SCRIPT_DIR/lib/install_safe_lock_policy.sh" \
-    "$SCRIPT_DIR/lib/install_safe_legacy.sh" \
-    "$SCRIPT_DIR/lib/install_safe_redis_transition.sh" \
     "$SCRIPT_DIR/lib/install_safe_runtime.sh" \
     "$SCRIPT_DIR/lib/install_safe_tls_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_postgres_ownership.sh" \
+    "$SCRIPT_DIR/lib/install_safe_dispatch.sh" \
     "$SCRIPT_DIR/lib/install_safe_proxy_mode.sh" \
     "$SCRIPT_DIR/lib/install_safe_package_policy.sh" \
     "$SCRIPT_DIR/lib/install_safe_activation_policy.sh" \
-    "$SCRIPT_DIR/lib/install_safe_failure_injection.sh" \
-    "$SCRIPT_DIR/lib/install_safe_dispatch.sh"; do
+    "$SCRIPT_DIR/lib/install_safe_failure_injection.sh"; do
     [[ -f "$module" && ! -L "$module" ]] || {
         printf 'ОШИБКА: installer module отсутствует или небезопасен: %s\n' "$module" >&2
         exit 1
