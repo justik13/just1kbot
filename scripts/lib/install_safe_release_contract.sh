@@ -31,6 +31,7 @@ scripts/lib/installer_diagnostics.sh
 scripts/lib/installer_foundation.sh
 scripts/lib/installer_foundation_compat.sh
 scripts/lib/install_safe_platform.sh
+scripts/lib/install_safe_platform_support.sh
 scripts/lib/install_safe_release_contract.sh
 scripts/lib/install_safe_lock_policy.sh
 scripts/lib/install_safe_legacy.sh
@@ -39,6 +40,7 @@ scripts/lib/install_safe_runtime.sh
 scripts/lib/install_safe_tls_policy.sh
 scripts/lib/install_safe_postgres_ownership.sh
 scripts/lib/install_safe_proxy_mode.sh
+scripts/lib/install_safe_package_policy.sh
 scripts/lib/install_safe_activation_policy.sh
 scripts/lib/install_safe_failure_injection.sh
 scripts/lib/install_safe_dispatch.sh
@@ -63,7 +65,7 @@ EOF_REQUIRED
 
 validate_source_tree() {
     release_contract_base_validate_source_tree
-    local required state
+    local required state mode
     while IFS= read -r required; do
         [[ -n "$required" ]] || continue
         [[ -f "$ROOT_DIR/$required" && ! -L "$ROOT_DIR/$required" ]] || {
