@@ -10,10 +10,7 @@ validate_lock() {
         return 1
     }
 
-    LOCK="$REQUIREMENTS_LOCK" python3 - <<'PY_LOCK' || {
-        error 'requirements.lock должен содержать только exact versions, SHA-256 hashes и безопасные markers'
-        return 1
-    }
+    if ! LOCK="$REQUIREMENTS_LOCK" python3 - <<'PY_LOCK'
 import os
 import re
 from pathlib import Path
@@ -82,6 +79,10 @@ for line in logical:
         if token.startswith("--") and not token.startswith("--hash=sha256:"):
             raise SystemExit(f"unsupported per-requirement option: {token}")
 PY_LOCK
+    then
+        error 'requirements.lock должен содержать только exact versions, SHA-256 hashes и безопасные markers'
+        return 1
+    fi
 }
 
 if [[ "${INSTALL_SAFE_LOCK_POLICY_SOURCE_ONLY:-0}" != 1 &&
