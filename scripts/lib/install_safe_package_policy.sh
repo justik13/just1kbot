@@ -72,8 +72,8 @@ install_dependencies() {
 
     if [[ "$redis_was_installed" == false ]]; then
         # redis-server package may start its generic system instance. Just1kBot
-        # uses only just1kbot-redis.service and restores the previous absent/
-        # inactive state of the generic service immediately.
+        # uses only just1kbot-redis.service; generic service сразу возвращается
+        # в исходное absent/inactive/disabled состояние.
         restore_unit_state redis-server.service "$redis_enabled" "$redis_active"
         restore_unit_state redis.service "$redis_enabled" "$redis_active"
     fi
