@@ -25,6 +25,7 @@ class GithubUpdateTests(unittest.TestCase):
         self.assertIn("https://github.com/justik13/projectx", result.stdout)
         self.assertIn("--check", result.stdout)
         self.assertIn("--dry-run", result.stdout)
+        self.assertIn("--sha", result.stdout)
 
     def test_unknown_argument_fails_before_any_update(self):
         result = subprocess.run(
@@ -35,6 +36,25 @@ class GithubUpdateTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 2)
         self.assertIn("Неизвестный аргумент update", result.stderr)
+
+    def test_unattended_update_requires_full_expected_sha(self):
+        result = subprocess.run(
+            ["bash", str(UPDATER), "--yes"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("--yes requires --sha", result.stderr)
+
+        invalid = subprocess.run(
+            ["bash", str(UPDATER), "--sha", "abc", "--yes"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(invalid.returncode, 2)
+        self.assertIn("полным hex commit SHA", invalid.stderr)
 
     def test_source_and_ref_are_fixed_and_live_is_not_a_checkout(self):
         for marker in (
@@ -67,6 +87,19 @@ class GithubUpdateTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.updater)
 
+    def test_expected_sha_is_compared_before_checkout_publish(self):
+        compare_index = self.updater.index(
+            'if [[ -n "$EXPECTED_SHA" && "$TARGET_SHA" != "$EXPECTED_SHA" ]]'
+        )
+        checkout_index = self.updater.index(
+            'run_git checkout --quiet --detach --force "$TARGET_SHA"'
+        )
+        publish_index = self.updater.index("harden_and_publish_release()")
+        self.assertLess(compare_index, checkout_index)
+        self.assertLess(compare_index, publish_index)
+        self.assertIn("expected=$EXPECTED_SHA fetched=$TARGET_SHA", self.updater)
+        self.assertIn("введите полный SHA", self.updater)
+
     def test_installed_sha_requires_trusted_metadata(self):
         for marker in (
             "source_repository=$REPOSITORY_URL",
@@ -85,6 +118,8 @@ class GithubUpdateTests(unittest.TestCase):
             ".gitmodules",
             "repository содержит symlink",
             "control character in tracked path",
+            "requirements.lock",
+            "scripts/install_safe.sh",
             "scripts/ops/deploy_application.sh",
         ):
             self.assertIn(marker, self.updater)
@@ -99,12 +134,12 @@ class GithubUpdateTests(unittest.TestCase):
         ):
             self.assertIn(marker, self.updater)
 
-    def test_update_delegates_to_transactional_deploy(self):
+    def test_update_delegates_to_transactional_safe_deploy(self):
         for marker in (
             'JUST1KBOT_SOURCE_COMMIT="$TARGET_SHA"',
             'bash "$PUBLISHED_RELEASE/deploy.sh" "${arguments[@]}"',
             "local -a arguments=(deploy)",
-            "Source release сохранён",
+            "Verified source release preserved",
         ):
             self.assertIn(marker, self.updater)
 
@@ -117,6 +152,7 @@ class GithubUpdateTests(unittest.TestCase):
         self.assertNotIn("run_locked_script", update_case)
         self.assertIn("Update from GitHub", self.control)
         self.assertIn("sudo bash deploy.sh update", self.control)
+        self.assertIn("update [--sha COMMIT]", self.control)
 
 
 if __name__ == "__main__":
