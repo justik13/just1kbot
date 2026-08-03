@@ -21,6 +21,12 @@ class InstallerInputContractTests(unittest.TestCase):
             set -Eeuo pipefail
             source {str(ROOT_DEPLOY)!r}
             source {str(PLATFORM)!r}
+            # Unit tests below validate required/forbidden .env keys. Production
+            # owner/mode enforcement has separate installer safety tests and
+            # cannot be reproduced by an unprivileged CI runner.
+            validate_env_file_safety() {{
+                [[ -f "$ENV_FILE" && ! -L "$ENV_FILE" ]]
+            }}
             LOG_FILE=/tmp/just1kbot-installer-contract.log
             {script}
             """
