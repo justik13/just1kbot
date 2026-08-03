@@ -8,13 +8,14 @@ from config import settings
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-DEPLOY = ROOT / "scripts" / "deploy.sh"
+RUNTIME = ROOT / "scripts" / "lib" / "install_safe_runtime.sh"
 
 
 class ServiceHomeHotfixTests(unittest.TestCase):
     def test_hardened_unit_keeps_protect_home_enabled(self):
-        deploy = DEPLOY.read_text(encoding="utf-8")
-        self.assertIn("ProtectHome=true", deploy)
+        runtime = RUNTIME.read_text(encoding="utf-8")
+        self.assertIn("ProtectHome=true", runtime)
+        self.assertIn("Environment=HOME=$RUNTIME_DIR", runtime)
 
     def test_service_account_uses_runtime_home(self):
         with (
