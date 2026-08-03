@@ -110,10 +110,10 @@ sudo env \
   REDIS_PASSWORD='...' \
   ADMIN_IDS='123456789' \
   SUPPORT_USERNAME='my_support_username' \
-  DOMAIN='vpn.example.com' \
-  SSL_EMAIL='admin@example.com' \
-  YOOKASSA_SHOP_ID='...' \
-  YOOKASSA_SECRET_KEY='...' \
+  DOMAIN='' \
+  SSL_EMAIL='' \
+  YOOKASSA_SHOP_ID='' \
+  YOOKASSA_SECRET_KEY='' \
   bash deploy.sh --yes
 ```
 
