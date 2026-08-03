@@ -35,7 +35,7 @@ from utils.datetime_helpers import now_utc
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
     "TRUNCATE payment_disputes, provider_refund_operations, webhook_inbox, "
-    "payment_refunds, payment_fulfillment_operations, payment_provider_operations, "
+    "payment_refunds, payment_provider_operations, "
     "account_balance_reservations, account_ledger_allocations, "
     "account_ledger_entries, payment_events, audit_logs, payments, users "
     "RESTART IDENTITY CASCADE"
@@ -64,8 +64,6 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def _topup(self, session, amount, *, external_id=None):
         payment = Payment(
             user_id=self.user_id,
-            tariff_id=None,
-            payment_kind="balance_topup",
             amount=Decimal(amount),
             currency="RUB",
             status="completed",
@@ -76,8 +74,6 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
             reconciliation_status="ok",
             checkout_status="active",
             ui_visible=False,
-            snapshot_amount=Decimal(amount),
-            snapshot_currency="RUB",
             provider_confirmed_at=now_utc(),
             external_id=external_id or "pay_" + uuid.uuid4().hex,
         )
@@ -228,8 +224,6 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             recovery = Payment(
                 user_id=self.user_id,
-                tariff_id=None,
-                payment_kind="balance_topup",
                 amount=Decimal("20"),
                 currency="RUB",
                 status="completed",
@@ -240,8 +234,6 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
                 reconciliation_status="ok",
                 checkout_status="active",
                 ui_visible=False,
-                snapshot_amount=Decimal("20"),
-                snapshot_currency="RUB",
                 provider_confirmed_at=now_utc(),
                 external_id="pay_" + uuid.uuid4().hex,
             )

@@ -71,6 +71,7 @@ python -m bot.main
 ```env
 BOT_TOKEN=123456:ABC-DEF
 ADMIN_IDS=[123456789]
+SUPPORT_USERNAME=my_support_username
 DATABASE_URL=postgresql+asyncpg://user:password@127.0.0.1:5432/database
 DB_ENCRYPTION_KEY=<Fernet key>
 REDIS_URL=redis://:password@127.0.0.1:6379/0
@@ -108,6 +109,7 @@ sudo env \
   DB_PASSWORD='...' \
   REDIS_PASSWORD='...' \
   ADMIN_IDS='123456789' \
+  SUPPORT_USERNAME='my_support_username' \
   DOMAIN='vpn.example.com' \
   SSL_EMAIL='admin@example.com' \
   YOOKASSA_SHOP_ID='...' \
@@ -115,7 +117,7 @@ sudo env \
   bash deploy.sh --yes
 ```
 
-`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic.
+`ADMIN_IDS` для `deploy.sh --yes` передаётся числами через запятую, например `ADMIN_IDS='123456789,987654321'`. Скрипт сам сохранит значение в `.env` как JSON-массив `[123456789,987654321]`, который ожидает Pydantic. `SUPPORT_USERNAME` обязателен и должен содержать реальный Telegram username поддержки без `@`.
 
 `DOMAIN` имеет смысл только вместе с YooKassa. Nginx публикует только:
 

@@ -12,7 +12,6 @@ from database.models import (
     AccountBalanceReservation,
     AccountLedgerEntry,
     Payment,
-    PaymentFulfillmentOperation,
     PaymentRefund,
     User,
     WebhookInbox,
@@ -35,7 +34,7 @@ from utils.datetime_helpers import now_utc
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
-    "payment_fulfillment_operations, account_balance_reservations, "
+    "account_balance_reservations, "
     "account_ledger_allocations, account_ledger_entries, "
     "payment_events, audit_logs, payments, users RESTART IDENTITY CASCADE"
 )
@@ -64,8 +63,6 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
         external_id = "pay_" + uuid.uuid4().hex
         payment = Payment(
             user_id=self.user_id,
-            tariff_id=None,
-            payment_kind="balance_topup",
             amount=Decimal(amount),
             currency="RUB",
             status="completed",
@@ -76,8 +73,6 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             reconciliation_status="ok",
             checkout_status="active",
             ui_visible=False,
-            snapshot_amount=Decimal(amount),
-            snapshot_currency="RUB",
             provider_confirmed_at=now_utc(),
             external_id=external_id,
         )
@@ -192,11 +187,12 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 await session.scalar(
-                    select(func.count(PaymentFulfillmentOperation.id)).where(
-                        PaymentFulfillmentOperation.payment_id == payment.id
+                    select(func.count(AccountLedgerEntry.id)).where(
+                        AccountLedgerEntry.payment_id == payment.id,
+                        AccountLedgerEntry.entry_type == "payment_credit",
                     )
                 ),
-                0,
+                1,
             )
 
     async def test_refund_after_spending_creates_debt_instead_of_free_money(self):

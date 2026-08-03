@@ -41,14 +41,14 @@ class AccountLedgerSchemaTests(unittest.TestCase):
             for foreign_key in table.foreign_keys:
                 self.assertEqual(foreign_key.ondelete, "RESTRICT")
 
-    def test_payment_kind_allows_tariffless_topups(self):
-        self.assertTrue(Payment.__table__.c.tariff_id.nullable)
-        self.assertFalse(Payment.__table__.c.payment_kind.nullable)
+    def test_payment_model_is_topup_only(self):
+        self.assertNotIn("tariff_id", Payment.__table__.c)
+        self.assertNotIn("tariff_quote_id", Payment.__table__.c)
+        self.assertNotIn("payment_kind", Payment.__table__.c)
         constraints = {
             item.name for item in Payment.__table__.constraints if item.name
         }
-        self.assertIn("ck_payments_balance_topup_shape", constraints)
-        self.assertIn("ck_payments_balance_topup_money", constraints)
+        self.assertIn("ck_payments_topup_money", constraints)
 
     def test_exactly_once_indexes_are_present(self):
         indexes = {item.name for item in AccountLedgerEntry.__table__.indexes}

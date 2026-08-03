@@ -410,12 +410,29 @@ read_admin_ids() {
     done
 }
 
+
+read_support_username() {
+    local value=""
+    while true; do
+        read -rp 'SUPPORT_USERNAME, без @: ' value
+        value=${value#@}
+        if [[ "$value" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] &&
+           [[ "${value,,}" != support ]] &&
+           [[ "${value,,}" != change_me_support_username ]]; then
+            SUPPORT_USERNAME=$value
+            return
+        fi
+        printf '%s\n' 'Укажите реальный Telegram username поддержки.'
+    done
+}
+
 collect_initial_input() {
     if [[ "$NON_INTERACTIVE" == true ]]; then
         BOT_TOKEN=${BOT_TOKEN:?BOT_TOKEN не задан}
         DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD не задан}
         REDIS_PASSWORD=${REDIS_PASSWORD:?REDIS_PASSWORD не задан}
         ADMIN_IDS=${ADMIN_IDS:?ADMIN_IDS не задан}
+        SUPPORT_USERNAME=${SUPPORT_USERNAME:?SUPPORT_USERNAME не задан}
         DOMAIN=${DOMAIN:-}
         SSL_EMAIL=${SSL_EMAIL:-admin@example.com}
         AMNEZIA_API_URL=${AMNEZIA_API_URL:-http://127.0.0.1:4001}
@@ -431,6 +448,7 @@ collect_initial_input() {
     read_db_password 'Пароль PostgreSQL: ' DB_PASSWORD
     read_db_password 'Пароль Redis: ' REDIS_PASSWORD
     read_admin_ids
+    read_support_username
     read_optional 'Домен для webhook/health; Enter — без HTTPS' DOMAIN ''
     if [[ -n "$DOMAIN" ]]; then
         read_optional "Email Let's Encrypt" SSL_EMAIL 'admin@example.com'
@@ -500,6 +518,13 @@ validate_initial_input() {
     fi
     if [[ ! "$ADMIN_IDS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
         error "ADMIN_IDS имеет неверный формат"
+        return 1
+    fi
+    SUPPORT_USERNAME=${SUPPORT_USERNAME#@}
+    if [[ ! "$SUPPORT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
+       [[ "${SUPPORT_USERNAME,,}" == support ]] ||
+       [[ "${SUPPORT_USERNAME,,}" == change_me_support_username ]]; then
+        error "SUPPORT_USERNAME должен быть реальным Telegram username"
         return 1
     fi
     if ! validate_amnezia_api_url "$AMNEZIA_API_URL"; then
@@ -725,6 +750,7 @@ PY
 
     write_env_var BOT_TOKEN "$BOT_TOKEN"
     write_env_var ADMIN_IDS "$(normalize_admin_ids_json "$ADMIN_IDS")"
+    write_env_var SUPPORT_USERNAME "$SUPPORT_USERNAME"
     write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_encoded}@127.0.0.1:5432/just1kbot_bot"
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
     write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"

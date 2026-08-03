@@ -195,10 +195,12 @@ PY
     db_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
     redis_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
 
-    local support_username=${SUPPORT_USERNAME:-support}
+    local support_username=${SUPPORT_USERNAME:?SUPPORT_USERNAME не задан}
     support_username=${support_username#@}
-    if [[ ! "$support_username" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]]; then
-        error "SUPPORT_USERNAME имеет неверный формат"
+    if [[ ! "$support_username" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] ||
+       [[ "${support_username,,}" == support ]] ||
+       [[ "${support_username,,}" == change_me_support_username ]]; then
+        error "SUPPORT_USERNAME должен быть реальным Telegram username"
         return 1
     fi
 

@@ -307,13 +307,18 @@ class TariffVersion(Base):
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     tariff_id: Mapped[int] = mapped_column(ForeignKey("tariffs.id", ondelete="RESTRICT"), index=True)
-    version_number: Mapped[int] = mapped_column(Integer)
-    name_snapshot: Mapped[str] = mapped_column(String(100))
-    duration_hours: Mapped[int] = mapped_column(Integer)
-    device_limit: Mapped[int] = mapped_column(Integer)
-    price_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2))
-    currency: Mapped[str] = mapped_column(String(3), default="RUB")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    name_snapshot: Mapped[str] = mapped_column(String(100), nullable=False)
+    duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    device_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_rub: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="RUB", server_default=text("'RUB'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc,
+        server_default=text("now()")
+    )
 
 
 class TariffQuote(Base):

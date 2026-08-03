@@ -123,8 +123,8 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.execute(
                     text(
                         "INSERT INTO paid_value_ledger(user_id,source_type,source_id,entry_type,paid_hours_delta,"
-                        "paid_value_rub_delta,currency,tariff_version_id,quote_id,payment_id,metadata,created_at) "
-                        "VALUES(:u,'quote',:source,'account_purchase',720,90,'RUB',:v,:q,NULL,'{}',:n)"
+                        "paid_value_rub_delta,currency,tariff_version_id,quote_id,metadata,created_at) "
+                        "VALUES(:u,'quote',:source,'account_purchase',720,90,'RUB',:v,:q,'{}',:n)"
                     ),
                     {
                         "u": user,

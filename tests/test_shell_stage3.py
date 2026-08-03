@@ -56,7 +56,7 @@ class ShellStage3Tests(unittest.TestCase):
         ):
             self.assertIn(marker, self.deploy)
         self.assertNotIn("flock -n 9 || exit 0", self.deploy)
-        self.assertIn("rollback_heartbeat=legacy", self.deploy)
+        self.assertIn("rollback_heartbeat=obsolete", self.deploy)
 
     def test_ci_runs_shellcheck_for_repository_scripts(self):
         self.assertIn("shellcheck", self.workflow)

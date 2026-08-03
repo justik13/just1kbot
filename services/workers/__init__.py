@@ -71,7 +71,7 @@ def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
 
 
-# Queue fulfillment workers are critical. The remaining workers provide periodic
+# Durable API and financial workers are critical. The remaining workers provide periodic
 # maintenance/notifications/telemetry and may stop after exhausting their budget
 # without pretending that a durable customer operation is still being processed.
 WORKERS: tuple[WorkerDefinition, ...] = (

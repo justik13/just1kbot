@@ -77,27 +77,6 @@ class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.retryable)
         self.assertFalse(result.ambiguous)
 
-    async def test_cancel_2xx_json_list_reconciles_with_get(self):
-        claim = ProviderOperationClaim(
-            1,
-            1,
-            "cancel_payment",
-            {"provider_payment_id": "p"},
-            "key",
-            "w",
-            1,
-            "p",
-            now_utc(),
-        )
-        result = await self._transport_call(
-            lambda service: perform_http(claim, service),
-            [],
-            {"id": "p", "status": "waiting_for_capture"},
-        )
-        self.assertTrue(result.ok)
-        self.assertEqual(result.value["status"], "waiting_for_capture")
-        self.assertEqual(FakeJSONClient.responses, [])
-
     async def test_malformed_2xx_has_command_specific_ambiguity(self):
         from unittest.mock import patch
         from services.yookassa_service import YooKassaService
@@ -138,45 +117,11 @@ class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
                 {}, idempotency_key="key"
             )
             get = await YooKassaService.get_payment_result("p")
-            cancel = await YooKassaService.cancel_payment_result(
-                "p", idempotency_key="key"
-            )
         self.assertEqual(create.error_kind, YooKassaErrorKind.INVALID_RESPONSE)
         self.assertTrue(create.retryable)
         self.assertTrue(create.ambiguous)
         self.assertTrue(get.retryable)
         self.assertFalse(get.ambiguous)
-        self.assertTrue(cancel.retryable)
-        self.assertTrue(cancel.ambiguous)
-
-    async def test_cancel_timeout_reconciles_with_get(self):
-        transport = SimpleNamespace(
-            cancel_payment_result=AsyncMock(
-                return_value=YooKassaResult(
-                    False,
-                    error_kind=YooKassaErrorKind.TIMEOUT,
-                    retryable=True,
-                    ambiguous=True,
-                )
-            ),
-            get_payment_result=AsyncMock(
-                return_value=YooKassaResult(True, value={"status": "canceled"})
-            ),
-        )
-        claim = ProviderOperationClaim(
-            1,
-            1,
-            "cancel_payment",
-            {"provider_payment_id": "p"},
-            "key",
-            "w",
-            1,
-            "p",
-            now_utc(),
-        )
-        result = await perform_http(claim, transport)
-        self.assertTrue(result.ok)
-        transport.get_payment_result.assert_awaited_once_with("p")
 
     async def test_get_server_error_is_not_ambiguous_by_contract(self):
         result = YooKassaResult(

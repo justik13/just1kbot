@@ -1,8 +1,10 @@
 import os
+import re
 import pwd
 from functools import lru_cache
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,7 +41,7 @@ class Settings(BaseSettings):
     # ── Telegram ──
     BOT_TOKEN: str
     ADMIN_IDS: List[int] = []
-    SUPPORT_USERNAME: str = "support"
+    SUPPORT_USERNAME: str
 
     # ── Database ──
     DATABASE_URL: str
@@ -68,6 +70,18 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
+
+    @field_validator("SUPPORT_USERNAME")
+    @classmethod
+    def validate_support_username(cls, value: str) -> str:
+        username = value.strip().lstrip("@")
+        if (
+            not username
+            or username.lower() in {"support", "change_me_support_username"}
+            or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,31}", username) is None
+        ):
+            raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
+        return username
 
 
 @lru_cache()

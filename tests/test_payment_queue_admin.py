@@ -57,7 +57,7 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
 
     def test_card_and_orm_confirmation_versions_match_for_every_queue(self):
         now = datetime.now(timezone.utc)
-        for queue in ("provider", "fulfillment"):
+        for queue in ("provider",):
             card = QueueRow(
                 queue,
                 42,
@@ -139,7 +139,7 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(all(len(value.encode()) <= 64 for value in callbacks))
         self.assertTrue(all("operator reason" not in value for value in callbacks))
-        self.assertEqual(set(QUEUE_CODES), {"provider", "fulfillment", "webhook"})
+        self.assertEqual(set(QUEUE_CODES), {"provider", "webhook"})
 
     async def test_invalid_inputs_are_rejected_before_database_access(self):
         with self.assertRaises(ValueError):
@@ -180,8 +180,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         session.scalar.return_value = row
         with (
             patch(
-                "services.payment_queue_admin.retry_dead_fulfillment_operation",
-                AsyncMock(return_value=row),
+                "services.payment_queue_admin.retry_dead_provider_operation",
+                AsyncMock(return_value=SimpleNamespace(accepted=True, reason=None)),
             ) as retry,
             patch("services.payment_queue_admin._audit", AsyncMock()) as audit,
             patch(
@@ -192,7 +192,7 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
             result = await confirm_manual_retry(
                 session,
                 admin_id=1,
-                queue="fulfillment",
+                queue="provider",
                 operation_id=2,
                 reason="operator approved",
                 expected_version="a" * 64,

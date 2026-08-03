@@ -20,7 +20,6 @@ from database.models import (
     EntitlementEntry,
     PaidValueLedgerEntry,
     Payment,
-    PaymentFulfillmentOperation,
     PaymentProviderOperation,
     Tariff,
     TariffQuote,
@@ -101,11 +100,8 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def topup(self, session, amount: int) -> Payment:
         payment = Payment(
             user_id=self.user_id,
-            tariff_id=None,
-            payment_kind="balance_topup",
             amount=Decimal(amount),
             currency="RUB",
-            status="paid_processing",
             public_order_id="topup_" + uuid.uuid4().hex,
             provider_idempotency_key=uuid.uuid4().hex,
             provider_status="succeeded",
@@ -113,8 +109,6 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             reconciliation_status="ok",
             checkout_status="active",
             ui_visible=True,
-            snapshot_amount=Decimal(amount),
-            snapshot_currency="RUB",
             provider_confirmed_at=now_utc(),
         )
         session.add(payment)
@@ -198,8 +192,8 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(first.created)
             self.assertFalse(repeated.created)
             self.assertEqual(first.payment.id, repeated.payment.id)
-            self.assertEqual(first.payment.payment_kind, "balance_topup")
-            self.assertIsNone(first.payment.tariff_id)
+            self.assertEqual(first.payment.currency, "RUB")
+            self.assertNotIn("tariff_id", Payment.__table__.c)
             operation = await session.scalar(
                 select(PaymentProviderOperation).where(
                     PaymentProviderOperation.payment_id == first.payment.id
@@ -241,12 +235,13 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(created)
             self.assertEqual(snapshot.available, Decimal("40.00"))
-            grants = await session.scalar(
-                select(func.count(PaymentFulfillmentOperation.id)).where(
-                    PaymentFulfillmentOperation.payment_id == first.payment.id
+            credits = await session.scalar(
+                select(func.count(AccountLedgerEntry.id)).where(
+                    AccountLedgerEntry.payment_id == first.payment.id,
+                    AccountLedgerEntry.entry_type == "payment_credit",
                 )
             )
-            self.assertEqual(grants, 0)
+            self.assertEqual(credits, 1)
 
     async def test_pending_exposure_prevents_late_balance_overflow(self):
         settings = self.topup_settings(BALANCE_MAX_AVAILABLE_RUB=100)

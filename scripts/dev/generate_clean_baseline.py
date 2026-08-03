@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from database.models import Base
+from database import dispute_models as _dispute_models  # noqa: F401
 from database import refund_models as _refund_models  # noqa: F401
 
 

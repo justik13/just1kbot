@@ -17,7 +17,10 @@ def validate_provider_payment(payment, data: dict) -> str | None:
             return "currency_mismatch"
         if metadata.get("order_id") != payment.public_order_id:
             return "order_id_mismatch"
-        if str(metadata.get("local_payment_id") or "") != str(payment.id):
+        local_payment_id = metadata.get("local_payment_id")
+        if local_payment_id in (None, ""):
+            return "local_payment_id_missing"
+        if str(local_payment_id) != str(payment.id):
             return "local_payment_id_mismatch"
     except (InvalidOperation, ValueError, TypeError):
         return "invalid_provider_snapshot"

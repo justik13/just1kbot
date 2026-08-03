@@ -13,8 +13,6 @@ from bot.keyboards.payment import (
     get_topup_waiting_keyboard,
 )
 from bot.texts_data.user_texts import TEXTS
-from services.payment_service import PaymentService
-
 from database.models import Payment
 
 
@@ -110,7 +108,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("yookassa_routes", router_source)
         self.assertNotIn("pay_yookassa:", keyboard_source)
-        self.assertFalse(hasattr(PaymentService, "create_yookassa_payment"))
+        self.assertFalse((Path(__file__).parents[1] / "services" / "payment_service").exists())
 
 
 if __name__ == "__main__":
