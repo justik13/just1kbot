@@ -73,6 +73,18 @@ class RuntimeConfigContractTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.build(data)
 
+    def test_removed_global_settings_fail(self):
+        for key, value in (
+            ("AMNEZIA_API_URL", "http://127.0.0.1:4001"),
+            ("AMNEZIA_API_KEY", "old-global-key"),
+            ("WEBHOOK_URL", "https://vpn.example.test/webhook/yookassa"),
+        ):
+            with self.subTest(key=key):
+                data = dict(BASE)
+                data[key] = value
+                with self.assertRaises(ValidationError):
+                    self.build(data)
+
     def test_main_has_no_payment_disabled_startup_mode(self):
         source = (ROOT / "bot" / "main.py").read_text(encoding="utf-8")
         self.assertNotIn(
