@@ -127,7 +127,7 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertIn("root", result.stderr.lower())
 
     def test_psql_variables_are_never_embedded_in_dash_c_sql(self):
-        variable = re.compile(r""":(?:'|")?[A-Za-z_][A-Za-z0-9_]*"""")
+        variable = re.compile(r""":(?:'|"")?[A-Za-z_][A-Za-z0-9_]*""")
         for script in sorted(ROOT.rglob("*.sh")):
             logical_lines = script.read_text(encoding="utf-8").replace(
                 "\\\n", " "
@@ -227,7 +227,7 @@ pg_repair_env_port
             "previous_service=absent start_not_attempted=true", runtime
         )
         absent_branch = runtime.index(
-            'if [[ ! -f "$ROLLBACK_SNAPSHOT/systemd.service" ]]'
+            'if [[ ! -f "$ROLLBACK_SNAPSHOT/systemd.service"]]'
         )
         next_start = runtime.index("service_call start", absent_branch)
         branch_return = runtime.index("return 1", absent_branch)
