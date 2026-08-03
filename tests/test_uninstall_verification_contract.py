@@ -23,15 +23,16 @@ class UninstallVerificationContractTests(unittest.TestCase):
 
     def test_official_entrypoint_checks_ownership_and_verifies_result(self):
         source = ENTRYPOINT.read_text(encoding="utf-8")
+        state_check = 'bash "$INSPECT_STATE" --operation uninstall --require-safe'
         self.assertIn("INSPECT_STATE", source)
-        self.assertIn('bash "$INSPECT_STATE" --require-safe', source)
+        self.assertIn(state_check, source)
         self.assertIn("PREFLIGHT_RESOURCES", source)
         self.assertIn('bash "$PREFLIGHT_RESOURCES"', source)
         self.assertIn("VERIFY_UNINSTALL", source)
         self.assertIn('source "$VERIFY_UNINSTALL"', source)
         self.assertIn('verify_uninstall_main "$VERIFY_MODE"', source)
         self.assertLess(
-            source.index('bash "$INSPECT_STATE" --require-safe'),
+            source.index(state_check),
             source.index('bash "$PREFLIGHT_RESOURCES"'),
         )
         self.assertLess(
