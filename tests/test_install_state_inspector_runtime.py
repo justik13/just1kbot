@@ -120,14 +120,15 @@ class InstallStateInspectorRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["state"], "foreign_collision")
         self.assertIn("unit", str(payload["reason"]))
 
-    def test_known_incomplete_install_is_recoverable(self):
+    def test_known_incomplete_install_requires_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
             env = self.make_env(Path(directory))
             project = self.create_legacy_project(env)
             (project / ".env").write_text('BOT_TOKEN="redacted"\n', encoding="utf-8")
             result, payload = self.run_inspector(env)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 23, result.stderr)
         self.assertEqual(payload["state"], "partial_install")
+        self.assertIn("recovery", str(payload["action"]).lower())
 
     def test_confirmed_preserved_backup_blocks_deploy_but_allows_uninstall(self):
         with tempfile.TemporaryDirectory() as directory:
