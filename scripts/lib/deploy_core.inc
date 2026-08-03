@@ -272,6 +272,15 @@ validate_env_file() {
         fi
     done
 
+    local removed
+    for removed in AMNEZIA_API_URL AMNEZIA_API_KEY WEBHOOK_URL; do
+        value=$(read_env_value "$removed")
+        if [[ -n "$value" ]]; then
+            error "В production .env найден удалённый параметр: $removed"
+            return 1
+        fi
+    done
+
     local bot_token support_username admin_ids encryption_key
     local shop_id secret_key domain ssl_email webhook_port
 
