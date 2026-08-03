@@ -37,6 +37,17 @@ jobs:
           Path('/tmp/fix_installer.py').write_text(script, encoding='utf-8')
           PY
           python /tmp/fix_installer.py
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/lib/deploy_core.inc')
+          text = path.read_text(encoding='utf-8')
+          old = "printf 'Укажите реальный email для Let's Encrypt.\\n'"
+          new = "printf 'Укажите реальный email для сертификата.\\n'"
+          if old not in text:
+              raise SystemExit('unsafe email prompt not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Run targeted checks
         shell: bash
