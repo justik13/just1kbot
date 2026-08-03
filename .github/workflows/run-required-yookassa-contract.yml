@@ -1,0 +1,76 @@
+name: Run required YooKassa contract
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.number == 53
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/greenfield-ui-ux-cleanup
+          fetch-depth: 0
+
+      - name: Apply corrected transformation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/apply-required-yookassa-contract.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Run targeted checks"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          body = source[start:end]
+          body = "\n".join(
+              line[10:] if line.startswith("          ") else line
+              for line in body.splitlines()
+          ) + "\n"
+          old = 'text = replace_exact(text, old_method, new_method, "installer valid and missing tests")'
+          new = '''text = replace_between(
+              text,
+              "    def test_valid_install_input_does_not_need_amnezia_values(self):\\n",
+              "    def test_domain_rejects_placeholder_certbot_email(self):\\n",
+              new_method,
+              "installer valid and missing tests",
+          )'''
+          if old not in body:
+              raise SystemExit('installer method replacement call not found')
+          body = body.replace(old, new, 1)
+          Path('/tmp/apply_required_yookassa.py').write_text(body, encoding='utf-8')
+          PY
+          python /tmp/apply_required_yookassa.py
+
+      - name: Run targeted checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -r requirements.txt --quiet
+          bash -n deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh scripts/lib/deploy_core.inc
+          shellcheck --severity=error deploy.sh scripts/deploy.sh scripts/deploy_full.sh scripts/deploy_full_library.sh
+          python -m unittest discover -s tests -p 'test_installer_input_contract.py' -v
+          python -m unittest discover -s tests -p 'test_runtime_config_contract.py' -v
+          python -m unittest discover -s tests -p 'test_deploy_rollback.py' -v
+          git diff --check
+
+      - name: Commit verified changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/apply-required-yookassa-contract.yml \
+            .github/workflows/run-required-yookassa-contract.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: require complete YooKassa production configuration'
+          git pull --rebase origin agent/greenfield-ui-ux-cleanup
+          git push origin HEAD:agent/greenfield-ui-ux-cleanup
