@@ -12,6 +12,7 @@ DISPATCH = SCRIPTS / "lib" / "install_safe_dispatch.sh"
 UNINSTALL_ENTRY = SCRIPTS / "uninstall_foundation.sh"
 UNINSTALL_CORE = SCRIPTS / "lib" / "uninstall_safe_core.sh"
 UNINSTALL_ACTIONS = SCRIPTS / "lib" / "uninstall_safe_actions.sh"
+UNINSTALL_OWNERSHIP = SCRIPTS / "lib" / "uninstall_safe_ownership.sh"
 
 
 class ShellHotfixRegressionTests(unittest.TestCase):
@@ -52,17 +53,27 @@ class ShellHotfixRegressionTests(unittest.TestCase):
 
     def test_manifest_preflight_precedes_any_uninstall_stop(self):
         entry = UNINSTALL_ENTRY.read_text(encoding="utf-8")
-        core = UNINSTALL_CORE.read_text(encoding="utf-8")
-        actions = UNINSTALL_ACTIONS.read_text(encoding="utf-8")
+        sources = [
+            entry,
+            UNINSTALL_CORE.read_text(encoding="utf-8"),
+            UNINSTALL_ACTIONS.read_text(encoding="utf-8"),
+            UNINSTALL_OWNERSHIP.read_text(encoding="utf-8"),
+        ]
         main = entry[entry.index("main()") :]
         self.assertLess(main.index("manifest_preflight"), main.index("stop_units"))
         self.assertLess(main.index("prepare_postgres"), main.index("stop_units"))
         self.assertLess(main.index("backup_before_keep"), main.index("stop_units"))
         self.assertLess(main.index("stop_units"), main.index("remove_files"))
-        for source in (entry, core, actions):
+        for source in sources:
             self.assertNotIn("ufw ", source)
             self.assertNotIn("setup-amnezia-api.sh", source)
-            self.assertNotIn("/etc/redis/redis.conf", source)
+            for forbidden in (
+                "sed -i /etc/redis/redis.conf",
+                "rm -f /etc/redis/redis.conf",
+                "rm -rf /etc/redis",
+                "> /etc/redis/redis.conf",
+            ):
+                self.assertNotIn(forbidden, source)
 
     def test_legacy_wrappers_cannot_bypass_safe_control_plane(self):
         deploy_wrapper = (SCRIPTS / "deploy.sh").read_text(encoding="utf-8")
