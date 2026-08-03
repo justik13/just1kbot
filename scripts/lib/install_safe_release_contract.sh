@@ -34,8 +34,6 @@ scripts/lib/install_safe_platform.sh
 scripts/lib/install_safe_platform_support.sh
 scripts/lib/install_safe_release_contract.sh
 scripts/lib/install_safe_lock_policy.sh
-scripts/lib/install_safe_legacy.sh
-scripts/lib/install_safe_redis_transition.sh
 scripts/lib/install_safe_runtime.sh
 scripts/lib/install_safe_tls_policy.sh
 scripts/lib/install_safe_postgres_ownership.sh

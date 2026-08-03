@@ -31,8 +31,6 @@ class ShellLayoutTests(unittest.TestCase):
             "lib/install_safe_platform.sh",
             "lib/install_safe_release_contract.sh",
             "lib/install_safe_lock_policy.sh",
-            "lib/install_safe_legacy.sh",
-            "lib/install_safe_redis_transition.sh",
             "lib/install_safe_runtime.sh",
             "lib/install_safe_tls_policy.sh",
             "lib/install_safe_postgres_ownership.sh",
@@ -129,7 +127,7 @@ class ShellLayoutTests(unittest.TestCase):
         self.assertIn("root", result.stderr.lower())
 
     def test_psql_variables_are_never_embedded_in_dash_c_sql(self):
-        variable = re.compile(r""":(?:'|")?[A-Za-z_][A-Za-z0-9_]*""")
+        variable = re.compile(r""":(?:'|")?[A-Za-z_][A-Za-z0-9_]*"""")
         for script in sorted(ROOT.rglob("*.sh")):
             logical_lines = script.read_text(encoding="utf-8").replace(
                 "\\\n", " "

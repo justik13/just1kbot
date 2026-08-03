@@ -7,15 +7,6 @@ umask 077
 EXTERNAL_PROXY_SNIPPET=${EXTERNAL_PROXY_SNIPPET:-/var/lib/just1kbot/install-state/external-proxy.nginx.conf}
 PROXY_MODE=${PROXY_MODE:-}
 
-clone_function collect_initial_input proxy_base_collect_initial_input
-clone_function validate_initial_input proxy_base_validate_initial_input
-clone_function preflight_before_packages proxy_base_preflight_before_packages
-clone_function run_existing_read_only_preflight proxy_base_existing_preflight
-clone_function setup_nginx_initial proxy_base_setup_nginx_initial
-clone_function refresh_existing_nginx proxy_base_refresh_existing_nginx
-clone_function configure_operational_transaction proxy_base_configure_operational_transaction
-clone_function show_status proxy_base_show_status
-
 resolve_proxy_mode() {
     local requested=${JUST1KBOT_PROXY_MODE:-} recorded=''
     if foundation_manifest_validate >/dev/null 2>&1; then
@@ -103,6 +94,7 @@ collect_external_initial_input() {
     YOOKASSA_WEBHOOK_PORT=$(choose_internal_webhook_port)
 }
 
+clone_function collect_initial_input proxy_base_collect_initial_input
 collect_initial_input() {
     local explicit_port=false
     [[ -n "${YOOKASSA_WEBHOOK_PORT+x}" ]] && explicit_port=true
@@ -117,6 +109,7 @@ collect_initial_input() {
     fi
 }
 
+clone_function validate_initial_input proxy_base_validate_initial_input
 validate_initial_input() {
     resolve_proxy_mode
     if [[ "$PROXY_MODE" == external && -z "${SSL_EMAIL:-}" ]]; then
@@ -137,6 +130,7 @@ proxy_preflight_postgres() {
     fi
 }
 
+clone_function preflight_before_packages proxy_base_preflight_before_packages
 preflight_before_packages() {
     resolve_proxy_mode
     if [[ "$PROXY_MODE" == managed ]]; then
@@ -154,6 +148,7 @@ preflight_before_packages() {
     proxy_preflight_postgres
 }
 
+clone_function run_existing_read_only_preflight proxy_base_existing_preflight
 run_existing_read_only_preflight() {
     resolve_proxy_mode
     if [[ "$PROXY_MODE" == managed || ! -f "$INSTALL_MANIFEST" ]]; then
@@ -211,6 +206,7 @@ EOF_PROXY
     printf 'Готовый upstream contract: %s\n' "$EXTERNAL_PROXY_SNIPPET"
 }
 
+clone_function setup_nginx_initial proxy_base_setup_nginx_initial
 setup_nginx_initial() {
     resolve_proxy_mode
     if [[ "$PROXY_MODE" == external ]]; then
@@ -222,6 +218,7 @@ setup_nginx_initial() {
     fi
 }
 
+clone_function refresh_existing_nginx proxy_base_refresh_existing_nginx
 refresh_existing_nginx() {
     resolve_proxy_mode
     if [[ "$PROXY_MODE" == external ]]; then
@@ -233,6 +230,7 @@ refresh_existing_nginx() {
     fi
 }
 
+clone_function configure_operational_transaction proxy_base_configure_operational_transaction
 configure_operational_transaction() {
     resolve_proxy_mode
     proxy_base_configure_operational_transaction
@@ -257,6 +255,7 @@ configure_operational_transaction() {
     OPERATIONAL_NGINX=false
 }
 
+clone_function show_status proxy_base_show_status
 show_status() {
     proxy_base_show_status
     resolve_proxy_mode

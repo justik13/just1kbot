@@ -37,16 +37,14 @@ class InstallerPlanCompletionTests(unittest.TestCase):
             "install_safe_platform_support.sh",
             "install_safe_release_contract.sh",
             "install_safe_lock_policy.sh",
-            "install_safe_legacy.sh",
-            "install_safe_redis_transition.sh",
             "install_safe_runtime.sh",
             "install_safe_tls_policy.sh",
             "install_safe_postgres_ownership.sh",
-            "install_safe_proxy_mode.sh",
             "install_safe_package_policy.sh",
             "install_safe_activation_policy.sh",
             "install_safe_failure_injection.sh",
             "install_safe_dispatch.sh",
+            "install_safe_proxy_mode.sh",
         ]
         positions = [self.loader.index(name) for name in ordered]
         self.assertEqual(positions, sorted(positions))
