@@ -90,12 +90,12 @@ run_existing_read_only_preflight() {
         return 1
     }
 
-    if foundation_manifest_validate; then
-        foundation_preflight_static_resources
-        foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
-    else
-        legacy_read_only_preflight
-    fi
+    foundation_manifest_validate || {
+        error 'Manifest отсутствует или повреждён; update невозможен без ownership manifest.'
+        return 1
+    }
+    foundation_preflight_static_resources
+    foundation_preflight_domain "$DOMAIN" "$YOOKASSA_WEBHOOK_PORT"
 }
 
 perform_deploy_mutations() {
@@ -128,7 +128,6 @@ perform_deploy_mutations() {
     else
         pg_prepare update
         record_existing_postgres
-        record_legacy_redis_transition
     fi
     installer_failpoint after-postgresql
 
