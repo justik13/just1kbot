@@ -9,13 +9,16 @@ on:
       - .github/workflows/requirements-lock.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -30,16 +33,27 @@ jobs:
             --strip-extras \
             --output-file /tmp/requirements.lock \
             requirements.txt
-      - name: Verify committed lock is current
-        run: |
-          if [ -f requirements.lock ]; then
-            diff -u requirements.lock /tmp/requirements.lock
-          fi
       - name: Verify locked installation
         run: |
           python -m venv /tmp/lock-check
           /tmp/lock-check/bin/python -m pip install 'pip==25.3'
           /tmp/lock-check/bin/python -m pip install --require-hashes -r /tmp/requirements.lock
+      - name: Commit deterministic lock on non-main branches
+        if: github.event_name == 'push' && github.ref_name != 'main'
+        run: |
+          cp /tmp/requirements.lock requirements.lock
+          git add requirements.lock
+          if git diff --cached --quiet; then
+            echo 'requirements.lock is already current.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'build: refresh deterministic requirements lock'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Verify committed lock on main or manual runs
+        if: github.ref_name == 'main' || github.event_name == 'workflow_dispatch'
+        run: diff -u requirements.lock /tmp/requirements.lock
       - uses: actions/upload-artifact@v4
         with:
           name: requirements-lock-${{ github.sha }}
