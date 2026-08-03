@@ -29,12 +29,12 @@ FOUNDATION="$ROOT_DIR/scripts/lib/installer_foundation.sh"
 FOUNDATION_COMPAT="$ROOT_DIR/scripts/lib/installer_foundation_compat.sh"
 
 usage() {
-    cat <<'EOF'
+    cat <<'EOF_USAGE'
 Just1kBot doctor — read-only production diagnostics
 Usage:
   sudo bash scripts/ops/doctor.sh
   sudo bash scripts/ops/doctor.sh --smoke
-EOF
+EOF_USAGE
 }
 
 ok() { printf '[OK] %s\n' "$*"; }
@@ -89,6 +89,7 @@ check_os() {
 }
 
 check_manifest() {
+    local library
     for library in "$FOUNDATION" "$FOUNDATION_COMPAT"; do
         if [[ ! -f "$library" || -L "$library" ]]; then
             fail "installer library отсутствует: $library"
@@ -155,7 +156,10 @@ check_dedicated_redis() {
 check_permissions() {
     local state account home shell
     account=$(getent passwd just1kbot 2>/dev/null || true)
-    if [[ -z "$account" ]]; then fail 'Service account just1kbot отсутствует'; return; fi
+    if [[ -z "$account" ]]; then
+        fail 'Service account just1kbot отсутствует'
+        return
+    fi
     home=$(cut -d: -f6 <<<"$account")
     shell=$(cut -d: -f7 <<<"$account")
     [[ "$home" == /home/just1kbot ]] && ok "Service account home: $home" || fail "Service account home: $home"
@@ -181,13 +185,19 @@ check_permissions() {
 }
 
 check_heartbeat() {
-    if ! safe_regular_file "$HEARTBEAT_FILE"; then fail "Heartbeat missing/unsafe: $HEARTBEAT_FILE"; return; fi
+    if ! safe_regular_file "$HEARTBEAT_FILE"; then
+        fail "Heartbeat missing/unsafe: $HEARTBEAT_FILE"
+        return
+    fi
     local age=$(( $(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE") ))
     (( age >= 0 && age <= MAX_HEARTBEAT_AGE )) && ok "Heartbeat fresh: age=${age}s" || fail "Heartbeat stale: age=${age}s"
 }
 
 check_release_metadata() {
-    if ! safe_regular_file "$RELEASE_METADATA"; then warn '.release-version отсутствует; вероятно deploy из checkout'; return; fi
+    if ! safe_regular_file "$RELEASE_METADATA"; then
+        warn '.release-version отсутствует; вероятно deploy из checkout'
+        return
+    fi
     local commit
     commit=$(sed -n 's/^source_commit=//p' "$RELEASE_METADATA")
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] && ok "Release commit: $commit" || fail 'Release metadata commit invalid'
@@ -204,7 +214,10 @@ check_timers() {
 check_backup() {
     local latest age sidecar expected actual
     latest=$(find "$BACKUP_DIR" -maxdepth 1 -type f -name 'just1kbot-pg-v1-????????T??????Z.tar.age' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
-    if [[ -z "$latest" ]]; then warn 'Encrypted backup отсутствует'; return; fi
+    if [[ -z "$latest" ]]; then
+        warn 'Encrypted backup отсутствует'
+        return
+    fi
     age=$(( $(date +%s) - $(stat -c %Y "$latest") ))
     (( age <= MAX_BACKUP_AGE )) && ok "Latest backup age=${age}s" || warn "Latest backup old: age=${age}s"
     sidecar="$latest.sha256"
@@ -218,22 +231,28 @@ check_backup() {
 }
 
 check_runtime_dependencies() {
-    [[ -x "$VENV_DIR/bin/python" ]] || { fail 'Virtualenv Python отсутствует'; return; }
-    timeout --signal=TERM --kill-after=5s 30s \
+    [[ -x "$VENV_DIR/bin/python" ]] || {
+        fail 'Virtualenv Python отсутствует'
+        return
+    }
+
+    if ! timeout --signal=TERM --kill-after=5s 30s \
         runuser -u just1kbot -- env \
-        HOME=/run/just1kbot PYTHONPATH="$PROJECT_DIR" PYTHONDONTWRITEBYTECODE=1 \
-        "$VENV_DIR/bin/python" - <<'PY' || {
-            fail 'Runtime dependency check failed (secrets redacted)'
-            return
-        }
+        HOME=/run/just1kbot \
+        PYTHONPATH="$PROJECT_DIR" \
+        PYTHONDONTWRITEBYTECODE=1 \
+        "$VENV_DIR/bin/python" - <<'PY_RUNTIME'
 import asyncio
+
+from aiogram import Bot
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 import redis.asyncio as redis
-from aiogram import Bot
+
 from config.settings import get_settings
+
 
 async def check():
     settings = get_settings()
@@ -255,7 +274,11 @@ async def check():
     bot = Bot(settings.BOT_TOKEN)
     try:
         async with engine.connect() as connection:
-            revision = (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+            revision = (
+                await connection.execute(
+                    text("SELECT version_num FROM alembic_version")
+                )
+            ).scalar_one()
             if revision != heads[0]:
                 raise RuntimeError("database revision mismatch")
         if not await redis_client.ping():
@@ -268,13 +291,21 @@ async def check():
         await bot.session.close()
         await engine.dispose()
 
+
 asyncio.run(asyncio.wait_for(check(), timeout=25))
-PY
+PY_RUNTIME
+    then
+        fail 'Runtime dependency check failed (secrets redacted)'
+        return
+    fi
     ok 'PostgreSQL/Alembic, Redis and Telegram checks passed'
 }
 
 check_nginx() {
-    command -v nginx >/dev/null 2>&1 || { fail 'nginx binary отсутствует'; return; }
+    command -v nginx >/dev/null 2>&1 || {
+        fail 'nginx binary отсутствует'
+        return
+    }
     nginx -t >/dev/null 2>&1 && ok 'Nginx configuration valid' || fail 'nginx -t failed'
 }
 
