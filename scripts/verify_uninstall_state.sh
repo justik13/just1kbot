@@ -133,7 +133,7 @@ print_result() {
     return 1
 }
 
-main() {
+verify_uninstall_main() {
     case ${1:-} in
         --keep-data) MODE=keep ;;
         --purge-data) MODE=purge ;;
@@ -159,4 +159,8 @@ main() {
     print_result
 }
 
-main "$@"
+if [[ "${VERIFY_UNINSTALL_SOURCE_ONLY:-0}" == 1 ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+verify_uninstall_main "$@"
