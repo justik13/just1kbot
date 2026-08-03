@@ -44,10 +44,13 @@ class ShellHotfixRegressionTests(unittest.TestCase):
 
     def test_uninstall_preflight_precedes_any_operational_stop(self):
         text = (SCRIPTS / "uninstall.sh").read_text(encoding="utf-8")
-        main = text[text.index("main(){"):]
+        main = text[text.index("main() {") :]
+        self.assertLess(main.index("run_resource_preflight"), main.index("preflight_purge"))
         self.assertLess(main.index("preflight_purge"), main.index("pause_operational_work"))
         self.assertLess(main.index("pause_operational_work"), main.index("stop_units"))
         self.assertNotIn("mapfile -t connection < <(redis_connection)", text)
+        self.assertNotIn("ufw ", text)
+        self.assertNotIn("setup-amnezia-api.sh", text)
 
 
 if __name__ == "__main__":
