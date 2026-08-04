@@ -8,6 +8,7 @@ ROOT_LOADER = ROOT / "deploy.sh"
 CONTROL_MODULE = ROOT / "scripts" / "lib" / "control_plane.sh"
 STATE_INSPECTOR = ROOT / "scripts" / "inspect_install_state.sh"
 DIAGNOSTICS = ROOT / "scripts" / "lib" / "installer_diagnostics.sh"
+ACTIVATION_POLICY = ROOT / "scripts" / "lib" / "install_safe_activation_policy.sh"
 
 
 class InstallerControlPlaneContractTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             CONTROL_MODULE,
             STATE_INSPECTOR,
             DIAGNOSTICS,
+            ACTIVATION_POLICY,
         ):
             with self.subTest(script=script):
                 result = subprocess.run(
@@ -63,6 +65,78 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             "update [--sha COMMIT]",
         ):
             self.assertIn(marker, source)
+
+    def test_recovery_bootstrap_is_installed_before_mutations_and_cleaned(self):
+        source = ACTIVATION_POLICY.read_text(encoding="utf-8")
+        self.assertIn("/usr/local/libexec/just1kbot-installer", source)
+        self.assertIn("CLI_BOOTSTRAP_TEMP_ROOT", source)
+        self.assertIn("stage_recovery_bundle", source)
+        self.assertIn("foundation_journal_add_created_resource", source)
+        self.assertIn("install_recovery_cli_launcher", source)
+        self.assertIn("PRIMARY=/opt/just1kbot/deploy.sh", source)
+        self.assertIn("RECOVERY=$CLI_BOOTSTRAP_ROOT/deploy.sh", source)
+        self.assertIn("remove_recovery_bootstrap", source)
+        self.assertIn("remove_recovery_path", source)
+        self.assertIn("recovery_paths_safe_for_cleanup", source)
+        self.assertIn("CLI_BOOTSTRAP_MARKER", source)
+        self.assertIn("root:root 750", source)
+        self.assertIn("rollback_empty_pre_manifest_journal", source)
+        self.assertIn("remove_recovery_bundle", source)
+
+        transaction = source[
+            source.index("begin_installer_transaction()") : source.index("activate_release_bundle()")
+        ]
+        self.assertLess(
+            transaction.index("foundation_journal_begin \"$operation\" preflight"),
+            transaction.index("stage_recovery_bundle"),
+        )
+
+        stage = source[
+            source.index("stage_recovery_bundle()") : source.index("remove_recovery_path()")
+        ]
+        self.assertLess(
+            stage.index('foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"'),
+            stage.index('install -d -o root -g root -m 0750 "$temporary"'),
+        )
+        self.assertLess(
+            stage.index('foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"'),
+            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
+        )
+        self.assertLess(
+            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
+            stage.index("install_recovery_cli_launcher"),
+        )
+
+        activate = source[source.index("activate_release_bundle()"):]
+        self.assertLess(
+            activate.index("foundation_install_cli"),
+            activate.index("install_recovery_cli_launcher"),
+        )
+
+        automatic_rollback = source[
+            source.index("automatic_initial_rollback()") : source.index("base_run_deploy_definition")
+        ]
+        self.assertLess(
+            automatic_rollback.index("recovery_paths_safe_for_cleanup"),
+            automatic_rollback.index("base_automatic_initial_rollback"),
+        )
+
+        rollback = source[
+            source.index("rollback_incomplete()") : source.index("if [[ \"${INSTALL_SAFE_ACTIVATION_POLICY_SOURCE_ONLY:-0}\"",)
+        ]
+        self.assertLess(
+            rollback.index("recovery_paths_safe_for_cleanup"),
+            rollback.index('bash "$SCRIPT_DIR/uninstall_foundation.sh"'),
+        )
+
+        pre_manifest = source[
+            source.index("rollback_empty_pre_manifest_journal()") : source.index("base_automatic_initial_rollback_definition")
+        ]
+        self.assertIn('"path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH"', pre_manifest)
+        self.assertLess(
+            pre_manifest.index("recovery_paths_safe_for_cleanup"),
+            pre_manifest.index("remove_recovery_bootstrap"),
+        )
 
     def test_diagnostics_explain_problem_and_next_action(self):
         source = DIAGNOSTICS.read_text(encoding="utf-8")
