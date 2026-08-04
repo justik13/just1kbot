@@ -259,12 +259,13 @@ class SubscriptionService:
             user.device_limit = new_device_limit
 
             if new_device_limit > old_device_limit:
-                user.device_creations_today = 0
-                user.last_creation_date = None
-
+                # P0-2: НЕ сбрасываем device_creations_today при апгрейде
+                # Сброс происходит только в ночном cleanup-воркере по календарю UTC.
+                # Это предотвращает абюз: юзер не может создать 25 устройств,
+                # апгрейднуться и создать еще 25, обойдя суточный лимит.
                 logger.info(
                     "extend_subscription: user %s upgraded from %s to %s devices. "
-                    "Daily creations counter reset to 0.",
+                    "Daily creations counter NOT reset (abuse prevention).",
                     telegram_id,
                     old_device_limit,
                     new_device_limit,
@@ -317,9 +318,8 @@ class SubscriptionService:
         user.notified_grace_12h = False
         user.notification_retry_count = 0
         user.last_notification_attempt = None
-        if device_limit > old_device_limit:
-            user.device_creations_today = 0
-            user.last_creation_date = None
+        # P0-2: НЕ сбрасываем device_creations_today при замене тарифа.
+        # Сброс только в ночном cleanup-воркере (защита от амьюза суточного лимита).
         await session.flush()
         invalidate_user_cache(user.telegram_id)
         await SubscriptionService._sync_access_state(session, user)
