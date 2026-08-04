@@ -84,6 +84,45 @@ print(json.loads(Path(os.environ["JOURNAL_PATH"]).read_text(encoding="utf-8"))["
 PY
 }
 
+# A resource created by the current durable transaction is already owned by
+# this installer operation even before its final manifest entry is written.
+# This is required for multi-phase activation where recovery bootstrap files
+# are journaled first and the normal manifest is populated later.
+foundation_journal_has_created_resource() {
+    local resource=$1
+    foundation_journal_validate || return 1
+    JOURNAL_PATH="$INSTALL_JOURNAL" RESOURCE_VALUE="$resource" python3 - <<'PY' >/dev/null
+import json
+import os
+from pathlib import Path
+
+value = os.environ["RESOURCE_VALUE"]
+data = json.loads(Path(os.environ["JOURNAL_PATH"]).read_text(encoding="utf-8"))
+raise SystemExit(0 if value in data.get("created_resources", []) else 1)
+PY
+}
+
+foundation_resource_owned_by_current_operation() {
+    local resource=$1
+    foundation_manifest_has_resource "$resource" && return 0
+    foundation_journal_has_created_resource "$resource" && return 0
+    return 1
+}
+
+# Override the foundation preflight hooks after foundation.sh has been sourced.
+# Existing/foreign resources remain blocked; only resources proven by the
+# current manifest or durable journal are accepted.
+foundation_preflight_path_absent_or_owned() {
+    local path=$1 marker=$2 description=$3
+    foundation_path_exists "$path" || return 0
+    foundation_resource_owned_by_current_operation "$marker" && return 0
+    foundation_fail \
+        FOREIGN_COLLISION \
+        "$description уже существует без ownership proof" \
+        "$path найден, но resource '$marker' отсутствует в manifest и текущем journal" \
+        'Перенесите чужой объект или выполните документированную legacy migration; installer не будет его перезаписывать.'
+}
+
 foundation_assert_ubuntu_2404() { foundation_exact_ubuntu_2404; }
 foundation_reserved_path_preflight() { foundation_preflight_path_absent_or_owned "$@"; }
 
@@ -92,13 +131,13 @@ foundation_port_preflight() {
     if ! foundation_port_in_use "$port"; then
         return 0
     fi
-    if foundation_manifest_has_resource "$resource"; then
+    if foundation_resource_owned_by_current_operation "$resource"; then
         [[ -z "$unit" ]] || systemctl is-active --quiet "$unit" 2>/dev/null
         return
     fi
     foundation_fail PORT_COLLISION \
         "$label port $port занят" \
-        'listener не принадлежит ownership manifest' \
+        'listener не принадлежит manifest или текущей installer transaction' \
         'Освободите порт или выберите другой.'
 }
 
