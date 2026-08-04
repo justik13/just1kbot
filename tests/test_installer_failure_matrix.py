@@ -25,6 +25,12 @@ setup_nginx_initial() {{ calls+=(managed-proxy); }}
 refresh_existing_nginx() {{ calls+=(refresh-proxy); }}
 setup_systemd() {{ calls+=(systemd); }}
 foundation_install_cli() {{ calls+=(cli); }}
+# install_safe_activation_policy.sh wraps these base lifecycle functions while
+# loading. The matrix isolates activate_release_bundle, so provide minimal
+# definitions for the unrelated wrappers before sourcing the production module.
+automatic_initial_rollback() {{ :; }}
+run_deploy() {{ :; }}
+recover_install() {{ :; }}
 REDIS_PASSWORD=test-password
 INITIAL_INSTALL=true
 INSTALL_SAFE_FAILURE_INJECTION_SOURCE_ONLY=1
