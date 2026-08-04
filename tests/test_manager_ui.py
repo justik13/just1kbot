@@ -43,7 +43,7 @@ class ManagerUiTests(unittest.TestCase):
 
     def test_blocked_state_hides_mutating_actions(self):
         blocked = self.ui[
-            self.ui.index("ui_blocked_menu()") : self.ui.index("menu()")
+            self.ui.index("ui_blocked_menu()") : self.ui.index("\nmenu() {")
         ]
         self.assertIn("Mutating actions скрыты", blocked)
         self.assertNotIn("dispatch deploy", blocked)
