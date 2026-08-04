@@ -133,6 +133,10 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             source.index("rollback_empty_pre_manifest_journal()") : source.index("base_automatic_initial_rollback_definition")
         ]
         self.assertIn('"path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH"', pre_manifest)
+        self.assertLess(
+            pre_manifest.index("recovery_paths_safe_for_cleanup"),
+            pre_manifest.index("remove_recovery_bootstrap"),
+        )
 
     def test_diagnostics_explain_problem_and_next_action(self):
         source = DIAGNOSTICS.read_text(encoding="utf-8")
