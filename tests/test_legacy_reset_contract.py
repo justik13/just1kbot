@@ -36,15 +36,16 @@ class LegacyResetContractTests(unittest.TestCase):
         self.assertIn("managed-by=just1kbot\\;installation-id=*", source)
         self.assertIn("[[ \"$db_comment\" == \"$role_comment\" ]]", source)
         self.assertIn("runuser -u postgres -- dropdb", source)
-        self.assertIn("DROP ROLE IF EXISTS", source)
+        self.assertIn("DROP ROLE IF EXISTS just1kbot;", source)
 
     def test_global_redis_and_firewall_are_not_touched(self):
         source = RESET.read_text(encoding="utf-8")
-        self.assertNotIn("/etc/redis/redis.conf", source)
+        self.assertNotIn("sed -i", source)
         self.assertNotIn("ufw", source)
         self.assertNotIn("iptables", source)
         self.assertNotIn("nft", source)
-        self.assertIn("Global Redis (/etc/redis/redis.conf) и firewall намеренно не изменялись.", source)
+        self.assertIn("Global Redis конфигурация /etc/redis/redis.conf и firewall намеренно не изменялись.", source)
+        self.assertIn("REDIS_CONFIG=${REDIS_CONFIG:-/etc/just1kbot/redis.conf}", source)
 
     def test_only_known_units_and_helpers_are_targeted(self):
         source = RESET.read_text(encoding="utf-8")
