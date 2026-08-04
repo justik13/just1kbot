@@ -8,6 +8,7 @@ ROOT_LOADER = ROOT / "deploy.sh"
 CONTROL_MODULE = ROOT / "scripts" / "lib" / "control_plane.sh"
 STATE_INSPECTOR = ROOT / "scripts" / "inspect_install_state.sh"
 DIAGNOSTICS = ROOT / "scripts" / "lib" / "installer_diagnostics.sh"
+ACTIVATION_POLICY = ROOT / "scripts" / "lib" / "install_safe_activation_policy.sh"
 
 
 class InstallerControlPlaneContractTests(unittest.TestCase):
@@ -17,6 +18,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             CONTROL_MODULE,
             STATE_INSPECTOR,
             DIAGNOSTICS,
+            ACTIVATION_POLICY,
         ):
             with self.subTest(script=script):
                 result = subprocess.run(
@@ -63,6 +65,26 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             "update [--sha COMMIT]",
         ):
             self.assertIn(marker, source)
+
+    def test_recovery_bootstrap_is_installed_before_mutations_and_cleaned(self):
+        source = ACTIVATION_POLICY.read_text(encoding="utf-8")
+        self.assertIn("CLI_BOOTSTRAP_ROOT=/usr/local/libexec/just1kbot-installer", source)
+        self.assertIn("stage_recovery_bundle", source)
+        self.assertIn("foundation_journal_add_created_resource", source)
+        self.assertIn("install_recovery_cli_launcher", source)
+        self.assertIn("PRIMARY=/opt/just1kbot/deploy.sh", source)
+        self.assertIn("RECOVERY=$CLI_BOOTSTRAP_ROOT/deploy.sh", source)
+        self.assertIn("remove_recovery_bootstrap", source)
+        self.assertIn("rollback_empty_pre_manifest_journal", source)
+        self.assertIn("remove_recovery_bundle", source)
+        self.assertLess(
+            source.index("foundation_journal_begin \"$operation\" preflight"),
+            source.index("stage_recovery_bundle"),
+        )
+        self.assertLess(
+            source.index("foundation_install_cli"),
+            source.index("install_recovery_cli_launcher", source.index("activate_release_bundle()")),
+        )
 
     def test_diagnostics_explain_problem_and_next_action(self):
         source = DIAGNOSTICS.read_text(encoding="utf-8")
