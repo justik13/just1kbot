@@ -65,7 +65,10 @@ project_looks_managed() {
 }
 
 legacy_cli_looks_managed() {
-    regular_root_owned_tool "$CLI_SBIN" || return 1
+    # State inspection is diagnostic only. It may classify a legacy launcher
+    # as residual even when its current owner is not root; the destructive
+    # legacy reset performs the stricter ownership check before deleting it.
+    [[ -f "$CLI_SBIN" && ! -L "$CLI_SBIN" ]] || return 1
     grep -Fq 'Just1kBot' "$CLI_SBIN" 2>/dev/null || return 1
     grep -Fq '/opt/just1kbot' "$CLI_SBIN" 2>/dev/null || return 1
 }
@@ -376,9 +379,9 @@ state_exit_code() {
         deploy:clean|deploy:installed_managed|deploy:legacy_managed) return 0 ;;
         uninstall:clean|uninstall:installed_managed|uninstall:legacy_managed|uninstall:partial_install|uninstall:residual_managed) return 0 ;;
         *:foreign_collision) return 20 ;;
-        *:corrupted_state) return 21 ;;
-        *:residual_managed) return 22 ;;
-        *:partial_install) return 23 ;;
+        *:corrupted_state) return 21 ;
+        *:residual_managed) return 22 ;
+        *:partial_install) return 23 ;
         *) return 24 ;;
     esac
 }
