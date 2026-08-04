@@ -263,6 +263,11 @@ check_runtime_dependencies() {
         return
     }
 
+    # CRITICAL: cd into project directory before runuser so that pydantic-settings
+    # finds .env in the correct location. Without this, Python searches the
+    # caller's CWD (e.g. /root), causing PermissionError for just1kbot user.
+    cd "$PROJECT_DIR" || { fail "Project dir missing: $PROJECT_DIR"; return; }
+
     if ! timeout --signal=TERM --kill-after=5s 45s \
         runuser -u just1kbot -- env \
         HOME=/run/just1kbot \
