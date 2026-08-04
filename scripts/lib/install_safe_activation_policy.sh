@@ -12,7 +12,7 @@ install_recovery_cli_launcher() {
     foundation_atomic_write "$CLI_PATH" root root 0750 <<EOF_CLI
 #!/bin/bash
 set -Eeuo pipefail
-IFS=\$'\\n\\t'
+IFS=\$'\n\t'
 umask 077
 
 # $CLI_BOOTSTRAP_MARKER
@@ -28,7 +28,7 @@ if [[ -f "\$RECOVERY" && ! -L "\$RECOVERY" && -f "\$RECOVERY_CONTROL" && ! -L "\
     exec /bin/bash "\$RECOVERY" "\$@"
 fi
 
-printf 'Just1kBot control plane недоступен: основная и recovery-копия отсутствуют или повреждены.\\n' >&2
+printf 'Just1kBot control plane недоступен: основная и recovery-копия отсутствуют или повреждены.\n' >&2
 exit 1
 EOF_CLI
 }
@@ -155,7 +155,6 @@ activate_release_bundle() {
     installer_failpoint after-dedicated-redis || return $?
 
     install_backup_tooling
-    install_healthcheck
     setup_logrotate
     installer_failpoint after-operational-tooling || return $?
 
@@ -166,6 +165,11 @@ activate_release_bundle() {
     fi
     installer_failpoint after-proxy-activation || return $?
 
+    # CRITICAL ORDERING: systemd unit and CLI-wrapper MUST be created BEFORE
+    # healthcheck. If healthcheck fails after creating these resources, the
+    # installer can still perform rollback or repair using the CLI-wrapper.
+    # Creating healthcheck first creates a deadlock: deploy blocks (residual
+    # state), repair blocks (needs CLI-wrapper), rollback blocks (needs manifest).
     setup_systemd
     installer_failpoint after-systemd || return $?
 
@@ -174,6 +178,12 @@ activate_release_bundle() {
     # recovery fallback until the whole transaction has passed readiness.
     install_recovery_cli_launcher
     installer_failpoint after-cli || return $?
+
+    # Healthcheck runs LAST so that a Telegram API timeout or other failure
+    # doesn't leave the installer in a deadlock state. The systemd unit and
+    # CLI-wrapper already exist, enabling repair or rollback.
+    install_healthcheck
+    installer_failpoint after-healthcheck || return $?
 }
 
 rollback_empty_pre_manifest_journal() {
