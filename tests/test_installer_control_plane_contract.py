@@ -78,6 +78,8 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         self.assertIn("remove_recovery_bootstrap", source)
         self.assertIn("remove_recovery_path", source)
         self.assertIn("recovery_paths_safe_for_cleanup", source)
+        self.assertIn("CLI_BOOTSTRAP_MARKER", source)
+        self.assertIn("root:root 750", source)
         self.assertIn("rollback_empty_pre_manifest_journal", source)
         self.assertIn("remove_recovery_bundle", source)
 
