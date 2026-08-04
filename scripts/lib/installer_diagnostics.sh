@@ -21,8 +21,26 @@ installer_set_log_file() {
     INSTALLER_LOG_FILE=${1:-}
 }
 
+installer_control_plane_command() {
+    local project_root
+    if [[ -f /opt/just1kbot/deploy.sh && ! -L /opt/just1kbot/deploy.sh ]]; then
+        printf 'sudo bash /opt/just1kbot/deploy.sh'
+        return 0
+    fi
+
+    project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)
+    if [[ -f "$project_root/deploy.sh" && ! -L "$project_root/deploy.sh" ]]; then
+        printf 'sudo bash %q/deploy.sh' "$project_root"
+        return 0
+    fi
+
+    printf 'sudo bash ./deploy.sh'
+}
+
 installer_print_diagnostic_footer() {
     local action=${1:-}
+    local control_plane_command
+    control_plane_command=$(installer_control_plane_command)
 
     printf '\nЧто сделать:\n' >&2
     if [[ -n "$action" ]]; then
@@ -33,8 +51,8 @@ installer_print_diagnostic_footer() {
     fi
 
     printf '\nКоманды диагностики:\n' >&2
-    printf '  sudo bash /opt/just1kbot/deploy.sh state\n' >&2
-    printf '  sudo bash /opt/just1kbot/deploy.sh doctor\n' >&2
+    printf '  %s state\n' "$control_plane_command" >&2
+    printf '  %s doctor\n' "$control_plane_command" >&2
     if [[ -n "$INSTALLER_LOG_FILE" ]]; then
         printf '  sudo tail -n 200 %q\n' "$INSTALLER_LOG_FILE" >&2
     fi

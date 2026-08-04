@@ -82,6 +82,17 @@ class InstallStateInspectorRuntimeTests(unittest.TestCase):
         )
         return project
 
+    def create_legacy_cli(self, env: dict[str, str]) -> Path:
+        cli = Path(env["CLI_SBIN"])
+        cli.parent.mkdir(parents=True)
+        cli.write_text(
+            "#!/bin/bash\n"
+            "# Just1kBot root control plane legacy launcher\n"
+            "PROJECT=/opt/just1kbot\n",
+            encoding="utf-8",
+        )
+        return cli
+
     def test_clean_state_is_safe_for_deploy(self):
         with tempfile.TemporaryDirectory() as directory:
             env = self.make_env(Path(directory))
@@ -90,6 +101,16 @@ class InstallStateInspectorRuntimeTests(unittest.TestCase):
         self.assertEqual(payload["state"], "clean")
         self.assertEqual(payload["operation"], "deploy")
         self.assertEqual(payload["evidence"], [])
+
+    def test_orphaned_legacy_cli_is_residual_not_clean(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = self.make_env(Path(directory))
+            cli = self.create_legacy_cli(env)
+            result, payload = self.run_inspector(env)
+        self.assertEqual(result.returncode, 22, result.stderr)
+        self.assertEqual(payload["state"], "residual_managed")
+        self.assertIn(str(cli), str(payload["reason"]))
+        self.assertIn("reset_legacy_install.sh", str(payload["action"]))
 
     def test_symlink_collision_is_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
