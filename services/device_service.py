@@ -2,6 +2,7 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
@@ -21,42 +22,36 @@ RESERVING_STATUSES = (
     "create_cleanup_pending",
 )
 
-
 class DeviceCreationError(Exception):
     pass
-
 
 class NoActiveSubscription(DeviceCreationError):
     pass
 
-
 class DailyLimitExceeded(DeviceCreationError):
     pass
-
 
 class DeviceLimitExceeded(DeviceCreationError):
     pass
 
-
 class ServerUnavailable(DeviceCreationError):
     pass
-
 
 class InvalidConfig(DeviceCreationError):
     pass
 
-
 class DeviceStillCreating(DeviceCreationError):
+    pass
+
+class DuplicateDeviceName(DeviceCreationError):
     pass
 
 
 async def close_redis() -> None:
     return None
 
-
 def _is_same_day_msk(stored_date: date | None, today: date) -> bool:
     return stored_date == today if stored_date else False
-
 
 class DeviceService:
     @staticmethod
@@ -100,7 +95,7 @@ class DeviceService:
             )
         ).scalar_one_or_none()
         if duplicate:
-            raise DeviceCreationError("Duplicate device name")
+            raise DuplicateDeviceName("Duplicate device name")
         if not is_admin(user.telegram_id):
             today = now_msk().date()
             if not _is_same_day_msk(user.last_creation_date, today):
@@ -154,7 +149,19 @@ class DeviceService:
             is_active=True,
         )
         session.add(profile)
-        await session.flush()
+        
+        # P0-3: Отлавливаем IntegrityError для дубликата имени устройства
+        try:
+            await session.flush()
+        except IntegrityError as e:
+            await session.rollback()
+            # Проверяем, что это нарушение уникального индекса uq_vpn_profiles_user_server_device_name
+            error_str = str(e.orig).lower() if e.orig else ""
+            if "duplicate" in error_str or "unique" in error_str or "uq_vpn_profiles" in error_str:
+                raise DuplicateDeviceName("Device name already exists on this server") from e
+            # Если это другая IntegrityError, пробрасываем как обычную DeviceCreationError
+            raise DeviceCreationError("Database integrity error") from e
+        
         profile.client_name = f"tg_{user.telegram_id}_p{profile.id}"
         await enqueue_api_operation(
             session,
