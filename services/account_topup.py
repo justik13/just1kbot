@@ -34,7 +34,6 @@ UNFINISHED_TOPUP_PROVIDER_STATUSES = (
     "succeeded",
 )
 
-
 class AccountTopupError(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
@@ -240,6 +239,26 @@ async def settle_succeeded_topup(
     """Credit a verified top-up and close its non-subscription lifecycle."""
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
+    
+    # P0-1: Проверка фин. блокировки перед зачислением
+    user = await lock_checkout_user(session, payment.user_id)
+    if user is not None and (user.topup_blocked or user.financial_hold):
+        # Пользователь заблокирован - переводим платеж на ручную проверку
+        payment.fulfillment_status = "manual_review"
+        payment.reconciliation_status = "manual_review"
+        payment.manual_review_reason = "user_financially_blocked"
+        session.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="topup_blocked_by_hold",
+                provider_status=payment.provider_status,
+                reason="user_financially_blocked",
+                source=source,
+            )
+        )
+        await session.flush()
+        return False, await get_account_balance(session, user_id=payment.user_id)
+    
     entry, created = await credit_succeeded_topup(
         session,
         locked_payment=payment,
