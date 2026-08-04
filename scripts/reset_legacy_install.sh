@@ -219,7 +219,7 @@ reset_postgres_if_owned() {
         marker=$(postgres_marker_pair "$port") || {
             if runuser -u postgres -- psql -p "$port" -At \
                 -c "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot';" 2>/dev/null | grep -q 1; then
-                warn "PostgreSQL just1k1bot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
+                warn "PostgreSQL just1kbot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
             fi
             continue
         }
