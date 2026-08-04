@@ -5,13 +5,14 @@ IFS=$'\n\t'
 umask 077
 
 CLI_BOOTSTRAP_ROOT=${CLI_BOOTSTRAP_ROOT:-/usr/local/libexec/just1kbot-installer}
+CLI_BOOTSTRAP_TEMP_ROOT=${CLI_BOOTSTRAP_TEMP_ROOT:-${CLI_BOOTSTRAP_ROOT}.tmp}
 CLI_BOOTSTRAP_MARKER='Managed by Just1kBot installer recovery bootstrap'
 
 install_recovery_cli_launcher() {
     foundation_atomic_write "$CLI_PATH" root root 0750 <<EOF_CLI
 #!/bin/bash
 set -Eeuo pipefail
-IFS=\$'\n\t'
+IFS=\$'\\n\\t'
 umask 077
 
 # $CLI_BOOTSTRAP_MARKER
@@ -39,6 +40,10 @@ stage_recovery_bundle() {
         error "Recovery bootstrap path уже существует без активной installer transaction: $CLI_BOOTSTRAP_ROOT"
         return 1
     }
+    foundation_path_exists "$CLI_BOOTSTRAP_TEMP_ROOT" && {
+        error "Recovery bootstrap staging path уже существует без ownership proof: $CLI_BOOTSTRAP_TEMP_ROOT"
+        return 1
+    }
     foundation_path_exists "$CLI_PATH" && {
         error "CLI path уже существует до первичной установки без ownership proof: $CLI_PATH"
         return 1
@@ -47,8 +52,19 @@ stage_recovery_bundle() {
     local parent temporary
     parent=$(dirname "$CLI_BOOTSTRAP_ROOT")
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_ROOT"
-    install -d -o root -g root -m 0755 "$parent"
-    temporary=$(mktemp -d "$parent/.just1kbot-installer.XXXXXX")
+    foundation_secure_parent_chain "$CLI_BOOTSTRAP_TEMP_ROOT"
+
+    # Claim every recovery-owned path in the durable journal before creating
+    # the staging directory or publishing the live bootstrap. A crash at any
+    # point in bundle preparation therefore leaves only journal-known paths.
+    foundation_journal_validate || return 1
+    foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"
+    foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
+    foundation_journal_add_created_resource "path:$CLI_PATH"
+    foundation_journal_validate || return 1
+
+    temporary="$CLI_BOOTSTRAP_TEMP_ROOT"
+    install -d -o root -g root -m 0750 "$temporary"
 
     if ! cp -a -- "$ROOT_DIR/deploy.sh" "$ROOT_DIR/scripts" "$temporary/"; then
         rm -rf -- "$temporary"
@@ -72,28 +88,27 @@ stage_recovery_bundle() {
     find "$temporary" -type d -exec chmod go-w {} +
     find "$temporary" -type f -exec chmod go-w {} +
 
-    # The durable journal must claim installer-owned recovery resources before
-    # the first filesystem mutation that makes them live. If the process dies
-    # between this point and the actual move/write, rollback can safely treat
-    # the recorded resources as absent and still finish deterministically.
-    foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
-    foundation_journal_add_created_resource "path:$CLI_PATH"
-
     mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"
     install_recovery_cli_launcher
 }
 
-remove_recovery_bundle() {
-    [[ ! -e "$CLI_BOOTSTRAP_ROOT" && ! -L "$CLI_BOOTSTRAP_ROOT" ]] && return 0
-    [[ -d "$CLI_BOOTSTRAP_ROOT" && ! -L "$CLI_BOOTSTRAP_ROOT" ]] || {
-        error "Recovery bootstrap path имеет небезопасный тип: $CLI_BOOTSTRAP_ROOT"
+remove_recovery_path() {
+    local path=$1
+    [[ ! -e "$path" && ! -L "$path" ]] && return 0
+    [[ -d "$path" && ! -L "$path" ]] || {
+        error "Recovery path имеет небезопасный тип: $path"
         return 1
     }
-    if find "$CLI_BOOTSTRAP_ROOT" -type l -print -quit | grep -q .; then
-        error "Recovery bootstrap path содержит symlink; автоматическое удаление заблокировано: $CLI_BOOTSTRAP_ROOT"
+    if find "$path" -type l -print -quit | grep -q .; then
+        error "Recovery path содержит symlink; автоматическое удаление заблокировано: $path"
         return 1
     fi
-    rm -rf --one-file-system -- "$CLI_BOOTSTRAP_ROOT"
+    rm -rf --one-file-system -- "$path"
+}
+
+remove_recovery_bundle() {
+    remove_recovery_path "$CLI_BOOTSTRAP_TEMP_ROOT" || return 1
+    remove_recovery_path "$CLI_BOOTSTRAP_ROOT"
 }
 
 remove_recovery_bootstrap() {
@@ -155,7 +170,7 @@ rollback_empty_pre_manifest_journal() {
     while IFS= read -r resource; do
         [[ -n "$resource" ]] || continue
         case "$resource" in
-            "path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH") ;;
+            "path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH") ;;
             *) return 1 ;;
         esac
     done <<<"$created"
