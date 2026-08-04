@@ -67,13 +67,15 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         "[JWT_REDACTED]",
     ),
-    # Encoded private keys and raw/embedded VPN configuration payloads.
-    (
-        re.compile(r"(?<![A-Za-z0-9_+/-])[A-Za-z0-9_+/-]{43,}={0,2}"),
-        "[LONG_SECRET_REDACTED]",
-    ),
+    # P1-4: УДАЛЕНА слишком агрессивная регулярка [LONG_SECRET_REDACTED]
+    # Она вырезала любые длинные base64 строки (43+ символа), включая:
+    # - Amnezia peer_id
+    # - SHA256 хэши
+    # - ID транзакций
+    # - Другие легитимные идентификаторы
+    # Это делало дебаг невозможным.
+    # Оставлены только специфичные паттерны выше (JWT, Telegram токены, VPN URI)
 )
-
 
 def sanitize_text(value: Any) -> str:
     """Return printable text with known credential forms removed."""
@@ -84,11 +86,9 @@ def sanitize_text(value: Any) -> str:
         sanitized = pattern.sub(replacement, sanitized)
     return sanitized
 
-
 def sanitize_short(value: Any, limit: int = 200) -> str:
     sanitized = sanitize_text(value)
     return sanitized if len(sanitized) <= limit else sanitized[:limit] + "..."
-
 
 def safe_url_target(value: Any) -> str:
     """Return only a URL hostname and optional port for logs/alerts."""
@@ -98,7 +98,6 @@ def safe_url_target(value: Any) -> str:
         return f"{host}:{parsed.port}" if parsed.port is not None else host
     except (TypeError, ValueError):
         return "<invalid-host>"
-
 
 class SensitiveDataFilter(logging.Filter):
     """Sanitize the final log message and any rendered exception traceback."""
@@ -122,7 +121,6 @@ class SensitiveDataFilter(logging.Filter):
             record.exc_info = None
             record.exc_text = None
         return True
-
 
 def install_sensitive_data_filter(logger: logging.Logger | None = None) -> None:
     """Install one redaction filter on a logger and each of its current handlers."""
