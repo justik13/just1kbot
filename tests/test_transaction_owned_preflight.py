@@ -88,7 +88,7 @@ PY
             ''',
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("current journal", result.stderr)
+        self.assertIn("текущем journal", result.stderr)
 
     def test_current_transaction_owned_port_is_accepted(self) -> None:
         result = self.run_shell(
