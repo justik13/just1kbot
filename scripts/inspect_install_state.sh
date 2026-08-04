@@ -64,6 +64,12 @@ project_looks_managed() {
     grep -Fq 'Just1kBot' "$PROJECT_DIR/deploy.sh"
 }
 
+legacy_cli_looks_managed() {
+    regular_root_owned_tool "$CLI_SBIN" || return 1
+    grep -Fq 'Just1kBot' "$CLI_SBIN" 2>/dev/null || return 1
+    grep -Fq '/opt/just1kbot' "$CLI_SBIN" 2>/dev/null || return 1
+}
+
 preserved_backup_looks_managed() {
     [[ -f "$BACKUP_CONF" && ! -L "$BACKUP_CONF" ]] || return 1
     grep -Eq '^BACKUP_AGE_RECIPIENT=age1[0-9a-z]+' "$BACKUP_CONF" || return 1
@@ -186,6 +192,7 @@ unsafe_path_type() {
             return 0
         fi
     done
+
     for path in \
         "$PROJECT_DIR" "$BOT_HOME" "$STATE_ROOT" "$STATE_DIR" \
         "$REDIS_DATA_DIR" "$BACKUP_DIR"; do
@@ -195,6 +202,7 @@ unsafe_path_type() {
             return 0
         fi
     done
+
     for path in \
         "$ENV_FILE" "$UNIT_FILE" "$MANIFEST" "$TRANSACTION" \
         "$REDIS_CONFIG" "$REDIS_UNIT" "$CLI_SBIN" "$CLI_BIN" \
@@ -214,7 +222,9 @@ has_confirmed_residual_marker() {
     unit_looks_managed && return 0
     redis_unit_looks_managed && return 0
     project_looks_managed && return 0
+    legacy_cli_looks_managed && return 0
     preserved_backup_looks_managed && return 0
+
     local path
     for path in \
         "$BACKUP_TOOL" "$RESTORE_TOOL" "$HEALTHCHECK_TOOL" \
@@ -231,8 +241,6 @@ classify_state() {
         return
     fi
 
-    # The journal is intentionally created before the ownership manifest. A
-    # crash in that narrow interval is recoverable, not a foreign collision.
     if path_exists "$TRANSACTION" && ! path_exists "$MANIFEST"; then
         if ! transaction_is_valid; then
             INSTALL_STATE=corrupted_state
@@ -242,7 +250,7 @@ classify_state() {
         fi
         INSTALL_STATE=partial_install
         INSTALL_STATE_REASON="найден pre-manifest journal незавершённой operation: $TRANSACTION"
-        INSTALL_STATE_ACTION='Используйте install-rollback; обычный deploy заблокирован.'
+        INSTALL_STATE_ACTION='Используйте install-rollback или scripts/reset_legacy_install.sh; обычный deploy заблокирован.'
         return
     fi
 
@@ -284,6 +292,7 @@ classify_state() {
         INSTALL_STATE_ACTION='Можно выполнять первичную установку.'
         return
     fi
+
     if path_exists "$UNIT_FILE" && ! unit_looks_managed; then
         INSTALL_STATE=foreign_collision
         INSTALL_STATE_REASON='just1kbot.service занят unit без ожидаемых markers'
@@ -300,21 +309,28 @@ classify_state() {
        unit_looks_managed && project_looks_managed; then
         INSTALL_STATE=legacy_managed
         INSTALL_STATE_REASON='найдена полная legacy installation без manifest'
-        INSTALL_STATE_ACTION='Safe installer создаст manifest только после strict marker validation.'
+        INSTALL_STATE_ACTION='Используйте documented migration или legacy reset; новый deploy не принимает её автоматически.'
         return
     fi
     if [[ -d "$PROJECT_DIR" && -f "$ENV_FILE" ]] && project_looks_managed; then
         INSTALL_STATE=partial_install
         INSTALL_STATE_REASON='production directory и .env найдены, но installation неполная'
-        INSTALL_STATE_ACTION='Обычный deploy заблокирован; используйте recovery или safe uninstall.'
+        INSTALL_STATE_ACTION='Обычный deploy заблокирован; используйте recovery или safe reset.'
+        return
+    fi
+    if legacy_cli_looks_managed; then
+        INSTALL_STATE=residual_managed
+        INSTALL_STATE_REASON="найден legacy global CLI без ownership manifest: $CLI_SBIN"
+        INSTALL_STATE_ACTION='Используйте sudo bash scripts/reset_legacy_install.sh; новый deploy не будет перезаписывать legacy CLI.'
         return
     fi
     if has_confirmed_residual_marker; then
         INSTALL_STATE=residual_managed
         INSTALL_STATE_REASON='найдены подтверждённые остатки legacy installation'
-        INSTALL_STATE_ACTION='Deploy поверх остатков запрещён; используйте safe uninstall.'
+        INSTALL_STATE_ACTION='Deploy поверх остатков запрещён; используйте legacy reset или safe uninstall.'
         return
     fi
+
     INSTALL_STATE=foreign_collision
     INSTALL_STATE_REASON='зарезервированные resources найдены, но ownership не доказан'
     INSTALL_STATE_ACTION='Installer не выполнит rm, chown, chmod или перезапись поверх них.'
