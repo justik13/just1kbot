@@ -190,6 +190,7 @@ rollback_empty_pre_manifest_journal() {
         esac
     done <<<"$created"
 
+    recovery_paths_safe_for_cleanup || return 1
     remove_recovery_bootstrap || return 1
     foundation_journal_clear
     rmdir "$INSTALL_STATE_DIR" 2>/dev/null || true
