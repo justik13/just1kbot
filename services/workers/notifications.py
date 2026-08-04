@@ -37,7 +37,6 @@ def _get_backoff_delay(retry_count: int) -> int:
 
     return BACKOFF_BASE_INTERVAL * (2**capped)
 
-
 def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
         return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L43_1
@@ -52,7 +51,6 @@ def _format_countdown(delta: timedelta) -> str:
 
     return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L53_1.format(value_0=hours, value_1=minutes)
 
-
 def _maybe_reset_retry_on_type_change(
     user: User,
     notification_type: str,
@@ -66,7 +64,6 @@ def _maybe_reset_retry_on_type_change(
         user.last_notification_attempt = None
 
     _last_notification_type[user.id] = notification_type
-
 
 def _infer_last_notification_type(user: User) -> str | None:
     if user.notified_grace_12h:
@@ -198,10 +195,15 @@ async def _send_pre_expiry_notifications(
                 retry_count = user.notification_retry_count or 0
 
                 if retry_count >= MAX_RETRY_COUNT:
-                    user.notified_3d = True
-                    user.notified_1d = True
-                    user.notified_2h = True
+                    # P0-4: НЕ помечаем notified_* как True при исчерпании ретраев
+                    # Это предотвращает потерю уведомлений, если Telegram был недоступен
                     user.notification_retry_count = 0
+                    user.last_notification_attempt = None
+
+                    logger.warning(
+                        "Max retries reached for user %s, will retry in next global cycle",
+                        user.telegram_id,
+                    )
 
                     continue
 
@@ -354,9 +356,15 @@ async def _send_post_expiry_notifications(
                 retry_count = user.notification_retry_count or 0
 
                 if retry_count >= MAX_RETRY_COUNT:
-                    user.notified_expired = True
-                    user.notified_grace_12h = True
+                    # P0-4: НЕ помечаем notified_* как True при исчерпании ретраев
+                    # Это предотвращает потерю уведомлений, если Telegram был недоступен
                     user.notification_retry_count = 0
+                    user.last_notification_attempt = None
+
+                    logger.warning(
+                        "Max retries reached for user %s, will retry in next global cycle",
+                        user.telegram_id,
+                    )
 
                     continue
 
