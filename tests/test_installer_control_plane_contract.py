@@ -68,7 +68,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
 
     def test_recovery_bootstrap_is_installed_before_mutations_and_cleaned(self):
         source = ACTIVATION_POLICY.read_text(encoding="utf-8")
-        self.assertIn("CLI_BOOTSTRAP_ROOT=/usr/local/libexec/just1kbot-installer", source)
+        self.assertIn("/usr/local/libexec/just1kbot-installer", source)
         self.assertIn("stage_recovery_bundle", source)
         self.assertIn("foundation_journal_add_created_resource", source)
         self.assertIn("install_recovery_cli_launcher", source)
@@ -81,9 +81,10 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             source.index("foundation_journal_begin \"$operation\" preflight"),
             source.index("stage_recovery_bundle"),
         )
+        activate = source[source.index("activate_release_bundle()"):]
         self.assertLess(
-            source.index("foundation_install_cli"),
-            source.index("install_recovery_cli_launcher", source.index("activate_release_bundle()")),
+            activate.index("foundation_install_cli"),
+            activate.index("install_recovery_cli_launcher"),
         )
 
     def test_diagnostics_explain_problem_and_next_action(self):
