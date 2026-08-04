@@ -21,6 +21,7 @@ from services.device_service import (
     DailyLimitExceeded,
     DeviceLimitExceeded,
     DeviceService,
+    DuplicateDeviceName,
     InvalidConfig,
     NoActiveSubscription,
     ServerUnavailable,
@@ -53,14 +54,12 @@ def _get_no_subscription_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
-
 def _get_device_limit_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L59_1, callback_data="payment_change_tariff")
     builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L60_1, callback_data="back_to_connections")
     builder.adjust(1)
     return builder.as_markup()
-
 
 def _classify_server_error(error_msg: str) -> str:
     msg_lower = error_msg.lower()
@@ -79,7 +78,6 @@ def _classify_server_error(error_msg: str) -> str:
         return "db_error"
 
     return "unknown"
-
 
 def _get_server_error_text(error_type: str) -> str:
     mapping = {
@@ -368,6 +366,16 @@ async def enter_device_name(
                 message.chat.id,
                 texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit),
                 _get_device_limit_keyboard(),
+            )
+            await state.clear()
+            return
+        except DuplicateDeviceName:
+            # P0-3: Показываем понятное сообщение при дубликате имени
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.DEVICE_NAME_DUPLICATE,
+                get_back_button("add_device"),
             )
             await state.clear()
             return
