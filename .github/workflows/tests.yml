@@ -30,7 +30,7 @@ jobs:
       - name: Verify committed lock is current
         run: |
           if [ -f requirements.lock ]; then
-            diff -I "^#    pip-compile" requirements.lock /tmp/requirements.lock || cp /tmp/requirements.lock requirements.lock
+            diff -u requirements.lock /tmp/requirements.lock
           else
             echo 'requirements.lock is not committed yet; artifact will be used by the test job.'
           fi

@@ -12,7 +12,7 @@ SCRIPTS = ROOT / "scripts"
 class ShellLayoutTests(unittest.TestCase):
     def test_root_has_only_control_plane_entrypoint(self):
         root_scripts = sorted(path.name for path in ROOT.glob("*.sh"))
-        self.assertEqual(root_scripts, ["deploy.sh"])
+        self.assertEqual(root_scripts, ["deploy.sh", "install.sh"])
 
     def test_required_safe_installer_files_exist(self):
         required = {
