@@ -113,6 +113,12 @@ recovery_paths_safe_for_cleanup() {
             return 1
         fi
     done
+
+    if [[ -e "$CLI_PATH" || -L "$CLI_PATH" ]]; then
+        [[ -f "$CLI_PATH" && ! -L "$CLI_PATH" ]] || return 1
+        grep -Fq "$CLI_BOOTSTRAP_MARKER" "$CLI_PATH" 2>/dev/null || return 1
+        [[ "$(stat -c '%U:%G %a' "$CLI_PATH" 2>/dev/null || true)" == 'root:root 750' ]] || return 1
+    fi
 }
 
 remove_recovery_bundle() {
