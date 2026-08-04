@@ -10,11 +10,9 @@ PROJECT_DIR=${PROJECT_DIR:-/opt/just1kbot}
 STATE_ROOT=${STATE_ROOT:-/var/lib/just1kbot}
 STATE_DIR=${STATE_DIR:-$STATE_ROOT/install-state}
 MANIFEST=${MANIFEST:-$STATE_DIR/manifest.json}
-TRANSACTION=${TRANSACTION:-$STATE_DIR/transaction.json}
 BOT_USER=${BOT_USER:-just1kbot}
 BOT_HOME=${BOT_HOME:-/home/just1kbot}
 CLI_PATH=${CLI_PATH:-/usr/local/sbin/just1kbot}
-REDIS_SERVICE=${REDIS_SERVICE:-just1kbot-redis.service}
 REDIS_CONFIG=${REDIS_CONFIG:-/etc/just1kbot/redis.conf}
 REDIS_DATA_DIR=${REDIS_DATA_DIR:-$STATE_ROOT/redis}
 
@@ -106,13 +104,17 @@ remove_legacy_project() {
 }
 
 remove_legacy_runtime() {
-    rm -rf --one-file-system -- "$REDIS_DATA_DIR" 2>/dev/null || true
+    if [[ -e "$REDIS_DATA_DIR" || -L "$REDIS_DATA_DIR" ]]; then
+        [[ -d "$REDIS_DATA_DIR" && ! -L "$REDIS_DATA_DIR" ]] || die "Dedicated Redis data path имеет небезопасный тип: $REDIS_DATA_DIR"
+        rm -rf --one-file-system -- "$REDIS_DATA_DIR"
+    fi
     if [[ -e "$REDIS_CONFIG" || -L "$REDIS_CONFIG" ]]; then
         [[ -f "$REDIS_CONFIG" && ! -L "$REDIS_CONFIG" ]] || die "Dedicated Redis config имеет небезопасный тип: $REDIS_CONFIG"
-        grep -Fq 'Just1kBot' "$REDIS_CONFIG" 2>/dev/null || warn "Redis config не содержит marker; оставлен: $REDIS_CONFIG"
         if grep -Fq 'Just1kBot' "$REDIS_CONFIG" 2>/dev/null; then
             rm -f -- "$REDIS_CONFIG"
             log "Удалён dedicated Redis config: $REDIS_CONFIG"
+        else
+            warn "Redis config не содержит marker; оставлен: $REDIS_CONFIG"
         fi
     fi
     rmdir /etc/just1kbot 2>/dev/null || true
@@ -120,17 +122,17 @@ remove_legacy_runtime() {
 
 postgres_marker_pair() {
     local port=$1
-    local database role db_comment role_comment
-    database=just1kbot_bot
-    role=just1kbot
+    local database=just1kbot_bot
+    local role=just1kbot
+    local db_comment role_comment
 
-    db_comment=$(psql -h 127.0.0.1 -p "$port" -U postgres -At -v db="$database" <<'SQL' 2>/dev/null || true
+    db_comment=$(runuser -u postgres -- psql -p "$port" -At -v db="$database" <<'SQL' 2>/dev/null || true
 SELECT COALESCE(shobj_description(oid, 'pg_database'), '')
 FROM pg_database
 WHERE datname = :'db';
 SQL
 )
-    role_comment=$(psql -h 127.0.0.1 -p "$port" -U postgres -At -v role="$role" <<'SQL' 2>/dev/null || true
+    role_comment=$(runuser -u postgres -- psql -p "$port" -At -v role="$role" <<'SQL' 2>/dev/null || true
 SELECT COALESCE(shobj_description(oid, 'pg_authid'), '')
 FROM pg_authid
 WHERE rolname = :'role';
@@ -146,7 +148,7 @@ SQL
 
 reset_postgres_if_owned() {
     command -v pg_lsclusters >/dev/null 2>&1 || return 0
-    command -v psql >/dev/null 2>&1 || return 0
+    command -v runuser >/dev/null 2>&1 || return 0
     command -v dropdb >/dev/null 2>&1 || return 0
 
     local found=false version cluster port marker
@@ -154,7 +156,7 @@ reset_postgres_if_owned() {
         [[ -n "$version" && -n "$cluster" && -n "$port" ]] || continue
         found=true
         marker=$(postgres_marker_pair "$port") || {
-            if psql -h 127.0.0.1 -p "$port" -U postgres -At -v db=just1kbot_bot \
+            if runuser -u postgres -- psql -p "$port" -At -v db=just1kbot_bot \
                 -c "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot';" 2>/dev/null | grep -q 1; then
                 warn "PostgreSQL just1kbot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
             fi
@@ -162,11 +164,11 @@ reset_postgres_if_owned() {
         }
 
         log "Подтверждён PostgreSQL ownership marker: $marker"
-        psql -h 127.0.0.1 -p "$port" -U postgres -At \
+        runuser -u postgres -- psql -p "$port" -At \
             -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='just1kbot_bot' AND pid <> pg_backend_pid();" \
             >/dev/null 2>&1 || true
-        dropdb -h 127.0.0.1 -p "$port" -U postgres --if-exists just1kbot_bot || die "не удалось удалить database just1kbot_bot на $version/$cluster:$port"
-        psql -h 127.0.0.1 -p "$port" -U postgres -v role=just1kbot \
+        runuser -u postgres -- dropdb -p "$port" --if-exists just1kbot_bot || die "не удалось удалить database just1kbot_bot на $version/$cluster:$port"
+        runuser -u postgres -- psql -p "$port" -v role=just1kbot \
             -c 'DROP ROLE IF EXISTS :"role";' >/dev/null || die "не удалось удалить role just1kbot на $version/$cluster:$port"
         log "Удалены PostgreSQL database/role на $version/$cluster:$port"
     done < <(pg_lsclusters --no-header 2>/dev/null)
