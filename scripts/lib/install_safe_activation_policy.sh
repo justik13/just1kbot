@@ -49,8 +49,6 @@ stage_recovery_bundle() {
         return 1
     }
 
-    local parent temporary
-    parent=$(dirname "$CLI_BOOTSTRAP_ROOT")
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_ROOT"
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_TEMP_ROOT"
 
@@ -63,7 +61,7 @@ stage_recovery_bundle() {
     foundation_journal_add_created_resource "path:$CLI_PATH"
     foundation_journal_validate || return 1
 
-    temporary="$CLI_BOOTSTRAP_TEMP_ROOT"
+    local temporary="$CLI_BOOTSTRAP_TEMP_ROOT"
     install -d -o root -g root -m 0750 "$temporary"
 
     if ! cp -a -- "$ROOT_DIR/deploy.sh" "$ROOT_DIR/scripts" "$temporary/"; then
@@ -104,6 +102,17 @@ remove_recovery_path() {
         return 1
     fi
     rm -rf --one-file-system -- "$path"
+}
+
+recovery_paths_safe_for_cleanup() {
+    local path
+    for path in "$CLI_BOOTSTRAP_TEMP_ROOT" "$CLI_BOOTSTRAP_ROOT"; do
+        [[ ! -e "$path" && ! -L "$path" ]] && continue
+        [[ -d "$path" && ! -L "$path" ]] || return 1
+        if find "$path" -type l -print -quit | grep -q .; then
+            return 1
+        fi
+    done
 }
 
 remove_recovery_bundle() {
@@ -189,6 +198,10 @@ unset base_automatic_initial_rollback_definition
 
 automatic_initial_rollback() {
     local rc
+    if ! recovery_paths_safe_for_cleanup; then
+        error 'Recovery bootstrap path небезопасен; automatic rollback заблокирован, чтобы сохранить journal для install-recover.'
+        return 1
+    fi
     set +e
     base_automatic_initial_rollback "$@"
     rc=$?
@@ -256,6 +269,10 @@ rollback_incomplete() {
         error 'Manifest отсутствует или повреждён, а journal содержит resources; automatic deletion запрещён.'
         return 1
     }
+    if ! recovery_paths_safe_for_cleanup; then
+        error 'Recovery bootstrap path небезопасен; rollback заблокирован, чтобы сохранить journal для install-recover.'
+        return 1
+    fi
     flock -u 200 2>/dev/null || true
     set +e
     bash "$SCRIPT_DIR/uninstall_foundation.sh" \
