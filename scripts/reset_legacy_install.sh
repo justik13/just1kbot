@@ -10,13 +10,16 @@ PROJECT_DIR=${PROJECT_DIR:-/opt/just1kbot}
 STATE_ROOT=${STATE_ROOT:-/var/lib/just1kbot}
 STATE_DIR=${STATE_DIR:-$STATE_ROOT/install-state}
 MANIFEST=${MANIFEST:-$STATE_DIR/manifest.json}
+TRANSACTION=${TRANSACTION:-$STATE_DIR/transaction.json}
 BOT_USER=${BOT_USER:-just1kbot}
 BOT_HOME=${BOT_HOME:-/home/just1kbot}
 CLI_PATH=${CLI_PATH:-/usr/local/sbin/just1kbot}
 REDIS_CONFIG=${REDIS_CONFIG:-/etc/just1kbot/redis.conf}
 REDIS_DATA_DIR=${REDIS_DATA_DIR:-$STATE_ROOT/redis}
+REDIS_UNIT=${REDIS_UNIT:-/etc/systemd/system/just1kbot-redis.service}
 
 RESET_PHRASE='RESET JUST1KBOT'
+REDIS_RUNTIME_OWNED=0
 
 log() { printf '[legacy-reset] %s\n' "$*"; }
 warn() { printf '[legacy-reset] WARNING: %s\n' "$*" >&2; }
@@ -57,22 +60,78 @@ legacy_cli_looks_managed() {
 managed_unit_file() {
     local path=$1
     root_owned_regular_file "$path" || return 1
-    grep -Fq 'Just1kBot' "$path" 2>/dev/null
+    grep -Fq 'Just1kBot' "$path" 2>/dev/null || return 1
+
+    case "$(basename "$path")" in
+        just1kbot-redis.service)
+            grep -Fq 'Description=Just1kBot dedicated Redis' "$path" || return 1
+            grep -Fq "ExecStart=/usr/bin/redis-server $REDIS_CONFIG" "$path" || return 1
+            ;;
+        just1kbot.service)
+            grep -Fq "ExecStart=$PROJECT_DIR/" "$path" || return 1
+            ;;
+    esac
+}
+
+managed_redis_config() {
+    root_owned_regular_file "$REDIS_CONFIG" || return 1
+    grep -Fq 'Just1kBot' "$REDIS_CONFIG" 2>/dev/null || return 1
+    grep -Eq '^[[:space:]]*port[[:space:]]+6380[[:space:]]*$' "$REDIS_CONFIG" || return 1
+    grep -Fq "dir $REDIS_DATA_DIR" "$REDIS_CONFIG" || return 1
+}
+
+legacy_redis_is_managed() {
+    managed_unit_file "$REDIS_UNIT" || return 1
+    managed_redis_config || return 1
+    [[ -d "$REDIS_DATA_DIR" && ! -L "$REDIS_DATA_DIR" ]] || return 1
+}
+
+detect_legacy_redis_ownership() {
+    if legacy_redis_is_managed; then
+        REDIS_RUNTIME_OWNED=1
+    else
+        REDIS_RUNTIME_OWNED=0
+    fi
+}
+
+journal_created_resource() {
+    local resource=$1
+    [[ -f "$TRANSACTION" && ! -L "$TRANSACTION" ]] || return 1
+    JOURNAL_PATH="$TRANSACTION" RESOURCE_VALUE="$resource" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+path = Path(os.environ["JOURNAL_PATH"])
+try:
+    value = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError):
+    raise SystemExit(1)
+created = value.get("created_resources")
+if not isinstance(created, list):
+    raise SystemExit(1)
+raise SystemExit(0 if os.environ["RESOURCE_VALUE"] in created else 1)
+PY
 }
 
 stop_and_remove_unit() {
     local unit=$1
     local path="/etc/systemd/system/$unit"
+
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        return 0
+    fi
+
+    managed_unit_file "$path" || {
+        warn "Чужой или неподтверждённый unit оставлен и не остановлен: $path"
+        return 0
+    }
+
+    # Ownership must be proven before any state-changing systemctl call.
     systemctl stop "$unit" 2>/dev/null || true
     systemctl disable "$unit" 2>/dev/null || true
-    if [[ -e "$path" || -L "$path" ]]; then
-        managed_unit_file "$path" || {
-            warn "Чужой или неподтверждённый unit оставлен: $path"
-            return 0
-        }
-        rm -f -- "$path"
-        log "Удалён unit: $path"
-    fi
+    rm -f -- "$path"
+    log "Удалён unit: $path"
 }
 
 remove_legacy_cli() {
@@ -104,26 +163,28 @@ remove_legacy_project() {
 }
 
 remove_legacy_runtime() {
-    if [[ -e "$REDIS_DATA_DIR" || -L "$REDIS_DATA_DIR" ]]; then
-        [[ -d "$REDIS_DATA_DIR" && ! -L "$REDIS_DATA_DIR" ]] || die "Dedicated Redis data path имеет небезопасный тип: $REDIS_DATA_DIR"
-        rm -rf --one-file-system -- "$REDIS_DATA_DIR"
-    fi
-    if [[ -e "$REDIS_CONFIG" || -L "$REDIS_CONFIG" ]]; then
-        [[ -f "$REDIS_CONFIG" && ! -L "$REDIS_CONFIG" ]] || die "Dedicated Redis config имеет небезопасный тип: $REDIS_CONFIG"
-        if grep -Fq 'Just1kBot' "$REDIS_CONFIG" 2>/dev/null; then
+    if (( REDIS_RUNTIME_OWNED == 1 )); then
+        if [[ -e "$REDIS_DATA_DIR" || -L "$REDIS_DATA_DIR" ]]; then
+            [[ -d "$REDIS_DATA_DIR" && ! -L "$REDIS_DATA_DIR" ]] || die "Dedicated Redis data path имеет небезопасный тип: $REDIS_DATA_DIR"
+            rm -rf --one-file-system -- "$REDIS_DATA_DIR"
+            log "Удалён dedicated Redis data: $REDIS_DATA_DIR"
+        fi
+        if [[ -e "$REDIS_CONFIG" || -L "$REDIS_CONFIG" ]]; then
+            [[ -f "$REDIS_CONFIG" && ! -L "$REDIS_CONFIG" ]] || die "Dedicated Redis config имеет небезопасный тип: $REDIS_CONFIG"
             rm -f -- "$REDIS_CONFIG"
             log "Удалён dedicated Redis config: $REDIS_CONFIG"
-        else
-            warn "Redis config не содержит marker; оставлен: $REDIS_CONFIG"
         fi
+    else
+        [[ ! -e "$REDIS_DATA_DIR" && ! -L "$REDIS_DATA_DIR" ]] ||
+            warn "Dedicated Redis data сохранён: ownership не подтверждён через managed unit + config: $REDIS_DATA_DIR"
+        [[ ! -e "$REDIS_CONFIG" && ! -L "$REDIS_CONFIG" ]] ||
+            warn "Dedicated Redis config сохранён: ownership не подтверждён через managed unit + config: $REDIS_CONFIG"
     fi
     rmdir /etc/just1kbot 2>/dev/null || true
 }
 
 postgres_marker_pair() {
     local port=$1
-    local database=just1kbot_bot
-    local role=just1kbot
     local db_comment role_comment
 
     db_comment=$(runuser -u postgres -- psql -p "$port" -At <<'SQL' 2>/dev/null || true
@@ -151,14 +212,14 @@ reset_postgres_if_owned() {
     command -v runuser >/dev/null 2>&1 || return 0
     command -v dropdb >/dev/null 2>&1 || return 0
 
-    local found=false version cluster port marker
+    local found=false version cluster port _ marker
     while read -r version cluster port _; do
         [[ -n "$version" && -n "$cluster" && -n "$port" ]] || continue
         found=true
         marker=$(postgres_marker_pair "$port") || {
             if runuser -u postgres -- psql -p "$port" -At \
                 -c "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot';" 2>/dev/null | grep -q 1; then
-                warn "PostgreSQL just1kbot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
+                warn "PostgreSQL just1k1bot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
             fi
             continue
         }
@@ -178,6 +239,12 @@ reset_postgres_if_owned() {
 
 remove_service_user() {
     id "$BOT_USER" >/dev/null 2>&1 || return 0
+
+    if ! journal_created_resource "service-user:$BOT_USER"; then
+        warn "Service user $BOT_USER сохранён: transaction journal не подтверждает, что его создал installer."
+        return 0
+    fi
+
     pgrep -u "$BOT_USER" >/dev/null 2>&1 && die "процессы пользователя $BOT_USER ещё работают"
     userdel "$BOT_USER" 2>/dev/null || die "не удалось удалить service user $BOT_USER"
     [[ ! -e "$BOT_HOME" && ! -L "$BOT_HOME" ]] || rm -rf --one-file-system -- "$BOT_HOME"
@@ -194,6 +261,8 @@ main() {
     require_root
     require_no_manifest
     confirm_reset
+
+    detect_legacy_redis_ownership
 
     log 'Остановка и удаление только подтверждённых Just1kBot units.'
     for unit in \
@@ -225,7 +294,7 @@ main() {
 
     log 'Legacy reset завершён.'
     log 'Global Redis конфигурация /etc/redis/redis.conf и firewall намеренно не изменялись.'
-    log 'Если PostgreSQL database/role были сохранены из-за отсутствия ownership marker, удалите их вручную только после проверки, что они принадлежат неиспользуемой старой установке.'
+    log 'Если PostgreSQL database/role, dedicated Redis data/config или service user были сохранены из-за отсутствия ownership proof, проверьте их вручную перед удалением.'
     log 'Теперь повторите: sudo bash deploy.sh state && sudo bash deploy.sh deploy --dry-run && sudo bash deploy.sh deploy'
 }
 
