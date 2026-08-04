@@ -25,16 +25,16 @@ setup_nginx_initial() {{ calls+=(managed-proxy); }}
 refresh_existing_nginx() {{ calls+=(refresh-proxy); }}
 setup_systemd() {{ calls+=(systemd); }}
 foundation_install_cli() {{ calls+=(cli); }}
-# The recovery launcher is part of the real activation path. Keep it as a
-# no-op here because this matrix asserts activation ordering/failpoints, not
-# filesystem effects of the launcher itself.
-install_recovery_cli_launcher() {{ :; }}
 REDIS_PASSWORD=test-password
 INITIAL_INSTALL=true
 INSTALL_SAFE_FAILURE_INJECTION_SOURCE_ONLY=1
 source {str(FAILURE)!r}
 INSTALL_SAFE_ACTIVATION_POLICY_SOURCE_ONLY=1
 source {str(ACTIVATION)!r}
+# The recovery launcher is part of the real activation path. Replace only the
+# filesystem-writing helper after sourcing the production module so the matrix
+# continues to assert activation ordering/failpoints without mutating files.
+install_recovery_cli_launcher() {{ :; }}
 JUST1KBOT_FAILPOINT={failpoint!r}
 set +e
 activate_release_bundle
