@@ -126,16 +126,16 @@ postgres_marker_pair() {
     local role=just1kbot
     local db_comment role_comment
 
-    db_comment=$(runuser -u postgres -- psql -p "$port" -At -v db="$database" <<'SQL' 2>/dev/null || true
+    db_comment=$(runuser -u postgres -- psql -p "$port" -At <<'SQL' 2>/dev/null || true
 SELECT COALESCE(shobj_description(oid, 'pg_database'), '')
 FROM pg_database
-WHERE datname = :'db';
+WHERE datname = 'just1kbot_bot';
 SQL
 )
-    role_comment=$(runuser -u postgres -- psql -p "$port" -At -v role="$role" <<'SQL' 2>/dev/null || true
+    role_comment=$(runuser -u postgres -- psql -p "$port" -At <<'SQL' 2>/dev/null || true
 SELECT COALESCE(shobj_description(oid, 'pg_authid'), '')
 FROM pg_authid
-WHERE rolname = :'role';
+WHERE rolname = 'just1kbot';
 SQL
 )
 
@@ -156,7 +156,7 @@ reset_postgres_if_owned() {
         [[ -n "$version" && -n "$cluster" && -n "$port" ]] || continue
         found=true
         marker=$(postgres_marker_pair "$port") || {
-            if runuser -u postgres -- psql -p "$port" -At -v db=just1kbot_bot \
+            if runuser -u postgres -- psql -p "$port" -At \
                 -c "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot';" 2>/dev/null | grep -q 1; then
                 warn "PostgreSQL just1kbot_bot найден на $version/$cluster:$port, но ownership marker не подтверждён; БД/роль сохранены."
             fi
@@ -168,8 +168,8 @@ reset_postgres_if_owned() {
             -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='just1kbot_bot' AND pid <> pg_backend_pid();" \
             >/dev/null 2>&1 || true
         runuser -u postgres -- dropdb -p "$port" --if-exists just1kbot_bot || die "не удалось удалить database just1kbot_bot на $version/$cluster:$port"
-        runuser -u postgres -- psql -p "$port" -v role=just1kbot \
-            -c 'DROP ROLE IF EXISTS :"role";' >/dev/null || die "не удалось удалить role just1kbot на $version/$cluster:$port"
+        runuser -u postgres -- psql -p "$port" \
+            -c 'DROP ROLE IF EXISTS just1kbot;' >/dev/null || die "не удалось удалить role just1kbot на $version/$cluster:$port"
         log "Удалены PostgreSQL database/role на $version/$cluster:$port"
     done < <(pg_lsclusters --no-header 2>/dev/null)
 
@@ -224,7 +224,7 @@ main() {
     remove_state_and_logs
 
     log 'Legacy reset завершён.'
-    log 'Global Redis (/etc/redis/redis.conf) и firewall намеренно не изменялись.'
+    log 'Global Redis конфигурация /etc/redis/redis.conf и firewall намеренно не изменялись.'
     log 'Если PostgreSQL database/role были сохранены из-за отсутствия ownership marker, удалите их вручную только после проверки, что они принадлежат неиспользуемой старой установке.'
     log 'Теперь повторите: sudo bash deploy.sh state && sudo bash deploy.sh deploy --dry-run && sudo bash deploy.sh deploy'
 }
