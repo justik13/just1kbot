@@ -86,6 +86,18 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             transaction.index("stage_recovery_bundle"),
         )
 
+        stage = source[
+            source.index("stage_recovery_bundle()") : source.index("remove_recovery_bundle()")
+        ]
+        self.assertLess(
+            stage.index('foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"'),
+            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
+        )
+        self.assertLess(
+            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
+            stage.index("install_recovery_cli_launcher"),
+        )
+
         activate = source[source.index("activate_release_bundle()"):]
         self.assertLess(
             activate.index("foundation_install_cli"),
