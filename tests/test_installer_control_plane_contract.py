@@ -77,6 +77,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         self.assertIn("RECOVERY=$CLI_BOOTSTRAP_ROOT/deploy.sh", source)
         self.assertIn("remove_recovery_bootstrap", source)
         self.assertIn("remove_recovery_path", source)
+        self.assertIn("recovery_paths_safe_for_cleanup", source)
         self.assertIn("rollback_empty_pre_manifest_journal", source)
         self.assertIn("remove_recovery_bundle", source)
 
@@ -110,10 +111,26 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
             activate.index("install_recovery_cli_launcher"),
         )
 
+        automatic_rollback = source[
+            source.index("automatic_initial_rollback()") : source.index("base_run_deploy_definition")
+        ]
+        self.assertLess(
+            automatic_rollback.index("recovery_paths_safe_for_cleanup"),
+            automatic_rollback.index("base_automatic_initial_rollback"),
+        )
+
         rollback = source[
+            source.index("rollback_incomplete()") : source.index("if [[ \"${INSTALL_SAFE_ACTIVATION_POLICY_SOURCE_ONLY:-0}\"",)
+        ]
+        self.assertLess(
+            rollback.index("recovery_paths_safe_for_cleanup"),
+            rollback.index('bash "$SCRIPT_DIR/uninstall_foundation.sh"'),
+        )
+
+        pre_manifest = source[
             source.index("rollback_empty_pre_manifest_journal()") : source.index("base_automatic_initial_rollback_definition")
         ]
-        self.assertIn('"path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH"', rollback)
+        self.assertIn('"path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH"', pre_manifest)
 
     def test_diagnostics_explain_problem_and_next_action(self):
         source = DIAGNOSTICS.read_text(encoding="utf-8")
