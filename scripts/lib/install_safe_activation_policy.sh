@@ -11,7 +11,7 @@ install_recovery_cli_launcher() {
     foundation_atomic_write "$CLI_PATH" root root 0750 <<EOF_CLI
 #!/bin/bash
 set -Eeuo pipefail
-IFS=\$'\\n\\t'
+IFS=\$'\n\t'
 umask 077
 
 # $CLI_BOOTSTRAP_MARKER
@@ -71,10 +71,15 @@ stage_recovery_bundle() {
     chown -R root:root "$temporary"
     find "$temporary" -type d -exec chmod go-w {} +
     find "$temporary" -type f -exec chmod go-w {} +
-    mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"
 
+    # The durable journal must claim installer-owned recovery resources before
+    # the first filesystem mutation that makes them live. If the process dies
+    # between this point and the actual move/write, rollback can safely treat
+    # the recorded resources as absent and still finish deterministically.
     foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
     foundation_journal_add_created_resource "path:$CLI_PATH"
+
+    mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"
     install_recovery_cli_launcher
 }
 
