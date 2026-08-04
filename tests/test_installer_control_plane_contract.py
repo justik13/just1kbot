@@ -77,10 +77,15 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         self.assertIn("remove_recovery_bootstrap", source)
         self.assertIn("rollback_empty_pre_manifest_journal", source)
         self.assertIn("remove_recovery_bundle", source)
+
+        transaction = source[
+            source.index("begin_installer_transaction()") : source.index("activate_release_bundle()")
+        ]
         self.assertLess(
-            source.index("foundation_journal_begin \"$operation\" preflight"),
-            source.index("stage_recovery_bundle"),
+            transaction.index("foundation_journal_begin \"$operation\" preflight"),
+            transaction.index("stage_recovery_bundle"),
         )
+
         activate = source[source.index("activate_release_bundle()"):]
         self.assertLess(
             activate.index("foundation_install_cli"),
