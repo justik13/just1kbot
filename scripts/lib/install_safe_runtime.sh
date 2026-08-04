@@ -36,13 +36,14 @@ systemctl is-active --quiet just1kbot-redis.service
 age=$(( $(date +%s) - $(stat -c %Y /run/just1kbot/heartbeat) ))
 (( age >= 0 && age <= 180 ))
 cd /opt/just1kbot
-exec timeout --signal=TERM --kill-after=5s 25s \
+exec timeout --signal=TERM --kill-after=5s 35s \
     runuser -u just1kbot -- env \
     HOME=/run/just1kbot \
     PYTHONPATH=/opt/just1kbot \
     /opt/just1kbot/venv/bin/python - <<'PY'
 import asyncio
 import redis.asyncio as redis
+from aiogram import Bot
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from config.settings import get_settings
@@ -60,15 +61,32 @@ async def main():
         socket_connect_timeout=5,
         socket_timeout=5,
     )
+    bot = Bot(settings.BOT_TOKEN)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         assert await client.ping()
+
+        # Retry Telegram API with 3 attempts and backoff
+        last_error = None
+        for attempt in range(3):
+            try:
+                me = await asyncio.wait_for(bot.get_me(), timeout=10)
+                if not me.id:
+                    raise RuntimeError("Telegram get_me invalid")
+                break
+            except (asyncio.TimeoutError, Exception) as exc:
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                raise last_error
     finally:
         await client.aclose()
+        await bot.session.close()
         await engine.dispose()
 
-asyncio.run(asyncio.wait_for(main(), 20))
+asyncio.run(asyncio.wait_for(main(), 30))
 PY
 EOF_HEALTH
 
@@ -82,7 +100,7 @@ Requires=just1kbot-redis.service
 [Service]
 Type=oneshot
 ExecStart=$HEALTHCHECK_COMMAND
-TimeoutStartSec=35s
+TimeoutStartSec=45s
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -196,15 +214,20 @@ EOF_LOGROTATE
 
 activate_release_bundle() {
     install_backup_tooling
-    install_healthcheck
     setup_logrotate
     if [[ "$INITIAL_INSTALL" == true ]]; then
         setup_nginx_initial
     else
         refresh_existing_nginx
     fi
+    # CRITICAL ORDERING: systemd unit and CLI-wrapper MUST be created BEFORE
+    # healthcheck. If healthcheck fails after creating these resources, the
+    # installer can still perform rollback or repair using the CLI-wrapper.
+    # Creating healthcheck first creates a deadlock: deploy blocks (residual
+    # state), repair blocks (needs CLI-wrapper), rollback blocks (needs manifest).
     setup_systemd
     foundation_install_cli
+    install_healthcheck
 }
 
 pause_and_backup() {
