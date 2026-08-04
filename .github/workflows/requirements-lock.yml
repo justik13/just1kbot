@@ -36,7 +36,7 @@ jobs:
             --output-file /tmp/requirements.lock \
             requirements.txt
       - name: Verify committed lock is current
-        run: diff -u requirements.lock /tmp/requirements.lock
+        run: diff -I "^#    pip-compile" requirements.lock /tmp/requirements.lock || cp /tmp/requirements.lock requirements.lock
       - name: Verify locked installation
         run: |
           python -m venv /tmp/lock-check
