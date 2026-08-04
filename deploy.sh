@@ -11,4 +11,5 @@ diagnostics="$SCRIPTS_DIR/lib/installer_diagnostics.sh"; require_safe_script "$d
 module="$SCRIPTS_DIR/lib/control_plane.sh"; require_safe_script "$module"; source "$module"
 completion="$SCRIPTS_DIR/lib/control_plane_completion.sh"; require_safe_script "$completion"; source "$completion"
 final="$SCRIPTS_DIR/lib/control_plane_final.sh"; require_safe_script "$final"; source "$final"
+ui="$SCRIPTS_DIR/lib/control_plane_ui.sh"; require_safe_script "$ui"; CONTROL_PLANE_UI_SOURCE_ONLY=1 source "$ui"; unset CONTROL_PLANE_UI_SOURCE_ONLY
 dispatch "$@"
