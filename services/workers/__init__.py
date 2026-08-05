@@ -64,6 +64,9 @@ def _traffic(bot): return traffic_sync_loop(shutdown_event)
 def _cleanup(bot): return cleanup_dangling_peers_loop(shutdown_event)
 def _stale_payments(bot): return stale_payments_checker_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
+def _outbox(bot):
+    from services.workers.outbox import outbox_worker_loop
+    return outbox_worker_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)
 def _api_operations(bot): return api_operations_loop(shutdown_event)
 def _account_balance(bot): return account_balance_notifications_loop(bot, shutdown_event)
@@ -79,6 +82,7 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("cleanup", _cleanup, False),
     WorkerDefinition("stale_payments", _stale_payments, False),
     WorkerDefinition("notifications", _notifications, False),
+    WorkerDefinition("outbox", _outbox, False),
     WorkerDefinition("account_balance", _account_balance, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("queue_health", _queue_health, False),

@@ -116,11 +116,14 @@ async def confirm_delete_device(
         await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
         await state.clear()
 
-        if not await DeviceService.delete_device(
-            session,
-            profile,
-            actor_id=callback.from_user.id,
-        ):
+        from services.device_service import DeviceStillCreating
+        try:
+            success = await DeviceService.delete_device(session, profile, actor_id=callback.from_user.id)
+        except DeviceStillCreating:
+            await callback.answer("Устройство ещё создаётся, подождите", show_alert=True)
+            return
+
+        if not success:
             await callback.answer(
                 texts.ERROR_SERVER_UNAVAILABLE_GENERIC,
                 show_alert=True,

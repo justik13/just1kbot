@@ -307,7 +307,6 @@ class SubscriptionService:
                 f"Cannot downgrade: {profiles_count} devices > "
                 f"{device_limit} limit. User must delete devices first."
             )
-        old_device_limit = user.device_limit or 0
         user.subscription_end = subscription_end
         user.device_limit = device_limit
         user.current_tariff_id = tariff_id
@@ -356,7 +355,7 @@ class SubscriptionService:
             permanent = bool(
                 target_active
                 and user.subscription_end
-                and user.subscription_end.year >= 2100
+                and __import__('utils.datetime_helpers', fromlist=['is_permanent_subscription']).is_permanent_subscription(user.subscription_end)
             )
             expires_at = (
                 int(user.subscription_end.timestamp())

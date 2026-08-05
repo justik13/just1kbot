@@ -830,20 +830,37 @@ class AmneziaClient:
         page_count = 0
         MAX_SAFETY_PAGES = 100
 
-        while page_count < MAX_SAFETY_PAGES:
-            result = await self._request(
+        from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+        import httpx
+
+        # P2-4: Add tenacity retry to pagination
+        @retry(
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            stop=stop_after_attempt(3),
+            retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+            reraise=True
+        )
+        async def fetch_page(skip: int, limit: int):
+            return await self._request(
                 "GET",
                 "/clients",
                 semantics=RequestSemantics.READ,
                 params={
-                    "skip": page_count * page_size,
-                    "limit": page_size,
+                    "skip": skip,
+                    "limit": limit,
                 },
             )
 
+        while page_count < MAX_SAFETY_PAGES:
+            try:
+                result = await fetch_page(page_count * page_size, page_size)
+            except Exception as e:
+                logger.warning("get_all_clients: API failed on page %s after retries: %s", page_count, e)
+                return None
+
             if result is None:
                 logger.warning(
-                    "get_all_clients: API failed on page %s. "
+                    "get_all_clients: API returned None on page %s. "
                     "Returning None instead of partial result.",
                     page_count,
                 )

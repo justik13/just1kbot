@@ -27,7 +27,6 @@ from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub
-from services.subscription import SubscriptionService
 
 
 logger = logging.getLogger("AccountBalanceNotifications")
@@ -145,31 +144,32 @@ async def process_balance_purchase_referrals() -> int:
                 )
                 session.add(reward)
                 await session.flush()
-            user_days = 5 if reward.is_first else 0
-            referrer_days = 3 if reward.is_first else 1
-            if user_days and await _referral_entitlement(
-                session,
-                user_id=user.id,
-                quote_id=quote.id,
-                entry_type="referral_user_bonus",
-                days=user_days,
-            ):
-                await SubscriptionService.extend_subscription(
-                    session, user.telegram_id, user_days
+            # P3-1: Новая реферальная система - бонусный баланс вместо дней
+            bonus_amount_rub = int(quote.amount_due_rub * 0.10)
+
+            if bonus_amount_rub > 0:
+                from database.repositories.account_ledger_repo import credit_manual_grant
+                from database.models import AccountLedgerEntry
+
+                # Проверяем, не начислен ли уже бонус для этой квоты
+                existing_bonus = await session.scalar(
+                    select(AccountLedgerEntry).where(
+                        AccountLedgerEntry.user_id == referrer.id,
+                        AccountLedgerEntry.entry_type == "referral_bonus",
+                        AccountLedgerEntry.metadata_.op("->>")("source_quote_id") == str(quote.id)
+                    )
                 )
-            if await _referral_entitlement(
-                session,
-                user_id=referrer.id,
-                quote_id=quote.id,
-                entry_type="referral_referrer_bonus",
-                days=referrer_days,
-            ):
-                await SubscriptionService.extend_subscription(
-                    session, referrer.telegram_id, referrer_days
-                )
-                referrer.referral_days = (
-                    referrer.referral_days or 0
-                ) + referrer_days
+
+                if not existing_bonus:
+                    await credit_manual_grant(
+                        session,
+                        user_id=referrer.id,
+                        amount_rub=bonus_amount_rub,
+                        actor_id=None,
+                        metadata={"source_quote_id": quote.id, "referred_user_id": user.id},
+                    )
+                    logger.info("Granted %s RUB referral bonus to %s for quote %s", bonus_amount_rub, referrer.telegram_id, quote.id)
+
             quote.referral_processed_at = now_utc()
             processed += 1
     return processed

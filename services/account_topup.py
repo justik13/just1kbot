@@ -330,6 +330,13 @@ async def request_topup_status_refresh(
     )
     if payment is None:
         raise AccountTopupError("topup_not_found")
+    user = await lock_checkout_user(session, payment.user_id)
+    if user is not None and (user.topup_blocked or user.financial_hold):
+        payment.fulfillment_status = "manual_review"
+        payment.reconciliation_status = "manual_review"
+        payment.manual_review_reason = "user_financially_blocked"
+        return payment
+
     if payment.external_id and payment.provider_status not in {
         "refunded",
         "canceled",

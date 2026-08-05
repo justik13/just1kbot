@@ -18,6 +18,7 @@ from database.repositories.servers_repo import (
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
+    DeviceCreationError,
     DailyLimitExceeded,
     DeviceLimitExceeded,
     DeviceService,
@@ -385,6 +386,24 @@ async def enter_device_name(
                 message.chat.id,
                 texts.ERROR_API_CREATE_FAILED,
                 get_back_button("back_to_connections"),
+            )
+            await state.clear()
+            return
+        except DuplicateDeviceName as e:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.DEVICE_NAME_DUPLICATE if hasattr(texts, "DEVICE_NAME_DUPLICATE") else "⚠️ Устройство с таким именем на этом сервере уже существует. Выберите другое имя.",
+                get_back_button("add_device"),
+            )
+            await state.clear()
+            return
+        except DeviceCreationError as e:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                str(e),
+                get_back_button("add_device"),
             )
             await state.clear()
             return

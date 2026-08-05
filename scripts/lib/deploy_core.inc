@@ -470,7 +470,13 @@ read_bot_token() {
     local value=""
     while true; do
         read -rsp 'BOT_TOKEN: ' value
-        printf '\n'
+        printf '
+'
+        if [[ -z "$value" ]]; then
+            printf 'Значение не может быть пустым.
+'
+            continue
+        fi
         if [[ "$value" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
             BOT_TOKEN=$value
             return
@@ -483,6 +489,11 @@ read_admin_ids() {
     local value=""
     while true; do
         read -rp 'ADMIN_IDS, числа через запятую: ' value
+        if [[ -z "$value" ]]; then
+            printf 'Значение не может быть пустым.
+'
+            continue
+        fi
         if [[ "$value" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
             ADMIN_IDS=$value
             return
@@ -497,6 +508,11 @@ read_support_username() {
     while true; do
         read -rp 'SUPPORT_USERNAME, без @: ' value
         value=${value#@}
+        if [[ -z "$value" ]]; then
+            printf 'Значение не может быть пустым.
+'
+            continue
+        fi
         if [[ "$value" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] &&
            [[ "${value,,}" != support ]] &&
            [[ "${value,,}" != change_me_support_username ]]; then
