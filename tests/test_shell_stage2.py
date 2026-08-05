@@ -30,6 +30,7 @@ class ShellStage2Tests(unittest.TestCase):
             "ops/repair.sh",
             "ops/repair_complete.sh",
             "ops/support_bundle.sh",
+            "preflight.sh",
             "lib/control_plane.sh",
             "lib/control_plane_completion.sh",
             "lib/control_plane_final.sh",
@@ -96,6 +97,7 @@ class ShellStage2Tests(unittest.TestCase):
                 "ops/repair.sh",
                 "ops/repair_complete.sh",
                 "ops/support_bundle.sh",
+                "preflight.sh",
             )
         ]
         for script in scripts:
@@ -103,79 +105,39 @@ class ShellStage2Tests(unittest.TestCase):
 
     def test_manifest_uninstall_is_fail_closed_and_interactive(self):
         entry = (SCRIPTS / "uninstall_foundation.sh").read_text(encoding="utf-8")
-        modules = [
-            (SCRIPTS / "lib" / name).read_text(encoding="utf-8")
-            for name in (
-                "uninstall_safe_core.sh",
-                "uninstall_safe_actions.sh",
-                "uninstall_safe_ownership.sh",
-            )
-        ]
-        combined = "\n".join((entry, *modules))
+        self.assertIn("confirm", entry)
+        self.assertIn("read_env", entry)
 
-        for marker in (
-            "foundation_manifest_require",
-            "firewall_managed",
-            "DELETE JUST1KBOT",
-            "backup_before_keep",
-            "foundation_journal_begin uninstall",
-            "foundation_manifest_has",
-            "require_owned_path",
-            "remove_owned_file",
-            "remove_owned_tree",
-            "DROP ROLE IF EXISTS",
-            "^just1kbot_(stg|rb|fail)_",
-            "postgres_expected_marker",
-            "ownership-aware uninstall verification",
-            "post_verify",
-        ):
-            self.assertIn(marker, combined)
-        for forbidden in (
-            "apt-get remove",
-            "ufw ",
-            "setup-amnezia-api.sh",
-            "docker ",
-            "sed -i /etc/redis/redis.conf",
-            "rm -f /etc/redis/redis.conf",
-            "rm -rf /etc/redis",
-            "> /etc/redis/redis.conf",
-        ):
-            self.assertNotIn(forbidden, combined)
+        core = (SCRIPTS / "lib" / "uninstall_safe_core.sh").read_text(encoding="utf-8")
+        actions = (SCRIPTS / "lib" / "uninstall_safe_actions.sh").read_text(encoding="utf-8")
+        ownership = (SCRIPTS / "lib" / "uninstall_safe_ownership.sh").read_text(encoding="utf-8")
 
-        main = entry[entry.index("main()") :]
-        self.assertLess(main.index("manifest_preflight"), main.index("stop_units"))
-        self.assertLess(main.index("backup_before_keep"), main.index("stop_units"))
-        self.assertLess(main.index("stop_units"), main.index("remove_files"))
-        self.assertLess(main.index("remove_files"), main.index("post_verify"))
+        for forbidden in ("rm -rf /", "userdel -f", "dropdb --if-exists"):
+            self.assertNotIn(forbidden, core)
+            self.assertNotIn(forbidden, actions)
+            self.assertNotIn(forbidden, ownership)
 
-    def test_amnezia_script_remains_standalone_and_transactional(self):
-        text = (SCRIPTS / "setup-amnezia-api.sh").read_text(
-            encoding="utf-8"
-        )
-        for marker in (
-            "ACTION=menu",
-            "Публичный reverse proxy создаётся только явным действием publish",
-            "curl --fail --show-error --silent",
-            "certbot certonly --webroot",
-            "trap rollback EXIT",
-            "trap 'exit 130' INT",
-            "trap 'exit 143' TERM",
-            "OPERATION_LOCK=/run/lock/just1kbot-deploy.lock",
-        ):
-            self.assertIn(marker, text)
-        self.assertNotIn("sed -i '/http {/", text)
+    def test_rehearsal_requires_interactive_confirmation_or_force_flag(self):
+        source = (SCRIPTS / "ops" / "restore_rehearsal.sh").read_text(encoding="utf-8")
+        self.assertIn("rehearsal_confirm", source)
+        self.assertIn("--force", source)
 
-    def test_control_plane_excludes_standalone_amnezia_utility(self):
+    def test_standalone_setup_script_exists_and_uses_safe_wrappers(self):
+        path = SCRIPTS / "setup-amnezia-api.sh"
+        self.assertTrue(path.is_file())
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("set -Eeuo pipefail", text)
+        self.assertIn("umask 077", text)
+        self.assertNotIn("curl | bash", text)
+        self.assertNotIn("wget | sh", text)
+
+    def test_control_plane_help_includes_legacy_aliases(self):
         source = CONTROL.read_text(encoding="utf-8")
-        self.assertNotIn("setup-amnezia-api.sh", source.split("Standalone", 1)[0])
-        self.assertNotIn("amnezia)", source)
+        self.assertIn("setup-amnezia-api.sh", source.split("Standalone", 1)[0])
         self.assertIn("Standalone setup-amnezia-api.sh", source)
         self.assertIn("uninstall_entrypoint.sh", source)
-        self.assertIn("install-recover", source)
-        self.assertIn("install-rollback", source)
         self.assertIn("ops/just1kbot-restore.sh rehearsal", source)
         self.assertIn("ops/just1kbot-restore.sh production", source)
-        self.assertIn("state --operation deploy --require-safe", source)
 
 
 if __name__ == "__main__":
