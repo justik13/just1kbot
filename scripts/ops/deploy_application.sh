@@ -9,7 +9,7 @@ set -uo pipefail
 : "${SNAPSHOT_DIR:=/var/lib/just1kbot/rollback-releases}"
 : "${SERVICE_NAME:=just1kbot}"
 : "${UNIT_FILE:=/etc/systemd/system/${SERVICE_NAME}.service}"
-: "${HEARTBEAT_FILE:=${PROJECT_DIR}/.heartbeat}"
+: "${HEARTBEAT_FILE:=/run/just1kbot/heartbeat}"
 : "${READINESS_TIMEOUT:=150}"
 : "${READINESS_POLL_INTERVAL:=2}"
 : "${HEALTHCHECK_COMMAND:=/usr/local/bin/just1kbot-healthcheck.sh}"
