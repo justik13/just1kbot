@@ -1,14 +1,14 @@
 #!/bin/bash
-# =============================================================================
+#
 # JUST1KBOT — безопасная установка, обновление и эксплуатационные команды
-# =============================================================================
+#
 # Первичная установка: sudo bash deploy.sh
 # Обновление:          sudo bash deploy.sh
 # Управление:          sudo bash deploy.sh --status|--logs|--restart|--backup
 # Проверка восстановления:
 #   sudo AGE_IDENTITY_FILE=/etc/just1kbot/backup.agekey \
 #       bash deploy.sh --restore /var/lib/just1kbot/backups/<backup>.tar.age
-# =============================================================================
+#
 
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -567,7 +567,11 @@ collect_initial_input() {
         printf 'Укажите корректный публичный домен.\n'
     done
     while true; do
-        read_optional 'Email для сертификата Let’s Encrypt' SSL_EMAIL ''
+
+
+
+        read_optional "Email для сертификата Let's Encrypt" SSL_EMAIL ''
+
         if validate_email "$SSL_EMAIL"; then
             break
         fi

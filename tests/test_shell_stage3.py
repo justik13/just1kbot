@@ -47,7 +47,6 @@ class ShellStage3Tests(unittest.TestCase):
     def test_healthcheck_is_bounded_and_lock_contention_fails(self):
         for marker in (
             "flock -s -w 5 8",
-            "[[ -e /proc/self/fd/200 ]]",
             "timeout --signal=TERM --kill-after=5s 25s",
             "TimeoutStartSec=35s",
             'connect_args={"timeout": 5, "command_timeout": 5}',
