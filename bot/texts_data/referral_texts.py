@@ -45,4 +45,8 @@ ID: <code>{telegram_id}</code>
 
 👥 Приглашено: <b>{invited_count}</b>
 🎁 Доступный реферальный бонус: <b>{bonus_balance} ₽</b>""",
+    "NOTIFY_TOPUP_SUCCESS": "✅ Баланс успешно пополнен на <b>{amount} ₽</b>.",
+    "NOTIFY_CHARGEBACK_DEBT": "⚠️ По вашему аккаунту зафиксирован чарджбэк. Доступ к VPN временно заблокирован до завершения проверки.",
+    "NOTIFY_ADMIN_SUB_REDUCE": "ℹ️ Администратор изменил срок вашей подписки.",
+    "NOTIFY_GENERIC": "🔔 Новое уведомление.",
 }
