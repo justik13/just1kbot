@@ -177,6 +177,7 @@ Admin <code>{admin_id}</code>
 <b>Рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}""",
 
-    # Text retained for admin queue retry flow; it does not belong to referral legacy.
     "ADMIN_QUEUE_RETRY_CONFIRMATION": "{card}\n\n⚠️ Операция может быть обработана повторно.",
+    "ADMIN_DISPUTE_CREATED_PREFIX": "Создан новый спор.\n\n",
+    "ADMIN_DISPUTE_EXISTING_PREFIX": "Спор уже существовал.\n\n",
 }
