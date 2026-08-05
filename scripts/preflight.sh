@@ -36,7 +36,7 @@ if grep -q "^DB_ENCRYPTION_KEY=" "$ENV_FILE"; then
         exit 1
     fi
     # Check if the service user can read the key
-    if [ ! -r "$BACKUP_KEY" ]; then
+    if ! [ -r "$BACKUP_KEY" ]; then
         echo "ERROR: Service user cannot read $BACKUP_KEY. Check permissions." >&2
         exit 1
     fi
