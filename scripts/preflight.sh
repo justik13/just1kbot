@@ -11,17 +11,17 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # We don't source it because values might contain spaces/quotes, we extract what we need
-if ! grep -q "^DATABASE_URL=" "$ENV_FILE"; then
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' "$ENV_FILE"; then
     echo "ERROR: DATABASE_URL is missing in $ENV_FILE." >&2
     exit 1
 fi
 
-if ! grep -q "^REDIS_URL=" "$ENV_FILE"; then
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?REDIS_URL=' "$ENV_FILE"; then
     echo "ERROR: REDIS_URL is missing in $ENV_FILE." >&2
     exit 1
 fi
 
-if ! grep -q "^BOT_TOKEN=" "$ENV_FILE"; then
+if ! grep -Eq '^[[:space:]]*(export[[:space:]]+)?BOT_TOKEN=' "$ENV_FILE"; then
     echo "ERROR: BOT_TOKEN is missing in $ENV_FILE." >&2
     exit 1
 fi
@@ -30,7 +30,7 @@ fi
 CONFIG_DIR=${JUST1KBOT_CONFIG_DIR:-/etc/just1kbot}
 BACKUP_KEY="$CONFIG_DIR/backup.agekey"
 
-if grep -q "^DB_ENCRYPTION_KEY=" "$ENV_FILE"; then
+if grep -Eq '^[[:space:]]*(export[[:space:]]+)?DB_ENCRYPTION_KEY=' "$ENV_FILE"; then
     if [ ! -f "$BACKUP_KEY" ]; then
         echo "ERROR: DB_ENCRYPTION_KEY is present but $BACKUP_KEY is missing." >&2
         exit 1

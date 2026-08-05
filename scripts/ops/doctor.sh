@@ -132,7 +132,7 @@ check_service() {
     grep -Fq 'ProtectHome=true' <<<"$unit" && ok 'Systemd sandbox: ProtectHome=true' || fail 'ProtectHome=true отсутствует'
     grep -Fq 'Environment=HOME=/run/just1kbot' <<<"$unit" && ok 'HOME=/run/just1kbot' || fail 'Runtime HOME mismatch'
     grep -Fq 'JUST1KBOT_HEARTBEAT_FILE=/run/just1kbot/heartbeat' <<<"$unit" && ok 'Heartbeat runtime path' || fail 'Heartbeat path mismatch'
-    systemctl show "$SERVICE" -p Requires | grep -q just1kbot-redis.service && ok 'Dedicated Redis dependency' || fail 'Dedicated Redis dependency absent'
+    (grep -Fq 'Requires=just1kbot-redis.service' <<<"$unit" || systemctl show "$SERVICE" -p Requires 2>/dev/null | grep -q 'just1kbot-redis.service') && ok 'Dedicated Redis dependency' || fail 'Dedicated Redis dependency absent'
 }
 
 check_dedicated_redis() {
