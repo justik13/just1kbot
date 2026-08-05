@@ -571,7 +571,11 @@ action_status() {
   echo "Текущая ветка:        ${REPO_BRANCH}"
   local local_sha remote_info remote_sha
   local_sha="$(get_local_sha)"
-  echo "Локальный commit:     ${local_sha:0:12:-неизвестно}"
+  if [[ -n "$local_sha" ]]; then
+    echo "Локальный commit:     ${local_sha:0:12}"
+  else
+    echo "Локальный commit:     неизвестно"
+  fi
 
   remote_info="$(fetch_remote_commit_info)"
   remote_sha="${remote_info%%$'\t'*}"
