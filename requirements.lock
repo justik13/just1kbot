@@ -4,3 +4,37 @@
 #
 #    pip-compile --allow-unsafe --generate-hashes --output-file=/tmp/requirements.lock --strip-extras requirements.txt
 #
+aiofiles==25.1.0 \
+    --hash=sha256:a8d728f0a29de45dc521f18f07297428d56992a742f0cd2701ba86e44d23d5b2 \
+    --hash=sha256:abe311e527c862958650f9438e859c1fa7568a141b22abcd015e120e86a85695
+    # via aiogram
+aiogram==3.2.0 \
+    --hash=sha256:49c0d381be0e611893c52a0a2dfcaea8cbbbd75d27b9c9f0bcad2cf0ca213797 \
+    --hash=sha256:91bd766d3a8fa489582ed7b1cbb66a859fb0a296ed6b8405d4df192994ebcfbe
+    # via -r requirements.txt
+aiohttp==3.11.12 \
+    --hash=sha256:0dca0e5883fe2843efc6099df344f6f8903df241bf8f6b49c719e71eb20c1598 \
+    --hash=sha256:1a84f50604107cf270e5b7fb818314e3b784a0d892d525cb1d6b05be5332f7a9 \
+    --hash=sha256:2209d6f6e80b2a7bd885387431e5f8cb41e5e6e30b80983d95ebac652be7b5c3 \
+    --hash=sha256:29bb22687a71f0bc1c7bce29aaedfa0efbc78f7e8006b528e5db61ebbb05e1fc \
+    --hash=sha256:3a6a9be78d46dbbbab0ee0938f3ea7eac0f10c660ca333246ebdb1496a792db8 \
+    --hash=sha256:49edb879ec364375bcf404285b7364669812423cf9e96f131a4f023fbaf6f35b \
+    --hash=sha256:5efb1c0ea61eb0d500f40d1aebe4dbf91753bb4d2b27bc89d5f75607fc88a1b5 \
+    --hash=sha256:65a6cce21e5aa9a8b132890ef0d19fecff02a9b3cebcffb1ceea257321e102f9 \
+    --hash=sha256:7c7c3dfedcd3ebbe2d69f0e8f0004ff97db2f2f75a7c29ae333ca24d3148fa7f \
+    --hash=sha256:8894dfeddb22dd2aeeefca0cb36a7ed2ffaa9d0d344adbebc56aeecda5df1ad2 \
+    --hash=sha256:9cfed5642a8bdfd75bf195f134bb3222e4eb2ee3ca29188040d99806440db731 \
+    --hash=sha256:a6b63c7dd59b5ae79caaa108a705139c82c3f87b8f9e05e5eb0ee6d6168eef0a \
+    --hash=sha256:ae30ec2b2a6fe1a1d636ff4b7119ff92c3008fa0aeccaeebff8a99252efae8bb \
+    --hash=sha256:bb6001097fa620f4cf33be6715f013d508e7b99c0ec90203f6f0592965c4046d \
+    --hash=sha256:bc31f964098939c124849646cbb159a60aa88383a54d521d8b67b1b369c73ef8 \
+    --hash=sha256:be636b0439efac3e7354929315091ff5fe2a5aa44ff727bb033bc6f0190fa770 \
+    --hash=sha256:d1e4eb4cbfa41c0ea46114eb384c2fa0c92fb3ac7f4ec701d510c4974f1ec5f7 \
+    --hash=sha256:d9b2e2d93e16b9b3e1503e9fe7258380fb359a1170d740eb760775836a908a8f \
+    --hash=sha256:dcdd9cb523f6696dbfca854ec32f5d96f9bf764fecb27376c26b5d92bf9b4d1b \
+    --hash=sha256:df41ff841fb005527beea7cf63fbf91866cf17f7d9fa9b19dfb4aa2bc664273c \
+    --hash=sha256:e32d431bb5386fa3fa4e1b8b8098fae3f89839446d61ffc61cf4147eb866d21b \
+    --hash=sha256:ed5e780fb9f33b1e3557e4e1dfa83e0ee741df748ebaa22237ebc0b566580556
+    # via aiogram
+aiosignal==1.3.2 \
+    --hash=sha256:32660d5fb1e9ed736c53e839e5e7836881734fcaed92b874fa775d7100b467ec \
