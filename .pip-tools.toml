@@ -1,2 +1,0 @@
-[tool.pip-tools.compile]
-upgrade-package = ["cffi==2.1.0"]
