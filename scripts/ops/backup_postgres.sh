@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-BACKUP_DIR=${BACKUP_DIR:-/root/backups/just1kbot}
+BACKUP_DIR=${BACKUP_DIR:-/var/lib/just1kbot/backups}
 ENV_FILE=${ENV_FILE:-/opt/just1kbot/.env}
 LOCK_FILE=${BACKUP_LOCK_FILE:-/run/lock/just1kbot-backup.lock}
 RETENTION_COUNT=${BACKUP_RETENTION_COUNT:-14}

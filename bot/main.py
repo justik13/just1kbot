@@ -286,12 +286,17 @@ async def main():
         settings = get_settings()
 
         # P3-2: Защита от потери backup.agekey
+        import os
+        from pathlib import Path
+        config_dir = os.getenv("JUST1KBOT_CONFIG_DIR", "/etc/just1kbot")
+        backup_key_path = Path(config_dir) / "backup.agekey"
+
         if settings.DB_ENCRYPTION_KEY and not await aiofiles.os.path.exists(
-            "/root/.config/just1kbot/backup.agekey"
+            str(backup_key_path)
         ):
             logger.critical(
                 "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "
-                "/root/.config/just1kbot/backup.agekey is missing!"
+                f"{backup_key_path} is missing!"
             )
             if settings.ADMIN_IDS:
                 try:

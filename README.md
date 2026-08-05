@@ -322,13 +322,13 @@ sudo just1kbot restore-finalize
 Encrypted PostgreSQL backups:
 
 ```text
-/root/backups/just1kbot/
+/var/lib/just1kbot/backups/
 ```
 
 Age identity:
 
 ```text
-/root/.config/just1kbot/backup.agekey
+/etc/just1kbot/backup.agekey
 ```
 
 Production restore сначала использует staging database, проверяет её, создаёт

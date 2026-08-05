@@ -144,6 +144,7 @@ Environment=HOME=$RUNTIME_DIR
 Environment=PYTHONPATH=$PROJECT_DIR
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=JUST1KBOT_HEARTBEAT_FILE=$HEARTBEAT_FILE
+ExecStartPre=/opt/just1kbot/scripts/preflight.sh
 ExecStart=$VENV_DIR/bin/python -m bot.main
 Restart=always
 RestartSec=5

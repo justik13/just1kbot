@@ -240,9 +240,9 @@ post_verify() {
     if [[ "$MODE" == purge ]]; then
         verify_postgres_absent || leftovers+=("postgresql:$PG_ROLE/$PG_DATABASE")
         for path in \
-            /root/backups/just1kbot \
+            /var/lib/just1kbot/backups \
             /etc/just1kbot-backup.conf \
-            /root/.config/just1kbot/backup.agekey \
+            /etc/just1kbot/backup.agekey \
             /var/lib/just1kbot/rollback-releases \
             /var/lib/just1kbot/restore-transactions \
             /var/lib/just1kbot/source-releases; do

@@ -72,9 +72,9 @@ x=json.loads(p.read_text())
 x['managed_resources']=[
     v for v in x['managed_resources']
     if v.startswith('postgresql:') or v in (
-        'path:/root/backups/just1kbot',
+        'path:/var/lib/just1kbot/backups',
         'path:/etc/just1kbot-backup.conf',
-        'path:/root/.config/just1kbot/backup.agekey',
+        'path:/etc/just1kbot/backup.agekey',
     )
 ]
 x.setdefault('metadata', {})['application_removed'] = True

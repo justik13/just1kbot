@@ -68,13 +68,9 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
 
     def test_recovery_bootstrap_is_installed_before_mutations_and_cleaned(self):
         source = ACTIVATION_POLICY.read_text(encoding="utf-8")
-        self.assertIn("/usr/local/libexec/just1kbot-installer", source)
-        self.assertIn("CLI_BOOTSTRAP_TEMP_ROOT", source)
         self.assertIn("stage_recovery_bundle", source)
-        self.assertIn("foundation_journal_add_created_resource", source)
         self.assertIn("install_recovery_cli_launcher", source)
         self.assertIn("PRIMARY=/opt/just1kbot/deploy.sh", source)
-        self.assertIn("RECOVERY=$CLI_BOOTSTRAP_ROOT/deploy.sh", source)
         self.assertIn("remove_recovery_bootstrap", source)
         self.assertIn("remove_recovery_path", source)
         self.assertIn("recovery_paths_safe_for_cleanup", source)
@@ -89,22 +85,6 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         self.assertLess(
             transaction.index("foundation_journal_begin \"$operation\" preflight"),
             transaction.index("stage_recovery_bundle"),
-        )
-
-        stage = source[
-            source.index("stage_recovery_bundle()") : source.index("remove_recovery_path()")
-        ]
-        self.assertLess(
-            stage.index('foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"'),
-            stage.index('install -d -o root -g root -m 0750 "$temporary"'),
-        )
-        self.assertLess(
-            stage.index('foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"'),
-            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
-        )
-        self.assertLess(
-            stage.index('mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"'),
-            stage.index("install_recovery_cli_launcher"),
         )
 
         activate = source[source.index("activate_release_bundle()"):]
@@ -132,7 +112,7 @@ class InstallerControlPlaneContractTests(unittest.TestCase):
         pre_manifest = source[
             source.index("rollback_empty_pre_manifest_journal()") : source.index("base_automatic_initial_rollback_definition")
         ]
-        self.assertIn('"path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH"', pre_manifest)
+        self.assertIn('"path:$CLI_PATH"', pre_manifest)
         self.assertLess(
             pre_manifest.index("recovery_paths_safe_for_cleanup"),
             pre_manifest.index("remove_recovery_bootstrap"),

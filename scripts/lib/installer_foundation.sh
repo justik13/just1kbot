@@ -19,7 +19,7 @@ umask 077
 : "${REDIS_CONFIG:=/etc/just1kbot/redis.conf}"
 : "${REDIS_DATA_DIR:=$STATE_ROOT/redis}"
 : "${REDIS_UNIT:=/etc/systemd/system/$REDIS_SERVICE}"
-: "${CLI_PATH:=/usr/local/sbin/just1kbot}"
+: "${CLI_PATH:=/usr/local/bin/just1kbot}"
 : "${NGINX_AVAILABLE_DIR:=/etc/nginx/sites-available}"
 : "${NGINX_ENABLED_DIR:=/etc/nginx/sites-enabled}"
 : "${LETSENCRYPT_LIVE_DIR:=/etc/letsencrypt/live}"
@@ -995,7 +995,7 @@ foundation_rollback_created_resources() {
                 ;;
             path:/etc/just1kbot/redis.conf) rm -f -- "$REDIS_CONFIG" ;;
             path:/var/lib/just1kbot/redis) rm -rf --one-file-system -- "$REDIS_DATA_DIR" ;;
-            path:/usr/local/sbin/just1kbot) rm -f -- "$CLI_PATH" ;;
+            path:/usr/local/bin/just1kbot) rm -f -- "$CLI_PATH" ;;
             nginx-enabled:*)
                 value=${resource#nginx-enabled:}
                 rm -f -- "$NGINX_ENABLED_DIR/$value"

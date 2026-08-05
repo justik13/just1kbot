@@ -95,10 +95,10 @@ prepare_uninstall_journal(){
 }
 backup_before_keep(){
     [[ -x /usr/local/bin/just1kbot-backup.sh && -x /usr/local/bin/verify_backup.sh ]] || fail 'backup tooling отсутствует'
-    local identity=${AGE_IDENTITY_FILE:-/root/.config/just1kbot/backup.agekey}
+    local identity=${AGE_IDENTITY_FILE:-/etc/just1kbot/backup.agekey}
     [[ -f "$identity" && ! -L "$identity" ]] || fail 'age identity отсутствует' 'Передайте AGE_IDENTITY_FILE, соответствующий backup recipient.'
     local started latest; started=$(date +%s); systemctl --wait start just1kbot-backup.service || fail 'backup service завершился ошибкой'
-    latest=$(find /root/backups/just1kbot -maxdepth 1 -type f -name 'just1kbot-pg-v1-*.tar.age' -printf '%T@ %p\n'|sort -rn|head -1|cut -d' ' -f2-)
+    latest=$(find /var/lib/just1kbot/backups -maxdepth 1 -type f -name 'just1kbot-pg-v1-*.tar.age' -printf '%T@ %p\n'|sort -rn|head -1|cut -d' ' -f2-)
     [[ -n "$latest" && -s "$latest" && -s "$latest.sha256" && $(stat -c %Y "$latest") -ge $started ]] || fail 'новый backup не опубликован'
     AGE_IDENTITY_FILE="$identity" /usr/local/bin/verify_backup.sh "$latest" || fail 'новый backup не прошёл verification'
     log "verified backup: $latest"
