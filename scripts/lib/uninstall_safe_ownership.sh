@@ -44,6 +44,57 @@ postgres_manifest_state() {
         'Сохраните manifest и выполните ручной аудит; partial ownership нельзя удалять автоматически.'
 }
 
+postgres_database_exists() {
+    local result
+    result=$(pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_database
+    WHERE datname = :'db'
+);
+SQL
+) || return 1
+    [[ "$result" == t ]]
+}
+
+postgres_role_exists() {
+    local result
+    result=$(pg_admin_psql_on_port "$PG_PORT" -v role="$PG_ROLE" -At <<'SQL'
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = :'role'
+);
+SQL
+) || return 1
+    [[ "$result" == t ]]
+}
+
+postgres_database_owner() {
+    pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
+SELECT COALESCE(r.rolname, '')
+FROM pg_database AS d
+LEFT JOIN pg_roles AS r ON r.oid = d.datdba
+WHERE d.datname = :'db';
+SQL
+}
+
+postgres_database_comment() {
+    pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
+SELECT COALESCE(shobj_description(oid, 'pg_database'), '')
+FROM pg_database
+WHERE datname = :'db';
+SQL
+}
+
+postgres_role_comment() {
+    pg_admin_psql_on_port "$PG_PORT" -v role="$PG_ROLE" -At <<'SQL'
+SELECT COALESCE(shobj_description(oid, 'pg_authid'), '')
+FROM pg_authid
+WHERE rolname = :'role';
+SQL
+}
+
 prepare_postgres() {
     [[ "$MODE" == purge ]] || return 0
 
@@ -55,24 +106,53 @@ prepare_postgres() {
     postgres_manifest_state
     [[ "$POSTGRES_RESOURCES_OWNED" == true ]] || return 0
 
-    local expected database_comment role_comment
+    local expected database_owner database_comment role_comment
+    postgres_database_exists || fail \
+        'manifest-owned PostgreSQL database отсутствует' \
+        "$PG_VERSION/$PG_CLUSTER:$PG_DATABASE" \
+        'Manifest заявляет ownership, но database не найдена; автоматическое удаление остановлено.'
+    postgres_role_exists || fail \
+        'manifest-owned PostgreSQL role отсутствует' \
+        "$PG_VERSION/$PG_CLUSTER:$PG_ROLE" \
+        'Manifest заявляет ownership, но role не найдена; автоматическое удаление остановлено.'
+
+    database_owner=$(postgres_database_owner) || fail \
+        'не удалось определить владельца PostgreSQL database' \
+        "$PG_DATABASE" \
+        'Автоматическое удаление остановлено, чтобы не удалить чужой объект.'
+    [[ "$database_owner" == "$PG_ROLE" ]] || fail \
+        'PostgreSQL database принадлежит неожиданной role' \
+        "database=$PG_DATABASE owner=${database_owner:-empty} expected=$PG_ROLE" \
+        'Проверьте ownership вручную; uninstall не будет удалять database/role с несовпадающим владельцем.'
+
     expected=$(postgres_expected_marker)
-    database_comment=$(pg_admin_psql_on_port "$PG_PORT" -v db="$PG_DATABASE" -At <<'SQL'
-SELECT COALESCE(shobj_description(oid, 'pg_database'), '')
-FROM pg_database
-WHERE datname = :'db';
-SQL
-) || fail 'не удалось прочитать database ownership COMMENT'
-    role_comment=$(pg_admin_psql_on_port "$PG_PORT" -v role="$PG_ROLE" -At <<'SQL'
-SELECT COALESCE(shobj_description(oid, 'pg_authid'), '')
-FROM pg_authid
-WHERE rolname = :'role';
-SQL
-) || fail 'не удалось прочитать role ownership COMMENT'
-    [[ "$database_comment" == "$expected" ]] ||
-        fail 'database ownership COMMENT не совпадает с manifest installation ID'
-    [[ "$role_comment" == "$expected" ]] ||
-        fail 'role ownership COMMENT не совпадает с manifest installation ID'
+    database_comment=$(postgres_database_comment) || fail \
+        'не удалось прочитать database ownership COMMENT' \
+        "$PG_DATABASE" \
+        'Проверьте PostgreSQL и повторите uninstall.'
+    role_comment=$(postgres_role_comment) || fail \
+        'не удалось прочитать role ownership COMMENT' \
+        "$PG_ROLE" \
+        'Проверьте PostgreSQL и повторите uninstall.'
+
+    if [[ "$database_comment" == "$expected" && "$role_comment" == "$expected" ]]; then
+        log 'PostgreSQL ownership подтверждён manifest + database owner + COMMENT'
+        return 0
+    fi
+
+    # Older managed installs may have a valid ownership manifest and matching
+    # database owner but no PostgreSQL COMMENT markers. Keep destructive removal
+    # safe by rejecting partial/mismatched markers, while allowing the explicit
+    # interactive --purge-data confirmation to authorize a marker-less legacy state.
+    if [[ -z "$database_comment" && -z "$role_comment" ]]; then
+        log 'WARNING: PostgreSQL COMMENT markers отсутствуют; ownership подтверждён manifest и database owner, продолжение разрешено явным --purge-data confirmation'
+        return 0
+    fi
+
+    fail \
+        'PostgreSQL ownership COMMENT не подтверждает manifest installation ID' \
+        "database_comment=${database_comment:-empty}; role_comment=${role_comment:-empty}; expected=$expected" \
+        'Не удаляйте role/database вручную. Исправьте ownership metadata или выполните ручной аудит.'
 }
 
 purge_postgres() {

@@ -35,8 +35,10 @@ class UninstallVerificationContractTests(unittest.TestCase):
         main = source[source.index("main()") :]
         self.assertLess(main.index("manifest_preflight"), main.index("stop_units"))
         self.assertLess(main.index("read_env"), main.index("stop_units"))
+        self.assertLess(main.index("resolve_managed_domain"), main.index("stop_units"))
         self.assertLess(main.index("confirm"), main.index("stop_units"))
         self.assertLess(main.index("prepare_postgres"), main.index("stop_units"))
+        self.assertLess(main.index("prepare_uninstall_journal"), main.index("stop_units"))
         self.assertLess(main.index("stop_units"), main.index("remove_nginx"))
         self.assertLess(main.index("remove_files"), main.index("post_verify"))
 
@@ -53,6 +55,40 @@ class UninstallVerificationContractTests(unittest.TestCase):
             "verified backup",
         ):
             self.assertIn(marker, core)
+
+    def test_systemd_stop_is_manifest_ownership_bounded(self):
+        core = CORE.read_text(encoding="utf-8")
+        self.assertIn("stop_owned_unit()", core)
+        self.assertIn("foundation_manifest_has \"$resource\"", core)
+        for marker in (
+            "path:/etc/systemd/system/just1kbot-healthcheck.timer",
+            "path:/etc/systemd/system/just1kbot-backup.timer",
+            "path:/etc/systemd/system/just1kbot-healthcheck.service",
+            "path:/etc/systemd/system/just1kbot-backup.service",
+            "systemd:just1kbot.service",
+            '"systemd:$REDIS_SERVICE"',
+        ):
+            self.assertIn(marker, core)
+        self.assertNotIn(
+            "for unit in just1kbot-healthcheck.timer just1kbot-backup.timer",
+            core,
+        )
+
+    def test_existing_transaction_journal_must_belong_to_uninstall(self):
+        core = CORE.read_text(encoding="utf-8")
+        entry = UNINSTALL.read_text(encoding="utf-8")
+        self.assertIn("prepare_uninstall_journal()", core)
+        self.assertIn("foundation_journal_validate", core)
+        self.assertIn("foundation_journal_operation", core)
+        self.assertIn("обнаружен journal другой операции", core)
+        self.assertIn("prepare_uninstall_journal", entry)
+
+    def test_manifest_domain_is_used_when_env_is_missing_or_stale(self):
+        core = CORE.read_text(encoding="utf-8")
+        self.assertIn("resolve_managed_domain()", core)
+        self.assertIn("foundation_validate_domain", core)
+        self.assertIn("DOMAIN в .env не совпадает с ownership manifest", core)
+        self.assertIn("DOMAIN=$manifest_domain", core)
 
     def test_every_removed_path_requires_manifest_ownership(self):
         source = ACTIONS.read_text(encoding="utf-8")
@@ -100,21 +136,32 @@ class UninstallVerificationContractTests(unittest.TestCase):
                 self.assertNotIn(forbidden, combined)
         self.assertIn("Firewall", UNINSTALL.read_text(encoding="utf-8"))
 
-    def test_purge_postgresql_is_name_manifest_and_comment_bounded(self):
+    def test_purge_postgresql_is_manifest_owner_and_marker_bounded(self):
         actions = ACTIONS.read_text(encoding="utf-8")
         ownership = OWNERSHIP.read_text(encoding="utf-8")
         self.assertIn("^just1kbot_(stg|rb|fail)_", actions)
+        self.assertIn("postgres_database_owner_by_name", actions)
+        self.assertIn("owner=${owner:-empty}", actions)
         self.assertIn("DROP ROLE IF EXISTS", actions)
         self.assertNotIn("DROP OWNED", actions)
         self.assertNotIn("DROP DATABASE postgres", actions)
         for marker in (
             "postgres_manifest_state",
-            "postgres_expected_marker",
+            "postgres_database_owner",
+            "database_owner",
             "database ownership COMMENT",
             "role ownership COMMENT",
             "installation-id=%s",
         ):
             self.assertIn(marker, ownership)
+        self.assertIn(
+            "COMMENT markers отсутствуют; ownership подтверждён manifest и database owner",
+            ownership,
+        )
+        self.assertIn(
+            "PostgreSQL ownership COMMENT не подтверждает manifest installation ID",
+            ownership,
+        )
 
     def test_post_verify_reports_all_managed_leftovers(self):
         actions = ACTIONS.read_text(encoding="utf-8")

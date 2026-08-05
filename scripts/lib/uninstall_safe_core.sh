@@ -40,6 +40,27 @@ PY
 ) || fail 'production .env не прошёл безопасный parse'
     mapfile -t values <<<"$output"; DOMAIN=${values[0]:-}; WEBHOOK_PORT=${values[1]:-8080}
 }
+resolve_managed_domain(){
+    local resource manifest_domain='' candidate
+    while IFS= read -r resource; do
+        case "$resource" in
+            nginx-site:*|nginx-enabled:*|certbot:*)
+                candidate=${resource#*:}
+                foundation_validate_domain "$candidate" ||
+                    fail 'manifest содержит небезопасный managed domain' "$candidate"
+                if [[ -z "$manifest_domain" ]]; then
+                    manifest_domain=$candidate
+                elif [[ "$manifest_domain" != "$candidate" ]]; then
+                    fail 'manifest содержит несколько разных managed domains' "${manifest_domain} и ${candidate}"
+                fi
+                ;;
+        esac
+    done < <(foundation_manifest_resources)
+
+    [[ -z "$manifest_domain" || -z "$DOMAIN" || "$manifest_domain" == "$DOMAIN" ]] ||
+        fail 'DOMAIN в .env не совпадает с ownership manifest' "env=${DOMAIN:-empty} manifest=$manifest_domain"
+    [[ -z "$manifest_domain" ]] || DOMAIN=$manifest_domain
+}
 confirm(){
     [[ "$MODE" == purge ]] || return 0
     [[ "$INCOMPLETE_INSTALL" == true && "$ASSUME_YES" == true ]] && return 0
@@ -57,6 +78,21 @@ manifest_preflight(){
         esac
     done < <(foundation_manifest_resources)
 }
+prepare_uninstall_journal(){
+    if foundation_exists "$INSTALL_JOURNAL"; then
+        foundation_journal_validate ||
+            fail 'transaction journal повреждён или имеет небезопасные ownership/permissions' "$INSTALL_JOURNAL" \
+                'Сохраните journal и выполните ручной аудит; uninstall не будет продолжать с повреждённым journal.'
+        local operation
+        operation=$(foundation_journal_operation) ||
+            fail 'не удалось определить operation transaction journal' "$INSTALL_JOURNAL"
+        [[ "$operation" == uninstall ]] ||
+            fail 'обнаружен journal другой операции' "operation=$operation path=$INSTALL_JOURNAL" \
+                'Сначала завершите recovery/rollback предыдущей операции; uninstall не переиспользует чужой transaction journal.'
+    else
+        foundation_journal_begin uninstall preflight
+    fi
+}
 backup_before_keep(){
     [[ -x /usr/local/bin/just1kbot-backup.sh && -x /usr/local/bin/verify_backup.sh ]] || fail 'backup tooling отсутствует'
     local identity=${AGE_IDENTITY_FILE:-/root/.config/just1kbot/backup.agekey}
@@ -67,8 +103,18 @@ backup_before_keep(){
     AGE_IDENTITY_FILE="$identity" /usr/local/bin/verify_backup.sh "$latest" || fail 'новый backup не прошёл verification'
     log "verified backup: $latest"
 }
+stop_owned_unit(){
+    local unit=$1 resource=$2
+    foundation_manifest_has "$resource" || return 0
+    systemctl stop "$unit" 2>/dev/null || true
+    systemctl disable "$unit" 2>/dev/null || true
+}
 stop_units(){
-    local unit
-    for unit in just1kbot-healthcheck.timer just1kbot-backup.timer just1kbot-healthcheck.service just1kbot-backup.service just1kbot.service "$REDIS_SERVICE"; do systemctl stop "$unit" 2>/dev/null||true; systemctl disable "$unit" 2>/dev/null||true; done
+    stop_owned_unit just1kbot-healthcheck.timer path:/etc/systemd/system/just1kbot-healthcheck.timer
+    stop_owned_unit just1kbot-backup.timer path:/etc/systemd/system/just1kbot-backup.timer
+    stop_owned_unit just1kbot-healthcheck.service path:/etc/systemd/system/just1kbot-healthcheck.service
+    stop_owned_unit just1kbot-backup.service path:/etc/systemd/system/just1kbot-backup.service
+    stop_owned_unit just1kbot.service systemd:just1kbot.service
+    stop_owned_unit "$REDIS_SERVICE" "systemd:$REDIS_SERVICE"
     if id "$BOT_USER" >/dev/null 2>&1; then pkill -TERM -u "$BOT_USER" 2>/dev/null||true; local end=$(( $(date +%s)+30 )); while pgrep -u "$BOT_USER" >/dev/null 2>&1 && (( $(date +%s)<=end )); do sleep 1; done; pgrep -u "$BOT_USER" >/dev/null 2>&1 && fail 'processes service user не остановлены'; fi
 }
