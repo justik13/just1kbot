@@ -61,6 +61,13 @@ async def finalize_create_success(
     sent_expires_at: datetime | None,
     session_factory=None,
 ) -> None:
+    """Atomically persist a previously validated CREATE result.
+
+    Validation of the external Amnezia response belongs to the executor boundary.
+    This finalizer is deliberately limited to the fenced database commit so that
+    a successful external CREATE and its local state transition remain one
+    atomic transaction.
+    """
     async with _scope(session_factory) as session:
         operation = await _locked(
             session, operation_id, worker_id, expected_attempt_number
@@ -78,12 +85,6 @@ async def finalize_create_success(
             raise RuntimeError("create_cancel_requested")
         if profile.provisioning_status not in {"pending_create", "active"}:
             raise RuntimeError("profile_not_create_finalizable")
-        from utils.vpn_parser import is_valid_vpn_uri, build_conf_file
-        if not raw_config or not is_valid_vpn_uri(raw_config) or not build_conf_file(raw_config):
-            profile.provisioning_status = "create_failed"
-            profile.last_sync_error = "Operation failed: invalid_raw_config"
-            _complete(operation, "dead", "invalid_raw_config")
-            return
 
         profile.peer_id = peer_id
         profile.raw_config = raw_config
