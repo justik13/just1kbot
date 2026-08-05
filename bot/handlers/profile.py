@@ -23,6 +23,7 @@ from database.repositories.users_repo import (
     get_user_with_referrals,
 )
 from services.payment_status import payment_display_status
+from services.referral_bonus import get_referral_bonus_balance
 from services.subscription import SubscriptionService
 from utils.formatters import (
     format_datetime,
@@ -56,6 +57,10 @@ async def _render_profile(
         await get_user_referrals(session, user.telegram_id)
     )
     balance = await get_account_balance(session, user_id=user.id)
+    referral_bonus_balance = await get_referral_bonus_balance(
+        session,
+        user_id=user.id,
+    )
 
     if has_access:
         device_limit = user.device_limit or 0
@@ -74,7 +79,7 @@ async def _render_profile(
                     texts.RUNTIME_BOT_HANDLERS_PROFILE_L75_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
                 )
 
-        rendered = texts.PROFILE_TEXT_ACTIVE.format(
+        rendered = texts.PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE.format(
             name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L80_1),
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
@@ -82,18 +87,18 @@ async def _render_profile(
             devices_count=profiles_count,
             total_traffic=format_traffic(total_traffic),
             referrals_count=referrals_count,
-            referral_days=user.referral_days,
             balance=int(balance.available),
+            referral_bonus_balance=int(referral_bonus_balance),
         )
         kb = get_profile_keyboard()
     else:
-        rendered = texts.PROFILE_TEXT_INACTIVE.format(
+        rendered = texts.PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE.format(
             name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L93_1),
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
             referrals_count=referrals_count,
-            referral_days=user.referral_days,
             balance=int(balance.available),
+            referral_bonus_balance=int(referral_bonus_balance),
         )
 
         builder = InlineKeyboardBuilder()
@@ -249,6 +254,11 @@ async def show_referral(
         db_user.telegram_id,
     )
 
+    bonus_balance = await get_referral_bonus_balance(
+        session,
+        user_id=db_user.id,
+    )
+
     bot_info = await callback.bot.get_me()
     referral_link = (
         f"https://t.me/{bot_info.username}"
@@ -260,10 +270,10 @@ async def show_referral(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.REFERRAL_TEXT.format(
+        texts.REFERRAL_TEXT_BALANCE.format(
             referral_link=referral_link,
             invited_count=invited_count,
-            bonus_total=db_user.referral_days,
+            bonus_balance=int(bonus_balance),
         ),
         get_referral_keyboard(referral_link),
     )
