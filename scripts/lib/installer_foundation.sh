@@ -19,7 +19,7 @@ umask 077
 : "${REDIS_CONFIG:=/etc/just1kbot/redis.conf}"
 : "${REDIS_DATA_DIR:=$STATE_ROOT/redis}"
 : "${REDIS_UNIT:=/etc/systemd/system/$REDIS_SERVICE}"
-: "${CLI_PATH:=/usr/local/bin/just1kbot}"
+: "${CLI_PATH:=/usr/local/sbin/just1kbot}"
 : "${NGINX_AVAILABLE_DIR:=/etc/nginx/sites-available}"
 : "${NGINX_ENABLED_DIR:=/etc/nginx/sites-enabled}"
 : "${LETSENCRYPT_LIVE_DIR:=/etc/letsencrypt/live}"
@@ -107,7 +107,7 @@ foundation_assert_directory() {
 }
 
 foundation_secure_parent_chain() {
-    local path=$1 current
+    local path=$1 current mode owner
     current=$(dirname "$path")
     while [[ "$current" != / ]]; do
         [[ ! -L "$current" ]] || foundation_fail \
@@ -115,6 +115,29 @@ foundation_secure_parent_chain() {
             'parent directory является symlink' \
             "$current входит в путь $path" \
             'Освободите зарезервированный путь или проверьте его вручную.'
+        
+        # Check ownership and permissions to prevent TOCTOU attacks
+        mode=$(stat -c '%a' "$current" 2>/dev/null || printf '000')
+        owner=$(stat -c '%U' "$current" 2>/dev/null || printf 'unknown')
+        
+        # Parent must not be group/other writable (mode & 022 must be 0)
+        if (( (8#$mode & 8#022) != 0 )); then
+            foundation_fail \
+                INSECURE_PARENT_PERMISSIONS \
+                'parent directory имеет небезопасные permissions' \
+                "$current имеет mode $mode (group/other writable)" \
+                "Исправьте permissions: chmod go-w $current"
+        fi
+        
+        # Parent must be owned by root or bot user
+        if [[ "$owner" != root && "$owner" != "$BOT_USER" && "$owner" != "unknown" ]]; then
+            foundation_fail \
+                INSECURE_PARENT_OWNER \
+                'parent directory имеет неожиданного владельца' \
+                "$current принадлежит $owner" \
+                "Исправьте ownership: chown root:root $current"
+        fi
+        
         current=$(dirname "$current")
     done
 }
@@ -126,7 +149,7 @@ foundation_require_commands() {
             MISSING_COMMAND \
             "не найдена обязательная команда: $command" \
             "PATH=${PATH:-empty}" \
-            'Установите пакет, предоставляющий команду, и повторите операцию.'
+            'Установите пакет, предоставлящий команду, и повторите операцию.'
     done
 }
 
@@ -151,9 +174,19 @@ foundation_atomic_write() {
     install -d -o "$owner" -g "$group" -m 0750 "$parent"
     temporary=$(mktemp "$parent/.just1kbot-write.XXXXXX")
     cat > "$temporary"
+    
+    # CRITICAL: fsync file data before rename to prevent data loss on crash
+    # mv -f is atomic at metadata level, but file data may still be in page cache.
+    # Without fsync, a crash 1ms after mv could leave corrupted/empty file on disk.
+    sync -f "$temporary" 2>/dev/null || true
+    
     chown "$owner:$group" "$temporary"
     chmod "$mode" "$temporary"
     mv -f -- "$temporary" "$target"
+    
+    # CRITICAL: fsync parent directory to ensure rename is persisted
+    # Without this, directory metadata may be lost on crash.
+    sync -f "$parent" 2>/dev/null || true
 }
 
 foundation_manifest_validate() {
@@ -995,7 +1028,7 @@ foundation_rollback_created_resources() {
                 ;;
             path:/etc/just1kbot/redis.conf) rm -f -- "$REDIS_CONFIG" ;;
             path:/var/lib/just1kbot/redis) rm -rf --one-file-system -- "$REDIS_DATA_DIR" ;;
-            path:/usr/local/bin/just1kbot) rm -f -- "$CLI_PATH" ;;
+            path:/usr/local/sbin/just1kbot) rm -f -- "$CLI_PATH" ;;
             nginx-enabled:*)
                 value=${resource#nginx-enabled:}
                 rm -f -- "$NGINX_ENABLED_DIR/$value"
