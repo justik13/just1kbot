@@ -66,10 +66,6 @@ _SCHEMA_STATEMENTS = (
     "CREATE TABLE public.provider_refund_operations (\n    id bigint NOT NULL,\n    operation_id uuid NOT NULL,\n    payment_id integer NOT NULL,\n    reservation_id bigint NOT NULL,\n    idempotency_key character varying(100) NOT NULL,\n    amount numeric(12,2) NOT NULL,\n    currency character varying(3) DEFAULT 'RUB'::character varying NOT NULL,\n    provider_payment_id character varying(255) NOT NULL,\n    provider_refund_id character varying(255),\n    provider_status character varying(20),\n    status character varying(20) DEFAULT 'pending'::character varying NOT NULL,\n    attempts integer DEFAULT 0 NOT NULL,\n    max_attempts integer DEFAULT 12 NOT NULL,\n    next_attempt_at timestamp with time zone DEFAULT now() NOT NULL,\n    locked_at timestamp with time zone,\n    locked_by character varying(100),\n    last_error_code character varying(100),\n    last_error text,\n    requested_by_admin_id bigint,\n    created_at timestamp with time zone DEFAULT now() NOT NULL,\n    updated_at timestamp with time zone DEFAULT now() NOT NULL,\n    completed_at timestamp with time zone,\n    CONSTRAINT ck_provider_refund_operations_attempts CHECK (((attempts >= 0) AND (max_attempts > 0))),\n    CONSTRAINT ck_provider_refund_operations_currency_rub CHECK (((currency)::text = 'RUB'::text)),\n    CONSTRAINT ck_provider_refund_operations_provider_status CHECK (((provider_status IS NULL) OR ((provider_status)::text = ANY ((ARRAY['pending'::character varying, 'succeeded'::character varying, 'canceled'::character varying])::text[])))),\n    CONSTRAINT ck_provider_refund_operations_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'processing'::character varying, 'retry'::character varying, 'completed'::character varying, 'failed'::character varying])::text[]))),\n    CONSTRAINT ck_provider_refund_operations_whole_amount CHECK (((amount > (0)::numeric) AND (amount = trunc(amount))))\n)",
     'CREATE SEQUENCE public.provider_refund_operations_id_seq\n    START WITH 1\n    INCREMENT BY 1\n    NO MINVALUE\n    NO MAXVALUE\n    CACHE 1',
     'ALTER SEQUENCE public.provider_refund_operations_id_seq OWNED BY public.provider_refund_operations.id',
-    "CREATE TABLE public.referral_eligibilities (\n    referred_user_id integer NOT NULL,\n    status character varying(20) NOT NULL,\n    source_payment_id integer,\n    source_quote_id bigint,\n    reason character varying(100),\n    created_at timestamp with time zone NOT NULL,\n    CONSTRAINT ck_referral_eligibilities_one_source CHECK (((source_payment_id IS NULL) OR (source_quote_id IS NULL))),\n    CONSTRAINT ck_referral_eligibilities_status CHECK (((status)::text = ANY ((ARRAY['claimed'::character varying, 'blocked'::character varying])::text[])))\n)",
-    'CREATE TABLE public.referral_rewards (\n    id bigint NOT NULL,\n    referred_user_id integer NOT NULL,\n    source_payment_id integer,\n    source_quote_id bigint,\n    referrer_user_id integer NOT NULL,\n    is_first boolean NOT NULL,\n    created_at timestamp with time zone NOT NULL,\n    reversed_at timestamp with time zone,\n    CONSTRAINT ck_referral_rewards_one_source CHECK (((source_payment_id IS NOT NULL) <> (source_quote_id IS NOT NULL)))\n)',
-    'CREATE SEQUENCE public.referral_rewards_id_seq\n    START WITH 1\n    INCREMENT BY 1\n    NO MINVALUE\n    NO MAXVALUE\n    CACHE 1',
-    'ALTER SEQUENCE public.referral_rewards_id_seq OWNED BY public.referral_rewards.id',
     'CREATE TABLE public.servers (\n    id integer NOT NULL,\n    name character varying(255) NOT NULL,\n    country_flag character varying(10),\n    api_url character varying(500) NOT NULL,\n    api_key text NOT NULL,\n    protocol character varying(50) NOT NULL,\n    max_clients integer NOT NULL,\n    is_active boolean NOT NULL,\n    created_at timestamp with time zone NOT NULL\n)',
     'CREATE SEQUENCE public.servers_id_seq\n    AS integer\n    START WITH 1\n    INCREMENT BY 1\n    NO MINVALUE\n    NO MAXVALUE\n    CACHE 1',
     'ALTER SEQUENCE public.servers_id_seq OWNED BY public.servers.id',
@@ -105,7 +101,6 @@ _SCHEMA_STATEMENTS = (
     "ALTER TABLE ONLY public.payment_refunds ALTER COLUMN id SET DEFAULT nextval('public.payment_refunds_id_seq'::regclass)",
     "ALTER TABLE ONLY public.payments ALTER COLUMN id SET DEFAULT nextval('public.payments_id_seq'::regclass)",
     "ALTER TABLE ONLY public.provider_refund_operations ALTER COLUMN id SET DEFAULT nextval('public.provider_refund_operations_id_seq'::regclass)",
-    "ALTER TABLE ONLY public.referral_rewards ALTER COLUMN id SET DEFAULT nextval('public.referral_rewards_id_seq'::regclass)",
     "ALTER TABLE ONLY public.servers ALTER COLUMN id SET DEFAULT nextval('public.servers_id_seq'::regclass)",
     "ALTER TABLE ONLY public.tariff_quotes ALTER COLUMN id SET DEFAULT nextval('public.tariff_quotes_id_seq'::regclass)",
     "ALTER TABLE ONLY public.tariff_versions ALTER COLUMN id SET DEFAULT nextval('public.tariff_versions_id_seq'::regclass)",
@@ -143,10 +138,6 @@ _SCHEMA_STATEMENTS = (
     'ALTER TABLE ONLY public.provider_refund_operations\n    ADD CONSTRAINT provider_refund_operations_pkey PRIMARY KEY (id)',
     'ALTER TABLE ONLY public.provider_refund_operations\n    ADD CONSTRAINT provider_refund_operations_provider_refund_id_key UNIQUE (provider_refund_id)',
     'ALTER TABLE ONLY public.provider_refund_operations\n    ADD CONSTRAINT provider_refund_operations_reservation_id_key UNIQUE (reservation_id)',
-    'ALTER TABLE ONLY public.referral_eligibilities\n    ADD CONSTRAINT referral_eligibilities_pkey PRIMARY KEY (referred_user_id)',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_pkey PRIMARY KEY (id)',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_source_payment_id_key UNIQUE (source_payment_id)',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_source_quote_id_key UNIQUE (source_quote_id)',
     'ALTER TABLE ONLY public.servers\n    ADD CONSTRAINT servers_pkey PRIMARY KEY (id)',
     'ALTER TABLE ONLY public.tariff_quotes\n    ADD CONSTRAINT tariff_quotes_pkey PRIMARY KEY (id)',
     'ALTER TABLE ONLY public.tariff_quotes\n    ADD CONSTRAINT tariff_quotes_public_id_key UNIQUE (public_id)',
@@ -199,7 +190,6 @@ _SCHEMA_STATEMENTS = (
     "CREATE INDEX ix_provider_refund_operations_claim ON public.provider_refund_operations USING btree (next_attempt_at, id) WHERE ((status)::text = ANY ((ARRAY['pending'::character varying, 'retry'::character varying])::text[]))",
     "CREATE INDEX ix_provider_refund_operations_lease ON public.provider_refund_operations USING btree (locked_at) WHERE ((status)::text = 'processing'::text)",
     'CREATE INDEX ix_provider_refund_operations_payment_id ON public.provider_refund_operations USING btree (payment_id)',
-    'CREATE INDEX ix_referral_rewards_referred_user_id ON public.referral_rewards USING btree (referred_user_id)',
     'CREATE INDEX ix_tariff_quotes_user_id ON public.tariff_quotes USING btree (user_id)',
     'CREATE INDEX ix_tariff_versions_tariff_id ON public.tariff_versions USING btree (tariff_id)',
     'CREATE INDEX ix_users_active_subscription ON public.users USING btree (subscription_end) WHERE ((is_deleted = false) AND (subscription_end IS NOT NULL))',
@@ -267,13 +257,6 @@ _SCHEMA_STATEMENTS = (
     'ALTER TABLE ONLY public.payments\n    ADD CONSTRAINT payments_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE RESTRICT',
     'ALTER TABLE ONLY public.provider_refund_operations\n    ADD CONSTRAINT provider_refund_operations_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id) ON DELETE RESTRICT',
     'ALTER TABLE ONLY public.provider_refund_operations\n    ADD CONSTRAINT provider_refund_operations_reservation_id_fkey FOREIGN KEY (reservation_id) REFERENCES public.account_balance_reservations(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_eligibilities\n    ADD CONSTRAINT referral_eligibilities_referred_user_id_fkey FOREIGN KEY (referred_user_id) REFERENCES public.users(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_eligibilities\n    ADD CONSTRAINT referral_eligibilities_source_payment_id_fkey FOREIGN KEY (source_payment_id) REFERENCES public.payments(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_eligibilities\n    ADD CONSTRAINT referral_eligibilities_source_quote_id_fkey FOREIGN KEY (source_quote_id) REFERENCES public.tariff_quotes(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_referred_user_id_fkey FOREIGN KEY (referred_user_id) REFERENCES public.users(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_referrer_user_id_fkey FOREIGN KEY (referrer_user_id) REFERENCES public.users(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_source_payment_id_fkey FOREIGN KEY (source_payment_id) REFERENCES public.payments(id) ON DELETE RESTRICT',
-    'ALTER TABLE ONLY public.referral_rewards\n    ADD CONSTRAINT referral_rewards_source_quote_id_fkey FOREIGN KEY (source_quote_id) REFERENCES public.tariff_quotes(id) ON DELETE RESTRICT',
     'ALTER TABLE ONLY public.tariff_quotes\n    ADD CONSTRAINT tariff_quotes_source_tariff_version_id_fkey FOREIGN KEY (source_tariff_version_id) REFERENCES public.tariff_versions(id) ON DELETE RESTRICT',
     'ALTER TABLE ONLY public.tariff_quotes\n    ADD CONSTRAINT tariff_quotes_target_tariff_version_id_fkey FOREIGN KEY (target_tariff_version_id) REFERENCES public.tariff_versions(id) ON DELETE RESTRICT',
     'ALTER TABLE ONLY public.tariff_quotes\n    ADD CONSTRAINT tariff_quotes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE RESTRICT',
@@ -294,8 +277,6 @@ def downgrade() -> None:
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.provider_refund_operations CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_disputes CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.account_ledger_allocations CASCADE")
-    bind.exec_driver_sql("DROP TABLE IF EXISTS public.referral_rewards CASCADE")
-    bind.exec_driver_sql("DROP TABLE IF EXISTS public.referral_eligibilities CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_refunds CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_provider_operations CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_events CASCADE")
