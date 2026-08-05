@@ -4,6 +4,10 @@ Entries retain source locations for easy copy editing.
 """
 
 TEXTS = {
+    'ALERT_CRITICAL_BOT_ERROR': """⚠️ <b>CRITICAL ERROR</b> ⚠️
+<b>Request ID:</b> {request_id}
+<b>Type:</b> {error_type}
+<pre>{error_short}</pre>""",
     # bot/handlers/admin/broadcast.py:628
     'RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1': 'Всего',
     # bot/handlers/admin/dashboard.py:111

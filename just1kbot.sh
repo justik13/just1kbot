@@ -267,25 +267,30 @@ ensure_service_user() {
 
 # --- ИСПРАВЛЕНО: Добавлена инициализация PostgreSQL для dnf/yum ---
 install_system_packages() {
-    info "Проверяю и устанавливаю системные пакеты (PostgreSQL, Redis, Python3, Git)..."
+    info "Проверяю и устанавливаю системные пакеты (PostgreSQL, Redis, Python3, Git, age)..."
     if command -v apt-get >/dev/null 2>&1; then
         apt-get update -qq
-        apt-get install -y -qq python3 python3-pip python3-venv git curl tar sudo postgresql postgresql-contrib redis-server >/dev/null
+        apt-get install -y -qq python3 python3-pip python3-venv git curl tar sudo postgresql postgresql-contrib redis-server age >/dev/null
     elif command -v dnf >/dev/null 2>&1; then
-        dnf install -y -q python3 python3-pip git curl tar sudo postgresql-server redis >/dev/null
+        dnf install -y -q python3 python3-pip git curl tar sudo postgresql-server redis age >/dev/null
         if [[ ! -d "/var/lib/pgsql/data/base" ]]; then
             postgresql-setup --initdb >/dev/null 2>&1 || true
         fi
     elif command -v yum >/dev/null 2>&1; then
-        yum install -y -q python3 python3-pip git curl tar sudo postgresql-server redis >/dev/null
+        yum install -y -q python3 python3-pip git curl tar sudo postgresql-server redis age >/dev/null
         if [[ ! -d "/var/lib/pgsql/data/base" ]]; then
             postgresql-setup --initdb >/dev/null 2>&1 || true
         fi
     else
-        warn "Не удалось автоматически определить пакетный менеджер. Убедитесь, что Python3, PostgreSQL и Redis установлены."
+        warn "Не удалось автоматически определить пакетный менеджер. Убедитесь, что Python3, PostgreSQL, Redis и age установлены."
     fi
     systemctl enable --now postgresql >/dev/null 2>&1 || true
     systemctl enable --now redis-server >/dev/null 2>&1 || systemctl enable --now redis >/dev/null 2>&1 || true
+    
+    if ! systemctl is-active --quiet redis-server 2>/dev/null && ! systemctl is-active --quiet redis 2>/dev/null; then
+        warn "Сервис Redis не запустился автоматически! Убедитесь, что Redis работает (systemctl start redis-server)."
+    fi
+
     ok "Системные зависимости готовы."
 }
 
@@ -299,6 +304,29 @@ setup_venv() {
         info "Устанавливаю зависимости из requirements.txt..."
         "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
         ok "Зависимости библиотеки Python успешно установлены."
+    fi
+}
+
+setup_backup_key() {
+    local enc_key
+    enc_key="$(get_env_value DB_ENCRYPTION_KEY)"
+    if [[ -n "$enc_key" ]]; then
+        local config_dir="/etc/just1kbot"
+        local key_file="$config_dir/backup.agekey"
+        
+        mkdir -p "$config_dir"
+        if [[ ! -f "$key_file" ]]; then
+            info "Генерирую ключ $key_file..."
+            if command -v age-keygen >/dev/null 2>&1; then
+                age-keygen -o "$key_file" 2>/dev/null
+            else
+                touch "$key_file"
+            fi
+        fi
+        
+        # Ensure service user can read it
+        chown "$SERVICE_USER:" "$key_file" 2>/dev/null || true
+        chmod 600 "$key_file" 2>/dev/null || true
     fi
 }
 
@@ -605,6 +633,7 @@ action_install() {
 
     setup_venv
     configure_env_interactively
+    setup_backup_key
     setup_postgres_db_if_local
     run_alembic_migrations
     setup_systemd_service
@@ -686,6 +715,7 @@ action_update() {
         return 1
     fi
 
+    setup_backup_key
     setup_systemd_service
     create_symlink
     persist_repo_branch
