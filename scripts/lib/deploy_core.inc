@@ -231,6 +231,8 @@ for raw in path.read_text(encoding="utf-8").splitlines():
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
         value = value[1:-1]
+        # Unescape backslash sequences to match python-dotenv behavior
+        value = value.encode().decode('unicode_escape')
     print(value)
     break
 PY
@@ -378,9 +380,16 @@ validate_supported_os() {
 
     case "$os_id" in
         ubuntu)
+            # Require Ubuntu 24.04 LTS or newer, but exclude non-LTS releases (25.04, 25.10, etc.)
+            # Match only 24.04, 24.10, 26.04, 26.10, etc. (even years)
             if (( version_major < 24 )); then
                 error "Поддерживается Ubuntu 24.04 или новее; обнаружено: $version_id"
                 return 1
+            fi
+            # Warn for non-LTS versions (odd minor versions like 24.10, 25.10)
+            local version_minor=${version_id#*.}
+            if [[ "$version_minor" =~ ^[0-9]+$ ]] && (( version_minor % 10 != 0 )); then
+                warn "Ubuntu $version_id не является LTS релизом; production рекомендуется 24.04 LTS"
             fi
             ;;
         debian)
@@ -567,7 +576,7 @@ collect_initial_input() {
         printf 'Укажите корректный публичный домен.\n'
     done
     while true; do
-        read_optional 'Email для сертификата Let’s Encrypt' SSL_EMAIL ''
+        read_optional 'Email для сертификата Let's Encrypt' SSL_EMAIL ''
         if validate_email "$SSL_EMAIL"; then
             break
         fi
@@ -606,7 +615,17 @@ if not value or len(value) > 254 or any(character.isspace() for character in val
     raise SystemExit(1)
 if value.lower() in {"admin@example.com", "change_me@example.com"}:
     raise SystemExit(1)
-if re.fullmatch(r"[^@]+@[^@]+\.[^@]+", value) is None:
+
+# Improved regex: require proper domain structure with valid TLD
+# - Local part: alphanumeric, dots, underscores, hyphens, plus signs
+# - Domain: labels separated by dots, each 1-63 chars, alphanumeric and hyphens
+# - TLD: at least 2 characters, letters only (rejects numeric TLDs like .123)
+pattern = re.compile(
+    r"^[a-zA-Z0-9._%+-]+@"
+    r"[a-zA-Z0-9.-]+\."
+    r"[a-zA-Z]{2,}$"
+)
+if pattern.fullmatch(value) is None:
     raise SystemExit(1)
 PY_EMAIL
 }
@@ -702,7 +721,9 @@ setup_postgresql_initial() {
     log "Настройка PostgreSQL"
     systemctl enable --now postgresql >/dev/null
 
-    su - postgres -c "psql -v ON_ERROR_STOP=1" <<EOSQL
+    # Use runuser instead of su - to avoid login shell issues with nologin users
+    # and PAM session creation in headless environments
+    runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<EOSQL
 DO \$\$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'just1kbot') THEN
@@ -714,8 +735,8 @@ END
 \$\$;
 EOSQL
 
-    if ! su - postgres -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'\"" | grep -q 1; then
-        su - postgres -c "createdb -O just1kbot just1kbot_bot"
+    if ! runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'" | grep -q 1; then
+        runuser -u postgres -- createdb -O just1kbot just1kbot_bot
     fi
 }
 
@@ -859,16 +880,20 @@ PY
 )
     fi
 
-    local db_encoded redis_encoded
+    local db_encoded redis_encoded redis_port
     db_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$DB_PASSWORD")
     redis_encoded=$(python3 -c 'import sys; from urllib.parse import quote; print(quote(sys.argv[1], safe=""))' "$REDIS_PASSWORD")
+    
+    # Use configured Redis port instead of hardcoded 6379
+    # Default to 6379 for legacy compatibility if REDIS_PORT is not set
+    redis_port="${REDIS_PORT:-6379}"
 
     write_env_var BOT_TOKEN "$BOT_TOKEN"
     write_env_var ADMIN_IDS "$(normalize_admin_ids_json "$ADMIN_IDS")"
     write_env_var SUPPORT_USERNAME "$SUPPORT_USERNAME"
     write_env_var DATABASE_URL "postgresql+asyncpg://just1kbot:${db_encoded}@127.0.0.1:5432/just1kbot_bot"
     write_env_var DB_ENCRYPTION_KEY "$DB_ENCRYPTION_KEY"
-    write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:6379/0"
+    write_env_var REDIS_URL "redis://:${redis_encoded}@127.0.0.1:${redis_port}/0"
     write_env_var REDIS_PASSWORD "$REDIS_PASSWORD"
     write_env_var YOOKASSA_SHOP_ID "$YOOKASSA_SHOP_ID"
     write_env_var YOOKASSA_SECRET_KEY "$YOOKASSA_SECRET_KEY"
@@ -915,6 +940,7 @@ Group=${BOT_USER}
 WorkingDirectory=${PROJECT_DIR}
 Environment=PYTHONPATH=${PROJECT_DIR}
 Environment=PYTHONUNBUFFERED=1
+Environment=JUST1KBOT_HEARTBEAT_FILE=/run/just1kbot/heartbeat
 ExecStart=${VENV_DIR}/bin/python -m bot.main
 Restart=always
 RestartSec=5
@@ -1077,7 +1103,8 @@ set -Eeuo pipefail
 SERVICE=just1kbot
 PROJECT_DIR=/opt/just1kbot
 VENV_DIR="$PROJECT_DIR/venv"
-HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
+# Use the same heartbeat path as show_status() for consistency
+HEARTBEAT_FILE="/run/just1kbot/heartbeat"
 LOCK_FILE=/run/lock/just1kbot-healthcheck.lock
 MAX_HEARTBEAT_AGE=180
 
