@@ -200,6 +200,33 @@ set_env_value() {
     return 0
 }
 
+# --- Парсинг DATABASE_URL через Python (надёжно для URL-encoded паролей и спецсимволов) ---
+# Выставляет: _DB_USER, _DB_PASS, _DB_HOST, _DB_PORT, _DB_NAME
+parse_database_url() {
+    local db_url="$1"
+    local parsed
+    parsed="$("$PYTHON_BIN" -c "
+from urllib.parse import urlparse, unquote
+import sys
+try:
+    url = urlparse(sys.argv[1])
+    user = unquote(url.username or '')
+    pwd  = unquote(url.password or '')
+    host = url.hostname or 'localhost'
+    port = str(url.port or 5432)
+    db   = (url.path or '').lstrip('/')
+    if user and db:
+        print(f'{user}\\t{pwd}\\t{host}\\t{port}\\t{db}')
+except Exception:
+    pass
+" "$db_url" 2>/dev/null || true)"
+    if [[ -z "$parsed" ]]; then
+        return 1
+    fi
+    IFS=$'\t' read -r _DB_USER _DB_PASS _DB_HOST _DB_PORT _DB_NAME <<< "$parsed"
+    return 0
+}
+
 persist_repo_branch() {
     mkdir -p "$STATE_DIR"
     printf '%s\n' "$REPO_BRANCH" > "$REPO_BRANCH_FILE"
@@ -367,17 +394,50 @@ configure_env_interactively() {
     ok "Конфигурация .env успешно сформирована."
 }
 
+# --- ИСПРАВЛЕНО: Парсинг DATABASE_URL, ALTER USER, гранты на схему public (PG15+) ---
 setup_postgres_db_if_local() {
     local db_url
     db_url="$(get_env_value DATABASE_URL)"
     if [[ "$db_url" == *"@localhost"* || "$db_url" == *"@127.0.0.1"* ]]; then
         info "Проверяю локальную базу данных PostgreSQL..."
-        sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='just1kbot'" | grep -q 1 || \
-        sudo -u postgres psql -c "CREATE USER just1kbot WITH PASSWORD 'just1kpass';" || true
-        sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'" | grep -q 1 || \
-        sudo -u postgres psql -c "CREATE DATABASE just1kbot_bot OWNER just1kbot;" || true
-        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE just1kbot_bot TO just1kbot;" || true
-        ok "Локальная БД PostgreSQL подготовлена."
+
+        if ! parse_database_url "$db_url"; then
+            warn "Не удалось распарсить DATABASE_URL. Пропускаем автонастройку БД."
+            return 0
+        fi
+
+        # Валидация: имена содержат только допустимые символы для PostgreSQL идентификаторов
+        if [[ ! "$_DB_USER" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            warn "Имя пользователя БД '$_DB_USER' содержит недопустимые символы. Пропускаем."
+            return 0
+        fi
+        if [[ ! "$_DB_NAME" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+            warn "Имя базы данных '$_DB_NAME' содержит недопустимые символы. Пропускаем."
+            return 0
+        fi
+
+        # 1. Создаём пользователя или обновляем пароль (идемпотентно — фикс InvalidPasswordError)
+        if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$_DB_USER'" 2>/dev/null | grep -q 1; then
+            info "Пользователь $_DB_USER существует — обновляю пароль..."
+            sudo -u postgres psql -c "ALTER USER \"$_DB_USER\" WITH PASSWORD '$_DB_PASS';" || true
+        else
+            info "Создаю пользователя $_DB_USER..."
+            sudo -u postgres psql -c "CREATE USER \"$_DB_USER\" WITH PASSWORD '$_DB_PASS';" || true
+        fi
+
+        # 2. Создаём БД или обновляем владельца
+        if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$_DB_NAME'" 2>/dev/null | grep -q 1; then
+            sudo -u postgres psql -c "CREATE DATABASE \"$_DB_NAME\" OWNER \"$_DB_USER\";" || true
+        else
+            sudo -u postgres psql -c "ALTER DATABASE \"$_DB_NAME\" OWNER TO \"$_DB_USER\";" || true
+        fi
+
+        # 3. Права на БД и схему public (критично для PostgreSQL 15+)
+        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \"$_DB_NAME\" TO \"$_DB_USER\";" || true
+        sudo -u postgres psql -d "$_DB_NAME" -c "GRANT ALL ON SCHEMA public TO \"$_DB_USER\";" || true
+        sudo -u postgres psql -d "$_DB_NAME" -c "ALTER SCHEMA public OWNER TO \"$_DB_USER\";" || true
+
+        ok "Локальная БД PostgreSQL подготовлена (User: $_DB_USER, DB: $_DB_NAME)."
     fi
 }
 
@@ -727,16 +787,25 @@ action_edit_env() {
     fi
 }
 
+# --- ИСПРАВЛЕНО: Парсинг имени БД из DATABASE_URL вместо хардкода ---
 action_backup_db() {
     require_root
+
+    local db_url dbname
+    db_url="$(get_env_value DATABASE_URL)"
+    dbname="just1kbot_bot"  # fallback
+    if [[ -n "$db_url" ]] && parse_database_url "$db_url"; then
+        dbname="$_DB_NAME"
+    fi
+
     mkdir -p "$BACKUP_ROOT"
-    local backup_file="${BACKUP_ROOT}/just1kbot_db_$(date +%Y%m%d_%H%M%S).sql"
-    info "Создаю бэкап базы данных PostgreSQL..."
-    if sudo -u postgres pg_dump just1kbot_bot > "$backup_file" 2>/dev/null; then
+    local backup_file="${BACKUP_ROOT}/${dbname}_$(date +%Y%m%d_%H%M%S).sql"
+    info "Создаю бэкап базы данных PostgreSQL ($dbname)..."
+    if sudo -u postgres pg_dump "$dbname" > "$backup_file" 2>/dev/null; then
         gzip "$backup_file"
         ok "Бэкап создан: ${backup_file}.gz"
     else
-        error "Не удалось создать бэкап БД!"
+        error "Не удалось создать бэкап БД $dbname!"
     fi
 }
 
