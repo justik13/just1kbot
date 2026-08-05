@@ -22,26 +22,34 @@ RESERVING_STATUSES = (
     "create_cleanup_pending",
 )
 
+
 class DeviceCreationError(Exception):
     pass
+
 
 class NoActiveSubscription(DeviceCreationError):
     pass
 
+
 class DailyLimitExceeded(DeviceCreationError):
     pass
+
 
 class DeviceLimitExceeded(DeviceCreationError):
     pass
 
+
 class ServerUnavailable(DeviceCreationError):
     pass
+
 
 class InvalidConfig(DeviceCreationError):
     pass
 
+
 class DeviceStillCreating(DeviceCreationError):
     pass
+
 
 class DuplicateDeviceName(DeviceCreationError):
     pass
@@ -50,8 +58,10 @@ class DuplicateDeviceName(DeviceCreationError):
 async def close_redis() -> None:
     return None
 
+
 def _is_same_day_msk(stored_date: date | None, today: date) -> bool:
     return stored_date == today if stored_date else False
+
 
 class DeviceService:
     @staticmethod
@@ -108,8 +118,8 @@ class DeviceService:
                     VPNProfile.user_id == user.id,
                     VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
                 )
-            )
-        ).scalar_one()
+            ).scalar_one()
+        )
         if user_count >= user.device_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
@@ -118,8 +128,8 @@ class DeviceService:
                     VPNProfile.server_id == server.id,
                     VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
                 )
-            )
-        ).scalar_one()
+            ).scalar_one()
+        )
         bot_peer_ids = frozenset(
             (
                 await session.execute(
@@ -136,16 +146,6 @@ class DeviceService:
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
 
-        # P1-3: Живая проверка слотов перед созданием
-        from services.amnezia_client import AmneziaClient
-        client = AmneziaClient(server.api_url, server.api_token)
-        try:
-            clients = await client.get_all_clients()
-            if clients is not None and len(clients) >= server.max_clients:
-                raise ServerUnavailable("Server is full")
-        finally:
-            await client.aclose()
-
         profile = VPNProfile(
             user_id=user.id,
             server_id=server.id,
@@ -160,19 +160,22 @@ class DeviceService:
             is_active=True,
         )
         session.add(profile)
-        
-        # P0-3: Отлавливаем IntegrityError для дубликата имени устройства
+
         try:
             await session.flush()
         except IntegrityError as e:
             await session.rollback()
-            # Проверяем, что это нарушение уникального индекса uq_vpn_profiles_user_server_device_name
             error_str = str(e.orig).lower() if e.orig else ""
-            if "duplicate" in error_str or "unique" in error_str or "uq_vpn_profiles" in error_str:
-                raise DuplicateDeviceName("Device name already exists on this server") from e
-            # Если это другая IntegrityError, пробрасываем как обычную DeviceCreationError
+            if (
+                "duplicate" in error_str
+                or "unique" in error_str
+                or "uq_vpn_profiles" in error_str
+            ):
+                raise DuplicateDeviceName(
+                    "Device name already exists on this server"
+                ) from e
             raise DeviceCreationError("Database integrity error") from e
-        
+
         profile.client_name = f"tg_{user.telegram_id}_p{profile.id}"
         await enqueue_api_operation(
             session,
