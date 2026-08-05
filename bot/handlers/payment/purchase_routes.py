@@ -23,6 +23,7 @@ from services.account_purchase import (
     prepare_account_purchase,
     settle_account_purchase,
 )
+from services.referral_bonus import grant_referral_bonus_for_purchase
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -161,6 +162,14 @@ async def confirm_purchase(
             get_back_button("menu_subscription"),
         )
         return
+
+    await grant_referral_bonus_for_purchase(
+        session,
+        purchaser_user_id=db_user.id,
+        quote_id=result.quote.id,
+        purchase_amount=abs(result.debit.amount),
+    )
+
     intent = await get_account_purchase_intent(
         session, user_id=db_user.id, quote_public_id=quote_id
     )
