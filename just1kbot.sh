@@ -47,12 +47,7 @@ PYTHON_BIN="$(command -v python3 || echo "/usr/bin/python3")"
 SELF_SYMLINK="/usr/local/bin/just1kbot"
 BACKUP_ROOT="${INSTALL_DIR}/backups"
 
-setup_tty() {
-  if [[ ! -t 0 ]] && [[ -c /dev/tty ]]; then
-    exec </dev/tty 2>/dev/null || true
-  fi
-}
-setup_tty
+
 
 log_to_file() {
   local msg="$1"
@@ -93,9 +88,15 @@ require_root() {
 }
 
 pause_if_tty() {
-  printf '\nНажмите Enter, чтобы продолжить...'
-  read -r _dummy 2>/dev/null || true
-  printf '\n'
+  if [[ -c /dev/tty ]]; then
+    printf '\nНажмите Enter, чтобы продолжить...'
+    read -r _dummy </dev/tty 2>/dev/null || true
+    printf '\n'
+  else
+    printf '\nНажмите Enter, чтобы продолжить...'
+    read -r _dummy 2>/dev/null || true
+    printf '\n'
+  fi
 }
 
 clear_if_tty() { clear 2>/dev/null || true; }
@@ -103,9 +104,16 @@ clear_if_tty() { clear 2>/dev/null || true; }
 prompt_raw() {
   local prompt="$1" __resultvar="$2" __input=""
   printf '%s' "$prompt"
-  if ! read -r __input; then
-    warn "Ввод прерван."
-    return 1
+  if [[ -c /dev/tty ]]; then
+    if ! read -r __input </dev/tty 2>/dev/null; then
+      warn "Ввод прерван."
+      return 1
+    fi
+  else
+    if ! read -r __input 2>/dev/null; then
+      warn "Ввод прерван."
+      return 1
+    fi
   fi
   __input="${__input#"${__input%%[![:space:]]*}"}"
   __input="${__input%"${__input##*[![:space:]]}"}"
@@ -706,8 +714,6 @@ show_menu() {
 }
 
 main() {
-  setup_tty
-
   local cmd="${1:-}"
   case "$cmd" in
     install) action_install ;;
