@@ -176,4 +176,7 @@ Admin <code>{admin_id}</code>
 <b>Устройств:</b> {devices_count}/{device_limit}
 <b>Рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}""",
+
+    # Text retained for admin queue retry flow; it does not belong to referral legacy.
+    "ADMIN_QUEUE_RETRY_CONFIRMATION": "{card}\n\n⚠️ Операция может быть обработана повторно.",
 }
