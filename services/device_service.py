@@ -7,6 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import Server, User, VPNProfile
+from services.amnezia_capacity import (
+    ServerAtCapacity,
+    ServerCapacityUnavailable,
+    ensure_server_capacity,
+)
 from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
@@ -145,6 +150,17 @@ class DeviceService:
         manual_peer_ids = snapshot.peer_ids - bot_peer_ids
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
+
+        try:
+            await ensure_server_capacity(
+                api_url=server.api_url,
+                api_key=server.api_key,
+                max_clients=server.max_clients,
+            )
+        except ServerAtCapacity as exc:
+            raise ServerUnavailable("Server is full") from exc
+        except ServerCapacityUnavailable as exc:
+            raise ServerUnavailable("Unable to verify server capacity") from exc
 
         profile = VPNProfile(
             user_id=user.id,
