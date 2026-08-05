@@ -80,12 +80,9 @@ async def finalize_create_success(
             raise RuntimeError("profile_not_create_finalizable")
         from utils.vpn_parser import is_valid_vpn_uri, build_conf_file
         if not raw_config or not is_valid_vpn_uri(raw_config) or not build_conf_file(raw_config):
-            # Переводим в create_failed, так как конфиг невалиден
             profile.provisioning_status = "create_failed"
             profile.last_sync_error = "Operation failed: invalid_raw_config"
-            operation.status = "failed"
-            operation.last_error = "invalid_raw_config"
-            operation.next_attempt_at = None
+            _complete(operation, "dead", "invalid_raw_config")
             return
 
         profile.peer_id = peer_id
