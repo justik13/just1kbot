@@ -52,9 +52,8 @@ SELF_SYMLINK="/usr/local/bin/just1kbot"
 BACKUP_ROOT="${INSTALL_DIR}/backups"
 
 setup_tty() {
-    if [[ ! -t 0 ]] && [[ -c /dev/tty ]]; then
-        exec </dev/tty 2>/dev/null || true
-    fi
+    # Без exec </dev/tty, чтобы не ломать поток ввода при пайпе (curl | bash)
+    return 0
 }
 setup_tty
 
@@ -98,7 +97,11 @@ require_root() {
 
 pause_if_tty() {
     printf '\nНажмите Enter, чтобы продолжить...'
-    read -r _dummy 2>/dev/null || true
+    if [[ -c /dev/tty ]]; then
+        read -r _dummy </dev/tty 2>/dev/null || true
+    else
+        read -r _dummy 2>/dev/null || true
+    fi
     printf '\n'
 }
 
@@ -107,7 +110,13 @@ clear_if_tty() { clear 2>/dev/null || true; }
 prompt_raw() {
     local prompt="$1" __resultvar="$2" __input=""
     printf '%s' "$prompt"
-    if ! read -r __input; then
+    local read_status=0
+    if [[ -c /dev/tty ]]; then
+        read -r __input </dev/tty || read_status=$?
+    else
+        read -r __input || read_status=$?
+    fi
+    if [[ $read_status -ne 0 ]]; then
         warn "Ввод прерван."
         return 1
     fi
