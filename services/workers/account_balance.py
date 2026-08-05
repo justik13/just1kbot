@@ -25,16 +25,6 @@ BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
 
 
-async def process_balance_purchase_referrals() -> int:
-    """Deprecated compatibility hook.
-
-    Referral rewards are now granted transactionally by the purchase and tariff
-    change handlers through ``services.referral_bonus``. Keeping this function
-    as a no-op avoids a second worker path that could double-credit rewards.
-    """
-    return 0
-
-
 async def process_balance_purchase_notifications(bot: Bot) -> int:
     async with session_scope() as session:
         rows = (
