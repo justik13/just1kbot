@@ -44,10 +44,11 @@ main(){
     acquire_lock
     manifest_preflight
     read_env
+    resolve_managed_domain
     confirm
     prepare_postgres
     [[ "$MODE" == keep ]] && backup_before_keep
-    foundation_exists "$INSTALL_JOURNAL" || foundation_journal_begin uninstall preflight
+    prepare_uninstall_journal
     foundation_journal_update stopping-services
     stop_units
     foundation_journal_update removing-nginx
