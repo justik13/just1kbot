@@ -77,5 +77,5 @@ def format_connection_device_card(
         last_connected_text=last_connected_text,
         traffic_down=format_traffic(profile.traffic_down),
         traffic_up=format_traffic(profile.traffic_up),
-        traffic_total=format_traffic(traffic_total),
+        traffic_total=traffic_total,
     )
