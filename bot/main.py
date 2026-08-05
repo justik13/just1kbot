@@ -56,7 +56,7 @@ from bot.handlers.admin.broadcast import (
 logging.basicConfig(
     level=logging.INFO,
     format=(
-        "%asctime)s - %(levelname)s - "
+        "%(asctime)s - %(levelname)s - "
         "[%(request_id)s] %(name)s: %(message)s"
     ),
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -291,7 +291,7 @@ async def main():
         ):
             logger.critical(
                 "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "
-                " /root/.config/just1kbot/backup.agekey is missing!"
+                "/root/.config/just1kbot/backup.agekey is missing!"
             )
             if settings.ADMIN_IDS:
                 try:
