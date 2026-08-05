@@ -55,7 +55,6 @@ def format_user_card_text(
         devices_count=len(profiles),
         device_limit=user.device_limit,
         referrals_count=len(referrals),
-        referral_days=user.referral_days,
         created_at=format_datetime(user.created_at),
     )
 
@@ -78,5 +77,5 @@ def format_connection_device_card(
         last_connected_text=last_connected_text,
         traffic_down=format_traffic(profile.traffic_down),
         traffic_up=format_traffic(profile.traffic_up),
-        traffic_total=traffic_total,
+        traffic_total=format_traffic(traffic_total),
     )
