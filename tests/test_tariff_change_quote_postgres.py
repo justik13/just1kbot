@@ -78,10 +78,10 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.execute(
                     text(
                         "INSERT INTO users(telegram_id,subscription_end,device_limit,current_tariff_id,"
-                        "referral_days,is_banned,is_bot_blocked,is_deleted,notification_retry_count,"
+                        "is_banned,is_bot_blocked,is_deleted,notification_retry_count,"
                         "notified_3d,notified_1d,notified_2h,notified_expired,notified_grace_12h,"
                         "device_creations_today,created_at) "
-                        "VALUES(:tg,:end,2,:tariff,0,false,false,false,0,false,false,false,false,false,0,:created_at) "
+                        "VALUES(:tg,:end,2,:tariff,false,false,false,0,false,false,false,false,false,0,:created_at) "
                         "RETURNING id"
                     ),
                     {
@@ -175,7 +175,6 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.scalar(select(func.count(PaymentProviderOperation.id))), 0
             )
 
-
     async def test_same_target_reuses_frozen_quote_until_source_history_changes(self):
         user, _, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
@@ -260,7 +259,6 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 1,
             )
 
-
     async def test_conflicts_expiry_and_closed_preconditions(self):
         user, source, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
@@ -302,11 +300,9 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_same_target_serializes_to_one_quote(self):
         user, _, target, as_of = await self.seed()
-        ready = asyncio.Event()
 
         async def create():
             async with self.sessions.begin() as session:
-                ready.set()
                 return await create_tariff_change_quote(
                     session, user_id=user, target_tariff_id=target, as_of=as_of
                 )
