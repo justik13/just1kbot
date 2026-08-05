@@ -102,7 +102,7 @@ extra_ok() { printf '[OK] %s\n' "$*"; }
 extra_fail() { EXTRA_FAILURES=$((EXTRA_FAILURES + 1)); printf '[FAIL] %s\n' "$*" >&2; }
 
 check_cli() {
-    local cli=/usr/local/sbin/just1kbot state
+    local cli=/usr/local/bin/just1kbot state
     if [[ ! -f "$cli" || -L "$cli" ]]; then
         extra_fail "Global CLI missing/unsafe: $cli"
         return

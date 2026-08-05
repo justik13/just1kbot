@@ -131,7 +131,6 @@ main() {
         /usr/local/bin/just1kbot-healthcheck.sh \
         /usr/local/bin/verify_backup.sh \
         /usr/local/bin/restore_rehearsal.sh \
-        /usr/local/sbin/just1kbot \
         /usr/local/bin/just1kbot; do
         assert_root_tool "$path"
     done

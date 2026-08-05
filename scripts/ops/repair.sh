@@ -159,7 +159,7 @@ check_project_permissions() {
 
 write_cli() {
     local temporary
-    temporary=$(mktemp /usr/local/sbin/.just1kbot-repair.XXXXXX)
+    temporary=$(mktemp /usr/local/bin/.just1kbot-repair.XXXXXX)
     cat >"$temporary" <<'EOF_CLI'
 #!/bin/bash
 set -Eeuo pipefail
