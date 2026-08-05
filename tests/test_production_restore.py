@@ -64,6 +64,27 @@ class ProductionRestoreContractTests(unittest.TestCase):
             self.restore,
         )
 
+    def test_absent_database_check_accepts_missing_database(self):
+        result = self._run_function_test(
+            """
+            database_exists() { return 1; }
+            assert_database_absent just1kbot_stg_20260801000000_1
+            """
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_absent_database_check_rejects_existing_database(self):
+        result = self._run_function_test(
+            """
+            database_exists() { return 0; }
+            if assert_database_absent just1kbot_stg_20260801000000_1; then
+                printf 'existing database was incorrectly accepted\n' >&2
+                exit 1
+            fi
+            """
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_staging_precedes_writer_stop_and_cutover(self):
         staging = self.restore.index("restore_staging_database")
         confirmation = self.restore.index("confirm_production_cutover", staging)
