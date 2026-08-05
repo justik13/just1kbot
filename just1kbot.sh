@@ -4,8 +4,6 @@ set -Eeuo pipefail
 # ============================================================
 # just1kbot — Скрипт автоматического деплоя и управления
 # ============================================================
-# Ссылка на репозиторий по умолчанию: https://github.com/justik13/just1kbot
-# ============================================================
 
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
@@ -46,39 +44,46 @@ INSTALL_LOG="/var/log/just1kbot-install.log"
 APP_LOG_DIR="/var/log/just1kbot"
 APP_LOG_FILE="${APP_LOG_DIR}/bot.log"
 PYTHON_BIN="$(command -v python3 || echo "/usr/bin/python3")"
-TTY_DEVICE="/dev/tty"
-INTERACTIVE_INTERRUPTED=0
 SELF_SYMLINK="/usr/local/bin/just1kbot"
 BACKUP_ROOT="${INSTALL_DIR}/backups"
 
+setup_tty() {
+  if [[ ! -t 0 ]] && [[ -c /dev/tty ]]; then
+    exec </dev/tty
+  fi
+}
+
+log_to_file() {
+  local msg="$1"
+  mkdir -p "$(dirname "$INSTALL_LOG")" 2>/dev/null || true
+  local sanitized
+  sanitized="$(printf '%s' "$msg" | sed -E -e 's/(BOT_TOKEN|YOOKASSA_SECRET_KEY|REDIS_PASSWORD|DB_ENCRYPTION_KEY)=[^[:space:]]+/\1=***REDACTED***/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{20,}/***TELEGRAM_TOKEN_REDACTED***/g')"
+  printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$sanitized" >> "$INSTALL_LOG" 2>/dev/null || true
+}
+
 print_line() { printf '%s\n' "------------------------------------------------------------"; }
-info() { printf '[*] %s\n' "$*" >&2; }
-ok() { printf '[+] %s\n' "$*" >&2; }
-warn() { printf '[!] %s\n' "$*" >&2; }
-error() { printf '[ERROR] %s\n' "$*" >&2; }
+
+supports_color() { [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; }
+color_red() { supports_color && printf '\033[1;31m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_green() { supports_color && printf '\033[1;32m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_yellow() { supports_color && printf '\033[1;33m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_cyan() { supports_color && printf '\033[1;36m%s\033[0m' "$1" || printf '%s' "$1"; }
+
+info() { printf '[*] %s\n' "$*"; log_to_file "[INFO] $*"; }
+ok() { printf '[+] %s\n' "$*"; log_to_file "[OK] $*"; }
+warn() { printf '[!] %s\n' "$*"; log_to_file "[WARN] $*"; }
+error() { printf '[ERROR] %s\n' "$*"; log_to_file "[ERROR] $*"; }
 die() { error "$*"; exit 1; }
 
 on_error_trap() {
   local line_no="${1:-unknown}" exit_code="${2:-1}"
-  exec 3>&- 2>/dev/null || true
-  exec 4>&- 2>/dev/null || true
   printf "[!] Ошибка на строке %s (rc=%s). Подробности в логе: %s\n" "$line_no" "$exit_code" "$INSTALL_LOG" >&2
 }
 trap 'on_error_trap "$LINENO" "$?"' ERR
 
-cleanup_fds() { exec 3>&- 2>/dev/null || true; exec 4>&- 2>/dev/null || true; }
-on_interrupt() {
-  INTERACTIVE_INTERRUPTED=1
-  printf '\n[!] Прервано пользователем (Ctrl+C).\n' >&2
-  cleanup_fds
-  exit 130
-}
-trap cleanup_fds EXIT
-trap on_interrupt INT TERM
-
 require_root() {
   if [[ "${EUID}" -ne 0 ]]; then
-    echo "Запусти скрипт от имени root (sudo):"
+    echo "Запустите скрипт от имени root (sudo):"
     echo "  sudo bash just1kbot.sh"
     echo "Или одной командой:"
     echo "  curl -fsSL ${RAW_BASE_URL}/just1kbot.sh | sudo REPO_BRANCH=${REPO_BRANCH} bash -s --"
@@ -86,86 +91,25 @@ require_root() {
   fi
 }
 
-setup_logging() {
-  mkdir -p "$(dirname "$INSTALL_LOG")" "$APP_LOG_DIR"
-  touch "$INSTALL_LOG" "$APP_LOG_FILE"
-  chmod 640 "$INSTALL_LOG" "$APP_LOG_FILE" || true
-  if ! exec > >(tee -a "$INSTALL_LOG" | sed -E -e 's/(BOT_TOKEN|YOOKASSA_SECRET_KEY|REDIS_PASSWORD|DB_ENCRYPTION_KEY)=[^[:space:]]+/\1=***REDACTED***/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{20,}/***TELEGRAM_TOKEN_REDACTED***/g') 2>&1; then
-    warn "Не удалось настроить запись в лог-файл, продолжаю вывод в консоль."
-  fi
-}
-
-setup_tty_fd() {
-  exec 3>&- 2>/dev/null || true
-  exec 4>&- 2>/dev/null || true
-  if [[ -c "$TTY_DEVICE" ]] && exec 3<>"$TTY_DEVICE" 2>/dev/null; then
-    exec 4>&3
-    return 0
-  fi
-  if [[ -t 0 && -t 1 ]] && exec 3<&0 4>&1 2>/dev/null; then
-    return 0
-  fi
-  exec 3</dev/null
-  exec 4>&1
-}
-
-has_tty() { [[ -t 3 && -t 4 ]]; }
-supports_color() { has_tty && [[ "${TERM:-}" != "dumb" ]]; }
-
-color_red() { supports_color && printf '\033[1;31m%s\033[0m' "$1" || printf '%s' "$1"; }
-color_green() { supports_color && printf '\033[1;32m%s\033[0m' "$1" || printf '%s' "$1"; }
-color_yellow() { supports_color && printf '\033[1;33m%s\033[0m' "$1" || printf '%s' "$1"; }
-color_cyan() { supports_color && printf '\033[1;36m%s\033[0m' "$1" || printf '%s' "$1"; }
-
-flush_tty_input() {
-  has_tty || return 0
-  local _discard
-  while IFS= read -r -s -u 3 -t 0.01 -n 1 _discard 2>/dev/null; do :; done
-}
-
 pause_if_tty() {
-  if has_tty; then
-    flush_tty_input
-    printf '\nНажми Enter, чтобы продолжить...' >&4
-    IFS= read -r -u 3 _dummy || true
-    printf '\n' >&4
+  if [[ -t 0 ]]; then
+    printf '\nНажмите Enter, чтобы продолжить...'
+    read -r _dummy || true
+    printf '\n'
   fi
 }
 
-clear_if_tty() { has_tty && clear || true; }
+clear_if_tty() { [[ -t 0 ]] && clear || true; }
 
 prompt_raw() {
   local prompt="$1" __resultvar="$2" __input=""
-  if ! has_tty; then
-    die "Невозможно запросить ввод без TTY (${prompt})."
-  fi
-  flush_tty_input
-  printf '%s' "$prompt" >&4
-  if ! IFS= read -r -u 3 __input; then
+  printf '%s' "$prompt"
+  if ! read -r __input; then
     warn "Ввод прерван."
     return 1
   fi
   __input="${__input#"${__input%%[![:space:]]*}"}"
   __input="${__input%"${__input##*[![:space:]]}"}"
-  printf -v "$__resultvar" '%s' "$__input"
-}
-
-prompt_menu_key() {
-  local prompt="$1" __resultvar="$2" __input=""
-  if ! has_tty; then
-    die "Невозможно запросить меню без TTY (${prompt})."
-  fi
-  flush_tty_input
-  printf '%s' "$prompt" >&4
-  if ! IFS= read -r -s -u 3 -n 1 __input; then
-    warn "Ввод прерван."
-    return 1
-  fi
-  printf '\n' >&4
-  case "$__input" in
-    $'\003') on_interrupt ;;
-    $'\004'|$'\033') __input="0" ;;
-  esac
   printf -v "$__resultvar" '%s' "$__input"
 }
 
@@ -193,13 +137,12 @@ confirm_explicit() {
     case "${value,,}" in
       y|yes|д|да) return 0 ;;
       n|no|н|нет) return 1 ;;
-      *) warn "Нужно подтверждение: введи y или n." ;;
+      *) warn "Нужно подтверждение: введите y или n." ;;
     esac
   done
 }
 
 service_exists() { [[ -f "$SERVICE_FILE" ]]; }
-is_installed() { [[ -f "$SERVICE_FILE" && -d "$INSTALL_DIR/bot" && -f "$INSTALL_DIR/bot/main.py" ]]; }
 
 get_env_value() {
   local key="$1"
@@ -497,7 +440,6 @@ deploy_code_from_dir() {
   info "Копирую файлы в ${INSTALL_DIR}..."
   mkdir -p "$INSTALL_DIR" "$STATE_DIR"
   
-  # Проверяем, если скрипт запущен локально из папки проекта
   if [[ "$src_dir" != "$INSTALL_DIR" ]]; then
     cp -a "$src_dir/bot" "$INSTALL_DIR/"
     cp -a "$src_dir/config" "$INSTALL_DIR/"
@@ -524,7 +466,6 @@ action_install() {
   ensure_service_user
   install_system_packages
 
-  # Копируем текущий код или скачиваем из git
   if [[ -d "$SCRIPT_DIR/bot" && -f "$SCRIPT_DIR/requirements.txt" ]]; then
     deploy_code_from_dir "$SCRIPT_DIR"
   else
@@ -561,7 +502,6 @@ action_update() {
   require_root
   ensure_service_user
 
-  # Делаем snapshot / бэкап текущего года и БД
   local backup_snapshot="${BACKUP_ROOT}/snapshot_$(date +%Y%m%d_%H%M%S)"
   mkdir -p "$backup_snapshot"
   if [[ -f "$ENV_FILE" ]]; then cp "$ENV_FILE" "$backup_snapshot/"; fi
@@ -743,7 +683,7 @@ show_menu() {
     print_line
 
     local choice=""
-    prompt_menu_key "Выберите пункт [0-10]: " choice
+    prompt_raw "Выберите пункт [0-10]: " choice
 
     case "$choice" in
       1) action_status; pause_if_tty ;;
@@ -763,8 +703,7 @@ show_menu() {
 }
 
 main() {
-  setup_logging
-  setup_tty_fd
+  setup_tty
 
   local cmd="${1:-}"
   case "$cmd" in
@@ -779,7 +718,7 @@ main() {
     diag|diagnostics) action_diagnostics ;;
     uninstall) action_uninstall ;;
     "")
-      if has_tty; then
+      if [[ -t 0 ]]; then
         show_menu
       else
         action_status
