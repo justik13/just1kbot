@@ -96,12 +96,8 @@ snapshot_previous_release() {
     mkdir -m 0700 "$temporary" || return 1
 
     # .env is persistent live state and must never come from a release snapshot.
-    # Use --filter to exclude .env and any symlinks pointing to it.
-    # This prevents snapshot from capturing .env symlinks which could cause
-    # rollback to restore stale symlinks pointing to moved targets.
     if ! rsync -a --delete \
         --exclude='.env' \
-        --exclude='.env*' \
         --exclude='.heartbeat' \
         --exclude='*.log' \
         --exclude='*.tmp' \
@@ -152,7 +148,6 @@ prepare_new_release() {
     rsync -a --delete \
         --exclude='.git/' \
         --exclude='.env' \
-        --exclude='.env*' \
         --exclude='.heartbeat' \
         --exclude='venv/' \
         --exclude='__pycache__/' \
@@ -253,7 +248,6 @@ restore_snapshot() {
 
     rsync -a --delete \
         --exclude='.env' \
-        --exclude='.env*' \
         --exclude='.heartbeat' \
         "$ROLLBACK_SNAPSHOT/application/" "$PROJECT_DIR/" || return 1
 

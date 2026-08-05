@@ -53,34 +53,18 @@ foundation_journal_update() {
     local phase=$1 note=${2:-}
     foundation_journal_update_phase "$phase"
     if [[ -n "$note" ]]; then
-        # Explicitly check Python exit code to prevent silent journal corruption
-        # While set -e catches errors, we add explicit validation to ensure
-        # journal remains in a consistent state
-        if ! JOURNAL_PATH="$INSTALL_JOURNAL" NOTE_VALUE="$note" python3 - <<'PY'
+        JOURNAL_PATH="$INSTALL_JOURNAL" NOTE_VALUE="$note" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
-import sys
-
 path = Path(os.environ["JOURNAL_PATH"])
-try:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    data.setdefault("notes", []).append(os.environ["NOTE_VALUE"])
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temporary.chmod(0o600)
-    os.replace(temporary, path)
-except Exception as e:
-    print(f"Journal update failed: {type(e).__name__}: {e}", file=sys.stderr)
-    sys.exit(1)
+data = json.loads(path.read_text(encoding="utf-8"))
+data.setdefault("notes", []).append(os.environ["NOTE_VALUE"])
+temporary = path.with_name(path.name + ".tmp")
+temporary.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+temporary.chmod(0o600)
+temporary.replace(path)
 PY
-        then
-            foundation_fail \
-                JOURNAL_UPDATE_FAILED \
-                'не удалось обновить transaction journal' \
-                "$INSTALL_JOURNAL" \
-                'Проверьте свободное место и permissions. Journal может быть повреждён.'
-        fi
         chown root:root "$INSTALL_JOURNAL"
         chmod 0600 "$INSTALL_JOURNAL"
     fi

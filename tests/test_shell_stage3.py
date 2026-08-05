@@ -46,7 +46,7 @@ class ShellStage3Tests(unittest.TestCase):
 
     def test_healthcheck_is_bounded_and_lock_contention_fails(self):
         for marker in (
-            "No flock here",
+            "flock -s -w 5 8",
             "timeout --signal=TERM --kill-after=5s 25s",
             "TimeoutStartSec=35s",
             'connect_args={"timeout": 5, "command_timeout": 5}',
@@ -54,7 +54,6 @@ class ShellStage3Tests(unittest.TestCase):
             "socket_timeout=5",
         ):
             self.assertIn(marker, self.runtime)
-        self.assertNotIn("flock -s -w 5 8", self.runtime)
         self.assertNotIn("flock -n 9 || exit 0", self.runtime)
         self.assertNotIn("rollback_heartbeat=obsolete", self.runtime)
         self.assertNotIn('HEARTBEAT_FILE="$PROJECT_DIR/.heartbeat"', self.runtime)

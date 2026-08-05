@@ -25,19 +25,11 @@ install_backup_tooling() {
 }
 
 install_healthcheck() {
-    # Healthcheck НЕ должен использовать flock на deploy.lock.
-    # Причина: flock работает на уровне open file description, а не inode.
-    # Deploy открывает fd 200, healthcheck — fd 8, это разные descriptions,
-    # поэтому locks не взаимодействуют, создавая TOCTOU race condition.
-    # Вместо этого healthcheck полагается на pause_operational_timers(),
-    # которая останавливает healthcheck timer перед началом deploy.
     foundation_atomic_write "$HEALTHCHECK_COMMAND" root root 0750 <<'EOF_HEALTH'
 #!/bin/bash
 set -Eeuo pipefail
-
-# No flock here - deploy pauses this timer before starting.
-# Relying on flock with different file descriptors creates race conditions.
-
+exec 8>/run/lock/just1kbot-deploy.lock
+[[ -e /proc/self/fd/200 ]] || flock -s -w 5 8
 systemctl is-active --quiet just1kbot.service
 systemctl is-active --quiet just1kbot-redis.service
 [[ -f /run/just1kbot/heartbeat && ! -L /run/just1kbot/heartbeat ]]
@@ -51,6 +43,7 @@ exec timeout --signal=TERM --kill-after=5s 25s \
     /opt/just1kbot/venv/bin/python - <<'PY'
 import asyncio
 import redis.asyncio as redis
+from aiogram import Bot
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from config.settings import get_settings
@@ -68,15 +61,31 @@ async def main():
         socket_connect_timeout=5,
         socket_timeout=5,
     )
+    bot = Bot(settings.BOT_TOKEN)
     try:
         async with engine.connect() as connection:
             await connection.execute(text("SELECT 1"))
         assert await client.ping()
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                me = await asyncio.wait_for(bot.get_me(), timeout=6)
+                if not me.id:
+                    raise RuntimeError("Telegram get_me invalid")
+                break
+            except Exception as exc:
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(attempt + 1)
+                    continue
+                raise last_error
     finally:
         await client.aclose()
+        await bot.session.close()
         await engine.dispose()
 
-asyncio.run(asyncio.wait_for(main(), 20))
+asyncio.run(asyncio.wait_for(main(), 22))
 PY
 EOF_HEALTH
 
@@ -135,6 +144,7 @@ Environment=HOME=$RUNTIME_DIR
 Environment=PYTHONPATH=$PROJECT_DIR
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=JUST1KBOT_HEARTBEAT_FILE=$HEARTBEAT_FILE
+ExecStartPre=/opt/just1kbot/scripts/preflight.sh
 ExecStart=$VENV_DIR/bin/python -m bot.main
 Restart=always
 RestartSec=5
@@ -204,6 +214,8 @@ EOF_LOGROTATE
 
 activate_release_bundle() {
     install_backup_tooling
+    # Keep the established transaction ordering: healthcheck creation is part
+    # of the activation sequence and its runtime probe is strictly bounded.
     install_healthcheck
     setup_logrotate
     if [[ "$INITIAL_INSTALL" == true ]]; then
@@ -229,8 +241,6 @@ show_status() {
     printf 'Manifest: %s\n' "$INSTALL_MANIFEST"
 }
 
-# Safe installer overrides the generic operational set. In particular, the
-# Nginx default site is never snapshotted, removed, or restored.
 configure_operational_transaction() {
     local domain=${DOMAIN:-}
     local normalized=""

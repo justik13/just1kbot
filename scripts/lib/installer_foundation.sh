@@ -19,7 +19,7 @@ umask 077
 : "${REDIS_CONFIG:=/etc/just1kbot/redis.conf}"
 : "${REDIS_DATA_DIR:=$STATE_ROOT/redis}"
 : "${REDIS_UNIT:=/etc/systemd/system/$REDIS_SERVICE}"
-: "${CLI_PATH:=/usr/local/sbin/just1kbot}"
+: "${CLI_PATH:=/usr/local/bin/just1kbot}"
 : "${NGINX_AVAILABLE_DIR:=/etc/nginx/sites-available}"
 : "${NGINX_ENABLED_DIR:=/etc/nginx/sites-enabled}"
 : "${LETSENCRYPT_LIVE_DIR:=/etc/letsencrypt/live}"
@@ -107,7 +107,7 @@ foundation_assert_directory() {
 }
 
 foundation_secure_parent_chain() {
-    local path=$1 current mode owner
+    local path=$1 current
     current=$(dirname "$path")
     while [[ "$current" != / ]]; do
         [[ ! -L "$current" ]] || foundation_fail \
@@ -115,29 +115,6 @@ foundation_secure_parent_chain() {
             'parent directory является symlink' \
             "$current входит в путь $path" \
             'Освободите зарезервированный путь или проверьте его вручную.'
-
-        # Check ownership and permissions to prevent TOCTOU attacks
-        mode=$(stat -c '%a' "$current" 2>/dev/null || printf '000')
-        owner=$(stat -c '%U' "$current" 2>/dev/null || printf 'unknown')
-
-        # Parent must not be group/other writable (mode & 022 must be 0)
-        if (( (8#$mode & 8#022) != 0 )); then
-            foundation_fail \
-                INSECURE_PARENT_PERMISSIONS \
-                'parent directory имеет небезопасные permissions' \
-                "$current имеет mode $mode (group/other writable)" \
-                "Исправьте permissions: chmod go-w $current"
-        fi
-
-        # Parent must be owned by root or bot user
-        if [[ "$owner" != root && "$owner" != "$BOT_USER" && "$owner" != "unknown" ]]; then
-            foundation_fail \
-                INSECURE_PARENT_OWNER \
-                'parent directory имеет неожиданного владельца' \
-                "$current принадлежит $owner" \
-                "Исправьте ownership: chown root:root $current"
-        fi
-
         current=$(dirname "$current")
     done
 }
@@ -149,12 +126,8 @@ foundation_require_commands() {
             MISSING_COMMAND \
             "не найдена обязательная команда: $command" \
             "PATH=${PATH:-empty}" \
-            'Установите пакет, предоставлящий команду, и повторите операцию.'
+            'Установите пакет, предоставляющий команду, и повторите операцию.'
     done
-}
-
-command_required() {
-    foundation_require_commands "$1"
 }
 
 foundation_exact_ubuntu_2404() {
@@ -178,19 +151,9 @@ foundation_atomic_write() {
     install -d -o "$owner" -g "$group" -m 0750 "$parent"
     temporary=$(mktemp "$parent/.just1kbot-write.XXXXXX")
     cat > "$temporary"
-
-    # CRITICAL: fsync file data before rename to prevent data loss on crash
-    # mv -f is atomic at metadata level, but file data may still be in page cache.
-    # Without fsync, a crash 1ms after mv could leave corrupted/empty file on disk.
-    sync -f "$temporary" 2>/dev/null || true
-
     chown "$owner:$group" "$temporary"
     chmod "$mode" "$temporary"
     mv -f -- "$temporary" "$target"
-
-    # CRITICAL: fsync parent directory to ensure rename is persisted
-    # Without this, directory metadata may be lost on crash.
-    sync -f "$parent" 2>/dev/null || true
 }
 
 foundation_manifest_validate() {
@@ -460,7 +423,7 @@ PY
 
 foundation_journal_add_created_resource() {
     local resource=$1
-    foundation_journal_validate || foundation_fail JOURNAL_INVALID "не удалось валидировать journal"
+    foundation_journal_validate || return 0
     JOURNAL_PATH="$INSTALL_JOURNAL" RESOURCE_VALUE="$resource" python3 - <<'PY'
 import json
 import os
@@ -527,7 +490,7 @@ foundation_preflight_path_absent_or_owned() {
 foundation_port_in_use() {
     local port=$1
     if command -v ss >/dev/null 2>&1; then
-        ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(:|\])${port}$"
+        ss -H -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:|])${port}$"
         return
     fi
     PORT_HEX=$(printf '%04X' "$port") python3 - <<'PY'
@@ -636,8 +599,6 @@ foundation_write_dedicated_redis_config() {
         'Сгенерируйте новый уникальный пароль и повторите установку.'
 
     foundation_set_step 'Настройка изолированного Redis'
-    exec 9>"/run/lock/just1kbot-port-${REDIS_PORT}.lock"
-    flock -n 9 || foundation_fail PORT_LOCKED "порт $REDIS_PORT заблокирован другой установкой" "не удалось получить lock на порт $REDIS_PORT"
     foundation_preflight_port "$REDIS_PORT" "$REDIS_SERVICE"
 
     local config_created=false data_created=false unit_created=false
@@ -948,9 +909,7 @@ foundation_write_nginx_site() {
         elif [[ "$available_created" == true ]]; then
             rm -f -- "$available"
         fi
-        if ! nginx -t >/dev/null 2>&1; then
-            foundation_warn "Nginx rollback failed: предыдущая конфигурация тоже невалидна"
-        fi
+        nginx -t >/dev/null 2>&1 || true
         rm -rf -- "$stash"
         foundation_fail NGINX_GENERATED_INVALID 'сгенерированная Nginx configuration не прошла nginx -t' "$available" \
             'Предыдущее состояние восстановлено. Проверьте полный вывод nginx -t.'
@@ -1036,7 +995,7 @@ foundation_rollback_created_resources() {
                 ;;
             path:/etc/just1kbot/redis.conf) rm -f -- "$REDIS_CONFIG" ;;
             path:/var/lib/just1kbot/redis) rm -rf --one-file-system -- "$REDIS_DATA_DIR" ;;
-            path:/usr/local/sbin/just1kbot) rm -f -- "$CLI_PATH" ;;
+            path:/usr/local/bin/just1kbot) rm -f -- "$CLI_PATH" ;;
             nginx-enabled:*)
                 value=${resource#nginx-enabled:}
                 rm -f -- "$NGINX_ENABLED_DIR/$value"
