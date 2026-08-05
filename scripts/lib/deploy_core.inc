@@ -576,7 +576,7 @@ collect_initial_input() {
         printf 'Укажите корректный публичный домен.\n'
     done
     while true; do
-        read_optional 'Email для сертификата Let's Encrypt' SSL_EMAIL ''
+        read_optional "Email для сертификата Let's Encrypt" SSL_EMAIL ''
         if validate_email "$SSL_EMAIL"; then
             break
         fi
