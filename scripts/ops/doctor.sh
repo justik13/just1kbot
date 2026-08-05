@@ -254,6 +254,15 @@ check_telegram_api() {
 }
 
 check_runtime_dependencies() {
+    # P3-2: Защита от потери backup.agekey
+    if grep -q "^DB_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
+        if [ ! -f "/root/.config/just1kbot/backup.agekey" ]; then
+            fail 'CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /root/.config/just1kbot/backup.agekey is missing!'
+        else
+            ok 'Backup key is present'
+        fi
+    fi
+
     [[ -x "$VENV_DIR/bin/python" ]] || {
         fail 'Virtualenv Python отсутствует'
         return

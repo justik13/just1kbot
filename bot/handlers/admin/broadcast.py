@@ -280,8 +280,9 @@ async def _send_broadcast_to_users_with_resume(
             )
             if not progress:
                 return
-            if progress.status == "stopping":
+            if progress.status == "stopping" or progress.stop_requested:
                 progress.status = "stopped"
+                progress.stop_requested = False
                 await session.commit()
                 final_progress = progress
                 return
@@ -309,6 +310,12 @@ async def _send_broadcast_to_users_with_resume(
         local_fail = 0
 
         while True:
+            # P1-5: Читаем stop_requested из БД для гарантии остановки даже после рестарта
+            async with session_scope() as session:
+                progress = await session.get(BroadcastProgress, progress_id)
+                if not progress or progress.stop_requested or progress.status != "in_progress":
+                    break
+
             if stop_event and stop_event.is_set():
                 break
 
@@ -713,8 +720,9 @@ async def stop_broadcast(callback: CallbackQuery):
                     BroadcastProgress.admin_id == admin_id,
                     BroadcastProgress.status == "in_progress",
                 )
-                .values(status="stopping")
+                .values(status="stopping", stop_requested=True)
             )
+            await session.commit()
     except Exception as e:
         logger.error(
             "Failed to set broadcast status to stopping: %s",

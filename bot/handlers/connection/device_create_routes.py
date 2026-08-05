@@ -388,6 +388,24 @@ async def enter_device_name(
             )
             await state.clear()
             return
+        except DuplicateDeviceName:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.DEVICE_NAME_DUPLICATE if hasattr(texts, "DEVICE_NAME_DUPLICATE") else "⚠️ Устройство с таким именем на этом сервере уже существует. Выберите другое имя.",
+                get_back_button("add_device"),
+            )
+            await state.clear()
+            return
+        except DeviceCreationError as e:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                str(e),
+                get_back_button("add_device"),
+            )
+            await state.clear()
+            return
         except ServerUnavailable as e:
             error_msg = str(e)
             error_type = _classify_server_error(error_msg)

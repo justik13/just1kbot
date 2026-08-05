@@ -356,7 +356,7 @@ class SubscriptionService:
             permanent = bool(
                 target_active
                 and user.subscription_end
-                and user.subscription_end.year >= 2100
+                and __import__('utils.datetime_helpers', fromlist=['is_permanent_subscription']).is_permanent_subscription(user.subscription_end)
             )
             expires_at = (
                 int(user.subscription_end.timestamp())

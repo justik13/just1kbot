@@ -135,6 +135,17 @@ class DeviceService:
         manual_peer_ids = snapshot.peer_ids - bot_peer_ids
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
+
+        # P1-3: Живая проверка слотов перед созданием
+        from services.amnezia_client import AmneziaClient
+        client = AmneziaClient(server.api_url, server.api_token)
+        try:
+            clients = await client.get_all_clients()
+            if clients is not None and len(clients) >= server.max_clients:
+                raise ServerUnavailable("Server is full")
+        finally:
+            await client.aclose()
+
         profile = VPNProfile(
             user_id=user.id,
             server_id=server.id,

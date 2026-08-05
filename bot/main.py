@@ -283,6 +283,20 @@ async def main():
     try:
         settings = get_settings()
 
+        # P3-2: Защита от потери backup.agekey
+        import os
+        from aiogram import Bot
+        if settings.DB_ENCRYPTION_KEY and not os.path.exists("/root/.config/just1kbot/backup.agekey"):
+            logger.critical("CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /root/.config/just1kbot/backup.agekey is missing!")
+            if settings.ADMIN_IDS:
+                try:
+                    temp_bot = Bot(token=settings.BOT_TOKEN)
+                    for admin_id in settings.ADMIN_IDS:
+                        await temp_bot.send_message(admin_id, "⚠️ <b>CRITICAL WARNING</b>: DB_ENCRYPTION_KEY is present but backup.agekey is missing! Backups cannot be decrypted.", parse_mode="HTML")
+                    await temp_bot.session.close()
+                except Exception:
+                    pass
+
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
         except Exception as exc:

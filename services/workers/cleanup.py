@@ -74,6 +74,7 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
 
     while not shutdown_event.is_set():
         try:
+            await _cleanup_stuck_profiles()
             await _cleanup_expired_profiles_grace()
             await _cleanup_dangling_peers()
 
@@ -115,7 +116,7 @@ async def _cleanup_expired_profiles_grace():
             .where(
                 User.is_deleted.is_(False),
                 User.subscription_end.is_not(None),
-                User.subscription_end < threshold,
+                (User.subscription_end < threshold) | User.financial_hold,
             )
             .order_by(User.subscription_end.asc())
             .limit(50)
@@ -142,7 +143,8 @@ async def _cleanup_expired_profiles_grace():
                     continue
                 if user.subscription_end is None:
                     continue
-                if user.subscription_end.year >= 2100:
+                from utils.datetime_helpers import is_permanent_subscription
+                if is_permanent_subscription(user.subscription_end):
                     continue
                 if user.subscription_end >= threshold:
                     continue
@@ -212,6 +214,25 @@ async def _cleanup_expired_profiles_grace():
             deleted_profiles_count,
         )
 
+
+async def _cleanup_stuck_profiles():
+    # P1-2: Cleanup dangling pending_create profiles
+    async with session_scope() as session:
+        cutoff_time = now_utc() - timedelta(hours=1)
+        stuck_profiles = (
+            await session.execute(
+                select(VPNProfile)
+                .where(
+                    VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending"]),
+                    VPNProfile.created_at < cutoff_time
+                )
+            )
+        ).scalars().all()
+
+        for profile in stuck_profiles:
+            profile.provisioning_status = "create_failed"
+            profile.last_sync_error = "Creation timed out by cleanup worker"
+            logger.info("Marked stuck pending_create profile %s as create_failed", profile.id)
 
 async def _cleanup_dangling_peers():
     servers_data = []

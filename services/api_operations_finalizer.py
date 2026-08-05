@@ -78,6 +78,16 @@ async def finalize_create_success(
             raise RuntimeError("create_cancel_requested")
         if profile.provisioning_status not in {"pending_create", "active"}:
             raise RuntimeError("profile_not_create_finalizable")
+        from utils.vpn_parser import is_valid_vpn_uri, build_conf_file
+        if not raw_config or not is_valid_vpn_uri(raw_config) or not build_conf_file(raw_config):
+            # Переводим в create_failed, так как конфиг невалиден
+            profile.provisioning_status = "create_failed"
+            profile.last_sync_error = "Operation failed: invalid_raw_config"
+            operation.status = "failed"
+            operation.last_error = "invalid_raw_config"
+            operation.next_attempt_at = None
+            return
+
         profile.peer_id = peer_id
         profile.raw_config = raw_config
         profile.actual_is_active = sent_is_active
@@ -220,7 +230,21 @@ async def finalize_operation_failure(
         operation.last_error_code = (error_code or "unknown_error")[:100]
         operation.last_error = error_message[:2000]
         if profile:
-            profile.last_sync_error = error_message[:2000]
+            # P2-5: Человекочитаемый текст для last_sync_error
+            error_mapping = {
+                "server_full": "Сервер переполнен",
+                "auth_failed": "Неверный API ключ сервера",
+                "invalid_raw_config": "Ошибка шифрования конфига",
+                "create_ambiguous_reconcile": "Не удалось проверить создание пира",
+                "invalid_created_config_cleanup": "Конфиг не сгенерирован (очистка)",
+                "duplicate_exact_client_name": "Такое имя уже существует на сервере",
+                "network_error": "Ошибка сети при обращении к серверу",
+                "timeout": "Таймаут обращения к серверу",
+            }
+            human_readable = error_mapping.get(operation.last_error_code, f"Operation failed: {operation.last_error_code}")
+            if error_message:
+                human_readable = f"{human_readable} ({error_message[:1000]})"
+            profile.last_sync_error = human_readable[:2000]
             if not should_retry:
                 if operation.operation_type == "create_peer":
                     cleanup = bool(operation.peer_id) or error_code in {
@@ -334,8 +358,9 @@ async def finalize_delete_success(
 
 async def _ensure_current_update(session, profile):
     active = profile.desired_is_active
+    from utils.datetime_helpers import is_permanent_subscription
     permanent = bool(
-        profile.desired_expires_at and profile.desired_expires_at.year >= 2100
+        profile.desired_expires_at and is_permanent_subscription(profile.desired_expires_at)
     )
     expires = (
         None

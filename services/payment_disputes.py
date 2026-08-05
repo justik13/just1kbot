@@ -89,6 +89,8 @@ async def refresh_user_dispute_hold(session, *, user_id: int) -> None:
     elif balance.debt > 0:
         user.financial_hold = True
         user.financial_block_reason = "chargeback_debt"
+        from services.subscription import SubscriptionService
+        await SubscriptionService._sync_access_state(session, user)
     elif user.financial_block_reason in DISPUTE_HOLD_REASONS:
         user.financial_hold = False
         user.financial_block_reason = None
