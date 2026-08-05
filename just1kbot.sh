@@ -1,0 +1,795 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# ============================================================
+# just1kbot — Скрипт автоматического деплоя и управления
+# ============================================================
+# Ссылка на репозиторий по умолчанию: https://github.com/justik13/just1kbot
+# ============================================================
+
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
+
+if [[ -n "${BASH_SOURCE[0]:-}" ]] && [[ -f "${BASH_SOURCE[0]:-}" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SCRIPT_DIR="$(pwd)"
+fi
+
+ORIGIN_URL="$(git -C "$SCRIPT_DIR" config --get remote.origin.url 2>/dev/null || true)"
+if [[ "$ORIGIN_URL" =~ github\.com[:/]([^/]+)/([^/.]+)(\.git)?$ ]]; then
+  DETECTED_REPO_OWNER="${BASH_REMATCH[1]}"
+  DETECTED_REPO_NAME="${BASH_REMATCH[2]}"
+else
+  DETECTED_REPO_OWNER=""
+  DETECTED_REPO_NAME=""
+fi
+
+REPO_OWNER="${REPO_OWNER:-${DETECTED_REPO_OWNER:-justik13}}"
+REPO_NAME="${REPO_NAME:-${DETECTED_REPO_NAME:-just1kbot}}"
+DEFAULT_REPO_BRANCH="bot"
+
+INSTALL_DIR="/opt/just1kbot"
+STATE_DIR="${INSTALL_DIR}/.state"
+REPO_BRANCH_FILE="${STATE_DIR}/repo_branch"
+REPO_BRANCH="${REPO_BRANCH:-$(cat "$REPO_BRANCH_FILE" 2>/dev/null | tr -d '\r\n' || true)}"
+REPO_BRANCH="${REPO_BRANCH:-$DEFAULT_REPO_BRANCH}"
+REPO_URL="https://github.com/${REPO_OWNER}/${REPO_NAME}"
+RAW_BASE_URL="https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${REPO_BRANCH}"
+COMMIT_API_URL="https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/commits/${REPO_BRANCH}"
+
+ENV_FILE="${INSTALL_DIR}/.env"
+VENV_DIR="${INSTALL_DIR}/.venv"
+SERVICE_NAME="just1kbot.service"
+SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}"
+BOT_USER="just1kbot"
+INSTALL_LOG="/var/log/just1kbot-install.log"
+APP_LOG_DIR="/var/log/just1kbot"
+APP_LOG_FILE="${APP_LOG_DIR}/bot.log"
+PYTHON_BIN="$(command -v python3 || echo "/usr/bin/python3")"
+TTY_DEVICE="/dev/tty"
+INTERACTIVE_INTERRUPTED=0
+SELF_SYMLINK="/usr/local/bin/just1kbot"
+BACKUP_ROOT="${INSTALL_DIR}/backups"
+
+print_line() { printf '%s\n' "------------------------------------------------------------"; }
+info() { printf '[*] %s\n' "$*" >&2; }
+ok() { printf '[+] %s\n' "$*" >&2; }
+warn() { printf '[!] %s\n' "$*" >&2; }
+error() { printf '[ERROR] %s\n' "$*" >&2; }
+die() { error "$*"; exit 1; }
+
+on_error_trap() {
+  local line_no="${1:-unknown}" exit_code="${2:-1}"
+  exec 3>&- 2>/dev/null || true
+  exec 4>&- 2>/dev/null || true
+  printf "[!] Ошибка на строке %s (rc=%s). Подробности в логе: %s\n" "$line_no" "$exit_code" "$INSTALL_LOG" >&2
+}
+trap 'on_error_trap "$LINENO" "$?"' ERR
+
+cleanup_fds() { exec 3>&- 2>/dev/null || true; exec 4>&- 2>/dev/null || true; }
+on_interrupt() {
+  INTERACTIVE_INTERRUPTED=1
+  printf '\n[!] Прервано пользователем (Ctrl+C).\n' >&2
+  cleanup_fds
+  exit 130
+}
+trap cleanup_fds EXIT
+trap on_interrupt INT TERM
+
+require_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    echo "Запусти скрипт от имени root (sudo):"
+    echo "  sudo bash just1kbot.sh"
+    echo "Или одной командой:"
+    echo "  curl -fsSL ${RAW_BASE_URL}/just1kbot.sh | sudo REPO_BRANCH=${REPO_BRANCH} bash -s --"
+    exit 1
+  fi
+}
+
+setup_logging() {
+  mkdir -p "$(dirname "$INSTALL_LOG")" "$APP_LOG_DIR"
+  touch "$INSTALL_LOG" "$APP_LOG_FILE"
+  chmod 640 "$INSTALL_LOG" "$APP_LOG_FILE" || true
+  if ! exec > >(tee -a "$INSTALL_LOG" | sed -E -e 's/(BOT_TOKEN|YOOKASSA_SECRET_KEY|REDIS_PASSWORD|DB_ENCRYPTION_KEY)=[^[:space:]]+/\1=***REDACTED***/g' -e 's/[0-9]{6,}:[A-Za-z0-9_-]{20,}/***TELEGRAM_TOKEN_REDACTED***/g') 2>&1; then
+    warn "Не удалось настроить запись в лог-файл, продолжаю вывод в консоль."
+  fi
+}
+
+setup_tty_fd() {
+  exec 3>&- 2>/dev/null || true
+  exec 4>&- 2>/dev/null || true
+  if [[ -c "$TTY_DEVICE" ]] && exec 3<>"$TTY_DEVICE" 2>/dev/null; then
+    exec 4>&3
+    return 0
+  fi
+  if [[ -t 0 && -t 1 ]] && exec 3<&0 4>&1 2>/dev/null; then
+    return 0
+  fi
+  exec 3</dev/null
+  exec 4>&1
+}
+
+has_tty() { [[ -t 3 && -t 4 ]]; }
+supports_color() { has_tty && [[ "${TERM:-}" != "dumb" ]]; }
+
+color_red() { supports_color && printf '\033[1;31m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_green() { supports_color && printf '\033[1;32m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_yellow() { supports_color && printf '\033[1;33m%s\033[0m' "$1" || printf '%s' "$1"; }
+color_cyan() { supports_color && printf '\033[1;36m%s\033[0m' "$1" || printf '%s' "$1"; }
+
+flush_tty_input() {
+  has_tty || return 0
+  local _discard
+  while IFS= read -r -s -u 3 -t 0.01 -n 1 _discard 2>/dev/null; do :; done
+}
+
+pause_if_tty() {
+  if has_tty; then
+    flush_tty_input
+    printf '\nНажми Enter, чтобы продолжить...' >&4
+    IFS= read -r -u 3 _dummy || true
+    printf '\n' >&4
+  fi
+}
+
+clear_if_tty() { has_tty && clear || true; }
+
+prompt_raw() {
+  local prompt="$1" __resultvar="$2" __input=""
+  if ! has_tty; then
+    die "Невозможно запросить ввод без TTY (${prompt})."
+  fi
+  flush_tty_input
+  printf '%s' "$prompt" >&4
+  if ! IFS= read -r -u 3 __input; then
+    warn "Ввод прерван."
+    return 1
+  fi
+  __input="${__input#"${__input%%[![:space:]]*}"}"
+  __input="${__input%"${__input##*[![:space:]]}"}"
+  printf -v "$__resultvar" '%s' "$__input"
+}
+
+prompt_menu_key() {
+  local prompt="$1" __resultvar="$2" __input=""
+  if ! has_tty; then
+    die "Невозможно запросить меню без TTY (${prompt})."
+  fi
+  flush_tty_input
+  printf '%s' "$prompt" >&4
+  if ! IFS= read -r -s -u 3 -n 1 __input; then
+    warn "Ввод прерван."
+    return 1
+  fi
+  printf '\n' >&4
+  case "$__input" in
+    $'\003') on_interrupt ;;
+    $'\004'|$'\033') __input="0" ;;
+  esac
+  printf -v "$__resultvar" '%s' "$__input"
+}
+
+prompt_with_default() {
+  local prompt="$1" default="${2:-}" __resultvar="$3" input_value=""
+  while true; do
+    if [[ -n "$default" ]]; then
+      prompt_raw "$prompt [$default]: " input_value
+      input_value="${input_value:-$default}"
+    else
+      prompt_raw "$prompt: " input_value
+    fi
+    if [[ -n "$input_value" ]]; then
+      printf -v "$__resultvar" '%s' "$input_value"
+      return 0
+    fi
+    warn "Значение не может быть пустым."
+  done
+}
+
+confirm_explicit() {
+  local prompt="$1" value=""
+  while true; do
+    prompt_raw "$prompt [y/n]: " value
+    case "${value,,}" in
+      y|yes|д|да) return 0 ;;
+      n|no|н|нет) return 1 ;;
+      *) warn "Нужно подтверждение: введи y или n." ;;
+    esac
+  done
+}
+
+service_exists() { [[ -f "$SERVICE_FILE" ]]; }
+is_installed() { [[ -f "$SERVICE_FILE" && -d "$INSTALL_DIR/bot" && -f "$INSTALL_DIR/bot/main.py" ]]; }
+
+get_env_value() {
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  grep -m1 -E "^${key}=" "$ENV_FILE" | cut -d'=' -f2- | tr -d '\r"' || true
+}
+
+set_env_value() {
+  local key="$1" value="$2"
+  mkdir -p "$INSTALL_DIR"
+  touch "$ENV_FILE"
+  chmod 600 "$ENV_FILE" || true
+  local escaped
+  escaped="$(printf '%s' "$value" | sed -e 's/[\\/&|]/\\&/g')"
+  if grep -q -E "^${key}=" "$ENV_FILE" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+  fi
+  return 0
+}
+
+persist_repo_branch() {
+  mkdir -p "$STATE_DIR"
+  printf '%s\n' "$REPO_BRANCH" > "$REPO_BRANCH_FILE"
+}
+
+get_local_sha() {
+  if [[ -d "$INSTALL_DIR/.git" ]]; then
+    git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || true
+  elif [[ -f "${STATE_DIR}/release_sha" ]]; then
+    cat "${STATE_DIR}/release_sha" 2>/dev/null | tr -d '\r\n' || true
+  fi
+}
+
+fetch_remote_commit_info() {
+  local payload="" parsed=""
+  payload="$(curl -fsSL --connect-timeout 10 --max-time 30 --retry 2 "$COMMIT_API_URL" 2>/dev/null || true)"
+  [[ -n "$payload" ]] || return 0
+  parsed="$("$PYTHON_BIN" - "$payload" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    data = json.loads(sys.argv[1])
+    sha = data.get("sha", "").strip()
+    msg = data.get("commit", {}).get("message", "").splitlines()[0].strip()
+    if sha: print(f"{sha}\t{msg}")
+except Exception: pass
+PY
+)"
+  printf '%s' "$parsed"
+}
+
+ensure_service_user() {
+  if ! id "$BOT_USER" >/dev/null 2>&1; then
+    info "Создаю системного пользователя ${BOT_USER}..."
+    useradd -r -s /usr/sbin/nologin -d "$INSTALL_DIR" -m "$BOT_USER" || true
+    ok "Пользователь ${BOT_USER} создан."
+  fi
+}
+
+install_system_packages() {
+  info "Проверяю и устанавливаю системные пакеты (PostgreSQL, Redis, Python3, Git)..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y -qq python3 python3-pip python3-venv git curl tar sudo postgresql postgresql-contrib redis-server >/dev/null
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q python3 python3-pip git curl tar sudo postgresql-server redis >/dev/null
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q python3 python3-pip git curl tar sudo postgresql-server redis >/dev/null
+  else
+    warn "Не удалось автоматически определить пакетный менеджер. Убедитесь, что Python3, PostgreSQL и Redis установлены."
+  fi
+
+  systemctl enable --now postgresql >/dev/null 2>&1 || true
+  systemctl enable --now redis-server >/dev/null 2>&1 || systemctl enable --now redis >/dev/null 2>&1 || true
+  ok "Системные зависимости готовы."
+}
+
+setup_venv() {
+  info "Настраиваю виртуальное окружение Python в ${VENV_DIR}..."
+  if [[ ! -d "$VENV_DIR" ]]; then
+    "$PYTHON_BIN" -m venv "$VENV_DIR"
+  fi
+  "$VENV_DIR/bin/pip" install --upgrade pip -q
+  if [[ -f "$INSTALL_DIR/requirements.txt" ]]; then
+    info "Устанавливаю зависимости из requirements.txt..."
+    "$VENV_DIR/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+    ok "Зависимости библиотеки Python успешно установлены."
+  fi
+}
+
+generate_fernet_key() {
+  "$VENV_DIR/bin/python" -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
+}
+
+configure_env_interactively() {
+  info "Настройка конфигурации .env..."
+  mkdir -p "$INSTALL_DIR"
+  if [[ ! -f "$ENV_FILE" && -f "$INSTALL_DIR/.env.example" ]]; then
+    cp "$INSTALL_DIR/.env.example" "$ENV_FILE"
+  fi
+  touch "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+
+  local bot_token admin_ids support_user db_url db_enc_key redis_url redis_pass shop_id secret_key domain ssl_email
+
+  bot_token="$(get_env_value BOT_TOKEN)"
+  if [[ -z "$bot_token" || "$bot_token" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "Введите Telegram BOT_TOKEN от @BotFather (формат 123456:ABC...)" "" bot_token
+    set_env_value BOT_TOKEN "'$bot_token'"
+  fi
+
+  admin_ids="$(get_env_value ADMIN_IDS)"
+  if [[ -z "$admin_ids" || "$admin_ids" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "Введите Telegram ID админа (например 123456789 или [123456789])" "[123456789]" admin_ids
+    [[ "$admin_ids" != "["* ]] && admin_ids="[$admin_ids]"
+    set_env_value ADMIN_IDS "'$admin_ids'"
+  fi
+
+  support_user="$(get_env_value SUPPORT_USERNAME)"
+  if [[ -z "$support_user" || "$support_user" == *"CHANGE_ME"* || "$support_user" == "support" ]]; then
+    prompt_with_default "Введите Username поддержки Telegram (без @)" "my_support_bot" support_user
+    set_env_value SUPPORT_USERNAME "'$support_user'"
+  fi
+
+  db_url="$(get_env_value DATABASE_URL)"
+  if [[ -z "$db_url" || "$db_url" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "DATABASE_URL PostgreSQL" "postgresql+asyncpg://just1kbot:just1kpass@localhost:5432/just1kbot_bot" db_url
+    set_env_value DATABASE_URL "'$db_url'"
+  fi
+
+  db_enc_key="$(get_env_value DB_ENCRYPTION_KEY)"
+  if [[ -z "$db_enc_key" || "$db_enc_key" == *"CHANGE_ME"* ]]; then
+    info "Генерирую DB_ENCRYPTION_KEY (Fernet base64)..."
+    db_enc_key="$(generate_fernet_key)"
+    set_env_value DB_ENCRYPTION_KEY "'$db_enc_key'"
+    ok "DB_ENCRYPTION_KEY создан."
+  fi
+
+  redis_url="$(get_env_value REDIS_URL)"
+  if [[ -z "$redis_url" || "$redis_url" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "REDIS_URL" "redis://localhost:6379/0" redis_url
+    set_env_value REDIS_URL "'$redis_url'"
+  fi
+
+  redis_pass="$(get_env_value REDIS_PASSWORD)"
+  if [[ -z "$redis_pass" || "$redis_pass" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "REDIS_PASSWORD (если без пароля, введите testpass)" "testpass" redis_pass
+    set_env_value REDIS_PASSWORD "'$redis_pass'"
+  fi
+
+  shop_id="$(get_env_value YOOKASSA_SHOP_ID)"
+  if [[ -z "$shop_id" || "$shop_id" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "YOOKASSA_SHOP_ID" "123456" shop_id
+    set_env_value YOOKASSA_SHOP_ID "'$shop_id'"
+  fi
+
+  secret_key="$(get_env_value YOOKASSA_SECRET_KEY)"
+  if [[ -z "$secret_key" || "$secret_key" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "YOOKASSA_SECRET_KEY" "live_secret_key_123" secret_key
+    set_env_value YOOKASSA_SECRET_KEY "'$secret_key'"
+  fi
+
+  set_env_value YOOKASSA_RETURN_URL "'https://t.me/{bot_username}'"
+  set_env_value YOOKASSA_WEBHOOK_PORT "8080"
+
+  domain="$(get_env_value DOMAIN)"
+  if [[ -z "$domain" || "$domain" == *"example.com"* || "$domain" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "Ваш публичный HTTPS домен (DOMAIN)" "vpn.mydomain.com" domain
+    set_env_value DOMAIN "'$domain'"
+  fi
+
+  ssl_email="$(get_env_value SSL_EMAIL)"
+  if [[ -z "$ssl_email" || "$ssl_email" == *"example.com"* || "$ssl_email" == *"CHANGE_ME"* ]]; then
+    prompt_with_default "SSL_EMAIL (ваш email для Let's Encrypt)" "admin@mydomain.com" ssl_email
+    set_env_value SSL_EMAIL "'$ssl_email'"
+  fi
+
+  chown "$BOT_USER:$BOT_USER" "$ENV_FILE" || true
+  ok "Конфигурация .env успешно сформирована."
+}
+
+setup_postgres_db_if_local() {
+  local db_url
+  db_url="$(get_env_value DATABASE_URL)"
+  if [[ "$db_url" == *"@localhost"* || "$db_url" == *"@127.0.0.1"* ]]; then
+    info "Проверяю локальную базу данных PostgreSQL..."
+    sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='just1kbot'" | grep -q 1 || \
+      sudo -u postgres psql -c "CREATE USER just1kbot WITH PASSWORD 'just1kpass';" || true
+    sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='just1kbot_bot'" | grep -q 1 || \
+      sudo -u postgres psql -c "CREATE DATABASE just1kbot_bot OWNER just1kbot;" || true
+    sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE just1kbot_bot TO just1kbot;" || true
+    ok "Локальная БД PostgreSQL подготовлена."
+  fi
+}
+
+run_alembic_migrations() {
+  info "Применяю миграции базы данных Alembic..."
+  if [[ -f "$INSTALL_DIR/alembic.ini" ]]; then
+    cd "$INSTALL_DIR"
+    "$VENV_DIR/bin/alembic" upgrade head
+    ok "Миграции Alembic успешно применены."
+  else
+    warn "alembic.ini не найден в $INSTALL_DIR, пропускаем миграции."
+  fi
+}
+
+setup_systemd_service() {
+  info "Создаю службу systemd (${SERVICE_NAME})..."
+  cat > "$SERVICE_FILE" <<SERVICE
+[Unit]
+Description=just1kbot Telegram VPN Service
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=${BOT_USER}
+Group=${BOT_USER}
+WorkingDirectory=${INSTALL_DIR}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${VENV_DIR}/bin/python -m bot.main
+Restart=always
+RestartSec=5s
+LimitNOFILE=65535
+
+# Security sandbox
+ProtectSystem=full
+ProtectHome=true
+RuntimeDirectory=just1kbot
+ReadWritePaths=${INSTALL_DIR} ${APP_LOG_DIR}
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME"
+  ok "Служба systemd создана и включена."
+}
+
+setup_logrotate() {
+  cat > /etc/logrotate.d/just1kbot <<ROTATE
+${APP_LOG_FILE} {
+  daily
+  rotate 14
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+  su ${BOT_USER} ${BOT_USER}
+}
+${INSTALL_LOG} {
+  weekly
+  rotate 8
+  compress
+  delaycompress
+  missingok
+  notifempty
+  copytruncate
+  su root root
+}
+ROTATE
+  chmod 644 /etc/logrotate.d/just1kbot
+}
+
+create_symlink() {
+  mkdir -p "$(dirname "$SELF_SYMLINK")"
+  if [[ -f "$INSTALL_DIR/just1kbot.sh" ]]; then
+    chmod +x "$INSTALL_DIR/just1kbot.sh"
+    ln -sfn "$INSTALL_DIR/just1kbot.sh" "$SELF_SYMLINK"
+    ok "Создан симлинк команды: ${SELF_SYMLINK}"
+  fi
+}
+
+download_code() {
+  local ref="${1:-$REPO_BRANCH}" tmp_dir download_url src_dir
+  tmp_dir="$(mktemp -d)"
+  download_url="https://codeload.github.com/${REPO_OWNER}/${REPO_NAME}/tar.gz/${ref}"
+  info "Скачиваю код из ${REPO_URL} (${ref})..."
+  if ! curl -fsSL --connect-timeout 20 --max-time 120 --retry 3 "$download_url" -o "$tmp_dir/repo.tar.gz"; then
+    die "Не удалось скачать исходный код из GitHub!"
+  fi
+  tar -xzf "$tmp_dir/repo.tar.gz" -C "$tmp_dir"
+  src_dir="$(find "$tmp_dir" -mindepth 1 -maxdepth 1 -type d | head -n1 || true)"
+  if [[ -z "$src_dir" || ! -d "$src_dir/bot" ]]; then
+    die "Некорректная структура репозитория в архиве."
+  fi
+  printf '%s' "$src_dir"
+}
+
+deploy_code_from_dir() {
+  local src_dir="$1"
+  info "Копирую файлы в ${INSTALL_DIR}..."
+  mkdir -p "$INSTALL_DIR" "$STATE_DIR"
+  
+  # Проверяем, если скрипт запущен локально из папки проекта
+  if [[ "$src_dir" != "$INSTALL_DIR" ]]; then
+    cp -a "$src_dir/bot" "$INSTALL_DIR/"
+    cp -a "$src_dir/config" "$INSTALL_DIR/"
+    cp -a "$src_dir/database" "$INSTALL_DIR/"
+    cp -a "$src_dir/services" "$INSTALL_DIR/"
+    cp -a "$src_dir/utils" "$INSTALL_DIR/"
+    cp -a "$src_dir/alembic" "$INSTALL_DIR/"
+    [[ -f "$src_dir/alembic.ini" ]] && cp "$src_dir/alembic.ini" "$INSTALL_DIR/"
+    [[ -f "$src_dir/requirements.txt" ]] && cp "$src_dir/requirements.txt" "$INSTALL_DIR/"
+    [[ -f "$src_dir/.env.example" ]] && cp "$src_dir/.env.example" "$INSTALL_DIR/"
+    [[ -f "$src_dir/just1kbot.sh" ]] && cp "$src_dir/just1kbot.sh" "$INSTALL_DIR/"
+  fi
+
+  chown -R "$BOT_USER:$BOT_USER" "$INSTALL_DIR"
+  chmod 755 "$INSTALL_DIR"
+  ok "Файлы успешно обновлены."
+}
+
+action_install() {
+  print_line
+  info "Запуск полной установки just1kbot..."
+  print_line
+  require_root
+  ensure_service_user
+  install_system_packages
+
+  # Копируем текущий код или скачиваем из git
+  if [[ -d "$SCRIPT_DIR/bot" && -f "$SCRIPT_DIR/requirements.txt" ]]; then
+    deploy_code_from_dir "$SCRIPT_DIR"
+  else
+    local src_dir
+    src_dir="$(download_code "$REPO_BRANCH")"
+    deploy_code_from_dir "$src_dir"
+  fi
+
+  setup_venv
+  configure_env_interactively
+  setup_postgres_db_if_local
+  run_alembic_migrations
+  setup_systemd_service
+  setup_logrotate
+  create_symlink
+  persist_repo_branch
+
+  info "Запускаю службу ${SERVICE_NAME}..."
+  systemctl restart "$SERVICE_NAME"
+  sleep 2
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    print_line
+    ok "Установка успешно завершена! Бот запущен и работает."
+    print_line
+  else
+    error "Служба не смогла запуститься. Проверьте логи командой: journalctl -u ${SERVICE_NAME} -e"
+  fi
+}
+
+action_update() {
+  print_line
+  info "Обновление / Переустановка just1kbot..."
+  print_line
+  require_root
+  ensure_service_user
+
+  # Делаем snapshot / бэкап текущего года и БД
+  local backup_snapshot="${BACKUP_ROOT}/snapshot_$(date +%Y%m%d_%H%M%S)"
+  mkdir -p "$backup_snapshot"
+  if [[ -f "$ENV_FILE" ]]; then cp "$ENV_FILE" "$backup_snapshot/"; fi
+
+  local src_dir
+  if [[ -d "$SCRIPT_DIR/bot" && "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
+    info "Использую исходные файлы из ${SCRIPT_DIR}..."
+    src_dir="$SCRIPT_DIR"
+  else
+    src_dir="$(download_code "$REPO_BRANCH")"
+  fi
+
+  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+
+  deploy_code_from_dir "$src_dir"
+  setup_venv
+  run_alembic_migrations
+  setup_systemd_service
+  create_symlink
+  persist_repo_branch
+
+  systemctl restart "$SERVICE_NAME"
+  sleep 2
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    print_line
+    ok "Обновление успешно выполнено! Бот перезапущен."
+    print_line
+  else
+    error "Ошибка запуска после обновления. Проверьте логи!"
+  fi
+}
+
+action_restart() {
+  require_root
+  info "Перезапуск службы ${SERVICE_NAME}..."
+  systemctl restart "$SERVICE_NAME"
+  sleep 2
+  if systemctl is-active --quiet "$SERVICE_NAME"; then
+    ok "Служба успешно перезапущена."
+  else
+    error "Служба не активна после перезапуска."
+  fi
+}
+
+action_stop() {
+  require_root
+  info "Остановка службы ${SERVICE_NAME}..."
+  systemctl stop "$SERVICE_NAME"
+  ok "Служба остановлена."
+}
+
+action_status() {
+  print_line
+  printf '%s\n' "$(color_cyan 'СТАТУС СИСТЕМЫ JUST1KBOT')"
+  print_line
+  echo "Директория установки: ${INSTALL_DIR}"
+  echo "Служба systemd:       ${SERVICE_NAME}"
+  if service_exists; then
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+      printf 'Статус бота:          %s\n' "$(color_green 'РАБОТАЕТ (Active)')"
+    else
+      printf 'Статус бота:          %s\n' "$(color_red 'ОСТАНОВЛЕН (Inactive)')"
+    fi
+  else
+    printf 'Статус бота:          %s\n' "$(color_yellow 'НЕ УСТАНОВЛЕН')"
+  fi
+
+  echo "Текущая ветка:        ${REPO_BRANCH}"
+  local local_sha remote_info remote_sha
+  local_sha="$(get_local_sha)"
+  echo "Локальный commit:     ${local_sha:0:12:-неизвестно}"
+
+  remote_info="$(fetch_remote_commit_info)"
+  remote_sha="${remote_info%%$'\t'*}"
+  if [[ -n "$remote_sha" ]]; then
+    echo "Remote commit:        ${remote_sha:0:12}"
+    if [[ -n "$local_sha" && "$local_sha" != "$remote_sha" ]]; then
+      printf 'Доступно обновление:  %s\n' "$(color_red 'ДА (Запустите обновление)')"
+    else
+      printf 'Доступно обновление:  %s\n' "$(color_green 'НЕТ (Актуальная версия)')"
+    fi
+  fi
+  print_line
+}
+
+action_logs() {
+  if service_exists; then
+    info "Просмотр последних 100 строк логов бота (Ctrl+C для выхода)..."
+    journalctl -u "$SERVICE_NAME" -n 100 -f
+  elif [[ -f "$APP_LOG_FILE" ]]; then
+    tail -n 100 -f "$APP_LOG_FILE"
+  else
+    warn "Логи не найдены."
+  fi
+}
+
+action_edit_env() {
+  require_root
+  if [[ -f "$ENV_FILE" ]]; then
+    local editor="${EDITOR:-nano}"
+    if ! command -v "$editor" >/dev/null 2>&1; then editor="vi"; fi
+    "$editor" "$ENV_FILE"
+    confirm_explicit "Перезапустить бота для применения изменений в .env?" && action_restart || true
+  else
+    error "Файл .env не найден в ${ENV_FILE}"
+  fi
+}
+
+action_backup_db() {
+  require_root
+  mkdir -p "$BACKUP_ROOT"
+  local backup_file="${BACKUP_ROOT}/just1kbot_db_$(date +%Y%m%d_%H%M%S).sql"
+  info "Создаю бэкап базы данных PostgreSQL..."
+  if sudo -u postgres pg_dump just1kbot_bot > "$backup_file" 2>/dev/null; then
+    gzip "$backup_file"
+    ok "Бэкап создан: ${backup_file}.gz"
+  else
+    error "Не удалось создать бэкап БД!"
+  fi
+}
+
+action_diagnostics() {
+  print_line
+  info "Запуск полной диагностики системы..."
+  print_line
+  echo "Python 3:          $(command -v python3 >/dev/null && echo 'Установлен' || echo 'ОТСУТСТВУЕТ')"
+  echo "PostgreSQL:        $(systemctl is-active --quiet postgresql && echo 'Работает' || echo 'Не активен')"
+  echo "Redis:             $(systemctl is-active --quiet redis-server || systemctl is-active --quiet redis && echo 'Работает' || echo 'Не активен')"
+  echo "Папка $INSTALL_DIR: $([[ -d "$INSTALL_DIR" ]] && echo 'Существует' || echo 'Отсутствует')"
+  echo "Виртуальное venv:  $([[-d "$VENV_DIR" ]] && echo 'Создано' || echo 'Отсутствует')"
+  echo "Файл .env:         $([[-f "$ENV_FILE" ]] && echo 'Найден' || echo 'Отсутствует')"
+  echo "Alembic ini:       $([[-f "$INSTALL_DIR/alembic.ini" ]] && echo 'Найден' || echo 'Отсутствует')"
+  print_line
+}
+
+action_uninstall() {
+  require_root
+  print_line
+  printf '%s\n' "$(color_red 'ВНИМАНИЕ: ПОЛНОЕ УДАЛЕНИЕ JUST1KBOT')"
+  print_line
+  if ! confirm_explicit "Вы уверены, что хотите полностью удалить бота и службу?"; then
+    info "Удаление отменено."
+    return 0
+  fi
+
+  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+  rm -f "$SERVICE_FILE"
+  systemctl daemon-reload
+
+  rm -f "$SELF_SYMLINK"
+  rm -f /etc/logrotate.d/just1kbot
+
+  if confirm_explicit "Удалить директорию установки ${INSTALL_DIR} (включая .env и кэши)?"; then
+    rm -rf "$INSTALL_DIR"
+    ok "Директория ${INSTALL_DIR} удалена."
+  fi
+
+  ok "just1kbot успешно удален из системы."
+}
+
+show_menu() {
+  while true; do
+    clear_if_tty
+    print_line
+    printf '     %s\n' "$(color_cyan 'МЕНЮ УПРАВЛЕНИЯ JUST1KBOT')"
+    print_line
+    echo " 1)  Статус бота и служб"
+    echo " 2)  Автоматическая установка (Install)"
+    echo " 3)  Переустановить / Обновить (Update)"
+    echo " 4)  Перезапустить бота (Restart)"
+    echo " 5)  Остановить бота (Stop)"
+    echo " 6)  Просмотр логов (Logs)"
+    echo " 7)  Редактировать конфигурацию (.env)"
+    echo " 8)  Создать бэкап базы данных"
+    echo " 9)  Диагностика системы"
+    echo " 10) Удалить бота (Uninstall)"
+    echo " 0)  Выход"
+    print_line
+
+    local choice=""
+    prompt_menu_key "Выберите пункт [0-10]: " choice
+
+    case "$choice" in
+      1) action_status; pause_if_tty ;;
+      2) action_install; pause_if_tty ;;
+      3) action_update; pause_if_tty ;;
+      4) action_restart; pause_if_tty ;;
+      5) action_stop; pause_if_tty ;;
+      6) action_logs; pause_if_tty ;;
+      7) action_edit_env; pause_if_tty ;;
+      8) action_backup_db; pause_if_tty ;;
+      9) action_diagnostics; pause_if_tty ;;
+      10) action_uninstall; pause_if_tty ;;
+      0|q|Q) echo "Выход."; exit 0 ;;
+      *) warn "Неверный пункт меню."; sleep 1 ;;
+    esac
+  done
+}
+
+main() {
+  setup_logging
+  setup_tty_fd
+
+  local cmd="${1:-}"
+  case "$cmd" in
+    install) action_install ;;
+    update|reinstall) action_update ;;
+    restart) action_restart ;;
+    stop) action_stop ;;
+    status) action_status ;;
+    logs) action_logs ;;
+    edit-env) action_edit_env ;;
+    backup) action_backup_db ;;
+    diag|diagnostics) action_diagnostics ;;
+    uninstall) action_uninstall ;;
+    "")
+      if has_tty; then
+        show_menu
+      else
+        action_status
+      fi
+      ;;
+    *)
+      echo "Использование: $0 {install|update|restart|stop|status|logs|edit-env|backup|diag|uninstall}"
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
