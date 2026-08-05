@@ -55,12 +55,14 @@ def _get_no_subscription_keyboard():
     builder.adjust(1)
     return builder.as_markup()
 
+
 def _get_device_limit_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L59_1, callback_data="payment_change_tariff")
     builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L60_1, callback_data="back_to_connections")
     builder.adjust(1)
     return builder.as_markup()
+
 
 def _classify_server_error(error_msg: str) -> str:
     msg_lower = error_msg.lower()
@@ -79,6 +81,7 @@ def _classify_server_error(error_msg: str) -> str:
         return "db_error"
 
     return "unknown"
+
 
 def _get_server_error_text(error_type: str) -> str:
     mapping = {
@@ -371,7 +374,6 @@ async def enter_device_name(
             await state.clear()
             return
         except DuplicateDeviceName:
-            # P0-3: Показываем понятное сообщение при дубликате имени
             await render_hub(
                 message.bot,
                 message.chat.id,
@@ -389,21 +391,20 @@ async def enter_device_name(
             )
             await state.clear()
             return
-        except DuplicateDeviceName as e:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.DEVICE_NAME_DUPLICATE if hasattr(texts, "DEVICE_NAME_DUPLICATE") else "⚠️ Устройство с таким именем на этом сервере уже существует. Выберите другое имя.",
-                get_back_button("add_device"),
-            )
-            await state.clear()
-            return
         except DeviceCreationError as e:
+            logger.error(
+                "Device creation failed for user=%s server=%s: %s",
+                telegram_user_id,
+                server_id,
+                e,
+                exc_info=True,
+            )
             await render_hub(
                 message.bot,
                 message.chat.id,
-                str(e),
-                get_back_button("add_device"),
+                texts.ERROR_TECHNICAL_MESSAGE,
+                get_back_button("back_to_connections"),
+                parse_mode="HTML",
             )
             await state.clear()
             return
