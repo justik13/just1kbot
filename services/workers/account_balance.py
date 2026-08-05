@@ -1,5 +1,4 @@
 """Durable, retryable user notifications for credited top-ups."""
-from bot import texts
 
 import asyncio
 import logging
@@ -7,21 +6,13 @@ import logging
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 
+from bot import texts
 from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
 from bot.keyboards import get_topup_credit_keyboard, get_topup_payment_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import (
-    EntitlementEntry,
-    Payment,
-    ReferralEligibility,
-    ReferralReward,
-    TariffQuote,
-    TariffVersion,
-    User,
-)
+from database.models import Payment, TariffQuote, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
@@ -34,145 +25,14 @@ BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
 
 
-async def _referral_entitlement(
-    session,
-    *,
-    user_id: int,
-    quote_id: int,
-    entry_type: str,
-    days: int,
-) -> bool:
-    entry_id = await session.scalar(
-        insert(EntitlementEntry)
-        .values(
-            beneficiary_user_id=user_id,
-            source_type="balance_referral",
-            source_id=str(quote_id),
-            entry_type=entry_type,
-            days_delta=days,
-            hours_delta=days * 24,
-            metadata={"source_quote_id": quote_id},
-        )
-        .on_conflict_do_nothing(constraint="uq_entitlement_entries_source")
-        .returning(EntitlementEntry.id)
-    )
-    return entry_id is not None
-
-
 async def process_balance_purchase_referrals() -> int:
-    processed = 0
-    async with session_scope() as session:
-        quote_ids = list(
-            (
-                await session.scalars(
-                    select(TariffQuote.id)
-                    .where(
-                        TariffQuote.status == "consumed",
-                        TariffQuote.operation_type.in_(("purchase", "renew")),
-                        TariffQuote.referral_processed_at.is_(None),
-                    )
-                    .order_by(TariffQuote.id)
-                    .limit(BALANCE_NOTIFICATION_BATCH)
-                )
-            ).all()
-        )
-    for quote_id in quote_ids:
-        async with session_scope() as session:
-            quote = await session.scalar(
-                select(TariffQuote)
-                .where(TariffQuote.id == quote_id)
-                .with_for_update()
-            )
-            if quote is None or quote.referral_processed_at is not None:
-                continue
-            user = await session.scalar(
-                select(User).where(User.id == quote.user_id).with_for_update()
-            )
-            version = await session.get(
-                TariffVersion, quote.target_tariff_version_id
-            )
-            if (
-                user is None
-                or version is None
-                or not user.referred_by
-                or version.duration_hours < 30 * 24
-            ):
-                quote.referral_processed_at = now_utc()
-                processed += 1
-                continue
-            referrer = await session.scalar(
-                select(User)
-                .where(User.telegram_id == user.referred_by)
-                .with_for_update()
-            )
-            eligibility = await session.scalar(
-                select(ReferralEligibility)
-                .where(ReferralEligibility.referred_user_id == user.id)
-                .with_for_update()
-            )
-            if (
-                referrer is None
-                or referrer.is_deleted
-                or referrer.is_banned
-                or (eligibility and eligibility.status == "blocked")
-            ):
-                quote.referral_processed_at = now_utc()
-                processed += 1
-                continue
-            reward = await session.scalar(
-                select(ReferralReward).where(
-                    ReferralReward.source_quote_id == quote.id
-                )
-            )
-            if reward is None:
-                first = eligibility is None
-                if first:
-                    eligibility = ReferralEligibility(
-                        referred_user_id=user.id,
-                        status="claimed",
-                        source_payment_id=None,
-                        source_quote_id=quote.id,
-                        reason="first_balance_purchase_reward",
-                    )
-                    session.add(eligibility)
-                reward = ReferralReward(
-                    referred_user_id=user.id,
-                    source_payment_id=None,
-                    source_quote_id=quote.id,
-                    referrer_user_id=referrer.id,
-                    is_first=first,
-                )
-                session.add(reward)
-                await session.flush()
-            # P3-1: Новая реферальная система - бонусный баланс вместо дней
-            bonus_amount_rub = int(quote.amount_due_rub * 0.10)
+    """Deprecated compatibility hook.
 
-            if bonus_amount_rub > 0:
-                from database.repositories.account_ledger_repo import credit_manual_grant
-                from database.models import AccountLedgerEntry
-
-                # Проверяем, не начислен ли уже бонус для этой квоты
-                existing_bonus = await session.scalar(
-                    select(AccountLedgerEntry).where(
-                        AccountLedgerEntry.user_id == referrer.id,
-                        AccountLedgerEntry.entry_type == "referral_bonus",
-                        AccountLedgerEntry.metadata_.op("->>")("source_quote_id") == str(quote.id)
-                    )
-                )
-
-                if not existing_bonus:
-                    await credit_manual_grant(
-                        session,
-                        user_id=referrer.id,
-                        amount_rub=bonus_amount_rub,
-                        actor_id=None,
-                        metadata={"source_quote_id": quote.id, "referred_user_id": user.id},
-                    )
-                    logger.info("Granted %s RUB referral bonus to %s for quote %s", bonus_amount_rub, referrer.telegram_id, quote.id)
-
-            quote.referral_processed_at = now_utc()
-            processed += 1
-    return processed
+    Referral rewards are now granted transactionally by the purchase and tariff
+    change handlers through ``services.referral_bonus``. Keeping this function
+    as a no-op avoids a second worker path that could double-credit rewards.
+    """
+    return 0
 
 
 async def process_balance_purchase_notifications(bot: Bot) -> int:
@@ -185,14 +45,9 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                     TariffQuote.operation_type,
                     TariffQuote.resulting_paid_hours,
                     TariffQuote.resulting_bonus_hours,
-                    TariffVersion.duration_hours,
-                    TariffVersion.device_limit,
+                    TariffQuote.target_tariff_version_id,
                 )
                 .join(User, User.id == TariffQuote.user_id)
-                .join(
-                    TariffVersion,
-                    TariffVersion.id == TariffQuote.target_tariff_version_id,
-                )
                 .where(
                     TariffQuote.status == "consumed",
                     TariffQuote.operation_type.in_(("purchase", "renew", "change")),
@@ -202,6 +57,30 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 .limit(BALANCE_NOTIFICATION_BATCH)
             )
         ).all()
+
+        version_ids = {
+            row.target_tariff_version_id
+            for row in rows
+            if row.target_tariff_version_id is not None
+        }
+        versions = {}
+        if version_ids:
+            version_rows = (
+                await session.execute(
+                    select(
+                        TariffQuote.target_tariff_version_id,
+                        TariffQuote.id,
+                    )
+                    .where(False)
+                )
+            ).all()
+            del version_rows
+
+        # Keep the existing notification query shape below; the version data
+        # is loaded per quote in the notification transaction to avoid changing
+        # the public notification semantics in this refactor.
+        del versions
+
     delivered = 0
     for (
         quote_id,
@@ -209,19 +88,34 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
         operation_type,
         resulting_paid_hours,
         resulting_bonus_hours,
-        duration_hours,
-        device_limit,
+        target_tariff_version_id,
     ) in rows:
         try:
+            async with session_scope() as session:
+                from database.models import TariffVersion
+
+                version = await session.get(
+                    TariffVersion,
+                    target_tariff_version_id,
+                )
+            if version is None:
+                continue
+
             await global_send_limiter.acquire()
             hours = (
                 resulting_paid_hours + resulting_bonus_hours
                 if operation_type == "change"
-                else duration_hours
+                else version.duration_hours
             )
             days, remainder = divmod(hours, 24)
-            duration = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L223_1.format(value_0=days) + (
-                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L224_1.format(value_0=remainder) if remainder else ""
+            duration = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L223_1.format(
+                value_0=days
+            ) + (
+                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L224_1.format(
+                    value_0=remainder
+                )
+                if remainder
+                else ""
             )
             title = (
                 texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L227_1
@@ -230,7 +124,11 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
             )
             await bot.send_message(
                 telegram_id,
-                texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(value_0=title, value_1=duration, value_2=device_limit),
+                texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(
+                    value_0=title,
+                    value_1=duration,
+                    value_2=version.device_limit,
+                ),
                 parse_mode="HTML",
             )
         except TelegramForbiddenError:
@@ -286,12 +184,16 @@ async def process_topup_link_presentations(bot: Bot) -> int:
             ):
                 continue
             user = await session.get(User, payment.user_id)
+            if user is None:
+                continue
             chat_id = int(context.get("chat_id") or user.telegram_id)
             try:
                 await render_hub(
                     bot,
                     chat_id,
-                    texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(value_0=int(payment.amount)),
+                    texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(
+                        value_0=int(payment.amount)
+                    ),
                     get_topup_payment_keyboard(payment.payment_url, payment.id),
                 )
             except TelegramForbiddenError:
@@ -341,8 +243,10 @@ async def process_balance_notifications(bot: Bot) -> int:
                 if resume
                 else ""
             )
-            message = (
-                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(value_0=int(payment.amount), value_1=int(balance.available), value_2=suffix)
+            message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
+                value_0=int(payment.amount),
+                value_1=int(balance.available),
+                value_2=suffix,
             )
             try:
                 await global_send_limiter.acquire()
@@ -356,13 +260,17 @@ async def process_balance_notifications(bot: Bot) -> int:
                     balance.accounting_position
                     > get_settings().BALANCE_MAX_AVAILABLE_RUB
                 ):
-                    diagnostic = (
-                        texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(value_0=payment.id, value_1=telegram_id, value_2=int(balance.accounting_position))
+                    diagnostic = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(
+                        value_0=payment.id,
+                        value_1=telegram_id,
+                        value_2=int(balance.accounting_position),
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()
                         await bot.send_message(
-                            admin_id, diagnostic, parse_mode="HTML"
+                            admin_id,
+                            diagnostic,
+                            parse_mode="HTML",
                         )
             except TelegramForbiddenError:
                 await mark_user_bot_blocked(session, telegram_id)
@@ -381,7 +289,6 @@ async def account_balance_notifications_loop(
 ):
     while not shutdown_event.is_set():
         try:
-            await process_balance_purchase_referrals()
             await process_balance_purchase_notifications(bot)
             await process_topup_link_presentations(bot)
             await process_balance_notifications(bot)
@@ -391,14 +298,16 @@ async def account_balance_notifications_loop(
             logger.exception("Account balance notification loop failed")
             try:
                 await asyncio.wait_for(
-                    shutdown_event.wait(), timeout=WORKER_ERROR_SLEEP_INTERVAL
+                    shutdown_event.wait(),
+                    timeout=WORKER_ERROR_SLEEP_INTERVAL,
                 )
                 break
             except asyncio.TimeoutError:
                 continue
         try:
             await asyncio.wait_for(
-                shutdown_event.wait(), timeout=BALANCE_NOTIFICATION_INTERVAL
+                shutdown_event.wait(),
+                timeout=BALANCE_NOTIFICATION_INTERVAL,
             )
             break
         except asyncio.TimeoutError:
