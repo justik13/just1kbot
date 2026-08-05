@@ -123,8 +123,8 @@ class DeviceService:
                     VPNProfile.user_id == user.id,
                     VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
                 )
-            ).scalar_one()
-        )
+            )
+        ).scalar_one()
         if user_count >= user.device_limit:
             raise DeviceLimitExceeded("Device limit reached")
         server_count = (
@@ -133,8 +133,8 @@ class DeviceService:
                     VPNProfile.server_id == server.id,
                     VPNProfile.provisioning_status.in_(RESERVING_STATUSES),
                 )
-            ).scalar_one()
-        )
+            )
+        ).scalar_one()
         bot_peer_ids = frozenset(
             (
                 await session.execute(
