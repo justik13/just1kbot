@@ -85,6 +85,20 @@ on_error_trap() {
 }
 trap 'on_error_trap "$LINENO" "$?"' ERR
 
+cleanup_transient_install_state() {
+    # Remove tmp directory if left over
+    if [[ -d "$tmp_dir" ]]; then rm -rf "$tmp_dir"; fi
+}
+
+on_interrupt() {
+    printf '\n[!] Прервано пользователем (Ctrl+C).\n' >&2
+    cleanup_transient_install_state 2>/dev/null || true
+    # We exit if running non-interactively or if not in main menu.
+    # If in main menu, let prompt_raw handle it.
+}
+trap on_interrupt INT TERM
+
+
 require_root() {
     if [[ "${EUID}" -ne 0 ]]; then
         echo "Запустите скрипт от имени root (sudo):"
@@ -107,23 +121,30 @@ pause_if_tty() {
 
 clear_if_tty() { clear 2>/dev/null || true; }
 
+
 prompt_raw() {
     local prompt="$1" __resultvar="$2" __input=""
     printf '%s' "$prompt"
     local read_status=0
+
+    # Temporarily disable set -e for read to handle EOF / Ctrl+D / errors without exiting
+    set +e
     if [[ -c /dev/tty ]]; then
         read -r __input </dev/tty || read_status=$?
     else
         read -r __input || read_status=$?
     fi
+    set -e
+
     if [[ $read_status -ne 0 ]]; then
-        warn "Ввод прерван."
+        warn "Ввод прерван или пуст."
         return 1
     fi
     __input="${__input#"${__input%%[![:space:]]*}"}"
     __input="${__input%"${__input##*[![:space:]]}"}"
     printf -v "$__resultvar" '%s' "$__input"
 }
+
 
 prompt_with_default() {
     local prompt="$1" default="${2:-}" __resultvar="$3" input_value=""
@@ -475,11 +496,42 @@ deploy_code_from_dir() {
     ok "Файлы успешно обновлены."
 }
 
+
+check_pre_install() {
+    info "Проверка системы перед установкой..."
+    detect_install_state
+
+    local errors=0
+
+    if [[ "$STATE_PYTHON_FOUND" -eq 0 ]] && ! command -v apt-get >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1 && ! command -v yum >/dev/null 2>&1; then
+        error "Менеджер пакетов не найден, а Python 3 отсутствует."
+        errors=$((errors+1))
+    fi
+
+    local free_space
+    free_space=$(df -m / | awk 'NR==2 {print $4}' 2>/dev/null || echo 0)
+    if [[ "$free_space" -lt 500 ]]; then
+        warn "Свободного места на диске меньше 500МБ (${free_space}МБ). Возможны проблемы."
+        confirm_explicit "Продолжить установку несмотря на предупреждение?" || errors=$((errors+1))
+    fi
+
+    if ! curl -Is https://github.com | head -1 | grep -q '200\|301\|302'; then
+        error "Нет связи с GitHub. Установка невозможна."
+        errors=$((errors+1))
+    fi
+
+    if [[ $errors -gt 0 ]]; then
+        die "Проверка системы выявила критические ошибки. Установка прервана."
+    fi
+    ok "Проверка системы пройдена успешно."
+}
+
 action_install() {
     print_line
     info "Запуск полной установки just1kbot..."
     print_line
     require_root
+    check_pre_install
     ensure_service_user
     install_system_packages
 
@@ -513,7 +565,8 @@ action_install() {
     fi
 }
 
-# --- ИСПРАВЛЕНО: Добавлен бэкап БД перед миграциями ---
+
+# --- ИСПРАВЛЕНО: Добавлен бэкап БД перед миграциями и поддержка отката ---
 action_update() {
     print_line
     info "Обновление / Переустановка just1kbot..."
@@ -525,24 +578,54 @@ action_update() {
     mkdir -p "$backup_snapshot"
     if [[ -f "$ENV_FILE" ]]; then cp "$ENV_FILE" "$backup_snapshot/"; fi
 
+    # Backup code
+    if [[ -d "$INSTALL_DIR/bot" ]]; then
+        info "Создаю бэкап текущего кода перед обновлением..."
+        cp -a "$INSTALL_DIR/bot" "$backup_snapshot/"
+    fi
+
     local src_dir
     if [[ -d "$SCRIPT_DIR/bot" && "$SCRIPT_DIR" != "$INSTALL_DIR" ]]; then
         info "Использую исходные файлы из ${SCRIPT_DIR}..."
         src_dir="$SCRIPT_DIR"
     else
         src_dir="$(download_code "$REPO_BRANCH")"
+        if [[ -z "$src_dir" ]]; then
+            error "Ошибка скачивания исходного кода. Отмена обновления."
+            return 1
+        fi
     fi
 
     systemctl stop "$SERVICE_NAME" 2>/dev/null || true
 
     # Резервное копирование БД перед обновлением и миграциями
     if [[ -f "$INSTALL_DIR/alembic.ini" ]] && command -v pg_dump >/dev/null 2>&1; then
-        action_backup_db
+        action_backup_db || warn "Не удалось создать бэкап БД, но продолжаем..."
     fi
 
-    deploy_code_from_dir "$src_dir"
-    setup_venv
-    run_alembic_migrations
+
+    if ! deploy_code_from_dir "$src_dir"; then
+        error "Ошибка копирования файлов! Запуск отката..."
+        cp -a "$backup_snapshot/bot" "$INSTALL_DIR/" 2>/dev/null || true
+        systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! setup_venv; then
+        error "Ошибка настройки виртуального окружения. Откат..."
+        cp -a "$backup_snapshot/bot" "$INSTALL_DIR/" 2>/dev/null || true
+        systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        return 1
+    fi
+
+    if ! run_alembic_migrations; then
+        error "Ошибка миграции БД. Откат..."
+        cp -a "$backup_snapshot/bot" "$INSTALL_DIR/" 2>/dev/null || true
+        # DB is harder to rollback perfectly without full restore, but code rollback is better than nothing
+        systemctl start "$SERVICE_NAME" 2>/dev/null || true
+        return 1
+    fi
+
     setup_systemd_service
     create_symlink
     persist_repo_branch
@@ -555,9 +638,14 @@ action_update() {
         ok "Обновление успешно выполнено! Бот перезапущен."
         print_line
     else
-        error "Ошибка запуска после обновления. Проверьте логи!"
+        error "Ошибка запуска после обновления. Выполняем откат кода!"
+        systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+        cp -a "$backup_snapshot/bot" "$INSTALL_DIR/" 2>/dev/null || true
+        systemctl restart "$SERVICE_NAME" 2>/dev/null || true
+        warn "Сделан откат кода до предыдущей версии. Проверьте логи: journalctl -u $SERVICE_NAME -e"
     fi
 }
+
 
 action_restart() {
     require_root
@@ -652,19 +740,34 @@ action_backup_db() {
     fi
 }
 
+
 action_diagnostics() {
     print_line
     info "Запуск полной диагностики системы..."
     print_line
-    echo "Python 3: $(command -v python3 >/dev/null && echo 'Установлен' || echo 'ОТСУТСТВУЕТ')"
-    echo "PostgreSQL: $(systemctl is-active --quiet postgresql && echo 'Работает' || echo 'Не активен')"
-    echo "Redis: $(systemctl is-active --quiet redis-server || systemctl is-active --quiet redis && echo 'Работает' || echo 'Не активен')"
-    echo "Папка $INSTALL_DIR: $([[ -d "$INSTALL_DIR" ]] && echo 'Существует' || echo 'Отсутствует')"
-    echo "Виртуальное venv: $([[ -d "$VENV_DIR" ]] && echo 'Создано' || echo 'Отсутствует')"
-    echo "Файл .env: $([[ -f "$ENV_FILE" ]] && echo 'Найден' || echo 'Отсутствует')"
-    echo "Alembic ini: $([[ -f "$INSTALL_DIR/alembic.ini" ]] && echo 'Найден' || echo 'Отсутствует')"
+
+    detect_install_state
+
+    echo "[ ПАКЕТЫ ]"
+    echo "  Python 3:   $(if [[ "$STATE_PYTHON_FOUND" -eq 1 ]]; then echo "$(color_green 'Установлен')"; else echo "$(color_red 'ОТСУТСТВУЕТ')"; fi)"
+    echo "  PostgreSQL: $(if [[ "$STATE_PG_FOUND" -eq 1 ]]; then echo "$(color_green 'Работает')"; else echo "$(color_yellow 'Не активен / Отсутствует')"; fi)"
+    echo "  Redis:      $(if [[ "$STATE_REDIS_FOUND" -eq 1 ]]; then echo "$(color_green 'Работает')"; else echo "$(color_yellow 'Не активен / Отсутствует')"; fi)"
+    echo "  Git:        $(if command -v git >/dev/null; then echo "$(color_green 'Установлен')"; else echo "$(color_red 'ОТСУТСТВУЕТ')"; fi)"
+    echo "  Curl:       $(if command -v curl >/dev/null; then echo "$(color_green 'Установлен')"; else echo "$(color_red 'ОТСУТСТВУЕТ')"; fi)"
+    echo ""
+    echo "[ СИСТЕМА И СЕТЬ ]"
+    echo "  Свободное место: $(df -h / | awk 'NR==2 {print $4}' 2>/dev/null || echo 'Неизвестно')"
+    echo "  Связь с GitHub:  $(if curl -Is https://github.com | head -1 | grep -q '200\|301\|302'; then echo "$(color_green 'Доступен')"; else echo "$(color_red 'Ошибка связи')"; fi)"
+    echo "  Связь с API TG:  $(if curl -Is https://api.telegram.org | head -1 | grep -q '200\|301\|302'; then echo "$(color_green 'Доступен')"; else echo "$(color_red 'Ошибка связи (Возможно нужен прокси/VPN)')"; fi)"
+    echo ""
+    echo "[ БОТ JUST1KBOT ]"
+    echo "  Папка установки: $(if [[ -d "$INSTALL_DIR" ]]; then echo "$(color_green "Существует ($INSTALL_DIR)")"; else echo "$(color_yellow 'Отсутствует')"; fi)"
+    echo "  Файл .env:       $(if [[ -f "$ENV_FILE" ]]; then echo "$(color_green 'Найден')"; else echo "$(color_yellow 'Отсутствует')"; fi)"
+    echo "  Служба systemd:  $(if [[ -f "$SERVICE_FILE" ]]; then echo "$(color_green 'Создана')"; else echo "$(color_yellow 'Отсутствует')"; fi)"
+
     print_line
 }
+
 
 action_uninstall() {
     require_root
@@ -690,42 +793,118 @@ action_uninstall() {
     ok "just1kbot успешно удален из системы."
 }
 
+
+# --- СТАТУСЫ СИСТЕМЫ ---
+STATE_BOT_INSTALLED=0
+STATE_BOT_RUNNING=0
+STATE_BOT_RESIDUAL=0
+STATE_PYTHON_FOUND=0
+STATE_PG_FOUND=0
+STATE_REDIS_FOUND=0
+
+detect_install_state() {
+    STATE_BOT_INSTALLED=0
+    STATE_BOT_RUNNING=0
+    STATE_BOT_RESIDUAL=0
+    STATE_PYTHON_FOUND=0
+    STATE_PG_FOUND=0
+    STATE_REDIS_FOUND=0
+
+    if command -v python3 >/dev/null 2>&1; then STATE_PYTHON_FOUND=1; fi
+    if systemctl is-active --quiet postgresql 2>/dev/null || systemctl is-active --quiet postgresql-server 2>/dev/null; then STATE_PG_FOUND=1; fi
+    if systemctl is-active --quiet redis-server 2>/dev/null || systemctl is-active --quiet redis 2>/dev/null; then STATE_REDIS_FOUND=1; fi
+
+    if [[ -d "$INSTALL_DIR" ]]; then
+        STATE_BOT_RESIDUAL=1
+    fi
+    if [[ -f "$SERVICE_FILE" ]] && [[ -f "$ENV_FILE" ]]; then
+        STATE_BOT_INSTALLED=1
+        if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+            STATE_BOT_RUNNING=1
+        fi
+    fi
+}
+
+
 show_menu() {
     while true; do
+        detect_install_state
         clear_if_tty
-        print_line
-        printf '  %s\n' "$(color_cyan 'МЕНЮ УПРАВЛЕНИЯ JUST1KBOT')"
-        print_line
-        echo "  1) Статус бота и служб"
-        echo "  2) Автоматическая установка (Install)"
-        echo "  3) Переустановить / Обновить (Update)"
-        echo "  4) Перезапустить бота (Restart)"
-        echo "  5) Остановить бота (Stop)"
-        echo "  6) Просмотр логов (Logs)"
-        echo "  7) Редактировать конфигурацию (.env)"
-        echo "  8) Создать бэкап базы данных"
-        echo "  9) Диагностика системы"
-        echo " 10) Удалить бота (Uninstall)"
-        echo "  0) Выход"
-        print_line
+        printf '%s\n' "$(color_cyan '==================================================================')"
+        printf '%s\n' "$(color_cyan ' 🚀   J U S T 1 K B O T   —   У П Р А В Л Е Н И Е   Б О Т О М   🚀')"
+        printf '%s\n' "$(color_cyan '==================================================================')"
+
+        if [[ "$STATE_BOT_INSTALLED" -eq 1 ]]; then
+            printf ' 👤 Пользователь: %-10s 📂 Папка: %s\n' "root" "$INSTALL_DIR"
+            printf ' 🌿 Ветка: %-17s 🤖 Служба: %s\n' "$REPO_BRANCH" "$SERVICE_NAME"
+            printf '%s\n' "$(color_cyan '==================================================================')"
+
+            if [[ "$STATE_BOT_RUNNING" -eq 1 ]]; then
+                printf ' [ СТАТУС ] %s\n' "$(color_green '🟢 РАБОТАЕТ (Active)')"
+            else
+                printf ' [ СТАТУС ] %s\n' "$(color_red '🔴 ОСТАНОВЛЕН (Inactive)')"
+            fi
+            printf '%s\n' "$(color_cyan '==================================================================')"
+            echo ""
+            echo " [1] 🛠  Статус бота и проверка обновлений (Status)"
+            echo " [2] 🔄  Обновить / Переустановить (Update)"
+            echo " [3] ⚙️  Настройки .env (Edit Config)"
+            if [[ "$STATE_BOT_RUNNING" -eq 1 ]]; then
+                echo " [4] ♻️  Перезапустить бота (Restart)"
+                echo " [5] ⏹  Остановить бота (Stop)"
+            else
+                echo " [4] ▶️  Запустить бота (Start)"
+            fi
+            echo " [6] 📜  Логи бота (Logs)"
+            echo " [7] 💾  Сделать бэкап базы данных (Backup)"
+            echo " [8] 🩺  Диагностика системы (Diagnostics)"
+            echo " [9] 🗑  Удалить бота (Uninstall)"
+            echo ""
+            echo " [0] ❌  Выход"
+        else
+            printf ' [ СТАТУС ] %s\n' "$(color_yellow '⚪️ НЕ УСТАНОВЛЕН')"
+            printf '%s\n' "$(color_cyan '==================================================================')"
+            echo ""
+            echo " [1] 🛠  Установить бота (Полная установка с проверкой)"
+            echo " [2] 🩺  Диагностика системы (Проверка готовности)"
+            if [[ "$STATE_BOT_RESIDUAL" -eq 1 ]]; then
+                echo " [9] 🗑  Удалить остаточные файлы (Clean up)"
+            fi
+            echo ""
+            echo " [0] ❌  Выход"
+        fi
+
+
+        echo ""
         local choice=""
-        prompt_raw "Выберите пункт [0-10]: " choice
-        case "$choice" in
-            1) action_status; pause_if_tty ;;
-            2) action_install; pause_if_tty ;;
-            3) action_update; pause_if_tty ;;
-            4) action_restart; pause_if_tty ;;
-            5) action_stop; pause_if_tty ;;
-            6) action_logs; pause_if_tty ;;
-            7) action_edit_env; pause_if_tty ;;
-            8) action_backup_db; pause_if_tty ;;
-            9) action_diagnostics; pause_if_tty ;;
-            10) action_uninstall; pause_if_tty ;;
-            0|q|Q) echo "Выход."; exit 0 ;;
-            *) warn "Неверный пункт меню."; sleep 1 ;;
-        esac
+        prompt_raw "Выберите действие [0-9]: " choice || continue
+
+        if [[ "$STATE_BOT_INSTALLED" -eq 1 ]]; then
+            case "$choice" in
+                1) action_status; pause_if_tty ;;
+                2) action_update; pause_if_tty ;;
+                3) action_edit_env; pause_if_tty ;;
+                4) if [[ "$STATE_BOT_RUNNING" -eq 1 ]]; then action_restart; else systemctl start "$SERVICE_NAME"; ok "Служба запущена"; fi; pause_if_tty ;;
+                5) if [[ "$STATE_BOT_RUNNING" -eq 1 ]]; then action_stop; else warn "Неверный пункт меню."; sleep 1; fi; pause_if_tty ;;
+                6) action_logs; pause_if_tty ;;
+                7) action_backup_db; pause_if_tty ;;
+                8) action_diagnostics; pause_if_tty ;;
+                9) action_uninstall; pause_if_tty ;;
+                0|q|Q) echo "Выход."; return 0 ;;
+                *) warn "Неверный пункт меню."; sleep 1 ;;
+            esac
+        else
+            case "$choice" in
+                1) action_install; pause_if_tty ;;
+                2) action_diagnostics; pause_if_tty ;;
+                9) if [[ "$STATE_BOT_RESIDUAL" -eq 1 ]]; then action_uninstall; pause_if_tty; else warn "Неверный пункт меню."; sleep 1; fi ;;
+                0|q|Q) echo "Выход."; return 0 ;;
+                *) warn "Неверный пункт меню."; sleep 1 ;;
+            esac
+        fi
     done
 }
+
 
 main() {
     setup_tty
