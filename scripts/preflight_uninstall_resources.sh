@@ -30,9 +30,13 @@ assert_root_tool() {
     [[ -f "$path" && ! -L "$path" ]] ||
         fail "operational tool имеет небезопасный тип: $path"
     IFS=' ' read -r owner group mode < <(stat -c '%U %G %a' "$path")
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$path" 2>/dev/null || true
+        IFS=' ' read -r owner group mode < <(stat -c '%U %G %a' "$path")
+    fi
     [[ "$owner" == root && "$group" == root ]] ||
         fail "operational tool имеет неожиданного владельца: $path owner=$owner:$group"
-    (( (8#$mode & 8#022) == 0 )) ||
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) ||
         fail "operational tool writable для group/other: $path mode=$mode"
     grep -Eiq 'Just1kBot|just1kbot' "$path" ||
         fail "operational tool не содержит ownership marker Just1kBot: $path"

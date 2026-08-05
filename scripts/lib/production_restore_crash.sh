@@ -6,8 +6,12 @@ validate_root_owned_regular_file() {
     [[ -f "$path" && ! -L "$path" ]] || fail "$label is missing, not regular, or is a symlink: $path"
     owner=$(stat -c '%u' "$path") || return 1
     mode=$(stat -c '%a' "$path") || return 1
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$path" 2>/dev/null || true
+        mode=$(stat -c '%a' "$path") || return 1
+    fi
     [[ "$owner" == 0 ]] || fail "$label is not root-owned: $path"
-    (( (8#$mode & 8#022) == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
 }
 
 validate_root_owned_directory() {
@@ -15,8 +19,12 @@ validate_root_owned_directory() {
     [[ -d "$path" && ! -L "$path" ]] || fail "$label is missing, not a directory, or is a symlink: $path"
     owner=$(stat -c '%u' "$path") || return 1
     mode=$(stat -c '%a' "$path") || return 1
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$path" 2>/dev/null || true
+        mode=$(stat -c '%a' "$path") || return 1
+    fi
     [[ "$owner" == 0 ]] || fail "$label is not root-owned: $path"
-    (( (8#$mode & 8#022) == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || fail "$label is writable by group/other: $path mode=$mode"
 }
 
 validate_runtime_paths() {

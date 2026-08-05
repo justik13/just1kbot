@@ -32,6 +32,10 @@ require_safe_script(){
         exit 1
     fi
     mode=$(stat -c %a "$real")
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$real" 2>/dev/null || true
+        mode=$(stat -c %a "$real")
+    fi
     (( (8#$mode & 8#022)==0 )) || { printf 'Ошибка: script writable group/other: %s\n' "$path" >&2; exit 1; }
 }
 if [[ "${DEPLOY_FUNCTIONS_ONLY:-0}" == 1 ]]; then library="$SCRIPTS_DIR/deploy_full.sh"; require_safe_script "$library"; source "$library"; return 0 2>/dev/null || exit 0; fi

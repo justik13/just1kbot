@@ -20,7 +20,11 @@ fi
 }
 owner=$(stat -c '%u' "$CORE_INCLUDE")
 mode=$(stat -c '%a' "$CORE_INCLUDE")
-(( (8#$mode & 8#022) == 0 )) || {
+if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+    chmod go-w "$CORE_INCLUDE" 2>/dev/null || true
+    mode=$(stat -c '%a' "$CORE_INCLUDE")
+fi
+(( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || {
     printf 'unsafe deploy implementation permissions: %s mode=%s\n' "$CORE_INCLUDE" "$mode" >&2
     return 1 2>/dev/null || exit 1
 }

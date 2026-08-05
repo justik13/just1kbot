@@ -3,6 +3,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
+PYTHON_BIN=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "python3")
 
 PROJECT_DIR=${PROJECT_DIR:-/opt/just1kbot}
 ENV_FILE=${ENV_FILE:-$PROJECT_DIR/.env}
@@ -83,7 +84,7 @@ preserved_backup_looks_managed() {
 manifest_is_valid() {
     [[ -f "$MANIFEST" && ! -L "$MANIFEST" ]] || return 1
     [[ "$(stat -c '%U:%G %a' "$MANIFEST" 2>/dev/null || true)" == 'root:root 600' ]] || return 1
-    MANIFEST_PATH="$MANIFEST" EXPECTED_PROJECT_DIR="$PROJECT_DIR" python3 - <<'PY_MANIFEST' >/dev/null
+    MANIFEST_PATH="$MANIFEST" EXPECTED_PROJECT_DIR="$PROJECT_DIR" "$PYTHON_BIN" - <<'PY_MANIFEST' >/dev/null
 import json
 import os
 import re
@@ -130,7 +131,7 @@ PY_MANIFEST
 transaction_is_valid() {
     [[ -f "$TRANSACTION" && ! -L "$TRANSACTION" ]] || return 1
     [[ "$(stat -c '%U:%G %a' "$TRANSACTION" 2>/dev/null || true)" == 'root:root 600' ]] || return 1
-    TRANSACTION_PATH="$TRANSACTION" python3 - <<'PY_TRANSACTION' >/dev/null
+    TRANSACTION_PATH="$TRANSACTION" "$PYTHON_BIN" - <<'PY_TRANSACTION' >/dev/null
 import json
 import os
 from pathlib import Path
@@ -150,7 +151,15 @@ PY_TRANSACTION
 collect_evidence() {
     local label path
     while IFS=$'\t' read -r label path; do
-        path_exists "$path" && add_evidence "$label=$path" || true
+        if [[ "$label" == "project_dir" ]]; then
+            if path_exists "$path"; then
+                if [[ -f "$ENV_FILE" ]] || ! project_looks_managed; then
+                    add_evidence "$label=$path"
+                fi
+            fi
+        else
+            path_exists "$path" && add_evidence "$label=$path" || true
+        fi
     done <<EOF_EVIDENCE
 project_dir	$PROJECT_DIR
 env_file	$ENV_FILE
@@ -223,7 +232,7 @@ unsafe_path_type() {
 has_confirmed_residual_marker() {
     unit_looks_managed && return 0
     redis_unit_looks_managed && return 0
-    project_looks_managed && return 0
+    (project_looks_managed && [[ -f "$ENV_FILE" ]]) && return 0
     legacy_cli_looks_managed && return 0
     preserved_backup_looks_managed && return 0
 
@@ -355,7 +364,7 @@ print_json() {
     INSTALL_STATE_REASON_VALUE=$INSTALL_STATE_REASON \
     INSTALL_STATE_ACTION_VALUE=$INSTALL_STATE_ACTION \
     INSTALL_STATE_EVIDENCE_VALUE=$(printf '%s\n' "${INSTALL_STATE_EVIDENCE[@]}") \
-    python3 - <<'PY_JSON'
+    "$PYTHON_BIN" - <<'PY_JSON'
 import json
 import os
 

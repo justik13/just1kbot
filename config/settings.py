@@ -1,6 +1,9 @@
 import os
 import re
-import pwd
+try:
+    import pwd
+except ImportError:
+    pwd = None
 from functools import lru_cache
 from typing import List
 
@@ -14,6 +17,9 @@ _SERVICE_RUNTIME_HOME = "/run/just1kbot"
 
 def _configure_database_client_home() -> None:
     """Keep asyncpg/libpq client-file discovery inside the systemd sandbox."""
+
+    if pwd is None or not hasattr(os, "geteuid"):
+        return
 
     try:
         username = pwd.getpwuid(os.geteuid()).pw_name

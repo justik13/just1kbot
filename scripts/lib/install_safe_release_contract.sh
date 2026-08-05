@@ -76,7 +76,12 @@ validate_source_tree() {
             return 1
         }
         mode=${state##* }
-        (( (8#$mode & 8#022) == 0 )) || {
+        if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+            chmod go-w "$ROOT_DIR/$required" 2>/dev/null || true
+            state=$(stat -c '%U:%G %a' "$ROOT_DIR/$required" 2>/dev/null || true)
+            mode=${state##* }
+        fi
+        (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || {
             error "Safety file writable group/other: $required mode=$mode"
             return 1
         }

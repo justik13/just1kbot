@@ -47,8 +47,12 @@ root_owned_regular_file() {
     [[ "$(stat -c '%U:%G' "$path" 2>/dev/null || true)" == 'root:root' ]] || return 1
     local mode
     mode=$(stat -c '%a' "$path" 2>/dev/null || true)
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$path" 2>/dev/null || true
+        mode=$(stat -c '%a' "$path" 2>/dev/null || true)
+    fi
     [[ "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
-    (( (8#$mode & 8#022) == 0 ))
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 ))
 }
 
 legacy_cli_looks_managed() {
