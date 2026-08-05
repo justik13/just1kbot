@@ -106,6 +106,16 @@ class Settings(BaseSettings):
             raise ValueError("ADMIN_IDS must contain positive Telegram IDs")
         return value
 
+    @field_validator("YOOKASSA_RETURN_URL")
+    @classmethod
+    def validate_yookassa_return_url(cls, value: str) -> str:
+        value = value.strip()
+        if "{bot_username}" not in value:
+            raise ValueError(
+                "YOOKASSA_RETURN_URL must contain '{bot_username}' placeholder"
+            )
+        return value
+
     @field_validator(
         "DATABASE_URL",
         "DB_ENCRYPTION_KEY",
@@ -113,24 +123,6 @@ class Settings(BaseSettings):
         "REDIS_PASSWORD",
         "YOOKASSA_SHOP_ID",
         "YOOKASSA_SECRET_KEY",
-        "YOOKASSA_RETURN_URL",
-    )
-    @field_validator("YOOKASSA_RETURN_URL")
-    @classmethod
-    def validate_yookassa_return_url(cls, value: str) -> str:
-        # P1-6: Валидация формата URL
-        if "{bot_username}" not in value:
-            raise ValueError("YOOKASSA_RETURN_URL must contain '{bot_username}' placeholder")
-        return value
-
-    @field_validator(
-        "DB_ENCRYPTION_KEY",
-        "BOT_TOKEN",
-        "ADMIN_IDS",
-        "DATABASE_URL",
-        "YOOKASSA_SHOP_ID",
-        "YOOKASSA_SECRET_KEY",
-        "YOOKASSA_RETURN_URL",
     )
     @classmethod
     def validate_required_value(cls, value: str) -> str:
