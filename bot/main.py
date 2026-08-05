@@ -1,10 +1,10 @@
 import asyncio
 import html
 import logging
-import os
 import signal
 import traceback
 
+import aiofiles.os
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
@@ -286,7 +286,7 @@ async def main():
         settings = get_settings()
 
         # P3-2: Защита от потери backup.agekey
-        if settings.DB_ENCRYPTION_KEY and not os.path.exists(
+        if settings.DB_ENCRYPTION_KEY and not await aiofiles.os.path.exists(
             "/root/.config/just1kbot/backup.agekey"
         ):
             logger.critical(
