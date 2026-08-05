@@ -163,7 +163,7 @@ load_postgresql_library() {
     PG_ROLE=$LIVE_ROLE
     pg_prepare update
     pg_repair_env_port
-    # pg_repair_env_port may have atomically corrected a obsolete hard-coded port.
+    # pg_repair_env_port may have atomically corrected an obsolete hard-coded port.
     # Re-read the live contract before comparing it with the selected cluster.
     read_env_contract
     [[ "$PG_PORT" == "$LIVE_PORT" ]] || fail "selected PostgreSQL port $PG_PORT does not match .env port $LIVE_PORT"
@@ -198,8 +198,9 @@ assert_database_absent() {
     if database_exists "$name"; then
         fail "database already exists: $name"
         return 1
+    else
+        rc=$?
     fi
-    rc=$?
     (( rc == 1 )) || { fail "could not verify database absence: $name"; return 1; }
 }
 
