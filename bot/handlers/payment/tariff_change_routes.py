@@ -22,6 +22,7 @@ from services.account_tariff_change import (
     get_account_tariff_change_intent,
     settle_account_tariff_change,
 )
+from services.referral_bonus import grant_referral_bonus_for_purchase
 from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -58,7 +59,13 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L61_1.format(value_0=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
+    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L61_1.format(
+        value_0=days
+    ) + (
+        texts.DURATION_HOURS_SUFFIX.format(hours=remainder)
+        if remainder
+        else ""
+    )
 
 
 async def render_tariff_change_review(
@@ -77,7 +84,10 @@ async def render_tariff_change_review(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            CHANGE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L80_1),
+            CHANGE_ERRORS.get(
+                exc.code,
+                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L80_1,
+            ),
             get_back_button("payment_change_tariff"),
         )
         return
@@ -86,19 +96,30 @@ async def render_tariff_change_review(
     before = int(intent.balance.available)
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
-    text = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L90_1.format(value_0=get_tariff_display_name(intent.target_version.device_limit), value_1=intent.target_version.device_limit, value_2=_hours_text(quote.resulting_paid_hours + quote.resulting_bonus_hours), value_3=due, value_4=before, value_5=after)
+    text = texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L90_1.format(
+        value_0=get_tariff_display_name(intent.target_version.device_limit),
+        value_1=intent.target_version.device_limit,
+        value_2=_hours_text(
+            quote.resulting_paid_hours + quote.resulting_bonus_hours
+        ),
+        value_3=due,
+        value_4=before,
+        value_5=after,
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
         exact = max(int(intent.shortage), minimum)
         remainder = exact - int(intent.shortage)
         if remainder:
-            text += (
-                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L104_1.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
+            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L104_1.format(
+                value_0=int(intent.shortage),
+                value_1=minimum,
+                value_2=remainder,
             )
         else:
-            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L109_1.format(value_0=int(intent.shortage))
+            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L109_1.format(
+                value_0=int(intent.shortage)
+            )
         keyboard = get_balance_change_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -123,7 +144,10 @@ async def review_tariff_change(
     await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L133_1, show_alert=True)
+        await callback.answer(
+            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L133_1,
+            show_alert=True,
+        )
         return
     await render_tariff_change_review(callback, session, db_user, quote_id)
 
@@ -135,7 +159,10 @@ async def confirm_tariff_change(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L145_1, show_alert=False)
+    await callback.answer(
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L145_1,
+        show_alert=False,
+    )
     await state.clear()
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -156,21 +183,39 @@ async def confirm_tariff_change(
             callback.bot,
             callback.message.chat.id,
             CHANGE_ERRORS.get(
-                exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L167_1
+                exc.code,
+                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L167_1,
             ),
             get_back_button("payment_change_tariff"),
         )
         return
+
+    charged = abs(int(result.debit.amount)) if result.debit else 0
+    if charged:
+        await grant_referral_bonus_for_purchase(
+            session,
+            purchaser_user_id=db_user.id,
+            quote_id=result.quote.id,
+            purchase_amount=charged,
+        )
+
     intent = await get_account_tariff_change_intent(
         session,
         user_id=db_user.id,
         quote_public_id=quote_id,
     )
-    charged = abs(int(result.debit.amount)) if result.debit else 0
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1.format(value_0=get_tariff_display_name(intent.target_version.device_limit), value_1=_hours_text(result.quote.resulting_paid_hours + result.quote.resulting_bonus_hours), value_2=charged, value_3=int(result.balance_after.available)),
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1.format(
+            value_0=get_tariff_display_name(intent.target_version.device_limit),
+            value_1=_hours_text(
+                result.quote.resulting_paid_hours
+                + result.quote.resulting_bonus_hours
+            ),
+            value_2=charged,
+            value_3=int(result.balance_after.available),
+        ),
         get_payment_success_keyboard(),
     )
     result.quote.purchase_notified_at = (
@@ -196,7 +241,10 @@ async def topup_exact_change_shortage(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L210_1, show_alert=False)
+    await callback.answer(
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L210_1,
+        show_alert=False,
+    )
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
@@ -205,7 +253,10 @@ async def topup_exact_change_shortage(
             session, db_user, quote_id
         )
     except AccountTariffChangeError:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L219_1, show_alert=True)
+        await callback.answer(
+            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L219_1,
+            show_alert=True,
+        )
         return
     if intent.shortage <= 0:
         await render_tariff_change_review(
@@ -238,7 +289,10 @@ async def topup_custom_change_shortage(
             session, db_user, quote_id
         )
     except AccountTariffChangeError:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L252_1, show_alert=True)
+        await callback.answer(
+            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L252_1,
+            show_alert=True,
+        )
         return
     minimum = max(
         int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
@@ -250,6 +304,8 @@ async def topup_custom_change_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L264_1.format(value_0=minimum),
+        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L264_1.format(
+            value_0=minimum
+        ),
         get_back_button(f"balance_change_review:{intent.quote.public_id}"),
     )
