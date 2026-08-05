@@ -100,7 +100,7 @@ class UninstallVerificationContractTests(unittest.TestCase):
                 self.assertNotIn(forbidden, combined)
         self.assertIn("Firewall", UNINSTALL.read_text(encoding="utf-8"))
 
-    def test_purge_postgresql_is_name_manifest_and_comment_bounded(self):
+    def test_purge_postgresql_is_manifest_owner_and_marker_bounded(self):
         actions = ACTIONS.read_text(encoding="utf-8")
         ownership = OWNERSHIP.read_text(encoding="utf-8")
         self.assertIn("^just1kbot_(stg|rb|fail)_", actions)
@@ -109,12 +109,21 @@ class UninstallVerificationContractTests(unittest.TestCase):
         self.assertNotIn("DROP DATABASE postgres", actions)
         for marker in (
             "postgres_manifest_state",
-            "postgres_expected_marker",
+            "postgres_database_owner",
+            "database_owner",
             "database ownership COMMENT",
             "role ownership COMMENT",
             "installation-id=%s",
         ):
             self.assertIn(marker, ownership)
+        self.assertIn(
+            "COMMENT markers отсутствуют; ownership подтверждён manifest и database owner",
+            ownership,
+        )
+        self.assertIn(
+            "database ownership COMMENT не подтверждает manifest installation ID",
+            ownership,
+        )
 
     def test_post_verify_reports_all_managed_leftovers(self):
         actions = ACTIONS.read_text(encoding="utf-8")
