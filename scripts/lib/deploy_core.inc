@@ -6,8 +6,8 @@
 # Обновление:          sudo bash deploy.sh
 # Управление:          sudo bash deploy.sh --status|--logs|--restart|--backup
 # Проверка восстановления:
-#   sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
-#       bash deploy.sh --restore /root/backups/just1kbot/<backup>.tar.age
+#   sudo AGE_IDENTITY_FILE=/etc/just1kbot/backup.agekey \
+#       bash deploy.sh --restore /var/lib/just1kbot/backups/<backup>.tar.age
 # =============================================================================
 
 set -Eeuo pipefail
@@ -22,9 +22,9 @@ SERVICE_NAME="just1kbot"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 LOG_FILE="/var/log/just1kbot-deploy.log"
 ROLLBACK_LOG="/var/log/just1kbot-rollback.log"
-BACKUP_DIR="/root/backups/just1kbot"
+BACKUP_DIR="/var/lib/just1kbot/backups"
 BACKUP_CONF="/etc/just1kbot-backup.conf"
-BACKUP_IDENTITY="/root/.config/just1kbot/backup.agekey"
+BACKUP_IDENTITY="/etc/just1kbot/backup.agekey"
 SNAPSHOT_DIR="/var/lib/just1kbot/rollback-releases"
 HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"
 HEALTHCHECK_COMMAND="/usr/local/bin/just1kbot-healthcheck.sh"

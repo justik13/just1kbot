@@ -4,8 +4,6 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 umask 077
 
-CLI_BOOTSTRAP_ROOT=${CLI_BOOTSTRAP_ROOT:-/usr/local/libexec/just1kbot-installer}
-CLI_BOOTSTRAP_TEMP_ROOT=${CLI_BOOTSTRAP_TEMP_ROOT:-${CLI_BOOTSTRAP_ROOT}.tmp}
 CLI_BOOTSTRAP_MARKER='Managed by Just1kBot installer recovery bootstrap'
 
 install_recovery_cli_launcher() {
@@ -18,17 +16,12 @@ umask 077
 # $CLI_BOOTSTRAP_MARKER
 PRIMARY=/opt/just1kbot/deploy.sh
 PRIMARY_CONTROL=/opt/just1kbot/scripts/lib/control_plane.sh
-RECOVERY=$CLI_BOOTSTRAP_ROOT/deploy.sh
-RECOVERY_CONTROL=$CLI_BOOTSTRAP_ROOT/scripts/lib/control_plane.sh
 
 if [[ -f "\$PRIMARY" && ! -L "\$PRIMARY" && -f "\$PRIMARY_CONTROL" && ! -L "\$PRIMARY_CONTROL" ]]; then
     exec /bin/bash "\$PRIMARY" "\$@"
 fi
-if [[ -f "\$RECOVERY" && ! -L "\$RECOVERY" && -f "\$RECOVERY_CONTROL" && ! -L "\$RECOVERY_CONTROL" ]]; then
-    exec /bin/bash "\$RECOVERY" "\$@"
-fi
 
-printf 'Just1kBot control plane недоступен: основная и recovery-копия отсутствуют или повреждены.\n' >&2
+printf 'Just1kBot control plane недоступен: основная копия отсутствует или повреждена.\n' >&2
 exit 1
 EOF_CLI
 }
@@ -36,81 +29,23 @@ EOF_CLI
 stage_recovery_bundle() {
     [[ "$INITIAL_INSTALL" == true ]] || return 0
 
-    foundation_path_exists "$CLI_BOOTSTRAP_ROOT" && {
-        error "Recovery bootstrap path уже существует без активной installer transaction: $CLI_BOOTSTRAP_ROOT"
-        return 1
-    }
-    foundation_path_exists "$CLI_BOOTSTRAP_TEMP_ROOT" && {
-        error "Recovery bootstrap staging path уже существует без ownership proof: $CLI_BOOTSTRAP_TEMP_ROOT"
-        return 1
-    }
     foundation_path_exists "$CLI_PATH" && {
         error "CLI path уже существует до первичной установки без ownership proof: $CLI_PATH"
         return 1
     }
 
-    foundation_secure_parent_chain "$CLI_BOOTSTRAP_ROOT"
-    foundation_secure_parent_chain "$CLI_BOOTSTRAP_TEMP_ROOT"
-
     foundation_journal_validate || return 1
-    foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"
-    foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
     foundation_journal_add_created_resource "path:$CLI_PATH"
     foundation_journal_validate || return 1
 
-    local temporary="$CLI_BOOTSTRAP_TEMP_ROOT"
-    install -d -o root -g root -m 0750 "$temporary"
-
-    if ! cp -a -- "$ROOT_DIR/deploy.sh" "$ROOT_DIR/scripts" "$temporary/"; then
-        rm -rf -- "$temporary"
-        error 'Не удалось подготовить recovery bootstrap bundle.'
-        return 1
-    fi
-
-    if find "$temporary" -type l -print -quit | grep -q .; then
-        rm -rf -- "$temporary"
-        error 'Recovery bootstrap bundle содержит symlink; создание bootstrap отменено.'
-        return 1
-    fi
-
-    [[ -f "$temporary/deploy.sh" && -f "$temporary/scripts/lib/control_plane.sh" ]] || {
-        rm -rf -- "$temporary"
-        error 'Recovery bootstrap bundle не содержит обязательный control plane.'
-        return 1
-    }
-
-    chown -R root:root "$temporary"
-    find "$temporary" -type d -exec chmod go-w {} +
-    find "$temporary" -type f -exec chmod go-w {} +
-
-    mv -- "$temporary" "$CLI_BOOTSTRAP_ROOT"
     install_recovery_cli_launcher
 }
 
 remove_recovery_path() {
-    local path=$1
-    [[ ! -e "$path" && ! -L "$path" ]] && return 0
-    [[ -d "$path" && ! -L "$path" ]] || {
-        error "Recovery path имеет небезопасный тип: $path"
-        return 1
-    }
-    if find "$path" -type l -print -quit | grep -q .; then
-        error "Recovery path содержит symlink; автоматическое удаление заблокировано: $path"
-        return 1
-    fi
-    rm -rf --one-file-system -- "$path"
+    return 0
 }
 
 recovery_paths_safe_for_cleanup() {
-    local path
-    for path in "$CLI_BOOTSTRAP_TEMP_ROOT" "$CLI_BOOTSTRAP_ROOT"; do
-        [[ ! -e "$path" && ! -L "$path" ]] && continue
-        [[ -d "$path" && ! -L "$path" ]] || return 1
-        if find "$path" -type l -print -quit | grep -q .; then
-            return 1
-        fi
-    done
-
     if [[ -e "$CLI_PATH" || -L "$CLI_PATH" ]]; then
         if [[ -L "$CLI_PATH" ]]; then
             local target=$(readlink -f "$CLI_PATH")
@@ -121,11 +56,11 @@ recovery_paths_safe_for_cleanup() {
         fi
         [[ "$(stat -c '%U:%G %a' "$CLI_PATH" 2>/dev/null || true)" == 'root:root 750' ]] || return 1
     fi
+    return 0
 }
 
 remove_recovery_bundle() {
-    remove_recovery_path "$CLI_BOOTSTRAP_TEMP_ROOT" || return 1
-    remove_recovery_path "$CLI_BOOTSTRAP_ROOT"
+    return 0
 }
 
 remove_recovery_bootstrap() {
@@ -133,7 +68,7 @@ remove_recovery_bootstrap() {
        grep -Fq "$CLI_BOOTSTRAP_MARKER" "$CLI_PATH" 2>/dev/null; then
         rm -f -- "$CLI_PATH"
     fi
-    remove_recovery_bundle
+    return 0
 }
 
 begin_installer_transaction() {
@@ -186,7 +121,7 @@ rollback_empty_pre_manifest_journal() {
     while IFS= read -r resource; do
         [[ -n "$resource" ]] || continue
         case "$resource" in
-            "path:$CLI_BOOTSTRAP_TEMP_ROOT"|"path:$CLI_BOOTSTRAP_ROOT"|"path:$CLI_PATH") ;;
+            "path:$CLI_PATH") ;;
             *) return 1 ;;
         esac
     done <<<"$created"

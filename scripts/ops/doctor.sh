@@ -16,7 +16,7 @@ HEALTHCHECK_TIMER=just1kbot-healthcheck.timer
 BACKUP_TIMER=just1kbot-backup.timer
 HEARTBEAT_FILE=/run/just1kbot/heartbeat
 RELEASE_METADATA="$PROJECT_DIR/.release-version"
-BACKUP_DIR=/root/backups/just1kbot
+BACKUP_DIR=/var/lib/just1kbot/backups
 DEPLOY_LOCK=/run/lock/just1kbot-deploy.lock
 MAX_HEARTBEAT_AGE=180
 MAX_BACKUP_AGE=172800
@@ -132,7 +132,7 @@ check_service() {
     grep -Fq 'ProtectHome=true' <<<"$unit" && ok 'Systemd sandbox: ProtectHome=true' || fail 'ProtectHome=true отсутствует'
     grep -Fq 'Environment=HOME=/run/just1kbot' <<<"$unit" && ok 'HOME=/run/just1kbot' || fail 'Runtime HOME mismatch'
     grep -Fq 'JUST1KBOT_HEARTBEAT_FILE=/run/just1kbot/heartbeat' <<<"$unit" && ok 'Heartbeat runtime path' || fail 'Heartbeat path mismatch'
-    grep -Fq 'Requires=just1kbot-redis.service' <<<"$unit" && ok 'Dedicated Redis dependency' || fail 'Dedicated Redis dependency absent'
+    systemctl show "$SERVICE" -p Requires | grep -q just1kbot-redis.service && ok 'Dedicated Redis dependency' || fail 'Dedicated Redis dependency absent'
 }
 
 check_dedicated_redis() {
@@ -256,8 +256,8 @@ check_telegram_api() {
 check_runtime_dependencies() {
     # P3-2: Защита от потери backup.agekey
     if grep -q "^DB_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
-        if [ ! -f "/root/.config/just1kbot/backup.agekey" ]; then
-            fail 'CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /root/.config/just1kbot/backup.agekey is missing!'
+        if [ ! -f "/etc/just1kbot/backup.agekey" ]; then
+            fail 'CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /etc/just1kbot/backup.agekey is missing!'
         else
             ok 'Backup key is present'
         fi

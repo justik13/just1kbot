@@ -17,7 +17,7 @@ PROJECT_DIR=/opt/just1kbot
 ENV_FILE="$PROJECT_DIR/.env"
 BOT_USER=just1kbot
 BOT_HOME=/home/just1kbot
-CLI_PATH=/usr/local/sbin/just1kbot
+CLI_PATH=/usr/local/bin/just1kbot
 ISSUES=0
 CHANGES=0
 

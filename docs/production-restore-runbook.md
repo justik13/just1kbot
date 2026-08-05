@@ -51,9 +51,9 @@ mode `0600`, как требует strict verifier.
 Сначала всегда выполните isolated rehearsal:
 
 ```bash
-sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+sudo AGE_IDENTITY_FILE=/etc/just1kbot/backup.agekey \
   bash /opt/just1kbot/deploy.sh restore-test \
-  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
+  /var/lib/just1kbot/backups/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
 Rehearsal создаёт только `just1kbot_rehearsal_*`, проверяет данные и удаляет эту
@@ -64,9 +64,9 @@ database. Production database не переименовывается и не у
 Интерактивный запуск:
 
 ```bash
-sudo AGE_IDENTITY_FILE=/root/.config/just1kbot/backup.agekey \
+sudo AGE_IDENTITY_FILE=/etc/just1kbot/backup.agekey \
   bash /opt/just1kbot/deploy.sh restore-production \
-  /root/backups/just1kbot/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
+  /var/lib/just1kbot/backups/just1kbot-pg-v1-YYYYMMDDTHHMMSSZ.tar.age
 ```
 
 До остановки приложения staging restore и migrations уже должны успешно

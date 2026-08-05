@@ -10,8 +10,8 @@ readonly UI_SERVICE=${UI_SERVICE:-just1kbot.service}
 readonly UI_REDIS_SERVICE=${UI_REDIS_SERVICE:-just1kbot-redis.service}
 readonly UI_BOT_LOG=${UI_BOT_LOG:-/var/log/just1kbot/bot.log}
 readonly UI_INSTALL_LOG=${UI_INSTALL_LOG:-/var/log/just1kbot-deploy.log}
-readonly UI_BACKUP_DIR=${UI_BACKUP_DIR:-/root/backups/just1kbot}
-readonly UI_AGE_IDENTITY=${UI_AGE_IDENTITY:-/root/.config/just1kbot/backup.agekey}
+readonly UI_BACKUP_DIR=${UI_BACKUP_DIR:-/var/lib/just1kbot/backups}
+readonly UI_AGE_IDENTITY=${UI_AGE_IDENTITY:-/etc/just1kbot/backup.agekey}
 readonly UI_RELEASE_METADATA=${UI_RELEASE_METADATA:-$UI_PROJECT_DIR/.release-version}
 
 UI_STATE=unknown

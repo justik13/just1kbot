@@ -152,6 +152,12 @@ prepare_new_release() {
         --exclude='venv/' \
         --exclude='__pycache__/' \
         "$SOURCE_DIR/" "$PROJECT_DIR/"
+
+    # Generate .release-version file
+    {
+        printf 'created_utc=%s\n' "$(date -u +%FT%TZ)"
+        printf 'source_commit=%s\n' "$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || printf unknown)"
+    } > "$PROJECT_DIR/.release-version"
 }
 
 heartbeat_mtime() {

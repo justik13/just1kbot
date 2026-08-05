@@ -22,7 +22,7 @@ verification, restore lifecycle или manifest-driven uninstall.
   подтверждение updater сохраняется.
 - Остановка сервиса требует `STOP`.
 - Удаление старых бэкапов требует `DELETE BACKUPS` и затрагивает только обычные
-  файлы `just1kbot-pg-v1-*.tar.age` внутри `/root/backups/just1kbot`.
+  файлы `just1kbot-pg-v1-*.tar.age` внутри `/var/lib/just1kbot/backups`.
 - Полный uninstall остаётся под защитой штатной фразы `DELETE JUST1KBOT`.
 - При неподтверждённом ownership mutating-пункты не показываются.
 

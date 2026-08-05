@@ -172,15 +172,15 @@ purge_saved() {
 
     local path
     for path in \
-        /root/backups/just1kbot \
+        /var/lib/just1kbot/backups \
         /var/lib/just1kbot/rollback-releases \
         /var/lib/just1kbot/restore-transactions \
         /var/lib/just1kbot/source-releases; do
         remove_owned_tree "$path"
     done
     remove_owned_file /etc/just1kbot-backup.conf
-    remove_owned_file /root/.config/just1kbot/backup.agekey
-    rmdir /root/.config/just1kbot 2>/dev/null || true
+    remove_owned_file /etc/just1kbot/backup.agekey
+    rmdir /etc/just1kbot 2>/dev/null || true
 }
 
 remove_user() {
