@@ -49,9 +49,10 @@ BACKUP_ROOT="${INSTALL_DIR}/backups"
 
 setup_tty() {
   if [[ ! -t 0 ]] && [[ -c /dev/tty ]]; then
-    exec </dev/tty
+    exec </dev/tty 2>/dev/null || true
   fi
 }
+setup_tty
 
 log_to_file() {
   local msg="$1"
@@ -92,14 +93,12 @@ require_root() {
 }
 
 pause_if_tty() {
-  if [[ -t 0 ]]; then
-    printf '\nНажмите Enter, чтобы продолжить...'
-    read -r _dummy || true
-    printf '\n'
-  fi
+  printf '\nНажмите Enter, чтобы продолжить...'
+  read -r _dummy 2>/dev/null || true
+  printf '\n'
 }
 
-clear_if_tty() { [[ -t 0 ]] && clear || true; }
+clear_if_tty() { clear 2>/dev/null || true; }
 
 prompt_raw() {
   local prompt="$1" __resultvar="$2" __input=""
