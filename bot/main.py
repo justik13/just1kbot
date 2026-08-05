@@ -284,9 +284,9 @@ async def main():
         settings = get_settings()
 
         # P3-2: Защита от потери backup.agekey
-        import os
         from aiogram import Bot
-        if settings.DB_ENCRYPTION_KEY and not os.path.exists("/root/.config/just1kbot/backup.agekey"):
+        from pathlib import Path
+        if settings.DB_ENCRYPTION_KEY and not Path("/root/.config/just1kbot/backup.agekey").exists():
             logger.critical("CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /root/.config/just1kbot/backup.agekey is missing!")
             if settings.ADMIN_IDS:
                 try:

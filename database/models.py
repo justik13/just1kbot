@@ -1127,4 +1127,3 @@ class HubMessage(Base):
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-from database.outbox_models import OutboxNotification

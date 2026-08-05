@@ -27,7 +27,6 @@ from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub
-from services.subscription import SubscriptionService
 
 
 logger = logging.getLogger("AccountBalanceNotifications")

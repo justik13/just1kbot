@@ -307,7 +307,6 @@ class SubscriptionService:
                 f"Cannot downgrade: {profiles_count} devices > "
                 f"{device_limit} limit. User must delete devices first."
             )
-        old_device_limit = user.device_limit or 0
         user.subscription_end = subscription_end
         user.device_limit = device_limit
         user.current_tariff_id = tariff_id
