@@ -213,11 +213,7 @@ async def open_payment_dispute(
     )
     session.add(dispute)
     await session.flush()
-    user = await session.scalar(
-        select(User).where(User.id == payment.user_id).with_for_update()
-    )
-    user.financial_hold = True
-    user.financial_block_reason = "open_payment_dispute"
+    await refresh_user_dispute_hold(session, user_id=payment.user_id)
     payment.reconciliation_status = "manual_review"
     payment.manual_review_reason = "payment_dispute_open"
     session.add(
