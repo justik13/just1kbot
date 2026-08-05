@@ -55,9 +55,19 @@ prepare_postgres() {
         fail 'PostgreSQL role ownership отсутствует в manifest'
 }
 
+postgres_database_owner_by_name() {
+    local database=$1
+    pg_admin_psql_on_port "$PG_PORT" -v db="$database" -At <<'SQL'
+SELECT COALESCE(r.rolname, '')
+FROM pg_database AS d
+LEFT JOIN pg_roles AS r ON r.oid = d.datdba
+WHERE d.datname = :'db';
+SQL
+}
+
 purge_postgres() {
     [[ "$MODE" == purge ]] || return 0
-    local databases database
+    local databases database owner
     databases=$(pg_admin_psql_on_port "$PG_PORT" -v main="$PG_DATABASE" <<'SQL'
 SELECT datname
 FROM pg_database
@@ -71,6 +81,16 @@ SQL
         [[ -n "$database" ]] || continue
         [[ "$database" == "$PG_DATABASE" || "$database" =~ ^just1kbot_(stg|rb|fail)_[0-9]{14}_[0-9]+$ ]] ||
             fail 'unexpected database name' "$database"
+
+        if [[ "$database" != "$PG_DATABASE" ]]; then
+            owner=$(postgres_database_owner_by_name "$database") ||
+                fail 'не удалось определить owner остаточной PostgreSQL database' "$database"
+            [[ "$owner" == "$PG_ROLE" ]] ||
+                fail 'остаточная PostgreSQL database имеет неожиданного owner' \
+                    "database=$database owner=${owner:-empty} expected=$PG_ROLE" \
+                    'Удаление остановлено, чтобы не удалить чужую database с похожим именем.'
+        fi
+
         pg_admin_psql_on_port "$PG_PORT" -v db="$database" >/dev/null <<'SQL'
 SELECT pg_terminate_backend(pid)
 FROM pg_stat_activity
