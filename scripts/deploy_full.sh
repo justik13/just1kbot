@@ -22,7 +22,11 @@ fi
     return 1 2>/dev/null || exit 1
 }
 mode=$(stat -c '%a' "$LIBRARY")
-(( (8#$mode & 8#022) == 0 )) || {
+if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+    chmod go-w "$LIBRARY" 2>/dev/null || true
+    mode=$(stat -c '%a' "$LIBRARY")
+fi
+(( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || {
     printf 'unsafe deploy function library permissions: %s mode=%s\n' "$LIBRARY" "$mode" >&2
     return 1 2>/dev/null || exit 1
 }

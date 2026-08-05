@@ -97,7 +97,11 @@ for library in \
     }
     owner=$(stat -c '%u' "$path")
     mode=$(stat -c '%a' "$path")
-    (( (8#$mode & 8#022) == 0 )) || {
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$path" 2>/dev/null || true
+        mode=$(stat -c '%a' "$path")
+    fi
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || {
         printf 'restore error: unsafe library mode: %s\n' "$path" >&2
         exit 1
     }

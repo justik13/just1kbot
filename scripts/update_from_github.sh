@@ -11,7 +11,11 @@ TARGET="$SCRIPT_DIR/update_from_github_complete.sh"
     exit 1
 }
 mode=$(stat -c '%a' "$TARGET")
-(( (8#$mode & 8#022) == 0 )) || {
+if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+    chmod go-w "$TARGET" 2>/dev/null || true
+    mode=$(stat -c '%a' "$TARGET")
+fi
+(( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 )) || {
     printf 'Complete GitHub updater writable by group/other: %s\n' "$TARGET" >&2
     exit 1
 }

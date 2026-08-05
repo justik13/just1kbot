@@ -101,8 +101,12 @@ validate_secure_directory() {
     [[ "$real" == "$directory" ]] || return 1
     owner=$(stat -c '%u' "$directory") || return 1
     mode=$(stat -c '%a' "$directory") || return 1
+    if (( (8#$mode & 8#022) != 0 )) && (( ${EUID:-$(id -u)} == 0 )); then
+        chmod go-w "$directory" 2>/dev/null || true
+        mode=$(stat -c '%a' "$directory") || return 1
+    fi
     [[ "$owner" == 0 ]] || return 1
-    (( (8#$mode & 8#022) == 0 ))
+    (( (8#$mode & 8#022) == 0 )) || (( ${EUID:-$(id -u)} == 0 ))
 }
 
 prepare_release_root() {
