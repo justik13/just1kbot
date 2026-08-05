@@ -12,7 +12,7 @@ install_recovery_cli_launcher() {
     foundation_atomic_write "$CLI_PATH" root root 0750 <<EOF_CLI
 #!/bin/bash
 set -Eeuo pipefail
-IFS=\$'\\n\\t'
+IFS=\$'\n\t'
 umask 077
 
 # $CLI_BOOTSTRAP_MARKER
@@ -28,7 +28,7 @@ if [[ -f "\$RECOVERY" && ! -L "\$RECOVERY" && -f "\$RECOVERY_CONTROL" && ! -L "\
     exec /bin/bash "\$RECOVERY" "\$@"
 fi
 
-printf 'Just1kBot control plane недоступен: основная и recovery-копия отсутствуют или повреждены.\\n' >&2
+printf 'Just1kBot control plane недоступен: основная и recovery-копия отсутствуют или повреждены.\n' >&2
 exit 1
 EOF_CLI
 }
@@ -52,9 +52,6 @@ stage_recovery_bundle() {
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_ROOT"
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_TEMP_ROOT"
 
-    # Claim every recovery-owned path in the durable journal before creating
-    # the staging directory or publishing the live bootstrap. A crash at any
-    # point in bundle preparation therefore leaves only journal-known paths.
     foundation_journal_validate || return 1
     foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"
     foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
@@ -115,8 +112,13 @@ recovery_paths_safe_for_cleanup() {
     done
 
     if [[ -e "$CLI_PATH" || -L "$CLI_PATH" ]]; then
-        [[ -f "$CLI_PATH" && ! -L "$CLI_PATH" ]] || return 1
-        grep -Fq "$CLI_BOOTSTRAP_MARKER" "$CLI_PATH" 2>/dev/null || return 1
+        if [[ -L "$CLI_PATH" ]]; then
+            local target=$(readlink -f "$CLI_PATH")
+            [[ "$target" == "$PROJECT_DIR"* ]] || return 1
+        else
+            [[ -f "$CLI_PATH" ]] || return 1
+            grep -Fq "$CLI_BOOTSTRAP_MARKER" "$CLI_PATH" 2>/dev/null || return 1
+        fi
         [[ "$(stat -c '%U:%G %a' "$CLI_PATH" 2>/dev/null || true)" == 'root:root 750' ]] || return 1
     fi
 }
@@ -143,8 +145,6 @@ begin_installer_transaction() {
         return 1
     fi
     foundation_journal_begin "$operation" preflight
-    # Recovery control plane is available before apt and every later mutation.
-    # It is tracked in the durable journal and cleaned after success/rollback.
     stage_recovery_bundle
 }
 
@@ -155,6 +155,9 @@ activate_release_bundle() {
     installer_failpoint after-dedicated-redis || return $?
 
     install_backup_tooling
+    # The healthcheck definition itself is a managed resource and does not
+    # execute until its timer is active. Create it here to preserve the
+    # deterministic transaction ordering expected by rollback tests.
     install_healthcheck
     setup_logrotate
     installer_failpoint after-operational-tooling || return $?
@@ -170,8 +173,6 @@ activate_release_bundle() {
     installer_failpoint after-systemd || return $?
 
     foundation_install_cli
-    # foundation_install_cli is the normal successful-install path; keep the
-    # recovery fallback until the whole transaction has passed readiness.
     install_recovery_cli_launcher
     installer_failpoint after-cli || return $?
 }

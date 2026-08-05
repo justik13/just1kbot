@@ -230,19 +230,61 @@ check_backup() {
     fi
 }
 
+check_telegram_api() {
+    # Pre-flight reachability check for api.telegram.org via curl.
+    # Gives a clear "Telegram API blocked/unreachable" message instead of
+    # hiding the root cause behind "secrets redacted" in the Python check.
+    if ! command -v curl >/dev/null 2>&1; then
+        warn 'curl не установлен; пропуск pre-flight проверки Telegram API'
+        return
+    fi
+    local http_code
+    http_code=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+        --max-time 10 --connect-timeout 5 \
+        'https://api.telegram.org/' 2>/dev/null || printf '000')
+    if [[ "$http_code" == '000' ]]; then
+        fail 'Telegram API unreachable: api.telegram.org (timeout/DNS/network). Проверьте провайдера, DNS, прокси или файрвол.'
+        return
+    fi
+    if [[ "$http_code" == '200' || "$http_code" == '404' || "$http_code" == '301' || "$http_code" == '302' ]]; then
+        ok "Telegram API reachable (HTTP $http_code)"
+    else
+        warn "Telegram API returned HTTP $http_code — может быть временная проблема на стороне Telegram"
+    fi
+}
+
 check_runtime_dependencies() {
+    # P3-2: Защита от потери backup.agekey
+    if grep -q "^DB_ENCRYPTION_KEY=" "$ENV_FILE" 2>/dev/null; then
+        if [ ! -f "/root/.config/just1kbot/backup.agekey" ]; then
+            fail 'CRITICAL WARNING: DB_ENCRYPTION_KEY is present but /root/.config/just1kbot/backup.agekey is missing!'
+        else
+            ok 'Backup key is present'
+        fi
+    fi
+
     [[ -x "$VENV_DIR/bin/python" ]] || {
         fail 'Virtualenv Python отсутствует'
         return
     }
+    [[ -d "$PROJECT_DIR" ]] || {
+        fail 'Project directory отсутствует: $PROJECT_DIR'
+        return
+    }
 
-    if ! timeout --signal=TERM --kill-after=5s 30s \
+    # CRITICAL: cd into project directory before runuser so that pydantic-settings
+    # finds .env in the correct location. Without this, Python searches the
+    # caller's CWD (e.g. /root), causing PermissionError for just1kbot user.
+    cd "$PROJECT_DIR" || { fail "Project dir missing: $PROJECT_DIR"; return; }
+
+    if ! timeout --signal=TERM --kill-after=5s 45s \
         runuser -u just1kbot -- env \
         HOME=/run/just1kbot \
         PYTHONPATH="$PROJECT_DIR" \
         PYTHONDONTWRITEBYTECODE=1 \
         "$VENV_DIR/bin/python" - <<'PY_RUNTIME'
 import asyncio
+import sys
 
 from aiogram import Bot
 from alembic.config import Config
@@ -283,16 +325,28 @@ async def check():
                 raise RuntimeError("database revision mismatch")
         if not await redis_client.ping():
             raise RuntimeError("redis ping false")
-        me = await bot.get_me()
-        if not me.id:
-            raise RuntimeError("Telegram get_me invalid")
+
+        # Retry Telegram API with 3 attempts and backoff
+        last_error = None
+        for attempt in range(3):
+            try:
+                me = await asyncio.wait_for(bot.get_me(), timeout=10)
+                if not me.id:
+                    raise RuntimeError("Telegram get_me invalid")
+                break
+            except (asyncio.TimeoutError, Exception) as exc:
+                last_error = exc
+                if attempt < 2:
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                raise last_error
     finally:
         await redis_client.aclose()
         await bot.session.close()
         await engine.dispose()
 
 
-asyncio.run(asyncio.wait_for(check(), timeout=25))
+asyncio.run(asyncio.wait_for(check(), timeout=35))
 PY_RUNTIME
     then
         fail 'Runtime dependency check failed (secrets redacted)'
@@ -322,6 +376,7 @@ main() {
     check_release_metadata
     check_timers
     check_backup
+    check_telegram_api
     check_runtime_dependencies
     check_nginx
     printf '\nDoctor result: failures=%s warnings=%s mode=%s\n' "$FAILURES" "$WARNINGS" "$MODE"

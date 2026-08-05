@@ -56,7 +56,8 @@ def _get_grace_deletion_time(user: User):
     if not user.subscription_end:
         return None
 
-    if user.subscription_end.year >= 2100:
+    from utils.datetime_helpers import is_permanent_subscription
+    if is_permanent_subscription(user.subscription_end):
         return None
 
     return user.subscription_end + timedelta(

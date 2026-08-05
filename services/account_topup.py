@@ -136,7 +136,7 @@ async def create_balance_topup(
         await session.scalar(
             select(func.count(Payment.id)).where(
                 Payment.user_id == user.id,
-                    Payment.credited_at.is_(None),
+                Payment.credited_at.is_(None),
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
         )
@@ -150,7 +150,7 @@ async def create_balance_topup(
         await session.scalar(
             select(func.count(Payment.id)).where(
                 Payment.user_id == user.id,
-                    Payment.created_at >= created_since,
+                Payment.created_at >= created_since,
             )
         )
         or 0
@@ -208,10 +208,7 @@ async def hide_balance_topup(
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
-    if (
-        payment is None
-        or payment.user_id != user_id
-    ):
+    if payment is None or payment.user_id != user_id:
         raise AccountTopupError("topup_not_found")
     await lock_checkout_user(session, user_id)
     if payment.provider_status in {"succeeded", "canceled", "refunded"}:
@@ -240,6 +237,35 @@ async def settle_succeeded_topup(
     """Credit a verified top-up and close its non-subscription lifecycle."""
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
+
+    user = await lock_checkout_user(session, payment.user_id)
+    if user is not None:
+        # Hard top-up blocks must never be bypassed. A chargeback debt hold is
+        # intentionally recoverable: the user needs to top up in order to settle
+        # the debt that caused the hold.
+        hard_block = user.topup_blocked
+        recovery_topup = (
+            user.financial_hold
+            and user.financial_block_reason == "chargeback_debt"
+        )
+        if hard_block or (user.financial_hold and not recovery_topup):
+            payment.fulfillment_status = "manual_review"
+            payment.reconciliation_status = "manual_review"
+            payment.manual_review_reason = "user_financially_blocked"
+            session.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="topup_blocked_by_hold",
+                    provider_status=payment.provider_status,
+                    reason="user_financially_blocked",
+                    source=source,
+                )
+            )
+            await session.flush()
+            return False, await get_account_balance(
+                session, user_id=payment.user_id
+            )
+
     entry, created = await credit_succeeded_topup(
         session,
         locked_payment=payment,
@@ -311,6 +337,18 @@ async def request_topup_status_refresh(
     )
     if payment is None:
         raise AccountTopupError("topup_not_found")
+    user = await lock_checkout_user(session, payment.user_id)
+    if user is not None:
+        recovery_topup = (
+            user.financial_hold
+            and user.financial_block_reason == "chargeback_debt"
+        )
+        if user.topup_blocked or (user.financial_hold and not recovery_topup):
+            payment.fulfillment_status = "manual_review"
+            payment.reconciliation_status = "manual_review"
+            payment.manual_review_reason = "user_financially_blocked"
+            return payment
+
     if payment.external_id and payment.provider_status not in {
         "refunded",
         "canceled",
@@ -327,7 +365,8 @@ async def request_topup_status_refresh(
     if (
         payment.provider_status == "succeeded"
         and payment.provider_confirmed_at is not None
-        and payment.fulfillment_status not in {"succeeded", "reversed", "manual_review"}
+        and payment.fulfillment_status
+        not in {"succeeded", "reversed", "manual_review"}
     ):
         await settle_succeeded_topup(
             session,

@@ -126,7 +126,6 @@ class User(Base):
     )
 
     referred_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
-    referral_days: Mapped[int] = mapped_column(Integer, default=0)
 
     last_payment_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -365,9 +364,6 @@ class TariffQuote(Base):
     source_entitlement_entry_ids: Mapped[list | None] = mapped_column(JSONB)
     source_ledger_entry_ids: Mapped[list | None] = mapped_column(JSONB)
     purchase_notified_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
-    referral_processed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
 
@@ -872,50 +868,6 @@ class PaymentRefund(Base):
     event_key: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class ReferralReward(Base):
-    __tablename__ = "referral_rewards"
-    __table_args__ = (
-        CheckConstraint(
-            "(source_payment_id IS NOT NULL) <> (source_quote_id IS NOT NULL)",
-            name="ck_referral_rewards_one_source",
-        ),
-    )
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
-    source_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, unique=True)
-    source_quote_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"),
-        nullable=True,
-        unique=True,
-    )
-    referrer_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    is_first: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
-class ReferralEligibility(Base):
-    __tablename__ = "referral_eligibilities"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('claimed','blocked')",
-            name="ck_referral_eligibilities_status",
-        ),
-        CheckConstraint(
-            "source_payment_id IS NULL OR source_quote_id IS NULL",
-            name="ck_referral_eligibilities_one_source",
-        ),
-    )
-    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id",ondelete="RESTRICT"),primary_key=True)
-    status: Mapped[str] = mapped_column(String(20),nullable=False)
-    source_payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id",ondelete="RESTRICT"))
-    source_quote_id: Mapped[int | None] = mapped_column(
-        ForeignKey("tariff_quotes.id", ondelete="RESTRICT")
-    )
-    reason: Mapped[str | None] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=now_utc)
 
 
 class PaymentEvent(Base):

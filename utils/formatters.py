@@ -55,7 +55,6 @@ def format_user_card_text(
         devices_count=len(profiles),
         device_limit=user.device_limit,
         referrals_count=len(referrals),
-        referral_days=user.referral_days,
         created_at=format_datetime(user.created_at),
     )
 

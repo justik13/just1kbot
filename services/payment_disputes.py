@@ -74,6 +74,10 @@ async def refresh_user_dispute_hold(session, *, user_id: int) -> None:
     )
     if user is None:
         return
+
+    previous_hold = user.financial_hold
+    previous_reason = user.financial_block_reason
+
     active = bool(
         await session.scalar(
             select(PaymentDispute.id).where(
@@ -92,6 +96,15 @@ async def refresh_user_dispute_hold(session, *, user_id: int) -> None:
     elif user.financial_block_reason in DISPUTE_HOLD_REASONS:
         user.financial_hold = False
         user.financial_block_reason = None
+
+    hold_changed = (
+        previous_hold != user.financial_hold
+        or previous_reason != user.financial_block_reason
+    )
+    if hold_changed:
+        from services.subscription import SubscriptionService
+
+        await SubscriptionService._sync_access_state(session, user)
 
 
 async def open_payment_dispute(
@@ -200,11 +213,7 @@ async def open_payment_dispute(
     )
     session.add(dispute)
     await session.flush()
-    user = await session.scalar(
-        select(User).where(User.id == payment.user_id).with_for_update()
-    )
-    user.financial_hold = True
-    user.financial_block_reason = "open_payment_dispute"
+    await refresh_user_dispute_hold(session, user_id=payment.user_id)
     payment.reconciliation_status = "manual_review"
     payment.manual_review_reason = "payment_dispute_open"
     session.add(

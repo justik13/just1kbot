@@ -54,7 +54,8 @@ def _format_time_left(subscription_end) -> str:
     if not subscription_end:
         return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L55_1
 
-    if subscription_end.year >= 2100:
+    from utils.datetime_helpers import is_permanent_subscription
+    if is_permanent_subscription(subscription_end):
         return texts.ADMIN_SUB_PERMANENT_LABEL
 
     current_time = now_utc()

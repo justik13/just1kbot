@@ -195,9 +195,12 @@ async def admin_sub_apply_reduce(
     await callback.answer(show_alert=False)
 
     try:
-        user = await get_user_by_telegram_id(
-            session,
-            telegram_id,
+        from database.models import User
+        from sqlalchemy import select
+        user = await session.scalar(
+            select(User)
+            .where(User.telegram_id == telegram_id, User.is_deleted.is_(False))
+            .with_for_update()
         )
 
         if not user or not user.subscription_end:

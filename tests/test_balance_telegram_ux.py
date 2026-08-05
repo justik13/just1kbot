@@ -12,7 +12,7 @@ from bot.keyboards.payment import (
     get_topup_payment_keyboard,
     get_topup_waiting_keyboard,
 )
-from bot.texts_data.user_texts import TEXTS
+from bot.texts import get_text
 from database.models import Payment
 
 
@@ -88,7 +88,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
 
     def test_main_and_profile_templates_require_visible_balance(self):
         for key in ("HUB_HEADER", "PROFILE_TEXT_ACTIVE", "PROFILE_TEXT_INACTIVE"):
-            self.assertIn("{balance}", TEXTS[key])
+            self.assertIn("{balance}", get_text(key))
 
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
@@ -108,7 +108,9 @@ class BalanceTelegramUXTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertNotIn("yookassa_routes", router_source)
         self.assertNotIn("pay_yookassa:", keyboard_source)
-        self.assertFalse((Path(__file__).parents[1] / "services" / "payment_service").exists())
+        self.assertFalse(
+            (Path(__file__).parents[1] / "services" / "payment_service").exists()
+        )
 
 
 if __name__ == "__main__":

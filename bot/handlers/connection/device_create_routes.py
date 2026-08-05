@@ -18,9 +18,11 @@ from database.repositories.servers_repo import (
 )
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
+    DeviceCreationError,
     DailyLimitExceeded,
     DeviceLimitExceeded,
     DeviceService,
+    DuplicateDeviceName,
     InvalidConfig,
     NoActiveSubscription,
     ServerUnavailable,
@@ -371,12 +373,38 @@ async def enter_device_name(
             )
             await state.clear()
             return
+        except DuplicateDeviceName:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.DEVICE_NAME_DUPLICATE,
+                get_back_button("add_device"),
+            )
+            await state.clear()
+            return
         except InvalidConfig:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_API_CREATE_FAILED,
                 get_back_button("back_to_connections"),
+            )
+            await state.clear()
+            return
+        except DeviceCreationError as e:
+            logger.error(
+                "Device creation failed for user=%s server=%s: %s",
+                telegram_user_id,
+                server_id,
+                e,
+                exc_info=True,
+            )
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_TECHNICAL_MESSAGE,
+                get_back_button("back_to_connections"),
+                parse_mode="HTML",
             )
             await state.clear()
             return

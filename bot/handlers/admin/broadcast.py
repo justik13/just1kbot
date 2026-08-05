@@ -113,7 +113,9 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L116_1.format(value_0=TELEGRAM_MESSAGE_LIMIT),
+            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L116_1.format(
+                value_0=TELEGRAM_MESSAGE_LIMIT
+            ),
             get_back_button("admin_menu"),
         )
         return
@@ -121,7 +123,9 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L125_1.format(value_0=TELEGRAM_CAPTION_LIMIT),
+            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L125_1.format(
+                value_0=TELEGRAM_CAPTION_LIMIT
+            ),
             get_back_button("admin_menu"),
         )
         return
@@ -253,10 +257,6 @@ async def _get_next_batch(
     return [(row[0], row[1]) for row in result.all()]
 
 
-# ──────────────────────────────────────────────────────────────
-# ИСПРАВЛЕНО: добавлен except Exception вокруг основного цикла.
-# При неожиданной ошибке broadcast → status = "stopped" + алерт.
-# ──────────────────────────────────────────────────────────────
 async def _send_broadcast_to_users_with_resume(
     bot,
     progress_id: int,
@@ -309,6 +309,11 @@ async def _send_broadcast_to_users_with_resume(
         local_fail = 0
 
         while True:
+            async with session_scope() as session:
+                progress = await session.get(BroadcastProgress, progress_id)
+                if not progress or progress.status != "in_progress":
+                    break
+
             if stop_event and stop_event.is_set():
                 break
 
@@ -390,7 +395,6 @@ async def _send_broadcast_to_users_with_resume(
                     await session.commit()
                     final_progress = progress
 
-    # ── ДОБАВЛЕНО: ловим неожиданные ошибки ──
     except Exception as e:
         logger.error(
             "Broadcast unexpected error (progress_id=%s): %s",
@@ -414,16 +418,21 @@ async def _send_broadcast_to_users_with_resume(
                 progress_id,
                 inner_e,
             )
-        # Алерт админу
         try:
             await bot.send_message(
                 admin_id,
-                texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L423_1.format(value_0=html.escape(type(e).__name__ + ': ' + str(e)[:200])),
+                texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L423_1.format(
+                    value_0=html.escape(
+                        type(e).__name__ + ": " + str(e)[:200]
+                    )
+                ),
                 parse_mode="HTML",
             )
         except Exception as alert_err:
             logger.warning(
-                "Failed to send crash alert to admin %s: %s", admin_id, alert_err
+                "Failed to send crash alert to admin %s: %s",
+                admin_id,
+                alert_err,
             )
 
     finally:
@@ -433,7 +442,10 @@ async def _send_broadcast_to_users_with_resume(
         _cleanup_stop_event(admin_id)
 
         if blocked_user_ids:
-            logger.info("Marking %d users as bot_blocked (bulk)", len(blocked_user_ids))
+            logger.info(
+                "Marking %d users as bot_blocked (bulk)",
+                len(blocked_user_ids),
+            )
             try:
                 async with session_scope() as session:
                     await session.execute(
@@ -616,7 +628,6 @@ async def _start_broadcast_process(
         await state.clear()
         return
 
-    progress_id = None
     async with session_scope() as sess:
         progress = BroadcastProgress(
             admin_id=admin_id,
@@ -625,7 +636,11 @@ async def _start_broadcast_process(
             broadcast_text=broadcast_text,
             media_id=media_id,
             content_type=content_type,
-            label=texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1 if audience == "all" else texts.BROADCAST_ACTIVE_LABEL,
+            label=(
+                texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1
+                if audience == "all"
+                else texts.BROADCAST_ACTIVE_LABEL
+            ),
             status="in_progress",
         )
         sess.add(progress)
@@ -703,8 +718,12 @@ async def stop_broadcast(callback: CallbackQuery):
         return
     admin_id = callback.from_user.id
     if admin_id not in _broadcast_in_progress:
-        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L709_1, show_alert=True)
+        await callback.answer(
+            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L709_1,
+            show_alert=True,
+        )
         return
+
     try:
         async with session_scope() as session:
             await session.execute(
@@ -715,13 +734,23 @@ async def stop_broadcast(callback: CallbackQuery):
                 )
                 .values(status="stopping")
             )
+            await session.commit()
     except Exception as e:
         logger.error(
-            "Failed to set broadcast status to stopping: %s",
+            "Failed to persist broadcast stop request: %s",
             e,
+            exc_info=True,
         )
-    stop_event = _get_stop_event(admin_id)
-    stop_event.set()
+        await callback.answer(
+            texts.ERROR_TECHNICAL_ALERT,
+            show_alert=True,
+        )
+        return
+
+    # Set the in-memory event only after the durable DB state is committed.
+    # On restart, resume_pending_broadcasts converts the persisted "stopping"
+    # state to "stopped" and never resumes the broadcast.
+    _get_stop_event(admin_id).set()
     await callback.answer(
         texts.BROADCAST_STOPPING,
         show_alert=True,

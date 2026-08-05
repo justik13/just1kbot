@@ -376,7 +376,7 @@ PY_JSON
 state_exit_code() {
     case "$OPERATION:$INSTALL_STATE" in
         deploy:clean|deploy:installed_managed|deploy:legacy_managed) return 0 ;;
-        uninstall:clean|uninstall:installed_managed|uninstall:legacy_managed|uninstall:partial_install|uninstall:residual_managed) return 0 ;;
+        uninstall:clean|uninstall:installed_managed|uninstall:legacy_managed|uninstall:partial_install|uninstall:residual_managed|install-rollback:partial_install) return 0 ;;
         *:foreign_collision) return 20 ;;
         *:corrupted_state) return 21 ;;
         *:residual_managed) return 22 ;;

@@ -166,6 +166,7 @@ async def _process_server_traffic(server_info, api_clients):
                 User.is_banned,
                 User.telegram_id,
                 User.subscription_end,
+                User.financial_hold,
             )
             .join(User, VPNProfile.user_id == User.id)
             .where(VPNProfile.server_id == server_id)
@@ -183,6 +184,7 @@ async def _process_server_traffic(server_info, api_clients):
             is_banned,
             tg_id,
             sub_end,
+            financial_hold,
         ) in rows:
             if peer_id not in api_clients:
                 continue
@@ -215,7 +217,7 @@ async def _process_server_traffic(server_info, api_clients):
                 sub_end is None or sub_end < current_time
             )
             local_should_be_disabled = (
-                (not is_active) or is_banned or is_subscription_expired
+                (not is_active) or is_banned or is_subscription_expired or financial_hold
             )
 
             if local_should_be_disabled and api_is_active:

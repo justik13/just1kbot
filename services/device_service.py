@@ -2,10 +2,16 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import Server, User, VPNProfile
+from services.amnezia_capacity import (
+    ServerAtCapacity,
+    ServerCapacityUnavailable,
+    ensure_server_capacity,
+)
 from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
@@ -47,6 +53,10 @@ class InvalidConfig(DeviceCreationError):
 
 
 class DeviceStillCreating(DeviceCreationError):
+    pass
+
+
+class DuplicateDeviceName(DeviceCreationError):
     pass
 
 
@@ -100,7 +110,7 @@ class DeviceService:
             )
         ).scalar_one_or_none()
         if duplicate:
-            raise DeviceCreationError("Duplicate device name")
+            raise DuplicateDeviceName("Duplicate device name")
         if not is_admin(user.telegram_id):
             today = now_msk().date()
             if not _is_same_day_msk(user.last_creation_date, today):
@@ -140,6 +150,18 @@ class DeviceService:
         manual_peer_ids = snapshot.peer_ids - bot_peer_ids
         if len(manual_peer_ids) + server_count >= server.max_clients:
             raise ServerUnavailable("Server is full")
+
+        try:
+            await ensure_server_capacity(
+                api_url=server.api_url,
+                api_key=server.api_key,
+                max_clients=server.max_clients,
+            )
+        except ServerAtCapacity as exc:
+            raise ServerUnavailable("Server is full") from exc
+        except ServerCapacityUnavailable as exc:
+            raise ServerUnavailable("Unable to verify server capacity") from exc
+
         profile = VPNProfile(
             user_id=user.id,
             server_id=server.id,
@@ -154,7 +176,22 @@ class DeviceService:
             is_active=True,
         )
         session.add(profile)
-        await session.flush()
+
+        try:
+            await session.flush()
+        except IntegrityError as e:
+            await session.rollback()
+            error_str = str(e.orig).lower() if e.orig else ""
+            if (
+                "duplicate" in error_str
+                or "unique" in error_str
+                or "uq_vpn_profiles" in error_str
+            ):
+                raise DuplicateDeviceName(
+                    "Device name already exists on this server"
+                ) from e
+            raise DeviceCreationError("Database integrity error") from e
+
         profile.client_name = f"tg_{user.telegram_id}_p{profile.id}"
         await enqueue_api_operation(
             session,

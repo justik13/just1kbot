@@ -35,6 +35,11 @@ def format_datetime_msk(
     return msk_dt.strftime(format_str)
 
 
+def is_permanent_subscription(dt: Optional[datetime]) -> bool:
+    if dt is None:
+        return False
+    return dt.year >= 2100 or (dt.replace(tzinfo=timezone.utc) - now_utc()).days >= 36500
+
 def days_left_msk(dt: Optional[datetime]) -> str:
     """
     Возвращает человекочитаемый остаток дней.
@@ -47,7 +52,7 @@ def days_left_msk(dt: Optional[datetime]) -> str:
     if dt is None:
         return "—"
 
-    if dt.year >= 2100:
+    if is_permanent_subscription(dt):
         return "∞"
 
     msk_dt = to_msk(dt)

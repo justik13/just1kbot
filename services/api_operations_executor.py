@@ -171,7 +171,8 @@ async def _execute_create(op, client):
     if profile_state != "pending_create":
         return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
-    expires = None if sent_expires and sent_expires.year >= 2100 else sent_expires
+    from utils.datetime_helpers import is_permanent_subscription
+    expires = None if sent_expires and is_permanent_subscription(sent_expires) else sent_expires
     result = await client.create_user_result(op.client_name,
         int(expires.timestamp()) if expires else None)
     if not result.ok:
