@@ -718,11 +718,7 @@ main() {
     diag|diagnostics) action_diagnostics ;;
     uninstall) action_uninstall ;;
     "")
-      if [[ -t 0 ]]; then
-        show_menu
-      else
-        action_status
-      fi
+      show_menu
       ;;
     *)
       echo "Использование: $0 {install|update|restart|stop|status|logs|edit-env|backup|diag|uninstall}"
