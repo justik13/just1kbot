@@ -159,7 +159,7 @@ class UninstallVerificationContractTests(unittest.TestCase):
             ownership,
         )
         self.assertIn(
-            "database ownership COMMENT не подтверждает manifest installation ID",
+            "PostgreSQL ownership COMMENT не подтверждает manifest installation ID",
             ownership,
         )
 
