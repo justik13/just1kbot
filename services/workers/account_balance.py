@@ -12,7 +12,7 @@ from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
 from bot.keyboards import get_topup_credit_keyboard, get_topup_payment_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Payment, TariffQuote, User
+from database.models import Payment, TariffQuote, TariffVersion, User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
@@ -45,41 +45,25 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                     TariffQuote.operation_type,
                     TariffQuote.resulting_paid_hours,
                     TariffQuote.resulting_bonus_hours,
-                    TariffQuote.target_tariff_version_id,
+                    TariffVersion.duration_hours,
+                    TariffVersion.device_limit,
                 )
                 .join(User, User.id == TariffQuote.user_id)
+                .join(
+                    TariffVersion,
+                    TariffVersion.id == TariffQuote.target_tariff_version_id,
+                )
                 .where(
                     TariffQuote.status == "consumed",
-                    TariffQuote.operation_type.in_(("purchase", "renew", "change")),
+                    TariffQuote.operation_type.in_(
+                        ("purchase", "renew", "change")
+                    ),
                     TariffQuote.purchase_notified_at.is_(None),
                 )
                 .order_by(TariffQuote.id)
                 .limit(BALANCE_NOTIFICATION_BATCH)
             )
         ).all()
-
-        version_ids = {
-            row.target_tariff_version_id
-            for row in rows
-            if row.target_tariff_version_id is not None
-        }
-        versions = {}
-        if version_ids:
-            version_rows = (
-                await session.execute(
-                    select(
-                        TariffQuote.target_tariff_version_id,
-                        TariffQuote.id,
-                    )
-                    .where(False)
-                )
-            ).all()
-            del version_rows
-
-        # Keep the existing notification query shape below; the version data
-        # is loaded per quote in the notification transaction to avoid changing
-        # the public notification semantics in this refactor.
-        del versions
 
     delivered = 0
     for (
@@ -88,24 +72,15 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
         operation_type,
         resulting_paid_hours,
         resulting_bonus_hours,
-        target_tariff_version_id,
+        duration_hours,
+        device_limit,
     ) in rows:
         try:
-            async with session_scope() as session:
-                from database.models import TariffVersion
-
-                version = await session.get(
-                    TariffVersion,
-                    target_tariff_version_id,
-                )
-            if version is None:
-                continue
-
             await global_send_limiter.acquire()
             hours = (
                 resulting_paid_hours + resulting_bonus_hours
                 if operation_type == "change"
-                else version.duration_hours
+                else duration_hours
             )
             days, remainder = divmod(hours, 24)
             duration = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L223_1.format(
@@ -127,7 +102,7 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(
                     value_0=title,
                     value_1=duration,
-                    value_2=version.device_limit,
+                    value_2=device_limit,
                 ),
                 parse_mode="HTML",
             )
