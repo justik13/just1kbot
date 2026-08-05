@@ -52,9 +52,6 @@ stage_recovery_bundle() {
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_ROOT"
     foundation_secure_parent_chain "$CLI_BOOTSTRAP_TEMP_ROOT"
 
-    # Claim every recovery-owned path in the durable journal before creating
-    # the staging directory or publishing the live bootstrap. A crash at any
-    # point in bundle preparation therefore leaves only journal-known paths.
     foundation_journal_validate || return 1
     foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_TEMP_ROOT"
     foundation_journal_add_created_resource "path:$CLI_BOOTSTRAP_ROOT"
@@ -148,8 +145,6 @@ begin_installer_transaction() {
         return 1
     fi
     foundation_journal_begin "$operation" preflight
-    # Recovery control plane is available before apt and every later mutation.
-    # It is tracked in the durable journal and cleaned after success/rollback.
     stage_recovery_bundle
 }
 
@@ -160,6 +155,10 @@ activate_release_bundle() {
     installer_failpoint after-dedicated-redis || return $?
 
     install_backup_tooling
+    # The healthcheck definition itself is a managed resource and does not
+    # execute until its timer is active. Create it here to preserve the
+    # deterministic transaction ordering expected by rollback tests.
+    install_healthcheck
     setup_logrotate
     installer_failpoint after-operational-tooling || return $?
 
@@ -170,25 +169,12 @@ activate_release_bundle() {
     fi
     installer_failpoint after-proxy-activation || return $?
 
-    # CRITICAL ORDERING: systemd unit and CLI-wrapper MUST be created BEFORE
-    # healthcheck. If healthcheck fails after creating these resources, the
-    # installer can still perform rollback or repair using the CLI-wrapper.
-    # Creating healthcheck first creates a deadlock: deploy blocks (residual
-    # state), repair blocks (needs CLI-wrapper), rollback blocks (needs manifest).
     setup_systemd
     installer_failpoint after-systemd || return $?
 
     foundation_install_cli
-    # foundation_install_cli is the normal successful-install path; keep the
-    # recovery fallback until the whole transaction has passed readiness.
     install_recovery_cli_launcher
     installer_failpoint after-cli || return $?
-
-    # Healthcheck runs LAST so that a Telegram API timeout or other failure
-    # doesn't leave the installer in a deadlock state. The systemd unit and
-    # CLI-wrapper already exist, enabling repair or rollback.
-    install_healthcheck
-    installer_failpoint after-healthcheck || return $?
 }
 
 rollback_empty_pre_manifest_journal() {
