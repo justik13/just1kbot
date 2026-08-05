@@ -65,7 +65,7 @@ log_to_file() {
     printf '[%s] %s\n' "$(date +'%Y-%m-%d %H:%M:%S')" "$sanitized" >> "$INSTALL_LOG" 2>/dev/null || true
 }
 
-print_line() { printf '%s\n' "------------------------------------------------------------"; }
+print_line() { printf '%s\n' "------------------------------------------------------------" >&2; }
 supports_color() { [[ -t 1 ]] && [[ "${TERM:-}" != "dumb" ]]; }
 
 color_red() { supports_color && printf '\033[1;31m%s\033[0m' "$1" || printf '%s' "$1"; }
@@ -73,10 +73,10 @@ color_green() { supports_color && printf '\033[1;32m%s\033[0m' "$1" || printf '%
 color_yellow() { supports_color && printf '\033[1;33m%s\033[0m' "$1" || printf '%s' "$1"; }
 color_cyan() { supports_color && printf '\033[1;36m%s\033[0m' "$1" || printf '%s' "$1"; }
 
-info() { printf '\[*\] %s\n' "$*"; log_to_file "[INFO] $*"; }
-ok() { printf '\[+\] %s\n' "$*"; log_to_file "[OK] $*"; }
-warn() { printf '\[!\] %s\n' "$*"; log_to_file "[WARN] $*"; }
-error() { printf '[ERROR] %s\n' "$*"; log_to_file "[ERROR] $*"; }
+info() { printf '[*] %s\n' "$*" >&2; log_to_file "[INFO] $*"; }
+ok() { printf '[+] %s\n' "$*" >&2; log_to_file "[OK] $*"; }
+warn() { printf '[!] %s\n' "$*" >&2; log_to_file "[WARN] $*"; }
+error() { printf '[ERROR] %s\n' "$*" >&2; log_to_file "[ERROR] $*"; }
 die() { error "$*"; exit 1; }
 
 on_error_trap() {
