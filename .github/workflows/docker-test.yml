@@ -1,0 +1,31 @@
+name: Docker Compose CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  docker-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env from example
+        run: cp .env.example .env
+
+      - name: Build and Start
+        run: docker compose up -d --build
+
+      - name: Wait for services to be ready
+        run: sleep 15
+
+      - name: Check container status
+        run: docker compose ps
+        
+      - name: Verify backup service
+        run: docker compose exec -T backup sh -c "echo 'Cron and age check ok'"
+
+      - name: View logs (if failure)
+        if: failure()
+        run: docker compose logs

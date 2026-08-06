@@ -43,6 +43,10 @@ Telegram-бот для продажи VPN-доступа на базе **Amnezia
 
 # Установка и запуск (Docker)
 
+> [!WARNING]
+> **Только для новых установок (Greenfield)!**
+> Данный способ развертывания предназначен только для запуска бота на новых, чистых серверах. Миграция с системных (systemd/bash) установок не поддерживается.
+
 Проект полностью контейнеризован и использует Docker Compose для запуска бота, PostgreSQL, Redis и Caddy (веб-сервер для автоматического HTTPS).
 Это гарантирует надежный запуск на любой системе.
 
@@ -54,23 +58,26 @@ Telegram-бот для продажи VPN-доступа на базе **Amnezia
 
 1. Склонируйте репозиторий:
    ```bash
-   git clone https://github.com/justik13/projectx.git
-   cd projectx
+   git clone https://github.com/justik13/just1kbot.git
+   cd just1kbot
    ```
 
 2. Создайте файл настроек окружения:
    ```bash
    cp .env.example .env
    ```
-   **ВАЖНО при миграции с существующего сервера:** 
-   Обязательно скопируйте ваш старый `DB_ENCRYPTION_KEY` в новый `.env`, иначе API-ключи серверов не расшифруются!
    
    Отредактируйте `.env` файл:
-   - Укажите токены и ключи
+   - Укажите токены и ключи (включая `BACKUP_AGE_RECIPIENT` для бекапов)
    - Настройте `DOMAIN` и `SSL_EMAIL` (обязательно для Caddy)
    - Укажите пароли для БД и Redis в блоке `Переменные для Docker Compose`
 
-3. Запустите проект:
+3. Если в `POSTGRES_PASSWORD` есть спецсимволы, укажите их в формате URL-encoded и выполните:
+   ```bash
+   bash scripts/docker/decode-env.sh
+   ```
+
+4. Запустите проект:
    ```bash
    docker compose up -d --build
    ```
@@ -89,8 +96,18 @@ docker compose up -d --build
 ## Бэкапы и восстановление
 
 Все данные сохраняются в Docker Volumes (`postgres_data`, `redis_data`, `caddy_data`).
-Для создания бэкапа БД запустите `pg_dump` внутри контейнера БД:
 
+Бэкапы базы данных создаются автоматически каждый день в 02:00 сервисом `backup`. 
+Дампы сжимаются (gzip) и шифруются с помощью утилиты `age` (открытым ключом `BACKUP_AGE_RECIPIENT`). 
+Файлы сохраняются в локальную папку `./backups/`. Старые бэкапы (старше 7 дней) удаляются автоматически.
+
+Для ручного создания бэкапа выполните:
 ```bash
-docker compose exec -T db pg_dump -U just1kbot -d just1kbot_bot > backup.sql
+docker compose exec backup sh /backup.sh
+```
+
+**Расшифровка бэкапа:**
+Скопируйте ваш приватный ключ `age` в файл `key.txt` и выполните:
+```bash
+age -d -i key.txt backup.sql.gz.age > backup.sql.gz
 ```

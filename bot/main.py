@@ -255,10 +255,10 @@ async def start_webhook_server(port: int):
     runner = web.AppRunner(app)
     await runner.setup()
 
-    site = web.TCPSite(runner, "127.0.0.1", port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    logger.info("Webhook server started on 127.0.0.1:%d", port)
+    logger.info("Webhook server started on 0.0.0.0:%d", port)
     return runner
 
 
@@ -291,7 +291,9 @@ async def main():
         config_dir = os.getenv("JUST1KBOT_CONFIG_DIR", "/etc/just1kbot")
         backup_key_path = Path(config_dir) / "backup.agekey"
 
-        if settings.DB_ENCRYPTION_KEY and not await aiofiles.os.path.exists(
+        is_docker = os.getenv("DOCKER_DEPLOYMENT", "false").lower() == "true"
+
+        if settings.DB_ENCRYPTION_KEY and not is_docker and not await aiofiles.os.path.exists(
             str(backup_key_path)
         ):
             logger.critical(

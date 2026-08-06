@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-just1kbot_secret_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_URL_DECODED:-just1kbot_secret_password}
       POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -39,6 +39,8 @@ services:
     env_file:
       - .env
     environment:
+      DOCKER_DEPLOYMENT: "true"
+      YOOKASSA_WEBHOOK_PORT: "8080"
       # Override the URLs in .env to point to the docker containers
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-just1kbot}:${POSTGRES_PASSWORD:-just1kbot_secret_password}@db:5432/${POSTGRES_DB:-just1kbot_bot}
       REDIS_URL: redis://:${REDIS_PASSWORD:-just1kbot_redis_secret}@redis:6379/0
@@ -63,6 +65,25 @@ services:
       - caddy_config:/config
     depends_on:
       - bot
+
+  backup:
+    image: postgres:16-alpine
+    container_name: just1kbot_backup
+    restart: unless-stopped
+    volumes:
+      - ./backups:/backups
+      - ./scripts/docker/backup.sh:/backup.sh
+    environment:
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-""}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_URL_DECODED:-just1kbot_secret_password}
+    # Run the script and then sleep indefinitely so the container stays up, 
+    # or you can run this via cron. Here we just set it up to run a cron daemon.
+    # We will install age and set up a cron job for backup.sh.
+    command: >
+      sh -c 'apk add --no-cache age && echo "0 2 * * * /backup.sh" > /etc/crontabs/root && crond -f -d 8'
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
