@@ -40,10 +40,19 @@ _broadcast_in_progress: set[int] = set()
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _handle_task_result(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error("Background broadcast task failed: %s", e, exc_info=True)
+
+
 def _start_background_task(coro) -> asyncio.Task:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    task.add_done_callback(lambda t: (_background_tasks.discard(t), _handle_task_result(t)))
     return task
 
 
