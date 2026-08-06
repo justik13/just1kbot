@@ -1,4 +1,10 @@
 services:
+  bot:
+    environment:
+      # Run the application startup path without making real Telegram API
+      # calls or starting polling. DB, Redis, migrations and HTTP health are
+      # still exercised by the Docker smoke test.
+      CI_TEST_MODE: "true"
   caddy:
     ports:
       # Expose on 8081 for CI testing
