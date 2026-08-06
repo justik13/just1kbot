@@ -63,7 +63,30 @@ class BalanceTelegramUXTests(unittest.TestCase):
             ],
         )
 
+    def test_balance_history_keyboard_pagination(self):
+        from bot.keyboards import get_balance_history_keyboard, get_referrals_list_keyboard
+        # Single page -> only back button
+        self.assertEqual(callbacks(get_balance_history_keyboard(1, 1)), ["menu_balance"])
+        # Multiple pages -> back, indicator, forward, back to menu
+        self.assertEqual(
+            callbacks(get_balance_history_keyboard(1, 3)),
+            ["ignore", "ignore", "balance_history:2", "menu_balance"],
+        )
+        self.assertEqual(
+            callbacks(get_balance_history_keyboard(2, 3)),
+            ["balance_history:1", "ignore", "balance_history:3", "menu_balance"],
+        )
+
+    def test_referrals_list_keyboard_pagination(self):
+        from bot.keyboards import get_referrals_list_keyboard
+        self.assertEqual(callbacks(get_referrals_list_keyboard(1, 1)), ["referral"])
+        self.assertEqual(
+            callbacks(get_referrals_list_keyboard(1, 2)),
+            ["ignore", "ignore", "referrals_list:2", "referral"],
+        )
+
     def test_amount_keyboard_always_has_custom_amount(self):
+
         values = callbacks(get_balance_amounts_keyboard([149, 499]))
         self.assertEqual(
             values,

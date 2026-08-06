@@ -215,3 +215,9 @@ async def back_to_main_menu(
         text,
         kb,
     )
+
+
+@router.callback_query(F.data == "ignore")
+async def ignore_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+

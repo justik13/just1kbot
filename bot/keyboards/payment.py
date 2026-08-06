@@ -143,6 +143,36 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
     return builder.as_markup()
 
 
+def get_balance_history_keyboard(
+
+    page: int = 1,
+    total_pages: int = 1,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    if total_pages > 1:
+        if page > 1:
+            builder.button(text="◀️ Назад", callback_data=f"balance_history:{page - 1}")
+        else:
+            builder.button(text=" ", callback_data="ignore")
+
+        builder.button(text=f"📄 {page}/{total_pages}", callback_data="ignore")
+
+        if page < total_pages:
+            builder.button(text="Вперед ▶️", callback_data=f"balance_history:{page + 1}")
+        else:
+            builder.button(text=" ", callback_data="ignore")
+
+        builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+        builder.adjust(3, 1)
+    else:
+        builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+        builder.adjust(1)
+
+    return builder.as_markup()
+
+
+
 def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for amount in amounts:

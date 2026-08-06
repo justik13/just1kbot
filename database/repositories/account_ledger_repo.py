@@ -679,19 +679,35 @@ async def get_account_history(
     *,
     user_id: int,
     limit: int = 20,
+    offset: int = 0,
 ) -> list[AccountLedgerEntry]:
     if limit < 1 or limit > 100:
         raise ValueError("history limit must be 1..100")
-    return list(
-        (
-            await session.scalars(
-                select(AccountLedgerEntry)
-                .where(AccountLedgerEntry.user_id == user_id)
-                .order_by(
-                    AccountLedgerEntry.created_at.desc(),
-                    AccountLedgerEntry.id.desc(),
-                )
-                .limit(limit)
-            )
-        ).all()
+    stmt = (
+        select(AccountLedgerEntry)
+        .where(AccountLedgerEntry.user_id == user_id)
+        .order_by(
+            AccountLedgerEntry.created_at.desc(),
+            AccountLedgerEntry.id.desc(),
+        )
+        .limit(limit)
     )
+    if offset > 0:
+        stmt = stmt.offset(offset)
+    return list((await session.scalars(stmt)).all())
+
+
+async def get_account_history_count(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> int:
+    return int(
+        await session.scalar(
+            select(func.count(AccountLedgerEntry.id)).where(
+                AccountLedgerEntry.user_id == user_id
+            )
+        )
+        or 0
+    )
+

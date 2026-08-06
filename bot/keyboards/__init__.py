@@ -1,5 +1,10 @@
 from .common import get_hub_keyboard, get_back_button
-from .user import get_profile_keyboard, get_history_keyboard, get_referral_keyboard
+from .user import (
+    get_profile_keyboard,
+    get_history_keyboard,
+    get_referral_keyboard,
+    get_referrals_list_keyboard,
+)
 from .device import get_device_keyboard, get_device_delete_confirm_keyboard
 from .payment import (
     get_tariff_showcase_keyboard,
@@ -8,6 +13,7 @@ from .payment import (
     get_change_tariff_keyboard,
     get_payment_success_keyboard,
     get_balance_keyboard,
+    get_balance_history_keyboard,
     get_balance_amounts_keyboard,
     get_topup_waiting_keyboard,
     get_topup_payment_keyboard,
@@ -54,6 +60,7 @@ __all__ = [
     "get_profile_keyboard",
     "get_history_keyboard",
     "get_referral_keyboard",
+    "get_referrals_list_keyboard",
     # device
     "get_device_keyboard",
     "get_device_delete_confirm_keyboard",
@@ -64,6 +71,7 @@ __all__ = [
     "get_change_tariff_keyboard",
     "get_payment_success_keyboard",
     "get_balance_keyboard",
+    "get_balance_history_keyboard",
     "get_balance_amounts_keyboard",
     "get_topup_waiting_keyboard",
     "get_topup_payment_keyboard",
@@ -98,3 +106,4 @@ __all__ = [
     "get_broadcast_result_keyboard",
     "get_broadcast_close_keyboard",
 ]
+
