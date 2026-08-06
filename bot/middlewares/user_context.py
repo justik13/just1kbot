@@ -63,6 +63,7 @@ class UserContextMiddleware(BaseMiddleware):
             session: AsyncSession | None = data.get("session")
             if cached is not None and session is not None:
                 cached = await session.merge(cached)
+                _user_cache[telegram_id] = cached
             data["db_user"] = cached
             return await handler(event, data)
 
