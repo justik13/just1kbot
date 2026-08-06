@@ -39,10 +39,8 @@ logger = logging.getLogger(__name__)
 async def _get_safe_device_name(session: AsyncSession, profile) -> str:
     server = await get_server_by_id(session, profile.server_id)
     server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f"_{m.group(1)}" if m else ""
     return "".join(
-        c for c in f"{server_name}{slot_suffix}" if c.isalnum() or c in (" ", "_", "-")
+        c for c in server_name if c.isalnum() or c in (" ", "_", "-")
     ).strip().replace(" ", "_") or "client"
 
 
@@ -214,8 +212,8 @@ async def download_conf(
         )
         return
 
-    vpn_content = build_vpn_file_from_dict(decoded)
-    conf_content = build_conf_file_from_dict(decoded)
+    vpn_content = build_vpn_file_from_dict(decoded, server_name=safe_device_name)
+    conf_content = build_conf_file_from_dict(decoded, server_name=safe_device_name)
 
     if not vpn_content or not conf_content:
         await render_hub(
