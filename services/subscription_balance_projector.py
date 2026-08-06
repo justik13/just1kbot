@@ -180,7 +180,7 @@ def project_subscription_balance(
     if any(
         not (
             event.entry_type in grants
-            and event.hours_delta > 0
+            and event.hours_delta >= 0
             and event.reversed_entry_id is None
         )
         and not (

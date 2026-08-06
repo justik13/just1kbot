@@ -38,7 +38,8 @@ async def set_maintenance_mode(
         maintenance.is_enabled = is_enabled
         if message is not None:
             maintenance.message = message
-        maintenance.updated_by = updated_by
+        if updated_by is not None:
+            maintenance.updated_by = updated_by
 
     await session.flush()
     await session.refresh(maintenance)

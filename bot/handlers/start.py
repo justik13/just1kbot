@@ -30,7 +30,7 @@ def parse_referral_id(command_args: str) -> int | None:
     if not command_args:
         return None
 
-    match = re.match(r"ref_(\d+)", command_args)
+    match = re.match(r"^(?:ref_)?(\d+)$", command_args)
 
     return int(match.group(1)) if match else None
 
