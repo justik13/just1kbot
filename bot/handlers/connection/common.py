@@ -141,33 +141,13 @@ async def _build_connections_screen(
             flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L140_1
             server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L141_1
 
-            if read_only:
-                builder.button(
-                    text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L145_1.format(value_0=safe(profile.device_name)),
-                    callback_data=f"manage_device:{profile.id}",
-                )
-            else:
-                builder.button(
-                    text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L150_1.format(value_0=safe(profile.device_name)),
-                    callback_data=f"manage_device:{profile.id}",
-                )
-
-            last_connected_text = (
-                texts.DEVICE_RECENTLY_ACTIVE.format(
-                    last_connected=format_datetime(
-                        profile.last_connected,
-                    ),
-                )
-                if profile.last_connected
-                else texts.DEVICE_NOT_CONNECTED
+            btn_text = f"{flag} {safe(profile.device_name)}"
+            builder.button(
+                text=btn_text,
+                callback_data=f"manage_device:{profile.id}",
             )
 
-            rendered += format_connection_device_card(
-                profile,
-                flag,
-                server_name,
-                last_connected_text,
-            )
+            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({flag} {safe(server_name)})"
             labels = {
                 "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
                 "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,
@@ -176,6 +156,8 @@ async def _build_connections_screen(
             }
             if profile.provisioning_status in labels:
                 rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
+
+        rendered += "\n\n<i>Нажмите на устройство ниже для управления и получения ключа:</i>"
 
     if not read_only and profiles_count < device_limit:
         builder.button(
