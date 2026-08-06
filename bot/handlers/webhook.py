@@ -3,8 +3,9 @@ import ipaddress
 import json
 import logging
 import uuid
-from aiohttp import web
+
 import redis.asyncio as aioredis
+from aiohttp import web
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 
@@ -75,22 +76,27 @@ def _is_yookassa_ip(ip: str) -> bool:
         return False
 
 
+def _is_private_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr.is_private or addr.is_loopback
+    except ValueError:
+        return False
+
+
 def _get_real_ip(request: web.Request) -> str:
     remote = (request.remote or "").strip()
-    trusted_proxy = remote in {"127.0.0.1", "::1"}
-    if trusted_proxy:
+    if _is_private_ip(remote):
         real_ip = request.headers.get("X-Real-IP", "").strip()
         if real_ip:
             return real_ip
         forwarded = request.headers.get("X-Forwarded-For", "").strip()
-        # P1-3: Ignore X-Forwarded-For to prevent SSRF bypass
-        forwarded = ""
         if forwarded:
-            first_ip = forwarded.split(",")[0].strip()
-            if first_ip:
-                return first_ip
+            # To prevent spoofing, we take the LAST IP appended by the trusted proxy
+            last_ip = forwarded.split(",")[-1].strip()
+            if last_ip:
+                return last_ip
     return remote
-
 
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:
