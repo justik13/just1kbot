@@ -178,7 +178,9 @@ def _is_stale_callback(callback: CallbackQuery) -> bool:
     if date is None:
         return False
 
-    if date.tzinfo is None:
+    if isinstance(date, (int, float)):
+        date = datetime.fromtimestamp(date, tz=timezone.utc)
+    elif date.tzinfo is None:
         date = date.replace(tzinfo=timezone.utc)
 
     now = datetime.now(timezone.utc)
