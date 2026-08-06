@@ -1,4 +1,5 @@
 import logging
+import re
 
 from aiogram import Router, F
 from aiogram.filters import StateFilter
@@ -16,6 +17,7 @@ from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
 )
+from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
     DeviceCreationError,
@@ -145,6 +147,10 @@ async def start_add_device(
         )
         return
 
+    if len(servers) == 1:
+        await state.set_state(DeviceCreationStates.choose_server)
+        return await _process_server_selection(callback, state, session, servers[0].id, user)
+
     builder = InlineKeyboardBuilder()
 
     for server in servers:
@@ -178,18 +184,38 @@ async def select_server(
     db_user: User | None = None,
 ):
     await callback.answer(show_alert=False)
+    server_id = parse_callback_id(callback.data, 1)
 
-    if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id
-    ):
-        await _render_maintenance(
-            callback.message, session, back_to="back_to_connections"
-        )
+    if server_id is None:
+        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L207_1, show_alert=True)
         _creating_devices.pop(callback.from_user.id, None)
         await state.clear()
         return
 
     user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
+    return await _process_server_selection(callback, state, session, server_id, user)
+
+
+async def _process_server_selection(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    server_id: int,
+    user: User | None = None,
+):
+    telegram_user_id = callback.from_user.id
+
+    if not await MaintenanceService.can_user_perform_action(
+        session, telegram_user_id
+    ):
+        await _render_maintenance(
+            callback.message, session, back_to="back_to_connections"
+        )
+        _creating_devices.pop(telegram_user_id, None)
+        await state.clear()
+        return
+
+    user = user or await get_user_by_telegram_id(session, telegram_user_id)
 
     if not user or not await SubscriptionService.check_access(
         session, user.telegram_id
@@ -200,15 +226,7 @@ async def select_server(
             texts.ERROR_NO_SUBSCRIPTION,
             _get_no_subscription_keyboard(),
         )
-        _creating_devices.pop(callback.from_user.id, None)
-        await state.clear()
-        return
-
-    server_id = parse_callback_id(callback.data, 1)
-
-    if server_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L207_1, show_alert=True)
-        _creating_devices.pop(callback.from_user.id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
@@ -216,7 +234,7 @@ async def select_server(
 
     if not server:
         await callback.answer(texts.ERROR_LOCATION_NOT_FOUND, show_alert=True)
-        _creating_devices.pop(callback.from_user.id, None)
+        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
@@ -227,59 +245,14 @@ async def select_server(
             texts.ERROR_SERVER_DISABLED,
             get_back_button("add_device"),
         )
-        _creating_devices.pop(callback.from_user.id, None)
-        await state.clear()
-        return
-
-    await state.update_data(server_id=server_id)
-    await state.set_state(DeviceCreationStates.enter_device_name)
-
-    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L234_1
-
-    _creating_devices.pop(callback.from_user.id, None)
-
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        texts.DEVICE_ADD_NAME_PROMPT.format(flag=flag, server_name=safe(server.name)),
-        get_back_button("add_device"),
-    )
-
-
-@router.message(DeviceCreationStates.enter_device_name)
-async def enter_device_name(
-    message: Message,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-):
-    telegram_user_id = message.from_user.id
-
-    if not await MaintenanceService.can_user_perform_action(session, telegram_user_id):
-        await _render_maintenance(message, session, back_to="back_to_connections")
         _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
-
-    user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
-
-    if not user or not await SubscriptionService.check_access(
-        session, user.telegram_id
-    ):
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_NO_SUBSCRIPTION,
-            _get_no_subscription_keyboard(),
-        )
-        _creating_devices.pop(telegram_user_id, None)
-        await state.clear()
-        return
-
+        
     if telegram_user_id in _creating_devices:
         await render_hub(
-            message.bot,
-            message.chat.id,
+            callback.bot,
+            callback.message.chat.id,
             texts.DEVICE_CREATE_IN_PROGRESS,
             get_back_button("add_device"),
         )
@@ -288,46 +261,28 @@ async def enter_device_name(
     _creating_devices[telegram_user_id] = True
 
     try:
-        if not message.text or message.text.startswith("/"):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_TEXT_REQUIRED,
-                get_back_button("add_device"),
-            )
-            return
-
-        device_name = message.text.strip()
-
-        if (
-            not device_name
-            or len(device_name) > 16
-            or not DEVICE_NAME_REGEX.match(device_name)
-        ):
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_INVALID_DEVICE_NAME,
-                get_back_button("add_device"),
-            )
-            return
-
-        data = await state.get_data()
-        server_id = data.get("server_id")
-
-        if not server_id:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_SERVER_UNAVAILABLE,
-                get_back_button("back_to_connections"),
-            )
-            await state.clear()
-            return
+        profiles = await get_user_profiles(session, user.id)
+        limit = await _get_effective_device_limit(user, session)
+        
+        used = set()
+        for p in profiles:
+            m = re.search(r'#(\d+)$', p.device_name)
+            if m:
+                used.add(int(m.group(1)))
+        
+        slot_index = 1
+        for i in range(1, limit + 1):
+            if i not in used:
+                slot_index = i
+                break
+        else:
+            slot_index = max(used) + 1 if used else 1
+            
+        device_name = f"Устройство #{slot_index}"
 
         await render_hub(
-            message.bot,
-            message.chat.id,
+            callback.bot,
+            callback.message.chat.id,
             texts.DEVICE_CREATING,
             get_back_button("add_device"),
             parse_mode="HTML",
@@ -346,8 +301,8 @@ async def enter_device_name(
             )
         except NoActiveSubscription:
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.ERROR_NO_SUBSCRIPTION,
                 _get_no_subscription_keyboard(),
             )
@@ -355,8 +310,8 @@ async def enter_device_name(
             return
         except DailyLimitExceeded:
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.ERROR_DEVICE_DAILY_LIMIT,
                 get_back_button("back_to_connections"),
                 parse_mode="HTML",
@@ -364,20 +319,18 @@ async def enter_device_name(
             await state.clear()
             return
         except DeviceLimitExceeded:
-            device_limit = await _get_effective_device_limit(user, session)
-
             await render_hub(
-                message.bot,
-                message.chat.id,
-                texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=device_limit),
+                callback.bot,
+                callback.message.chat.id,
+                texts.ERROR_DEVICE_LIMIT_UPGRADE.format(limit=limit),
                 _get_device_limit_keyboard(),
             )
             await state.clear()
             return
         except DuplicateDeviceName:
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.DEVICE_NAME_DUPLICATE,
                 get_back_button("add_device"),
             )
@@ -385,8 +338,8 @@ async def enter_device_name(
             return
         except InvalidConfig:
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.ERROR_API_CREATE_FAILED,
                 get_back_button("back_to_connections"),
             )
@@ -401,8 +354,8 @@ async def enter_device_name(
                 exc_info=True,
             )
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.ERROR_TECHNICAL_MESSAGE,
                 get_back_button("back_to_connections"),
                 parse_mode="HTML",
@@ -421,8 +374,8 @@ async def enter_device_name(
             )
 
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 error_text,
                 get_back_button("back_to_connections"),
             )
@@ -432,8 +385,8 @@ async def enter_device_name(
             logger.error(f"Unexpected error in enter_device_name: {e}", exc_info=True)
 
             await render_hub(
-                message.bot,
-                message.chat.id,
+                callback.bot,
+                callback.message.chat.id,
                 texts.ERROR_TECHNICAL_MESSAGE,
                 get_back_button("back_to_connections"),
                 parse_mode="HTML",
@@ -442,7 +395,7 @@ async def enter_device_name(
             return
 
         await state.clear()
-        await _render_connections(message, user, session)
+        await _render_connections(callback.message, user, session)
 
     finally:
         _creating_devices.pop(telegram_user_id, None)

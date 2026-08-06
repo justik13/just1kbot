@@ -1,3 +1,4 @@
+import re
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -111,12 +112,12 @@ async def rename_device_process(
         )
         return
 
-    new_name = message.text.strip()
+    base_new_name = message.text.strip()
 
     if (
-        not new_name
-        or len(new_name) > 16
-        or not DEVICE_NAME_REGEX.match(new_name)
+        not base_new_name
+        or len(base_new_name) > 16
+        or not DEVICE_NAME_REGEX.match(base_new_name)
     ):
         await render_hub(
             message.bot,
@@ -125,6 +126,10 @@ async def rename_device_process(
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
+
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_suffix = f" #{m.group(1)}" if m else ""
+    new_name = f"{base_new_name}{slot_suffix}"
 
     existing_profiles = await get_user_profiles(session, db_user.id)
 

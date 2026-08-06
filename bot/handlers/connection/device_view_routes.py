@@ -1,4 +1,5 @@
 import logging
+import re
 
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
@@ -34,6 +35,15 @@ from .common import _format_protocol
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+async def _get_safe_device_name(session: AsyncSession, profile) -> str:
+    server = await get_server_by_id(session, profile.server_id)
+    server_name = server.name if server else "server"
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_suffix = f"_{m.group(1)}" if m else ""
+    return "".join(
+        c for c in f"{server_name}{slot_suffix}" if c.isalnum() or c in (" ", "_", "-")
+    ).strip().replace(" ", "_") or "client"
 
 
 @router.callback_query(F.data.startswith("manage_device:"))
@@ -128,9 +138,7 @@ async def show_config(
         return
 
     if len(raw_config) > TELEGRAM_MESSAGE_LIMIT - 300:
-        safe_device_name = "".join(
-            c for c in profile.device_name if c.isalnum() or c in (" ", "_", "-")
-        ).strip() or "client"
+        safe_device_name = await _get_safe_device_name(session, profile)
 
         key_file = BufferedInputFile(
             raw_config.encode("utf-8"),
@@ -186,9 +194,7 @@ async def download_conf(
 
     await callback.answer(texts.DEVICE_CONFIG_GENERATING, show_alert=False)
 
-    safe_device_name = "".join(
-        c for c in profile.device_name if c.isalnum() or c in (" ", "_", "-")
-    ).strip() or "client"
+    safe_device_name = await _get_safe_device_name(session, profile)
 
     raw_config = profile.raw_config or ""
     if profile.provisioning_status != "active" or not profile.peer_id or not raw_config:
