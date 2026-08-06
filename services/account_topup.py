@@ -159,7 +159,7 @@ async def create_balance_topup(
         raise AccountTopupError("topup_creation_rate_limited")
 
     pending = await _pending_topup_exposure(session, user.id)
-    projected_position = balance.accounting_position + pending + rubles
+    projected_position = balance.real_position + pending + rubles
     if max(Decimal("0"), projected_position) > Decimal(
         cfg.BALANCE_MAX_AVAILABLE_RUB
     ):
@@ -322,7 +322,7 @@ async def settle_succeeded_topup(
     balance = await get_account_balance(session, user_id=payment.user_id)
     await refresh_user_dispute_hold(session, user_id=payment.user_id)
     cfg = settings or get_settings()
-    if balance.accounting_position > Decimal(cfg.BALANCE_MAX_AVAILABLE_RUB):
+    if balance.real_position > Decimal(cfg.BALANCE_MAX_AVAILABLE_RUB):
         user = await lock_checkout_user(session, payment.user_id)
         user.topup_blocked = True
         user.financial_block_reason = "balance_limit_exceeded_by_late_payment"

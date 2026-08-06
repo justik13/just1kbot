@@ -174,7 +174,7 @@ def _is_stale_callback(callback: CallbackQuery) -> bool:
     if message is None:
         return False
 
-    date = getattr(message, "date", None)
+    date = getattr(message, "edit_date", None) or getattr(message, "date", None)
     if date is None:
         return False
 

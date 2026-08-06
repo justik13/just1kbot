@@ -346,5 +346,6 @@ def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
     builder.button(text=texts.UI_BOT_KEYBOARDS_PAYMENT_L307_1, callback_data="menu_balance")
+    builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()

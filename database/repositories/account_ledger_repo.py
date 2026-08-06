@@ -52,6 +52,8 @@ class AccountBalanceSnapshot:
     available: Decimal
     reserved: Decimal
     debt: Decimal
+    real_position: Decimal = ZERO
+    bonus_position: Decimal = ZERO
     real_available: Decimal = ZERO
     bonus_available: Decimal = ZERO
 
@@ -134,6 +136,9 @@ async def get_account_balance(
         elif credit.entry_type == "admin_adjustment":
             bonus_available += cap
 
+    real_position = real_available
+    bonus_position = bonus_available
+
     if reserved > ZERO:
         if real_available >= reserved:
             real_available -= reserved
@@ -149,6 +154,8 @@ async def get_account_balance(
         available=available,
         reserved=reserved,
         debt=debt,
+        real_position=real_position,
+        bonus_position=bonus_position,
         real_available=real_available,
         bonus_available=bonus_available,
     )

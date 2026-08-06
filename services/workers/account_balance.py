@@ -237,13 +237,13 @@ async def process_balance_notifications(bot: Bot) -> int:
                     get_topup_credit_keyboard(payment.topup_context or {}),
                 )
                 if (
-                    balance.accounting_position
+                    balance.real_position
                     > get_settings().BALANCE_MAX_AVAILABLE_RUB
                 ):
                     diagnostic = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(
                         value_0=payment.id,
                         value_1=telegram_id,
-                        value_2=int(balance.accounting_position),
+                        value_2=int(balance.real_position),
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()
