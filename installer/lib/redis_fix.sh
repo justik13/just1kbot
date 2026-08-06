@@ -145,6 +145,8 @@ setup_local_redis() {
     service="$(redis_service_name)" || die "Служба Redis не найдена."
     include_file="$(dirname "$config")/just1kbot.conf"
 
+    # Remove only our stale include. Preserve the rest of the administrator's
+    # Redis configuration and keep a one-time backup for diagnostics.
     repair_redis_main_config "$config"
 
     redis_user="$(systemctl show -p User --value "$service" 2>/dev/null || true)"
@@ -169,18 +171,17 @@ REDISCONF
     systemctl enable "$service" >/dev/null 2>&1 || true
 
     if ! systemctl restart "$service"; then
-        warn "Redis не запустился после очистки legacy-конфигурации. Восстанавливаю исходный конфиг."
-        if [[ -f "${config}.just1kbot-backup" ]]; then
-            cp -af "${config}.just1kbot-backup" "$config"
-        fi
+        warn "Redis не запустился с managed-конфигурацией. Проверяю очищенный базовый конфиг."
         rm -f "$include_file"
+        repair_redis_main_config "$config"
         systemctl reset-failed "$service" 2>/dev/null || true
         systemctl restart "$service" || {
             show_redis_failure_details "$service"
-            die "Не удалось запустить Redis даже на исходной конфигурации."
+            die "Не удалось запустить Redis даже после удаления устаревшего just1kbot include."
         }
 
-        repair_redis_main_config "$config"
+        # The packaged/base Redis configuration is healthy. Add our settings
+        # again and retry exactly once.
         cat > "$include_file" <<REDISCONF
 # Managed by just1kbot. Do not edit manually.
 protected-mode yes
@@ -194,7 +195,7 @@ REDISCONF
         systemctl reset-failed "$service" 2>/dev/null || true
         systemctl restart "$service" || {
             show_redis_failure_details "$service"
-            die "Redis не удалось запустить после восстановления конфигурации."
+            die "Redis не удалось запустить после восстановления managed-конфигурации."
         }
     fi
 
