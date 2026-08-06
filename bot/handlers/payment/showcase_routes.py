@@ -205,18 +205,20 @@ async def select_tariff(
                 "subscription_balance_untracked": (
                     texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
                 ),
-                "subscription_inactive": (
+                "subscription_inactive": (  # TODO: extract to texts module
                     "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
                     "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
                 ),
-                "current_tariff_unknown": (
+                "current_tariff_unknown": (  # TODO: extract to texts module
                     "⚠️ Смена тарифа возможна только при действующей подписке.\n\n"
                     "Перейдите в раздел «Купить подписку» для оформления нового тарифа."
                 ),
-                "active_checkout_exists": (
+                "active_checkout_exists": (  # TODO: extract to texts module
                     "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
                 ),
-                "active_change_quote_exists": (
+                # NOTE: active_change_quote_exists is auto-resolved (old quote
+                # is cancelled), kept as defensive fallback for race conditions.
+                "active_change_quote_exists": (  # TODO: extract to texts module
                     "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его."
                 ),
             }

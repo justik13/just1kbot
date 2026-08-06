@@ -1,12 +1,14 @@
 """Two-step tariff-change confirmation and balance-shortage recovery."""
-from bot import texts
-
+import logging
 import uuid
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot import texts
 
 from bot.keyboards import (
     get_back_button,
@@ -16,13 +18,12 @@ from bot.keyboards import (
 )
 from bot.states import BalanceStates
 from config.settings import get_settings
-from database.models import User
+from database.models import TariffQuote, User
 from services.account_tariff_change import (
     AccountTariffChangeError,
     get_account_tariff_change_intent,
     settle_account_tariff_change,
 )
-from services.referral_bonus import grant_referral_bonus_for_purchase
 from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -31,6 +32,7 @@ from .balance_routes import _create_and_render_topup
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 CHANGE_ERRORS = {
@@ -174,8 +176,7 @@ async def confirm_tariff_change(
             quote_public_id=quote_id,
         )
     except AccountTariffChangeError as exc:
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "AccountTariffChangeError in confirm_tariff_change: code=%s, user_id=%s, quote_public_id=%s",
             exc.code,
             db_user.id,
@@ -187,8 +188,6 @@ async def confirm_tariff_change(
             )
             return
 
-        from database.models import TariffQuote
-        from sqlalchemy import select
         failed_quote = await session.scalar(
             select(TariffQuote).where(
                 TariffQuote.public_id == quote_id,
@@ -213,13 +212,6 @@ async def confirm_tariff_change(
         return
 
     charged = abs(int(result.debit.amount)) if result.debit else 0
-    if charged:
-        await grant_referral_bonus_for_purchase(
-            session,
-            purchaser_user_id=db_user.id,
-            quote_id=result.quote.id,
-            purchase_amount=charged,
-        )
 
     intent = await get_account_tariff_change_intent(
         session,
