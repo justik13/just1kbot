@@ -241,7 +241,7 @@ async def topup_exact_shortage(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L205_1, show_alert=False
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L209_1, show_alert=False
     )
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -252,7 +252,7 @@ async def topup_exact_shortage(
         )
     except AccountPurchaseError:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L214_1, show_alert=True
+            texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L218_1, show_alert=True
         )
         return
     if intent.shortage <= 0:
