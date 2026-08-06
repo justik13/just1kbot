@@ -123,6 +123,23 @@ show_redis_failure_details() {
     journalctl -u "$service" -n 80 --no-pager >&2 || true
 }
 
+write_managed_redis_config() {
+    local include_file="$1" redis_password="$2" redis_group="$3"
+    cat > "$include_file" <<REDISCONF
+# Managed by just1kbot. Do not edit manually.
+protected-mode yes
+bind 127.0.0.1 ::1
+port 6379
+# Send Redis logs to stdout/systemd journal instead of a legacy file path.
+# This avoids permission failures on stale /var/log/redis files.
+logfile ""
+syslog-enabled no
+requirepass $(quote_redis_password "$redis_password")
+REDISCONF
+    chown root:"$redis_group" "$include_file"
+    chmod 640 "$include_file"
+}
+
 setup_local_redis() {
     local redis_url redis_password config service include_file redis_user redis_group
     redis_url="$(get_env_value REDIS_URL)"
@@ -156,15 +173,7 @@ setup_local_redis() {
         redis_group="$(stat -c '%G' "$config")"
     fi
 
-    cat > "$include_file" <<REDISCONF
-# Managed by just1kbot. Do not edit manually.
-protected-mode yes
-bind 127.0.0.1 ::1
-port 6379
-requirepass $(quote_redis_password "$redis_password")
-REDISCONF
-    chown root:"$redis_group" "$include_file"
-    chmod 640 "$include_file"
+    write_managed_redis_config "$include_file" "$redis_password" "$redis_group"
     printf '\ninclude %s\n' "$include_file" >> "$config"
 
     systemctl reset-failed "$service" 2>/dev/null || true
@@ -182,15 +191,7 @@ REDISCONF
 
         # The packaged/base Redis configuration is healthy. Add our settings
         # again and retry exactly once.
-        cat > "$include_file" <<REDISCONF
-# Managed by just1kbot. Do not edit manually.
-protected-mode yes
-bind 127.0.0.1 ::1
-port 6379
-requirepass $(quote_redis_password "$redis_password")
-REDISCONF
-        chown root:"$redis_group" "$include_file"
-        chmod 640 "$include_file"
+        write_managed_redis_config "$include_file" "$redis_password" "$redis_group"
         printf '\ninclude %s\n' "$include_file" >> "$config"
         systemctl reset-failed "$service" 2>/dev/null || true
         systemctl restart "$service" || {
