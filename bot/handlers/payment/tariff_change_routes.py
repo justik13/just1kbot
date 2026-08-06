@@ -281,7 +281,7 @@ async def topup_exact_change_shortage(
         return
     amount = max(int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB)
     await _create_and_render_topup(
-        callback.message,
+        callback,
         session,
         db_user,
         amount,

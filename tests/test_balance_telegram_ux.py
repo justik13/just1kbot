@@ -137,6 +137,22 @@ class BalanceTelegramUXTests(unittest.TestCase):
             (Path(__file__).parents[1] / "services" / "payment_service").exists()
         )
 
+class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_create_and_render_topup_handles_callback_and_none_targets(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from aiogram.types import CallbackQuery
+        from bot.handlers.payment.balance_routes import _create_and_render_topup
+
+        # target is None
+        await _create_and_render_topup(None, MagicMock(), MagicMock(), 100)
+
+        # target is CallbackQuery with None message
+        cb = MagicMock(spec=CallbackQuery)
+        cb.bot = MagicMock()
+        cb.bot.get_me = AsyncMock(return_value=MagicMock(username="test"))
+        cb.message = None
+        await _create_and_render_topup(cb, MagicMock(), MagicMock(), 100)
+
 
 if __name__ == "__main__":
     unittest.main()

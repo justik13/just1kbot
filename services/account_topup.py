@@ -180,8 +180,9 @@ async def create_balance_topup(
     )
     session.add(payment)
     await session.flush()
+    bot_username_clean = (bot_username or "").lstrip("@")
     return_url = cfg.YOOKASSA_RETURN_URL.format(
-        bot_username=bot_username.lstrip("@")
+        bot_username=bot_username_clean
     )
     await enqueue_create(
         session,
