@@ -419,11 +419,10 @@ async def _send_broadcast_to_users_with_resume(
                     final_progress = progress
 
     except Exception as e:
-        logger.error(
+        logger.exception(
             "Broadcast unexpected error (progress_id=%s): %s",
             progress_id,
             e,
-            exc_info=True,
         )
         try:
             async with session_scope() as session:
@@ -457,6 +456,7 @@ async def _send_broadcast_to_users_with_resume(
                 admin_id,
                 alert_err,
             )
+        raise
 
     finally:
         if stop_event:
@@ -579,7 +579,8 @@ async def resume_pending_broadcasts(bot):
                 )
             )
     except Exception as e:
-        logger.error("Failed to resume broadcasts: %s", e, exc_info=True)
+        logger.exception("Failed to resume broadcasts: %s", e)
+        raise
 
 
 async def _start_broadcast_process(

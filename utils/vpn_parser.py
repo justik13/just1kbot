@@ -7,6 +7,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+class VPNConfigParseError(Exception):
+    pass
 
 def _decode_base64url(payload: str) -> Optional[bytes]:
     try:
@@ -15,14 +17,14 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
         if padding_needed:
             b64 += "=" * (4 - padding_needed)
         return base64.b64decode(b64, validate=True)
-    except Exception:
-        logger.exception("_decode_base64url failed")
-        return None
+    except Exception as e:
+        logger.warning(f"_decode_base64url failed: {e}")
+        raise VPNConfigParseError(f"Base64 decode failed: {e}")
 
 
 def _decompress_amnezia_format(data: bytes) -> Optional[str]:
     if len(data) < 4:
-        return None
+        raise VPNConfigParseError("Payload too short")
     expected_length = struct.unpack(">I", data[:4])[0]
     compressed = data[4:]
     try:
@@ -33,31 +35,31 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
                 expected_length,
                 len(decompressed),
             )
-            return None
+            raise VPNConfigParseError("Length mismatch")
         return decompressed.decode("utf-8")
-    except Exception:
-        logger.exception("_decompress_amnezia_format zlib failed")
-        return None
+    except Exception as e:
+        logger.warning(f"_decompress_amnezia_format zlib failed: {e}")
+        raise VPNConfigParseError(f"Decompress failed: {e}")
 
 
 def decode_vpn_uri_to_json(uri: str) -> Optional[dict]:
     if not uri or not isinstance(uri, str):
-        return None
+        raise VPNConfigParseError("Invalid URI type")
     payload = uri[6:] if uri.startswith("vpn://") else None
     if not payload:
-        return None
+        raise VPNConfigParseError("Missing payload in URI")
     decoded = _decode_base64url(payload)
     if decoded is None:
-        return None
+        raise VPNConfigParseError("Failed to decode payload")
     json_str = _decompress_amnezia_format(decoded)
     if json_str is None:
-        return None
+        raise VPNConfigParseError("Failed to decompress payload")
     try:
         data = json.loads(json_str)
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as e:
+        raise VPNConfigParseError(f"JSON decode failed: {e}")
     if not isinstance(data, dict):
-        return None
+        raise VPNConfigParseError("Payload is not a JSON object")
     return data
 
 
@@ -169,20 +171,22 @@ def build_conf_file_from_dict(data: dict) -> Optional[str]:
     try:
         awg = _get_first_awg_container(data)
         if not awg:
-            return None
+            raise VPNConfigParseError("No AWG container found")
         last_config = _parse_last_config(awg)
         if not last_config:
-            return None
+            raise VPNConfigParseError("No last_config found")
         config_str = last_config.get("config")
         if _looks_like_wireguard_conf(config_str):
             return config_str
         fallback_conf = _build_conf_fallback(data, last_config)
         if _looks_like_wireguard_conf(fallback_conf):
             return fallback_conf
-        return None
-    except Exception:
-        logger.exception("build_conf_file_from_dict: unexpected error")
-        return None
+        raise VPNConfigParseError("Failed to build wireguard conf")
+    except VPNConfigParseError:
+        raise
+    except Exception as e:
+        logger.error(f"build_conf_file_from_dict: unexpected error: {e}", exc_info=True)
+        raise VPNConfigParseError(f"Unexpected error: {e}")
 
 
 def build_vpn_file(uri: str) -> Optional[str]:
@@ -200,25 +204,28 @@ def build_conf_file(uri: str) -> Optional[str]:
 
 
 def is_valid_vpn_uri(uri: str) -> bool:
-    data = decode_vpn_uri_to_json(uri)
-    if not data or not isinstance(data, dict):
+    try:
+        data = decode_vpn_uri_to_json(uri)
+        if not data or not isinstance(data, dict):
+            return False
+        awg = _get_first_awg_container(data)
+        if not awg:
+            return False
+        protocol_version = awg.get("protocol_version")
+        if str(protocol_version) == "2":
+            return True
+        last_config = _parse_last_config(awg)
+        if not last_config:
+            return False
+        config_str = last_config.get("config")
+        if _looks_like_wireguard_conf(config_str):
+            return True
+        fallback_conf = _build_conf_fallback(data, last_config)
+        if _looks_like_wireguard_conf(fallback_conf):
+            return True
         return False
-    awg = _get_first_awg_container(data)
-    if not awg:
+    except VPNConfigParseError:
         return False
-    protocol_version = awg.get("protocol_version")
-    if str(protocol_version) == "2":
-        return True
-    last_config = _parse_last_config(awg)
-    if not last_config:
-        return False
-    config_str = last_config.get("config")
-    if _looks_like_wireguard_conf(config_str):
-        return True
-    fallback_conf = _build_conf_fallback(data, last_config)
-    if _looks_like_wireguard_conf(fallback_conf):
-        return True
-    return False
 
 
 def customize_vpn_config_dict(
@@ -232,6 +239,7 @@ def customize_vpn_config_dict(
         return data
 
     import copy
+    import re
     customized = copy.deepcopy(data)
 
     if description:
@@ -257,31 +265,23 @@ def customize_vpn_config_dict(
                         last_config["mtu"] = mtu
                         config_str = last_config.get("config")
                         if config_str and isinstance(config_str, str):
-                            new_lines = []
-                            has_dns = False
-                            has_mtu = False
-                            for line in config_str.splitlines():
-                                stripped = line.strip()
-                                if stripped.startswith("DNS ="):
-                                    new_lines.append(f"DNS = {dns1}, {dns2}")
-                                    has_dns = True
-                                elif stripped.startswith("MTU ="):
-                                    new_lines.append(f"MTU = {mtu}")
-                                    has_mtu = True
-                                else:
-                                    new_lines.append(line)
-                                    if stripped.startswith("Address =") and not has_mtu:
-                                        new_lines.append(f"MTU = {mtu}")
-                                        has_mtu = True
-                            if not has_dns:
-                                if "[Interface]" in new_lines:
-                                    idx = new_lines.index("[Interface]")
-                                    new_lines.insert(idx + 1, f"DNS = {dns1}, {dns2}")
-                            last_config["config"] = "\n".join(new_lines) + "\n"
+                            match = re.search(r'(\[Interface\].*?)(?=\[Peer\]|$)', config_str, re.IGNORECASE | re.DOTALL)
+                            if match:
+                                interface_section = match.group(1)
+                                interface_section = re.sub(r'^(DNS\s*=.*)$', '', interface_section, flags=re.MULTILINE | re.IGNORECASE)
+                                interface_section = re.sub(r'^(MTU\s*=.*)$', '', interface_section, flags=re.MULTILINE | re.IGNORECASE)
+                                interface_section = re.sub(r'\n{2,}', '\n', interface_section)
+                                new_interface = re.sub(
+                                    r'(\[Interface\])', 
+                                    f'\\1\nDNS = {dns1}, {dns2}\nMTU = {mtu}', 
+                                    interface_section, 
+                                    flags=re.IGNORECASE
+                                )
+                                last_config["config"] = config_str.replace(match.group(1), new_interface)
 
                         awg["last_config"] = json.dumps(last_config, ensure_ascii=False)
-                except Exception:
-                    logger.exception("customize_vpn_config_dict patch failed")
+                except Exception as e:
+                    logger.error(f"customize_vpn_config_dict patch failed: {e}", exc_info=True)
 
     return customized
 

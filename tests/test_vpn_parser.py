@@ -1,9 +1,10 @@
+import pytest
 import base64
 import json
 import struct
 import zlib
 
-from utils.vpn_parser import _decompress_amnezia_format, decode_vpn_uri_to_json
+from utils.vpn_parser import _decompress_amnezia_format, decode_vpn_uri_to_json, VPNConfigParseError
 
 
 def _payload(content: bytes, *, declared_length: int | None = None) -> bytes:
@@ -19,12 +20,13 @@ def test_decompresses_valid_amnezia_payload():
 
 def test_rejects_payload_with_mismatched_declared_length():
     content = b'{}'
-
-    assert _decompress_amnezia_format(_payload(content, declared_length=100)) is None
+    with pytest.raises(VPNConfigParseError):
+        _decompress_amnezia_format(_payload(content, declared_length=100))
 
 
 def test_rejects_truncated_header():
-    assert _decompress_amnezia_format(b"123") is None
+    with pytest.raises(VPNConfigParseError):
+        _decompress_amnezia_format(b"123")
 
 
 def test_full_vpn_uri_roundtrip():

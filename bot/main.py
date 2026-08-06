@@ -272,10 +272,11 @@ async def start_webhook_server(port: int):
     runner = web.AppRunner(app)
     await runner.setup()
 
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    host = os.getenv("WEBHOOK_HOST", "127.0.0.1")
+    site = web.TCPSite(runner, host, port)
     await site.start()
 
-    logger.info("Webhook server started on 0.0.0.0:%d", port)
+    logger.info("Webhook server started on %s:%d", host, port)
     return runner
 
 

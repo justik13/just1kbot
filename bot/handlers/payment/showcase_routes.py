@@ -217,22 +217,12 @@ async def select_tariff(
                 "user_ineligible": (
                     texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
                 ),
-                "subscription_inactive": (  # TODO: extract to texts module
-                    "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
-                    "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
-                ),
-                "current_tariff_unknown": (  # TODO: extract to texts module
-                    "⚠️ Смена тарифа возможна только при действующей подписке.\n\n"
-                    "Перейдите в раздел «Купить подписку» для оформления нового тарифа."
-                ),
-                "active_checkout_exists": (  # TODO: extract to texts module
-                    "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
-                ),
+                "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,
+                "current_tariff_unknown": texts.PAYMENT_CURRENT_TARIFF_UNKNOWN,
+                "active_checkout_exists": texts.PAYMENT_ACTIVE_CHECKOUT_EXISTS,
                 # NOTE: active_change_quote_exists is auto-resolved (old quote
                 # is cancelled), kept as defensive fallback for race conditions.
-                "active_change_quote_exists": (  # TODO: extract to texts module
-                    "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его."
-                ),
+                "active_change_quote_exists": texts.PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS,
             }
             back_button_target = (
                 "payment_showcase"
@@ -442,9 +432,7 @@ async def show_change_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            "⚠️ <b>Смена тарифа недоступна</b>\n\n"
-            "Смена тарифа с перерасчётом доступна только при наличии действующей подписки.\n"
-            "У вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже.",
+            texts.PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB,
             get_back_button("menu_subscription"),
         )
         return
