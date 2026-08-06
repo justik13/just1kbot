@@ -5,6 +5,7 @@ import logging
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select
 
 from bot import texts
@@ -87,6 +88,17 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 if operation_type == "change"
                 else texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L229_1
             )
+            builder = InlineKeyboardBuilder()
+            builder.button(
+                text="🏠 Главное меню",
+                callback_data="back_to_main_menu",
+            )
+            builder.button(
+                text="✅ Прочитано",
+                callback_data="dismiss_notification",
+            )
+            builder.adjust(2)
+
             await bot.send_message(
                 telegram_id,
                 texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(
@@ -94,6 +106,7 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                     value_1=duration,
                     value_2=device_limit,
                 ),
+                reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )
         except TelegramForbiddenError:
