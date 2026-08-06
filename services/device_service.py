@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -192,7 +193,9 @@ class DeviceService:
                 ) from e
             raise DeviceCreationError("Database integrity error") from e
 
-        profile.client_name = f"tg_{user.telegram_id}_p{profile.id}"
+        m = re.search(r'#(\d+)$', profile.device_name)
+        slot_suffix = f"_n{m.group(1)}" if m else ""
+        profile.client_name = f"tg_{user.telegram_id}_p{profile.id}{slot_suffix}"
         await enqueue_api_operation(
             session,
             operation_type="create_peer",
