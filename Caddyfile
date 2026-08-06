@@ -1,0 +1,7 @@
+{
+    email {$SSL_EMAIL}
+}
+
+{$DOMAIN} {
+    reverse_proxy bot:8080
+}

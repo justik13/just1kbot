@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+tests/
+scripts/
+docs/
+.shellcheckrc
+.pip-tools.toml
+docker-compose.yml
+Caddyfile
