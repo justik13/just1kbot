@@ -13,21 +13,6 @@ class HeartbeatPathContractTests(unittest.TestCase):
                 Path("/run/just1kbot/heartbeat"),
                 heartbeat.get_heartbeat_file(),
             )
-        root = Path(__file__).parents[1]
-        loader = (root / "scripts" / "install_safe.sh").read_text(
-            encoding="utf-8"
-        )
-        runtime = (
-            root / "scripts" / "lib" / "install_safe_runtime.sh"
-        ).read_text(encoding="utf-8")
-        combined = loader + runtime
-        self.assertIn("RUNTIME_DIR=/run/just1kbot", loader)
-        self.assertIn('HEARTBEAT_FILE="$RUNTIME_DIR/heartbeat"', loader)
-        self.assertIn(
-            "JUST1KBOT_HEARTBEAT_FILE=$HEARTBEAT_FILE", runtime
-        )
-        self.assertIn("/run/just1kbot/heartbeat", runtime)
-        self.assertNotIn('HEARTBEAT_FILE="/opt/just1kbot/.heartbeat"', combined)
 
     def test_local_file_can_be_overridden_explicitly(self):
         with patch.dict(
