@@ -2,4 +2,7 @@ FROM postgres:16-alpine
 
 RUN apk add --no-cache age
 
+COPY scripts/docker/backup.sh /backup.sh
+RUN chmod 0755 /backup.sh
+
 ENTRYPOINT ["/bin/sh", "/backup.sh"]
