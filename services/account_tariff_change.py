@@ -286,10 +286,10 @@ async def _settle_account_tariff_change(
     if (
         calculation.required_payment_rub != amount
         or calculation.resulting_paid_hours != quote.resulting_paid_hours
-        or calculation.paid_value_after_rub != quote.resulting_paid_value_rub
+        or calculation.paid_value_after_rub.quantize(Decimal("1.000000")) != quote.resulting_paid_value_rub.quantize(Decimal("1.000000"))
         or calculation.retained_bonus_hours != quote.resulting_bonus_hours
-        or calculation.rounding_loss_hours != quote.rounding_loss_hours
-        or calculation.rounding_loss_value_rub != quote.rounding_loss_value_rub
+        or calculation.rounding_loss_hours.quantize(Decimal("1.000000000000")) != quote.rounding_loss_hours.quantize(Decimal("1.000000000000"))
+        or calculation.rounding_loss_value_rub.quantize(Decimal("1.000000")) != quote.rounding_loss_value_rub.quantize(Decimal("1.000000"))
     ):
         raise AccountTariffChangeError("quote_economics_changed")
 
