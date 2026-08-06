@@ -92,3 +92,33 @@ def test_customize_vpn_config_dict_updates_description_dns_and_mtu():
     assert "DNS = 8.8.8.8, 8.8.4.4" in conf
     assert "MTU = 1280" in conf
 
+
+def test_customize_vpn_uri_roundtrip():
+    from utils.vpn_parser import customize_vpn_uri, decode_vpn_uri_to_json, encode_json_to_vpn_uri
+
+    config = {
+        "containers": [
+            {
+                "container": "amnesia-awg2",
+                "awg": {
+                    "protocol_version": "2",
+                    "last_config": "{}",
+                },
+            }
+        ],
+        "description": "OldName",
+    }
+    uri = encode_json_to_vpn_uri(config)
+    customized_uri = customize_vpn_uri(
+        uri,
+        description="Germany #2",
+        dns1="8.8.8.8",
+        dns2="8.8.4.4",
+        mtu="1280",
+    )
+    result = decode_vpn_uri_to_json(customized_uri)
+    assert result["description"] == "Germany #2"
+    assert result["dns1"] == "8.8.8.8"
+    assert result["dns2"] == "8.8.4.4"
+
+

@@ -285,3 +285,33 @@ def customize_vpn_config_dict(
 
     return customized
 
+
+def encode_json_to_vpn_uri(data: dict) -> str:
+    json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    length_prefix = struct.pack(">I", len(json_bytes))
+    compressed = zlib.compress(json_bytes)
+    payload = length_prefix + compressed
+    b64 = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    return f"vpn://{b64}"
+
+
+def customize_vpn_uri(
+    uri: str,
+    description: Optional[str] = None,
+    dns1: str = "8.8.8.8",
+    dns2: str = "8.8.4.4",
+    mtu: str = "1280",
+) -> str:
+    data = decode_vpn_uri_to_json(uri)
+    if not data:
+        return uri
+    customized = customize_vpn_config_dict(
+        data,
+        description=description,
+        dns1=dns1,
+        dns2=dns2,
+        mtu=mtu,
+    )
+    return encode_json_to_vpn_uri(customized)
+
+
