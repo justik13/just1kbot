@@ -134,6 +134,15 @@ async def _safe_run_post_commit(
         logging.error("Post-commit task failed: %s", e, exc_info=True)
 
 
+def _handle_task_result(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logging.error("Background task failed: %s", e, exc_info=True)
+
+
 async def _run_post_commit_tasks(session: AsyncSession) -> None:
     tasks: list[Callable[[], Awaitable[None]]] = session.info.pop(
         "post_commit_tasks", []
@@ -143,7 +152,7 @@ async def _run_post_commit_tasks(session: AsyncSession) -> None:
     for task in tasks:
         background_task = asyncio.create_task(_safe_run_post_commit(task))
         _post_commit_background_tasks.add(background_task)
-        background_task.add_done_callback(_post_commit_background_tasks.discard)
+        background_task.add_done_callback(lambda t: (_post_commit_background_tasks.discard(t), _handle_task_result(t)))
 
 
 def queue_post_commit_task(

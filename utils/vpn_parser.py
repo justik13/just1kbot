@@ -281,7 +281,7 @@ def customize_vpn_config_dict(
 
                         awg["last_config"] = json.dumps(last_config, ensure_ascii=False)
                 except Exception as e:
-                    logger.warning(f"customize_vpn_config_dict patch failed: {e}")
+                    logger.error(f"customize_vpn_config_dict patch failed: {e}", exc_info=True)
 
     return customized
 

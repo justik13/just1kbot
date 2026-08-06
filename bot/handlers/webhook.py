@@ -90,12 +90,6 @@ def _get_real_ip(request: web.Request) -> str:
         real_ip = request.headers.get("X-Real-IP", "").strip()
         if real_ip:
             return real_ip
-        forwarded = request.headers.get("X-Forwarded-For", "").strip()
-        if forwarded:
-            # To prevent spoofing, we take the LAST IP appended by the trusted proxy
-            last_ip = forwarded.split(",")[-1].strip()
-            if last_ip:
-                return last_ip
     return remote
 
 
