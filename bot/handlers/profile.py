@@ -87,8 +87,8 @@ async def _render_profile(
             devices_count=profiles_count,
             total_traffic=format_traffic(total_traffic),
             referrals_count=referrals_count,
-            balance=int(balance.available),
-            referral_bonus_balance=int(referral_bonus_balance),
+            balance=int(balance.real_available),
+            referral_bonus_balance=int(balance.bonus_available),
         )
         kb = get_profile_keyboard()
     else:
@@ -97,9 +97,10 @@ async def _render_profile(
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
             referrals_count=referrals_count,
-            balance=int(balance.available),
-            referral_bonus_balance=int(referral_bonus_balance),
+            balance=int(balance.real_available),
+            referral_bonus_balance=int(balance.bonus_available),
         )
+
 
         builder = InlineKeyboardBuilder()
         builder.button(

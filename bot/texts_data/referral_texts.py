@@ -8,8 +8,8 @@ ID: <code>{telegram_id}</code>
 🔌 <b>Устройства:</b> {devices_count}
 📊 <b>Всего трафика:</b> {total_traffic}
 
-💰 <b>Баланс:</b> {balance} ₽
-🎁 <b>Реферальный бонус:</b> {referral_bonus_balance} ₽
+💰 <b>Реальный баланс:</b> {balance} ₽
+🎁 <b>Бонусный баланс:</b> {referral_bonus_balance} ₽
 
 👥 <b>Рефералов:</b> {referrals_count}""",
     "PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE": """👤 <b>Профиль</b>
@@ -19,12 +19,13 @@ ID: <code>{telegram_id}</code>
 
 🔴 <b>Статус:</b> Нет активной подписки
 
-💰 <b>Баланс:</b> {balance} ₽
-🎁 <b>Реферальный бонус:</b> {referral_bonus_balance} ₽
+💰 <b>Реальный баланс:</b> {balance} ₽
+🎁 <b>Бонусный баланс:</b> {referral_bonus_balance} ₽
 
 Чтобы подключать устройства и пользоваться сервисом, оформите подписку.
 
 👥 <b>Рефералов:</b> {referrals_count}""",
+
     # Public aliases kept in the new text module so existing UI contracts keep
     # resolving without restoring the removed legacy user_texts implementation.
     "PROFILE_TEXT_ACTIVE": """👤 <b>Профиль</b>

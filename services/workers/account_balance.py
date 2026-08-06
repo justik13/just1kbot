@@ -210,9 +210,11 @@ async def process_balance_notifications(bot: Bot) -> int:
             )
             message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
                 value_0=int(payment.amount),
-                value_1=int(balance.available),
-                value_2=suffix,
+                value_1=int(balance.real_available),
+                value_2=int(balance.bonus_available),
+                value_3=suffix,
             )
+
             try:
                 await global_send_limiter.acquire()
                 await render_hub(

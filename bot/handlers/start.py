@@ -197,7 +197,12 @@ async def back_to_main_menu(
     name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
 
     balance = await get_account_balance(session, user_id=db_user.id)
-    text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
+    text = texts.HUB_HEADER.format(
+        name=name,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
+    )
+
 
     kb = get_hub_keyboard(
         is_admin=is_admin,

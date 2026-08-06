@@ -228,8 +228,10 @@ async def confirm_tariff_change(
                 + result.quote.resulting_bonus_hours
             ),
             value_2=charged,
-            value_3=int(result.balance_after.available),
+            value_3=int(result.balance_after.real_available),
+            value_4=int(result.balance_after.bonus_available),
         ),
+
         get_payment_success_keyboard(),
     )
     result.quote.purchase_notified_at = (

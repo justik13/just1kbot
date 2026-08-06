@@ -50,15 +50,18 @@ async def show_user_balance_menu(
         return
 
     balance_info = await get_account_balance(session, user_id=user.id)
-    available_rub = int(balance_info.available)
+    real_rub = int(balance_info.real_available)
+    bonus_rub = int(balance_info.bonus_available)
 
     username_str = f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
     text = (
         f"💳 <b>Управление балансом пользователя</b>\n\n"
         f"Пользователь: <b>{safe(username_str)}</b>\n"
-        f"Текущий доступный баланс: <b>{available_rub} ₽</b>\n\n"
+        f"💰 Реальный баланс: <b>{real_rub} ₽</b>\n"
+        f"🎁 Бонусный баланс: <b>{bonus_rub} ₽</b>\n\n"
         f"Выберите действие ниже:"
     )
+
 
     try:
         await callback.message.edit_text(

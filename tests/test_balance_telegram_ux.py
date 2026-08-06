@@ -88,7 +88,9 @@ class BalanceTelegramUXTests(unittest.TestCase):
 
     def test_main_and_profile_templates_require_visible_balance(self):
         for key in ("HUB_HEADER", "PROFILE_TEXT_ACTIVE", "PROFILE_TEXT_INACTIVE"):
-            self.assertIn("{balance}", get_text(key))
+            text = get_text(key)
+            self.assertTrue("{balance}" in text or "{real_balance}" in text)
+
 
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
