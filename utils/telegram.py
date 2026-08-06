@@ -226,6 +226,7 @@ async def render_hub(
     reply_markup: InlineKeyboardMarkup,
     parse_mode: str = "HTML",
     force_new: bool = False,
+    trigger_message_id: Optional[int] = None,
 ) -> int:
     """Render a single navigable hub, editing the current text message first."""
     _maybe_cleanup_cache()
@@ -234,6 +235,12 @@ async def render_hub(
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
+
+        if trigger_message_id and trigger_message_id not in old_ids:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
+            except Exception:
+                pass
 
         # Most bot screens fit in one Telegram message. Editing the existing hub
         # avoids visible flicker, preserves scroll position, and removes stale

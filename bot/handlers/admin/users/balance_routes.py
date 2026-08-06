@@ -5,6 +5,7 @@ from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -214,10 +215,22 @@ async def process_balance_topup(
 
     # Notify target user if possible
     try:
+        builder = InlineKeyboardBuilder()
+        builder.button(
+            text="💳 В баланс",
+            callback_data="menu_balance",
+        )
+        builder.button(
+            text="✅ Прочитано",
+            callback_data="dismiss_notification",
+        )
+        builder.adjust(2)
+
         await message.bot.send_message(
             user.telegram_id,
             f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
             f"Вы можете использовать его для покупки или продления подписки.",
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
     except Exception as e:
@@ -310,9 +323,21 @@ async def process_balance_deduct(
 
     # Notify target user if possible
     try:
+        builder = InlineKeyboardBuilder()
+        builder.button(
+            text="💳 В баланс",
+            callback_data="menu_balance",
+        )
+        builder.button(
+            text="✅ Прочитано",
+            callback_data="dismiss_notification",
+        )
+        builder.adjust(2)
+
         await message.bot.send_message(
             user.telegram_id,
             f"💳 <b>С вашего баланса списано: -{amount} ₽.</b>",
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
     except Exception as e:

@@ -99,6 +99,7 @@ async def _render_balance(
     user: User,
     *,
     notice: str | None = None,
+    trigger_message_id: int | None = None,
 ) -> None:
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
@@ -124,6 +125,7 @@ async def _render_balance(
         chat_id,
         text,
         get_balance_keyboard(has_visible_topup=visible is not None),
+        trigger_message_id=trigger_message_id,
     )
 
 
@@ -255,7 +257,13 @@ async def show_balance(
     if db_user is None:
         await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L246_1, show_alert=True)
         return
-    await _render_balance(callback.bot, callback.message.chat.id, session, db_user)
+    await _render_balance(
+        callback.bot,
+        callback.message.chat.id,
+        session,
+        db_user,
+        trigger_message_id=callback.message.message_id if callback.message else None,
+    )
 
 
 @router.callback_query(F.data.startswith("balance_history"))

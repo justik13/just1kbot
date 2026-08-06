@@ -5,6 +5,7 @@ import time
 from datetime import timedelta
 
 from aiogram.exceptions import TelegramForbiddenError
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import delete, select, update
 
 from database.connection import session_scope
@@ -182,9 +183,22 @@ async def _cleanup_expired_profiles_grace():
 
                         bot = get_bot_ref()
                         if bot:
+                            builder = InlineKeyboardBuilder()
+                            builder.button(
+                                text="🛒 Купить подписку",
+                                callback_data="menu_buy",
+                            )
+                            builder.button(
+                                text="✅ Прочитано",
+                                callback_data="dismiss_notification",
+                            )
+                            builder.adjust(1)
+
                             await bot.send_message(
                                 user.telegram_id,
                                 texts.UI_SERVICES_WORKERS_CLEANUP_L184_1,
+                                reply_markup=builder.as_markup(),
+                                parse_mode="HTML",
                             )
                     except TelegramForbiddenError:
                         user.is_bot_blocked = True
