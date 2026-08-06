@@ -174,11 +174,33 @@ async def confirm_tariff_change(
             quote_public_id=quote_id,
         )
     except AccountTariffChangeError as exc:
+        import logging
+        logging.getLogger(__name__).warning(
+            "AccountTariffChangeError in confirm_tariff_change: code=%s, user_id=%s, quote_public_id=%s",
+            exc.code,
+            db_user.id,
+            quote_id,
+        )
         if exc.code == "insufficient_balance":
             await render_tariff_change_review(
                 callback, session, db_user, quote_id
             )
             return
+
+        from database.models import TariffQuote
+        from sqlalchemy import select
+        failed_quote = await session.scalar(
+            select(TariffQuote).where(
+                TariffQuote.public_id == quote_id,
+                TariffQuote.user_id == db_user.id,
+                TariffQuote.status == "active",
+            )
+        )
+        if failed_quote:
+            failed_quote.status = "cancelled"
+            failed_quote.diagnostic_reason = f"settlement_failed:{exc.code}"
+            await session.flush()
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,

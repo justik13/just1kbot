@@ -176,7 +176,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         source_version_tariff_id = await session.scalar(select(TariffVersion.tariff_id).where(
             TariffVersion.id == existing_change.source_tariff_version_id))
         same_history = (
-            existing_change.source_subscription_end == user.subscription_end
+            _timestamp(existing_change.source_subscription_end) == _timestamp(user.subscription_end)
             and sorted(existing_change.source_entitlement_entry_ids or [])
                 == sorted(snapshot.source_entitlement_entry_ids)
             and sorted(existing_change.source_ledger_entry_ids or [])
@@ -185,13 +185,13 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         )
         if existing_change.target_tariff_version_id == target_version.id and same_history:
             return TariffChangeQuoteResult(existing_change, False, None)
-        if existing_change.target_tariff_version_id == target_version.id and not same_history:
-            existing_change.status = "cancelled"
-            existing_change.diagnostic_reason = "source_balance_changed"
-            await session.flush()
-            existing_change = None
-        if existing_change is not None:
-            return TariffChangeQuoteResult(failure_code="active_change_quote_exists")
+
+        existing_change.status = "cancelled"
+        existing_change.diagnostic_reason = (
+            "source_balance_changed" if not same_history else "superseded_by_new_target"
+        )
+        await session.flush()
+        existing_change = None
 
     required = max(Decimal(0), target_version.price_rub - snapshot.remaining_paid_value_rub).quantize(
         Decimal("1"), rounding=ROUND_CEILING)
