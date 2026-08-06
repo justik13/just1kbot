@@ -26,6 +26,8 @@ ALERT_TIMEOUT_SECONDS = 5.0
 class _Fingerprint:
     problem_types: frozenset[str]
     dead_count: int
+    overdue: int = 0
+    stale_processing: int = 0
 
 
 @dataclass
@@ -70,15 +72,14 @@ class QueueHealthMonitor:
             types.add("stale_processing")
         if queue.dead:
             types.add("dead")
-        return _Fingerprint(frozenset(types), queue.dead)
+        return _Fingerprint(frozenset(types), queue.dead, queue.overdue, queue.stale_processing)
 
     @staticmethod
     def _escalated(current: _Fingerprint,
                    previous: _Fingerprint | None) -> bool:
         if previous is None:
             return True
-        return (current.dead_count > previous.dead_count
-                or bool(current.problem_types - previous.problem_types))
+        return (current.dead_count > previous.dead_count or bool(current.problem_types - previous.problem_types) or current.overdue > (previous.overdue or 0) or current.stale_processing > (previous.stale_processing or 0))
 
     @staticmethod
     def _reset_delivery_state(episode: _Episode) -> None:

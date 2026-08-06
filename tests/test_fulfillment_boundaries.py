@@ -36,14 +36,14 @@ class FulfillmentBoundaryTests(unittest.TestCase):
         for path in (ROOT / "services").rglob("*.py"):
             if path.name == "amnezia_client.py":
                 continue
-            tree = ast.parse(path.read_text())
+            tree = ast.parse(path.read_text(encoding="utf-8"))
             if any(
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr in WRITES
                 for node in ast.walk(tree)
             ):
-                found.add(str(path.relative_to(ROOT)))
+                found.add(path.relative_to(ROOT).as_posix())
         # Traffic remains read/usage code and is deliberately not part of the
         # user lifecycle boundary; it will be migrated independently.
         self.assertIn("services/api_operations_executor.py", found)

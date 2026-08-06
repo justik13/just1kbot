@@ -1,5 +1,6 @@
 import logging
 
+import threading
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.types import TypeDecorator, Text
 
@@ -9,16 +10,18 @@ logger = logging.getLogger(__name__)
 
 _fernet_cache: dict[str, Fernet] = {}
 _FERNET_CACHE_MAX_SIZE = 10
+_fernet_lock = threading.Lock()
 
 
 def _get_fernet(key: str) -> Fernet:
-    if key not in _fernet_cache:
-        if len(_fernet_cache) >= _FERNET_CACHE_MAX_SIZE:
-            oldest_key = next(iter(_fernet_cache))
-            del _fernet_cache[oldest_key]
-            logger.debug("Fernet cache full, evicted oldest key")
-        _fernet_cache[key] = Fernet(key.encode("utf-8"))
-    return _fernet_cache[key]
+    with _fernet_lock:
+        if key not in _fernet_cache:
+            if len(_fernet_cache) >= _FERNET_CACHE_MAX_SIZE:
+                oldest_key = next(iter(_fernet_cache))
+                del _fernet_cache[oldest_key]
+                logger.debug("Fernet cache full, evicted oldest key")
+            _fernet_cache[key] = Fernet(key.encode("utf-8"))
+        return _fernet_cache[key]
 
 
 class EncryptedString(TypeDecorator):

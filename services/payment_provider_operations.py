@@ -263,7 +263,9 @@ async def finalize(session, claim, result):
                 ambiguous=claim.operation_type == "create_payment" and not claim.external_id,
             )
         else:
-            if payment.external_id and payment.external_id != provider_id:
+            if payment.external_id is None:
+                payment.external_id = provider_id
+            elif payment.external_id != provider_id:
                 payment.reconciliation_status = "mismatch"
                 payment.fulfillment_status = "manual_review"
                 payment.manual_review_reason = "external_id_mismatch"
