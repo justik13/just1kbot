@@ -521,8 +521,8 @@ TEXTS = {
     'RUNTIME_SERVICES_WORKERS_TRAFFIC_L67_1': 'Критическая ошибка в цикле трафика (crash #%s, next retry in %ss): %s',
     # services/workers/traffic.py:128
     'RUNTIME_SERVICES_WORKERS_TRAFFIC_L128_1': 'Ошибка трафика с %s: %s',
-    # services/workers/traffic.py:304
     'RUNTIME_SERVICES_WORKERS_TRAFFIC_L304_1': '⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>\n{value_0}\n👤 <b>Пользователь:</b> <code>{value_1}</code>\n🌍 <b>Сервер:</b> {value_2}\n📊 <b>Использовано:</b> <b>{value_3:.2f} TiB</b>\n🆔 <b>Profile ID:</b> <code>{value_4}</code>\n{value_5}\n<i>Пользователь скачал более 1 TiB трафика.\nРекомендуется связаться с ним или принять меры.\nДоступ НЕ отключён автоматически (Fair Usage Policy).</i>',
+    'STALE_TOPUP_ALERT_ROW': '{icon} <b>Пополнение #{payment_id}</b> от <code>{telegram_id}</code>: <b>{amount} {currency}</b> ({method})',
 }
 
 
