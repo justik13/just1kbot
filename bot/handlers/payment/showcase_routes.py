@@ -205,6 +205,18 @@ async def select_tariff(
                 "subscription_balance_untracked": (
                     texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
                 ),
+                "mixed_source_tariffs": (
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
+                ),
+                "target_tariff_not_found": (
+                    texts.ERROR_TARIFF_UNAVAILABLE
+                ),
+                "target_tariff_inactive": (
+                    texts.ERROR_TARIFF_UNAVAILABLE
+                ),
+                "user_ineligible": (
+                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
+                ),
                 "subscription_inactive": (  # TODO: extract to texts module
                     "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
                     "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
