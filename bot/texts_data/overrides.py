@@ -34,9 +34,7 @@ OVERRIDES['ADMIN_MANUAL_GRANT_USER_DELETED'] = '❌ Невозможно выд�
 
 OVERRIDES['ADMIN_SERVER_ADDED'] = '✅ Сервер успешно добавлен.'
 
-OVERRIDES['ADMIN_SERVER_CARD'] = '🖥 <b>Сервер:</b> {server_name}
-URL: {server_url}
-Макс. клиентов: {max_clients}'
+OVERRIDES['ADMIN_SERVER_CARD'] = '🖥 <b>Сервер:</b> {server_name}\nURL: {server_url}\nМакс. клиентов: {max_clients}'
 
 OVERRIDES['ADMIN_SERVER_CHECKING'] = '🔄 Проверка сервера...'
 

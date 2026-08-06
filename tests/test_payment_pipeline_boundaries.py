@@ -7,7 +7,7 @@ ROOT = pathlib.Path(__file__).parents[1]
 
 class PaymentBoundaries(unittest.TestCase):
     def test_webhook_handler_only_persists_inbox(self):
-        body = (ROOT / "bot/handlers/webhook.py").read_text()
+        body = (ROOT / "bot/handlers/webhook.py").read_text(encoding="utf-8")
         fn = body[
             body.index("async def yookassa_webhook_handler") : body.index(
                 "async def healthcheck_handler"
@@ -25,7 +25,7 @@ class PaymentBoundaries(unittest.TestCase):
     def test_paid_at_never_cleared_by_manual_review(self):
         for root in ("bot", "database", "services", "utils"):
             for path in (ROOT / root).rglob("*.py"):
-                tree = ast.parse(path.read_text())
+                tree = ast.parse(path.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
                     if isinstance(node, (ast.Assign, ast.AnnAssign)):
                         targets = (
@@ -46,7 +46,7 @@ class PaymentBoundaries(unittest.TestCase):
     def test_all_paid_at_clear_forms_are_forbidden(self):
         for root in ("bot", "database", "services", "utils"):
             for path in (ROOT / root).rglob("*.py"):
-                tree = ast.parse(path.read_text())
+                tree = ast.parse(path.read_text(encoding="utf-8"))
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Call):
                         if (
@@ -94,7 +94,7 @@ class PaymentBoundaries(unittest.TestCase):
             ROOT / "services/workers/webhook_inbox.py",
             ROOT / "bot/handlers/webhook.py",
         ]:
-            body = path.read_text()
+            body = path.read_text(encoding="utf-8")
             for forbidden in (
                 "SubscriptionService.extend_subscription",
                 "ReferralService.process_bonus",
@@ -104,9 +104,9 @@ class PaymentBoundaries(unittest.TestCase):
                 self.assertNotIn(forbidden, body, str(path))
 
     def test_repeatable_reconcile_and_idempotent_credit_are_present(self):
-        provider = (ROOT / "services/payment_provider_operations.py").read_text()
-        models = (ROOT / "database/models.py").read_text()
-        topup = (ROOT / "services/account_topup.py").read_text()
+        provider = (ROOT / "services/payment_provider_operations.py").read_text(encoding="utf-8")
+        models = (ROOT / "database/models.py").read_text(encoding="utf-8")
+        topup = (ROOT / "services/account_topup.py").read_text(encoding="utf-8")
         self.assertIn("ensure_reconcile_payment_operation", provider)
         self.assertIn("uuid.uuid4().hex", provider)
         self.assertIn("uq_account_ledger_payment_credit", models)
@@ -114,7 +114,7 @@ class PaymentBoundaries(unittest.TestCase):
 
     def test_create_calls_require_idempotency_key(self):
         for path in (ROOT / "services").rglob("*.py"):
-            tree = ast.parse(path.read_text())
+            tree = ast.parse(path.read_text(encoding="utf-8"))
             for node in ast.walk(tree):
                 if (
                     isinstance(node, ast.Call)
