@@ -12,7 +12,9 @@ from bot.keyboards import (
     get_history_keyboard,
     get_profile_keyboard,
     get_referral_keyboard,
+    get_referrals_list_keyboard,
 )
+
 from database.models import User
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.payments_repo import get_user_payments
@@ -280,7 +282,7 @@ async def show_referral(
     )
 
 
-@router.callback_query(F.data == "referrals_list")
+@router.callback_query(F.data.startswith("referrals_list"))
 async def show_referrals_list(
     callback: CallbackQuery,
     state: FSMContext,
@@ -297,6 +299,13 @@ async def show_referrals_list(
         )
         return
 
+    page = 1
+    if ":" in callback.data:
+        try:
+            page = int(callback.data.split(":")[1])
+        except (ValueError, IndexError):
+            page = 1
+
     _, referrals = await get_user_with_referrals(
         session,
         db_user.telegram_id,
@@ -304,28 +313,35 @@ async def show_referrals_list(
 
     if not referrals:
         rendered = texts.REFERRAL_LIST_EMPTY
+        total_pages = 1
     else:
+        page_size = 10
+        total_count = len(referrals)
+        total_pages = max(1, (total_count + page_size - 1) // page_size)
+        page = max(1, min(page, total_pages))
+
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        page_referrals = referrals[start_idx:end_idx]
+
         rendered = texts.REFERRAL_LIST_HEADER
-        for referral in referrals[:20]:
+        for idx, referral in enumerate(page_referrals, start=start_idx + 1):
             safe_user = (
                 f"@{safe(referral.username)}"
                 if referral.username
                 else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             )
-            rendered += texts.RUNTIME_BOT_HANDLERS_PROFILE_L306_1.format(value_0=safe_user)
+            created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
+            rendered += f"\n{idx}. <b>{safe_user}</b> ({created_str})"
 
-        if len(referrals) > 20:
-            rendered += (
-                texts.RUNTIME_BOT_HANDLERS_PROFILE_L310_1.format(value_0=len(referrals) - 20)
-            )
-
-        rendered += texts.REFERRAL_LIST_FOOTER.format(
-            count=len(referrals),
+        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(
+            count=total_count,
         )
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         rendered,
-        get_back_button("referral"),
+        get_referrals_list_keyboard(page=page, total_pages=total_pages),
     )
+

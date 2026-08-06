@@ -11,6 +11,7 @@ from bot import texts
 from bot.keyboards import (
     get_back_button,
     get_balance_amounts_keyboard,
+    get_balance_history_keyboard,
     get_balance_keyboard,
     get_topup_payment_keyboard,
     get_topup_waiting_keyboard,
@@ -21,7 +22,9 @@ from database.models import Payment, User
 from database.repositories.account_ledger_repo import (
     get_account_balance,
     get_account_history,
+    get_account_history_count,
 )
+
 from database.repositories.tariffs_repo import get_active_tariffs
 from services.account_topup import (
     AccountTopupError,
@@ -242,7 +245,7 @@ async def show_balance(
     await _render_balance(callback.bot, callback.message.chat.id, session, db_user)
 
 
-@router.callback_query(F.data == "balance_history")
+@router.callback_query(F.data.startswith("balance_history"))
 async def show_balance_history(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -251,13 +254,31 @@ async def show_balance_history(
     await callback.answer(show_alert=False)
     if db_user is None:
         return
-    entries = await get_account_history(session, user_id=db_user.id, limit=30)
+
+    page = 1
+    if ":" in callback.data:
+        try:
+            page = int(callback.data.split(":")[1])
+        except (ValueError, IndexError):
+            page = 1
+
+    total_count = await get_account_history_count(session, user_id=db_user.id)
+    page_size = 10
+    total_pages = max(1, (total_count + page_size - 1) // page_size)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * page_size
+
+    entries = await get_account_history(
+        session, user_id=db_user.id, limit=page_size, offset=offset
+    )
+
     await render_hub(
         callback.bot,
         callback.message.chat.id,
         texts.BALANCE_HISTORY_TITLE.format(history=_history_lines(entries)),
-        get_back_button("menu_balance"),
+        get_balance_history_keyboard(page=page, total_pages=total_pages),
     )
+
 
 
 @router.callback_query(F.data == "balance_topup")
