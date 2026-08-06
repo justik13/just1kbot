@@ -126,6 +126,7 @@ def get_bot_ref():
 def _write_heartbeat(final: bool = False):
     try:
         temp_file = HEARTBEAT_FILE.with_suffix(".tmp")
+        os.makedirs(HEARTBEAT_FILE.parent, exist_ok=True)
         if final:
             content = f"STOPPED {int(time.time())}\n"
         else:
