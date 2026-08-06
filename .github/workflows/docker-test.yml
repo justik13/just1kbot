@@ -171,7 +171,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose exec -T bot true
+          docker compose exec -T bot alembic upgrade head
           docker compose exec -T db psql -U just1kbot -d just1kbot_bot -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM alembic_version;'
 
       - name: View logs (if failure)
