@@ -318,19 +318,7 @@ async def main():
                 "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "
                 f"{backup_key_path} is missing!"
             )
-            if settings.ADMIN_IDS:
-                try:
-                    temp_bot = Bot(token=settings.BOT_TOKEN)
-                    for admin_id in settings.ADMIN_IDS:
-                        await temp_bot.send_message(
-                            admin_id,
-                            "⚠️ <b>CRITICAL WARNING</b>: DB_ENCRYPTION_KEY is present "
-                            "but backup.agekey is missing! Backups cannot be decrypted.",
-                            parse_mode="HTML",
-                        )
-                    await temp_bot.session.close()
-                except Exception:
-                    pass
+            raise RuntimeError(f"Startup aborted: {backup_key_path} is missing. Backups would be irrecoverable.")
 
         try:
             Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))

@@ -15,8 +15,8 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
         if padding_needed:
             b64 += "=" * (4 - padding_needed)
         return base64.b64decode(b64, validate=True)
-    except Exception as e:
-        logger.warning(f"_decode_base64url failed: {e}")
+    except Exception:
+        logger.exception("_decode_base64url failed")
         return None
 
 
@@ -35,8 +35,8 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
             )
             return None
         return decompressed.decode("utf-8")
-    except Exception as e:
-        logger.warning(f"_decompress_amnezia_format zlib failed: {e}")
+    except Exception:
+        logger.exception("_decompress_amnezia_format zlib failed")
         return None
 
 
@@ -180,8 +180,8 @@ def build_conf_file_from_dict(data: dict) -> Optional[str]:
         if _looks_like_wireguard_conf(fallback_conf):
             return fallback_conf
         return None
-    except Exception as e:
-        logger.error(f"build_conf_file_from_dict: unexpected error: {e}", exc_info=True)
+    except Exception:
+        logger.exception("build_conf_file_from_dict: unexpected error")
         return None
 
 
@@ -280,8 +280,8 @@ def customize_vpn_config_dict(
                             last_config["config"] = "\n".join(new_lines) + "\n"
 
                         awg["last_config"] = json.dumps(last_config, ensure_ascii=False)
-                except Exception as e:
-                    logger.warning(f"customize_vpn_config_dict patch failed: {e}")
+                except Exception:
+                    logger.exception("customize_vpn_config_dict patch failed")
 
     return customized
 

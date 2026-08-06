@@ -7,7 +7,7 @@ except ImportError:
 from functools import lru_cache
 from typing import List
 
-from pydantic import field_validator, model_validator
+from pydantic import field_validator, model_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,13 +45,13 @@ class Settings(BaseSettings):
     )
 
     # ── Telegram ──
-    BOT_TOKEN: str
+    BOT_TOKEN: str = Field(repr=False)
     ADMIN_IDS: List[int]
     SUPPORT_USERNAME: str
 
     # ── Database ──
     DATABASE_URL: str
-    DB_ENCRYPTION_KEY: str
+    DB_ENCRYPTION_KEY: str = Field(repr=False)
 
     # ── Redis ──
     REDIS_URL: str
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
 
     # ── YooKassa ──
     YOOKASSA_SHOP_ID: str
-    YOOKASSA_SECRET_KEY: str
+    YOOKASSA_SECRET_KEY: str = Field(repr=False)
     YOOKASSA_RETURN_URL: str
     YOOKASSA_WEBHOOK_PORT: int
     DOMAIN: str
