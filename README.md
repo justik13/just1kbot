@@ -58,12 +58,12 @@ sudo bash just1kbot.sh install
 sudo env \
   NON_INTERACTIVE=1 \
   BOT_TOKEN='123456789:telegram-token' \
-  ADMIN_IDS='[123456789]' \
+  ADMIN_IDS='[987654321]' \
   SUPPORT_USERNAME='support_username' \
   YOOKASSA_SHOP_ID='shop-id' \
   YOOKASSA_SECRET_KEY='secret-key' \
-  DOMAIN='vpn.example.com' \
-  SSL_EMAIL='admin@example.com' \
+  DOMAIN='vpn.acme.tld' \
+  SSL_EMAIL='ops@acme.tld' \
   bash just1kbot.sh install
 ```
 
