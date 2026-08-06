@@ -132,28 +132,14 @@ async def cmd_start(
 
     await _ensure_bot_unblocked(session, telegram_id)
 
-    is_active = await SubscriptionService.check_access(
-        session,
-        user.telegram_id,
-    )
-
-    is_admin = user.telegram_id in get_settings().ADMIN_IDS
-
-    name = safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
-
-    balance = await get_account_balance(session, user_id=user.id)
-    text = texts.HUB_HEADER.format(name=name, balance=int(balance.available))
-
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-    )
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
 
     await render_hub(
         message.bot,
         message.chat.id,
-        text,
-        kb,
+        texts.WELCOME_TEXT,
+        builder.as_markup(),
         force_new=True,
     )
 
