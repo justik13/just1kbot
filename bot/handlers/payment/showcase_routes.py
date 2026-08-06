@@ -435,6 +435,9 @@ async def show_change_tariff(
         )
         return
 
+    current_limit = await _get_effective_device_limit(session, db_user)
+    tariff_name = get_tariff_display_name(current_limit)
+
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
         valid_until=format_datetime(db_user.subscription_end),
