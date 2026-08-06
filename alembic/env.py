@@ -31,16 +31,28 @@ from database import refund_models as _refund_models  # noqa: E402,F401
 
 target_metadata = Base.metadata
 
-# Override sqlalchemy.url with DATABASE_URL from environment if available
+# Override sqlalchemy.url with DATABASE_URL from environment if available.
+# Alembic's ConfigParser uses '%' for interpolation, while URL-encoded
+# credentials legitimately contain '%' (for example, an encoded password).
+# Escape percent signs before inserting the URL; ConfigParser will restore
+# them when the value is read back by Alembic.
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    # Convert asyncpg URL to sync psycopg2 for Alembic if needed
-    # Alembic can work with asyncpg directly in async mode
-    config.set_main_option("sqlalchemy.url", database_url)
-    # Log only the host and database name, not credentials
+    config.set_main_option(
+        "sqlalchemy.url",
+        database_url.replace("%", "%%"),
+    )
+    # Log only the host and database name, not credentials.
     from urllib.parse import urlparse
+
     parsed = urlparse(database_url)
-    logger.info(f"Using database: {parsed.hostname}:{parsed.port or 5432}/{parsed.path.lstrip('/')}")
+    logger.info(
+        "Using database: %s:%s/%s",
+        parsed.hostname,
+        parsed.port or 5432,
+        parsed.path.lstrip("/"),
+    )
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""

@@ -1,0 +1,120 @@
+# docker-compose.yml
+# This is the Greenfield production deployment configuration.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: just1kbot_db
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1G"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-just1kbot} -d ${POSTGRES_DB:-just1kbot_bot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: just1kbot_redis
+    restart: unless-stopped
+    logging: *default-logging
+    # Keep the Redis password out of the redis-server command line.
+    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: just1kbot_app
+    restart: unless-stopped
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      DOCKER_DEPLOYMENT: "true"
+      YOOKASSA_WEBHOOK_PORT: "8080"
+      POSTGRES_HOST: "db"
+      REDIS_HOST: "redis"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "2G"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: just1kbot_caddy
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+      SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bot
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    container_name: just1kbot_backup
+    profiles: ["tools"]
+    logging: *default-logging
+    volumes:
+      - ./backups:/backups
+    environment:
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}
+      POSTGRES_HOST: "db"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
+      POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:

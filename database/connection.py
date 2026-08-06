@@ -21,11 +21,11 @@ _sessionmaker = None
 _post_commit_background_tasks: set[asyncio.Task[None]] = set()
 
 DEFAULT_TARIFFS = [
-    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35,  "sort_order": 10},
-    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 30, "device_limit": 2,  "price_rub": 90,  "sort_order": 11},
+    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35, "sort_order": 10},
+    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 30, "device_limit": 2,  "price_rub": 90, "sort_order": 11},
     {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 90, "device_limit": 2,  "price_rub": 240, "sort_order": 12},
-    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 30, "device_limit": 5,  "price_rub": 180, "sort_order": 20},
-    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 90, "device_limit": 5,  "price_rub": 480, "sort_order": 21},
+    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 30, "device_limit": 5, "price_rub": 180, "sort_order": 20},
+    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 90, "device_limit": 5, "price_rub": 480, "sort_order": 21},
     {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 30, "device_limit": 10, "price_rub": 320, "sort_order": 30},
     {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 90, "device_limit": 10, "price_rub": 850, "sort_order": 31},
 ]
@@ -57,7 +57,15 @@ async def _run_alembic_migrations(database_url: str) -> None:
     """Run Alembic migrations on the database and seed default data."""
     try:
         alembic_cfg = Config(str(Path(__file__).parent.parent / "alembic.ini"))
-        alembic_cfg.set_main_option("sqlalchemy.url", database_url)
+        # ConfigParser (used internally by Alembic Config) treats '%' as
+        # interpolation syntax. URL-encoded database passwords legitimately
+        # contain '%' (for example %40 for '@'), so escape percent signs before
+        # passing the URL into Alembic. ConfigParser restores them when the
+        # option is read back by Alembic.
+        alembic_cfg.set_main_option(
+            "sqlalchemy.url",
+            database_url.replace("%", "%%"),
+        )
 
         # env.py uses asyncio.run(). Running Alembic in a worker thread avoids
         # nesting that event loop inside the bot's already-running loop. It also
@@ -83,7 +91,7 @@ async def _seed_default_data() -> None:
                 session.add(Tariff(**tariff, is_active=True))
             await session.commit()
             logging.info("Default tariffs seeded successfully.")
-        
+
         # Seed maintenance mode
         from database.models import MaintenanceMode
         result = await session.execute(select(func.count(MaintenanceMode.id)))

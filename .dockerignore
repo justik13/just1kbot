@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+tests/
+docs/
+.shellcheckrc
+.pip-tools.toml
+docker-compose.yml
+Caddyfile
+Caddyfile.ci
+backups/

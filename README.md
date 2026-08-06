@@ -33,365 +33,235 @@ Telegram-бот для продажи VPN-доступа на базе **Amnezia
 | Telegram | aiogram 3 |
 | ORM | SQLAlchemy 2 async |
 | База данных | PostgreSQL 16 |
-| FSM | отдельный Redis 7 |
-| HTTP | aiohttp; managed Nginx или внешний reverse proxy |
+| FSM | Redis 7 |
+| HTTP | aiohttp + Caddy |
 | Платежи | YooKassa |
 | VPN | Amnezia API, `amneziawg2` |
 | Миграции | Alembic |
-| Backup | `pg_dump` + `age` |
+| Backup | `pg_dump` + `gzip` + `age` |
 
-# Production installer
+# Установка и запуск (Docker)
 
-## Платформа
+> [!WARNING]
+> **Только для новых установок (Greenfield)!**
+> Данный способ развертывания предназначен только для запуска бота на новых, чистых серверах. Миграция с системных (systemd/bash) установок не поддерживается этим PR.
 
-**Ubuntu 24.04 LTS и Python 3.12 — основная полностью протестированная
-production-платформа.** Именно эта комбинация используется в CI.
+Проект использует Docker Compose для запуска бота, PostgreSQL, Redis и Caddy.
+Caddy является единственной публичной точкой входа и проксирует внутренний
+HTTP endpoint бота на `bot:8080`.
 
-Installer не делает жёсткий запрет только по номеру ОС. Другие версии Ubuntu и
-Debian допускаются как совместимые, если read-only preflight подтверждает:
+## Требования
 
-- `apt` и `dpkg-query`;
-- работающий systemd;
-- системный Python **ровно 3.12**, под который создан `requirements.lock`;
-- необходимые PostgreSQL, Redis и системные команды;
-- отсутствие конфликтов с существующими ресурсами.
+- Docker Engine
+- Docker Compose v2
+- публичный DNS-запись для `DOMAIN`, направленная на VPS
+- свободные порты `80` и `443`
 
-На неподдерживаемой или несовместимой системе installer завершается до
-управляемых изменений и объясняет, какой capability отсутствует.
+## Первая установка
 
-## Работа на занятом сервере
+1. Склонируйте репозиторий:
+   ```bash
+   git clone https://github.com/justik13/just1kbot.git
+   cd just1kbot
+   ```
 
-Чистый сервер не требуется. До первой мутации проверяются:
+2. Создайте файл настроек:
+   ```bash
+   cp .env.example .env
+   chmod 600 .env
+   ```
 
-- зарезервированные пути, типы файлов и symlink;
-- service account и systemd unit names;
-- PostgreSQL role/database;
-- Redis unit и порт;
-- CLI path;
-- домен, Nginx site, сертификат и внутренний HTTP port;
-- незавершённые transaction journals.
+3. Заполните `.env`.
 
-После длительного package step проверки повторяются, чтобы закрыть TOCTOU race.
-Installer:
+   Важные параметры:
+   - `BOT_TOKEN`, `ADMIN_IDS`, `SUPPORT_USERNAME`;
+   - `DB_ENCRYPTION_KEY`;
+   - `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`;
+   - `REDIS_PASSWORD`;
+   - `YOOKASSA_SHOP_ID`, `YOOKASSA_SECRET_KEY`, `YOOKASSA_RETURN_URL`;
+   - `DOMAIN`, `SSL_EMAIL`;
+   - `BACKUP_AGE_RECIPIENT`.
 
-- устанавливает только отсутствующие packages и не выполняет `apt upgrade`;
-- не изменяет UFW, nftables или iptables;
-- не изменяет `/etc/redis/redis.conf`;
-- не удаляет Nginx default site;
-- не принимает чужой path/unit/database/site/certificate под управление;
-- не трогает Docker, WireGuard, AmneziaWG и VPN peers;
-- выводит operation, stage, problem, cause и конкретное следующее действие.
+   Пароли PostgreSQL и Redis указываются **как обычные raw-значения**. URL-кодировать их вручную не нужно: Docker entrypoint формирует `DATABASE_URL` и `REDIS_URL` с корректным URL-encoding автоматически.
 
-Если установка пакета `redis-server` временно запустила глобальный Redis,
-installer возвращает этот generic service в прежнее inactive/disabled состояние.
-Just1kBot использует только собственный Redis unit.
+4. Запустите проект:
+   ```bash
+   docker compose up -d --build
+   ```
 
-## Изолированный Redis
+   При старте бот дождётся PostgreSQL и Redis, применит Alembic migrations и затем запустит приложение.
+
+5. Проверьте состояние:
+   ```bash
+   docker compose ps
+   docker compose logs --tail=100 bot
+   ```
+
+   В production ожидается:
+   - `db` — healthy;
+   - `redis` — healthy;
+   - `bot` — healthy;
+   - `caddy` — running.
+
+## Обновление и rollback
+
+Для обновления:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+Миграции выполняются автоматически при старте нового контейнера бота.
+
+Перед обновлением production рекомендуется иметь свежий зашифрованный backup БД.
+
+**Rollback приложения:**
+
+```bash
+git reset --hard <previous-commit>
+docker compose up -d --build
+```
+
+Rollback должен выполняться только после проверки совместимости схемы БД.
+Если новая миграция уже была применена, простой откат Git-коммита не откатывает
+схему PostgreSQL автоматически. Для destructive schema rollback используйте
+отдельную процедуру восстановления БД из backup.
+
+# Бэкапы и восстановление
+
+PostgreSQL, Redis и данные Caddy хранятся в Docker volumes. Зашифрованные
+PostgreSQL backups сохраняются в локальную директорию `./backups/`.
+
+> [!CAUTION]
+> **Приватный ключ `age` НИКОГДА не должен храниться на production-сервере.**
+> На сервере хранится только `BACKUP_AGE_RECIPIENT` — публичный recipient для
+> шифрования. Приватный ключ нужен только для расшифровки и восстановления.
+
+> [!WARNING]
+> **Ограничения Disaster Recovery**
+> Локальные зашифрованные backups защищают от повреждения приложения или базы
+> данных, но не являются полноценным Disaster Recovery решением. Если VPS или
+> его диск будет потерян, локальные backups также будут потеряны. Для полноценного
+> DR копируйте `.sql.gz.age` во внешнее независимое хранилище.
+
+## Автоматические бэкапы через host cron
+
+Backup container не работает постоянно. Он запускается как одноразовый job.
+Для ежедневного запуска используйте cron на host-системе.
+
+Создайте запись через `crontab -e`:
+
+```cron
+# Каждый день в 02:00
+0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd /absolute/path/to/just1kbot && docker compose --profile tools run --rm backup >> /absolute/path/to/just1kbot/backups/backup.log 2>&1'
+```
+
+Замените `/absolute/path/to/just1kbot` на фактический путь проекта.
+Пользователь, от имени которого работает cron, должен иметь доступ к Docker.
+
+`flock` предотвращает параллельный запуск двух backup jobs.
+
+## Ручной backup
+
+```bash
+docker compose --profile tools run --rm backup
+```
+
+Backup выполняется по схеме:
 
 ```text
-just1kbot-redis.service
-127.0.0.1:6380
-/etc/just1kbot/redis.conf
-/var/lib/just1kbot/redis/
+PostgreSQL
+  ↓
+pg_dump
+  ↓
+gzip
+  ↓
+age encrypt (BACKUP_AGE_RECIPIENT)
+  ↓
+*.sql.gz.age
 ```
 
-Общий Redis на `6379` не перенастраивается и не очищается. При переходе со
-старой установки ephemeral FSM-состояния не копируются: namespace Aiogram
-`fsm:*` сам по себе не доказывает принадлежность конкретному боту. Старый Redis
-остаётся без изменений.
+После успешного шифрования plaintext dump удаляется. При ошибке backup script
+также удаляет временный plaintext dump.
 
-Dedicated Redis создаётся внутри той же rollback-covered activation transaction,
-что systemd, operational tooling, proxy configuration и global CLI.
+Старые encrypted backups старше 7 дней удаляются автоматически.
 
-## Ownership manifest и durable journal
+## Восстановление
 
-Root-only manifest:
+1. Скопируйте `.sql.gz.age` на локальный компьютер, где хранится private age key.
+2. Расшифруйте backup локально:
+   ```bash
+   age -d -i private_key.txt backup.sql.gz.age > backup.sql.gz
+   ```
+3. Распакуйте:
+   ```bash
+   gunzip backup.sql.gz
+   ```
+4. Остановите бота:
+   ```bash
+   docker compose stop bot
+   ```
+5. Перед восстановлением создайте новый backup текущей БД.
+6. Скопируйте SQL dump в PostgreSQL container:
+   ```bash
+   docker cp backup.sql just1kbot_db:/tmp/restore.sql
+   ```
+7. Восстановите dump в целевую БД. Для кастомных `POSTGRES_USER` и `POSTGRES_DB`
+   значения берутся из environment самого PostgreSQL container:
+   ```bash
+   docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/restore.sql'
+   ```
 
-```text
-/var/lib/just1kbot/install-state/manifest.json
-```
+   Восстановление существующей БД может столкнуться с уже существующими таблицами
+   или объектами. Для полного disaster recovery предпочтительно восстанавливать
+   dump в пустую целевую БД после остановки приложения.
 
-Durable journal текущей операции:
+8. Запустите бота:
+   ```bash
+   docker compose start bot
+   ```
 
-```text
-/var/lib/just1kbot/install-state/transaction.json
-```
+9. Проверьте:
+   ```bash
+   docker compose ps
+   docker compose logs --tail=100 bot
+   ```
 
-Manifest содержит installation ID, platform metadata, proxy/Redis mode и точный
-список управляемых paths, units, PostgreSQL objects, Nginx sites и certificates.
-PostgreSQL role/database дополнительно получают `COMMENT`:
+# Безопасность
 
-```text
-managed-by=just1kbot;installation-id=<uuid>
-```
+- не коммитьте `.env`;
+- не храните private age key на production-сервере;
+- не публикуйте `8080` бота наружу — публичный трафик должен идти через Caddy;
+- используйте отдельные сильные пароли PostgreSQL и Redis;
+- регулярно копируйте encrypted backups во внешнее хранилище.
 
-Update, repair и uninstall требуют совпадения ownership proof. Повреждённый или
-неоднозначный state блокирует destructive operation.
+# Troubleshooting
 
-Если процесс прерван или сервер перезагрузился:
+## Bot перезапускается
 
 ```bash
-sudo just1kbot state
-sudo just1kbot install-recover
-sudo just1kbot install-rollback
+docker compose ps -a
+docker compose logs --tail=200 bot
 ```
 
-Journal создаётся до `apt-get`. При ошибке первичной установки выполняется
-автоматический manifest-driven rollback. Если сбой произошёл до manifest,
-удаляется пустой journal; установленные system packages намеренно не удаляются.
-Update использует application/operational rollback и сохраняет journal для
-последующей диагностики.
+Частые причины:
 
-## Воспроизводимые зависимости
+- отсутствует обязательная переменная в `.env`;
+- неверный `DB_ENCRYPTION_KEY`;
+- PostgreSQL недоступен;
+- Redis недоступен;
+- некорректный формат `ADMIN_IDS`;
+- некорректный `DOMAIN`, `SSL_EMAIL` или YooKassa settings.
 
-Production virtualenv устанавливается только из committed lock:
+## Caddy не выдаёт HTTPS
+
+Проверьте:
 
 ```bash
-python -m pip install --no-deps --require-hashes -r requirements.lock
+getent hosts "$DOMAIN"
+ss -lntp | grep -E ':80|:443'
+docker compose logs --tail=200 caddy
 ```
 
-Lock генерируется и проверяется на Ubuntu 24.04 / Python 3.12 с toolchain
-`pip==25.3`, `pip-tools==7.5.2`. Запрещены alternate indexes, trusted hosts,
-VCS/local/direct URL dependencies и requirements без SHA-256 hashes.
-
-# Установка
-
-Read-only state и dry run:
-
-```bash
-sudo bash deploy.sh state
-sudo bash deploy.sh deploy --dry-run
-```
-
-## Managed Nginx/TLS
-
-По умолчанию installer использует уже работающий системный Nginx:
-
-```bash
-sudo bash deploy.sh deploy
-```
-
-Он не включает и не запускает глобальный Nginx service автоматически. Nginx
-должен быть active и его текущий `nginx -t` должен проходить. Installer создаёт
-только manifest-owned site и certificate выбранного домена. Существующий
-certificate без ownership proof не усыновляется.
-
-Публикуются только:
-
-```text
-POST /webhook/yookassa
-GET  /health
-```
-
-## External proxy mode
-
-Для Caddy, Traefik, Apache, собственного Nginx layout или отдельной ingress-ноды:
-
-```bash
-sudo just1kbot deploy --external-proxy
-```
-
-В этом режиме:
-
-- Nginx и Certbot не устанавливаются и не требуются;
-- глобальный proxy/TLS не изменяется;
-- приложение слушает только автоматически выбранный свободный loopback port;
-- создаётся root-only upstream contract:
-
-```text
-/var/lib/just1kbot/install-state/external-proxy.nginx.conf
-```
-
-Показать contract:
-
-```bash
-sudo just1kbot proxy-config
-```
-
-## Неинтерактивная установка
-
-```bash
-sudo env \
-  BOT_TOKEN='...' \
-  DB_PASSWORD='...' \
-  REDIS_PASSWORD='...' \
-  ADMIN_IDS='123456789,987654321' \
-  SUPPORT_USERNAME='support_username' \
-  DOMAIN='vpn.example.com' \
-  SSL_EMAIL='owner@example.com' \
-  YOOKASSA_SHOP_ID='...' \
-  YOOKASSA_SECRET_KEY='...' \
-  bash deploy.sh --yes
-```
-
-Для external proxy добавьте:
-
-```text
-JUST1KBOT_PROXY_MODE=external
-```
-
-# Global CLI и state-aware menu
-
-После установки доступен root-owned launcher:
-
-```text
-/usr/local/sbin/just1kbot
-```
-
-Без аргументов он показывает меню, зависящее от состояния установки. При
-`foreign_collision`, `corrupted_state` или неизвестном ownership mutating
-пункты скрыты; доступны только state, doctor и support bundle.
-
-Основные команды:
-
-```bash
-sudo just1kbot state
-sudo just1kbot status
-sudo just1kbot doctor
-sudo just1kbot doctor --json
-sudo just1kbot logs
-sudo just1kbot restart
-sudo just1kbot backup
-sudo just1kbot repair --check
-sudo just1kbot repair --apply
-sudo just1kbot support-bundle
-```
-
-`repair --apply` исправляет только manifest-owned drift: permissions, legacy
-service shell, CLI launcher, enabled/active state подтверждённых units. Он не
-усыновляет и не переписывает Nginx/TLS/PostgreSQL data/firewall/foreign files.
-После применения обязательно запускается полный ownership-aware doctor.
-
-Support bundle создаётся вне installation state:
-
-```text
-/root/just1kbot-support-bundles/
-```
-
-Он не содержит `.env`, dumps, backup archives, age identity, tokens, passwords,
-API keys или credential-bearing URLs. Это явный operator export и uninstall его
-автоматически не удаляет.
-
-# Обновление из GitHub
-
-Фиксированный источник:
-
-```text
-https://github.com/justik13/projectx.git
-refs/heads/main
-```
-
-Проверка:
-
-```bash
-sudo just1kbot update --check
-```
-
-Интерактивное обновление требует вручную ввести полный fetched SHA:
-
-```bash
-sudo just1kbot update
-```
-
-Unattended update требует заранее проверенный полный SHA:
-
-```bash
-sudo just1kbot update \
-  --sha 0123456789abcdef0123456789abcdef01234567 \
-  --yes
-```
-
-Updater проверяет `git fsck`, clean checkout, exact commit, отсутствие symlink и
-submodule, а также наличие всего production safety stack: installer policies,
-manifest/journal, complete updater, repair, doctor, support bundle и
-ownership-aware uninstall. Неполный release не публикуется.
-
-# Backup и restore
-
-```bash
-sudo just1kbot backup
-sudo just1kbot verify-backup /path/backup.tar.age
-sudo just1kbot restore-test /path/backup.tar.age
-sudo just1kbot restore-production /path/backup.tar.age
-sudo just1kbot restore-status
-sudo just1kbot restore-recover
-sudo just1kbot restore-rollback
-sudo just1kbot restore-finalize
-```
-
-Encrypted PostgreSQL backups:
-
-```text
-/var/lib/just1kbot/backups/
-```
-
-Age identity:
-
-```text
-/etc/just1kbot/backup.agekey
-```
-
-Production restore сначала использует staging database, проверяет её, создаёт
-pre-cutover backup и только затем выполняет короткий cutover.
-
-# Полное безопасное удаление
-
-Сохранить PostgreSQL и backups:
-
-```bash
-sudo just1kbot uninstall --keep-data
-```
-
-Перед остановкой сервисов создаётся и проверяется свежий encrypted backup.
-Application, dedicated Redis, units, CLI, Nginx/TLS или external proxy contract
-удаляются, а residual manifest сохраняет ownership только оставшихся данных.
-
-Полностью удалить manifest-owned installation и data:
-
-```bash
-sudo just1kbot uninstall --purge-data
-```
-
-Требуется точная фраза:
-
-```text
-DELETE JUST1KBOT
-```
-
-Uninstall:
-
-- сверяет manifest resource и PostgreSQL `COMMENT` с installation ID;
-- удаляет только подтверждённые paths/units/user/database/site/certificate;
-- не изменяет firewall, global Redis, foreign proxy sites или system packages;
-- не вызывает Docker, WireGuard, AWG или VPN tooling;
-- выполняет post-scan files, units, processes, user, PostgreSQL и proxy/TLS;
-- не выводит success, пока manifest-owned остатки существуют.
-
-# Amnezia API
-
-Бот не использует глобальные `AMNEZIA_API_URL` и `AMNEZIA_API_KEY`. Каждый
-VPN-сервер добавляется через Telegram-админку, а API key хранится в PostgreSQL в
-зашифрованном виде.
-
-`scripts/setup-amnezia-api.sh` — standalone utility для ручного запуска на
-отдельной VPN-ноде. Installer, update, repair, menu и uninstall её не вызывают,
-не копируют в global CLI и не включают в ownership manifest бота.
-
-# CI
-
-Primary workflow: Ubuntu 24.04 / Python 3.12.
-
-Он выполняет:
-
-- deterministic regeneration и installation `requirements.lock`;
-- Ruff и ShellCheck;
-- root control-plane help;
-- 500+ unit/contract/runtime tests;
-- shared-host package scenarios;
-- state collision tests;
-- failure-injection matrix до и внутри rollback-covered activation;
-- ownership-aware uninstall contracts;
-- Alembic upgrade, downgrade до base, проверку отсутствия application tables и
-  повторный upgrade;
-- compile всех Python trees;
-- `git diff --check`.
+DNS для `DOMAIN` должен указывать на VPS, а порты `80/443` должны быть доступны извне.

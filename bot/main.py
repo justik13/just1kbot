@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+import os
 import signal
 import traceback
 
@@ -73,6 +74,16 @@ logger = logging.getLogger(__name__)
 _error_alert_cache: TTLCache[str, bool] = TTLCache(
     maxsize=10000, ttl=300.0
 )
+
+
+def _is_ci_test_mode() -> bool:
+    """Return True only for the explicit offline CI smoke-test mode."""
+    return os.getenv("CI_TEST_MODE", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 async def global_error_handler(
@@ -156,6 +167,12 @@ async def global_error_handler(
 
 
 async def setup_bot_commands(bot: Bot):
+    if _is_ci_test_mode():
+        logger.info(
+            "CI_TEST_MODE enabled; skipping Telegram API command registration"
+        )
+        return
+
     commands = [
         BotCommand(command="start", description=texts.BOT_START_DESCRIPTION),
     ]
@@ -255,10 +272,10 @@ async def start_webhook_server(port: int):
     runner = web.AppRunner(app)
     await runner.setup()
 
-    site = web.TCPSite(runner, "127.0.0.1", port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
-    logger.info("Webhook server started on 127.0.0.1:%d", port)
+    logger.info("Webhook server started on 0.0.0.0:%d", port)
     return runner
 
 
@@ -284,14 +301,17 @@ async def main():
 
     try:
         settings = get_settings()
+        ci_test_mode = _is_ci_test_mode()
+        shutdown_event.clear()
 
         # P3-2: Защита от потери backup.agekey
-        import os
-        from pathlib import Path
         config_dir = os.getenv("JUST1KBOT_CONFIG_DIR", "/etc/just1kbot")
+        from pathlib import Path
         backup_key_path = Path(config_dir) / "backup.agekey"
 
-        if settings.DB_ENCRYPTION_KEY and not await aiofiles.os.path.exists(
+        is_docker = os.getenv("DOCKER_DEPLOYMENT", "false").lower() == "true"
+
+        if settings.DB_ENCRYPTION_KEY and not is_docker and not await aiofiles.os.path.exists(
             str(backup_key_path)
         ):
             logger.critical(
@@ -334,8 +354,14 @@ async def main():
             settings.YOOKASSA_WEBHOOK_PORT
         )
 
-        await resume_pending_broadcasts(bot)
-        logger.info("Pending broadcasts resumed (if any)")
+        if ci_test_mode:
+            logger.info(
+                "CI_TEST_MODE enabled; skipping Telegram polling, "
+                "pending broadcast resume and background workers"
+            )
+        else:
+            await resume_pending_broadcasts(bot)
+            logger.info("Pending broadcasts resumed (if any)")
 
         loop = asyncio.get_running_loop()
 
@@ -348,6 +374,14 @@ async def main():
                 loop.add_signal_handler(sig, _signal_handler)
             except NotImplementedError:
                 pass
+
+        if ci_test_mode:
+            logger.info(
+                "CI_TEST_MODE ready: HTTP health endpoint is available; "
+                "waiting for test container shutdown"
+            )
+            await shutdown_event.wait()
+            return
 
         await start_background_workers(bot)
 
