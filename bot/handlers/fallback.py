@@ -6,7 +6,19 @@ from aiogram.types import CallbackQuery, Message
 
 from bot import texts
 
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from utils.telegram import render_hub
+
 router = Router()
+
+
+def get_fallback_keyboard():
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+    builder.button(text="💬 Поддержка", callback_data="menu_support")
+    builder.adjust(2)
+    return builder.as_markup()
 
 
 @router.message(
@@ -17,19 +29,23 @@ router = Router()
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
     await state.clear()
-    try:
-        await message.delete()
-    except Exception:
-        pass
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        texts.FALLBACK_MEDIA_TEXT,
+        get_fallback_keyboard(),
+    )
 
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
     await state.clear()
-    try:
-        await message.delete()
-    except Exception:
-        pass
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        texts.FALLBACK_UNKNOWN_TEXT,
+        get_fallback_keyboard(),
+    )
 
 
 @router.callback_query(F.data == "dismiss_notification")

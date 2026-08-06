@@ -123,17 +123,8 @@ async def _get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    stmt = select(func.count(Payment.id)).where(
-        Payment.tariff_id == tariff_id,
-        Payment.status.in_(
-            [
-                "pending",
-                "requires_manual_review",
-            ]
-        ),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one() or 0
+    return 0
+
 
 
 @router.callback_query(F.data == "admin_tariffs")
