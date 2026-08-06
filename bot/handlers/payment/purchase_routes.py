@@ -50,6 +50,17 @@ PURCHASE_ERRORS = {
     "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L46_1,
     "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L47_1,
     "too_many_devices": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L48_1,
+    "purchase_user_missing": texts.ERROR_USER_NOT_FOUND,
+    "purchase_user_banned": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L46_1,
+    "purchase_user_ineligible": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
+    "current_tariff_unknown": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
+    "tariff_change_required": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
+    "active_tariff_change_quote_exists": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
+    "consumed_quote_incomplete": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L39_1,
+    "quote_operation_mismatch": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
+    "active_quote_has_existing_debit": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
+    "active_quote_has_existing_entitlement": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
+    "tariff_duration_not_whole_days": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
 }
 
 

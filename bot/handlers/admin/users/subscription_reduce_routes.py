@@ -204,8 +204,11 @@ async def admin_sub_apply_reduce(
         )
 
         if not user or not user.subscription_end:
-            await callback.message.edit_text(
-                texts.ADMIN_SUB_NO_SUBSCRIPTION
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.ADMIN_SUB_NO_SUBSCRIPTION,
+                get_back_button(f"admin_user_card:{telegram_id}"),
             )
             return
 

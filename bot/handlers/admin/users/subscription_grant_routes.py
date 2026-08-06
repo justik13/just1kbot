@@ -97,17 +97,15 @@ async def admin_sub_grant(
         telegram_id=telegram_id
     )
 
-    try:
-        await callback.message.edit_text(
-            text,
-            reply_markup=get_admin_grant_tariff_keyboard(
-                telegram_id,
-                groups,
-            ),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(f"admin_sub_grant edit_text failed: {e}")
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        get_admin_grant_tariff_keyboard(
+            telegram_id,
+            groups,
+        ),
+    )
 
 
 @router.callback_query(F.data.startswith("admin_sub_grant_group:"))
