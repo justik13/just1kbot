@@ -1,122 +1,197 @@
-# 🚀 just1kbot — Telegram VPN Bot
+# just1kbot
 
-**just1kbot** — это автоматизированный Telegram-бот для продажи и управления VPN-подписками на базе **Amnezia WG / WireGuard**, с интеграцией оплаты через **ЮKassa**, системой балансов, реферальной программой и полным скриптом автоматического деплоя на Linux.
+Telegram-бот для продажи и управления VPN-подписками через Amnezia API, с PostgreSQL, Redis, YooKassa, фоновыми задачами и административным интерфейсом.
 
----
+Ветка `bot` содержит приложение и production-инсталлятор `just1kbot.sh`.
 
-## ✨ Основные возможности
+## Поддерживаемые системы
 
-- 🛡 **Интеграция с Amnezia WG / WireGuard**: Автоматическая выдача, продление и отзыв конфигураций через Amnezia API.
-- 💳 **Платежная система ЮKassa**: Автоматическое пополнение баланса пользователя и оплата подписок с обработкой webhook.
-- 💰 **Внутренний баланс и тарифы**: Гибкая настройка стоимости подписок, перерасчет при смене тарифов и возврат средств.
-- 👥 **Реферальная система**: Начисление бонусов за приглашенных пользователей.
-- 🔒 **Высокий уровень безопасности**:
-  - Шифрование Fernet для чувствительных данных и API-ключей в PostgreSQL.
-  - Защита от SSRF (ограничение запросов к локальным сетям).
-  - Безопасный запуск службы в изоляции Systemd.
-- ⚡ **Автоматический деплой и CLI-меню**: Готовый скрипт `just1kbot.sh` для установки, обновления, бэкапов и диагностики в 1 клик.
+Проверяемая целевая конфигурация:
 
----
+- Ubuntu 22.04 / 24.04;
+- Debian 12;
+- AlmaLinux / Rocky Linux 9 с `dnf` и EPEL;
+- `systemd` должен работать как init-система;
+- Python 3.10 или новее;
+- минимум 1 ГБ свободного места, 2 ГБ RAM рекомендуется.
 
-## 🚀 Быстрый старт и Установка
+Скрипт устанавливает PostgreSQL, Redis, Nginx, Certbot, `age`, Python и остальные системные зависимости. Docker не требуется.
 
-### Требования к серверу
-- **ОС**: Ubuntu 20.04/22.04/24.04, Debian 11/12, AlmaLinux / Rocky Linux / RHEL / CentOS.
-- **Права**: Права `root` или `sudo`.
-- **Зависимости**: Python 3.10+, PostgreSQL, Redis (устанавливаются автоматически скриптом).
+## Что подготовить до установки
 
-### Установка одной командой
+1. Создайте DNS-запись `A` для домена бота, указывающую на VPS. Запись `AAAA` добавляйте только при рабочем IPv6.
+2. Откройте входящие TCP-порты `80` и `443` в firewall и панели хостинга.
+3. Подготовьте:
+   - токен Telegram-бота;
+   - Telegram ID администраторов;
+   - username поддержки;
+   - `shopId` и секретный ключ YooKassa;
+   - реальный email для Let's Encrypt.
 
-Выполните на вашем Linux-сервере:
+Инсталлятор не меняет firewall автоматически.
+
+## Установка
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/justik13/just1kbot/bot/just1kbot.sh -o just1kbot.sh && sudo bash just1kbot.sh install
+curl -fsSL https://raw.githubusercontent.com/justik13/just1kbot/bot/just1kbot.sh -o just1kbot.sh
+sudo bash just1kbot.sh install
 ```
 
-Скрипт автоматически:
-1. Установит все необходимые системные пакеты (PostgreSQL, Redis, Python3, Git).
-2. Настроит виртуальное окружение Python (`.venv`) и установит зависимости.
-3. Проведет интерактивную настройку файла `.env`.
-4. Инициализирует базу данных PostgreSQL и применит миграции Alembic.
-5. Создаст и запустит системную службу Systemd (`just1kbot.service`).
-6. Настроит ротацию логов `logrotate` и создаст удобный CLI-симлинк `/usr/local/bin/just1kbot`.
+Во время интерактивной установки скрипт запросит обязательные значения. Для локальных PostgreSQL и Redis безопасные пароли генерируются автоматически.
 
----
+После успешной установки:
 
-## 🛠 Меню управления (`just1kbot.sh`)
+- сервис: `just1kbot.service`;
+- CLI: `/usr/local/bin/just1kbot`;
+- конфигурация: `/etc/just1kbot/just1kbot.env`;
+- активный релиз: `/opt/just1kbot/current`;
+- релизы: `/opt/just1kbot/releases/<commit-sha>`;
+- резервные копии: `/var/backups/just1kbot`;
+- webhook YooKassa: `https://ВАШ_ДОМЕН/webhook/yookassa`;
+- health-check: `https://ВАШ_ДОМЕН/health`.
 
-После установки вы можете управлять ботом из терминала с помощью команды `just1kbot` или `sudo bash just1kbot.sh`:
+### Неинтерактивная установка
 
-```
-------------------------------------------------------------
-  МЕНЮ УПРАВЛЕНИЯ JUST1KBOT
-------------------------------------------------------------
-  1) Статус бота и служб
-  2) Автоматическая установка (Install)
-  3) Переустановить / Обновить (Update)
-  4) Перезапустить бота (Restart)
-  5) Остановить бота (Stop)
-  6) Просмотр логов (Logs)
-  7) Редактировать конфигурацию (.env)
-  8) Создать бэкап базы данных
-  9) Диагностика системы
- 10) Удалить бота (Uninstall)
-  0) Выход
-------------------------------------------------------------
+Все обязательные значения можно передать через окружение:
+
+```bash
+sudo env \
+  NON_INTERACTIVE=1 \
+  BOT_TOKEN='123456789:telegram-token' \
+  ADMIN_IDS='[987654321]' \
+  SUPPORT_USERNAME='support_username' \
+  YOOKASSA_SHOP_ID='shop-id' \
+  YOOKASSA_SECRET_KEY='secret-key' \
+  DOMAIN='vpn.acme.tld' \
+  SSL_EMAIL='ops@acme.tld' \
+  bash just1kbot.sh install
 ```
 
-### Основные команды CLI:
+Опционально можно передать собственные `DATABASE_URL`, `REDIS_URL`, `REDIS_PASSWORD`, `DB_ENCRYPTION_KEY` и `YOOKASSA_WEBHOOK_PORT`. Для внешних PostgreSQL и Redis инсталлятор не меняет конфигурацию удалённых сервисов.
 
-- `just1kbot status` — проверить статус работы бота, служб и наличие обновлений на GitHub.
-- `just1kbot update` — обновить код из репозитория, применить миграции БД (с автоматическим бэкапом) и перезапустить бота.
-- `just1kbot restart` / `just1kbot stop` — перезапустить или остановить службу.
-- `just1kbot logs` — онлайн-просмотр логов работы бота (`journalctl`).
-- `just1kbot backup` — дамп базы данных PostgreSQL в архив `.sql.gz`.
-- `just1kbot edit-env` — быстрая правка конфигурации `.env`.
+## Безопасное обновление
 
----
-
-## ⚙️ Переменные окружения (`.env`)
-
-Файл конфигурации `.env` расположен по пути `/opt/just1kbot/.env`.
-
-| Переменная | Описание | Пример |
-| :--- | :--- | :--- |
-| `BOT_TOKEN` | Токен Telegram-бота от [@BotFather](https://t.me/BotFather) | `1234567890:ABC...` |
-| `ADMIN_IDS` | JSON-массив ID администраторов | `[123456789]` |
-| `SUPPORT_USERNAME` | Telegram Username поддержки | `my_support_bot` |
-| `DATABASE_URL` | Подключение к PostgreSQL (asyncpg) | `postgresql+asyncpg://user:pass@localhost:5432/db` |
-| `DB_ENCRYPTION_KEY` | 32-байтовый Fernet-ключ (Base64) для шифрования | `gAAAAABk...` |
-| `REDIS_URL` | Подключение к Redis | `redis://:password@localhost:6379/0` |
-| `YOOKASSA_SHOP_ID` | Идентификатор магазина ЮKassa | `123456` |
-| `YOOKASSA_SECRET_KEY` | Секретный ключ ЮKassa | `live_secret_...` |
-| `DOMAIN` | Публичный HTTPS-домен бота | `vpn.mydomain.com` |
-| `SSL_EMAIL` | Email для выпуска SSL-сертификата | `admin@mydomain.com` |
-
----
-
-## 📁 Структура проекта
-
-```
-just1kbot/
-├── alembic/                # Скрипты миграций базы данных
-├── alembic.ini             # Конфигурация Alembic
-├── bot/                    # Основная логика Telegram-бота (Aiogram 3)
-│   ├── handlers/           # Обработчики команд и инлайновых кнопок
-│   ├── keyboards/          # Клавиатуры и кнопки
-│   ├── middlewares/        # Промежуточные слои (сессии, регистрация, бана)
-│   ├── main.py             # Точка входа приложения
-│   └── states.py           # Состояния FSM
-├── config/                 # Загрузка и валидация конфигурации (.env)
-├── database/               # Модели SQLAlchemy и сессии БД
-├── services/               # Бизнес-логика (ЮKassa, Amnezia API, подписки)
-├── utils/                  # Вспомогательные утилиты и логирование
-├── just1kbot.sh            # Скрипт деплоя и CLI управления
-└── requirements.txt        # Python-зависимости проекта
+```bash
+sudo just1kbot update
 ```
 
----
+Обновление выполняется по commit SHA и не перезаписывает текущий релиз на месте:
 
-## 📄 Лицензия
+1. скачивается новый архив GitHub;
+2. создаётся отдельный virtualenv;
+3. проверяются настройки, импорты и синтаксис Python;
+4. бот останавливается;
+5. создаётся зашифрованный согласованный дамп БД;
+6. применяются миграции Alembic;
+7. атомарно переключается symlink `current`;
+8. запускается сервис и проверяется локальный `/health`;
+9. при ошибке кода выполняется возврат на предыдущий релиз.
 
-Проект распространяется под лицензией MIT.
+Миграции БД не всегда обратимы. При несовместимой миграции используйте созданный перед обновлением бэкап и команду `restore`.
+
+Продолжение обновления без бэкапа запрещено. Аварийное исключение:
+
+```bash
+sudo ALLOW_UPDATE_WITHOUT_BACKUP=1 just1kbot update
+```
+
+## Управление
+
+```bash
+sudo just1kbot status
+sudo just1kbot doctor
+sudo just1kbot restart
+sudo just1kbot stop
+sudo just1kbot start
+sudo just1kbot logs
+sudo just1kbot edit-env
+```
+
+После изменения `.env` выполните:
+
+```bash
+sudo just1kbot restart
+sudo just1kbot doctor
+```
+
+Устаревшие параметры `AMNEZIA_API_URL`, `AMNEZIA_API_KEY` и `WEBHOOK_URL` автоматически удаляются из production-конфигурации: серверы Amnezia управляются через записи в БД.
+
+## Резервные копии
+
+```bash
+sudo just1kbot backup
+```
+
+В архив входят:
+
+- PostgreSQL dump в custom-формате;
+- production `.env`;
+- commit, ветка и время создания.
+
+Архив шифруется `age` и сохраняется как:
+
+```text
+/var/backups/just1kbot/just1kbot_YYYYMMDDTHHMMSSZ.tar.gz.age
+```
+
+Приватный ключ находится в `/etc/just1kbot/backup.agekey`, имеет права `0600` и доступен только root. **Скопируйте этот ключ в отдельное защищённое хранилище. Без него восстановить архив невозможно. Не храните ключ рядом с единственной копией бэкапа.**
+
+Восстановление:
+
+```bash
+sudo just1kbot restore /var/backups/just1kbot/just1kbot_YYYYMMDDTHHMMSSZ.tar.gz.age
+```
+
+Команда останавливает сервис, очищает текущие объекты БД через `pg_restore --clean`, восстанавливает дамп и запускает health-check. Production `.env` из архива автоматически не подменяется.
+
+## TLS и Nginx
+
+По умолчанию Certbot выпускает сертификат через webroot и Nginx публикует только:
+
+- `POST /webhook/yookassa`;
+- `GET /health`;
+- ACME challenge;
+- остальные пути возвращают `404`.
+
+Для локального теста без сертификата допускается:
+
+```bash
+sudo INSTALL_TLS=0 bash just1kbot.sh install
+```
+
+При этом будет настроен HTTP reverse proxy, но такой режим не является production-защищённым и не должен использоваться для YooKassa.
+
+## Диагностика
+
+```bash
+sudo just1kbot doctor
+sudo journalctl -u just1kbot.service -n 200 --no-pager
+sudo nginx -t
+curl -fsS http://127.0.0.1:8080/health
+```
+
+Лог инсталлятора: `/var/log/just1kbot-install.log`. Токены и основные секреты маскируются перед записью.
+
+## Удаление
+
+Удалить приложение, сохранив конфигурацию, ключ и бэкапы:
+
+```bash
+sudo just1kbot uninstall
+```
+
+Полное удаление файлов приложения:
+
+```bash
+sudo just1kbot uninstall --purge
+```
+
+PostgreSQL, Redis, Nginx, базы данных и TLS-сертификаты автоматически не удаляются, чтобы не повредить другие сервисы на VPS.
+
+## Разработка и проверки
+
+```bash
+bash tests/test_installer.sh
+```
+
+Проверка запускается в GitHub Actions и включает синтаксис Bash, компиляцию Python-файлов и статические инварианты production-инсталлятора.
