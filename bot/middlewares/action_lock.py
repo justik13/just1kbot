@@ -171,11 +171,18 @@ def _is_stale_action(callback_data: str) -> bool:
 def _is_stale_callback(callback: CallbackQuery) -> bool:
     message = callback.message
 
-    if message is None or message.date is None:
-        return True
+    if message is None:
+        return False
+
+    date = getattr(message, "date", None)
+    if date is None:
+        return False
+
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
 
     now = datetime.now(timezone.utc)
-    age = (now - message.date).total_seconds()
+    age = (now - date).total_seconds()
 
     return age > STALE_MAX_AGE_SECONDS
 
