@@ -118,7 +118,7 @@ jobs:
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
       - name: Verify root control plane help
-        run: bash deploy.sh help
+        run: bash just1kbot.sh help
       - run: alembic upgrade head
       - name: Run full test suite
         id: unittests
