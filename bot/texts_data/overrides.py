@@ -34,7 +34,7 @@ OVERRIDES['ADMIN_MANUAL_GRANT_USER_DELETED'] = '❌ Невозможно выд�
 
 OVERRIDES['ADMIN_SERVER_ADDED'] = '✅ Сервер успешно добавлен.'
 
-OVERRIDES['ADMIN_SERVER_CARD'] = '🖥 <b>Сервер:</b> {name}\nURL: {api_url}\nМакс. клиентов: {max_clients}'
+OVERRIDES['ADMIN_SERVER_CARD'] = '{flag} <b>Сервер:</b> {name} (ID: {id})\nСтатус: {status}\nПротокол: {protocol}\nURL: {api_url}\nМакс. клиентов: {max_clients}'
 
 OVERRIDES['ADMIN_SERVER_CHECKING'] = '🔄 Проверка сервера...'
 
@@ -162,3 +162,26 @@ OVERRIDES['ADMIN_PAYMENT_USER_WITH_USERNAME'] = '@{username}'
 
 OVERRIDES['ADMIN_PAYMENT_USER_WITH_ID'] = 'ID: {user_id}'
 
+OVERRIDES['PAYMENT_SUBSCRIPTION_INACTIVE'] = (
+    "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
+    "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+)
+
+OVERRIDES['PAYMENT_CURRENT_TARIFF_UNKNOWN'] = (
+    "⚠️ Смена тарифа возможна только при действующей подписке.\n\n"
+    "Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+)
+
+OVERRIDES['PAYMENT_ACTIVE_CHECKOUT_EXISTS'] = (
+    "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
+)
+
+OVERRIDES['PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS'] = (
+    "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его."
+)
+
+OVERRIDES['PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB'] = (
+    "⚠️ <b>Смена тарифа недоступна</b>\n\n"
+    "Смена тарифа с перерасчётом доступна только при наличии действующей подписки.\n"
+    "У вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже."
+)

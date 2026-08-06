@@ -22,7 +22,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from utils.datetime_helpers import is_expired, now_utc
+from utils.datetime_helpers import is_expired, now_utc, is_permanent_subscription
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +355,7 @@ class SubscriptionService:
             permanent = bool(
                 target_active
                 and user.subscription_end
-                and __import__('utils.datetime_helpers', fromlist=['is_permanent_subscription']).is_permanent_subscription(user.subscription_end)
+                and is_permanent_subscription(user.subscription_end)
             )
             expires_at = (
                 int(user.subscription_end.timestamp())
