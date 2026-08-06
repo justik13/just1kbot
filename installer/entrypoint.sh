@@ -14,6 +14,8 @@ source "$SCRIPT_DIR/lib/platform.sh"
 source "$SCRIPT_DIR/lib/release.sh"
 # shellcheck source=installer/lib/compat.sh
 source "$SCRIPT_DIR/lib/compat.sh"
+# shellcheck source=installer/lib/redis_fix.sh
+source "$SCRIPT_DIR/lib/redis_fix.sh"
 # shellcheck source=installer/lib/commands.sh
 source "$SCRIPT_DIR/lib/commands.sh"
 
