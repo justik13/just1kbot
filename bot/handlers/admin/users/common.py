@@ -203,12 +203,14 @@ async def _render_user_card(
     user: User,
     session: AsyncSession,
 ):
+    from database.repositories.account_ledger_repo import get_account_balance
     profiles = user.profiles if user.profiles else []
 
     referrals = await get_user_referrals(
         session,
         user.telegram_id,
     )
+    balance = await get_account_balance(session, user_id=user.id)
 
     current_time = now_utc()
 
@@ -217,6 +219,8 @@ async def _render_user_card(
         profiles,
         referrals,
         current_time,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
     )
 
     try:
@@ -237,12 +241,14 @@ async def _show_user_card_edit(
     user,
     session: AsyncSession,
 ):
+    from database.repositories.account_ledger_repo import get_account_balance
     profiles = await get_user_profiles(session, user.id)
 
     referrals = await get_user_referrals(
         session,
         user.telegram_id,
     )
+    balance = await get_account_balance(session, user_id=user.id)
 
     current_time = now_utc()
 
@@ -251,7 +257,10 @@ async def _show_user_card_edit(
         profiles,
         referrals,
         current_time,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
     )
+
 
     try:
         await message.edit_text(

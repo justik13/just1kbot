@@ -24,20 +24,15 @@ def calculate_referral_bonus(purchase_amount: object) -> Decimal:
     )
 
 
-async def grant_referral_bonus_for_purchase(
+async def grant_referral_bonus_for_topup(
     session: AsyncSession,
     *,
     purchaser_user_id: int,
-    quote_id: int,
-    purchase_amount: object,
+    payment_id: int,
+    topup_amount: object,
 ) -> Decimal:
-    """Credit the referrer with 10% of a successful in-bot purchase.
-
-    The credit is stored as an ``admin_adjustment`` with a strict metadata tag
-    so existing FIFO account spending remains compatible without adding a new
-    database enum/check constraint. It is idempotent per purchase+referrer.
-    """
-    bonus = calculate_referral_bonus(purchase_amount)
+    """Credit the referrer with 10% of a real money balance top-up."""
+    bonus = calculate_referral_bonus(topup_amount)
     if bonus <= 0:
         return Decimal("0")
 
@@ -64,7 +59,7 @@ async def grant_referral_bonus_for_purchase(
     if referrer is None or referrer.is_banned:
         return Decimal("0")
 
-    idempotency_key = f"referral-bonus:{quote_id}:{referrer.id}"
+    idempotency_key = f"referral-bonus:topup:{payment_id}:{referrer.id}"
     existing = await session.scalar(
         select(AccountLedgerEntry).where(
             AccountLedgerEntry.idempotency_key == idempotency_key
@@ -85,7 +80,7 @@ async def grant_referral_bonus_for_purchase(
             entry_type="admin_adjustment",
             amount=bonus,
             currency="RUB",
-            payment_id=None,
+            payment_id=payment_id,
             quote_id=None,
             reversal_of_id=None,
             idempotency_key=idempotency_key,
@@ -94,13 +89,25 @@ async def grant_referral_bonus_for_purchase(
                 "referrer_user_id": referrer.id,
                 "referred_user_id": purchaser.id,
                 "referred_telegram_id": purchaser.telegram_id,
-                "purchase_quote_id": quote_id,
+                "topup_payment_id": payment_id,
                 "bonus_rate": str(REFERRAL_BONUS_RATE),
             },
         )
     )
     await session.flush()
     return bonus
+
+
+async def grant_referral_bonus_for_purchase(
+    session: AsyncSession,
+    *,
+    purchaser_user_id: int,
+    quote_id: int,
+    purchase_amount: object,
+) -> Decimal:
+    """Legacy alias for backward compatibility."""
+    return Decimal("0")
+
 
 
 async def get_referral_bonus_balance(

@@ -10,9 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from database.models import (
     AccountBalanceReservation,
@@ -51,6 +52,8 @@ class AccountBalanceSnapshot:
     available: Decimal
     reserved: Decimal
     debt: Decimal
+    real_available: Decimal = ZERO
+    bonus_available: Decimal = ZERO
 
 
 def whole_rubles(value: object, *, allow_zero: bool = False) -> Decimal:
@@ -108,13 +111,48 @@ async def get_account_balance(
         or ZERO
     )
     debt = max(ZERO, -position)
-    available = max(ZERO, position) - reserved
+
+    credits = (
+        await session.scalars(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == user_id,
+                AccountLedgerEntry.amount > 0,
+                AccountLedgerEntry.entry_type.in_(
+                    ("payment_credit", "admin_adjustment")
+                ),
+            )
+        )
+    ).all()
+
+    real_available = ZERO
+    bonus_available = ZERO
+
+    for credit in credits:
+        cap = await _credit_capacity(session, credit)
+        if credit.entry_type == "payment_credit":
+            real_available += cap
+        elif credit.entry_type == "admin_adjustment":
+            bonus_available += cap
+
+    if reserved > ZERO:
+        if real_available >= reserved:
+            real_available -= reserved
+        else:
+            rem_res = reserved - real_available
+            real_available = ZERO
+            bonus_available = max(ZERO, bonus_available - rem_res)
+
+    available = max(ZERO, real_available + bonus_available)
+
     return AccountBalanceSnapshot(
         accounting_position=position,
-        available=max(ZERO, available),
+        available=available,
         reserved=reserved,
         debt=debt,
+        real_available=real_available,
+        bonus_available=bonus_available,
     )
+
 
 
 def _same_entry(entry: AccountLedgerEntry, expected: dict) -> bool:
@@ -309,8 +347,16 @@ async def _allocate_fifo(
                     ("payment_credit", "admin_adjustment")
                 ),
             )
-            .order_by(AccountLedgerEntry.created_at, AccountLedgerEntry.id)
+            .order_by(
+                case(
+                    (AccountLedgerEntry.entry_type == "admin_adjustment", 0),
+                    else_=1,
+                ),
+                AccountLedgerEntry.created_at,
+                AccountLedgerEntry.id,
+            )
             .with_for_update()
+
         )
     ).all()
     remaining = amount

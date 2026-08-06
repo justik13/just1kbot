@@ -18,6 +18,11 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
+        text="💳 Баланс пользователя",
+        callback_data=f"admin_user_balance:{user_id}",
+    )
+
+    builder.button(
         text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L20_1,
         callback_data=f"admin_user_devices:{user_id}",
     )
@@ -41,6 +46,30 @@ def get_admin_user_card_keyboard(
     builder.adjust(1)
 
     return builder.as_markup()
+
+
+def get_admin_user_balance_keyboard(
+    user_id: int,
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+
+    builder.button(
+        text="➕ Начислить баланс (Бонус)",
+        callback_data=f"admin_balance_topup:{user_id}",
+    )
+    builder.button(
+        text="➖ Списать баланс",
+        callback_data=f"admin_balance_deduct:{user_id}",
+    )
+    builder.button(
+        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
+        callback_data=f"admin_user_card:{user_id}",
+    )
+
+    builder.adjust(1)
+
+    return builder.as_markup()
+
 
 
 def get_admin_subscription_keyboard(
