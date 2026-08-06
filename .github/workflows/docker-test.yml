@@ -2,7 +2,7 @@ name: Docker Compose CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -12,114 +12,176 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Generate Ephemeral CI Env and Age Key
+        shell: bash
         run: |
-          # Install age
-          sudo apt-get update && sudo apt-get install -y age
+          set -euo pipefail
 
-          # Generate age key
+          sudo apt-get update
+          sudo apt-get install -y age
+
           age-keygen -o ci-key.txt
-          PUBKEY=$(grep 'public key' ci-key.txt | awk '{print $4}')
+          PUBKEY="$(sed -n 's/^# public key: //p' ci-key.txt)"
+          test -n "$PUBKEY"
 
-          # Generate complex passwords
-          DB_PASS="Pg_@#%^&*()_pass"
-          REDIS_PASS="Redis_!@#%_pass"
+          # Exercise URL encoding with characters that are significant in URIs.
+          DB_PASS='Pg_@#%^&*()_pass'
+          REDIS_PASS='Redis_!@#%_pass'
 
-          cat <<EOF > .env
+          cat > .env <<EOF
           BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-          ADMIN_IDS=123456,654321
-          DB_ENCRYPTION_KEY=valid_encryption_key_for_testing
+          ADMIN_IDS='[123456,654321]'
+          SUPPORT_USERNAME=ci_support_bot
+          DB_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           POSTGRES_USER=just1kbot
-          POSTGRES_PASSWORD=$DB_PASS
+          POSTGRES_PASSWORD='$DB_PASS'
           POSTGRES_DB=just1kbot_bot
-          REDIS_PASSWORD=$REDIS_PASS
-          DOMAIN=localhost
-          SSL_EMAIL=test@example.com
+          REDIS_PASSWORD='$REDIS_PASS'
+          YOOKASSA_SHOP_ID=123456
+          YOOKASSA_SECRET_KEY=ci_test_secret
+          YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+          YOOKASSA_WEBHOOK_PORT=8080
+          DOMAIN=vpn.example.test
+          SSL_EMAIL=ci@example.test
           BACKUP_AGE_RECIPIENT=$PUBKEY
           EOF
 
-      - name: Build and Start Services
+      - name: Validate Compose Configuration
+        shell: bash
         run: |
+          set -euo pipefail
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml config --quiet
+
+      - name: Build and Start Services
+        shell: bash
+        run: |
+          set -euo pipefail
           docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
 
       - name: Wait and Assert Health Status
+        shell: bash
         run: |
+          set -euo pipefail
+
           echo "Waiting for containers to become healthy..."
-          timeout=60
+          timeout_seconds=120
           elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            # Check if any container is restarting or exited
-            if docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.State}}' | grep -q -E 'Restarting|Exited'; then
+
+          while [ "$elapsed" -lt "$timeout_seconds" ]; do
+            states="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.State}}')"
+            if printf '%s\n' "$states" | grep -Eq 'Restarting|Exited|Dead'; then
               echo "A container crashed or is restarting!"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
               exit 1
             fi
-            
-            # Check db health
-            DB_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo "starting")
-            REDIS_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo "starting")
-            BOT_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo "starting")
-            
-            if [ "$DB_HEALTH" = "healthy" ] && [ "$REDIS_HEALTH" = "healthy" ] && [ "$BOT_HEALTH" = "healthy" ]; then
-              echo "All services are healthy!"
+
+            DB_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
+            REDIS_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
+            BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
+            CADDY_STATE="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo missing)"
+
+            echo "db=$DB_HEALTH redis=$REDIS_HEALTH bot=$BOT_HEALTH caddy=$CADDY_STATE"
+
+            if [ "$DB_HEALTH" = healthy ] \
+              && [ "$REDIS_HEALTH" = healthy ] \
+              && [ "$BOT_HEALTH" = healthy ] \
+              && [ "$CADDY_STATE" = running ]; then
+              echo "All services are healthy and Caddy is running."
               break
             fi
-            
-            if [ "$DB_HEALTH" = "unhealthy" ] || [ "$REDIS_HEALTH" = "unhealthy" ] || [ "$BOT_HEALTH" = "unhealthy" ]; then
-              echo "A service became unhealthy!"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+
+            if [ "$DB_HEALTH" = unhealthy ] \
+              || [ "$REDIS_HEALTH" = unhealthy ] \
+              || [ "$BOT_HEALTH" = unhealthy ] \
+              || [ "$CADDY_STATE" = exited ] \
+              || [ "$CADDY_STATE" = dead ]; then
+              echo "A service became unhealthy or stopped!"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
               exit 1
             fi
-            
+
             sleep 2
-            elapsed=$((elapsed+2))
+            elapsed=$((elapsed + 2))
           done
-          
-          if [ $elapsed -ge $timeout ]; then
+
+          if [ "$elapsed" -ge "$timeout_seconds" ]; then
             echo "Timeout waiting for healthy status."
-            docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
             exit 1
           fi
 
       - name: Test Caddy Proxy
+        shell: bash
         run: |
-          curl -f http://localhost:8081/health || (echo "Caddy proxy failed" && docker logs just1kbot_caddy && exit 1)
+          set -euo pipefail
+          curl --fail --silent --show-error http://localhost:8081/health
+
+      - name: Seed Backup Probe Data
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose exec -T db psql \
+            -U just1kbot \
+            -d just1kbot_bot \
+            -v ON_ERROR_STOP=1 \
+            -c "DROP TABLE IF EXISTS ci_backup_probe; CREATE TABLE ci_backup_probe (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO ci_backup_probe (id, marker) VALUES (1, 'pr78-backup-restore');"
 
       - name: Test Backup and Restore
+        shell: bash
         run: |
-          echo "Running backup..."
-          docker compose run --rm backup /backup.sh
-          
-          BACKUP_FILE=$(ls backups/*.sql.gz.age | head -n 1)
-          if [ -z "$BACKUP_FILE" ]; then
-            echo "Backup file not found!"
-            exit 1
-          fi
-          
-          echo "Decrypting backup..."
-          age -d -i ci-key.txt "$BACKUP_FILE" > backup-restored.sql.gz
-          
-          if [ ! -s backup-restored.sql.gz ]; then
-            echo "Decrypted file is empty or failed!"
-            exit 1
-          fi
-          
-          # Ensure no plaintext backup remains in the volume
-          if ls backups/*.sql.gz >/dev/null 2>&1; then
+          set -euo pipefail
+
+          echo "Running encrypted backup..."
+          docker compose --profile tools run --rm backup
+
+          BACKUP_FILE="$(find backups -maxdepth 1 -type f -name '*.sql.gz.age' -print -quit)"
+          test -n "$BACKUP_FILE"
+          echo "Backup created: $BACKUP_FILE"
+
+          if find backups -maxdepth 1 -type f -name '*.sql.gz' -print -quit | grep -q .; then
             echo "Plaintext backup was not cleaned up!"
             exit 1
           fi
-          
-          echo "Restoring backup to check integrity..."
+
+          echo "Decrypting backup..."
+          age -d -i ci-key.txt "$BACKUP_FILE" > backup-restored.sql.gz
+          test -s backup-restored.sql.gz
           gunzip backup-restored.sql.gz
-          
+          test -s backup-restored.sql
+
+          echo "Creating temporary restore database..."
+          docker compose exec -T db dropdb -U just1kbot --if-exists just1kbot_restore
+          docker compose exec -T db createdb -U just1kbot just1kbot_restore
+
           docker cp backup-restored.sql just1kbot_db:/tmp/restore.sql
-          docker compose exec -T db psql -U just1kbot -d just1kbot_bot -f /tmp/restore.sql
+          docker compose exec -T db psql \
+            -U just1kbot \
+            -d just1kbot_restore \
+            -v ON_ERROR_STOP=1 \
+            -f /tmp/restore.sql
+
+          RESTORE_MARKER="$(docker compose exec -T db psql -U just1kbot -d just1kbot_restore -Atc "SELECT marker FROM ci_backup_probe WHERE id = 1;")"
+          test "$RESTORE_MARKER" = "pr78-backup-restore"
+
+          docker compose exec -T db dropdb -U just1kbot --if-exists just1kbot_restore
+
+      - name: Test Alembic Idempotency
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose exec -T bot true
+          docker compose exec -T db psql -U just1kbot -d just1kbot_bot -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM alembic_version;'
 
       - name: View logs (if failure)
         if: failure()
-        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
 
       - name: Cleanup
         if: always()
         run: |
-          rm -f ci-key.txt .env backup-restored.sql
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v --remove-orphans || true
+          rm -f ci-key.txt .env backup-restored.sql backup-restored.sql.gz
