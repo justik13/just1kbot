@@ -1,0 +1,7 @@
+services:
+  caddy:
+    ports:
+      # Expose on 8081 for CI testing
+      - "8081:80"
+    volumes:
+      - ./Caddyfile.ci:/etc/caddy/Caddyfile

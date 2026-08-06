@@ -1,14 +1,26 @@
-version: '3.8'
+# docker-compose.yml
+# This is the Greenfield production deployment configuration.
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
 
 services:
   db:
     image: postgres:16-alpine
     container_name: just1kbot_db
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_URL_DECODED:-just1kbot_secret_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1G"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +33,16 @@ services:
     image: redis:7-alpine
     container_name: just1kbot_redis
     restart: unless-stopped
-    command: redis-server --requirepass ${REDIS_PASSWORD:-just1kbot_redis_secret}
+    logging: *default-logging
+    # Mask password from command line
+    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf'
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -36,14 +57,19 @@ services:
       dockerfile: Dockerfile
     container_name: just1kbot_app
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
       DOCKER_DEPLOYMENT: "true"
       YOOKASSA_WEBHOOK_PORT: "8080"
-      # Override the URLs in .env to point to the docker containers
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-just1kbot}:${POSTGRES_PASSWORD:-just1kbot_secret_password}@db:5432/${POSTGRES_DB:-just1kbot_bot}
-      REDIS_URL: redis://:${REDIS_PASSWORD:-just1kbot_redis_secret}@redis:6379/0
+      POSTGRES_HOST: "db"
+      REDIS_HOST: "redis"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "2G"
     depends_on:
       db:
         condition: service_healthy
@@ -54,11 +80,13 @@ services:
     image: caddy:2-alpine
     container_name: just1kbot_caddy
     restart: unless-stopped
+    logging: *default-logging
     ports:
       - "80:80"
       - "443:443"
-    env_file:
-      - .env
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN is required}
+      SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
@@ -67,20 +95,20 @@ services:
       - bot
 
   backup:
-    image: postgres:16-alpine
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
     container_name: just1kbot_backup
-    restart: unless-stopped
+    profiles: ["tools"]
+    logging: *default-logging
     volumes:
       - ./backups:/backups
-      - ./scripts/docker/backup.sh:/backup.sh
     environment:
-      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:-""}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD_URL_DECODED:-just1kbot_secret_password}
-    # Run the script and then sleep indefinitely so the container stays up, 
-    # or you can run this via cron. Here we just set it up to run a cron daemon.
-    # We will install age and set up a cron job for backup.sh.
-    command: >
-      sh -c 'apk add --no-cache age && echo "0 2 * * * /backup.sh" > /etc/crontabs/root && crond -f -d 8'
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}
+      POSTGRES_HOST: "db"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
+      POSTGRES_DB: ${POSTGRES_DB:-just1kbot_bot}
     depends_on:
       db:
         condition: service_healthy

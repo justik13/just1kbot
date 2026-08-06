@@ -11,21 +11,115 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create .env from example
-        run: cp .env.example .env
+      - name: Generate Ephemeral CI Env and Age Key
+        run: |
+          # Install age
+          sudo apt-get update && sudo apt-get install -y age
 
-      - name: Build and Start
-        run: docker compose up -d --build
+          # Generate age key
+          age-keygen -o ci-key.txt
+          PUBKEY=$(grep 'public key' ci-key.txt | awk '{print $4}')
 
-      - name: Wait for services to be ready
-        run: sleep 15
+          # Generate complex passwords
+          DB_PASS="Pg_@#%^&*()_pass"
+          REDIS_PASS="Redis_!@#%_pass"
 
-      - name: Check container status
-        run: docker compose ps
-        
-      - name: Verify backup service
-        run: docker compose exec -T backup sh -c "echo 'Cron and age check ok'"
+          cat <<EOF > .env
+          BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+          ADMIN_IDS=123456,654321
+          DB_ENCRYPTION_KEY=CHANGE_ME
+          POSTGRES_USER=just1kbot
+          POSTGRES_PASSWORD=$DB_PASS
+          POSTGRES_DB=just1kbot_bot
+          REDIS_PASSWORD=$REDIS_PASS
+          DOMAIN=localhost
+          SSL_EMAIL=test@example.com
+          BACKUP_AGE_RECIPIENT=$PUBKEY
+          EOF
+
+      - name: Build and Start Services
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+
+      - name: Wait and Assert Health Status
+        run: |
+          echo "Waiting for containers to become healthy..."
+          timeout=60
+          elapsed=0
+          while [ $elapsed -lt $timeout ]; do
+            # Check if any container is restarting or exited
+            if docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.State}}' | grep -q -E 'Restarting|Exited'; then
+              echo "A container crashed or is restarting!"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+              exit 1
+            fi
+            
+            # Check db health
+            DB_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo "starting")
+            REDIS_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo "starting")
+            BOT_HEALTH=$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo "starting")
+            
+            if [ "$DB_HEALTH" = "healthy" ] && [ "$REDIS_HEALTH" = "healthy" ] && [ "$BOT_HEALTH" = "healthy" ]; then
+              echo "All services are healthy!"
+              break
+            fi
+            
+            if [ "$DB_HEALTH" = "unhealthy" ] || [ "$REDIS_HEALTH" = "unhealthy" ] || [ "$BOT_HEALTH" = "unhealthy" ]; then
+              echo "A service became unhealthy!"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+              exit 1
+            fi
+            
+            sleep 2
+            elapsed=$((elapsed+2))
+          done
+          
+          if [ $elapsed -ge $timeout ]; then
+            echo "Timeout waiting for healthy status."
+            docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+            exit 1
+          fi
+
+      - name: Test Caddy Proxy
+        run: |
+          curl -f http://localhost:8081/health || (echo "Caddy proxy failed" && docker logs just1kbot_caddy && exit 1)
+
+      - name: Test Backup and Restore
+        run: |
+          echo "Running backup..."
+          docker compose run --rm backup /backup.sh
+          
+          BACKUP_FILE=$(ls backups/*.sql.gz.age | head -n 1)
+          if [ -z "$BACKUP_FILE" ]; then
+            echo "Backup file not found!"
+            exit 1
+          fi
+          
+          echo "Decrypting backup..."
+          age -d -i ci-key.txt "$BACKUP_FILE" > backup-restored.sql.gz
+          
+          if [ ! -s backup-restored.sql.gz ]; then
+            echo "Decrypted file is empty or failed!"
+            exit 1
+          fi
+          
+          # Ensure no plaintext backup remains in the volume
+          if ls backups/*.sql.gz >/dev/null 2>&1; then
+            echo "Plaintext backup was not cleaned up!"
+            exit 1
+          fi
+          
+          echo "Restoring backup to check integrity..."
+          gunzip backup-restored.sql.gz
+          
+          docker cp backup-restored.sql just1kbot_db:/tmp/restore.sql
+          docker compose exec -T db psql -U just1kbot -d just1kbot_bot -f /tmp/restore.sql
 
       - name: View logs (if failure)
         if: failure()
-        run: docker compose logs
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f ci-key.txt .env backup-restored.sql

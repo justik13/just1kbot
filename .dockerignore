@@ -13,3 +13,4 @@ docs/
 .pip-tools.toml
 docker-compose.yml
 Caddyfile
+backups/

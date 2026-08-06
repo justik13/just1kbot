@@ -1,0 +1,5 @@
+FROM postgres:16-alpine
+
+RUN apk add --no-cache age
+
+ENTRYPOINT ["/bin/sh", "/backup.sh"]
