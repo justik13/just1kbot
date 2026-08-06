@@ -167,12 +167,37 @@ jobs:
 
           docker compose exec -T db dropdb -U just1kbot --if-exists just1kbot_restore
 
-      - name: Test Alembic Idempotency
+      - name: Test Alembic Idempotency Through Real Bot Restart
         shell: bash
         run: |
           set -euo pipefail
-          docker compose exec -T bot alembic upgrade head
-          docker compose exec -T db psql -U just1kbot -d just1kbot_bot -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM alembic_version;'
+
+          docker compose restart bot
+
+          timeout_seconds=120
+          elapsed=0
+          while [ "$elapsed" -lt "$timeout_seconds" ]; do
+            BOT_STATE="$(docker inspect --format='{{.State.Status}}' just1kbot_app 2>/dev/null || echo missing)"
+            BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
+            echo "bot_state=$BOT_STATE bot_health=$BOT_HEALTH"
+
+            if [ "$BOT_STATE" = running ] && [ "$BOT_HEALTH" = healthy ]; then
+              break
+            fi
+
+            if [ "$BOT_STATE" = exited ] || [ "$BOT_STATE" = dead ] || [ "$BOT_HEALTH" = unhealthy ]; then
+              docker compose logs --no-color bot
+              exit 1
+            fi
+
+            sleep 2
+            elapsed=$((elapsed + 2))
+          done
+
+          if [ "$elapsed" -ge "$timeout_seconds" ]; then
+            docker compose logs --no-color bot
+            exit 1
+          fi
 
       - name: View logs (if failure)
         if: failure()
