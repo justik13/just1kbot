@@ -200,11 +200,17 @@ async def _create_and_render_topup(
             context=context,
         )
     except AccountTopupError as exc:
+        from bot.keyboards.payment import get_back_or_cancel_topups_keyboard
+        keyboard = (
+            get_back_or_cancel_topups_keyboard() 
+            if exc.code == "too_many_unfinished_topups" 
+            else get_back_button("menu_balance")
+        )
         await render_hub(
             target.bot,
             target.chat.id,
             _topup_errors().get(exc.code, texts.ERROR_PAYMENT_SERVICE),
-            get_back_button("menu_balance"),
+            keyboard,
         )
         return
     if context:
@@ -481,6 +487,30 @@ async def cancel_topup_ui(
         session,
         db_user,
         notice=texts.TOPUP_HIDE_NOTICE,
+    )
+
+
+@router.callback_query(F.data == "balance_cancel_all")
+async def cancel_all_topups_ui(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    await callback.answer(show_alert=False)
+    await state.clear()
+    if db_user is None:
+        return
+    from services.account_topup import cancel_all_unfinished_topups
+    count = await cancel_all_unfinished_topups(session, user_id=db_user.id)
+    if count == 0:
+        await callback.answer(texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True)
+    await _render_balance(
+        callback.bot,
+        callback.message.chat.id,
+        session,
+        db_user,
+        notice=f"Отменено {count} ссылок." if count > 0 else None,
     )
 
 

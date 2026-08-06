@@ -227,6 +227,46 @@ async def hide_balance_topup(
     return payment
 
 
+async def cancel_all_unfinished_topups(
+    session: AsyncSession, *, user_id: int
+) -> int:
+    """Force cancel all unfinished topups for a user."""
+    await lock_checkout_user(session, user_id)
+    payments = (
+        await session.scalars(
+            select(Payment)
+            .where(
+                Payment.user_id == user_id,
+                Payment.credited_at.is_(None),
+                Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+            )
+            .with_for_update()
+        )
+    ).all()
+
+    count = 0
+    for payment in payments:
+        if payment.provider_status in {"succeeded", "canceled", "refunded"}:
+            continue
+        payment.provider_status = "canceled"
+        payment.checkout_status = "abandoned"
+        payment.ui_visible = False
+        payment.user_cancel_requested_at = payment.user_cancel_requested_at or now_utc()
+        session.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="balance_topup_hidden",
+                provider_status="canceled",
+                source="telegram",
+            )
+        )
+        count += 1
+    
+    if count > 0:
+        await session.flush()
+    return count
+
+
 async def settle_succeeded_topup(
     session: AsyncSession,
     *,

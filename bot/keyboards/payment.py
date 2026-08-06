@@ -159,6 +159,17 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="❌ Закрыть незавершённые ссылки",
+        callback_data="balance_cancel_all",
+    )
+    builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
