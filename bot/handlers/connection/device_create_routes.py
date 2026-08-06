@@ -4,7 +4,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,10 +33,9 @@ from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from services.slots_cache import capture_server_peer_snapshot
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub, safe
+from utils.telegram import render_hub
 
 from .common import (
-    DEVICE_NAME_REGEX,
     _get_effective_device_limit,
     _render_maintenance,
     _render_connections,
@@ -368,7 +367,7 @@ async def _process_server_selection(
             error_text = _get_server_error_text(error_type)
 
             logger.warning(
-                "ServerUnavailable in enter_device_name: type=%s, msg=%s",
+                "ServerUnavailable in _process_server_selection: type=%s, msg=%s",
                 error_type,
                 error_msg,
             )
@@ -382,7 +381,7 @@ async def _process_server_selection(
             await state.clear()
             return
         except Exception as e:
-            logger.error(f"Unexpected error in enter_device_name: {e}", exc_info=True)
+            logger.error(f"Unexpected error in _process_server_selection: {e}", exc_info=True)
 
             await render_hub(
                 callback.bot,
