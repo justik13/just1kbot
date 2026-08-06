@@ -29,6 +29,7 @@ from utils.vpn_parser import (
     build_conf_file_from_dict,
     build_vpn_file_from_dict,
     customize_vpn_config_dict,
+    customize_vpn_uri,
     decode_vpn_uri_to_json,
 )
 
@@ -138,11 +139,25 @@ async def show_config(
         await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
         return
 
-    if len(raw_config) > TELEGRAM_MESSAGE_LIMIT - 300:
+    server = await get_server_by_id(session, profile.server_id)
+    server_name = server.name if server else "server"
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_suffix = f" #{m.group(1)}" if m else ""
+    client_description = f"{server_name}{slot_suffix}"
+
+    display_key = customize_vpn_uri(
+        raw_config,
+        description=client_description,
+        dns1="8.8.8.8",
+        dns2="8.8.4.4",
+        mtu="1280",
+    )
+
+    if len(display_key) > TELEGRAM_MESSAGE_LIMIT - 300:
         safe_device_name = await _get_safe_device_name(session, profile)
 
         key_file = BufferedInputFile(
-            raw_config.encode("utf-8"),
+            display_key.encode("utf-8"),
             filename=f"{safe_device_name}_key.txt",
         )
 
@@ -163,7 +178,7 @@ async def show_config(
         callback.message.chat.id,
         texts.DEVICE_SHOW_KEY.format(
             device_name=safe(profile.device_name),
-            raw_config=safe(raw_config),
+            raw_config=safe(display_key),
         ),
         get_back_button(f"manage_device:{profile.id}"),
     )
