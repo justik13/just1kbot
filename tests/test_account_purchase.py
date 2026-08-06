@@ -55,7 +55,7 @@ class AccountPurchaseContractTests(unittest.TestCase):
         )
         self.assertEqual(
             callbacks(markup),
-            ["balance_resume_purchase:7:showcase", "menu_balance"],
+            ["balance_resume_purchase:7:showcase", "menu_balance", "dismiss_notification"],
         )
         self.assertNotIn("balance_purchase_confirm", repr(markup))
 
