@@ -278,14 +278,18 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             conflict = await create_tariff_change_quote(
                 session, user_id=user, target_tariff_id=different, as_of=as_of
             )
-            self.assertEqual(conflict.failure_code, "active_change_quote_exists")
-            after_expiry = await create_tariff_change_quote(
-                session,
-                user_id=user,
-                target_tariff_id=different,
-                as_of=as_of + timedelta(minutes=15),
+            self.assertTrue(conflict.created)
+            
+            # The first quote should now be cancelled
+            first_reloaded = await session.get(TariffQuote, first.quote.id)
+            self.assertEqual(first_reloaded.status, "cancelled")
+
+            # But trying to create one for the same target should return the existing one
+            same_target = await create_tariff_change_quote(
+                session, user_id=user, target_tariff_id=different, as_of=as_of
             )
-            self.assertTrue(after_expiry.created)
+            self.assertFalse(same_target.created)
+            self.assertEqual(same_target.quote.id, conflict.quote.id)
         legacy, _, legacy_target, legacy_as_of = await self.seed(
             tracked=False, duration_days=31
         )
