@@ -208,7 +208,10 @@ async def _settle_account_tariff_change(
     target = await session.get(TariffVersion, quote.target_tariff_version_id)
     if source is None or target is None or source.tariff_id == target.tariff_id:
         raise AccountTariffChangeError("quote_tariff_version_invalid")
-    if user.current_tariff_id != source.tariff_id:
+    if user.current_tariff_id is None:
+        user.current_tariff_id = source.tariff_id
+        await session.flush()
+    elif user.current_tariff_id != source.tariff_id:
         raise AccountTariffChangeError("subscription_state_changed")
     tariff = await session.scalar(
         select(Tariff).where(Tariff.id == target.tariff_id).with_for_update()

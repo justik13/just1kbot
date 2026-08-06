@@ -103,7 +103,30 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="account_debt")
     if user.subscription_end is None or user.subscription_end <= as_of:
         return TariffChangeQuoteResult(failure_code="subscription_inactive")
-    if user.current_tariff_id is None:
+    current_tariff_id = user.current_tariff_id
+    if current_tariff_id is None:
+        snapshot_temp = await get_subscription_balance_snapshot(
+            session, user_id=user_id, as_of=as_of, locked_user=user
+        )
+        if snapshot_temp.paid_lots:
+            v_ids = {lot.tariff_version_id for lot in snapshot_temp.paid_lots}
+            t_ids = set(await session.scalars(select(TariffVersion.tariff_id).where(TariffVersion.id.in_(v_ids))))
+            if len(t_ids) == 1:
+                current_tariff_id = next(iter(t_ids))
+        if current_tariff_id is None:
+            matched_tariff_id = await session.scalar(
+                select(Tariff.id).where(
+                    Tariff.device_limit == user.device_limit,
+                    Tariff.is_active.is_(True),
+                ).limit(1)
+            )
+            if matched_tariff_id is not None:
+                current_tariff_id = matched_tariff_id
+        if current_tariff_id is not None:
+            user.current_tariff_id = current_tariff_id
+            await session.flush()
+
+    if current_tariff_id is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
 
     active = await get_active_financial_quotes_for_update(
@@ -112,10 +135,10 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="active_checkout_exists")
 
     tariffs = (await session.scalars(select(Tariff).where(
-        Tariff.id.in_({user.current_tariff_id, target_tariff_id})
+        Tariff.id.in_({current_tariff_id, target_tariff_id})
     ).order_by(Tariff.id).with_for_update())).all()
     by_id = {x.id: x for x in tariffs}
-    source = by_id.get(user.current_tariff_id)
+    source = by_id.get(current_tariff_id)
     target = by_id.get(target_tariff_id)
     if source is None:
         return TariffChangeQuoteResult(failure_code="current_tariff_unknown")
