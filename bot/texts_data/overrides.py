@@ -157,3 +157,8 @@ OVERRIDES['ALERT_CRITICAL_BOT_ERROR'] = '[MISSING TEXT: ALERT_CRITICAL_BOT_ERROR
 OVERRIDES['ERROR_SERVER_DUPLICATE_URL'] = '[MISSING TEXT: ERROR_SERVER_DUPLICATE_URL]'
 
 OVERRIDES['PAYMENT_STATUS_NAMES'] = {'completed': 'Выполнен', 'cancelled': 'Отменен', 'failed': 'Ошибка', 'refunded': 'Возврат', 'requires_manual_review': 'Ручная проверка', 'pending': 'Ожидание', 'paid_processing': 'Обработка'}
+
+OVERRIDES['ADMIN_PAYMENT_USER_WITH_USERNAME'] = '[MISSING TEXT: ADMIN_PAYMENT_USER_WITH_USERNAME]'
+
+OVERRIDES['ADMIN_PAYMENT_USER_WITH_ID'] = '[MISSING TEXT: ADMIN_PAYMENT_USER_WITH_ID]'
+
