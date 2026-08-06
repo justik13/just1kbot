@@ -43,15 +43,25 @@ async def _get_effective_device_limit(
 
 
 async def _render_maintenance(
-    callback: CallbackQuery,
+    target,
     session: AsyncSession,
     *,
     back_to: str = "back_to_main_menu",
 ) -> None:
+    if target is None:
+        return
+    bot = getattr(target, "bot", None)
+    chat = getattr(target, "chat", None)
+    chat_id = chat.id if chat else None
+    if (bot is None or chat_id is None) and isinstance(target, CallbackQuery):
+        bot = target.bot
+        chat_id = target.message.chat.id if target.message else None
+    if bot is None or chat_id is None:
+        return
     message = await MaintenanceService.get_message(session)
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
+        bot,
+        chat_id,
         message,
         get_back_button(back_to),
     )
