@@ -46,8 +46,8 @@ async def init_db():
     )
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
-    # Run Alembic migrations instead of create_all
-    await _run_alembic_migrations(settings.DATABASE_URL)
+    # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
+    await _seed_default_data()
 
     logging.info("PostgreSQL database initialized successfully")
     return _engine, _sessionmaker
