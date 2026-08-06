@@ -188,6 +188,7 @@ async def _cleanup_expired_profiles_grace():
                             )
                     except TelegramForbiddenError:
                         user.is_bot_blocked = True
+                        await session.commit()
                         logger.info(
                             "User %s blocked the bot (grace cleanup notification)",
                             user.telegram_id,
@@ -352,6 +353,16 @@ async def _cleanup_old_records():
             .where(BroadcastProgress.status.in_(["completed", "stopped"]))
             .where(BroadcastProgress.updated_at < threshold_broadcasts)
         )
+        
+        # Mark stuck in_progress broadcasts as stopped
+        threshold_stuck = current_time - timedelta(hours=2)
+        stmt_stuck = (
+            update(BroadcastProgress)
+            .where(BroadcastProgress.status == "in_progress")
+            .where(BroadcastProgress.updated_at < threshold_stuck)
+            .values(status="stopped", details="cleanup_stuck")
+        )
+        await session.execute(stmt_stuck)
         result_broadcasts = await session.execute(stmt_broadcasts)
         broadcasts_deleted = result_broadcasts.rowcount
 

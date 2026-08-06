@@ -441,25 +441,26 @@ async def apply_balance_topup_refund_success(
         provider_status="succeeded",
         event_key=event_key,
     )
-    await create_payment_debit(
-        session,
-        payment_id=payment.id,
-        entry_type="refund_debit",
-        amount=amount,
-        idempotency_key=f"provider-refund-debit:{provider_refund_id}",
-        metadata={
-            "provider_refund_id": provider_refund_id,
-            "event_key": event_key,
-            "source": "provider_refund",
-        },
-    )
-    await _consume_matching_reservation(
-        session,
-        payment_id=payment.id,
-        amount=amount,
-        reservation_id=reservation_id,
-    )
-    await _update_topup_after_refund(session, payment)
+    async with session.begin_nested():
+        await create_payment_debit(
+            session,
+            payment_id=payment.id,
+            entry_type="refund_debit",
+            amount=amount,
+            idempotency_key=f"provider-refund-debit:{provider_refund_id}",
+            metadata={
+                "provider_refund_id": provider_refund_id,
+                "event_key": event_key,
+                "source": "provider_refund",
+            },
+        )
+        await _consume_matching_reservation(
+            session,
+            payment_id=payment.id,
+            amount=amount,
+            reservation_id=reservation_id,
+        )
+        await _update_topup_after_refund(session, payment)
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"

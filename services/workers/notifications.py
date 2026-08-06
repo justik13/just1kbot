@@ -199,6 +199,7 @@ async def _send_pre_expiry_notifications(
                     # Это предотвращает потерю уведомлений, если Telegram был недоступен
                     user.notification_retry_count = 0
                     user.last_notification_attempt = None
+                    await session.flush()
 
                     logger.warning(
                         "Max retries reached for user %s, will retry in next global cycle",
@@ -270,6 +271,7 @@ async def _send_pre_expiry_notifications(
 
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    await session.flush()
 
                     if notification_type == "2h":
                         user.notified_2h = True
@@ -289,6 +291,7 @@ async def _send_pre_expiry_notifications(
                 except Exception as e:
                     user.notification_retry_count = retry_count + 1
                     user.last_notification_attempt = current_time
+                    await session.flush()
 
                     logger.warning(
                         "Failed to send pre-expiry notification to %s: %s",
@@ -360,6 +363,7 @@ async def _send_post_expiry_notifications(
                     # Это предотвращает потерю уведомлений, если Telegram был недоступен
                     user.notification_retry_count = 0
                     user.last_notification_attempt = None
+                    await session.flush()
 
                     logger.warning(
                         "Max retries reached for user %s, will retry in next global cycle",
@@ -440,6 +444,7 @@ async def _send_post_expiry_notifications(
 
                     user.notification_retry_count = 0
                     user.last_notification_attempt = current_time
+                    await session.flush()
 
                     if notification_type == "grace_12h":
                         user.notified_grace_12h = True
@@ -454,6 +459,7 @@ async def _send_post_expiry_notifications(
                 except Exception as e:
                     user.notification_retry_count = retry_count + 1
                     user.last_notification_attempt = current_time
+                    await session.flush()
 
                     logger.warning(
                         "Failed to send post-expiry notification to %s: %s",

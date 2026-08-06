@@ -83,6 +83,8 @@ def _get_real_ip(request: web.Request) -> str:
         if real_ip:
             return real_ip
         forwarded = request.headers.get("X-Forwarded-For", "").strip()
+        # P1-3: Ignore X-Forwarded-For to prevent SSRF bypass
+        forwarded = ""
         if forwarded:
             first_ip = forwarded.split(",")[0].strip()
             if first_ip:
