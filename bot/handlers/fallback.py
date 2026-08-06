@@ -19,28 +19,19 @@ router = Router()
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
     await state.clear()
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        texts.ERROR_OPERATION_INTERRUPTED,
-        get_back_button("back_to_main_menu"),
-    )
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
-    if not message.text:
-        return
-
     await state.clear()
-
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        texts.FALLBACK_UNKNOWN_TEXT,
-        get_back_button("back_to_main_menu"),
-    )
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
 
 @router.callback_query(F.data == "dismiss_notification")

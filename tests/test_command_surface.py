@@ -44,7 +44,7 @@ class CommandSurfaceTests(unittest.TestCase):
             encoding="utf-8"
         )
         self.assertLess(main.index("admin_payment_queues_router,"), main.index("fallback_router,"))
-        self.assertIn('get_back_button("back_to_main_menu")', fallback)
+        self.assertIn("message.delete()", fallback)
         self.assertIn("@router.message()", fallback)
 
     def test_admin_navigation_has_no_slash_entrypoint(self):
