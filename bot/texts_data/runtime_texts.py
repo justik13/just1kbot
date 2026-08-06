@@ -489,7 +489,8 @@ TEXTS = {
     # services/workers/account_balance.py:340
     'RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1': '\n\nТариф готов к покупке. Подтвердите покупку с баланса.',
     # services/workers/account_balance.py:345
-    'RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1': '✅ <b>Баланс пополнен на {value_0} ₽</b>\nДоступно: <b>{value_1} ₽</b>{value_2}',
+    'RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1': '✅ <b>Баланс пополнен на +{value_0} ₽!</b>\n\n💰 Реальный баланс: <b>{value_1} ₽</b>\n🎁 Бонусный баланс: <b>{value_2} ₽</b>{value_3}',
+
     # services/workers/account_balance.py:361
     'RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1': '⚠️ Поздняя оплата превысила лимит баланса\nPayment: <code>{value_0}</code>\nUser: <code>{value_1}</code>\nБаланс: <b>{value_2} ₽</b>',
     # services/workers/cleanup.py:90

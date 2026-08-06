@@ -196,9 +196,17 @@ async def confirm_purchase(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(value_0=operation, value_1=get_tariff_display_name(intent.version.device_limit), value_2=intent.version.duration_hours // 24, value_3=charged, value_4=int(result.balance_after.available)),
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(
+            value_0=operation,
+            value_1=get_tariff_display_name(intent.version.device_limit),
+            value_2=intent.version.duration_hours // 24,
+            value_3=charged,
+            value_4=int(result.balance_after.real_available),
+            value_5=int(result.balance_after.bonus_available),
+        ),
         get_payment_success_keyboard(),
     )
+
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()
 
 

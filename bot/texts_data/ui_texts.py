@@ -356,7 +356,7 @@ TEXTS = {
     # bot/handlers/payment/purchase_routes.py:147
     'UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L147_1': 'Проводим покупку…',
     # bot/handlers/payment/purchase_routes.py:180
-    'UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1': '🎉 <b>{value_0}</b>\n\nТариф: <b>{value_1}</b>\nСрок: {value_2} дней\nСписано: <b>{value_3} ₽</b>\nБаланс: <b>{value_4} ₽</b>',
+    'UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1': '🎉 <b>{value_0}</b>\n\nТариф: <b>{value_1}</b>\nСрок: {value_2} дней\nСписано: <b>{value_3} ₽</b>\n💰 Реальный баланс: <b>{value_4} ₽</b>\n🎁 Бонусный баланс: <b>{value_5} ₽</b>',
     # bot/handlers/payment/purchase_routes.py:209
     'UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L209_1': 'Создаём ссылку…',
     # bot/handlers/payment/purchase_routes.py:218
@@ -386,7 +386,8 @@ TEXTS = {
     # bot/handlers/payment/tariff_change_routes.py:145
     'UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L145_1': 'Меняем тариф…',
     # bot/handlers/payment/tariff_change_routes.py:180
-    'UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1': '🎉 <b>Тариф изменён</b>\n\nНовый тариф: <b>{value_0}</b>\nСрок: {value_1}\nСписано: <b>{value_2} ₽</b>\nБаланс: <b>{value_3} ₽</b>',
+    'UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1': '🎉 <b>Тариф изменён</b>\n\nНовый тариф: <b>{value_0}</b>\nСрок: {value_1}\nСписано: <b>{value_2} ₽</b>\n💰 Реальный баланс: <b>{value_3} ₽</b>\n🎁 Бонусный баланс: <b>{value_4} ₽</b>',
+
     # bot/handlers/payment/tariff_change_routes.py:210
     'UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L210_1': 'Создаём ссылку…',
     # bot/handlers/payment/tariff_change_routes.py:219
