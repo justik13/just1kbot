@@ -274,8 +274,8 @@ async def finalize(session, claim, result):
                     error_kind=YooKassaErrorKind.INVALID_RESPONSE,
                     retryable=False,
                 )
-            else:
-                payment.external_id = provider_id
+
+            if result.ok:
                 if claim.operation_type == "create_payment":
                     confirmation = data.get("confirmation") or {}
                     payment.payment_url = (
