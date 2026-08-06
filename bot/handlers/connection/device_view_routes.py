@@ -28,6 +28,7 @@ from utils.telegram import (
 from utils.vpn_parser import (
     build_conf_file_from_dict,
     build_vpn_file_from_dict,
+    customize_vpn_config_dict,
     decode_vpn_uri_to_json,
 )
 
@@ -214,8 +215,22 @@ async def download_conf(
         )
         return
 
-    vpn_content = build_vpn_file_from_dict(decoded)
-    conf_content = build_conf_file_from_dict(decoded)
+    server = await get_server_by_id(session, profile.server_id)
+    server_name = server.name if server else "server"
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_suffix = f" #{m.group(1)}" if m else ""
+    client_description = f"{server_name}{slot_suffix}"
+
+    customized_data = customize_vpn_config_dict(
+        decoded,
+        description=client_description,
+        dns1="8.8.8.8",
+        dns2="8.8.4.4",
+        mtu="1280",
+    )
+
+    vpn_content = build_vpn_file_from_dict(customized_data)
+    conf_content = build_conf_file_from_dict(customized_data)
 
     if not vpn_content or not conf_content:
         await render_hub(

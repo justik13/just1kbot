@@ -5,8 +5,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot import texts
-from bot.keyboards import get_back_button
-from utils.telegram import render_hub
 
 router = Router()
 
