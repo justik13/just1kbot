@@ -344,8 +344,22 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
+        try:
+            from services.referral_bonus import grant_referral_bonus_for_topup
+            await grant_referral_bonus_for_topup(
+                session,
+                purchaser_user_id=payment.user_id,
+                payment_id=payment.id,
+                topup_amount=payment.amount,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(
+                f"Failed to grant referral bonus for topup {payment.id}: {e}"
+            )
     await session.flush()
     return created, balance
+
 
 
 async def settle_succeeded_topup_by_id(

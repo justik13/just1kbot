@@ -171,11 +171,14 @@ Admin <code>{admin_id}</code>
 <b>Имя:</b> {first_name}
 <b>Статус:</b> {status}
 <b>Бан:</b> {ban}
+<b>💰 Реальный баланс:</b> {real_balance} ₽
+<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
 <b>Действует до:</b> {valid_until}
 <b>Осталось:</b> {days_left}
 <b>Устройств:</b> {devices_count}/{device_limit}
 <b>Рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}""",
+
 
     "ADMIN_QUEUE_RETRY_CONFIRMATION": "{card}\n\n⚠️ Операция может быть обработана повторно.",
     "ADMIN_DISPUTE_CREATED_PREFIX": "Создан новый спор.\n\n",

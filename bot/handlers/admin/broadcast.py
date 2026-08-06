@@ -249,12 +249,26 @@ async def _get_next_batch(
         User.is_bot_blocked.is_(False),
         User.is_banned.is_(False),
     )
+    current_time = now_utc()
     if audience == "active":
-        current_time = now_utc()
         stmt = stmt.where(User.subscription_end > current_time)
+    elif audience == "expired":
+        stmt = stmt.where(
+            User.subscription_end.is_not(None),
+            User.subscription_end <= current_time,
+        )
+    elif audience == "never":
+        stmt = stmt.where(User.subscription_end.is_(None))
+    elif audience.startswith("test_"):
+        try:
+            admin_tg_id = int(audience.split("_", 1)[1])
+            stmt = stmt.where(User.telegram_id == admin_tg_id)
+        except (IndexError, ValueError):
+            pass
     stmt = stmt.order_by(User.id).limit(limit)
     result = await session.execute(stmt)
     return [(row[0], row[1]) for row in result.all()]
+
 
 
 async def _send_broadcast_to_users_with_resume(
@@ -612,11 +626,27 @@ async def _start_broadcast_process(
         User.is_bot_blocked.is_(False),
         User.is_banned.is_(False),
     )
+    current_time = now_utc()
     if audience == "active":
-        current_time = now_utc()
         count_stmt = count_stmt.where(
             User.subscription_end > current_time,
         )
+    elif audience == "expired":
+        count_stmt = count_stmt.where(
+            User.subscription_end.is_not(None),
+            User.subscription_end <= current_time,
+        )
+    elif audience == "never":
+        count_stmt = count_stmt.where(
+            User.subscription_end.is_(None),
+        )
+    elif audience.startswith("test_"):
+        try:
+            admin_tg_id = int(audience.split("_", 1)[1])
+            count_stmt = count_stmt.where(User.telegram_id == admin_tg_id)
+        except (IndexError, ValueError):
+            pass
+
     result = await session.execute(count_stmt)
     total_count = result.scalar_one()
 
@@ -628,6 +658,14 @@ async def _start_broadcast_process(
         await state.clear()
         return
 
+    label_map = {
+        "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
+        "active": texts.BROADCAST_ACTIVE_LABEL,
+        "expired": "🔴 Истекшие подписки",
+        "never": "🆕 Без подписок",
+    }
+    label = label_map.get(audience, "🧪 Тест мне (Админу)" if audience.startswith("test_") else audience)
+
     async with session_scope() as sess:
         progress = BroadcastProgress(
             admin_id=admin_id,
@@ -636,11 +674,7 @@ async def _start_broadcast_process(
             broadcast_text=broadcast_text,
             media_id=media_id,
             content_type=content_type,
-            label=(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1
-                if audience == "all"
-                else texts.BROADCAST_ACTIVE_LABEL
-            ),
+            label=label,
             status="in_progress",
         )
         sess.add(progress)
@@ -706,6 +740,62 @@ async def broadcast_to_active(
         )
         return
     await _start_broadcast_process(callback, state, session, "active")
+
+
+@router.callback_query(
+    StateFilter(AdminStates.confirming_broadcast),
+    F.data == "broadcast_send_expired",
+)
+async def broadcast_to_expired(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+    await _start_broadcast_process(callback, state, session, "expired")
+
+
+@router.callback_query(
+    StateFilter(AdminStates.confirming_broadcast),
+    F.data == "broadcast_send_never",
+)
+async def broadcast_to_never(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+    await _start_broadcast_process(callback, state, session, "never")
+
+
+@router.callback_query(
+    StateFilter(AdminStates.confirming_broadcast),
+    F.data == "broadcast_send_test",
+)
+async def broadcast_to_test(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+    audience = f"test_{callback.from_user.id}"
+    await _start_broadcast_process(callback, state, session, audience)
+
 
 
 @router.callback_query(F.data == "broadcast_stop")
