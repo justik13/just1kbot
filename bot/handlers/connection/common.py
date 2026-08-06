@@ -25,7 +25,7 @@ from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z0-9\s_-]+$")
+DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_-]+$")
 
 _PROTOCOL_DISPLAY = {
     "amneziawg2": "AWG 2.0",

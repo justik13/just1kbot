@@ -73,7 +73,7 @@ class CapacityBoundaryTests(unittest.TestCase):
 class DeviceCreateLockRegressionTests(unittest.TestCase):
     def test_creating_devices_lock_uses_telegram_id(self):
         source = (ROOT / "bot/handlers/connection/device_create_routes.py").read_text()
-        self.assertIn("telegram_user_id = message.from_user.id", source)
+        self.assertIn("telegram_user_id = callback.from_user.id", source)
         self.assertIn("db_user_id = user.id", source)
         self.assertIn("_creating_devices[telegram_user_id] = True", source)
         self.assertIn("_creating_devices.pop(telegram_user_id, None)", source)
@@ -82,3 +82,9 @@ class DeviceCreateLockRegressionTests(unittest.TestCase):
         source = (ROOT / "bot/handlers/connection/device_create_routes.py").read_text()
         finally_block = source[source.rindex("    finally:") :]
         self.assertIn("_creating_devices.pop(telegram_user_id, None)", finally_block)
+
+    def test_device_name_regex_supports_russian(self):
+        from bot.handlers.connection.common import DEVICE_NAME_REGEX
+        self.assertTrue(DEVICE_NAME_REGEX.match("Телефон"))
+        self.assertTrue(DEVICE_NAME_REGEX.match("Мой ПК"))
+        self.assertTrue(DEVICE_NAME_REGEX.match("iPhone 15"))
