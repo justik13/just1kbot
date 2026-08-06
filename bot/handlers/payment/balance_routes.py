@@ -197,13 +197,26 @@ async def _create_and_render_topup(
     *,
     context: dict | None = None,
 ) -> None:
-    bot_info = await target.bot.get_me()
+    if target is None:
+        return
+    bot = getattr(target, "bot", None)
+    chat = getattr(target, "chat", None)
+    chat_id = chat.id if chat else None
+    if (bot is None or chat_id is None) and isinstance(target, CallbackQuery):
+        bot = target.bot
+        chat_id = target.message.chat.id if target.message else None
+
+    if bot is None or chat_id is None:
+        return
+
+    bot_info = await bot.get_me()
+    bot_username = bot_info.username if bot_info else ""
     try:
         result = await create_balance_topup(
             session,
             user_id=user.id,
             amount=amount,
-            bot_username=bot_info.username,
+            bot_username=bot_username,
             context=context,
         )
     except AccountTopupError as exc:
@@ -214,8 +227,8 @@ async def _create_and_render_topup(
             else get_back_button("menu_balance")
         )
         await render_hub(
-            target.bot,
-            target.chat.id,
+            bot,
+            chat_id,
             _topup_errors().get(exc.code, texts.ERROR_PAYMENT_SERVICE),
             keyboard,
         )
@@ -226,7 +239,7 @@ async def _create_and_render_topup(
             **context,
         }
     await _render_topup(
-        target.bot, target.chat.id, session, user, result.payment
+        bot, chat_id, session, user, result.payment
     )
 
 
@@ -338,7 +351,7 @@ async def create_preset_topup(
     amount = parse_callback_id(callback.data, 1)
     if db_user is None or amount is None:
         return
-    await _create_and_render_topup(callback.message, session, db_user, amount)
+    await _create_and_render_topup(callback, session, db_user, amount)
 
 
 @router.callback_query(F.data == "balance_custom_amount")
