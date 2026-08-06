@@ -205,7 +205,26 @@ async def select_tariff(
                 "subscription_balance_untracked": (
                     texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
                 ),
+                "subscription_inactive": (
+                    "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
+                    "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+                ),
+                "current_tariff_unknown": (
+                    "⚠️ Смена тарифа возможна только при действующей подписке.\n\n"
+                    "Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+                ),
+                "active_checkout_exists": (
+                    "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
+                ),
+                "active_change_quote_exists": (
+                    "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его."
+                ),
             }
+            back_button_target = (
+                "payment_showcase"
+                if quote_result.failure_code in {"subscription_inactive", "current_tariff_unknown"}
+                else "payment_change_tariff"
+            )
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -215,7 +234,7 @@ async def select_tariff(
                 ),
                 get_same_tariff_keyboard()
                 if quote_result.failure_code == "same_tariff_requires_renew"
-                else get_back_button("payment_change_tariff"),
+                else get_back_button(back_button_target),
             )
             await callback.answer(show_alert=False)
             return
@@ -404,9 +423,17 @@ async def show_change_tariff(
         )
         return
 
-    current_limit = await _get_effective_device_limit(session, db_user)
-    tariff_name = get_tariff_display_name(current_limit)
     is_active = await _is_subscription_active(db_user)
+    if not is_active:
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            "⚠️ <b>Смена тарифа недоступна</b>\n\n"
+            "Смена тарифа с перерасчётом доступна только при наличии действующей подписки.\n"
+            "У вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже.",
+            get_back_button("menu_subscription"),
+        )
+        return
 
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
