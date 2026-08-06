@@ -494,7 +494,27 @@ def project_subscription_balance(
     if active and (
         coverage is None or abs(_micros(coverage - subscription_end)) > 1_000_000
     ):
-        return fail("subscription_end_projection_mismatch", coverage)
+        if coverage is None or coverage < subscription_end:
+            untracked_start = max(coverage, as_of) if coverage else as_of
+            untracked_whole = _whole(untracked_start, subscription_end, as_of, coverage)
+            if untracked_whole > 0:
+                bonus_hours += untracked_whole
+                bonus.append(
+                    ProjectedBonusLot(
+                        0,
+                        "legacy",
+                        "admin",
+                        "manual_grant",
+                        untracked_whole,
+                        untracked_whole,
+                        untracked_start,
+                        subscription_end,
+                    )
+                )
+                coverage = subscription_end
+
+        if coverage is None or abs(_micros(coverage - subscription_end)) > 1_000_000:
+            return fail("subscription_end_projection_mismatch", coverage)
     if not active and (paid_hours or bonus_hours):
         return fail("subscription_end_projection_mismatch", coverage)
     value = sum((item.remaining_paid_value_rub for item in paid), Decimal(0))

@@ -110,10 +110,6 @@ async def _render_profile(
             callback_data="menu_buy",
         )
         builder.button(
-            text=texts.UI_BOT_HANDLERS_PROFILE_L107_1,
-            callback_data="menu_balance",
-        )
-        builder.button(
             text=texts.UI_BOT_HANDLERS_PROFILE_L111_1,
             callback_data="referral",
         )
@@ -125,7 +121,7 @@ async def _render_profile(
             text=texts.UI_BOT_HANDLERS_PROFILE_L119_1,
             callback_data="back_to_main_menu",
         )
-        builder.adjust(1, 1, 1, 1, 1)
+        builder.adjust(1, 1, 1, 1)
         kb = builder.as_markup()
 
     await render_hub(
