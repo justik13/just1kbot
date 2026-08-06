@@ -1,0 +1,21 @@
+name: Installer checks
+
+on:
+  push:
+    branches: [main, bot]
+  pull_request:
+    branches: [main, bot]
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate installer and Python syntax
+        run: bash tests/test_installer.sh
