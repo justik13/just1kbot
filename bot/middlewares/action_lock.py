@@ -46,8 +46,8 @@ LOCKED_ACTION_PREFIXES = (
     "balance_cancel:",
     "balance_purchase_confirm:",
     "balance_change_confirm:",
-    "balance_shortage_exact:",
-    "balance_change_shortage_exact:",
+    "bal_short_exact:",
+    "bal_chg_short_exact:",
     # Админские платежи.
     "admin_payment_refund_apply:",
     # Админские действия с подпиской.

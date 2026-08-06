@@ -70,8 +70,8 @@ class AccountTariffChangeContractTests(unittest.TestCase):
         self.assertEqual(
             values[:2],
             [
-                f"balance_change_shortage_exact:{quote_id}",
-                f"balance_change_shortage_custom:{quote_id}",
+                f"bal_chg_short_exact:{quote_id}",
+                f"bal_chg_short_custom:{quote_id}",
             ],
         )
 

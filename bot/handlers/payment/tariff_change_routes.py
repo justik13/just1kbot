@@ -235,7 +235,7 @@ async def _shortage_context(session, user, quote_id):
     }
 
 
-@router.callback_query(F.data.startswith("balance_change_shortage_exact:"))
+@router.callback_query(F.data.startswith("bal_chg_short_exact:"))
 async def topup_exact_change_shortage(
     callback: CallbackQuery,
     session: AsyncSession,
@@ -273,7 +273,7 @@ async def topup_exact_change_shortage(
     )
 
 
-@router.callback_query(F.data.startswith("balance_change_shortage_custom:"))
+@router.callback_query(F.data.startswith("bal_chg_short_custom:"))
 async def topup_custom_change_shortage(
     callback: CallbackQuery,
     state: FSMContext,

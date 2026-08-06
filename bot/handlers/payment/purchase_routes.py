@@ -198,13 +198,15 @@ async def _shortage_context(session, user, quote_id):
     }
 
 
-@router.callback_query(F.data.startswith("balance_shortage_exact:"))
+@router.callback_query(F.data.startswith("bal_short_exact:"))
 async def topup_exact_shortage(
     callback: CallbackQuery,
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L209_1, show_alert=False)
+    await callback.answer(
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L205_1, show_alert=False
+    )
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
@@ -213,14 +215,16 @@ async def topup_exact_shortage(
             session, db_user, quote_id
         )
     except AccountPurchaseError:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L218_1, show_alert=True)
+        await callback.answer(
+            texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L214_1, show_alert=True
+        )
         return
     if intent.shortage <= 0:
-        await _render_purchase_review(callback, session, db_user, quote_id)
+        await _render_purchase_review(
+            callback, session, db_user, quote_id
+        )
         return
-    amount = max(
-        int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
-    )
+    amount = max(int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB)
     await _create_and_render_topup(
         callback.message,
         session,
@@ -230,7 +234,7 @@ async def topup_exact_shortage(
     )
 
 
-@router.callback_query(F.data.startswith("balance_shortage_custom:"))
+@router.callback_query(F.data.startswith("bal_short_custom:"))
 async def topup_custom_shortage(
     callback: CallbackQuery,
     state: FSMContext,

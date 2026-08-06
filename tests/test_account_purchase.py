@@ -44,8 +44,8 @@ class AccountPurchaseContractTests(unittest.TestCase):
                 )
             )[:2],
             [
-                f"balance_shortage_exact:{quote_id}",
-                f"balance_shortage_custom:{quote_id}",
+                f"bal_short_exact:{quote_id}",
+                f"bal_short_custom:{quote_id}",
             ],
         )
 

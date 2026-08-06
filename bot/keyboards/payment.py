@@ -278,11 +278,11 @@ def get_balance_shortage_keyboard(
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L269_1.format(value_0=exact_amount),
-        callback_data=f"balance_shortage_exact:{quote_public_id}",
+        callback_data=f"bal_short_exact:{quote_public_id}",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L273_1,
-        callback_data=f"balance_shortage_custom:{quote_public_id}",
+        callback_data=f"bal_short_custom:{quote_public_id}",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
@@ -295,11 +295,11 @@ def get_balance_change_shortage_keyboard(
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L286_1.format(value_0=exact_amount),
-        callback_data=f"balance_change_shortage_exact:{quote_public_id}",
+        callback_data=f"bal_chg_short_exact:{quote_public_id}",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L290_1,
-        callback_data=f"balance_change_shortage_custom:{quote_public_id}",
+        callback_data=f"bal_chg_short_custom:{quote_public_id}",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
