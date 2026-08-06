@@ -5,7 +5,7 @@ import time
 from datetime import timedelta
 
 from aiogram.exceptions import TelegramForbiddenError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from database.connection import session_scope
 from database.models import (
