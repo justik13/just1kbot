@@ -74,7 +74,9 @@ class AccountTariffChangeSettlement:
     created: bool
 
 
-def _timestamp(value) -> str:
+def _timestamp(value) -> str | None:
+    if value is None:
+        return None
     return (
         value.astimezone(timezone.utc)
         .isoformat(timespec="microseconds")

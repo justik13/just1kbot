@@ -1,12 +1,14 @@
 """Two-step confirmation and shortage recovery for balance purchases."""
-from bot import texts
-
+import logging
 import uuid
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from bot import texts
 
 from bot.keyboards import (
     get_back_button,
@@ -16,14 +18,14 @@ from bot.keyboards import (
 )
 from bot.states import BalanceStates
 from config.settings import get_settings
-from database.models import User
+from database.models import TariffQuote, User
 from services.account_purchase import (
     AccountPurchaseError,
     get_account_purchase_intent,
     prepare_account_purchase,
     settle_account_purchase,
 )
-from services.referral_bonus import grant_referral_bonus_for_purchase
+
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
@@ -33,6 +35,7 @@ from .balance_routes import _create_and_render_topup
 
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 PURCHASE_ERRORS = {
@@ -150,9 +153,28 @@ async def confirm_purchase(
             quote_public_id=quote_id,
         )
     except AccountPurchaseError as exc:
+        logger.warning(
+            "AccountPurchaseError in confirm_purchase: code=%s, user_id=%s, quote_public_id=%s",
+            exc.code,
+            db_user.id,
+            quote_id,
+        )
         if exc.code == "insufficient_balance":
             await _render_purchase_review(callback, session, db_user, quote_id)
             return
+
+        failed_quote = await session.scalar(
+            select(TariffQuote).where(
+                TariffQuote.public_id == quote_id,
+                TariffQuote.user_id == db_user.id,
+                TariffQuote.status == "active",
+            )
+        )
+        if failed_quote:
+            failed_quote.status = "cancelled"
+            failed_quote.diagnostic_reason = f"settlement_failed:{exc.code}"
+            await session.flush()
+
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -163,12 +185,7 @@ async def confirm_purchase(
         )
         return
 
-    await grant_referral_bonus_for_purchase(
-        session,
-        purchaser_user_id=db_user.id,
-        quote_id=result.quote.id,
-        purchase_amount=abs(result.debit.amount),
-    )
+    charged = abs(int(result.debit.amount)) if result.debit else 0
 
     intent = await get_account_purchase_intent(
         session, user_id=db_user.id, quote_public_id=quote_id
@@ -179,7 +196,7 @@ async def confirm_purchase(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(value_0=operation, value_1=get_tariff_display_name(intent.version.device_limit), value_2=intent.version.duration_hours // 24, value_3=abs(int(result.debit.amount)), value_4=int(result.balance_after.available)),
+        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(value_0=operation, value_1=get_tariff_display_name(intent.version.device_limit), value_2=intent.version.duration_hours // 24, value_3=charged, value_4=int(result.balance_after.available)),
         get_payment_success_keyboard(),
     )
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()
