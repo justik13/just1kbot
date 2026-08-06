@@ -34,7 +34,7 @@ services:
     container_name: just1kbot_redis
     restart: unless-stopped
     logging: *default-logging
-    # Mask password from command line
+    # Keep the Redis password out of the redis-server command line.
     command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
@@ -46,7 +46,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-just1kbot_redis_secret}", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping"]
       interval: 5s
       timeout: 5s
       retries: 5
