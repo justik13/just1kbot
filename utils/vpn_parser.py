@@ -93,44 +93,6 @@ def _parse_last_config(awg: dict) -> Optional[dict]:
     return last_config
 
 
-def customize_vpn_data(data: dict, server_name: Optional[str] = None) -> dict:
-    import copy
-    data = copy.deepcopy(data)
-    data["dns1"] = "8.8.8.8"
-    data["dns2"] = "8.8.4.4"
-    if server_name:
-        data["description"] = server_name
-
-    awg = _get_first_awg_container(data)
-    if awg:
-        last_config = _parse_last_config(awg)
-        if last_config:
-            last_config["mtu"] = "1280"
-            config_str = last_config.get("config")
-            if config_str and isinstance(config_str, str):
-                lines = []
-                for line in config_str.splitlines():
-                    stripped = line.strip()
-                    if stripped.startswith("DNS =") or stripped.startswith("DNS="):
-                        lines.append("DNS = 8.8.8.8, 8.8.4.4")
-                    elif stripped.startswith("MTU =") or stripped.startswith("MTU="):
-                        lines.append("MTU = 1280")
-                    else:
-                        lines.append(line)
-
-                has_mtu = any(l.strip().startswith("MTU") for l in lines)
-                if not has_mtu:
-                    new_lines = []
-                    for l in lines:
-                        new_lines.append(l)
-                        if l.strip() == "[Interface]":
-                            new_lines.append("MTU = 1280")
-                    lines = new_lines
-                last_config["config"] = "\n".join(lines)
-            awg["last_config"] = json.dumps(last_config, ensure_ascii=False)
-    return data
-
-
 def _build_conf_fallback(data: dict, last_config: dict) -> Optional[str]:
     client_priv_key = last_config.get("client_priv_key")
     server_pub_key = last_config.get("server_pub_key")
@@ -146,9 +108,9 @@ def _build_conf_fallback(data: dict, last_config: dict) -> Optional[str]:
     if "/" not in str(client_ip):
         client_ip = f"{client_ip}/32"
 
-    dns1 = "8.8.8.8"
-    dns2 = "8.8.4.4"
-    mtu = "1280"
+    dns1 = data.get("dns1") or "8.8.8.8"
+    dns2 = data.get("dns2") or "8.8.4.4"
+    mtu = last_config.get("mtu") or "1280"
     persistent_keep_alive = last_config.get("persistent_keep_alive") or 25
     psk_key = last_config.get("psk_key")
 
@@ -163,7 +125,9 @@ def _build_conf_fallback(data: dict, last_config: dict) -> Optional[str]:
         if last_config.get(key) is None:
             return None
 
-    lines = ["[Interface]", f"Address = {client_ip}", f"DNS = {dns1}, {dns2}", f"MTU = {mtu}"]
+    lines = ["[Interface]", f"Address = {client_ip}", f"DNS = {dns1}, {dns2}"]
+    if mtu:
+        lines.append(f"MTU = {mtu}")
     lines.append(f"PrivateKey = {client_priv_key}")
     lines.extend([
         f"Jc = {last_config.get('Jc')}",
@@ -197,15 +161,13 @@ def _build_conf_fallback(data: dict, last_config: dict) -> Optional[str]:
     return "\n".join(lines) + "\n"
 
 
-def build_vpn_file_from_dict(data: dict, server_name: Optional[str] = None) -> str:
-    customized = customize_vpn_data(data, server_name)
-    return json.dumps(customized, indent=2, ensure_ascii=False) + "\n"
+def build_vpn_file_from_dict(data: dict) -> str:
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def build_conf_file_from_dict(data: dict, server_name: Optional[str] = None) -> Optional[str]:
+def build_conf_file_from_dict(data: dict) -> Optional[str]:
     try:
-        customized = customize_vpn_data(data, server_name)
-        awg = _get_first_awg_container(customized)
+        awg = _get_first_awg_container(data)
         if not awg:
             return None
         last_config = _parse_last_config(awg)
@@ -214,7 +176,7 @@ def build_conf_file_from_dict(data: dict, server_name: Optional[str] = None) -> 
         config_str = last_config.get("config")
         if _looks_like_wireguard_conf(config_str):
             return config_str
-        fallback_conf = _build_conf_fallback(customized, last_config)
+        fallback_conf = _build_conf_fallback(data, last_config)
         if _looks_like_wireguard_conf(fallback_conf):
             return fallback_conf
         return None
@@ -223,18 +185,18 @@ def build_conf_file_from_dict(data: dict, server_name: Optional[str] = None) -> 
         return None
 
 
-def build_vpn_file(uri: str, server_name: Optional[str] = None) -> Optional[str]:
+def build_vpn_file(uri: str) -> Optional[str]:
     data = decode_vpn_uri_to_json(uri)
     if data is None:
         return None
-    return build_vpn_file_from_dict(data, server_name)
+    return build_vpn_file_from_dict(data)
 
 
-def build_conf_file(uri: str, server_name: Optional[str] = None) -> Optional[str]:
+def build_conf_file(uri: str) -> Optional[str]:
     data = decode_vpn_uri_to_json(uri)
     if data is None:
         return None
-    return build_conf_file_from_dict(data, server_name)
+    return build_conf_file_from_dict(data)
 
 
 def is_valid_vpn_uri(uri: str) -> bool:
@@ -257,3 +219,69 @@ def is_valid_vpn_uri(uri: str) -> bool:
     if _looks_like_wireguard_conf(fallback_conf):
         return True
     return False
+
+
+def customize_vpn_config_dict(
+    data: dict,
+    description: Optional[str] = None,
+    dns1: str = "8.8.8.8",
+    dns2: str = "8.8.4.4",
+    mtu: str = "1280",
+) -> dict:
+    if not isinstance(data, dict):
+        return data
+
+    import copy
+    customized = copy.deepcopy(data)
+
+    if description:
+        customized["description"] = description
+
+    customized["dns1"] = dns1
+    customized["dns2"] = dns2
+
+    containers = customized.get("containers", [])
+    if isinstance(containers, list):
+        for container in containers:
+            if not isinstance(container, dict):
+                continue
+            awg = container.get("awg")
+            if not awg or not isinstance(awg, dict):
+                continue
+
+            last_config_str = awg.get("last_config")
+            if last_config_str and isinstance(last_config_str, str):
+                try:
+                    last_config = json.loads(last_config_str)
+                    if isinstance(last_config, dict):
+                        last_config["mtu"] = mtu
+                        config_str = last_config.get("config")
+                        if config_str and isinstance(config_str, str):
+                            new_lines = []
+                            has_dns = False
+                            has_mtu = False
+                            for line in config_str.splitlines():
+                                stripped = line.strip()
+                                if stripped.startswith("DNS ="):
+                                    new_lines.append(f"DNS = {dns1}, {dns2}")
+                                    has_dns = True
+                                elif stripped.startswith("MTU ="):
+                                    new_lines.append(f"MTU = {mtu}")
+                                    has_mtu = True
+                                else:
+                                    new_lines.append(line)
+                                    if stripped.startswith("Address =") and not has_mtu:
+                                        new_lines.append(f"MTU = {mtu}")
+                                        has_mtu = True
+                            if not has_dns:
+                                if "[Interface]" in new_lines:
+                                    idx = new_lines.index("[Interface]")
+                                    new_lines.insert(idx + 1, f"DNS = {dns1}, {dns2}")
+                            last_config["config"] = "\n".join(new_lines) + "\n"
+
+                        awg["last_config"] = json.dumps(last_config, ensure_ascii=False)
+                except Exception as e:
+                    logger.warning(f"customize_vpn_config_dict patch failed: {e}")
+
+    return customized
+
