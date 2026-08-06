@@ -152,6 +152,7 @@ async def cmd_start(
         message.chat.id,
         text,
         kb,
+        force_new=True,
     )
 
 

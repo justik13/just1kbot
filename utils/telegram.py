@@ -225,6 +225,7 @@ async def render_hub(
     text: str,
     reply_markup: InlineKeyboardMarkup,
     parse_mode: str = "HTML",
+    force_new: bool = False,
 ) -> int:
     """Render a single navigable hub, editing the current text message first."""
     _maybe_cleanup_cache()
@@ -237,7 +238,7 @@ async def render_hub(
         # Most bot screens fit in one Telegram message. Editing the existing hub
         # avoids visible flicker, preserves scroll position, and removes stale
         # payment buttons immediately. Media/multipart screens fall back to send.
-        if len(text_parts) == 1 and old_ids:
+        if not force_new and len(text_parts) == 1 and old_ids:
             current_id = old_ids[-1]
             try:
                 await bot.edit_message_text(

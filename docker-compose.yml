@@ -65,6 +65,7 @@ services:
       YOOKASSA_WEBHOOK_PORT: "8080"
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
+      JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
     deploy:
       resources:
         limits:

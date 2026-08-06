@@ -37,6 +37,7 @@ from .common import (
     DEVICE_NAME_REGEX,
     _get_effective_device_limit,
     _render_maintenance,
+    _render_connections,
 )
 
 router = Router()
@@ -440,14 +441,8 @@ async def enter_device_name(
             await state.clear()
             return
 
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L418_1,
-            get_back_button("back_to_connections"),
-        )
-
         await state.clear()
+        await _render_connections(message, user, session)
 
     finally:
         _creating_devices.pop(telegram_user_id, None)
