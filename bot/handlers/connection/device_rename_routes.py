@@ -119,7 +119,6 @@ async def rename_device_process(
         or len(base_new_name) > 16
         or not DEVICE_NAME_REGEX.match(base_new_name)
     ):
-        await state.clear()
         await render_hub(
             message.bot,
             message.chat.id,

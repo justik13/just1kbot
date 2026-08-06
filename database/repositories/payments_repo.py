@@ -71,7 +71,6 @@ async def get_payment_by_id(
         select(Payment)
         .options(
             selectinload(Payment.user),
-            selectinload(Payment.tariff),
         )
         .where(Payment.id == payment_id)
     )
@@ -86,7 +85,6 @@ async def get_payment_by_id_for_update(
         select(Payment)
         .options(
             selectinload(Payment.user),
-            selectinload(Payment.tariff),
         )
         .where(Payment.id == payment_id)
         .with_for_update()
@@ -108,8 +106,8 @@ async def mark_payment_as_cancelled(
 ) -> bool:
     result = await session.execute(
         update(Payment)
-        .where(Payment.id == payment_id, Payment.status == "pending")
-        .values(status="cancelled")
+        .where(Payment.id == payment_id, Payment.provider_status == "pending")
+        .values(provider_status="canceled")
     )
     await session.flush()
     return result.rowcount > 0
@@ -142,9 +140,5 @@ async def get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    stmt = select(func.count(Payment.id)).where(
-        Payment.tariff_id == tariff_id,
-        Payment.status.in_(["pending", "requires_manual_review"]),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one() or 0
+    return 0
+
