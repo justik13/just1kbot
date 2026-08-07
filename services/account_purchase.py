@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +17,6 @@ from database.models import (
     TariffQuote,
     TariffVersion,
     User,
-    VPNProfile,
 )
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
@@ -41,6 +40,7 @@ from services.audit_service import AuditService
 from services.referral_bonus import grant_referral_bonus_for_purchase
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from database.repositories.profiles_repo import get_user_profiles_count
 
 
 class AccountPurchaseError(RuntimeError):
@@ -310,12 +310,7 @@ async def _settle_account_purchase(
             or current_tariff.device_limit != version.device_limit
         ):
             raise AccountPurchaseError("subscription_state_changed")
-    profiles = int(
-        await session.scalar(
-            select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user.id)
-        )
-        or 0
-    )
+    profiles = await get_user_profiles_count(session, user.id)
     if profiles > version.device_limit:
         raise AccountPurchaseError("too_many_devices")
 
