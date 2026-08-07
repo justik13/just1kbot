@@ -128,8 +128,8 @@ async def start_balance_deduct(
 
     try:
         await callback.message.edit_text(
-            f"📉 <b>Списание средств с баланса</b>\n\n"
-            f"Введите сумму списания в рублях (целое число от 1 до {MAX_BALANCE_ADJUSTMENT}):",
+            f"📉 <b>Списание бонусных средств</b>\n\n"
+            f"Введите сумму списания бонусных рублей (целое число от 1 до {MAX_BALANCE_ADJUSTMENT}):",
             reply_markup=get_back_button(f"admin_user_balance:{telegram_id}"),
             parse_mode="HTML",
         )
@@ -314,12 +314,12 @@ async def process_balance_deduct(
         return
 
     balance_info = await get_account_balance(session, user_id=user.id)
-    if balance_info.available < amount:
+    if balance_info.bonus_available < amount:
         await render_hub(
             message.bot,
             message.chat.id,
-            f"⚠️ <b>У пользователя недостаточно средств на балансе.</b>\n"
-            f"Доступно для списания: <b>{int(balance_info.available)} ₽</b>",
+            f"⚠️ <b>У пользователя недостаточно бонусных средств.</b>\n"
+            f"Доступно для списания бонусных средств: <b>{int(balance_info.bonus_available)} ₽</b>",
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
         )

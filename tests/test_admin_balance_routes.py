@@ -29,6 +29,7 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             available=Decimal("100"),
             reserved=Decimal("0"),
             debt=Decimal("0"),
+            bonus_available=Decimal("100"),
         )
 
         session = AsyncMock()
@@ -43,7 +44,7 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
 
             mock_render.assert_called_once()
             text_arg = mock_render.call_args[0][2]
-            self.assertIn("недостаточно средств", text_arg)
+            self.assertIn("недостаточно бонусных средств", text_arg)
             state.clear.assert_called_once()
 
     async def test_process_balance_deduct_handles_ledger_error(self):
@@ -65,6 +66,7 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
             available=Decimal("100"),
             reserved=Decimal("0"),
             debt=Decimal("0"),
+            bonus_available=Decimal("100"),
         )
 
         session = AsyncMock()
