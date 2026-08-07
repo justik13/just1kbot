@@ -270,10 +270,11 @@ check_prerequisites() {
 
 # --- Установка пакетов ---
 install_packages() {
-    log "Установка Nginx и Certbot..."
+    log "Установка Nginx, Certbot и утилит..."
     apt-get update -qq
-    apt-get install -y -qq nginx certbot python3-certbot-nginx dnsutils > /dev/null 2>&1
+    apt-get install -y -qq nginx certbot python3-certbot-nginx dnsutils curl > /dev/null 2>&1
     systemctl enable nginx > /dev/null 2>&1
+    systemctl start nginx > /dev/null 2>&1 || true
     log "Пакеты установлены"
 }
 
@@ -301,7 +302,7 @@ setup_nginx() {
         echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
     fi
 
-    local redirect_url="https://\$host:\$PUBLIC_PORT\$request_uri"
+    local redirect_url="https://\$host:${PUBLIC_PORT}\$request_uri"
     if [[ "$PUBLIC_PORT" == "443" ]]; then
         redirect_url="https://\$host\$request_uri"
     fi
@@ -331,7 +332,7 @@ EOF
     mkdir -p /var/www/certbot
 
     nginx -t 2>> "$LOG_FILE"
-    systemctl reload nginx
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx
 
     log "Nginx HTTP конфиг создан"
 }
@@ -371,7 +372,7 @@ setup_https_config() {
     local conf_name="just1kbot-amnezia-${DOMAIN}"
     local conf_path="/etc/nginx/sites-available/${conf_name}"
 
-    local redirect_url="https://\$host:\$PUBLIC_PORT\$request_uri"
+    local redirect_url="https://\$host:${PUBLIC_PORT}\$request_uri"
     if [[ "$PUBLIC_PORT" == "443" ]]; then
         redirect_url="https://\$host\$request_uri"
     fi
@@ -443,9 +444,9 @@ server {
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
 
-        # WebSocket support
+        # WebSocket support (conditional)
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection \$http_upgrade;
     }
 
     # Скрытие служебных эндпоинтов
@@ -467,7 +468,7 @@ server {
 EOF
 
     nginx -t 2>> "$LOG_FILE"
-    systemctl reload nginx
+    systemctl reload nginx 2>/dev/null || systemctl restart nginx
 
     log "HTTPS конфиг применён"
 }
@@ -509,8 +510,8 @@ main() {
     info "=== Настройка Amnezia API: Nginx + SSL ==="
     echo ""
 
-    check_prerequisites
     install_packages
+    check_prerequisites
     setup_nginx
     setup_ssl
     setup_https_config
