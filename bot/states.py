@@ -31,4 +31,5 @@ class AdminStates(StatesGroup):
     admin_grant_custom_days = State()
     entering_user_balance_topup = State()
     entering_user_balance_deduct = State()
+    sending_user_message = State()
 

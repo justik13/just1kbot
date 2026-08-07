@@ -313,6 +313,7 @@ async def show_user_audit(
         "PAYMENT_SUCCESS": "✅ Оплата (YooKassa)",
         "PAYMENT_FAILED": "❌ Ошибка оплаты",
         "REFUND": "↩️ Возврат средств",
+        "ADMIN_DIRECT_MESSAGE_SENT": "✉️ Сообщение от админа",
     }
 
     lines = [

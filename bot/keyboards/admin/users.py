@@ -32,6 +32,11 @@ def get_admin_user_card_keyboard(
         callback_data=f"admin_user_audit:{user_id}",
     )
 
+    builder.button(
+        text="✉️ Написать пользователю",
+        callback_data=f"admin_send_msg:{user_id}",
+    )
+
     if is_banned:
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L26_1,
