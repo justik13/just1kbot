@@ -1,6 +1,6 @@
 import logging
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -13,17 +13,17 @@ from bot.keyboards import (
     get_balance_purchase_start_keyboard,
     get_change_tariff_keyboard,
     get_renew_keyboard,
-    get_tariff_duration_keyboard,
     get_same_tariff_keyboard,
+    get_tariff_duration_keyboard,
 )
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
     get_tariff_by_id,
 )
-from services.maintenance_service import MaintenanceService
 from services.account_purchase import AccountPurchaseError, prepare_account_purchase
 from services.account_tariff_change import get_account_tariff_change_intent
+from services.maintenance_service import MaintenanceService
 from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
@@ -456,11 +456,15 @@ async def show_change_tariff(
         valid_until=format_datetime(db_user.subscription_end),
     )
 
+    current_tariff = await get_tariff_by_id(session, db_user.current_tariff_id) if getattr(db_user, "current_tariff_id", None) else None
+    current_duration_days = getattr(current_tariff, "duration_days", 30) if current_tariff else 30
+
     keyboard = get_change_tariff_keyboard(
         tariffs,
         current_limit,
         is_subscription_active=is_active,
         current_tariff_id=db_user.current_tariff_id,
+        current_duration_days=current_duration_days,
     )
 
     await render_hub(
