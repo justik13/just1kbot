@@ -57,7 +57,7 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
     await _preload_alerted_stale_payments()
     while not shutdown_event.is_set():
         try:
-            await _recover_stale_topups()
+            await _recover_stale_topups(bot)
             await _alert_new_stale_payments(bot, settings)
         except asyncio.CancelledError:
             break
@@ -79,7 +79,7 @@ async def stale_payments_checker_loop(bot: Bot, shutdown_event: asyncio.Event):
             continue
 
 
-async def _recover_stale_topups():
+async def _recover_stale_topups(bot: Bot | None = None):
     async with session_scope() as session:
         payments = (
             await session.scalars(
@@ -109,6 +109,7 @@ async def _recover_stale_topups():
                     session,
                     payment_id=payment.id,
                     source="stale_topup_recovery",
+                    bot=bot,
                 )
 
 
