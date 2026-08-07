@@ -186,11 +186,23 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         update = self._create_message_update("Hello from Admin!")
         await self.dp.feed_update(bot=self.bot, update=update)
 
-        send_req = next(
-            req
-            for req in reversed(self.session.requests)
-            if req.__class__.__name__ == "SendMessage" and req.chat_id == 987654321
-        )
+        import asyncio
+        import time
+        deadline = time.time() + 2.0
+        send_req = None
+        while time.time() < deadline:
+            try:
+                send_req = next(
+                    req
+                    for req in reversed(self.session.requests)
+                    if req.__class__.__name__ == "SendMessage" and req.chat_id == 987654321
+                )
+                break
+            except StopIteration:
+                await asyncio.sleep(0.05)
+                
+        if send_req is None:
+            self.fail("No outgoing Telegram request produced by admin flow — check bot send path and test mocks")
         self.assertIn("Hello from Admin!", send_req.text)
 
 
