@@ -135,6 +135,7 @@ async def _safe_run_post_commit(
 
 
 def _handle_task_result(task: asyncio.Task) -> None:
+    _post_commit_background_tasks.discard(task)
     try:
         task.result()
     except asyncio.CancelledError:
@@ -152,7 +153,7 @@ async def _run_post_commit_tasks(session: AsyncSession) -> None:
     for task in tasks:
         background_task = asyncio.create_task(_safe_run_post_commit(task))
         _post_commit_background_tasks.add(background_task)
-        background_task.add_done_callback(lambda t: (_post_commit_background_tasks.discard(t), _handle_task_result(t)))
+        background_task.add_done_callback(_handle_task_result)
 
 
 def queue_post_commit_task(
