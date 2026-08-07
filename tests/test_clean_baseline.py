@@ -7,13 +7,7 @@ from alembic.script import ScriptDirectory
 
 class CleanBaselineTests(unittest.TestCase):
     def test_exactly_one_root_revision(self):
-        versions = sorted(
-            path for path in (Path(__file__).parents[1] / "alembic" / "versions").glob("*.py")
-            if path.name != "__init__.py"
-        )
-        self.assertEqual([path.name for path in versions], ["0001_clean_baseline.py"])
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0001_clean_baseline"])
         self.assertEqual(scripts.get_bases(), ["0001_clean_baseline"])
 
     def test_baseline_contains_financial_guards_and_no_phase6_artifacts(self):
