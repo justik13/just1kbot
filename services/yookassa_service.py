@@ -84,7 +84,10 @@ class YooKassaService:
         settings = get_settings()
         shop = settings.YOOKASSA_SHOP_ID
         secret = settings.YOOKASSA_SECRET_KEY
-        headers = {"Accept": "application/json"}
+        headers = {
+            "Accept": "application/json",
+            "Authorization": aiohttp.encode_basic_auth(shop, secret),
+        }
         if idempotency_key:
             if len(idempotency_key) > 64:
                 return YooKassaResult(
@@ -93,9 +96,8 @@ class YooKassaService:
             headers["Idempotence-Key"] = idempotency_key
         try:
             client = await _get_client_session()
-            auth = aiohttp.BasicAuth(shop, secret)
             async with client.request(
-                method, cls.API + path, json=payload, headers=headers, auth=auth
+                method, cls.API + path, json=payload, headers=headers
             ) as response:
                 code = response.status
                 try:

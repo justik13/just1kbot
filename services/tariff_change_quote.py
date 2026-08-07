@@ -204,7 +204,12 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
             and source_version_tariff_id == user.current_tariff_id
         )
         if existing_change.target_tariff_version_id == target_version.id and same_history:
-            return TariffChangeQuoteResult(existing_change, False, None)
+            return TariffChangeQuoteResult(
+                quote=existing_change,
+                created=False,
+                failure_code=None,
+                snapshot_failure_code=None,
+            )
 
         existing_change.status = "cancelled"
         existing_change.diagnostic_reason = (

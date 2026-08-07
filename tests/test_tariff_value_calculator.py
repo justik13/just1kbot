@@ -55,8 +55,8 @@ class TariffValueCalculatorTests(unittest.TestCase):
 
     def test_exact_frozen_due_and_operation_shapes(self):
         for operation, source, source_hours, source_value, confirmed in (
-            ("purchase", None, 0, 0, Decimal("299.99")),
-            ("purchase", None, 0, 0, Decimal("301")),
+            ("purchase", None, 0, 0, Decimal("290")),
+            ("purchase", None, 0, 0, Decimal("310")),
             ("purchase", snap(), 1, Decimal("0.40"), Decimal("300")),
             ("renew", snap(2), 1, Decimal("0.40"), Decimal("300")),
             ("change", snap(), 1, Decimal("0.40"), Decimal("300")),

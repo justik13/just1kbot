@@ -278,7 +278,7 @@ async def claim_api_operations(
 
     claimed: list[ClaimedAPIOperation] = []
     async with _transaction(session_factory) as session:
-        now = now_utc() + timedelta(seconds=1)
+        now = now_utc()
         exhausted = (await session.execute(select(APIOperation).where(
             APIOperation.status.in_(("pending", "retry")),
             APIOperation.attempts >= APIOperation.max_attempts,

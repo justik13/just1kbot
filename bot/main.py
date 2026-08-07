@@ -383,7 +383,7 @@ async def main():
         await start_background_workers(bot)
 
         logger.info("Запуск polling...")
-        polling_task = asyncio.create_task(dp.start_polling(bot))
+        polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
         shutdown_task = asyncio.create_task(shutdown_event.wait())
 
         done, pending = await asyncio.wait(
@@ -431,6 +431,8 @@ async def main():
             await stop_clean_chat_worker()
         except Exception as e:
             logger.error("Error stopping CleanChat worker: %s", e)
+
+        await asyncio.sleep(0.5)  # Allow background worker loops to completely exit before closing DB pool
 
         logger.info("Cleaning up resources...")
 

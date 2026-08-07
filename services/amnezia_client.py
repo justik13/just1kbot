@@ -136,6 +136,7 @@ _circuit_breakers: dict[str, CircuitBreaker] = {}
 
 
 def _get_circuit_breaker(api_url: str) -> CircuitBreaker:
+    api_url = (api_url or "").rstrip("/")  # Normalize trailing slash for consistent keys
     if api_url not in _circuit_breakers:
         _circuit_breakers[api_url] = CircuitBreaker(
             failure_threshold=5,
@@ -194,6 +195,7 @@ _rate_limiters: dict[str, TokenBucketRateLimiter] = {}
 
 
 def _get_rate_limiter(api_url: str) -> TokenBucketRateLimiter:
+    api_url = (api_url or "").rstrip("/")  # Normalize trailing slash for consistent keys
     if api_url not in _rate_limiters:
         _rate_limiters[api_url] = TokenBucketRateLimiter(
             rate=3.0,
@@ -273,6 +275,7 @@ async def close_http_session():
     global _http_session
     if _http_session:
         await _http_session.close()
+        await asyncio.sleep(0.250)  # Allow underlying SSL connectors to close gracefully
         _http_session = None
 
 

@@ -60,6 +60,7 @@ services:
     env_file:
       - .env
     environment:
+      PYTHONUNBUFFERED: "1"
       DOCKER_DEPLOYMENT: "true"
       YOOKASSA_WEBHOOK_PORT: "8080"
       # Bind to all interfaces so Caddy can reach bot:8080 over the Docker
