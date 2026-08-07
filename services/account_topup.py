@@ -394,26 +394,30 @@ async def settle_succeeded_topup(
             try:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 builder = InlineKeyboardBuilder()
-                builder.button(text="📱 Мои подключения", callback_data="menu_connections")
-                builder.button(text="👤 Профиль", callback_data="menu_profile")
-                builder.adjust(1)
 
                 if auto_fulfilled_action == "tariff_change":
                     text = (
                         "🎉 <b>Оплата получена и тариф успешно обновлен!</b>\n\n"
                         "Ваш новый тариф активирован. Настройки подписки и подключений обновлены."
                     )
+                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
+                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
                 elif auto_fulfilled_action == "purchase":
                     text = (
                         "🎉 <b>Оплата получена и подписка успешно оформлена!</b>\n\n"
                         "Ваши VPN-ключи и настройки подключений доступны в меню «Мои подключения»."
                     )
+                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
+                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
                 else:
                     text = (
-                        f"✅ <b>Баланс успешно пополнен!</b>\n\n"
-                        f"Сумма зачисления: <b>{int(payment.amount)} руб.</b>"
+                        f"✅ <b>Баланс пополнен на +{int(payment.amount)} ₽!</b>\n\n"
+                        f"💰 Реальный баланс: <b>{int(balance.real_position)} ₽</b>"
                     )
+                    builder.button(text="💰 Мой баланс", callback_data="menu_balance")
+                    builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
 
+                builder.adjust(1)
                 from utils.telegram import render_hub
                 await render_hub(
                     bot,
