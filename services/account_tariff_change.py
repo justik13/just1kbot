@@ -246,9 +246,8 @@ async def _settle_account_tariff_change(
     if last_change_at is not None:
         if last_change_at.tzinfo is None:
             last_change_at = last_change_at.replace(tzinfo=timezone.utc)
-        source_rate = Decimal(source.price_rub) / Decimal(source.duration_hours)
-        target_rate = Decimal(target.price_rub) / Decimal(target.duration_hours)
-        if target_rate < source_rate and (now - last_change_at) < timedelta(hours=24):
+        is_downgrade = target.device_limit < source.device_limit
+        if is_downgrade and (now - last_change_at) < timedelta(hours=24):
             raise AccountTariffChangeError("change_cooldown_active")
 
     snapshot = await get_subscription_balance_snapshot(
