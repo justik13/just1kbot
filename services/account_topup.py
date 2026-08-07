@@ -414,15 +414,16 @@ async def settle_succeeded_topup(
                         f"Сумма зачисления: <b>{int(payment.amount)} руб.</b>"
                     )
 
-                await bot.send_message(
+                from utils.telegram import render_hub
+                await render_hub(
+                    bot,
                     user.telegram_id,
                     text,
-                    reply_markup=builder.as_markup(),
-                    parse_mode="HTML",
+                    builder.as_markup(),
                 )
             except Exception as exc:
                 import logging
-                logging.getLogger(__name__).warning("Failed to send push notification to user %s: %s", user.telegram_id, exc)
+                logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", user.telegram_id, exc)
 
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None
