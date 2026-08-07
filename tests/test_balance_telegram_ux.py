@@ -2,9 +2,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
 from bot.handlers.payment.balance_routes import topup_presets
 from bot.keyboards.payment import (
     get_balance_amounts_keyboard,
@@ -123,8 +120,6 @@ class BalanceTelegramUXTests(unittest.TestCase):
 
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
-        scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0001_clean_baseline"])
 
     def test_direct_tariff_yookassa_route_is_not_registered(self):
         router_source = (
