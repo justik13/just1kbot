@@ -19,7 +19,7 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
         return base64.b64decode(b64, validate=True)
     except Exception as e:
         logger.warning(f"_decode_base64url failed: {e}")
-        raise VPNConfigParseError(f"Base64 decode failed: {e}")
+        raise VPNConfigParseError(f"Base64 decode failed: {e}") from e
 
 
 def _decompress_amnezia_format(data: bytes) -> Optional[str]:
@@ -39,7 +39,7 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
         return decompressed.decode("utf-8")
     except Exception as e:
         logger.warning(f"_decompress_amnezia_format zlib failed: {e}")
-        raise VPNConfigParseError(f"Decompress failed: {e}")
+        raise VPNConfigParseError(f"Decompress failed: {e}") from e
 
 
 def decode_vpn_uri_to_json(uri: str) -> Optional[dict]:
@@ -57,7 +57,7 @@ def decode_vpn_uri_to_json(uri: str) -> Optional[dict]:
     try:
         data = json.loads(json_str)
     except json.JSONDecodeError as e:
-        raise VPNConfigParseError(f"JSON decode failed: {e}")
+        raise VPNConfigParseError(f"JSON decode failed: {e}") from e
     if not isinstance(data, dict):
         raise VPNConfigParseError("Payload is not a JSON object")
     return data
@@ -186,7 +186,7 @@ def build_conf_file_from_dict(data: dict) -> Optional[str]:
         raise
     except Exception as e:
         logger.error(f"build_conf_file_from_dict: unexpected error: {e}", exc_info=True)
-        raise VPNConfigParseError(f"Unexpected error: {e}")
+        raise VPNConfigParseError(f"Unexpected error: {e}") from e
 
 
 def build_vpn_file(uri: str) -> Optional[str]:

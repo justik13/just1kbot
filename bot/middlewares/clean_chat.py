@@ -51,17 +51,16 @@ def _ensure_worker_started():
 
 
 async def stop_clean_chat_worker():
-    global _delete_worker_task
+    global _delete_worker_task, _delete_queue
     if _delete_worker_task and not _delete_worker_task.done():
         _delete_worker_task.cancel()
         try:
             await _delete_worker_task
         except asyncio.CancelledError:
             pass
-        _delete_worker_task = None
-        logger.info("CleanChat worker stopped")
-    else:
-        _delete_worker_task = None
+    _delete_worker_task = None
+    _delete_queue = None
+    logger.info("CleanChat worker stopped")
 
 
 class CleanChatMiddleware(BaseMiddleware):

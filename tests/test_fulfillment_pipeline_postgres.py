@@ -2,7 +2,7 @@ import os
 import unittest
 from datetime import timedelta
 from datetime import datetime, timezone
-from sqlalchemy import delete
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.api_operations_queue import ensure_delete_operation
@@ -17,10 +17,15 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
             u = User(
                 telegram_id=91001,
                 device_limit=20,
@@ -34,10 +39,15 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
         await self.engine.dispose()
 
     async def test_ban_during_create_cancels_pending_without_peer(self):

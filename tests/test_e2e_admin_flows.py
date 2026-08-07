@@ -14,6 +14,7 @@ from tests.test_e2e_user_flows import MockedSession
 
 DB = os.getenv("TEST_DATABASE_URL")
 
+
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -30,10 +31,10 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             # Create the admin user
-            self.admin_user_db = DBUser(telegram_id=999999999)
+            self.admin_user_db = DBUser(telegram_id=123456789)
             # Create a regular user
-            self.target_user_db = DBUser(telegram_id=123456789)
-            
+            self.target_user_db = DBUser(telegram_id=987654321)
+
             self.tariff = Tariff(
                 name="E2E Basic",
                 duration_days=30,
@@ -54,88 +55,121 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(version)
             await session.commit()
-            
-        self.patcher = patch("bot.main.get_settings")
-        self.mock_settings = self.patcher.start()
-        
-        class MockConfig:
-            BOT_TOKEN = "123:test"
-            REDIS_URL = "redis://redis:6379/1"
-            ADMIN_IDS = (999999999,)  # the admin user
-            SUPPORT_USERNAME = "test_support"
-            DOMAIN = "test.domain"
-            DB_ENCRYPTION_KEY = "test_key"
-            
-        self.mock_settings.return_value = MockConfig()
-        
+
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789, 999999999]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "DATABASE_URL": "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test",
+            },
+        )
+        self.env_patcher.start()
+
+        from config.settings import get_settings
+
+        get_settings.cache_clear()
+
         self.session = MockedSession()
         self.bot = Bot(token="123:test", session=self.session)
-        
-        _, self.dp = await setup_bot()
+
+        from aiogram.fsm.storage.memory import MemoryStorage
+
+        _, self.dp = await setup_bot(self.bot, storage=MemoryStorage())
 
         self.admin = User(
-            id=999999999,
+            id=123456789,
             is_bot=False,
             first_name="Admin User",
             username="adminuser",
         )
-        self.chat = Chat(id=999999999, type="private")
+        self.chat = Chat(id=123456789, type="private")
 
     async def asyncTearDown(self):
+        from bot.middlewares.clean_chat import stop_clean_chat_worker
+        from config.settings import get_settings
+        from database.connection import close_db
+
+        await close_db()
+        await stop_clean_chat_worker()
+        self.env_patcher.stop()
+        get_settings.cache_clear()
         await self.dp.storage.close()
         await self.bot.session.close()
         await self.engine.dispose()
-        self.patcher.stop()
 
     def _create_message_update(self, text: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         message = Message(
-            message_id=100,
-            date=0,
+            message_id=100 + self._update_counter,
+            date=int(time.time()),
             chat=self.chat,
             from_user=self.admin,
             text=text,
         )
-        return Update(update_id=1, message=message)
+        return Update(update_id=self._update_counter, message=message)
 
     def _create_callback_update(self, data: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         callback = CallbackQuery(
-            id="query1",
+            id=f"query_{self._update_counter}",
             from_user=self.admin,
             chat_instance="chat1",
             message=Message(
-                message_id=101,
-                date=0,
+                message_id=100 + self._update_counter,
+                date=int(time.time()),
                 chat=self.chat,
                 from_user=self.admin,
                 text="previous menu",
-            ),
+            ).as_(self.bot),
             data=data,
-        )
-        return Update(update_id=2, callback_query=callback)
+        ).as_(self.bot)
+        return Update(update_id=self._update_counter, callback_query=callback)
 
     async def test_admin_flow_open_menu(self):
-        update = self._create_message_update("/admin")
+        update = self._create_callback_update("admin_menu")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "SendMessage")
-        self.assertIn("Панель администратора", req.text)
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("Админ-панель", req.text)
 
     async def test_admin_flow_user_management(self):
         update = self._create_callback_update("admin_users")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "EditMessageText")
-        self.assertIn("Введите ID пользователя", req.text)
-        
-        # Admin sends user ID
-        update = self._create_message_update("123456789")
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("Пользователи", req.text)
+
+        # Admin clicks on user card
+        import asyncio
+        await asyncio.sleep(0.35)
+        update = self._create_callback_update("admin_user_card:987654321")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "SendMessage")
-        self.assertIn("Профиль пользователя", req.text)
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("987654321", req.text)
+
 
 if __name__ == "__main__":
     unittest.main()

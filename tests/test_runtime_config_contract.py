@@ -97,6 +97,17 @@ class RuntimeConfigContractTests(unittest.TestCase):
             source,
         )
 
+    def test_quoted_env_values_are_sanitized(self):
+        data = dict(BASE)
+        data["ADMIN_IDS"] = "'[123456789]'"
+        data["YOOKASSA_RETURN_URL"] = "'https://t.me/{bot_username}'"
+        data["REDIS_PASSWORD"] = "'Redis_!@#%_pass'"
+        settings = self.build(data)
+        self.assertEqual(settings.ADMIN_IDS, [123456789])
+        self.assertEqual(settings.YOOKASSA_RETURN_URL, "https://t.me/{bot_username}")
+        self.assertEqual(settings.REDIS_PASSWORD, "Redis_!@#%_pass")
+
+
 
 if __name__ == "__main__":
     unittest.main()

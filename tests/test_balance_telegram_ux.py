@@ -64,7 +64,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
         )
 
     def test_balance_history_keyboard_pagination(self):
-        from bot.keyboards import get_balance_history_keyboard, get_referrals_list_keyboard
+        from bot.keyboards import get_balance_history_keyboard
         # Single page -> only back button
         self.assertEqual(callbacks(get_balance_history_keyboard(1, 1)), ["menu_balance"])
         # Multiple pages -> back, indicator, forward, back to menu

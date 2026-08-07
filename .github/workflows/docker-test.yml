@@ -29,21 +29,24 @@ jobs:
 
           cat > .env <<EOF
           BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-          ADMIN_IDS='[123456,654321]'
+          ADMIN_IDS=[123456,654321]
           SUPPORT_USERNAME=ci_support_bot
           DB_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           POSTGRES_USER=just1kbot
-          POSTGRES_PASSWORD='$DB_PASS'
+          POSTGRES_PASSWORD=$DB_PASS
           POSTGRES_DB=just1kbot_bot
-          REDIS_PASSWORD='$REDIS_PASS'
+          REDIS_PASSWORD=$REDIS_PASS
           YOOKASSA_SHOP_ID=123456
           YOOKASSA_SECRET_KEY=ci_test_secret
-          YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+          YOOKASSA_RETURN_URL=https://t.me/{bot_username}
           YOOKASSA_WEBHOOK_PORT=8080
           DOMAIN=vpn.example.test
           SSL_EMAIL=ci@example.test
           BACKUP_AGE_RECIPIENT=$PUBKEY
           EOF
+
+          echo "DB_PASS=$DB_PASS" >> "$GITHUB_ENV"
+          echo "REDIS_PASS=$REDIS_PASS" >> "$GITHUB_ENV"
 
       - name: Validate Compose Configuration
         shell: bash
@@ -122,7 +125,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose exec -T db psql \
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql \
             -U just1kbot \
             -d just1kbot_bot \
             -v ON_ERROR_STOP=1 \
@@ -152,20 +155,20 @@ jobs:
           test -s backup-restored.sql
 
           echo "Creating temporary restore database..."
-          docker compose exec -T db dropdb -U just1kbot --if-exists just1kbot_restore
-          docker compose exec -T db createdb -U just1kbot just1kbot_restore
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db dropdb -U just1kbot --if-exists just1kbot_restore
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db createdb -U just1kbot just1kbot_restore
 
           docker cp backup-restored.sql just1kbot_db:/tmp/restore.sql
-          docker compose exec -T db psql \
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql \
             -U just1kbot \
             -d just1kbot_restore \
             -v ON_ERROR_STOP=1 \
             -f /tmp/restore.sql
 
-          RESTORE_MARKER="$(docker compose exec -T db psql -U just1kbot -d just1kbot_restore -Atc "SELECT marker FROM ci_backup_probe WHERE id = 1;")"
+          RESTORE_MARKER="$(docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql -U just1kbot -d just1kbot_restore -Atc "SELECT marker FROM ci_backup_probe WHERE id = 1;")"
           test "$RESTORE_MARKER" = "pr78-backup-restore"
 
-          docker compose exec -T db dropdb -U just1kbot --if-exists just1kbot_restore
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db dropdb -U just1kbot --if-exists just1kbot_restore
 
       - name: Test Alembic Idempotency Through Real Bot Restart
         shell: bash

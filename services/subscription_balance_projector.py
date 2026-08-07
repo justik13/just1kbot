@@ -170,6 +170,9 @@ def project_subscription_balance(
     def fail(code, end=None):
         return _failed(as_of, code, events, ledger, end)
 
+    if subscription_end is not None and not events and not ledger:
+        return fail("subscription_balance_untracked")
+
     grants = {
         "account_purchase_grant",
         "referral_user_bonus",

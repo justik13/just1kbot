@@ -5,7 +5,7 @@ try:
 except ImportError:
     pwd = None
 from functools import lru_cache
-from typing import List
+from typing import Any, List
 
 from pydantic import field_validator, model_validator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -97,25 +97,35 @@ class Settings(BaseSettings):
             raise ValueError(f"removed settings are not supported: {names}")
         return self
 
-    @field_validator("BOT_TOKEN")
+    @field_validator("BOT_TOKEN", mode="before")
     @classmethod
     def validate_bot_token(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         token = value.strip()
         if re.fullmatch(r"[0-9]+:[A-Za-z0-9_-]+", token) is None:
             raise ValueError("BOT_TOKEN has invalid format")
         return token
 
-    @field_validator("ADMIN_IDS")
+    @field_validator("ADMIN_IDS", mode="before")
     @classmethod
-    def validate_admin_ids(cls, value: List[int]) -> List[int]:
-        if not value or any(item <= 0 for item in value):
+    def validate_admin_ids(cls, value: Any) -> List[int]:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
+            import json
+            try:
+                value = json.loads(value)
+            except Exception:
+                pass
+        if not isinstance(value, list) or not value or any(not isinstance(item, int) or item <= 0 for item in value):
             raise ValueError("ADMIN_IDS must contain positive Telegram IDs")
         return value
 
-    @field_validator("YOOKASSA_RETURN_URL")
+    @field_validator("YOOKASSA_RETURN_URL", mode="before")
     @classmethod
     def validate_yookassa_return_url(cls, value: str) -> str:
-        value = value.strip()
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         if "{bot_username}" not in value:
             raise ValueError(
                 "YOOKASSA_RETURN_URL must contain '{bot_username}' placeholder"
@@ -129,9 +139,12 @@ class Settings(BaseSettings):
         "REDIS_PASSWORD",
         "YOOKASSA_SHOP_ID",
         "YOOKASSA_SECRET_KEY",
+        mode="before",
     )
     @classmethod
     def validate_required_value(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         normalized = value.strip()
         if not normalized or "change_me" in normalized.lower():
             raise ValueError(
@@ -139,9 +152,11 @@ class Settings(BaseSettings):
             )
         return normalized
 
-    @field_validator("DOMAIN")
+    @field_validator("DOMAIN", mode="before")
     @classmethod
     def validate_domain(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         domain = value.strip().lower().rstrip(".")
         labels = domain.split(".")
         label_pattern = re.compile(
@@ -159,9 +174,11 @@ class Settings(BaseSettings):
             raise ValueError("DOMAIN must be a valid public hostname")
         return domain
 
-    @field_validator("SSL_EMAIL")
+    @field_validator("SSL_EMAIL", mode="before")
     @classmethod
     def validate_ssl_email(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         email = value.strip().lower()
         if (
             not email
@@ -172,18 +189,23 @@ class Settings(BaseSettings):
             raise ValueError("SSL_EMAIL must be a real certificate email")
         return email
 
-    @field_validator("YOOKASSA_WEBHOOK_PORT")
+    @field_validator("YOOKASSA_WEBHOOK_PORT", mode="before")
     @classmethod
-    def validate_webhook_port(cls, value: int) -> int:
-        if value < 1 or value > 65535:
+    def validate_webhook_port(cls, value: Any) -> int:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
+        int_val = int(value)
+        if int_val < 1 or int_val > 65535:
             raise ValueError(
                 "YOOKASSA_WEBHOOK_PORT must be between 1 and 65535"
             )
-        return value
+        return int_val
 
-    @field_validator("SUPPORT_USERNAME")
+    @field_validator("SUPPORT_USERNAME", mode="before")
     @classmethod
     def validate_support_username(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
         username = value.strip().lstrip("@")
         if (
             not username

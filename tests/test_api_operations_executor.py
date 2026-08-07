@@ -7,7 +7,7 @@ import zlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import delete
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.amnezia_client import (
@@ -36,10 +36,15 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
             user = User(
                 telegram_id=90001,
                 subscription_end=datetime.now(timezone.utc) + timedelta(days=1),
@@ -57,10 +62,15 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
         connection._sessionmaker = self.old_sessionmaker
         await self.engine.dispose()
 

@@ -12,6 +12,8 @@ import urllib.parse
 
 def check_var(name):
     val = os.environ.get(name, "")
+    if isinstance(val, str):
+        val = val.strip().strip("\x27\x22")
     if not val or "CHANGE_ME" in val.upper():
         print(f"echo \"CRITICAL ERROR: {name} is missing or contains a placeholder!\" >&2")
         print("exit 1")
@@ -26,29 +28,29 @@ check_var("BOT_TOKEN")
 check_var("ADMIN_IDS")
 check_var("SUPPORT_USERNAME")
 check_var("DB_ENCRYPTION_KEY")
-check_var("POSTGRES_USER")
-check_var("POSTGRES_PASSWORD")
-check_var("POSTGRES_DB")
-check_var("REDIS_PASSWORD")
+pg_user_raw = check_var("POSTGRES_USER")
+pg_pass_raw = check_var("POSTGRES_PASSWORD")
+pg_db_raw = check_var("POSTGRES_DB")
+redis_pass_raw = check_var("REDIS_PASSWORD")
 check_var("YOOKASSA_SHOP_ID")
 check_var("YOOKASSA_SECRET_KEY")
 check_var("YOOKASSA_RETURN_URL")
 check_var("DOMAIN")
 check_var("SSL_EMAIL")
-check_var("BACKUP_AGE_RECIPIENT")
 
 pg_host = os.environ.get("POSTGRES_HOST", "db")
 redis_host = os.environ.get("REDIS_HOST", "redis")
 
-# URL-encode credentials exactly once. PostgreSQL and Redis receive the raw
-# passwords, while the application connection URLs receive encoded values.
-pg_pass_encoded = urllib.parse.quote(os.environ["POSTGRES_PASSWORD"], safe="")
-redis_pass_encoded = urllib.parse.quote(os.environ["REDIS_PASSWORD"], safe="")
+# URL-encode credentials exactly once after stripping any surrounding quotes.
+# PostgreSQL and Redis receive raw passwords, while the application
+# connection URLs receive encoded values.
+pg_pass_encoded = urllib.parse.quote(pg_pass_raw, safe="")
+redis_pass_encoded = urllib.parse.quote(redis_pass_raw, safe="")
 
-pg_user = urllib.parse.quote(os.environ["POSTGRES_USER"], safe="")
-pg_db = urllib.parse.quote(os.environ["POSTGRES_DB"], safe="")
+pg_user_encoded = urllib.parse.quote(pg_user_raw, safe="")
+pg_db_encoded = urllib.parse.quote(pg_db_raw, safe="")
 
-db_url = f"postgresql+asyncpg://{pg_user}:{pg_pass_encoded}@{pg_host}:5432/{pg_db}"
+db_url = f"postgresql+asyncpg://{pg_user_encoded}:{pg_pass_encoded}@{pg_host}:5432/{pg_db_encoded}"
 redis_url = f"redis://:{redis_pass_encoded}@{redis_host}:6379/0"
 
 print(f"export DATABASE_URL=\"{db_url}\"")

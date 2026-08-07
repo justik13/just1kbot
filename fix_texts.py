@@ -18,6 +18,8 @@ for file in os.listdir("d:/just1kbot/bot/texts_data"):
             defined_keys.update(re.findall(r"'([A-Z0-9_]+)'\s*:", content))
             defined_keys.update(re.findall(r'"([A-Z0-9_]+)"\s*:', content))
             defined_keys.update(re.findall(r'([A-Z0-9_]+)\s*=', content))
+            defined_keys.update(re.findall(r"OVERRIDES\['([A-Z0-9_]+)'\]\s*=", content))
+            defined_keys.update(re.findall(r'OVERRIDES\["([A-Z0-9_]+)"\]\s*=', content))
 
 missing_keys = sorted([k for k in used_keys if k not in defined_keys])
 

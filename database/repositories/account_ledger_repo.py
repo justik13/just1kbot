@@ -286,11 +286,16 @@ async def create_admin_adjustment(
         "idempotency_key": idempotency_key,
         "metadata_": dict(metadata),
     }
-    return await _insert_or_get_entry(
+    entry, created = await _insert_or_get_entry(
         session,
         values=values,
         economic_lookup=AccountLedgerEntry.idempotency_key == idempotency_key,
     )
+    if created and amount < 0:
+        await _allocate_fifo(
+            session, user_id=user_id, debit=entry, amount=abs(amount)
+        )
+    return entry, created
 
 
 async def _debit_is_reversed(session: AsyncSession, debit_id: int) -> bool:

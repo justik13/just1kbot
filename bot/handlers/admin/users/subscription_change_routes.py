@@ -282,11 +282,9 @@ async def admin_sub_apply_tariff(
         )
 
         if not user:
-            await render_hub(
-                callback.bot,
-                callback.message.chat.id,
+            await callback.answer(
                 texts.ERROR_USER_NOT_FOUND,
-                get_back_button("admin_users"),
+                show_alert=True,
             )
             return
 

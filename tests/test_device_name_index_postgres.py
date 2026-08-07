@@ -1,9 +1,9 @@
 import os
 import unittest
-from sqlalchemy import delete, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from database.models import APIOperation, Server, User, VPNProfile
+from database.models import Server, User, VPNProfile
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
@@ -12,17 +12,27 @@ class DeviceNameIndexPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
 
     async def asyncTearDown(self):
         async with self.sessions.begin() as s:
-            await s.execute(delete(APIOperation))
-            await s.execute(delete(VPNProfile))
-            await s.execute(delete(User))
-            await s.execute(delete(Server))
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
         await self.engine.dispose()
 
     async def test_device_name_index_uses_column_expression(self):
