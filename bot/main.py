@@ -257,7 +257,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         admin_payment_queues_router,
         fallback_router,
     ]:
-        r._parent_router = None
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)
@@ -276,7 +275,7 @@ async def start_webhook_server(port: int):
     runner = web.AppRunner(app)
     await runner.setup()
 
-    host = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+    host = os.getenv("WEBHOOK_HOST", "127.0.0.1")
     site = web.TCPSite(runner, host, port)
     await site.start()
 

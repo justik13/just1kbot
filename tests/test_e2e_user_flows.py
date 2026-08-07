@@ -156,6 +156,11 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.throttle_patcher.stop()
         get_settings.cache_clear()
         await self.dp.storage.close()
+        # Detach module-level routers from this dispatcher so subsequent
+        # test methods can call setup_bot cleanly without aiogram raising
+        # "Router is already included in ...".
+        for router in self.dp.sub_routers[:]:
+            router._parent_router = None
         await self.bot.session.close()
         await self.engine.dispose()
 
