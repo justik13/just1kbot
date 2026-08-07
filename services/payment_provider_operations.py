@@ -233,7 +233,58 @@ def _retry_delay(attempts: int) -> timedelta:
     return timedelta(seconds=min(300, 2 ** min(attempts, 8)))
 
 
-async def finalize(session, claim, result):
+async def _push_payment_url(bot, session, payment) -> None:
+    """Send or update the Telegram message with the payment URL immediately after it is received."""
+    import logging
+    _log = logging.getLogger(__name__)
+    try:
+        from database.models import User
+        from sqlalchemy import select as _select
+        user = await session.scalar(_select(User).where(User.id == payment.user_id))
+        if user is None or not user.telegram_id:
+            return
+        ctx = payment.topup_context or {}
+        chat_id = ctx.get("chat_id") or user.telegram_id
+        message_id = ctx.get("message_id")
+
+        from bot import texts as _texts
+        from database.repositories.account_ledger_repo import get_account_balance
+        balance = await get_account_balance(session, user_id=payment.user_id)
+        text = (
+            f"💳 <b>Ссылка на оплату готова!</b>\n\n"
+            f"Сумма: <b>{int(payment.amount)} ₽</b>\n"
+            f"Текущий баланс: <b>{int(balance.available)} ₽</b>\n\n"
+            f"Нажмите кнопку ниже, чтобы перейти к оплате."
+        )
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text=_texts.BUTTON_OPEN_PAYMENT, url=payment.payment_url)
+        builder.button(text=_texts.BUTTON_CHECK_TOPUP, callback_data=f"balance_check:{payment.id}")
+        builder.button(text=_texts.BUTTON_CLOSE_TOPUP, callback_data=f"balance_cancel:{payment.id}")
+        builder.adjust(1)
+        keyboard = builder.as_markup()
+
+        from utils.telegram import render_hub
+        new_msg_id = await render_hub(bot, chat_id, text, keyboard, trigger_message_id=message_id)
+        # Update stored message_id so future renders overwrite the same message
+        if new_msg_id and new_msg_id != message_id:
+            payment.topup_context = {
+                **ctx,
+                "message_id": new_msg_id,
+                "auto_show": False,
+            }
+        elif message_id:
+            payment.topup_context = {
+                **ctx,
+                "auto_show": False,
+            }
+        payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Failed to push payment URL to user %s: %s", payment.user_id, exc)
+
+
+async def finalize(session, claim, result, bot=None):
     payment = await session.scalar(
         select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
@@ -278,6 +329,7 @@ async def finalize(session, claim, result):
             if result.ok:
                 if claim.operation_type == "create_payment":
                     confirmation = data.get("confirmation") or {}
+                    old_url = payment.payment_url
                     payment.payment_url = (
                         confirmation.get("confirmation_url")
                         or confirmation.get("url")
@@ -290,6 +342,9 @@ async def finalize(session, claim, result):
                             retryable=True,
                             ambiguous=False,
                         )
+                    elif not old_url and payment.payment_url and bot is not None:
+                        # URL just became available — push payment link to user immediately
+                        await _push_payment_url(bot, session, payment)
             if result.ok:
                 transition = await apply_provider_transition(
                     session,
@@ -311,6 +366,7 @@ async def finalize(session, claim, result):
                         session,
                         payment=payment,
                         source=provider_transition_source(claim),
+                        bot=bot,
                     )
 
     if result and result.ok:

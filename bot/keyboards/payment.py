@@ -216,10 +216,6 @@ def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
     )
-    builder.button(
-        text=texts.BUTTON_RETURN_LATER,
-        callback_data=f"balance_later:{payment_id}",
-    )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -236,10 +232,6 @@ def get_topup_payment_keyboard(
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
-    )
-    builder.button(
-        text=texts.BUTTON_RETURN_LATER,
-        callback_data=f"balance_later:{payment_id}",
     )
     builder.adjust(1)
     return builder.as_markup()

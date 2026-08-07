@@ -101,13 +101,19 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_topup_controls_match_hidden_payment_semantics(self):
         waiting = callbacks(get_topup_waiting_keyboard(42))
         ready = callbacks(get_topup_payment_keyboard("https://example.com", 42))
-        expected = [
+        # "Return later" button removed — it caused UX confusion.
+        # Waiting keyboard: Check + Cancel
+        expected_waiting = [
             "balance_check:42",
             "balance_cancel:42",
-            "balance_later:42",
         ]
-        self.assertEqual(waiting, expected)
-        self.assertEqual(ready, expected)
+        # Payment keyboard: URL button (not a callback) + Check + Cancel
+        expected_ready = [
+            "balance_check:42",
+            "balance_cancel:42",
+        ]
+        self.assertEqual(waiting, expected_waiting)
+        self.assertEqual(ready, expected_ready)
 
     def test_main_and_profile_templates_require_visible_balance(self):
         for key in ("HUB_HEADER", "PROFILE_TEXT_ACTIVE", "PROFILE_TEXT_INACTIVE"):

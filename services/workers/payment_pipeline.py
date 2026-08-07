@@ -25,7 +25,7 @@ async def _run_claim(module, claim, bot=None):
         if module is provider:
             result = await provider.perform_http(claim)
             async with session_scope() as session:
-                await provider.finalize(session, claim, result)
+                await provider.finalize(session, claim, result, bot=bot)
         elif module is provider_refunds:
             result = await provider_refunds.perform_http(claim)
             async with session_scope() as session:

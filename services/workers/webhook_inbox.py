@@ -186,6 +186,22 @@ async def finalize(session, claim, result, bot=None):
 
     payment, error = await _find_payment(session, claim)
     if payment is None:
+        # For payment.canceled webhooks, the payment may legitimately not exist
+        # in our DB (e.g. created externally, or external_id not yet linked).
+        # Retrying 30 times is wasteful — silently succeed to avoid dead queue spam.
+        if claim.event_type == "payment.canceled":
+            import logging
+            logging.getLogger(__name__).info(
+                "webhook payment.canceled: payment not found for external_id=%s order=%s — discarding silently",
+                claim.payment_external_id,
+                claim.public_order_id,
+            )
+            row.status = "succeeded"
+            row.processed_at = now_utc()
+            row.locked_at = None
+            row.locked_by = None
+            await session.flush()
+            return
         _schedule_retry(row, code=error or "payment_not_visible", seconds=10)
         return
 

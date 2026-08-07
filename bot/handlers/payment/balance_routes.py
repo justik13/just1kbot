@@ -105,9 +105,12 @@ async def _render_balance(
     history = await get_account_history(session, user_id=user.id, limit=5)
     visible = await get_visible_balance_topup(session, user_id=user.id)
     details = [
-        f"💰 Реальный баланс: <b>{int(snapshot.real_available)} ₽</b>",
-        f"🎁 Бонусный баланс: <b>{int(snapshot.bonus_available)} ₽</b>",
+        f"💰 Баланс: <b>{int(snapshot.real_available)} ₽</b>",
     ]
+    if snapshot.bonus_available > 0:
+        details.append(
+            f"🎁 Бонусный баланс: <b>{int(snapshot.bonus_available)} ₽</b>"
+        )
     if snapshot.reserved > 0:
         details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L106_1.format(value_0=int(snapshot.reserved)))
     if snapshot.debt > 0:
@@ -334,10 +337,12 @@ async def choose_topup_amount(
     tariffs = await get_active_tariffs(session)
     amounts = topup_presets(tariffs)
     balance = await get_account_balance(session, user_id=db_user.id)
+    balance_lines = f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
+    if balance.bonus_available > 0:
+        balance_lines += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
     text = (
         f"➕ <b>Пополнение баланса</b>\n\n"
-        f"💰 Реальный баланс: <b>{int(balance.real_available)} ₽</b>\n"
-        f"🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>\n\n"
+        f"{balance_lines}\n\n"
         f"Выберите сумму или укажите другую целую сумму в рублях."
     )
     await render_hub(
