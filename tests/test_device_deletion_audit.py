@@ -20,7 +20,7 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
 
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
-        session.delete = AsyncMock()
+        session.delete = MagicMock()
 
         result = await DeviceService.delete_device(session, profile)
 
@@ -42,7 +42,7 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
         session.get = AsyncMock(return_value=server)
-        session.delete = AsyncMock()
+        session.delete = MagicMock()
 
         with patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock):
             result = await DeviceService.delete_device(session, profile, force=True)

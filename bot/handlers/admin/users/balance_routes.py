@@ -326,17 +326,18 @@ async def process_balance_deduct(
         await state.clear()
         return
 
-    idempotency_key = f"admin_deduct_{message.from_user.id}_{user.id}_{uuid4().hex[:10]}"
+    target_user_id = user.id
+    idempotency_key = f"admin_deduct_{message.from_user.id}_{target_user_id}_{uuid4().hex[:10]}"
     try:
         await create_admin_adjustment(
             session,
-            user_id=user.id,
+            user_id=target_user_id,
             signed_amount=-amount,
             idempotency_key=idempotency_key,
             metadata={"admin_id": message.from_user.id, "reason": "manual_deduction"},
         )
     except (AccountLedgerError, Exception) as exc:
-        logger.error("Failed to deduct balance for user %s: %s", user.id, exc)
+        logger.error("Failed to deduct balance for user %s: %s", target_user_id, exc)
         await render_hub(
             message.bot,
             message.chat.id,
