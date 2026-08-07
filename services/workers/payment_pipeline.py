@@ -20,7 +20,7 @@ async def _claim(module, worker_id):
         return await module.claim(session, worker_id)
 
 
-async def _run_claim(module, claim):
+async def _run_claim(module, claim, bot=None):
     try:
         if module is provider:
             result = await provider.perform_http(claim)
@@ -33,7 +33,7 @@ async def _run_claim(module, claim):
         elif module is webhook_inbox:
             result = await webhook_inbox.fetch_provider(claim)
             async with session_scope() as session:
-                await webhook_inbox.finalize(session, claim, result)
+                await webhook_inbox.finalize(session, claim, result, bot=bot)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -78,7 +78,7 @@ async def payment_pipeline_loop(bot, shutdown_event: asyncio.Event) -> None:
                 cursor += 1
                 claim = await _claim(module, worker_id)
                 if claim:
-                    active.add(asyncio.create_task(_run_claim(module, claim)))
+                    active.add(asyncio.create_task(_run_claim(module, claim, bot=bot)))
             if active:
                 done, _ = await asyncio.wait(
                     active, timeout=POLL_SECONDS, return_when=asyncio.FIRST_COMPLETED

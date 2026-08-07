@@ -90,6 +90,9 @@ def _get_real_ip(request: web.Request) -> str:
         real_ip = request.headers.get("X-Real-IP", "").strip()
         if real_ip:
             return real_ip
+        forwarded = request.headers.get("X-Forwarded-For", "").strip()
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return remote
 
 
@@ -99,6 +102,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
     set_request_id(request_id)
     peer_ip = _get_real_ip(request)
     if not peer_ip or not _is_yookassa_ip(peer_ip):
+        logger.warning("[%s] Rejected webhook from unverified IP %s", request_id, peer_ip)
         return web.Response(status=403, text="Forbidden")
     if request.content_length is not None and request.content_length > 262144:
         return web.Response(status=413, text="Payload too large")
@@ -108,6 +112,7 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
             _validate_webhook_payload(payload)
         )
 
+        logger.info("[%s] Accepted YooKassa webhook event %s for object %s from IP %s", request_id, event, provider_object_id, peer_ip)
         metadata = obj.get("metadata") or {}
         public_order_id = metadata.get("order_id")
         canonical = json.dumps(

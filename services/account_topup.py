@@ -274,6 +274,7 @@ async def settle_succeeded_topup(
     payment: Payment,
     source: str,
     settings=None,
+    bot=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
     """Credit a verified top-up and close its non-subscription lifecycle."""
     if payment.provider_confirmed_at is None:
@@ -303,9 +304,8 @@ async def settle_succeeded_topup(
                 )
             )
             await session.flush()
-            return False, await get_account_balance(
-                session, user_id=payment.user_id
-            )
+            snapshot = await get_account_balance(session, user_id=payment.user_id)
+            return False, snapshot
 
     entry, created = await credit_succeeded_topup(
         session,
@@ -335,6 +335,7 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
+    auto_fulfilled_action = None
     if created:
         session.add(
             PaymentEvent(
@@ -374,6 +375,7 @@ async def settle_succeeded_topup(
                             user_id=payment.user_id,
                             quote_public_id=quote_uuid,
                         )
+                        auto_fulfilled_action = "tariff_change"
                         logging.getLogger(__name__).info("Auto-fulfilled tariff change for payment %s, user_id=%s", payment.id, payment.user_id)
                     elif auto_action == "purchase":
                         from services.account_purchase import settle_account_purchase
@@ -382,13 +384,54 @@ async def settle_succeeded_topup(
                             user_id=payment.user_id,
                             quote_public_id=quote_uuid,
                         )
+                        auto_fulfilled_action = "purchase"
                         logging.getLogger(__name__).info("Auto-fulfilled purchase for payment %s, user_id=%s", payment.id, payment.user_id)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning("Auto-fulfillment failed for topup payment %s: %s", payment.id, e)
+
+        if bot is not None and user is not None and user.telegram_id:
+            try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                builder = InlineKeyboardBuilder()
+                builder.button(text="📱 Мои подключения", callback_data="menu_connections")
+                builder.button(text="👤 Профиль", callback_data="menu_profile")
+                builder.adjust(1)
+
+                if auto_fulfilled_action == "tariff_change":
+                    text = (
+                        "🎉 <b>Оплата получена и тариф успешно обновлен!</b>\n\n"
+                        "Ваш новый тариф активирован. Настройки подписки и подключений обновлены."
+                    )
+                elif auto_fulfilled_action == "purchase":
+                    text = (
+                        "🎉 <b>Оплата получена и подписка успешно оформлена!</b>\n\n"
+                        "Ваши VPN-ключи и настройки подключений доступны в меню «Мои подключения»."
+                    )
+                else:
+                    text = (
+                        f"✅ <b>Баланс успешно пополнен!</b>\n\n"
+                        f"Сумма зачисления: <b>{int(payment.amount)} руб.</b>"
+                    )
+
+                await bot.send_message(
+                    user.telegram_id,
+                    text,
+                    reply_markup=builder.as_markup(),
+                    parse_mode="HTML",
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Failed to send push notification to user %s: %s", user.telegram_id, exc)
+
+    payment.ui_visible = False
+    payment.fulfillment_last_error_code = None
+    payment.fulfillment_last_error = None
+    if payment.reconciliation_status not in {"mismatch", "manual_review"}:
+        payment.reconciliation_status = "ok"
+
     await session.flush()
     return created, balance
-
 
 
 async def settle_succeeded_topup_by_id(

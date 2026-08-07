@@ -172,7 +172,7 @@ def _schedule_retry(row, *, code: str, seconds: int = 10, force_dead=False):
     return dead
 
 
-async def finalize(session, claim, result):
+async def finalize(session, claim, result, bot=None):
     row = await session.scalar(
         select(WebhookInbox).where(WebhookInbox.id == claim.inbox_id).with_for_update()
     )
@@ -332,6 +332,7 @@ async def finalize(session, claim, result):
                     session,
                     payment=payment,
                     source="webhook_inbox",
+                    bot=bot,
                 )
 
     row.status = "succeeded"
