@@ -13,6 +13,7 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_user_balance_keyboard
 from bot.states import AdminStates
 from database.repositories.account_ledger_repo import (
+    AccountLedgerError,
     create_admin_adjustment,
     get_account_balance,
 )
@@ -312,14 +313,40 @@ async def process_balance_deduct(
         await state.clear()
         return
 
+    balance_info = await get_account_balance(session, user_id=user.id)
+    if balance_info.available < amount:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"⚠️ <b>У пользователя недостаточно средств на балансе.</b>\n"
+            f"Доступно для списания: <b>{int(balance_info.available)} ₽</b>",
+            get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
+        await state.clear()
+        return
+
     idempotency_key = f"admin_deduct_{message.from_user.id}_{user.id}_{uuid4().hex[:10]}"
-    await create_admin_adjustment(
-        session,
-        user_id=user.id,
-        signed_amount=-amount,
-        idempotency_key=idempotency_key,
-        metadata={"admin_id": message.from_user.id, "reason": "manual_deduction"},
-    )
+    try:
+        await create_admin_adjustment(
+            session,
+            user_id=user.id,
+            signed_amount=-amount,
+            idempotency_key=idempotency_key,
+            metadata={"admin_id": message.from_user.id, "reason": "manual_deduction"},
+        )
+    except (AccountLedgerError, Exception) as exc:
+        logger.error("Failed to deduct balance for user %s: %s", user.id, exc)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "⚠️ <b>Не удалось списать средства с баланса.</b>\n"
+            "Причина: недостаточно доступных лотов или ошибка системы.",
+            get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
+        await state.clear()
+        return
 
     await AuditService.log_action(
         session,
