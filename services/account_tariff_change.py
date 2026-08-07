@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+logger = logging.getLogger(__name__)
+
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
