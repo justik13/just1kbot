@@ -96,6 +96,8 @@ class DanglingPeerReportOnlyTests(unittest.IsolatedAsyncioTestCase):
             patch.object(cleanup, "AmneziaClient", return_value=client),
             patch.object(cleanup, "logger", test_logger),
         ):
+            cleanup._unmanaged_peers_log_cache.clear()
+            cleanup._unmanaged_peers_summary_last_logged = None
             await cleanup._cleanup_dangling_peers()
 
         log_calls = (
