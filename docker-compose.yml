@@ -34,7 +34,7 @@ services:
     container_name: just1kbot_redis
     restart: unless-stopped
     logging: *default-logging
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    command: /bin/sh -c 'REDIS_PASS=$$(echo "$$REDIS_PASSWORD" | tr -d "'\\\"") && exec redis-server --requirepass "$$REDIS_PASS"'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     deploy:
