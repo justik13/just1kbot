@@ -289,14 +289,15 @@ def project_subscription_balance(
                     if original_hours <= 0 or original_value < 0:
                         return fail("tariff_change_source_invalid", coverage)
                     source_paid_hours += whole
-                    source_paid_value += original_value * Decimal(whole) / Decimal(
-                        original_hours
-                    )
+                    source_paid_value += (
+                        original_value * Decimal(whole) / Decimal(original_hours)
+                    ).quantize(Decimal("1.000000"))
                 else:
                     source_bonus_hours += whole
             if (
                 source_paid_hours != current_paid_hours
-                or source_paid_value != current_paid_value
+                or source_paid_value.quantize(Decimal("1.000000"))
+                != current_paid_value.quantize(Decimal("1.000000"))
                 or source_bonus_hours != current_bonus_hours
             ):
                 return fail("tariff_change_source_mismatch", coverage)
@@ -460,7 +461,7 @@ def project_subscription_balance(
                 context.prec = 38
                 remaining_value = (
                     original_value * Decimal(whole) / Decimal(original_hours)
-                )
+                ).quantize(Decimal("1.000000"))
             paid.append(
                 ProjectedPaidLot(
                     segment.event.id,
@@ -518,7 +519,9 @@ def project_subscription_balance(
             return fail("subscription_end_projection_mismatch", coverage)
     if not active and (paid_hours or bonus_hours):
         return fail("subscription_end_projection_mismatch", coverage)
-    value = sum((item.remaining_paid_value_rub for item in paid), Decimal(0))
+    value = sum(
+        (item.remaining_paid_value_rub for item in paid), Decimal(0)
+    ).quantize(Decimal("1.000000"))
     ceiling = sum((item.paid_value_rub_delta for item in purchases), Decimal(0)) + sum(
         (item.paid_value_rub_delta for item in conversions), Decimal(0)
     )
