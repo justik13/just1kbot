@@ -54,8 +54,8 @@ class AccountTariffChangeContractTests(unittest.TestCase):
                 current_tariff_id=1,
             )
         )
-        self.assertNotIn("select_tariff_type:2:change", values)
-        self.assertIn("select_tariff_type:5:change", values)
+        self.assertNotIn("select_tariff:1:change", values)
+        self.assertIn("select_tariff:2:change", values)
         self.assertEqual(
             callbacks(get_same_tariff_keyboard())[0], "payment_quick_renew"
         )

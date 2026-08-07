@@ -2,7 +2,6 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
-
 from utils.tariff_names import get_tariff_group_name
 
 
@@ -78,6 +77,7 @@ def get_change_tariff_keyboard(
     *,
     is_subscription_active: bool = False,
     current_tariff_id: int | None = None,
+    current_duration_days: int | None = 30,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     grouped: dict[int, list] = {}
@@ -96,9 +96,15 @@ def get_change_tariff_keyboard(
             group_name += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L96_1
         elif limit > current_limit:
             group_name += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L98_1
+
+        group_tariffs = grouped[limit]
+        best_tariff = next(
+            (t for t in group_tariffs if getattr(t, "duration_days", None) == current_duration_days),
+            min(group_tariffs, key=lambda t: getattr(t, "duration_days", 30)),
+        )
         builder.button(
             text=group_name,
-            callback_data=f"select_tariff_type:{limit}:change",
+            callback_data=f"select_tariff:{best_tariff.id}:change",
         )
     builder.button(
         text=texts.BUTTON_BACK, callback_data="back_to_main_menu"
