@@ -32,7 +32,7 @@ jobs:
           if [ -f requirements.lock ]; then
             grep -v '^#' requirements.lock > /tmp/req_repo.txt
             grep -v '^#' /tmp/requirements.lock > /tmp/req_ci.txt
-            diff -u /tmp/req_repo.txt /tmp/req_ci.txt
+            diff -u --strip-trailing-cr /tmp/req_repo.txt /tmp/req_ci.txt
           else
             echo 'requirements.lock is not committed yet; artifact will be used by the test job.'
           fi
