@@ -392,8 +392,8 @@ async def _cleanup_old_records():
         result_hub = await session.execute(stmt_hub)
         hub_deleted = result_hub.rowcount
 
-        # Auto-expire abandoned pending payments older than 24 hours
-        threshold_payments = current_time - timedelta(hours=24)
+        # Auto-expire abandoned pending payments older than 48 hours
+        threshold_payments = current_time - timedelta(hours=48)
         stmt_payments = (
             update(Payment)
             .where(
@@ -404,7 +404,7 @@ async def _cleanup_old_records():
                 provider_status="canceled",
                 fulfillment_status="canceled",
                 reconciliation_status="reconciled",
-                manual_review_reason="auto_expired_abandoned_pending",
+                manual_review_reason="auto_expired_abandoned_pending_48h",
             )
         )
         result_payments = await session.execute(stmt_payments)

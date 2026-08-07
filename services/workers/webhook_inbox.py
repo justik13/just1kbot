@@ -361,8 +361,12 @@ async def finalize(session, claim, result, bot=None):
 async def auto_resolve_untracked_canceled_webhooks(session) -> int:
     """Auto-heal dead webhooks where the payment is untracked/missing (payment_not_visible).
 
-    These webhooks cannot be reconciled to any DB payment and are harmlessly discarded.
+    Canceled and refund webhooks for untracked payments are harmlessly discarded.
+    Financial payment.succeeded webhooks for untracked payments are preserved for manual review.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     rows = (
         await session.scalars(
             select(WebhookInbox)
@@ -373,13 +377,24 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
             .with_for_update(skip_locked=True)
         )
     ).all()
+    resolved_count = 0
     for row in rows:
-        row.status = "succeeded"
-        row.processed_at = now_utc()
-        row.locked_at = None
-        row.locked_by = None
-        row.last_error = f"auto_resolved: {row.event_type} for untracked payment"
-    return len(rows)
+        # Safe to auto-heal: canceled payments and refunds for untracked payments
+        if row.event_type in {"payment.canceled", "refund.succeeded", "refund.canceled"}:
+            row.status = "succeeded"
+            row.processed_at = now_utc()
+            row.locked_at = None
+            row.locked_by = None
+            row.last_error = f"auto_resolved: {row.event_type} for untracked payment"
+            resolved_count += 1
+        else:
+            logger.warning(
+                "WebhookInbox dead entry requires manual review (untracked payment): id=%s, event_type=%s, external_id=%s",
+                row.id,
+                row.event_type,
+                row.payment_external_id,
+            )
+    return resolved_count
 
 
 async def recover_stale(session, lease_seconds=WEBHOOK_LEASE_SECONDS):

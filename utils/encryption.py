@@ -4,8 +4,6 @@ from functools import lru_cache
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.types import Text, TypeDecorator
 
-from config.settings import get_settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +23,8 @@ class EncryptedString(TypeDecorator):
     def process_bind_param(self, value, dialect):
         if value is None:
             return None
+        from config.settings import get_settings
+
         settings = get_settings()
         key = settings.DB_ENCRYPTION_KEY
         if not key:
@@ -44,6 +44,8 @@ class EncryptedString(TypeDecorator):
     def process_result_value(self, value, dialect):
         if value is None:
             return None
+        from config.settings import get_settings
+
         settings = get_settings()
         key = settings.DB_ENCRYPTION_KEY
         if not key:
