@@ -248,7 +248,7 @@ async def _settle_account_tariff_change(
             if last_change_at.tzinfo is None:
                 last_change_at = last_change_at.replace(tzinfo=timezone.utc)
             meta = last_change_entry.metadata_ or {}
-            was_last_downgrade = meta.get("is_downgrade", True)
+            was_last_downgrade = bool(meta.get("is_downgrade", False))
             if was_last_downgrade and (now - last_change_at) < timedelta(hours=24):
                 raise AccountTariffChangeError("change_cooldown_active")
 
