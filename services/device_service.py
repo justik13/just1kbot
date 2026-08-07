@@ -23,9 +23,6 @@ RESERVING_STATUSES = (
     "pending_create",
     "active",
     "pending_update",
-    "deleting",
-    "delete_failed",
-    "create_cleanup_pending",
 )
 
 

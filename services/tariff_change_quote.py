@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
-from database.models import Tariff, TariffQuote, TariffVersion, VPNProfile
+from database.models import Tariff, TariffQuote, TariffVersion
+from database.repositories.account_ledger_repo import get_account_balance
+from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariff_quotes_repo import (
     QUOTE_LIFETIME, get_active_financial_quotes_for_update,
     get_or_create_current_version, lock_checkout_user,
@@ -20,7 +22,6 @@ from services.subscription_balance_service import get_subscription_balance_snaps
 from services.tariff_value_calculator import (
     TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
 )
-from database.repositories.account_ledger_repo import get_account_balance
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     if source.duration_days <= 0 or source.price_rub <= 0 or source.device_limit <= 0 \
             or target.duration_days <= 0 or target.price_rub <= 0 or target.device_limit <= 0:
         return TariffChangeQuoteResult(failure_code="target_tariff_inactive")
-    profiles = await session.scalar(select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id))
+    profiles = await get_user_profiles_count(session, user_id)
     if profiles > target.device_limit:
         return TariffChangeQuoteResult(failure_code="target_device_limit_too_small")
 

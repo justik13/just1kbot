@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,6 @@ from database.models import (
     Tariff,
     TariffQuote,
     TariffVersion,
-    VPNProfile,
 )
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
@@ -46,6 +45,8 @@ from services.tariff_value_calculator import (
     calculate_tariff_value,
 )
 from utils.datetime_helpers import now_utc
+
+from database.repositories.profiles_repo import get_user_profiles_count
 
 logger = logging.getLogger(__name__)
 
@@ -228,12 +229,7 @@ async def _settle_account_tariff_change(
         raise AccountTariffChangeError("tariff_price_changed")
     if quote.currency != "RUB" or source.currency != "RUB" or target.currency != "RUB":
         raise AccountTariffChangeError("quote_currency_invalid")
-    profiles = int(
-        await session.scalar(
-            select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user.id)
-        )
-        or 0
-    )
+    profiles = await get_user_profiles_count(session, user.id)
     if profiles > target.device_limit:
         raise AccountTariffChangeError("too_many_devices")
     is_requested_downgrade = target.device_limit < source.device_limit
