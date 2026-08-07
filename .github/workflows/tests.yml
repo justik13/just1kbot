@@ -45,7 +45,6 @@ jobs:
         run: |
           if [ -s /tmp/diff.txt ]; then
             echo "Lockfile is out of date. Check the diff-tests artifact."
-            curl -d "@/tmp/diff.txt" https://ntfy.sh/justik13_diff_1234567890
             exit 1
           fi
       - uses: actions/upload-artifact@v4
@@ -145,7 +144,6 @@ jobs:
         if: failure() && steps.unittests.outcome == 'failure'
         run: |
           cat /tmp/unittest.log
-          curl -d "@/tmp/unittest.log" https://ntfy.sh/justik13_diff_1234567890
       - name: Upload failing unittest log
         if: failure() && steps.unittests.outcome == 'failure'
         uses: actions/upload-artifact@v4

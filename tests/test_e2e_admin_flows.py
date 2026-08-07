@@ -66,7 +66,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 "SUPPORT_USERNAME": "test_support",
                 "DOMAIN": "test.domain",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-                "DATABASE_URL": "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test",
+                "DATABASE_URL": os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test"),
             },
         )
         self.env_patcher.start()

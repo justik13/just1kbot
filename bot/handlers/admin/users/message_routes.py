@@ -50,7 +50,7 @@ async def prompt_send_user_message(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BUTTON_CANCEL,
+        text="❌ Отмена",
         callback_data=f"admin_user_card:{user.telegram_id}",
     )
 
@@ -142,15 +142,17 @@ async def process_send_user_message(
         logger.warning(f"Failed to send admin direct message to {target_telegram_id}: {exc}")
 
     if msg_sent:
-        await AuditService.log(
+        import json
+        await AuditService.log_action(
             session,
-            actor_user_id=message.from_user.id,
+            admin_id=message.from_user.id,
             action="ADMIN_DIRECT_MESSAGE_SENT",
-            target_user_id=user.id,
-            metadata={
+            target_type="user",
+            target_id=user.id,
+            details=json.dumps({
                 "target_telegram_id": target_telegram_id,
                 "text": text_to_send[:500] if text_to_send else "",
-            },
+            }, ensure_ascii=False),
         )
         notice = f"✅ <b>Сообщение пользователю ID {target_telegram_id} успешно отправлено!</b>"
     else:
