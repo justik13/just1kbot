@@ -35,7 +35,7 @@ services:
     restart: unless-stopped
     logging: *default-logging
     # Keep the Redis password out of the redis-server command line.
-    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf'
+    command: /bin/sh -c 'echo "requirepass \"$$REDIS_PASSWORD\"" > /data/redis.conf && redis-server /data/redis.conf'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     deploy:

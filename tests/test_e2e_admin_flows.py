@@ -31,9 +31,9 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             # Create the admin user
-            self.admin_user_db = DBUser(telegram_id=999999999)
+            self.admin_user_db = DBUser(telegram_id=123456789)
             # Create a regular user
-            self.target_user_db = DBUser(telegram_id=123456789)
+            self.target_user_db = DBUser(telegram_id=987654321)
 
             self.tariff = Tariff(
                 name="E2E Basic",
@@ -62,7 +62,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 "BOT_TOKEN": "123:test",
                 "REDIS_URL": "redis://localhost:6379/1",
                 "REDIS_PASSWORD": "test",
-                "ADMIN_IDS": "[999999999]",
+                "ADMIN_IDS": "[123456789, 999999999]",
                 "SUPPORT_USERNAME": "test_support",
                 "DOMAIN": "test.domain",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
@@ -83,12 +83,12 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         _, self.dp = await setup_bot(self.bot, storage=MemoryStorage())
 
         self.admin = User(
-            id=999999999,
+            id=123456789,
             is_bot=False,
             first_name="Admin User",
             username="adminuser",
         )
-        self.chat = Chat(id=999999999, type="private")
+        self.chat = Chat(id=123456789, type="private")
 
     async def asyncTearDown(self):
         from bot.middlewares.clean_chat import stop_clean_chat_worker
@@ -160,7 +160,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         # Admin clicks on user card
         import asyncio
         await asyncio.sleep(0.35)
-        update = self._create_callback_update("admin_user_card:123456789")
+        update = self._create_callback_update("admin_user_card:987654321")
         await self.dp.feed_update(bot=self.bot, update=update)
 
         req = next(
@@ -168,7 +168,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             for req in reversed(self.session.requests)
             if req.__class__.__name__ == "EditMessageText"
         )
-        self.assertIn("123456789", req.text)
+        self.assertIn("987654321", req.text)
 
 
 if __name__ == "__main__":
