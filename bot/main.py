@@ -257,6 +257,11 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         admin_payment_queues_router,
         fallback_router,
     ]:
+        # Reset parent so module-level router singletons can be included in a
+        # fresh Dispatcher on each call (idempotent). In production setup_bot
+        # is called once so this is a no-op; in tests each test method creates
+        # its own Dispatcher and needs a clean slate.
+        r._parent_router = None
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)
