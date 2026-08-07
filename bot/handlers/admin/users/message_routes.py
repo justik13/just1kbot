@@ -92,18 +92,39 @@ async def process_send_user_message(
 
     if not target_telegram_id or not target_user_db_id:
         await state.clear()
-        await message.answer("❌ Ошибка: не найден целевой пользователь.")
+        from bot.keyboards.common import get_back_button
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "❌ Ошибка: не найден целевой пользователь.",
+            get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
+        )
         return
 
     user = await get_user_by_telegram_id(session, target_telegram_id)
     if not user:
         await state.clear()
-        await message.answer(texts.ERROR_USER_NOT_FOUND)
+        from bot.keyboards.common import get_back_button
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_USER_NOT_FOUND,
+            get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
+        )
         return
 
     text_to_send = message.text or message.caption
     if not text_to_send and not message.photo and not message.document:
-        await message.answer("⚠️ Пожалуйста, отправьте текстовое сообщение или медиа с подписью.")
+        from bot.keyboards.common import get_back_button
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "⚠️ Пожалуйста, отправьте текстовое сообщение или медиа с подписью.",
+            get_back_button(f"admin_user_card:{target_telegram_id}"),
+            trigger_message_id=message.message_id,
+        )
         return
 
     await state.clear()
@@ -158,5 +179,5 @@ async def process_send_user_message(
     else:
         notice = f"❌ <b>Не удалось отправить сообщение:</b> {error_reason}"
 
-    await message.answer(notice, parse_mode="HTML")
-    await _show_user_card_edit(message, user, session)
+    await _show_user_card_edit(message, user, session, notice=notice)
+

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from services.referral_bonus import calculate_referral_bonus
 
