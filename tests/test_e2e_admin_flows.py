@@ -104,30 +104,36 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     def _create_message_update(self, text: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         message = Message(
-            message_id=100,
-            date=0,
+            message_id=100 + self._update_counter,
+            date=int(time.time()),
             chat=self.chat,
             from_user=self.admin,
             text=text,
         )
-        return Update(update_id=1, message=message)
+        return Update(update_id=self._update_counter, message=message)
 
     def _create_callback_update(self, data: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         callback = CallbackQuery(
-            id="query1",
+            id=f"query_{self._update_counter}",
             from_user=self.admin,
             chat_instance="chat1",
             message=Message(
-                message_id=101,
-                date=0,
+                message_id=100 + self._update_counter,
+                date=int(time.time()),
                 chat=self.chat,
                 from_user=self.admin,
                 text="previous menu",
-            ),
+            ).as_(self.bot),
             data=data,
-        )
-        return Update(update_id=2, callback_query=callback)
+        ).as_(self.bot)
+        return Update(update_id=self._update_counter, callback_query=callback)
 
     async def test_admin_flow_open_menu(self):
         update = self._create_callback_update("admin_menu")
@@ -152,13 +158,15 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Пользователи", req.text)
 
         # Admin clicks on user card
+        import asyncio
+        await asyncio.sleep(0.35)
         update = self._create_callback_update("admin_user_card:123456789")
         await self.dp.feed_update(bot=self.bot, update=update)
 
         req = next(
             req
             for req in reversed(self.session.requests)
-            if req.__class__.__name__ == "EditMessageText" and hasattr(req, "text") and req.text and "123456789" in req.text
+            if req.__class__.__name__ == "EditMessageText"
         )
         self.assertIn("123456789", req.text)
 

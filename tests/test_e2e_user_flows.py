@@ -160,30 +160,36 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     def _create_message_update(self, text: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         message = Message(
-            message_id=100,
-            date=0,
+            message_id=100 + self._update_counter,
+            date=int(time.time()),
             chat=self.chat,
             from_user=self.user,
             text=text,
         )
-        return Update(update_id=1, message=message)
+        return Update(update_id=self._update_counter, message=message)
 
     def _create_callback_update(self, data: str) -> Update:
+        import time
+
+        self._update_counter = getattr(self, "_update_counter", 0) + 1
         callback = CallbackQuery(
-            id="query1",
+            id=f"query_{self._update_counter}",
             from_user=self.user,
             chat_instance="chat1",
             message=Message(
-                message_id=101,
-                date=0,
+                message_id=100 + self._update_counter,
+                date=int(time.time()),
                 chat=self.chat,
                 from_user=self.user,
                 text="previous menu",
-            ),
+            ).as_(self.bot),
             data=data,
-        )
-        return Update(update_id=2, callback_query=callback)
+        ).as_(self.bot)
+        return Update(update_id=self._update_counter, callback_query=callback)
 
     async def test_full_start_to_purchase_flow(self):
         # 1. User sends /start
