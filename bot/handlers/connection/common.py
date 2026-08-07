@@ -2,6 +2,7 @@ import logging
 import re
 from datetime import timedelta
 
+from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 

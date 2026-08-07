@@ -6,7 +6,6 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -15,7 +14,6 @@ from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
 from bot.states import AdminStates
-from database.models import Payment
 from database.repositories.tariffs_repo import (
     get_tariff_by_id,
     get_tariff_count,

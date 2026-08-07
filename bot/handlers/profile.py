@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import (
-    get_back_button,
     get_history_keyboard,
     get_profile_keyboard,
     get_referral_keyboard,
@@ -59,10 +58,6 @@ async def _render_profile(
         await get_user_referrals(session, user.telegram_id)
     )
     balance = await get_account_balance(session, user_id=user.id)
-    referral_bonus_balance = await get_referral_bonus_balance(
-        session,
-        user_id=user.id,
-    )
 
     if has_access:
         device_limit = user.device_limit or 0
