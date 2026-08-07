@@ -211,7 +211,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         
         req = self.session.get_request()
         self.assertEqual(req.__class__.__name__, "EditMessageText")
-        self.assertIn("Реальный баланс:", req.text)
+        self.assertIn("Баланс:", req.text)
         
         # 3. User tries to buy tariff from showcase
         update = self._create_callback_update("payment_showcase")
