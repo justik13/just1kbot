@@ -29,16 +29,16 @@ jobs:
 
           cat > .env <<EOF
           BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-          ADMIN_IDS='[123456,654321]'
+          ADMIN_IDS=[123456,654321]
           SUPPORT_USERNAME=ci_support_bot
           DB_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
           POSTGRES_USER=just1kbot
-          POSTGRES_PASSWORD='$DB_PASS'
+          POSTGRES_PASSWORD=$DB_PASS
           POSTGRES_DB=just1kbot_bot
-          REDIS_PASSWORD='$REDIS_PASS'
+          REDIS_PASSWORD=$REDIS_PASS
           YOOKASSA_SHOP_ID=123456
           YOOKASSA_SECRET_KEY=ci_test_secret
-          YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+          YOOKASSA_RETURN_URL=https://t.me/{bot_username}
           YOOKASSA_WEBHOOK_PORT=8080
           DOMAIN=vpn.example.test
           SSL_EMAIL=ci@example.test
