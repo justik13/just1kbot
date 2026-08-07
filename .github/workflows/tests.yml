@@ -32,9 +32,20 @@ jobs:
           if [ -f requirements.lock ]; then
             grep -v '^#' requirements.lock > /tmp/req_repo.txt
             grep -v '^#' /tmp/requirements.lock > /tmp/req_ci.txt
-            diff -u --strip-trailing-cr /tmp/req_repo.txt /tmp/req_ci.txt
+            diff -u /tmp/req_repo.txt /tmp/req_ci.txt > /tmp/diff.txt || true
           else
             echo 'requirements.lock is not committed yet; artifact will be used by the test job.'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-tests
+          path: /tmp/diff.txt
+      - name: Fail if diff exists
+        run: |
+          if [ -s /tmp/diff.txt ]; then
+            echo "Lockfile is out of date. Check the diff-tests artifact."
+            exit 1
           fi
       - uses: actions/upload-artifact@v4
         with:
