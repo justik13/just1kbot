@@ -276,10 +276,9 @@ async def claim_api_operations(
 
     claimed: list[ClaimedAPIOperation] = []
     async with _transaction(session_factory) as session:
-        # Use the database clock for every transition in this transaction.
-        from sqlalchemy import func
+        from sqlalchemy import func, text
 
-        now = func.now()
+        now = func.now() + text("INTERVAL '1 second'")
         exhausted = (await session.execute(select(APIOperation).where(
             APIOperation.status.in_(("pending", "retry")),
             APIOperation.attempts >= APIOperation.max_attempts,
