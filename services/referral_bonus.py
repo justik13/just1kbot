@@ -80,7 +80,7 @@ async def grant_referral_bonus_for_topup(
             entry_type="admin_adjustment",
             amount=bonus,
             currency="RUB",
-            payment_id=payment_id,
+            payment_id=None,        # admin_adjustment requires payment_id IS NULL per DB constraint
             quote_id=None,
             reversal_of_id=None,
             idempotency_key=idempotency_key,
@@ -89,7 +89,7 @@ async def grant_referral_bonus_for_topup(
                 "referrer_user_id": referrer.id,
                 "referred_user_id": purchaser.id,
                 "referred_telegram_id": purchaser.telegram_id,
-                "topup_payment_id": payment_id,
+                "topup_payment_id": payment_id,  # kept here for traceability
                 "bonus_rate": str(REFERRAL_BONUS_RATE),
             },
         )
