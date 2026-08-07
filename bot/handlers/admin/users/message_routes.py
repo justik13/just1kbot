@@ -1,3 +1,5 @@
+"""Admin direct messaging routes for user card panel."""
+
 import logging
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
