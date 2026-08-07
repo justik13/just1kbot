@@ -214,7 +214,10 @@ class DeviceService:
 
     @staticmethod
     async def delete_device(
-        session: AsyncSession, profile: VPNProfile, actor_id: int | None = None
+        session: AsyncSession,
+        profile: VPNProfile,
+        actor_id: int | None = None,
+        force: bool = False,
     ) -> bool:
         profile = (
             await session.execute(
@@ -223,13 +226,29 @@ class DeviceService:
         ).scalar_one_or_none()
         if not profile:
             return True
-        if profile.provisioning_status == "pending_create":
+        if profile.provisioning_status == "pending_create" and not force:
             raise DeviceStillCreating("Устройство ещё создаётся")
-        if profile.provisioning_status == "create_failed" and not profile.peer_id:
-            await session.delete(profile)
+        if not profile.peer_id or force:
+            if profile.peer_id:
+                server = await session.get(Server, profile.server_id)
+                try:
+                    await ensure_delete_operation(
+                        session,
+                        idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                        server_id=server.id if server else None,
+                        profile_id=profile.id,
+                        server_name_snapshot=server.name if server else None,
+                        api_url_snapshot=server.api_url if server else None,
+                        api_key_snapshot=server.api_key if server else None,
+                        peer_id=profile.peer_id,
+                        client_name=profile.client_name,
+                        audit_reason="device_delete_force" if force else "device_delete",
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
+            session.delete(profile)
             return True
-        if not profile.peer_id:
-            raise DeviceCreationError("Profile has no managed peer")
+
         server = await session.get(Server, profile.server_id)
         profile.provisioning_status = "deleting"
         await ensure_delete_operation(
@@ -244,4 +263,6 @@ class DeviceService:
             client_name=profile.client_name,
             audit_reason="device_delete",
         )
+        if not server:
+            session.delete(profile)
         return True

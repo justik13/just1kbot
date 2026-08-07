@@ -209,6 +209,7 @@ async def admin_delete_device_apply(
             session,
             profile,
             actor_id=callback.from_user.id,
+            force=True,
         )
 
         if not success:
