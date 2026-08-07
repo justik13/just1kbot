@@ -11,8 +11,6 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
@@ -48,6 +46,8 @@ from services.tariff_value_calculator import (
     calculate_tariff_value,
 )
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 class AccountTariffChangeError(RuntimeError):

@@ -6,8 +6,6 @@ from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from bot import texts
 from bot.keyboards import (
     get_back_button,
@@ -41,6 +39,8 @@ from .common import (
     _show_hub,
     _show_showcase,
 )
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
