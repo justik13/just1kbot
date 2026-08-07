@@ -160,7 +160,7 @@ async def _build_users_list_text_and_kb(
 
             days = format_days_left(user.subscription_end)
 
-            profiles_count = len(user.profiles) if user.profiles else 0
+            profiles_count = len([p for p in user.profiles if getattr(p, "provisioning_status", None) != "deleting"]) if user.profiles else 0
 
             button_text = truncate_button_text(
                 texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L165_1.format(value_0=status, value_1=ban, value_2=username, value_3=days, value_4=profiles_count)
@@ -204,7 +204,7 @@ async def _render_user_card(
     session: AsyncSession,
 ):
     from database.repositories.account_ledger_repo import get_account_balance
-    profiles = user.profiles if user.profiles else []
+    profiles = await get_user_profiles(session, user.id)
 
     referrals = await get_user_referrals(
         session,

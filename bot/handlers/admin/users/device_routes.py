@@ -11,7 +11,7 @@ from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
     get_admin_user_devices_keyboard,
 )
-from database.repositories.profiles_repo import get_profile_by_id
+from database.repositories.profiles_repo import get_profile_by_id, get_user_profiles
 from database.repositories.servers_repo import get_server_by_id
 from services.device_service import DeviceService
 from utils.admin import is_admin
@@ -57,7 +57,7 @@ async def admin_user_devices(
         )
         return
 
-    profiles = user.profiles if user.profiles else []
+    profiles = await get_user_profiles(session, user.id)
 
     if not profiles:
         text = (
