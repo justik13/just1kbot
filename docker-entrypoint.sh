@@ -13,7 +13,7 @@ import urllib.parse
 def check_var(name):
     val = os.environ.get(name, "")
     if isinstance(val, str):
-        val = val.strip().strip("'").strip('"')
+        val = val.strip().strip("\x27\x22")
     if not val or "CHANGE_ME" in val.upper():
         print(f"echo \"CRITICAL ERROR: {name} is missing or contains a placeholder!\" >&2")
         print("exit 1")
