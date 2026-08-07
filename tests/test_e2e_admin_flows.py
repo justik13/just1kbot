@@ -170,6 +170,29 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("987654321", req.text)
 
+    async def test_admin_flow_send_direct_message(self):
+        import asyncio
+        update = self._create_callback_update("admin_send_msg:987654321")
+        await self.dp.feed_update(bot=self.bot, update=update)
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("Отправка сообщения пользователю", req.text)
+
+        await asyncio.sleep(0.35)
+        update = self._create_message_update("Hello from Admin!")
+        await self.dp.feed_update(bot=self.bot, update=update)
+
+        send_req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "SendMessage" and req.chat_id == 987654321
+        )
+        self.assertIn("Hello from Admin!", send_req.text)
+
 
 if __name__ == "__main__":
     unittest.main()
