@@ -240,6 +240,7 @@ async def _show_user_card_edit(
     message,
     user,
     session: AsyncSession,
+    notice: str | None = None,
 ):
     from database.repositories.account_ledger_repo import get_account_balance
     profiles = await get_user_profiles(session, user.id)
@@ -261,25 +262,19 @@ async def _show_user_card_edit(
         bonus_balance=int(balance.bonus_available),
     )
 
+    if notice:
+        rendered = f"{notice}\n\n{rendered}"
 
-    try:
-        await message.edit_text(
-            rendered,
-            reply_markup=get_admin_user_card_keyboard(
-                user.telegram_id,
-                user.is_banned,
-            ),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(f"_show_user_card_edit edit_text failed: {e}")
+    trigger_message_id = getattr(message, "message_id", None)
 
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            rendered,
-            get_admin_user_card_keyboard(
-                user.telegram_id,
-                user.is_banned,
-            ),
-        )
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        rendered,
+        get_admin_user_card_keyboard(
+            user.telegram_id,
+            user.is_banned,
+        ),
+        trigger_message_id=trigger_message_id,
+    )
+
