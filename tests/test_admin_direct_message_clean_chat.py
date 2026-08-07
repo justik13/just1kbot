@@ -48,6 +48,7 @@ class AdminDirectMessageCleanChatTests(unittest.IsolatedAsyncioTestCase):
             message.bot.send_message.assert_called_once_with(
                 902161217,
                 "📨 <b>Сообщение от администрации:</b>\n\nTest admin direct message content",
+                reply_markup=unittest.mock.ANY,
                 parse_mode="HTML",
             )
 

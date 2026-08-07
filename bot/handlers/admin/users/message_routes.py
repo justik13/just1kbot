@@ -131,6 +131,11 @@ async def process_send_user_message(
 
     msg_sent = False
     error_reason = None
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    dismiss_builder = InlineKeyboardBuilder()
+    dismiss_builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+    reply_markup = dismiss_builder.as_markup()
+
     try:
         if message.photo:
             photo_id = message.photo[-1].file_id
@@ -138,6 +143,7 @@ async def process_send_user_message(
                 target_telegram_id,
                 photo=photo_id,
                 caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                reply_markup=reply_markup,
                 parse_mode="HTML",
             )
         elif message.document:
@@ -146,6 +152,7 @@ async def process_send_user_message(
                 target_telegram_id,
                 document=doc_id,
                 caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                reply_markup=reply_markup,
                 parse_mode="HTML",
             )
         else:
@@ -153,6 +160,7 @@ async def process_send_user_message(
             await message.bot.send_message(
                 target_telegram_id,
                 f"{header}{text_to_send}",
+                reply_markup=reply_markup,
                 parse_mode="HTML",
             )
         msg_sent = True
