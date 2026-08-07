@@ -110,5 +110,20 @@ class WebhookProviderVerificationTests(unittest.IsolatedAsyncioTestCase):
         transport.get_payment_result.assert_not_awaited()
 
 
+class WebhookRouteRegistrationTests(unittest.TestCase):
+    def test_both_yookassa_webhook_routes_are_registered(self):
+        from aiohttp import web
+        from bot.handlers.webhook import setup_webhook_routes
+
+        app = web.Application()
+        setup_webhook_routes(app)
+
+        registered_paths = [route.resource.canonical for route in app.router.routes()]
+        self.assertIn("/webhook/yookassa", registered_paths)
+        self.assertIn("/yookassa/webhook", registered_paths)
+        self.assertIn("/health", registered_paths)
+
+
 if __name__ == "__main__":
     unittest.main()
+

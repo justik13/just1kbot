@@ -231,6 +231,7 @@ async def _shortage_context(session, user, quote_id):
         "quote_public_id": str(intent.quote.public_id),
         "tariff_id": intent.tariff.id,
         "source": source,
+        "auto_fulfill_action": "purchase",
     }
 
 

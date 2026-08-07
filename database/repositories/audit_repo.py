@@ -41,3 +41,16 @@ async def clear_audit_logs(session: AsyncSession, older_than_days: int = 30) -> 
     result = await session.execute(stmt)
     await session.flush()
     return result.rowcount
+
+
+async def get_user_audit_logs(session: AsyncSession, user_id: int, limit: int = 10) -> List[AuditLog]:
+    stmt = (
+        select(AuditLog)
+        .where(
+            (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
+        )
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())

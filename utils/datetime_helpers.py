@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -83,3 +83,13 @@ def is_expired(dt: Optional[datetime]) -> bool:
         dt = dt.replace(tzinfo=timezone.utc)
 
     return dt < now_utc()
+
+
+def is_vpn_access_expired(dt: Optional[datetime], grace_hours: int = 4) -> bool:
+    if dt is None:
+        return True
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return (dt + timedelta(hours=grace_hours)) < now_utc()

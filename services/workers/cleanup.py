@@ -374,7 +374,7 @@ async def _cleanup_old_records():
             update(BroadcastProgress)
             .where(BroadcastProgress.status == "in_progress")
             .where(BroadcastProgress.updated_at < threshold_stuck)
-            .values(status="stopped", details="cleanup_stuck")
+            .values(status="stopped")
         )
         await session.execute(stmt_stuck)
         result_broadcasts = await session.execute(stmt_broadcasts)

@@ -239,13 +239,53 @@ async def show_user_card(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    user = await _get_user_with_profiles(session, telegram_id)
+    await _render_user_card(callback, user, session)
 
-    if not user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+
+@router.callback_query(F.data.startswith("admin_user_audit:"))
+async def show_user_audit(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    await _render_user_card(callback, user, session)
+    telegram_id = parse_callback_id(callback.data, 1)
+    if telegram_id is None:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
+    user = await _get_user_with_profiles(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    from database.repositories.audit_repo import get_user_audit_logs
+    from bot.keyboards import get_back_button
+    from utils.formatters import format_datetime
+
+    logs = await get_user_audit_logs(session, user_id=user.id, limit=10)
+    lines = [f"📜 <b>История действий пользователя ID {user.telegram_id}:</b>\n"]
+    if not logs:
+        lines.append("<i>История действий пуста.</i>")
+    else:
+        for item in logs:
+            dt = format_datetime(item.created_at)
+            action = item.action or "действие"
+            details = f" ({item.details})" if item.details else ""
+            lines.append(f"• <code>[{dt}]</code> {action}{details}")
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🔙 К карточке пользователя",
+        callback_data=f"admin_user_card:{telegram_id}",
+    )
+    builder.adjust(1)
+
+    await callback.message.edit_text(
+        "\n".join(lines),
+        reply_markup=builder.as_markup(),
+        parse_mode="HTML",
+    )
