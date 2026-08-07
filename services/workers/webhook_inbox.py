@@ -388,6 +388,9 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
             row.last_error = f"auto_resolved: {row.event_type} for untracked payment"
             resolved_count += 1
         else:
+            # Mark as flagged for manual review so we log it ONCE instead of every loop iteration
+            row.last_error_code = "payment_not_visible_flagged"
+            row.last_error = f"requires_manual_review: {row.event_type} for untracked payment"
             logger.warning(
                 "WebhookInbox dead entry requires manual review (untracked payment): id=%s, event_type=%s, external_id=%s",
                 row.id,

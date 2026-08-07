@@ -25,6 +25,9 @@ from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger("BackgroundWorker")
 
+_unmanaged_peers_log_cache: dict[tuple[int, str], float] = {}
+_unmanaged_peers_summary_last_logged: float = 0.0
+
 MAX_PENDING_ATTEMPTS = 10
 PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
@@ -341,18 +344,26 @@ async def _cleanup_dangling_peers():
             if peer_exists_in_db:
                 continue
 
-            logger.warning(
-                "Unmanaged VPN peer detected: server_id=%s, "
-                "server=%s, peer=%s..., client=%s; "
-                "automatic deletion disabled",
-                server_info["id"],
-                _safe_log_value(server_info["name"]),
-                _safe_log_value(client_id, 16),
-                _safe_log_value(client_name),
-            )
+            peer_key = (server_info["id"], client_id)
+            now_ts = asyncio.get_event_loop().time()
+            last_logged = _unmanaged_peers_log_cache.get(peer_key, 0.0)
+            if now_ts - last_logged >= 3600.0:  # Log at most once per hour per peer
+                _unmanaged_peers_log_cache[peer_key] = now_ts
+                logger.warning(
+                    "Unmanaged VPN peer detected: server_id=%s, "
+                    "server=%s, peer=%s..., client=%s; "
+                    "automatic deletion disabled",
+                    server_info["id"],
+                    _safe_log_value(server_info["name"]),
+                    _safe_log_value(client_id, 16),
+                    _safe_log_value(client_name),
+                )
             unmanaged_count += 1
 
-    if unmanaged_count:
+    global _unmanaged_peers_summary_last_logged
+    now_ts = asyncio.get_event_loop().time()
+    if unmanaged_count and (now_ts - _unmanaged_peers_summary_last_logged >= 3600.0):
+        _unmanaged_peers_summary_last_logged = now_ts
         logger.warning(
             "Unmanaged VPN peers detected: %s; automatic deletion disabled",
             unmanaged_count,
