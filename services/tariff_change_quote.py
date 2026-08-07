@@ -172,7 +172,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         )
         if existing_change is not None:
             existing_change.status = "cancelled"
-            existing_change.diagnostic_reason = "source_balance_untracked"
+            existing_change.diagnostic_reason = f"source_balance_untracked:{snapshot.failure_code}"
             await session.flush()
         return TariffChangeQuoteResult(
             failure_code="subscription_balance_untracked",
