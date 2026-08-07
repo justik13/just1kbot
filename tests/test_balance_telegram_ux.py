@@ -2,9 +2,6 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
 from bot.handlers.payment.balance_routes import topup_presets
 from bot.keyboards.payment import (
     get_balance_amounts_keyboard,
