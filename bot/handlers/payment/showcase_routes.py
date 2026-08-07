@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -37,6 +39,8 @@ from .common import (
     _show_hub,
     _show_showcase,
 )
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
@@ -184,6 +188,13 @@ async def select_tariff(
             as_of=now_utc(),
         )
         if quote_result.failure_code:
+            logger.warning(
+                "Tariff change quote creation failed: user_id=%s, target_tariff_id=%s, failure_code=%s, snapshot_failure_code=%s",
+                db_user.id,
+                tariff.id,
+                quote_result.failure_code,
+                quote_result.snapshot_failure_code,
+            )
             errors = {
                 "target_device_limit_too_small": (
                     texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(

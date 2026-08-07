@@ -514,7 +514,7 @@ def project_subscription_balance(
                         subscription_end,
                     )
                 )
-                coverage = subscription_end
+            coverage = subscription_end
 
         if coverage is None or abs(_micros(coverage - subscription_end)) > 1_000_000:
             return fail("subscription_end_projection_mismatch", coverage)

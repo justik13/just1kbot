@@ -125,6 +125,29 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
                 tariff_versions={},
             )
 
+    def test_sub_hour_remaining_subscription_duration_is_tracked(self):
+        # 30-minute fractional gap between entitlement coverage (1 hour) and subscription_end (1 hour 30 minutes)
+        event = EntitlementEvent(
+            id=10,
+            user_id=7,
+            source_type="admin",
+            source_id="1",
+            entry_type="manual_grant",
+            hours_delta=1,
+            created_at=T0,
+        )
+        result = project_subscription_balance(
+            as_of=T0,
+            subscription_end=T0 + timedelta(hours=1, minutes=30),
+            entitlement_events=(event,),
+            ledger_entries=(),
+            tariff_versions={},
+        )
+        self.assertTrue(result.tracked)
+        self.assertIsNone(result.failure_code)
+        self.assertEqual(result.remaining_paid_hours, 0)
+        self.assertEqual(result.remaining_bonus_hours, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

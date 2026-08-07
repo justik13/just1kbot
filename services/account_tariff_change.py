@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import timedelta, timezone
 from decimal import Decimal
@@ -45,6 +46,8 @@ from services.tariff_value_calculator import (
     calculate_tariff_value,
 )
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 class AccountTariffChangeError(RuntimeError):
@@ -241,6 +244,13 @@ async def _settle_account_tariff_change(
         locked_user=user,
     )
     if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
+        logger.warning(
+            "settle_account_tariff_change untracked balance: user_id=%s, snapshot_failure_code=%s, coverage_end=%s, subscription_end=%s",
+            user.id,
+            snapshot.failure_code,
+            snapshot.coverage_end,
+            user.subscription_end,
+        )
         raise AccountTariffChangeError("subscription_balance_untracked")
     fingerprint = balance_snapshot_fingerprint(
         user_id=user.id,

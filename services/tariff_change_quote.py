@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import json
 import uuid
 from dataclasses import dataclass
@@ -21,12 +22,15 @@ from services.tariff_value_calculator import (
 )
 from database.repositories.account_ledger_repo import get_account_balance
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class TariffChangeQuoteResult:
     quote: TariffQuote | None = None
     created: bool = False
     failure_code: str | None = None
+    snapshot_failure_code: str | None = None
 
 
 class SnapshotCanonicalizationError(ValueError):
@@ -159,15 +163,31 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
     snapshot = await get_subscription_balance_snapshot(
         session, user_id=user_id, as_of=as_of, locked_user=user)
     if not snapshot.tracked or snapshot.remaining_paid_value_rub is None:
+        logger.warning(
+            "create_tariff_change_quote untracked balance: user_id=%s, snapshot_failure_code=%s, coverage_end=%s, subscription_end=%s",
+            user_id,
+            snapshot.failure_code,
+            snapshot.coverage_end,
+            user.subscription_end,
+        )
         if existing_change is not None:
             existing_change.status = "cancelled"
             existing_change.diagnostic_reason = "source_balance_untracked"
             await session.flush()
-        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
+        return TariffChangeQuoteResult(
+            failure_code="subscription_balance_untracked",
+            snapshot_failure_code=snapshot.failure_code,
+        )
 
     version_ids = {lot.tariff_version_id for lot in snapshot.paid_lots}
     lot_versions = (await session.scalars(select(TariffVersion).where(TariffVersion.id.in_(version_ids)))).all() if version_ids else []
     if len(lot_versions) != len(version_ids) or any(v.tariff_id != user.current_tariff_id for v in lot_versions):
+        logger.warning(
+            "create_tariff_change_quote mixed_source_tariffs: user_id=%s, current_tariff_id=%s, version_ids=%s",
+            user_id,
+            user.current_tariff_id,
+            version_ids,
+        )
         return TariffChangeQuoteResult(failure_code="mixed_source_tariffs")
     source_version = await get_or_create_current_version(session, source)
     target_version = await get_or_create_current_version(session, target)
@@ -204,8 +224,16 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
             target_tariff=TariffVersionSnapshot(target.id, target_version.id, target_version.duration_hours,
                                                 target_version.price_rub, target_version.currency),
             confirmed_additional_payment_rub=required, bonus_hours=snapshot.remaining_bonus_hours)
-    except TariffCalculationError:
-        return TariffChangeQuoteResult(failure_code="subscription_balance_untracked")
+    except TariffCalculationError as exc:
+        logger.warning(
+            "create_tariff_change_quote TariffCalculationError for user_id=%s: %s",
+            user_id,
+            exc,
+        )
+        return TariffChangeQuoteResult(
+            failure_code="subscription_balance_untracked",
+            snapshot_failure_code="tariff_calculation_error",
+        )
     fingerprint = balance_snapshot_fingerprint(user_id=user_id, subscription_end=user.subscription_end,
                                                snapshot=snapshot)
     quote = TariffQuote(
