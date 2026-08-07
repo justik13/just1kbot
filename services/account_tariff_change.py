@@ -237,6 +237,19 @@ async def _settle_account_tariff_change(
     if profiles > target.device_limit:
         raise AccountTariffChangeError("too_many_devices")
 
+    last_change_at = await session.scalar(
+        select(func.max(EntitlementEntry.created_at)).where(
+            EntitlementEntry.beneficiary_user_id == user.id,
+            EntitlementEntry.entry_type == "tariff_change",
+        )
+    )
+    if last_change_at is not None:
+        if last_change_at.tzinfo is None:
+            last_change_at = last_change_at.replace(tzinfo=timezone.utc)
+        is_downgrade = target.device_limit < source.device_limit
+        if is_downgrade and (now - last_change_at) < timedelta(hours=24):
+            raise AccountTariffChangeError("change_cooldown_active")
+
     snapshot = await get_subscription_balance_snapshot(
         session,
         user_id=user.id,
@@ -268,7 +281,10 @@ async def _settle_account_tariff_change(
         mismatches.append(f"ledger_ids({quote.source_ledger_entry_ids}!={snapshot.source_ledger_entry_ids})")
     if quote.current_paid_hours != snapshot.remaining_paid_hours:
         mismatches.append(f"paid_hours({quote.current_paid_hours}!={snapshot.remaining_paid_hours})")
-    if quote.current_paid_value_rub != snapshot.remaining_paid_value_rub:
+    if (
+        quote.current_paid_value_rub.quantize(Decimal("1.000000"))
+        != snapshot.remaining_paid_value_rub.quantize(Decimal("1.000000"))
+    ):
         mismatches.append(f"paid_value({quote.current_paid_value_rub}!={snapshot.remaining_paid_value_rub})")
     if quote.bonus_hours != snapshot.remaining_bonus_hours:
         mismatches.append(f"bonus_hours({quote.bonus_hours}!={snapshot.remaining_bonus_hours})")

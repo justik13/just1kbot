@@ -187,7 +187,11 @@ def setup_webhook_routes(app: web.Application):
         "/webhook/yookassa",
         yookassa_webhook_handler,
     )
+    app.router.add_post(
+        "/yookassa/webhook",
+        yookassa_webhook_handler,
+    )
     app.router.add_get("/health", healthcheck_handler)
     app.on_cleanup.append(_close_healthcheck_redis)
-    logger.info("YooKassa webhook route registered: POST /webhook/yookassa")
+    logger.info("YooKassa webhook route registered: POST /webhook/yookassa & POST /yookassa/webhook")
     logger.info("Healthcheck endpoint registered: GET /health")

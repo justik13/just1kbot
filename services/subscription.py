@@ -22,7 +22,12 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
-from utils.datetime_helpers import is_expired, now_utc, is_permanent_subscription
+from utils.datetime_helpers import (
+    is_expired,
+    is_vpn_access_expired,
+    now_utc,
+    is_permanent_subscription,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -328,7 +333,7 @@ class SubscriptionService:
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
         target_active = bool(
             user.subscription_end
-            and not is_expired(user.subscription_end)
+            and not is_vpn_access_expired(user.subscription_end, grace_hours=4)
             and not user.is_banned
             and not user.financial_hold
         )

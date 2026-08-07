@@ -359,6 +359,33 @@ async def settle_succeeded_topup(
             logging.getLogger(__name__).error(
                 f"Failed to grant referral bonus for topup {payment.id}: {e}"
             )
+        try:
+            if payment.topup_context and isinstance(payment.topup_context, dict):
+                auto_action = payment.topup_context.get("auto_fulfill_action")
+                quote_raw = payment.topup_context.get("quote_public_id")
+                if auto_action and quote_raw:
+                    import uuid
+                    import logging
+                    quote_uuid = uuid.UUID(str(quote_raw))
+                    if auto_action == "tariff_change":
+                        from services.account_tariff_change import settle_account_tariff_change
+                        await settle_account_tariff_change(
+                            session,
+                            user_id=payment.user_id,
+                            quote_public_id=quote_uuid,
+                        )
+                        logging.getLogger(__name__).info("Auto-fulfilled tariff change for payment %s, user_id=%s", payment.id, payment.user_id)
+                    elif auto_action == "purchase":
+                        from services.account_purchase import settle_account_purchase
+                        await settle_account_purchase(
+                            session,
+                            user_id=payment.user_id,
+                            quote_public_id=quote_uuid,
+                        )
+                        logging.getLogger(__name__).info("Auto-fulfilled purchase for payment %s, user_id=%s", payment.id, payment.user_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Auto-fulfillment failed for topup payment %s: %s", payment.id, e)
     await session.flush()
     return created, balance
 
