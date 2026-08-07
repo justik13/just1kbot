@@ -148,6 +148,27 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
         self.assertEqual(result.remaining_paid_hours, 0)
         self.assertEqual(result.remaining_bonus_hours, 1)
 
+    def test_coverage_exceeding_subscription_end_is_tracked(self):
+        # Entitlement coverage (24 hours) exceeds user.subscription_end (12 hours)
+        event = EntitlementEvent(
+            id=11,
+            user_id=7,
+            source_type="admin",
+            source_id="2",
+            entry_type="manual_grant",
+            hours_delta=24,
+            created_at=T0,
+        )
+        result = project_subscription_balance(
+            as_of=T0,
+            subscription_end=T0 + timedelta(hours=12),
+            entitlement_events=(event,),
+            ledger_entries=(),
+            tariff_versions={},
+        )
+        self.assertTrue(result.tracked)
+        self.assertIsNone(result.failure_code)
+
 
 if __name__ == "__main__":
     unittest.main()

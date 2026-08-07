@@ -494,9 +494,7 @@ def project_subscription_balance(
     active = subscription_end is not None and subscription_end > as_of
     if not Decimal(0) <= rounding_loss < Decimal(1):
         return fail("rounding_invariant_violation", coverage)
-    if active and (
-        coverage is None or abs(_micros(coverage - subscription_end)) > 1_000_000
-    ):
+    if active and (coverage is None or coverage < subscription_end):
         if coverage is None or coverage < subscription_end:
             untracked_start = max(coverage, as_of) if coverage else as_of
             untracked_whole = _whole(untracked_start, subscription_end, as_of, coverage)
@@ -516,7 +514,7 @@ def project_subscription_balance(
                 )
             coverage = subscription_end
 
-        if coverage is None or abs(_micros(coverage - subscription_end)) > 1_000_000:
+        if coverage is None or coverage < subscription_end:
             return fail("subscription_end_projection_mismatch", coverage)
     if not active and (paid_hours or bonus_hours):
         return fail("subscription_end_projection_mismatch", coverage)
