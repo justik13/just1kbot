@@ -36,7 +36,10 @@ jobs:
             --output-file /tmp/requirements.lock \
             requirements.txt
       - name: Verify committed lock is current
-        run: diff -u requirements.lock /tmp/requirements.lock
+        run: |
+          grep -v '^#' requirements.lock > /tmp/req_repo.txt
+          grep -v '^#' /tmp/requirements.lock > /tmp/req_ci.txt
+          diff -u /tmp/req_repo.txt /tmp/req_ci.txt
       - name: Verify locked installation
         run: |
           python -m venv /tmp/lock-check
