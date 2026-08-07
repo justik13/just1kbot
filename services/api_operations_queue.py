@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import AsyncIterator, Callable
 
-from utils.time import now_utc
+from utils.datetime_helpers import now_utc
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
