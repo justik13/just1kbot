@@ -60,13 +60,13 @@ jobs:
           --health-retries 5
       redis:
         image: redis:7
+        ports:
+          - 6379:6379
         options: >-
-          --health-cmd "redis-cli -a ci_redis_password ping"
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 6379:6379
     env:
       DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
       TEST_DATABASE_URL: postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test
@@ -74,8 +74,8 @@ jobs:
       BOT_TOKEN: "123456:TEST_ONLY_NOT_A_REAL_TOKEN"
       SUPPORT_USERNAME: "test_support_bot"
       ADMIN_IDS: "[123456789]"
-      REDIS_URL: "redis://:ci_redis_password@localhost:6379/0"
-      REDIS_PASSWORD: "ci_redis_password"
+      REDIS_URL: "redis://localhost:6379/0"
+      REDIS_PASSWORD: ""
       YOOKASSA_SHOP_ID: "123456"
       YOOKASSA_SECRET_KEY: "ci_test_secret"
       YOOKASSA_RETURN_URL: "https://t.me/{bot_username}"
