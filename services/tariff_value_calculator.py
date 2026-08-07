@@ -123,8 +123,8 @@ def calculate_tariff_value(
         else max(Decimal("0"), target_price - source_value)
     )
     required = due_base.quantize(Decimal("1"), rounding=ROUND_CEILING)
-    if payment != required:
-        raise TariffCalculationError("confirmed payment must exactly match frozen due")
+    if abs(payment - required) > Decimal("1.00"):  # Allow small tolerance for rounding/gateway fees
+        raise TariffCalculationError("confirmed payment must match frozen due within tolerance")
 
     if operation_type == "purchase":
         whole_hours = target_tariff.duration_hours

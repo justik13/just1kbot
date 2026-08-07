@@ -177,7 +177,7 @@ async def _send_pre_expiry_notifications(
 
         async with session_scope() as session:
             users_result = await session.execute(
-                select(User).where(User.id.in_(batch_ids))
+                select(User).where(User.id.in_(batch_ids)).with_for_update(skip_locked=True)
             )
 
             batch_users = list(users_result.scalars().all())
@@ -337,7 +337,7 @@ async def _send_post_expiry_notifications(
 
         async with session_scope() as session:
             users_result = await session.execute(
-                select(User).where(User.id.in_(batch_ids))
+                select(User).where(User.id.in_(batch_ids)).with_for_update(skip_locked=True)
             )
 
             batch_users = list(users_result.scalars().all())

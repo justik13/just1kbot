@@ -132,13 +132,13 @@ def _validate_callback_params(callback_data: str) -> bool:
         return False
 
     # Validate numeric parameters match expected patterns
-    for param_pattern, validation_pattern in CALLBACK_PARAM_PATTERNS.items():
-        matches = re.findall(param_pattern, callback_data)
-        for match in matches:
-            if not re.match(validation_pattern, str(match)):
+    for param_prefix in ("device_id=", "devices/", "server:", "servers/", "tariff:", "tariffs/", "user:", "users/"):
+        if param_prefix in callback_data:
+            param_val = callback_data.split(param_prefix, 1)[1].split(":")[0].split("_")[0].split("/")[0]
+            if not param_val.isdigit():
                 logger.warning(
                     "Invalid callback parameter value: %s in %s",
-                    match,
+                    param_val,
                     callback_data[:100],
                 )
                 return False

@@ -193,7 +193,7 @@ async def select_tariff(
                 db_user.id,
                 tariff.id,
                 quote_result.failure_code,
-                quote_result.snapshot_failure_code,
+                getattr(quote_result, "snapshot_failure_code", None),
             )
             errors = {
                 "target_device_limit_too_small": (

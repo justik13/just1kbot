@@ -359,7 +359,7 @@ async def finalize(session, claim, result, bot=None):
 
 
 async def auto_resolve_untracked_canceled_webhooks(session) -> int:
-    """Auto-heal dead payment.canceled webhooks where the payment is untracked/missing.
+    """Auto-heal dead webhooks where the payment is untracked/missing (payment_not_visible).
 
     These webhooks cannot be reconciled to any DB payment and are harmlessly discarded.
     """
@@ -368,7 +368,6 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
             select(WebhookInbox)
             .where(
                 WebhookInbox.status == "dead",
-                WebhookInbox.event_type == "payment.canceled",
                 WebhookInbox.last_error_code == "payment_not_visible",
             )
             .with_for_update(skip_locked=True)
@@ -379,7 +378,7 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
         row.processed_at = now_utc()
         row.locked_at = None
         row.locked_by = None
-        row.last_error = "auto_resolved: payment.canceled for untracked payment"
+        row.last_error = f"auto_resolved: {row.event_type} for untracked payment"
     return len(rows)
 
 

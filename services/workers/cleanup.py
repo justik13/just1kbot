@@ -12,6 +12,7 @@ from database.connection import session_scope
 from database.models import (
     BroadcastProgress,
     HubMessage,
+    Payment,
     Server,
     User,
     VPNProfile,
@@ -241,6 +242,7 @@ async def _cleanup_stuck_profiles():
                     VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending"]),
                     VPNProfile.created_at < cutoff_time
                 )
+                .with_for_update(skip_locked=True)
             )
         ).scalars().all()
 
@@ -390,11 +392,30 @@ async def _cleanup_old_records():
         result_hub = await session.execute(stmt_hub)
         hub_deleted = result_hub.rowcount
 
-        if broadcasts_deleted > 0 or deleted_logs > 0 or hub_deleted > 0:
+        # Auto-expire abandoned pending payments older than 24 hours
+        threshold_payments = current_time - timedelta(hours=24)
+        stmt_payments = (
+            update(Payment)
+            .where(
+                Payment.provider_status == "pending",
+                Payment.created_at < threshold_payments,
+            )
+            .values(
+                provider_status="canceled",
+                fulfillment_status="canceled",
+                reconciliation_status="reconciled",
+                manual_review_reason="auto_expired_abandoned_pending",
+            )
+        )
+        result_payments = await session.execute(stmt_payments)
+        payments_expired = result_payments.rowcount
+
+        if broadcasts_deleted > 0 or deleted_logs > 0 or hub_deleted > 0 or payments_expired > 0:
             logger.info(
                 "Cleanup: %s old broadcasts, %s old audit logs, "
-                "%s old hub_messages deleted",
+                "%s old hub_messages deleted, %s abandoned pending payments expired",
                 broadcasts_deleted,
                 deleted_logs,
                 hub_deleted,
+                payments_expired,
             )

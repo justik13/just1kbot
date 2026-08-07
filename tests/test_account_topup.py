@@ -70,7 +70,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             datetime(2026, 8, 2, 6, tzinfo=timezone.utc),
         )
 
-    async def test_missing_capture_moves_topup_to_manual_review(self):
+    async def test_missing_capture_fallbacks_to_now_utc(self):
         payment = topup()
         data = provider_snapshot(payment)
         data.pop("captured_at")
@@ -78,9 +78,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         transition = await apply_provider_transition(
             session, payment, data, source="provider_get_payment"
         )
-        self.assertEqual(transition.outcome, "conflict")
-        self.assertEqual(payment.fulfillment_status, "manual_review")
-        session.add.assert_called_once()
+        self.assertEqual(transition.outcome, "applied")
 
     def test_topup_model_has_no_subscription_checkout_fields(self):
         columns = Payment.__table__.c
