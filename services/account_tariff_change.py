@@ -257,17 +257,28 @@ async def _settle_account_tariff_change(
         subscription_end=user.subscription_end,
         snapshot=snapshot,
     )
-    if (
-        quote.source_subscription_end != user.subscription_end
-        or quote.source_balance_fingerprint != fingerprint
-        or sorted(quote.source_entitlement_entry_ids or [])
-        != sorted(snapshot.source_entitlement_entry_ids)
-        or sorted(quote.source_ledger_entry_ids or [])
-        != sorted(snapshot.source_ledger_entry_ids)
-        or quote.current_paid_hours != snapshot.remaining_paid_hours
-        or quote.current_paid_value_rub != snapshot.remaining_paid_value_rub
-        or quote.bonus_hours != snapshot.remaining_bonus_hours
-    ):
+    mismatches = []
+    if _timestamp(quote.source_subscription_end) != _timestamp(user.subscription_end):
+        mismatches.append(f"sub_end({_timestamp(quote.source_subscription_end)}!={_timestamp(user.subscription_end)})")
+    if quote.source_balance_fingerprint != fingerprint:
+        mismatches.append(f"fingerprint({quote.source_balance_fingerprint[:8]}!={fingerprint[:8]})")
+    if sorted(quote.source_entitlement_entry_ids or []) != sorted(snapshot.source_entitlement_entry_ids):
+        mismatches.append(f"entitlement_ids({quote.source_entitlement_entry_ids}!={snapshot.source_entitlement_entry_ids})")
+    if sorted(quote.source_ledger_entry_ids or []) != sorted(snapshot.source_ledger_entry_ids):
+        mismatches.append(f"ledger_ids({quote.source_ledger_entry_ids}!={snapshot.source_ledger_entry_ids})")
+    if quote.current_paid_hours != snapshot.remaining_paid_hours:
+        mismatches.append(f"paid_hours({quote.current_paid_hours}!={snapshot.remaining_paid_hours})")
+    if quote.current_paid_value_rub != snapshot.remaining_paid_value_rub:
+        mismatches.append(f"paid_value({quote.current_paid_value_rub}!={snapshot.remaining_paid_value_rub})")
+    if quote.bonus_hours != snapshot.remaining_bonus_hours:
+        mismatches.append(f"bonus_hours({quote.bonus_hours}!={snapshot.remaining_bonus_hours})")
+
+    if mismatches:
+        logger.warning(
+            "settle_account_tariff_change quote_source_history_changed: user_id=%s, mismatches=%s",
+            user.id,
+            ", ".join(mismatches),
+        )
         raise AccountTariffChangeError("quote_source_history_changed")
     try:
         calculation = calculate_tariff_value(
