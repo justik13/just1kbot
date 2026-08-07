@@ -7,6 +7,7 @@ import traceback
 
 import aiofiles.os
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import (
     BotCommand,
@@ -182,11 +183,13 @@ async def setup_bot_commands(bot: Bot):
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
-async def setup_bot() -> tuple[Bot, Dispatcher]:
+async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) -> tuple[Bot, Dispatcher]:
     settings = get_settings()
 
-    bot = Bot(token=settings.BOT_TOKEN)
-    storage = RedisStorage.from_url(settings.REDIS_URL)
+    if bot is None:
+        bot = Bot(token=settings.BOT_TOKEN)
+    if storage is None:
+        storage = RedisStorage.from_url(settings.REDIS_URL)
     dp = Dispatcher(storage=storage)
 
     dp.message.middleware(CorrelationMiddleware())
@@ -254,6 +257,7 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
         admin_payment_queues_router,
         fallback_router,
     ]:
+        r._parent_router = None
         dp.include_router(r)
 
     dp.errors.register(global_error_handler)

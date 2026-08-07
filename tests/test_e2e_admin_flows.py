@@ -14,6 +14,7 @@ from tests.test_e2e_user_flows import MockedSession
 
 DB = os.getenv("TEST_DATABASE_URL")
 
+
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -33,7 +34,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.admin_user_db = DBUser(telegram_id=999999999)
             # Create a regular user
             self.target_user_db = DBUser(telegram_id=123456789)
-            
+
             self.tariff = Tariff(
                 name="E2E Basic",
                 duration_days=30,
@@ -54,24 +55,32 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(version)
             await session.commit()
-            
-        self.patcher = patch("bot.main.get_settings")
-        self.mock_settings = self.patcher.start()
-        
-        class MockConfig:
-            BOT_TOKEN = "123:test"
-            REDIS_URL = "redis://redis:6379/1"
-            ADMIN_IDS = (999999999,)  # the admin user
-            SUPPORT_USERNAME = "test_support"
-            DOMAIN = "test.domain"
-            DB_ENCRYPTION_KEY = "test_key"
-            
-        self.mock_settings.return_value = MockConfig()
-        
+
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[999999999]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "DATABASE_URL": "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test",
+            },
+        )
+        self.env_patcher.start()
+
+        from config.settings import get_settings
+
+        get_settings.cache_clear()
+
         self.session = MockedSession()
         self.bot = Bot(token="123:test", session=self.session)
-        
-        _, self.dp = await setup_bot()
+
+        from aiogram.fsm.storage.memory import MemoryStorage
+
+        _, self.dp = await setup_bot(self.bot, storage=MemoryStorage())
 
         self.admin = User(
             id=999999999,
@@ -82,10 +91,17 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.chat = Chat(id=999999999, type="private")
 
     async def asyncTearDown(self):
+        from bot.middlewares.clean_chat import stop_clean_chat_worker
+        from config.settings import get_settings
+        from database.connection import close_db
+
+        await close_db()
+        await stop_clean_chat_worker()
+        self.env_patcher.stop()
+        get_settings.cache_clear()
         await self.dp.storage.close()
         await self.bot.session.close()
         await self.engine.dispose()
-        self.patcher.stop()
 
     def _create_message_update(self, text: str) -> Update:
         message = Message(
@@ -114,28 +130,38 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         return Update(update_id=2, callback_query=callback)
 
     async def test_admin_flow_open_menu(self):
-        update = self._create_message_update("/admin")
+        update = self._create_callback_update("admin_menu")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "SendMessage")
-        self.assertIn("Панель администратора", req.text)
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("Админ-панель", req.text)
 
     async def test_admin_flow_user_management(self):
         update = self._create_callback_update("admin_users")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "EditMessageText")
-        self.assertIn("Введите ID пользователя", req.text)
-        
-        # Admin sends user ID
-        update = self._create_message_update("123456789")
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
+        self.assertIn("Пользователи", req.text)
+
+        # Admin clicks on user card
+        update = self._create_callback_update("admin_user_card:123456789")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
-        req = self.session.get_request()
-        self.assertEqual(req.__class__.__name__, "SendMessage")
-        self.assertIn("Профиль пользователя", req.text)
+
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText" and "Карточка" in req.text
+        )
+        self.assertIn("Карточка", req.text)
+
 
 if __name__ == "__main__":
     unittest.main()

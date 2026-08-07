@@ -100,9 +100,6 @@ class CorrelationMiddleware(BaseMiddleware):
         try:
             return await handler(event, data)
         except Exception as e:
-            # Не логируем текст исключения здесь.
-            # Полный stack trace будет обработан глобальным error handler'ом,
-            # где вывод должен быть дополнительно санитизирован.
             logger.error(
                 "[%s] Unhandled exception in %s: %s",
                 request_id,
