@@ -126,6 +126,8 @@ class ProfileDeletionService:
                 count += 1
                 continue
             if not profile.peer_id:
+                await session.delete(profile)
+                count += 1
                 continue
             server = await session.get(Server, profile.server_id)
             profile.provisioning_status = "deleting"
