@@ -181,11 +181,10 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
 
     version_ids = {lot.tariff_version_id for lot in snapshot.paid_lots}
     lot_versions = (await session.scalars(select(TariffVersion).where(TariffVersion.id.in_(version_ids)))).all() if version_ids else []
-    if len(lot_versions) != len(version_ids) or any(v.tariff_id != user.current_tariff_id for v in lot_versions):
+    if len(lot_versions) != len(version_ids):
         logger.warning(
-            "create_tariff_change_quote mixed_source_tariffs: user_id=%s, current_tariff_id=%s, version_ids=%s",
+            "create_tariff_change_quote missing_tariff_versions: user_id=%s, version_ids=%s",
             user_id,
-            user.current_tariff_id,
             version_ids,
         )
         return TariffChangeQuoteResult(failure_code="mixed_source_tariffs")
