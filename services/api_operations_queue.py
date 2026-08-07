@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import AsyncIterator, Callable
 
+from utils.time import now_utc
+
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -276,9 +278,7 @@ async def claim_api_operations(
 
     claimed: list[ClaimedAPIOperation] = []
     async with _transaction(session_factory) as session:
-        from sqlalchemy import func, text
-
-        now = func.now() + text("INTERVAL '1 second'")
+        now = now_utc() + timedelta(seconds=1)
         exhausted = (await session.execute(select(APIOperation).where(
             APIOperation.status.in_(("pending", "retry")),
             APIOperation.attempts >= APIOperation.max_attempts,
