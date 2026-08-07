@@ -20,7 +20,7 @@ from services.audit_service import AuditService
 from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.formatters import format_datetime
-from utils.telegram import safe
+from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
 router = Router()
@@ -58,6 +58,12 @@ async def _show_admin_dashboard(
         )
     except TelegramBadRequest as e:
         logger.debug("admin dashboard edit_text failed: %s", e)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            text,
+            get_admin_menu(maintenance_enabled=maintenance_enabled),
+        )
 
 
 @router.callback_query(F.data.in_({"menu_admin", "admin_menu"}))

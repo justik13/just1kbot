@@ -161,6 +161,7 @@ async def process_balance_topup(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -172,6 +173,7 @@ async def process_balance_topup(
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -181,6 +183,7 @@ async def process_balance_topup(
             message.chat.id,
             f"⚠️ Сумма должна быть больше 0 и не превышать {MAX_BALANCE_ADJUSTMENT} ₽",
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -191,6 +194,7 @@ async def process_balance_topup(
             message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
             get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
         )
         await state.clear()
         return
@@ -241,6 +245,7 @@ async def process_balance_topup(
         message.chat.id,
         f"✅ <b>Успешно!</b> Пользователю {user.telegram_id} начислено <b>+{amount} ₽</b>.",
         get_back_button(f"admin_user_card:{user.telegram_id}"),
+        trigger_message_id=message.message_id,
     )
 
     await state.clear()
@@ -269,6 +274,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ERROR_OPERATION_CANCELLED,
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -280,6 +286,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ERROR_POSITIVE_NUMBER,
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -289,6 +296,7 @@ async def process_balance_deduct(
             message.chat.id,
             f"⚠️ Сумма должна быть больше 0 и не превышать {MAX_BALANCE_ADJUSTMENT} ₽",
             get_back_button(f"admin_user_balance:{telegram_id}"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -299,6 +307,7 @@ async def process_balance_deduct(
             message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
             get_back_button("admin_users"),
+            trigger_message_id=message.message_id,
         )
         await state.clear()
         return
@@ -348,6 +357,7 @@ async def process_balance_deduct(
         message.chat.id,
         f"✅ <b>Успешно!</b> С баланса пользователя {user.telegram_id} списано <b>-{amount} ₽</b>.",
         get_back_button(f"admin_user_card:{user.telegram_id}"),
+        trigger_message_id=message.message_id,
     )
 
     await state.clear()

@@ -13,15 +13,15 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
 }
 
 
-async def get_user_profiles(session: AsyncSession, user_id: int) -> list[VPNProfile]:
-    stmt = (
-        select(VPNProfile)
-        .where(VPNProfile.user_id == user_id)
-        .options(selectinload(VPNProfile.server))
-        .order_by(VPNProfile.created_at.desc())
-    )
+async def get_user_profiles(
+    session: AsyncSession, user_id: int, include_deleting: bool = False
+) -> list[VPNProfile]:
+    stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
+    if not include_deleting:
+        stmt = stmt.where(VPNProfile.provisioning_status != "deleting")
+    stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.desc())
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
 
 
 async def get_profile_by_id(session: AsyncSession, profile_id: int) -> VPNProfile | None:
@@ -66,7 +66,11 @@ async def delete_profile(session: AsyncSession, profile: VPNProfile) -> None:
     await session.flush()
 
 
-async def get_user_profiles_count(session: AsyncSession, user_id: int) -> int:
+async def get_user_profiles_count(
+    session: AsyncSession, user_id: int, include_deleting: bool = False
+) -> int:
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
+    if not include_deleting:
+        stmt = stmt.where(VPNProfile.provisioning_status != "deleting")
     result = await session.execute(stmt)
     return result.scalar_one()
