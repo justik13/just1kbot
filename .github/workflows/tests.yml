@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
           cache: pip
       - name: Generate deterministic hash lock
         run: |
@@ -30,9 +30,22 @@ jobs:
       - name: Verify committed lock is current
         run: |
           if [ -f requirements.lock ]; then
-            diff -u -I '^#' requirements.lock /tmp/requirements.lock
+            grep -v '^#' requirements.lock > /tmp/req_repo.txt
+            grep -v '^#' /tmp/requirements.lock > /tmp/req_ci.txt
+            diff -u /tmp/req_repo.txt /tmp/req_ci.txt > /tmp/diff.txt || true
           else
             echo 'requirements.lock is not committed yet; artifact will be used by the test job.'
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diff-tests
+          path: /tmp/diff.txt
+      - name: Fail if diff exists
+        run: |
+          if [ -s /tmp/diff.txt ]; then
+            echo "Lockfile is out of date. Check the diff-tests artifact."
+            exit 1
           fi
       - uses: actions/upload-artifact@v4
         with:
@@ -129,7 +142,8 @@ jobs:
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
       - name: Show unittest log on failure
         if: failure() && steps.unittests.outcome == 'failure'
-        run: cat /tmp/unittest.log
+        run: |
+          cat /tmp/unittest.log
       - name: Upload failing unittest log
         if: failure() && steps.unittests.outcome == 'failure'
         uses: actions/upload-artifact@v4
