@@ -236,19 +236,25 @@ async def _settle_account_tariff_change(
     )
     if profiles > target.device_limit:
         raise AccountTariffChangeError("too_many_devices")
-
-    last_change_at = await session.scalar(
-        select(func.max(EntitlementEntry.created_at)).where(
-            EntitlementEntry.beneficiary_user_id == user.id,
-            EntitlementEntry.entry_type == "tariff_change",
+    is_requested_downgrade = target.device_limit < source.device_limit
+    if is_requested_downgrade:
+        last_change_entry = await session.scalar(
+            select(EntitlementEntry)
+            .where(
+                EntitlementEntry.beneficiary_user_id == user.id,
+                EntitlementEntry.entry_type == "tariff_change",
+            )
+            .order_by(EntitlementEntry.created_at.desc())
+            .limit(1)
         )
-    )
-    if last_change_at is not None:
-        if last_change_at.tzinfo is None:
-            last_change_at = last_change_at.replace(tzinfo=timezone.utc)
-        is_downgrade = target.device_limit < source.device_limit
-        if is_downgrade and (now - last_change_at) < timedelta(hours=24):
-            raise AccountTariffChangeError("change_cooldown_active")
+        if last_change_entry is not None:
+            last_change_at = last_change_entry.created_at
+            if last_change_at.tzinfo is None:
+                last_change_at = last_change_at.replace(tzinfo=timezone.utc)
+            meta = last_change_entry.metadata_ or {}
+            was_last_downgrade = meta.get("is_downgrade", True)
+            if was_last_downgrade and (now - last_change_at) < timedelta(hours=24):
+                raise AccountTariffChangeError("change_cooldown_active")
 
     snapshot = await get_subscription_balance_snapshot(
         session,
@@ -367,6 +373,7 @@ async def _settle_account_tariff_change(
         "resulting_paid_value_rub": _decimal(quote.resulting_paid_value_rub),
         "resulting_bonus_hours": quote.resulting_bonus_hours,
         "account_debit_id": debit.id if debit else None,
+        "is_downgrade": target.device_limit < source.device_limit,
     }
     try:
         conversion = await get_or_create_conversion_entry(
