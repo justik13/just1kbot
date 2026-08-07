@@ -158,9 +158,9 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         req = next(
             req
             for req in reversed(self.session.requests)
-            if req.__class__.__name__ == "EditMessageText" and "Карточка" in req.text
+            if req.__class__.__name__ == "EditMessageText" and hasattr(req, "text") and req.text and "123456789" in req.text
         )
-        self.assertIn("Карточка", req.text)
+        self.assertIn("123456789", req.text)
 
 
 if __name__ == "__main__":

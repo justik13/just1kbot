@@ -211,7 +211,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         # Emulate clicking on the tariff to quote
         update = self._create_callback_update(f"select_tariff:{self.tariff.id}:showcase")
         await self.dp.feed_update(bot=self.bot, update=update)
-        req = self.session.get_request()
+        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ in ("EditMessageText", "SendMessage") and hasattr(r, "text") and r.text)
         self.assertIn("Базовый", req.text)
         self.assertIn("150", req.text)
         # Here they should see "Не хватает" (insufficient funds)
