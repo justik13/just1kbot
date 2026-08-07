@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -145,18 +144,6 @@ async def create_balance_topup(
     if unfinished >= cfg.BALANCE_MAX_UNFINISHED_TOPUPS:
         raise AccountTopupError("too_many_unfinished_topups")
 
-    created_since = now_utc() - timedelta(hours=24)
-    creation_count = int(
-        await session.scalar(
-            select(func.count(Payment.id)).where(
-                Payment.user_id == user.id,
-                Payment.created_at >= created_since,
-            )
-        )
-        or 0
-    )
-    if creation_count >= cfg.BALANCE_MAX_TOPUP_CREATIONS_24H:
-        raise AccountTopupError("topup_creation_rate_limited")
 
     pending = await _pending_topup_exposure(session, user.id)
     projected_position = balance.real_position + pending + rubles
@@ -412,7 +399,7 @@ async def settle_succeeded_topup(
                 else:
                     text = (
                         f"✅ <b>Баланс пополнен на +{int(payment.amount)} ₽!</b>\n\n"
-                        f"💰 Реальный баланс: <b>{int(balance.real_position)} ₽</b>"
+                        f"💰 Баланс: <b>{int(balance.real_position)} ₽</b>"
                     )
                     builder.button(text="💰 Мой баланс", callback_data="menu_balance")
                     builder.button(text="📦 Купить подписку", callback_data="payment_showcase")

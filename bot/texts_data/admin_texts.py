@@ -171,7 +171,7 @@ Admin <code>{admin_id}</code>
 <b>Имя:</b> {first_name}
 <b>Статус:</b> {status}
 <b>Бан:</b> {ban}
-<b>💰 Реальный баланс:</b> {real_balance} ₽
+<b>💰 Баланс:</b> {real_balance} ₽
 <b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
 <b>Действует до:</b> {valid_until}
 <b>Осталось:</b> {days_left}

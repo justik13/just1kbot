@@ -8,7 +8,7 @@ ID: <code>{telegram_id}</code>
 🔌 <b>Устройства:</b> {devices_count}
 📊 <b>Всего трафика:</b> {total_traffic}
 
-💰 <b>Реальный баланс:</b> {balance} ₽
+💰 <b>Баланс:</b> {balance} ₽
 🎁 <b>Бонусный баланс:</b> {referral_bonus_balance} ₽
 
 👥 <b>Рефералов:</b> {referrals_count}""",
@@ -19,7 +19,7 @@ ID: <code>{telegram_id}</code>
 
 🔴 <b>Статус:</b> Нет активной подписки
 
-💰 <b>Реальный баланс:</b> {balance} ₽
+💰 <b>Баланс:</b> {balance} ₽
 🎁 <b>Бонусный баланс:</b> {referral_bonus_balance} ₽
 
 Чтобы подключать устройства и пользоваться сервисом, оформите подписку.

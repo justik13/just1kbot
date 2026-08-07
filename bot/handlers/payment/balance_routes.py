@@ -57,7 +57,6 @@ def _topup_errors(settings=None) -> dict[str, str]:
         "too_many_unfinished_topups": texts.TOPUP_ERROR_UNFINISHED.format(
             limit=cfg.BALANCE_MAX_UNFINISHED_TOPUPS
         ),
-        "topup_creation_rate_limited": texts.TOPUP_ERROR_RATE_LIMIT,
         "topup_blocked": texts.TOPUP_ERROR_BLOCKED,
         "topup_user_banned": texts.TOPUP_ERROR_BANNED,
     }
@@ -105,7 +104,7 @@ async def _render_balance(
     history = await get_account_history(session, user_id=user.id, limit=5)
     visible = await get_visible_balance_topup(session, user_id=user.id)
     details = [
-        f"💰 Реальный баланс: <b>{int(snapshot.real_available)} ₽</b>",
+        f"💰 Баланс: <b>{int(snapshot.real_available)} ₽</b>",
     ]
     if snapshot.bonus_available > 0:
         details.append(
@@ -337,7 +336,7 @@ async def choose_topup_amount(
     tariffs = await get_active_tariffs(session)
     amounts = topup_presets(tariffs)
     balance = await get_account_balance(session, user_id=db_user.id)
-    balance_lines = f"💰 Реальный баланс: <b>{int(balance.real_available)} ₽</b>"
+    balance_lines = f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
     if balance.bonus_available > 0:
         balance_lines += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
     text = (
