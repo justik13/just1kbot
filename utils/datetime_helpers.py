@@ -92,4 +92,4 @@ def is_vpn_access_expired(dt: Optional[datetime], grace_hours: int = 4) -> bool:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
 
-    return (dt + timedelta(hours=grace_hours)) < now_utc()
+    return (dt + timedelta(hours=grace_hours)) < now_utc()

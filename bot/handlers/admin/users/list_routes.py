@@ -373,4 +373,4 @@ async def show_user_audit(
             parse_mode="HTML",
         )
     except TelegramBadRequest:
-        pass
+        pass

@@ -36,7 +36,7 @@ async def clear_audit_logs(session: AsyncSession, older_than_days: int = 30) -> 
     from datetime import timedelta
     from sqlalchemy import delete
     threshold = now_utc() - timedelta(days=older_than_days)
-    
+
     stmt = delete(AuditLog).where(AuditLog.created_at < threshold)
     result = await session.execute(stmt)
     await session.flush()
@@ -73,4 +73,4 @@ async def get_user_audit_logs_count(
             (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
         )
     )
-    return int(await session.scalar(stmt) or 0)
+    return int(await session.scalar(stmt) or 0)
