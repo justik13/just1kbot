@@ -259,7 +259,14 @@ async def show_user_audit(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
-    telegram_id = parse_callback_id(callback.data, 1)
+    parts = callback.data.split(":")
+    if len(parts) < 2:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    telegram_id = int(parts[1]) if parts[1].isdigit() else None
+    page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+
     if telegram_id is None:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
@@ -270,30 +277,99 @@ async def show_user_audit(
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
+    import math
     from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from database.repositories.audit_repo import get_user_audit_logs
+    from database.repositories.audit_repo import (
+        get_user_audit_logs,
+        get_user_audit_logs_count,
+    )
     from utils.formatters import format_datetime
 
-    logs = await get_user_audit_logs(session, user_id=user.id, limit=10)
-    lines = [f"📜 <b>История действий пользователя ID {user.telegram_id}:</b>\n"]
+    page_size = 10
+    offset = (page - 1) * page_size
+    total_count = await get_user_audit_logs_count(session, user_id=user.id)
+    total_pages = max(1, math.ceil(total_count / page_size))
+    page = min(max(1, page), total_pages)
+    offset = (page - 1) * page_size
+
+    logs = await get_user_audit_logs(
+        session, user_id=user.id, offset=offset, limit=page_size
+    )
+
+    action_map = {
+        "ACCOUNT_TARIFF_CHANGE_SETTLED": "🔄 Смена тарифа",
+        "ACCOUNT_PURCHASE_SETTLED": "🛒 Покупка тарифа",
+        "TOPUP_USER_BALANCE": "💳 Начисление баланса",
+        "ADMIN_BALANCE_TOPUP": "➕ Начисление баланса админом",
+        "ADMIN_BALANCE_DEDUCT": "➖ Списание баланса админом",
+        "ADMIN_SUB_GRANT": "🎁 Выдача подписки админом",
+        "ADMIN_SUB_EXTEND": "⏳ Продление подписки админом",
+        "ADMIN_SUB_REDUCE": "✂️ Сокращение подписки админом",
+        "ADMIN_SUB_CHANGE": "⚙️ Изменение подписки админом",
+        "BAN_USER": "🚫 Блокировка пользователя",
+        "UNBAN_USER": "✅ Разблокировка пользователя",
+        "DEVICE_CREATE": "📱 Создание устройства",
+        "DEVICE_DELETE": "🗑 Удаление устройства",
+        "PAYMENT_SUCCESS": "✅ Оплата (YooKassa)",
+        "PAYMENT_FAILED": "❌ Ошибка оплаты",
+        "REFUND": "↩️ Возврат средств",
+    }
+
+    lines = [
+        f"📜 <b>История действий пользователя ID {user.telegram_id}:</b>",
+        f"<i>Всего записей: {total_count}</i>\n",
+    ]
     if not logs:
         lines.append("<i>История действий пуста.</i>")
     else:
         for item in logs:
             dt = format_datetime(item.created_at)
-            action = item.action or "действие"
-            details = f" ({item.details})" if item.details else ""
-            lines.append(f"• <code>[{dt}]</code> {action}{details}")
+            action_text = action_map.get(item.action, item.action or "Действие")
+            details_text = ""
+            if item.details:
+                if "debit=" in item.details and "conversion=" in item.details:
+                    details_text = ""
+                else:
+                    details_text = f" — {item.details}"
+            lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
+    if total_pages > 1:
+        if page > 1:
+            builder.button(
+                text="◀️ Назад",
+                callback_data=f"admin_user_audit:{telegram_id}:{page - 1}",
+            )
+        else:
+            builder.button(text=" ⏹ ", callback_data="ignore")
+
+        builder.button(
+            text=f"Стр {page}/{total_pages}",
+            callback_data="ignore",
+        )
+
+        if page < total_pages:
+            builder.button(
+                text="Вперед ▶️",
+                callback_data=f"admin_user_audit:{telegram_id}:{page + 1}",
+            )
+        else:
+            builder.button(text=" ⏹ ", callback_data="ignore")
+
+        builder.adjust(3, 1)
+    else:
+        builder.adjust(1)
+
     builder.button(
         text="🔙 К карточке пользователя",
         callback_data=f"admin_user_card:{telegram_id}",
     )
-    builder.adjust(1)
 
-    await callback.message.edit_text(
-        "\n".join(lines),
-        reply_markup=builder.as_markup(),
-        parse_mode="HTML",
-    )
+    try:
+        await callback.message.edit_text(
+            "\n".join(lines),
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest:
+        pass

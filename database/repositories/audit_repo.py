@@ -43,14 +43,34 @@ async def clear_audit_logs(session: AsyncSession, older_than_days: int = 30) -> 
     return result.rowcount
 
 
-async def get_user_audit_logs(session: AsyncSession, user_id: int, limit: int = 10) -> List[AuditLog]:
+async def get_user_audit_logs(
+    session: AsyncSession,
+    user_id: int,
+    offset: int = 0,
+    limit: int = 10,
+) -> List[AuditLog]:
     stmt = (
         select(AuditLog)
         .where(
             (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
         )
         .order_by(AuditLog.created_at.desc())
+        .offset(offset)
         .limit(limit)
     )
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return list(result.scalars().all())
+
+
+async def get_user_audit_logs_count(
+    session: AsyncSession,
+    user_id: int,
+) -> int:
+    from sqlalchemy import func
+    stmt = (
+        select(func.count(AuditLog.id))
+        .where(
+            (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
+        )
+    )
+    return int(await session.scalar(stmt) or 0)
