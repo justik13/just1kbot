@@ -371,5 +371,11 @@ class AmneziaTypedResultTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(failure.error_kind)
 
 
+    async def test_pagination_stops_immediately_on_429(self):
+        from services.amnezia_client_pagination import get_all_clients_with_retry
+        self.use_session(*(FakeResponse(429) for _ in range(10)))
+        clients = await get_all_clients_with_retry(self.client)
+        self.assertIsNone(clients)
+
 if __name__ == "__main__":
     unittest.main()
