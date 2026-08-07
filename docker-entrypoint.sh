@@ -37,7 +37,6 @@ check_var("YOOKASSA_SECRET_KEY")
 check_var("YOOKASSA_RETURN_URL")
 check_var("DOMAIN")
 check_var("SSL_EMAIL")
-check_var("BACKUP_AGE_RECIPIENT")
 
 pg_host = os.environ.get("POSTGRES_HOST", "db")
 redis_host = os.environ.get("REDIS_HOST", "redis")
