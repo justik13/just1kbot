@@ -246,7 +246,7 @@ class DeviceService:
                     )
                 except Exception as exc:
                     logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
-            await session.delete(profile)
+            session.delete(profile)
             return True
 
         server = await session.get(Server, profile.server_id)
