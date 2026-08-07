@@ -20,7 +20,7 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
 
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
-        session.delete = MagicMock()
+        session.delete = AsyncMock()
 
         result = await DeviceService.delete_device(session, profile)
 
@@ -42,7 +42,7 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
         session.get = AsyncMock(return_value=server)
-        session.delete = MagicMock()
+        session.delete = AsyncMock()
 
         with patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock):
             result = await DeviceService.delete_device(session, profile, force=True)
@@ -60,3 +60,19 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         profiles = await get_user_profiles(session, user_id=1)
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0].id, 1)
+
+    async def test_profile_deletion_service_deletes_non_peer_id_profile(self):
+        """ProfileDeletionService should delete profiles without peer_id from session directly."""
+        from services.profile_deletion_service import ProfileDeletionService
+
+        p_no_peer = VPNProfile(id=12, user_id=1, peer_id=None, provisioning_status="active")
+        mock_scalars = MagicMock()
+        mock_scalars.__iter__ = MagicMock(return_value=iter([p_no_peer]))
+        mock_scalars.all = MagicMock(return_value=[p_no_peer])
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=mock_scalars)))
+        session.delete = AsyncMock()
+
+        count = await ProfileDeletionService.delete_profiles_for_user(session, user_id=1, reason="test_ban")
+        self.assertEqual(count, 1)
+        session.delete.assert_called_once_with(p_no_peer)
