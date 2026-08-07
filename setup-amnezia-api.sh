@@ -298,9 +298,7 @@ setup_nginx() {
 
     # Rate limiting zone (в отдельный файл)
     local rate_limit_conf="/etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf"
-    if [[ ! -f "$rate_limit_conf" ]]; then
-        echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
-    fi
+    echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
 
     local redirect_url="https://\$host:${PUBLIC_PORT}\$request_uri"
     if [[ "$PUBLIC_PORT" == "443" ]]; then

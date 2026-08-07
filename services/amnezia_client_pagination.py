@@ -41,7 +41,11 @@ async def get_all_clients_with_retry(
                 result = response.value
                 break
 
-            if not response.retryable or attempt + 1 >= max_attempts_per_page:
+            if (
+                not response.retryable
+                or response.status_code == 429
+                or attempt + 1 >= max_attempts_per_page
+            ):
                 return None
 
             await asyncio.sleep(2**attempt)
