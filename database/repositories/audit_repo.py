@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import AuditLog
 from typing import List, Optional
@@ -52,7 +52,8 @@ async def get_user_audit_logs(
     stmt = (
         select(AuditLog)
         .where(
-            (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
+            func.lower(AuditLog.target_type) == "user",
+            AuditLog.target_id == user_id,
         )
         .order_by(AuditLog.created_at.desc())
         .offset(offset)
@@ -66,11 +67,11 @@ async def get_user_audit_logs_count(
     session: AsyncSession,
     user_id: int,
 ) -> int:
-    from sqlalchemy import func
     stmt = (
         select(func.count(AuditLog.id))
         .where(
-            (AuditLog.target_id == user_id) | (AuditLog.admin_id == user_id)
+            func.lower(AuditLog.target_type) == "user",
+            AuditLog.target_id == user_id,
         )
     )
     return int(await session.scalar(stmt) or 0)

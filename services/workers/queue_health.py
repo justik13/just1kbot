@@ -191,9 +191,16 @@ class QueueHealthMonitor:
             logger.warning("Queue health alert has no configured recipients")
             return False
 
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        builder = InlineKeyboardBuilder()
+        builder.button(text="✖ Скрыть", callback_data="dismiss_notification")
+        reply_markup = builder.as_markup()
+
         async def send_one(admin_id: int) -> bool:
             try:
-                await self.bot.send_message(admin_id, message, parse_mode="HTML")
+                await self.bot.send_message(
+                    admin_id, message, parse_mode="HTML", reply_markup=reply_markup
+                )
                 return True
             except asyncio.CancelledError:
                 raise

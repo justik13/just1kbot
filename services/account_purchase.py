@@ -369,8 +369,8 @@ async def _settle_account_purchase(
         session,
         admin_id=0,
         action="ACCOUNT_PURCHASE_SETTLED",
-        target_type="TariffQuote",
-        target_id=quote.id,
+        target_type="User",
+        target_id=user.id,
         details=(
             f"operation={quote.operation_type}, debit={debit.id}, "
             f"amount={int(amount)} RUB"

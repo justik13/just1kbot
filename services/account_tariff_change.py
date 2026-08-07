@@ -436,8 +436,8 @@ async def _settle_account_tariff_change(
         session,
         admin_id=0,
         action="ACCOUNT_TARIFF_CHANGE_SETTLED",
-        target_type="TariffQuote",
-        target_id=quote.id,
+        target_type="User",
+        target_id=user.id,
         details=(
             f"debit={debit.id if debit else 'none'}, "
             f"conversion={conversion.id}, amount={int(amount)} RUB"
