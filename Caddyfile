@@ -3,5 +3,7 @@
 }
 
 {$DOMAIN} {
-    reverse_proxy bot:8080
+    reverse_proxy bot:8080 {
+        header_up X-Real-IP {remote_host}
+    }
 }

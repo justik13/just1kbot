@@ -92,7 +92,7 @@ def _get_real_ip(request: web.Request) -> str:
             return real_ip
         forwarded = request.headers.get("X-Forwarded-For", "").strip()
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            return forwarded.split(",")[-1].strip()
     return remote
 
 

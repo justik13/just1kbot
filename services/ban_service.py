@@ -30,6 +30,42 @@ class BanService:
     """
 
     @staticmethod
+    async def ban_user(
+        session: AsyncSession,
+        admin_id: int,
+        telegram_id: int,
+    ) -> tuple:
+        user = await get_user_by_telegram_id(session, telegram_id)
+        if not user:
+            return False, "Пользователь не найден"
+        if user.is_banned:
+            return True, "уже забанен"
+        return await BanService._ban_user(
+            session=session,
+            admin_id=admin_id,
+            user=user,
+            telegram_id=telegram_id,
+        )
+
+    @staticmethod
+    async def unban_user(
+        session: AsyncSession,
+        admin_id: int,
+        telegram_id: int,
+    ) -> tuple:
+        user = await get_user_by_telegram_id(session, telegram_id)
+        if not user:
+            return False, "Пользователь не найден"
+        if not user.is_banned:
+            return True, "уже разбанен"
+        return await BanService._unban_user(
+            session=session,
+            admin_id=admin_id,
+            user=user,
+            telegram_id=telegram_id,
+        )
+
+    @staticmethod
     async def toggle_ban(
         session: AsyncSession,
         admin_id: int,

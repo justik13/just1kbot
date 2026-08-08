@@ -405,16 +405,23 @@ async def settle_succeeded_topup(
                     builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
 
                 builder.adjust(1)
-                from utils.telegram import render_hub
-                await render_hub(
-                    bot,
-                    user.telegram_id,
-                    text,
-                    builder.as_markup(),
-                )
+                push_text = text
+                push_markup = builder.as_markup()
+                target_user_id = user.telegram_id
+
+                async def _send_topup_push():
+                    try:
+                        from utils.telegram import render_hub
+                        await render_hub(bot, target_user_id, push_text, push_markup)
+                    except Exception as exc:
+                        import logging
+                        logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
+
+                from database.connection import queue_post_commit_task
+                queue_post_commit_task(session, _send_topup_push)
             except Exception as exc:
                 import logging
-                logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", user.telegram_id, exc)
+                logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)
 
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None
