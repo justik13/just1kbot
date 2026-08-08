@@ -109,6 +109,62 @@ async def grant_referral_bonus_for_purchase(
     return Decimal("0")
 
 
+async def reverse_referral_bonus_for_topup(
+    session: AsyncSession,
+    *,
+    payment_id: int,
+) -> Decimal:
+    """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
+    bonus_credits = (
+        await session.scalars(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount > 0,
+                AccountLedgerEntry.metadata_["source_type"].as_string() == REFERRAL_BONUS_SOURCE,
+            )
+        )
+    ).all()
+    matching_credit = None
+    for credit in bonus_credits:
+        if (credit.metadata_ or {}).get("topup_payment_id") == payment_id:
+            matching_credit = credit
+            break
+
+    if matching_credit is None:
+        return Decimal("0")
+
+    idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.idempotency_key == idempotency_key
+        )
+    )
+    if existing is not None:
+        return Decimal(abs(existing.amount))
+
+    reversal_amount = -abs(Decimal(matching_credit.amount))
+    session.add(
+        AccountLedgerEntry(
+            user_id=matching_credit.user_id,
+            entry_type="admin_adjustment",
+            amount=reversal_amount,
+            currency="RUB",
+            payment_id=None,
+            quote_id=None,
+            reversal_of_id=matching_credit.id,
+            idempotency_key=idempotency_key,
+            metadata_={
+                "source_type": REFERRAL_BONUS_SOURCE,
+                "reason": "topup_refund_reversal",
+                "topup_payment_id": payment_id,
+                "original_credit_id": matching_credit.id,
+            },
+        )
+    )
+    await session.flush()
+    return abs(reversal_amount)
+
+
 
 async def get_referral_bonus_balance(
     session: AsyncSession,

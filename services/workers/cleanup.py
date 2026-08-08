@@ -23,9 +23,13 @@ from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
 from bot.constants import GRACE_PERIOD_HOURS
 
+from cachetools import TTLCache
+
 logger = logging.getLogger("BackgroundWorker")
 
-_unmanaged_peers_log_cache: dict[tuple[int, str], float | None] = {}
+_unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(
+    maxsize=5000, ttl=3600.0
+)
 _unmanaged_peers_summary_last_logged: float | None = None
 
 MAX_PENDING_ATTEMPTS = 10

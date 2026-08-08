@@ -162,10 +162,7 @@ async def confirm_delete_server(
         VPNProfile.server_id == server.id).with_for_update())).scalars().all())
     operations = list((await session.execute(select(APIOperation).where(
         APIOperation.server_id == server.id,
-        or_(
-            APIOperation.operation_type == "create_peer",
-            APIOperation.status.in_(("pending", "retry", "processing")),
-        ),
+        APIOperation.status.in_(("pending", "retry", "processing")),
     ).with_for_update())).scalars().all())
     processing_update = any(
         op.status == "processing" and op.operation_type == "update_peer"

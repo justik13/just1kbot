@@ -27,7 +27,7 @@ from database.models import BroadcastProgress, User
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.rate_limiter import global_send_limiter
+from utils.rate_limiter import broadcast_send_limiter
 from utils.telegram import render_hub, send_hub_document, send_hub_photo, safe
 
 router = Router()
@@ -188,45 +188,42 @@ async def process_broadcast_message(
 
 async def _send_with_html(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
-        await bot.send_photo(
-            uid,
-            media_id,
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=kb,
-        )
+        await bot.send_photo(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
     elif content_type == "document" and media_id:
-        await bot.send_document(
-            uid,
-            media_id,
-            caption=text,
-            parse_mode="HTML",
-            reply_markup=kb,
-        )
+        await bot.send_document(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif content_type == "video" and media_id:
+        await bot.send_video(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif content_type == "voice" and media_id:
+        await bot.send_voice(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif content_type == "audio" and media_id:
+        await bot.send_audio(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif content_type == "video_note" and media_id:
+        await bot.send_video_note(uid, media_id, reply_markup=kb)
+    elif content_type == "animation" and media_id:
+        await bot.send_animation(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+    elif content_type == "sticker" and media_id:
+        await bot.send_sticker(uid, media_id, reply_markup=kb)
     else:
-        await bot.send_message(
-            uid,
-            text,
-            parse_mode="HTML",
-            reply_markup=kb,
-        )
+        await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
 
 
 async def _send_plain(bot, uid, text, media_id, content_type, kb):
     if content_type == "photo" and media_id:
-        await bot.send_photo(
-            uid,
-            media_id,
-            caption=text,
-            reply_markup=kb,
-        )
+        await bot.send_photo(uid, media_id, caption=text, reply_markup=kb)
     elif content_type == "document" and media_id:
-        await bot.send_document(
-            uid,
-            media_id,
-            caption=text,
-            reply_markup=kb,
-        )
+        await bot.send_document(uid, media_id, caption=text, reply_markup=kb)
+    elif content_type == "video" and media_id:
+        await bot.send_video(uid, media_id, caption=text, reply_markup=kb)
+    elif content_type == "voice" and media_id:
+        await bot.send_voice(uid, media_id, caption=text, reply_markup=kb)
+    elif content_type == "audio" and media_id:
+        await bot.send_audio(uid, media_id, caption=text, reply_markup=kb)
+    elif content_type == "video_note" and media_id:
+        await bot.send_video_note(uid, media_id, reply_markup=kb)
+    elif content_type == "animation" and media_id:
+        await bot.send_animation(uid, media_id, caption=text, reply_markup=kb)
+    elif content_type == "sticker" and media_id:
+        await bot.send_sticker(uid, media_id, reply_markup=kb)
     else:
         await bot.send_message(uid, text, reply_markup=kb)
 
@@ -353,7 +350,7 @@ async def _send_broadcast_to_users_with_resume(
                     if stop_event and stop_event.is_set():
                         break
                     try:
-                        await global_send_limiter.acquire()
+                        await broadcast_send_limiter.acquire()
                         await _dispatch_message(
                             bot,
                             uid,
@@ -365,7 +362,7 @@ async def _send_broadcast_to_users_with_resume(
                     except TelegramRetryAfter as e:
                         await asyncio.sleep(e.retry_after + 1)
                         try:
-                            await global_send_limiter.acquire()
+                            await broadcast_send_limiter.acquire()
                             await _dispatch_message(
                                 bot,
                                 uid,
