@@ -15,7 +15,6 @@ scripts/migrate_users.py — Перенос пользователей из awg-
 
 import argparse
 import asyncio
-import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
