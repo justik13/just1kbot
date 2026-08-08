@@ -5,8 +5,6 @@ import os
 import time
 from pathlib import Path
 
-from cachetools import TTLCache
-
 from services.amnezia_client import _circuit_breakers
 from config.settings import get_settings
 from utils.logging_security import safe_url_target
@@ -27,10 +25,8 @@ def get_heartbeat_file() -> Path:
 HEARTBEAT_FILE = get_heartbeat_file()
 HEARTBEAT_INTERVAL = 60.0
 
-# ИСПРАВЛЕНО: TTLCache вместо бесконечного dict.
-_api_alert_sent: TTLCache[str, float] = TTLCache(maxsize=1000, ttl=7200)
-_API_ALERT_COOLDOWN = 1800.0
-
+# Отслеживание серверов с активным алертом для исключения спама
+_active_open_cb_alerts: set[str] = set()
 _bot_ref = None
 
 
@@ -74,43 +70,71 @@ async def _check_circuit_breakers():
     from database.repositories.servers_repo import get_server_by_api_url
 
     settings = get_settings()
-    now = time.monotonic()
 
     for api_url, cb in list(_circuit_breakers.items()):
-        if not cb.is_open:
-            continue
-        last_alert = _api_alert_sent.get(api_url, 0)
-        if now - last_alert < _API_ALERT_COOLDOWN:
-            continue
-
         safe_target = safe_url_target(api_url)
-        server_name = safe_target
-        try:
-            async with session_scope() as session:
-                server = await get_server_by_api_url(session, api_url)
-                if server:
-                    server_name = server.name
-        except Exception:
-            pass
 
-        alert_msg = (
-            texts.RUNTIME_SERVICES_WORKERS_HEARTBEAT_L99_1.format(value_0=server_name, value_1=safe_target, value_2=cb.recovery_timeout)
-        )
+        if cb.is_open:
+            if api_url in _active_open_cb_alerts:
+                continue
 
-        if _bot_ref is not None:
-            for admin_id in settings.ADMIN_IDS:
-                try:
-                    await _bot_ref.send_message(admin_id, alert_msg, parse_mode="HTML")
-                except Exception as e:
-                    logger.warning("Failed to send CB alert to admin %s: %s", admin_id, e)
-        else:
-            logger.warning(
-                "CircuitBreaker OPEN for server '%s' (%s). bot_ref is None.",
-                server_name,
-                safe_target,
+            server_name = safe_target
+            try:
+                async with session_scope() as session:
+                    server = await get_server_by_api_url(session, api_url)
+                    if server:
+                        server_name = server.name
+            except Exception:
+                pass
+
+            alert_msg = (
+                texts.RUNTIME_SERVICES_WORKERS_HEARTBEAT_L99_1.format(
+                    value_0=server_name,
+                    value_1=safe_target,
+                    value_2=cb.recovery_timeout,
+                )
             )
 
-        _api_alert_sent[api_url] = now
+            if _bot_ref is not None:
+                for admin_id in settings.ADMIN_IDS:
+                    try:
+                        await _bot_ref.send_message(admin_id, alert_msg, parse_mode="HTML")
+                    except Exception as e:
+                        logger.warning("Failed to send CB alert to admin %s: %s", admin_id, e)
+            else:
+                logger.warning(
+                    "CircuitBreaker OPEN for server '%s' (%s). bot_ref is None.",
+                    server_name,
+                    safe_target,
+                )
+
+            _active_open_cb_alerts.add(api_url)
+        else:
+            if api_url in _active_open_cb_alerts:
+                _active_open_cb_alerts.remove(api_url)
+
+                server_name = safe_target
+                try:
+                    async with session_scope() as session:
+                        server = await get_server_by_api_url(session, api_url)
+                        if server:
+                            server_name = server.name
+                except Exception:
+                    pass
+
+                recovery_msg = (
+                    f"✅ <b>Связь с сервером Amnezia восстановлена!</b>\n"
+                    f"🌍 <b>{server_name}</b>\n"
+                    f"🔗 <code>{safe_target}</code>"
+                )
+
+                if _bot_ref is not None:
+                    for admin_id in settings.ADMIN_IDS:
+                        try:
+                            await _bot_ref.send_message(admin_id, recovery_msg, parse_mode="HTML")
+                        except Exception as e:
+                            logger.warning("Failed to send CB recovery alert to admin %s: %s", admin_id, e)
+                logger.info("CircuitBreaker recovered for server '%s' (%s)", server_name, safe_target)
 
 
 def set_bot_ref(bot):

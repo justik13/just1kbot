@@ -100,7 +100,7 @@ async def admin_ban_apply(
         )
         return
 
-    success, message = await BanService.toggle_ban(
+    success, message = await BanService.ban_user(
         session,
         callback.from_user.id,
         telegram_id,
@@ -185,7 +185,7 @@ async def admin_unban_apply(
 
     await callback.answer(show_alert=False)
 
-    success, message = await BanService.toggle_ban(
+    success, message = await BanService.unban_user(
         session,
         callback.from_user.id,
         telegram_id,

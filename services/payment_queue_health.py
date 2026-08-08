@@ -104,7 +104,12 @@ async def _snapshot_queue(
         malformed_lease,
         model.locked_at < stale_cutoff,
     )
-    dead = model.status == terminal_status
+    if name == "webhook_inbox":
+        dead = (model.status == terminal_status) & (
+            model.last_error_code != "payment_not_visible_flagged"
+        )
+    else:
+        dead = model.status == terminal_status
     processing_age_source = func.coalesce(
         model.locked_at,
         updated_column,
