@@ -143,6 +143,6 @@ class TestReferralBonusLedgerEntryShape:
         assert entry is not None
         assert entry.user_id == 1
         assert entry.amount == Decimal("-10")
-        assert entry.reversal_of_id == 100
+        assert entry.reversal_of_id is None
         assert entry.payment_id is None
 

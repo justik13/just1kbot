@@ -171,7 +171,7 @@ async def reverse_referral_bonus_for_topup(
             currency="RUB",
             payment_id=None,
             quote_id=None,
-            reversal_of_id=matching_credit.id,
+            reversal_of_id=None,
             idempotency_key=idempotency_key,
             metadata_={
                 "source_type": REFERRAL_BONUS_SOURCE,
