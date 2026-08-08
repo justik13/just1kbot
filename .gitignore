@@ -32,8 +32,10 @@ dist/
 build/
 *.egg-info/
 
-# Cache directories
-.mypy_cache/
-.pytest_cache/
-```
-.cecli*
+# Dev scripts and local tools
+find_missing.py
+fix_missing.py
+fix_texts.py
+test_admin_card.py
+mcp_args.json
+audit.md
