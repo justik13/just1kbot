@@ -416,8 +416,8 @@ async def _cleanup_old_records():
             )
             .values(
                 provider_status="canceled",
-                fulfillment_status="canceled",
-                reconciliation_status="reconciled",
+                fulfillment_status="failed",
+                reconciliation_status="ok",
                 manual_review_reason="auto_expired_abandoned_pending_48h",
             )
         )

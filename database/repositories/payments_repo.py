@@ -9,49 +9,7 @@ from sqlalchemy.orm import selectinload
 from database.models import Payment, PaymentEvent
 
 
-async def create_payment(
-    session: AsyncSession,
-    user_id: int,
-    tariff_id: int,
-    amount: Decimal,
-    currency: str,
-    *,
-    snapshot_duration_days: Optional[int] = None,
-    snapshot_device_limit: Optional[int] = None,
-    snapshot_amount: Optional[Decimal] = None,
-    snapshot_currency: Optional[str] = None,
-    tariff_quote_id: Optional[int] = None,
-    tariff_version_id: Optional[int] = None,
-) -> Payment:
-    payment = Payment(
-        user_id=user_id,
-        tariff_id=tariff_id,
-        amount=amount,
-        currency=currency,
-        tariff_quote_id=tariff_quote_id,
-        tariff_version_id=tariff_version_id,
-        public_order_id="pay_" + uuid.uuid4().hex,
-        provider_idempotency_key=uuid.uuid4().hex,
-        provider_status="creating",
-        fulfillment_status="not_ready",
-        reconciliation_status="ok",
-        snapshot_duration_days=snapshot_duration_days,
-        snapshot_device_limit=snapshot_device_limit,
-        snapshot_amount=(
-            snapshot_amount
-            if snapshot_amount is not None
-            else amount
-        ),
-        snapshot_currency=(
-            snapshot_currency
-            if snapshot_currency is not None
-            else currency
-        ),
-    )
-    session.add(payment)
-    await session.flush()
-    await session.refresh(payment)
-    return payment
+
 
 
 async def get_user_payments(session: AsyncSession, user_id: int) -> List[Payment]:
