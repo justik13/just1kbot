@@ -1,5 +1,4 @@
 import logging
-from uuid import uuid4
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
