@@ -296,6 +296,9 @@ setup_nginx() {
         fi
     fi
 
+    # Очищаем возможные дублирующие зоны из главного nginx.conf
+    sed -i '/limit_req_zone.*just1kbot_amnezia_api/d' /etc/nginx/nginx.conf 2>/dev/null || true
+
     # Rate limiting zone (в отдельный файл)
     local rate_limit_conf="/etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf"
     echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
