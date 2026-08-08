@@ -199,7 +199,7 @@ async def process_balance_topup(
         await state.clear()
         return
 
-    idempotency_key = f"admin_topup_{message.from_user.id}_{user.id}_{message.message_id}"
+    idempotency_key = f"admin_topup_{message.chat.id}_{message.from_user.id}_{user.id}_{message.message_id}"
     await create_admin_adjustment(
         session,
         user_id=user.id,
@@ -326,7 +326,7 @@ async def process_balance_deduct(
         return
 
     target_user_id = user.id
-    idempotency_key = f"admin_deduct_{message.from_user.id}_{target_user_id}_{message.message_id}"
+    idempotency_key = f"admin_deduct_{message.chat.id}_{message.from_user.id}_{target_user_id}_{message.message_id}"
     try:
         await create_admin_adjustment(
             session,
