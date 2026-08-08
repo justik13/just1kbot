@@ -461,6 +461,8 @@ async def apply_balance_topup_refund_success(
             reservation_id=reservation_id,
         )
         await _update_topup_after_refund(session, payment)
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+        await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"

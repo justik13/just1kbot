@@ -83,6 +83,14 @@ class CleanChatMiddleware(BaseMiddleware):
             ):
                 return await handler(event, data)
 
+            state = data.get("raw_state") or data.get("state")
+            if state:
+                try:
+                    if await state.get_state() is not None:
+                        return await handler(event, data)
+                except Exception:
+                    pass
+
             _ensure_worker_started()
             try:
                 await asyncio.wait_for(

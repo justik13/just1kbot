@@ -109,6 +109,82 @@ async def grant_referral_bonus_for_purchase(
     return Decimal("0")
 
 
+async def reverse_referral_bonus_for_topup(
+    session: AsyncSession,
+    *,
+    payment_id: int,
+) -> Decimal:
+    """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
+    from database.models import Payment, User
+
+    payment = await session.get(Payment, payment_id)
+    if payment is None or payment.user_id is None:
+        return Decimal("0")
+
+    purchaser = await session.get(User, payment.user_id)
+    if purchaser is None or not purchaser.referred_by:
+        return Decimal("0")
+
+    referrer = await session.scalar(
+        select(User).where(User.telegram_id == purchaser.referred_by)
+    )
+    if referrer is None:
+        return Decimal("0")
+
+    candidate_credits = (
+        await session.scalars(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == referrer.id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount > 0,
+                AccountLedgerEntry.reversal_of_id.is_(None),
+            )
+        )
+    ).all()
+    matching_credit = next(
+        (
+            c for c in candidate_credits
+            if (c.metadata_ or {}).get("topup_payment_id") == payment_id
+            and (c.metadata_ or {}).get("source_type") == REFERRAL_BONUS_SOURCE
+        ),
+        None,
+    )
+
+    if matching_credit is None:
+        return Decimal("0")
+
+    idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
+    existing = await session.scalar(
+        select(AccountLedgerEntry).where(
+            AccountLedgerEntry.idempotency_key == idempotency_key
+        )
+    )
+    if existing is not None:
+        return Decimal(abs(existing.amount))
+
+    reversal_amount = -abs(Decimal(matching_credit.amount))
+    session.add(
+        AccountLedgerEntry(
+            user_id=matching_credit.user_id,
+            entry_type="admin_adjustment",
+            amount=reversal_amount,
+            currency="RUB",
+            payment_id=None,
+            quote_id=None,
+            reversal_of_id=None,
+            idempotency_key=idempotency_key,
+            metadata_={
+                "source_type": REFERRAL_BONUS_SOURCE,
+                "reason": "topup_refund_reversal",
+                "topup_payment_id": payment_id,
+                "original_credit_id": matching_credit.id,
+            },
+        )
+    )
+    await session.flush()
+    return abs(reversal_amount)
+
+
 
 async def get_referral_bonus_balance(
     session: AsyncSession,

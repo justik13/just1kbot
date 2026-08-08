@@ -129,8 +129,9 @@ async def get_account_balance(
     real_available = ZERO
     bonus_available = ZERO
 
+    capacities = await _batch_credit_capacities(session, list(credits))
     for credit in credits:
-        cap = await _credit_capacity(session, credit)
+        cap = capacities.get(credit.id, ZERO)
         if credit.entry_type == "payment_credit":
             real_available += cap
         elif credit.entry_type == "admin_adjustment":
@@ -210,6 +211,7 @@ async def credit_succeeded_topup(
 ) -> tuple[AccountLedgerEntry, bool]:
     if locked_payment is None and payment_id is None:
         raise ValueError("payment_id or locked_payment is required")
+
     payment = locked_payment or await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
@@ -309,37 +311,85 @@ async def _debit_is_reversed(session: AsyncSession, debit_id: int) -> bool:
     )
 
 
+async def _batch_credit_capacities(
+    session: AsyncSession, credits: list[AccountLedgerEntry]
+) -> dict[int, Decimal]:
+    if not credits:
+        return {}
+
+    credit_ids = [c.id for c in credits]
+    payment_ids = [c.payment_id for c in credits if c.payment_id is not None]
+
+    allocations = (
+        await session.scalars(
+            select(AccountLedgerAllocation).where(
+                AccountLedgerAllocation.credit_entry_id.in_(credit_ids)
+            )
+        )
+    ).all()
+
+    debit_ids = {a.debit_entry_id for a in allocations}
+    reversed_debit_ids: set[int] = set()
+    if debit_ids:
+        reversed_debit_ids = set(
+            (
+                await session.scalars(
+                    select(AccountLedgerEntry.reversal_of_id).where(
+                        AccountLedgerEntry.entry_type == "purchase_reversal",
+                        AccountLedgerEntry.reversal_of_id.in_(debit_ids),
+                    )
+                )
+            ).all()
+        )
+
+    external_debits_by_payment: dict[int, Decimal] = {}
+    if payment_ids:
+        rows = (
+            await session.execute(
+                select(
+                    AccountLedgerEntry.payment_id,
+                    func.coalesce(func.sum(AccountLedgerEntry.amount), 0),
+                ).where(
+                    AccountLedgerEntry.payment_id.in_(payment_ids),
+                    AccountLedgerEntry.entry_type.in_(
+                        ("refund_debit", "chargeback_debit")
+                    ),
+                ).group_by(AccountLedgerEntry.payment_id)
+            )
+        ).all()
+        for p_id, sum_amt in rows:
+            if p_id is not None:
+                external_debits_by_payment[p_id] = abs(Decimal(sum_amt))
+
+    used_by_credit: dict[int, Decimal] = {}
+    for alloc in allocations:
+        if alloc.debit_entry_id not in reversed_debit_ids:
+            used_by_credit[alloc.credit_entry_id] = (
+                used_by_credit.get(alloc.credit_entry_id, ZERO)
+                + Decimal(alloc.amount)
+            )
+
+    capacities: dict[int, Decimal] = {}
+    for credit in credits:
+        debt_offset = Decimal(str((credit.metadata_ or {}).get("debt_offset_rub", "0")))
+        used = used_by_credit.get(credit.id, ZERO)
+        ext_debit = (
+            external_debits_by_payment.get(credit.payment_id, ZERO)
+            if credit.payment_id is not None
+            else ZERO
+        )
+        capacities[credit.id] = max(
+            ZERO, Decimal(credit.amount) - debt_offset - used - ext_debit
+        )
+
+    return capacities
+
+
 async def _credit_capacity(
     session: AsyncSession, credit: AccountLedgerEntry
 ) -> Decimal:
-    debt_offset = Decimal(str((credit.metadata_ or {}).get("debt_offset_rub", "0")))
-    used = ZERO
-    allocations = (
-        await session.scalars(
-            select(AccountLedgerAllocation)
-            .where(AccountLedgerAllocation.credit_entry_id == credit.id)
-            .order_by(AccountLedgerAllocation.id)
-        )
-    ).all()
-    for allocation in allocations:
-        if not await _debit_is_reversed(session, allocation.debit_entry_id):
-            used += Decimal(allocation.amount)
-    external_debits = ZERO
-    if credit.payment_id is not None:
-        external_debits = abs(
-            Decimal(
-                await session.scalar(
-                    select(func.coalesce(func.sum(AccountLedgerEntry.amount), 0)).where(
-                        AccountLedgerEntry.payment_id == credit.payment_id,
-                        AccountLedgerEntry.entry_type.in_(
-                            ("refund_debit", "chargeback_debit")
-                        ),
-                    )
-                )
-                or ZERO
-            )
-        )
-    return max(ZERO, Decimal(credit.amount) - debt_offset - used - external_debits)
+    res = await _batch_credit_capacities(session, [credit])
+    return res.get(credit.id, ZERO)
 
 
 async def _allocate_fifo(

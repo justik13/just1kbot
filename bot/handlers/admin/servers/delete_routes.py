@@ -3,7 +3,7 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -162,10 +162,7 @@ async def confirm_delete_server(
         VPNProfile.server_id == server.id).with_for_update())).scalars().all())
     operations = list((await session.execute(select(APIOperation).where(
         APIOperation.server_id == server.id,
-        or_(
-            APIOperation.operation_type == "create_peer",
-            APIOperation.status.in_(("pending", "retry", "processing")),
-        ),
+        APIOperation.status.in_(("pending", "retry", "processing")),
     ).with_for_update())).scalars().all())
     processing_update = any(
         op.status == "processing" and op.operation_type == "update_peer"

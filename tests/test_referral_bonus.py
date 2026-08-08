@@ -90,3 +90,59 @@ class TestReferralBonusLedgerEntryShape:
         assert entry.metadata_["topup_payment_id"] == 42, \
             "topup_payment_id should be preserved in metadata for traceability"
 
+    def test_reverse_referral_bonus_for_topup(self):
+        import asyncio
+        from services.referral_bonus import reverse_referral_bonus_for_topup
+        from database.models import AccountLedgerEntry
+
+        captured_entry = {}
+
+        existing_bonus_credit = MagicMock()
+        existing_bonus_credit.id = 100
+        existing_bonus_credit.user_id = 1
+        existing_bonus_credit.amount = Decimal("10")
+        existing_bonus_credit.metadata_ = {"topup_payment_id": 42, "source_type": "referral_bonus"}
+
+        def fake_add(entry):
+            if isinstance(entry, AccountLedgerEntry):
+                captured_entry["obj"] = entry
+
+        payment = MagicMock()
+        payment.user_id = 4
+
+        purchaser = MagicMock()
+        purchaser.id = 4
+        purchaser.referred_by = 111
+
+        referrer = MagicMock()
+        referrer.id = 1
+
+        def fake_get(model, pk):
+            if pk == 42:
+                return payment
+            if pk == 4:
+                return purchaser
+            return None
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [existing_bonus_credit]
+
+        session = AsyncMock()
+        session.get = AsyncMock(side_effect=fake_get)
+        session.scalar = AsyncMock(side_effect=[referrer, None])
+        session.scalars = AsyncMock(return_value=scalars_mock)
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, payment_id=42)
+        )
+
+        assert reversed_amount == Decimal("10")
+        entry = captured_entry.get("obj")
+        assert entry is not None
+        assert entry.user_id == 1
+        assert entry.amount == Decimal("-10")
+        assert entry.reversal_of_id is None
+        assert entry.payment_id is None
+
