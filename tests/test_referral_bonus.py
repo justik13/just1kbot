@@ -107,12 +107,30 @@ class TestReferralBonusLedgerEntryShape:
             if isinstance(entry, AccountLedgerEntry):
                 captured_entry["obj"] = entry
 
+        payment = MagicMock()
+        payment.user_id = 4
+
+        purchaser = MagicMock()
+        purchaser.id = 4
+        purchaser.referred_by = 111
+
+        referrer = MagicMock()
+        referrer.id = 1
+
+        def fake_get(model, pk):
+            if pk == 42:
+                return payment
+            if pk == 4:
+                return purchaser
+            return None
+
         scalars_mock = MagicMock()
         scalars_mock.all.return_value = [existing_bonus_credit]
 
         session = AsyncMock()
+        session.get = AsyncMock(side_effect=fake_get)
+        session.scalar = AsyncMock(side_effect=[referrer, None])
         session.scalars = AsyncMock(return_value=scalars_mock)
-        session.scalar = AsyncMock(return_value=None)
         session.add = fake_add
         session.flush = AsyncMock()
 

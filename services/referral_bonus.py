@@ -115,20 +115,40 @@ async def reverse_referral_bonus_for_topup(
     payment_id: int,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
-    bonus_credits = (
+    from database.models import Payment, User
+
+    payment = await session.get(Payment, payment_id)
+    if payment is None or payment.user_id is None:
+        return Decimal("0")
+
+    purchaser = await session.get(User, payment.user_id)
+    if purchaser is None or not purchaser.referred_by:
+        return Decimal("0")
+
+    referrer = await session.scalar(
+        select(User).where(User.telegram_id == purchaser.referred_by)
+    )
+    if referrer is None:
+        return Decimal("0")
+
+    candidate_credits = (
         await session.scalars(
             select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == referrer.id,
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.metadata_["source_type"].as_string() == REFERRAL_BONUS_SOURCE,
+                AccountLedgerEntry.reversal_of_id.is_(None),
             )
         )
     ).all()
-    matching_credit = None
-    for credit in bonus_credits:
-        if (credit.metadata_ or {}).get("topup_payment_id") == payment_id:
-            matching_credit = credit
-            break
+    matching_credit = next(
+        (
+            c for c in candidate_credits
+            if (c.metadata_ or {}).get("topup_payment_id") == payment_id
+            and (c.metadata_ or {}).get("source_type") == REFERRAL_BONUS_SOURCE
+        ),
+        None,
+    )
 
     if matching_credit is None:
         return Decimal("0")

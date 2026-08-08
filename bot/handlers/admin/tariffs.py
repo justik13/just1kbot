@@ -121,12 +121,14 @@ async def _get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    from database.models import TariffQuote
+    from database.models import TariffQuote, TariffVersion
     from sqlalchemy import func, select
     return int(
         await session.scalar(
-            select(func.count(TariffQuote.id)).where(
-                TariffQuote.tariff_id == tariff_id,
+            select(func.count(TariffQuote.id))
+            .join(TariffVersion, TariffQuote.target_tariff_version_id == TariffVersion.id)
+            .where(
+                TariffVersion.tariff_id == tariff_id,
                 TariffQuote.status == "active",
             )
         )
