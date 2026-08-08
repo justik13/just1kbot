@@ -1,5 +1,3 @@
-from decimal import Decimal
-import uuid
 from typing import Optional, List
 
 from sqlalchemy import select, update

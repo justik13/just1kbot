@@ -5,8 +5,6 @@ import os
 import time
 from pathlib import Path
 
-from cachetools import TTLCache
-
 from services.amnezia_client import _circuit_breakers
 from config.settings import get_settings
 from utils.logging_security import safe_url_target
