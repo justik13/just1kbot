@@ -27,9 +27,14 @@ async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0)
     import asyncio
     await asyncio.sleep(delay)
     try:
+        from utils.telegram import _load_hub_ids_from_db
+        active_ids = await _load_hub_ids_from_db(chat_id)
+        if msg_id in active_ids:
+            return
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
     except Exception:
         pass
+
 
 
 @router.message()
