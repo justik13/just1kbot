@@ -29,9 +29,9 @@ async def _send_admin_alert(bot: Bot, text: str, alert_key: str):
     for k in expired_keys:
         _last_alert_time.pop(k, None)
 
-    last_time = _last_alert_time.get(alert_key, 0.0)
-    if now - last_time < ALERT_COOLDOWN_SECONDS:
+    if alert_key in _last_alert_time and (now - _last_alert_time[alert_key] < ALERT_COOLDOWN_SECONDS):
         return
+
 
     _last_alert_time[alert_key] = now
     settings = get_settings()
