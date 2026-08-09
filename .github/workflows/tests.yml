@@ -134,25 +134,11 @@ jobs:
       - run: alembic upgrade head
       - name: Run full test suite
         id: unittests
-        run: |
-          set -o pipefail
-          python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log
+        run: python -m unittest discover -s tests -v
         env:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
-      - name: Show unittest log on failure
-        if: failure()
-        run: |
-          cat /tmp/unittest.log
 
-      - name: Upload failing unittest log
-        if: failure() && steps.unittests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: unittest-log-${{ github.sha }}
-          path: /tmp/unittest.log
-          if-no-files-found: error
-          retention-days: 7
       - run: alembic downgrade base
       - name: Verify downgrade leaves no application tables
         run: |
