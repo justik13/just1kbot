@@ -124,6 +124,7 @@ async def process_mass_bonus_amount(
             message.chat.id,
             "⚠️ Введите корректную сумму начисления от 1 до 100 000 ₽",
             get_back_button("admin_mass_bonus"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -144,6 +145,7 @@ async def process_mass_bonus_amount(
         text,
         get_back_button("admin_mass_bonus"),
         parse_mode="HTML",
+        trigger_message_id=message.message_id,
     )
 
 
@@ -207,7 +209,9 @@ async def process_mass_bonus_reason(
         text,
         builder.as_markup(),
         parse_mode="HTML",
+        trigger_message_id=message.message_id,
     )
+
 
 
 @router.callback_query(F.data == "confirm_mass_bonus_apply")

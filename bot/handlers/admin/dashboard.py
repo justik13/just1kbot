@@ -420,6 +420,7 @@ async def process_edit_mtproto(
             message.chat.id,
             texts.ERROR_TEXT_REQUIRED,
             get_back_button("admin_settings"),
+            trigger_message_id=message.message_id,
         )
         return
 
@@ -442,4 +443,5 @@ async def process_edit_mtproto(
         f"{header}{status_msg}",
         get_back_button("admin_settings"),
         parse_mode="HTML",
+        trigger_message_id=message.message_id,
     )
