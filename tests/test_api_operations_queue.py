@@ -298,7 +298,8 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         async with self.sessions.begin() as session:
             row = await session.get(APIOperation, operation.id)
-            row.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+            row.next_attempt_at = datetime.now(timezone.utc) - timedelta(hours=1)
+
 
         second = (
             await claim_api_operations(
