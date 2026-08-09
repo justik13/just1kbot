@@ -238,10 +238,19 @@ async def render_hub(
 
         target_edit_id = None
         if not force_new and len(text_parts) == 1:
-            if trigger_message_id:
+            if trigger_message_id and trigger_message_id in old_ids:
                 target_edit_id = trigger_message_id
             elif old_ids:
                 target_edit_id = old_ids[-1]
+            elif trigger_message_id:
+                target_edit_id = trigger_message_id
+
+        if trigger_message_id and trigger_message_id != target_edit_id and trigger_message_id not in old_ids:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
+            except Exception:
+                pass
+
 
         edited = False
         if target_edit_id:
