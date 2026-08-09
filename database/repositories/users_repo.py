@@ -219,3 +219,55 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
     )
     result = await session.execute(stmt)
     return result.scalar_one() or 0
+
+
+def _apply_user_filters(stmt, filter_type: str, filter_param=None):
+    now = now_utc()
+    if filter_type == "new_24h":
+        stmt = stmt.where(User.created_at >= now - timedelta(hours=24))
+    elif filter_type == "expiring_3d":
+        stmt = stmt.where(
+            User.subscription_end > now,
+            User.subscription_end <= now + timedelta(days=3),
+        )
+    elif filter_type == "server" and filter_param is not None:
+        from database.models import Profile
+        stmt = stmt.where(User.profiles.any(Profile.server_id == int(filter_param)))
+    elif filter_type == "country" and filter_param:
+        from database.models import Profile, Server
+        stmt = stmt.where(User.profiles.any(Profile.server.has(Server.country_flag == str(filter_param))))
+    elif filter_type == "tariff" and filter_param is not None:
+        stmt = stmt.where(User.current_tariff_id == int(filter_param))
+    return stmt
+
+
+async def get_filtered_users_count(
+    session: AsyncSession,
+    filter_type: str = "all",
+    filter_param=None,
+) -> int:
+    stmt = select(func.count(User.id.distinct())).where(User.is_deleted.is_(False))
+    stmt = _apply_user_filters(stmt, filter_type, filter_param)
+    result = await session.execute(stmt)
+    return result.scalar_one() or 0
+
+
+async def get_filtered_users_paginated(
+    session: AsyncSession,
+    filter_type: str = "all",
+    filter_param=None,
+    page: int = 1,
+    per_page: int = 10,
+) -> list[User]:
+    offset = (page - 1) * per_page
+    stmt = select(User).where(User.is_deleted.is_(False))
+    stmt = _apply_user_filters(stmt, filter_type, filter_param)
+    stmt = (
+        stmt.options(selectinload(User.profiles))
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
+

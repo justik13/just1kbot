@@ -8,19 +8,19 @@ def get_profile_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.BUTTON_INVITE,
-        callback_data="referral",
+        text="💳 Пополнить баланс",
+        callback_data="menu_balance",
     )
     builder.button(
-        text=texts.BUTTON_TOPUP_HISTORY,
-        callback_data="user_history",
+        text="🎁 Пригласить друга (+10%)",
+        callback_data="referral",
     )
     builder.button(
         text=texts.BUTTON_MAIN_MENU,
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1)
+    builder.adjust(1)
 
     return builder.as_markup()
 

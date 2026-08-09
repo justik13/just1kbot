@@ -11,6 +11,8 @@ from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.repositories.users_repo import (
+    get_filtered_users_count,
+    get_filtered_users_paginated,
     get_user_by_telegram_id,
     get_user_count,
     get_users_paginated_with_profiles,
@@ -48,23 +50,13 @@ async def show_users_list(
     await state.clear()
 
     total_users = await get_user_count(session)
-
-    total_pages = max(
-        1,
-        math.ceil(total_users / USERS_PER_PAGE),
-    )
-
+    total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
     users = await get_users_paginated_with_profiles(
-        session,
-        page=1,
-        per_page=USERS_PER_PAGE,
+        session, page=1, per_page=USERS_PER_PAGE
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
-        users,
-        1,
-        total_pages,
-        total_users,
+        users, 1, total_pages, total_users, filter_type="all", filter_param="none"
     )
 
     try:
@@ -75,6 +67,61 @@ async def show_users_list(
         )
     except TelegramBadRequest as e:
         logger.debug(f"show_users_list edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("admin_users_filter:"))
+async def users_filter_pagination(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    parts = callback.data.split(":")
+    filter_type = parts[1] if len(parts) > 1 else "all"
+    filter_param = parts[2] if len(parts) > 2 else "none"
+    try:
+        page = int(parts[3]) if len(parts) > 3 else 1
+    except ValueError:
+        page = 1
+
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    param_val = None if filter_param == "none" else filter_param
+    total_users = await get_filtered_users_count(
+        session, filter_type=filter_type, filter_param=param_val
+    )
+    total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
+    page = min(max(1, page), total_pages)
+
+    users = await get_filtered_users_paginated(
+        session,
+        filter_type=filter_type,
+        filter_param=param_val,
+        page=page,
+        per_page=USERS_PER_PAGE,
+    )
+
+    rendered, kb = await _build_users_list_text_and_kb(
+        users,
+        page,
+        total_pages,
+        total_users,
+        filter_type=filter_type,
+        filter_param=filter_param,
+    )
+
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"users_filter_pagination edit_text failed: {e}")
 
 
 @router.callback_query(F.data.startswith("admin_users_page:"))
@@ -90,39 +137,20 @@ async def users_pagination(
         )
         return
 
-    page = parse_callback_id(callback.data, 1)
-
-    if page is None or page < 1:
-        await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L97_1,
-            show_alert=True,
-        )
-        return
-
+    page = parse_callback_id(callback.data, 1) or 1
     await callback.answer(show_alert=False)
     await state.clear()
 
     total_users = await get_user_count(session)
-
-    total_pages = max(
-        1,
-        math.ceil(total_users / USERS_PER_PAGE),
-    )
-
-    if page > total_pages:
-        page = total_pages
+    total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
+    page = min(max(1, page), total_pages)
 
     users = await get_users_paginated_with_profiles(
-        session,
-        page=page,
-        per_page=USERS_PER_PAGE,
+        session, page=page, per_page=USERS_PER_PAGE
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
-        users,
-        page,
-        total_pages,
-        total_users,
+        users, page, total_pages, total_users, filter_type="all", filter_param="none"
     )
 
     try:
@@ -326,12 +354,7 @@ async def show_user_audit(
         for item in logs:
             dt = format_datetime(item.created_at)
             action_text = action_map.get(item.action, item.action or "Действие")
-            details_text = ""
-            if item.details:
-                if "debit=" in item.details and "conversion=" in item.details:
-                    details_text = ""
-                else:
-                    details_text = f" — {item.details}"
+            details_text = format_audit_details(item.details)
             lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()

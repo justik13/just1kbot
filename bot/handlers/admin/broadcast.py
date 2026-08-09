@@ -66,6 +66,13 @@ def _cleanup_stop_event(admin_id: int) -> None:
     _broadcast_stop_events.pop(admin_id, None)
 
 
+from bot.keyboards.admin.broadcast import (
+    get_broadcast_audience_keyboard,
+    get_broadcast_close_keyboard,
+    get_broadcast_launch_keyboard,
+    get_broadcast_result_keyboard,
+)
+
 @router.callback_query(F.data == "admin_broadcast")
 async def start_broadcast(
     callback: CallbackQuery,
@@ -81,18 +88,42 @@ async def start_broadcast(
     await state.clear()
     try:
         await callback.message.edit_text(
-            texts.BROADCAST_PROMPT,
-            reply_markup=get_back_button("admin_menu"),
+            "📢 <b>Рассылка › Шаг 1: Выберите аудиторию</b>\n\nКому отправить сообщение?",
+            reply_markup=get_broadcast_audience_keyboard(),
+            parse_mode="HTML",
         )
     except TelegramBadRequest as e:
         logger.debug(f"start_broadcast edit_text failed: {e}")
+
+
+@router.callback_query(F.data.startswith("broadcast_aud:"))
+async def select_broadcast_audience(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    audience = callback.data.split(":", 1)[1]
+    await callback.answer(show_alert=False)
+    await state.update_data(target_audience=audience)
     await state.set_state(AdminStates.entering_broadcast_message)
+
+    try:
+        await callback.message.edit_text(
+            texts.BROADCAST_PROMPT,
+            reply_markup=get_back_button("admin_broadcast"),
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"select_broadcast_audience edit_text failed: {e}")
 
 
 @router.message(AdminStates.entering_broadcast_message)
 async def process_broadcast_message(
     message: Message,
     state: FSMContext,
+    session: AsyncSession = None,
 ):
     if not is_admin(message.from_user.id):
         await state.clear()
@@ -139,42 +170,93 @@ async def process_broadcast_message(
         )
         return
 
-    preview = texts.BROADCAST_PREVIEW.format(
-        content_type=content_type,
-        text=safe(broadcast_text),
+    data = await state.get_data()
+    target_audience = data.get("target_audience", "all")
+
+    # Send test preview directly to admin first so admin sees actual Telegram rendering
+    try:
+        await _dispatch_message(
+            message.bot,
+            message.from_user.id,
+            broadcast_text,
+            media_id,
+            content_type,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send test preview to admin: {e}")
+
+    # Count recipients
+    count_stmt = select(func.count(User.id)).where(
+        User.is_deleted.is_(False),
+        User.is_bot_blocked.is_(False),
+        User.is_banned.is_(False),
+    )
+    current_time = now_utc()
+    if target_audience == "active":
+        count_stmt = count_stmt.where(User.subscription_end > current_time)
+    elif target_audience == "expiring_3d":
+        count_stmt = count_stmt.where(
+            User.subscription_end > current_time,
+            User.subscription_end <= current_time + asyncio.subprocess.timedelta(days=3) if hasattr(asyncio, "subprocess") else current_time,
+        )
+    elif target_audience == "expired":
+        count_stmt = count_stmt.where(
+            User.subscription_end.is_not(None),
+            User.subscription_end <= current_time,
+        )
+    elif target_audience == "never":
+        count_stmt = count_stmt.where(User.subscription_end.is_(None))
+    elif target_audience == "test" or target_audience.startswith("test_"):
+        count_stmt = count_stmt.where(User.telegram_id == message.from_user.id)
+
+    total_count = 1
+    if session:
+        try:
+            from datetime import timedelta
+            if target_audience == "expiring_3d":
+                count_stmt = select(func.count(User.id)).where(
+                    User.is_deleted.is_(False),
+                    User.is_bot_blocked.is_(False),
+                    User.is_banned.is_(False),
+                    User.subscription_end > current_time,
+                    User.subscription_end <= current_time + timedelta(days=3),
+                )
+            result = await session.execute(count_stmt)
+            total_count = result.scalar_one() or 0
+        except Exception as e:
+            logger.warning(f"Failed to count recipients in session: {e}")
+
+    label_map = {
+        "all": "Все пользователи",
+        "active": "Активные подписки",
+        "expiring_3d": "Подписки истекают < 3 дней",
+        "expired": "Истекшие подписки",
+        "never": "Без подписок",
+        "test": "Тестовая отправка админу",
+    }
+    aud_label = label_map.get(target_audience, target_audience)
+
+    preview_summary = (
+        f"✅ <b>Тестовое сообщение отправлено вам для проверки!</b>\n\n"
+        f"👥 <b>Аудитория:</b> {aud_label}\n"
+        f"📊 <b>Получателей:</b> {total_count} чел.\n\n"
+        f"Ознакомьтесь с предпросмотром выше и подтвердите запуск рассылки."
     )
 
     try:
-        if media_id and content_type == "photo":
-            await send_hub_photo(
-                message.bot,
-                message.chat.id,
-                message.photo[-1],
-                caption=preview,
-                reply_markup=get_broadcast_confirm_keyboard(),
-                parse_mode="HTML",
-            )
-        elif media_id and content_type == "document":
-            await send_hub_document(
-                message.bot,
-                message.chat.id,
-                message.document,
-                caption=preview,
-                reply_markup=get_broadcast_confirm_keyboard(),
-                parse_mode="HTML",
-            )
-        else:
-            await render_hub(
-                message.bot,
-                message.chat.id,
-                preview,
-                get_broadcast_confirm_keyboard(),
-                parse_mode="HTML",
-            )
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            preview_summary,
+            get_broadcast_launch_keyboard(total_count),
+            parse_mode="HTML",
+        )
         await state.update_data(
             broadcast_text=broadcast_text,
             media_id=media_id,
             content_type=content_type,
+            target_audience=target_audience,
+            total_count=total_count,
         )
         await state.set_state(AdminStates.confirming_broadcast)
     except Exception as e:
@@ -711,6 +793,26 @@ async def _start_broadcast_process(
         )
 
     await state.clear()
+
+
+@router.callback_query(
+    StateFilter(AdminStates.confirming_broadcast),
+    F.data == "broadcast_confirm_launch",
+)
+async def broadcast_confirm_launch(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        return
+    data = await state.get_data()
+    audience = data.get("target_audience", "all")
+    await _start_broadcast_process(callback, state, session, audience)
 
 
 @router.callback_query(

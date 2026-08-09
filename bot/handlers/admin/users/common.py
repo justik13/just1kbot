@@ -131,14 +131,42 @@ async def _build_users_list_text_and_kb(
     page: int,
     total_pages: int,
     total: int,
+    filter_type: str = "all",
+    filter_param: str = "none",
 ) -> tuple[str, InlineKeyboardBuilder]:
+    filter_labels = {
+        "all": "Все пользователи",
+        "new_24h": "Новые за 24 часа",
+        "expiring_3d": "Осталось < 3 дней",
+        "server": f"Сервер #{filter_param}",
+        "country": f"Страна {filter_param}",
+        "tariff": f"Тариф #{filter_param}",
+    }
+    filter_desc = filter_labels.get(filter_type, filter_type)
+
     rendered = texts.ADMIN_USERS_HEADER.format(
         page=page,
         total_pages=total_pages,
         total=total,
     )
+    if filter_type != "all":
+        rendered += f"🔍 Фильтр: <b>{filter_desc}</b>\n\n"
 
     builder = InlineKeyboardBuilder()
+
+    # Filter selector buttons row
+    builder.button(
+        text="🆕 Новые (24ч)",
+        callback_data="admin_users_filter:new_24h:none:1",
+    )
+    builder.button(
+        text="⏳ < 3 дней",
+        callback_data="admin_users_filter:expiring_3d:none:1",
+    )
+    builder.button(
+        text="👥 Все",
+        callback_data="admin_users_filter:all:none:1",
+    )
 
     if not users:
         rendered += texts.ADMIN_USERS_EMPTY
@@ -174,13 +202,13 @@ async def _build_users_list_text_and_kb(
     if page > 1:
         builder.button(
             text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L175_1,
-            callback_data=f"admin_users_page:{page - 1}",
+            callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page - 1}",
         )
 
     if page < total_pages:
         builder.button(
             text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L181_1,
-            callback_data=f"admin_users_page:{page + 1}",
+            callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page + 1}",
         )
 
     builder.button(
@@ -193,7 +221,14 @@ async def _build_users_list_text_and_kb(
         callback_data="admin_menu",
     )
 
-    builder.adjust(1)
+    # Layout: 3 filter buttons on top, then 1 per user, then nav buttons
+    adjust_pattern = [3] + [1] * (len(users) if users else 0)
+    nav_count = (1 if page > 1 else 0) + (1 if page < total_pages else 0)
+    if nav_count:
+        adjust_pattern.append(nav_count)
+    adjust_pattern.extend([1, 1])
+
+    builder.adjust(*adjust_pattern)
 
     return rendered, builder
 

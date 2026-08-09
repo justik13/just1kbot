@@ -70,12 +70,14 @@ async def manage_device(
 
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
+    country_display = get_country_display(flag, default_text="🌐")
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
     protocol = _format_protocol(server.protocol if server else None)
 
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         flag=flag,
+        country_display=country_display,
         server_name=safe(server_name),
         protocol=protocol,
         traffic_total=format_traffic(profile.traffic_down + profile.traffic_up),

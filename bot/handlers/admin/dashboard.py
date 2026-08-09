@@ -19,7 +19,7 @@ from database.repositories.users_repo import get_dashboard_stats
 from services.audit_service import AuditService
 from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
-from utils.formatters import format_datetime
+from utils.formatters import format_datetime, format_audit_details
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
@@ -120,7 +120,8 @@ async def show_admin_audit(
 
             details = ""
             if log.details:
-                details = f"\n{safe(truncate_details(log.details, 300))}"
+                formatted_d = format_audit_details(log.details)
+                details = f"\n{safe(truncate_details(formatted_d, 300))}"
 
             text += texts.AUDIT_ENTRY.format(
                 date=format_datetime(log.created_at),

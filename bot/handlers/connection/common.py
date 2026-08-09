@@ -17,6 +17,7 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from utils.formatters import get_country_display
 from utils.telegram import render_hub, safe
 from bot.constants import GRACE_PERIOD_HOURS
 
@@ -146,6 +147,7 @@ async def _build_connections_screen(
             server = profile.server
 
             flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L140_1
+            country_display = get_country_display(flag, default_text="🌐")
             server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L141_1
 
             btn_text = f"{flag} {safe(profile.device_name)}"
@@ -154,7 +156,7 @@ async def _build_connections_screen(
                 callback_data=f"manage_device:{profile.id}",
             )
 
-            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({flag} {safe(server_name)})"
+            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({country_display} — {safe(server_name)})"
             labels = {
                 "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
                 "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,
