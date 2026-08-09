@@ -93,8 +93,9 @@ async def _get_dead_queues_count(session: AsyncSession) -> int:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
-    from database.repositories.servers_repo import get_all_active_servers
-    servers = await get_all_active_servers(session)
+    from database.repositories.servers_repo import get_active_servers
+    servers = await get_active_servers(session)
+
     if not servers:
         return "<i>Серверов пока нет</i>"
     lines = []
