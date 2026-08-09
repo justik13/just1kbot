@@ -16,6 +16,7 @@ from database.models import Payment, User
 from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
+from services.referral_bonus import grant_referral_bonus_for_topup
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
@@ -99,6 +100,7 @@ async def _recover_stale_topups(bot: Bot | None = None):
                 await ensure_reconcile_payment_operation(
                     session, payment, reason="stale_topup_worker"
                 )
+
             if (
                 payment.provider_status == "succeeded"
                 and payment.provider_confirmed_at is not None
@@ -110,6 +112,22 @@ async def _recover_stale_topups(bot: Bot | None = None):
                     payment_id=payment.id,
                     source="stale_topup_recovery",
                     bot=bot,
+                )
+
+            # Referral bonuses are ledger entries with their own idempotency key.
+            # Retrying them for every settled top-up makes a transient failure
+            # recoverable instead of silently losing the 10% reward. Existing
+            # successful bonuses are a no-op.
+            if (
+                payment.provider_status == "succeeded"
+                and payment.provider_confirmed_at is not None
+                and payment.fulfillment_status == "succeeded"
+            ):
+                await grant_referral_bonus_for_topup(
+                    session,
+                    purchaser_user_id=payment.user_id,
+                    payment_id=payment.id,
+                    topup_amount=payment.amount,
                 )
 
 
