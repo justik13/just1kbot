@@ -115,20 +115,26 @@ async def _recover_stale_topups(bot: Bot | None = None):
                 )
 
             # Referral bonuses are ledger entries with their own idempotency key.
-            # Retrying them for every settled top-up makes a transient failure
-            # recoverable instead of silently losing the 10% reward. Existing
-            # successful bonuses are a no-op.
+            # Retry them in a savepoint so a transient bonus failure cannot roll
+            # back a verified user payment. The next worker pass retries it.
             if (
                 payment.provider_status == "succeeded"
                 and payment.provider_confirmed_at is not None
                 and payment.fulfillment_status == "succeeded"
             ):
-                await grant_referral_bonus_for_topup(
-                    session,
-                    purchaser_user_id=payment.user_id,
-                    payment_id=payment.id,
-                    topup_amount=payment.amount,
-                )
+                try:
+                    async with session.begin_nested():
+                        await grant_referral_bonus_for_topup(
+                            session,
+                            purchaser_user_id=payment.user_id,
+                            payment_id=payment.id,
+                            topup_amount=payment.amount,
+                        )
+                except Exception:
+                    logger.exception(
+                        "Referral bonus retry failed for topup payment %s",
+                        payment.id,
+                    )
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):
