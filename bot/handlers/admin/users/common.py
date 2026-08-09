@@ -173,6 +173,13 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
+    # These filters are backed by real DB values and open a selection menu.
+    # Keeping the parameter out of the main list callback avoids arbitrary
+    # admin-supplied SQL parameters while still exposing the repository filters.
+    builder.button(text="🖥 По серверам", callback_data="admin_users_filter_menu:server")
+    builder.button(text="🌐 По странам", callback_data="admin_users_filter_menu:country")
+    builder.button(text="💎 По тарифам", callback_data="admin_users_filter_menu:tariff")
+
     if not users:
         rendered += "<i>Пользователи не найдены.</i>"
     else:
@@ -226,7 +233,7 @@ async def _build_users_list_text_and_kb(
     )
 
     item_count = len(users) if users else 0
-    adjust_pattern = [3, 2] + ([1] * item_count)
+    adjust_pattern = [3, 3] + ([1] * item_count)
     if nav_buttons > 0:
         adjust_pattern.append(nav_buttons)
     adjust_pattern.extend([1, 1])
@@ -234,7 +241,6 @@ async def _build_users_list_text_and_kb(
     builder.adjust(*adjust_pattern)
 
     return rendered, builder
-
 
 
 async def _render_user_card(
@@ -316,4 +322,3 @@ async def _show_user_card_edit(
         ),
         trigger_message_id=trigger_message_id,
     )
-
