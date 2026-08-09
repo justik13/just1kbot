@@ -99,19 +99,27 @@ async def _show_servers_list(
 
 
 async def _show_server_card(
-    callback: CallbackQuery, session: AsyncSession, server,
+    callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
-    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L105_1
-    status = texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L106_1 if server.is_active else texts.SERVER_DISABLED_LABEL
-    rendered = texts.ADMIN_SERVER_CARD.format(
-        flag=flag,
-        name=safe(server.name),
-        id=server.id,
-        status=status,
-        protocol=server.protocol,
-        api_url=safe(server.api_url),
-        max_clients=server.max_clients,
+    from utils.formatters import format_admin_breadcrumbs
+    flag = server.country_flag or "🌐"
+    status = "🟢 Активен" if server.is_active else "🔴 Отключен"
+    used_clients = getattr(server, "current_clients_count", 0) or 0
+    max_clients = server.max_clients or 240
+    header = format_admin_breadcrumbs("🖥 Серверы", f"{flag} {server.name}")
+
+    rendered = (
+        f"{header}"
+        f"🖥 <b>Карточка VPN-сервера {flag} {safe(server.name)}</b> (ID: {server.id})\n\n"
+        f"• Статус в боте: <b>{status}</b>\n"
+        f"• Протокол: <code>{server.protocol}</code>\n"
+        f"• Заполненность слотов: <b>{used_clients} / {max_clients}</b>\n"
+        f"• API URL: <code>{safe(server.api_url)}</code>\n"
     )
+
+    if ping_result:
+        rendered += f"\n⚡ <b>Результат проверки связи:</b>\n{ping_result}\n"
+
     try:
         await callback.message.edit_text(
             rendered,
@@ -122,3 +130,4 @@ async def _show_server_card(
         )
     except TelegramBadRequest as e:
         logger.debug(f"_show_server_card edit_text failed: {e}")
+

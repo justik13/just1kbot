@@ -10,6 +10,7 @@ from .subscription_menu_routes import router as subscription_menu_router
 from .subscription_reduce_routes import router as subscription_reduce_router
 from .balance_routes import router as balance_router
 from .message_routes import router as message_router
+from .mass_bonus import router as mass_bonus_router
 
 router = Router()
 
@@ -23,6 +24,7 @@ router.include_router(device_router)
 router.include_router(ban_router)
 router.include_router(balance_router)
 router.include_router(message_router)
+router.include_router(mass_bonus_router)
 
 
 __all__ = [

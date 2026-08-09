@@ -79,14 +79,20 @@ async def start_broadcast(
         return
     await callback.answer(show_alert=False)
     await state.clear()
+
+    from utils.formatters import format_admin_breadcrumbs
+    header = format_admin_breadcrumbs("📢 Рассылки", "Составление поста")
+
     try:
         await callback.message.edit_text(
-            texts.BROADCAST_PROMPT,
+            f"{header}{texts.BROADCAST_PROMPT}",
             reply_markup=get_back_button("admin_menu"),
+            parse_mode="HTML",
         )
     except TelegramBadRequest as e:
         logger.debug(f"start_broadcast edit_text failed: {e}")
     await state.set_state(AdminStates.entering_broadcast_message)
+
 
 
 @router.message(AdminStates.entering_broadcast_message)

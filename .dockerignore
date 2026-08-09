@@ -6,8 +6,9 @@ venv
 __pycache__
 *.pyc
 *.pyo
-tests/
+# tests/
 docs/
+
 .shellcheckrc
 .pip-tools.toml
 docker-compose.yml

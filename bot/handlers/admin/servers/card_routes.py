@@ -192,3 +192,40 @@ async def toggle_server_apply(
     refreshed = await get_server_by_id(session, server_id)
 
     await _show_server_card(callback, session, refreshed)
+
+
+@router.callback_query(F.data.startswith("admin_server_ping:"))
+async def ping_server(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    server_id = parse_callback_id(callback.data, 1)
+    if server_id is None:
+        await callback.answer("Ошибка: ID сервера не указан", show_alert=True)
+        return
+
+    server = await get_server_by_id(session, server_id)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    await callback.answer("⚡ Проверка связи...", show_alert=False)
+
+    import time
+    from services.amnezia_client import AmneziaClient
+
+    client = AmneziaClient(server.api_url, server.api_key)
+    start_t = time.monotonic()
+    is_healthy = await client.healthcheck()
+    duration_ms = int((time.monotonic() - start_t) * 1000)
+
+    if is_healthy:
+        ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
+    else:
+        ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
+
+    await _show_server_card(callback, session, server, ping_result=ping_res)

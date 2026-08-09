@@ -84,3 +84,13 @@ def format_connection_device_card(
         traffic_up=format_traffic(profile.traffic_up),
         traffic_total=traffic_total,
     )
+
+
+def format_admin_breadcrumbs(*crumbs: str) -> str:
+    """
+    Форматирует строку Хлебных крошек (Breadcrumbs) для административных меню.
+    Пример: format_admin_breadcrumbs("🖥 Серверы", "Node #1")
+    -> "📌 <b>🏠 Админка ➔ 🖥 Серверы ➔ Node #1</b>\n\n"
+    """
+    items = ["🏠 Админка"] + [c for c in crumbs if c]
+    return f"📌 <b>{' ➔ '.join(items)}</b>\n\n"

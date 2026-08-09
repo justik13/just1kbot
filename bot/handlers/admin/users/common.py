@@ -131,31 +131,59 @@ async def _build_users_list_text_and_kb(
     page: int,
     total_pages: int,
     total: int,
+    filter_type: str = "all",
 ) -> tuple[str, InlineKeyboardBuilder]:
-    rendered = texts.ADMIN_USERS_HEADER.format(
-        page=page,
-        total_pages=total_pages,
-        total=total,
+    from utils.formatters import format_admin_breadcrumbs
+    filter_names = {
+        "all": "Все",
+        "new": "🆕 Новенькие (<7д)",
+        "active": "⚡ С подпиской",
+        "expired": "⏳ Без подписки",
+        "problem": "🚫 Проблемные",
+    }
+    cur_filter_name = filter_names.get(filter_type, "Все")
+    header = format_admin_breadcrumbs("👥 Пользователи", f"Фильтр: {cur_filter_name}")
+
+    rendered = (
+        f"{header}"
+        f"👥 <b>Управление пользователями</b> (Стр. {page}/{total_pages}, всего: {total})\n\n"
     )
 
     builder = InlineKeyboardBuilder()
 
+    # Фильтры
+    filters = [
+        ("all", "Все"),
+        ("new", "🆕 Новые"),
+        ("active", "⚡ Активные"),
+        ("expired", "⏳ Истекшие"),
+        ("problem", "🚫 Баны"),
+    ]
+
+    for f_code, f_name in filters:
+        label = f"• {f_name} •" if f_code == filter_type else f_name
+        builder.button(
+            text=label,
+            callback_data=f"admin_users_filter:{f_code}:1",
+        )
+    builder.adjust(3, 2)
+
     if not users:
-        rendered += texts.ADMIN_USERS_EMPTY
+        rendered += "<i>Пользователи не найдены.</i>"
     else:
         current_time = now_utc()
 
         for user in users:
             status = (
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L149_1
+                "🟢"
                 if user.subscription_end and user.subscription_end > current_time
-                else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L151_1
+                else "🔴"
             )
 
-            ban = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L154_1 if user.is_banned else ""
+            ban = " [БАН]" if user.is_banned else (" [Блок бота]" if user.is_bot_blocked else "")
 
             username = (
-                f"@{user.username}" if user.username else texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=user.telegram_id)
+                f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
             )
 
             days = format_days_left(user.subscription_end)
@@ -163,7 +191,7 @@ async def _build_users_list_text_and_kb(
             profiles_count = len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in ("deleting", "create_cleanup_pending")]) if user.profiles else 0
 
             button_text = truncate_button_text(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L165_1.format(value_0=status, value_1=ban, value_2=username, value_3=days, value_4=profiles_count)
+                f"{status}{ban} {username} | {days} | {profiles_count} устр."
             )
 
             builder.button(
@@ -171,31 +199,41 @@ async def _build_users_list_text_and_kb(
                 callback_data=f"admin_user_card:{user.telegram_id}",
             )
 
+    nav_buttons = []
     if page > 1:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L175_1,
-            callback_data=f"admin_users_page:{page - 1}",
+            text="◀️ Назад",
+            callback_data=f"admin_users_filter:{filter_type}:{page - 1}",
         )
+        nav_buttons.append(1)
 
     if page < total_pages:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L181_1,
-            callback_data=f"admin_users_page:{page + 1}",
+            text="Вперед ▶️",
+            callback_data=f"admin_users_filter:{filter_type}:{page + 1}",
         )
+        nav_buttons.append(1)
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L186_1,
+        text="🔍 Поиск по @username / ID",
         callback_data="admin_users_search",
     )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L191_1,
+        text="🔙 В админ-меню",
         callback_data="admin_menu",
     )
 
-    builder.adjust(1)
+    # Применение макета кнопок
+    item_count = len(users)
+    nav_row = len(nav_buttons)
+    if nav_row > 0:
+        builder.adjust(3, 2, *([1] * item_count), nav_row, 1, 1)
+    else:
+        builder.adjust(3, 2, *([1] * item_count), 1, 1)
 
     return rendered, builder
+
 
 
 async def _render_user_card(

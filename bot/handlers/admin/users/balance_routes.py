@@ -12,10 +12,10 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_user_balance_keyboard
 from bot.states import AdminStates
 from database.repositories.account_ledger_repo import (
-    AccountLedgerError,
     create_admin_adjustment,
     get_account_balance,
 )
+
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
 from utils.admin import is_admin
@@ -187,68 +187,18 @@ async def process_balance_topup(
         )
         return
 
-    user = await get_user_by_telegram_id(session, telegram_id)
-    if not user:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("admin_users"),
-            trigger_message_id=message.message_id,
-        )
-        await state.clear()
-        return
-
-    idempotency_key = f"admin_topup_{message.chat.id}_{message.from_user.id}_{user.id}_{message.message_id}"
-    await create_admin_adjustment(
-        session,
-        user_id=user.id,
-        signed_amount=amount,
-        idempotency_key=idempotency_key,
-        metadata={"admin_id": message.from_user.id, "reason": "manual_topup"},
-    )
-
-    await AuditService.log_action(
-        session,
-        message.from_user.id,
-        "TOPUP_USER_BALANCE",
-        "User",
-        user.id,
-        f"Added +{amount} RUB to user {user.telegram_id}",
-    )
-
-    # Notify target user if possible
-    try:
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text="💳 В баланс",
-            callback_data="menu_balance",
-        )
-        builder.button(
-            text="✅ Прочитано",
-            callback_data="dismiss_notification",
-        )
-        builder.adjust(2)
-
-        await message.bot.send_message(
-            user.telegram_id,
-            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-            f"Вы можете использовать его для покупки или продления подписки.",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.debug(f"Failed to notify user {user.telegram_id} about topup: {e}")
+    await state.update_data(amount=amount, action_type="topup")
+    await state.set_state(AdminStates.entering_user_balance_reason)
 
     await render_hub(
         message.bot,
         message.chat.id,
-        f"✅ <b>Успешно!</b> Пользователю {user.telegram_id} начислено <b>+{amount} ₽</b>.",
-        get_back_button(f"admin_user_card:{user.telegram_id}"),
+        f"📝 <b>Причина начисления (+{amount} ₽)</b>\n\n"
+        f"Введите текстовое примечание (причину начисления) для лога аудита:\n"
+        f"<i>(Или отправьте <code>-</code> дефис для абстрактного описания)</i>",
+        get_back_button(f"admin_user_balance:{telegram_id}"),
         trigger_message_id=message.message_id,
     )
-
-    await state.clear()
 
 
 @router.message(AdminStates.entering_user_balance_deduct)
@@ -325,66 +275,175 @@ async def process_balance_deduct(
         await state.clear()
         return
 
-    target_user_id = user.id
-    idempotency_key = f"admin_deduct_{message.chat.id}_{message.from_user.id}_{target_user_id}_{message.message_id}"
-    try:
-        await create_admin_adjustment(
-            session,
-            user_id=target_user_id,
-            signed_amount=-amount,
-            idempotency_key=idempotency_key,
-            metadata={"admin_id": message.from_user.id, "reason": "manual_deduction"},
-        )
-    except (AccountLedgerError, Exception) as exc:
-        logger.error("Failed to deduct balance for user %s: %s", target_user_id, exc)
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            "⚠️ <b>Не удалось списать средства с баланса.</b>\n"
-            "Причина: недостаточно доступных лотов или ошибка системы.",
-            get_back_button(f"admin_user_balance:{telegram_id}"),
-            trigger_message_id=message.message_id,
-        )
-        await state.clear()
-        return
-
-    await AuditService.log_action(
-        session,
-        message.from_user.id,
-        "DEDUCT_USER_BALANCE",
-        "User",
-        user.id,
-        f"Deducted -{amount} RUB from user {user.telegram_id}",
-    )
-
-    # Notify target user if possible
-    try:
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text="💳 В баланс",
-            callback_data="menu_balance",
-        )
-        builder.button(
-            text="✅ Прочитано",
-            callback_data="dismiss_notification",
-        )
-        builder.adjust(2)
-
-        await message.bot.send_message(
-            user.telegram_id,
-            f"💳 <b>С вашего баланса списано: -{amount} ₽.</b>",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.debug(f"Failed to notify user {user.telegram_id} about deduction: {e}")
+    await state.update_data(amount=amount, action_type="deduct")
+    await state.set_state(AdminStates.entering_user_balance_reason)
 
     await render_hub(
         message.bot,
         message.chat.id,
-        f"✅ <b>Успешно!</b> С баланса пользователя {user.telegram_id} списано <b>-{amount} ₽</b>.",
-        get_back_button(f"admin_user_card:{user.telegram_id}"),
+        f"📝 <b>Причина списания (-{amount} ₽)</b>\n\n"
+        f"Введите текстовое примечание (причину списания) для лога аудита:\n"
+        f"<i>(Или отправьте <code>-</code> дефис для абстрактного описания)</i>",
+        get_back_button(f"admin_user_balance:{telegram_id}"),
         trigger_message_id=message.message_id,
     )
 
+
+@router.message(AdminStates.entering_user_balance_reason)
+async def process_balance_reason(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+
+    data = await state.get_data()
+    telegram_id = data.get("target_telegram_id")
+    amount = data.get("amount")
+    action_type = data.get("action_type")
+
+    if not telegram_id or not amount or not action_type:
+        await state.clear()
+        return
+
+    reason = message.text.strip() if message.text and message.text.strip() != "-" else "Корректировка администратором"
+    await state.update_data(reason=reason)
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await state.clear()
+        return
+
+    username_str = f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
+    change_str = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
+
+    from utils.formatters import format_admin_breadcrumbs
+    header = format_admin_breadcrumbs("👥 Пользователи", f"ID {user.telegram_id}", "Баланс")
+
+    text = (
+        f"{header}"
+        f"⚠️ <b>Подтверждение изменения баланса:</b>\n\n"
+        f"Пользователь: <b>{safe(username_str)}</b>\n"
+        f"Тип счета: <b>🎁 Бонусный баланс (RUB)</b>\n"
+        f"Изменение: <b>{change_str}</b>\n"
+        f"Причина: <b>{safe(reason)}</b>\n\n"
+        f"Вы уверены, что хотите применить данное изменение?"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Подтвердить и применить",
+        callback_data="confirm_admin_balance_apply",
+    )
+    builder.button(
+        text="❌ Отмена",
+        callback_data=f"admin_user_balance:{telegram_id}",
+    )
+    builder.adjust(1)
+
+    await state.set_state(AdminStates.confirming_user_balance)
+
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        text,
+        builder.as_markup(),
+        trigger_message_id=message.message_id,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "confirm_admin_balance_apply")
+async def apply_user_balance_change(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    data = await state.get_data()
+    telegram_id = data.get("target_telegram_id")
+    amount = data.get("amount")
+    action_type = data.get("action_type")
+    reason = data.get("reason", "Корректировка администратором")
+
+    if not telegram_id or not amount or not action_type:
+        await callback.answer("Ошибка: данные устарели.", show_alert=True)
+        await state.clear()
+        return
+
+    user = await get_user_by_telegram_id(session, telegram_id)
+    if not user:
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await state.clear()
+        return
+
+    signed_amount = amount if action_type == "topup" else -amount
+    idempotency_key = f"admin_adj_{callback.message.chat.id}_{callback.from_user.id}_{user.id}_{action_type}_{amount}"
+
+    try:
+        await create_admin_adjustment(
+            session,
+            user_id=user.id,
+            signed_amount=signed_amount,
+            idempotency_key=idempotency_key,
+            metadata={"admin_id": callback.from_user.id, "reason": reason},
+        )
+    except Exception as exc:
+        logger.error("Failed to apply admin balance adjustment for user %s: %s", user.id, exc)
+        await callback.answer("⚠️ Ошибка применения баланса.", show_alert=True)
+        await state.clear()
+        return
+
+    audit_action = "TOPUP_USER_BALANCE" if action_type == "topup" else "DEDUCT_USER_BALANCE"
+    audit_desc = f"{action_type.title()} {signed_amount} RUB to user {user.telegram_id}. Reason: {reason}"
+    await AuditService.log_action(
+        session,
+        callback.from_user.id,
+        audit_action,
+        "User",
+        user.id,
+        audit_desc,
+    )
+
+    # Уведомление пользователю
+    try:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="💳 В баланс", callback_data="menu_balance")
+        builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+        builder.adjust(2)
+
+        msg_text = (
+            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
+            f"Причина: <i>{safe(reason)}</i>"
+            if action_type == "topup"
+            else f"💳 <b>С вашего бонусного баланса списано: -{amount} ₽.</b>\nПричина: <i>{safe(reason)}</i>"
+        )
+        await callback.bot.send_message(
+            user.telegram_id,
+            msg_text,
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.debug("Failed to notify user %s about balance change: %s", user.telegram_id, e)
+
     await state.clear()
+    await callback.answer("✅ Успешно приведено в действие!", show_alert=True)
+
+    from utils.formatters import format_admin_breadcrumbs
+    header = format_admin_breadcrumbs("👥 Пользователи", f"ID {user.telegram_id}", "Баланс")
+    change_formatted = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        f"{header}✅ <b>Успешно!</b> Бонусный баланс пользователя {user.telegram_id} изменен на <b>{change_formatted}</b>.\nПричина: <i>{safe(reason)}</i>",
+        get_back_button(f"admin_user_card:{user.telegram_id}"),
+        parse_mode="HTML",
+    )
+
