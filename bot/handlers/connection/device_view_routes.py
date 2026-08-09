@@ -72,14 +72,15 @@ async def manage_device(
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
-    location_display = f"{flag} {safe(server_name)}"
     protocol = _format_protocol(server.protocol if server else None)
 
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         flag=flag,
-        country_display=location_display,
-        server_name="",
+        # The server name is the actual location label; keep the country flag
+        # as a compact suffix instead of rendering the same location twice.
+        country_display=server_name,
+        server_name=flag,
         protocol=protocol,
         traffic_total=format_traffic(profile.traffic_down + profile.traffic_up),
         last_connected=(
@@ -107,10 +108,6 @@ async def manage_device(
         builder.adjust(1)
         keyboard = builder.as_markup()
 
-    # Pass the exact clicked message to render_hub. The hub cache can lag
-    # immediately after device creation; relying only on cached hub IDs can
-    # make the first device card render without its keyboard. Editing the
-    # callback message directly makes the controls deterministic.
     await render_hub(
         callback.bot,
         callback.message.chat.id,
