@@ -88,19 +88,17 @@ services:
       PYTHONUNBUFFERED: "1"
       DOCKER_DEPLOYMENT: "true"
       YOOKASSA_WEBHOOK_PORT: "8080"
-      # Bind to all interfaces so Caddy can reach bot:8080 over the Docker
-      # bridge network. The code default (127.0.0.1) is intentionally kept
-      # for non-Docker / bare-metal deployments.
       WEBHOOK_HOST: "0.0.0.0"
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
       JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
-    # The bot does not need Linux capabilities. These restrictions reduce the
-    # impact of a dependency or application compromise inside the container.
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     deploy:
       resources:
         limits:
@@ -126,7 +124,7 @@ services:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
