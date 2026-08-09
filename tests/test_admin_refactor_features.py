@@ -70,6 +70,36 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs["chat_id"], 999)
             self.assertIn("Диск VPN-ноды забит > 85%", call_kwargs["text"])
 
+    async def test_node_monitor_down_alert(self):
+        bot = AsyncMock()
+        server = MagicMock()
+        server.id = 2
+        server.name = "NL-1"
+        server.api_url = "http://127.0.0.1:3001"
+        server.api_key = "secret"
+
+        client_mock = AsyncMock()
+        client_mock.healthcheck.return_value = False
+
+        with (
+            patch("services.workers.node_monitor.session_scope"),
+            patch("services.workers.node_monitor.get_active_servers", return_value=[server]),
+            patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
+            patch("services.workers.node_monitor.get_settings") as mock_settings,
+            patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
+        ):
+            settings_obj = MagicMock()
+            settings_obj.ADMIN_IDS = [888]
+            mock_settings.return_value = settings_obj
+
+            await check_node_resources_and_alerts(bot)
+
+            bot.send_message.assert_called_once()
+            call_kwargs = bot.send_message.call_args[1]
+            self.assertEqual(call_kwargs["chat_id"], 888)
+            self.assertIn("VPN-нода недоступна", call_kwargs["text"])
+
+
     async def test_amnezia_client_get_server_load(self):
         client = AmneziaClient("http://localhost:3000", "testkey")
         with patch.object(client, "_request", return_value={"cpu_percent": 12.0, "disk_percent": 45.0}):
