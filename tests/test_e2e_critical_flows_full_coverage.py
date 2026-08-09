@@ -34,8 +34,9 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
                     "tariff_quotes, tariff_versions, payments, vpn_profiles, "
-                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers "
+                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings "
                     "RESTART IDENTITY CASCADE"
+
                 )
             )
 

@@ -65,8 +65,9 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs "
+                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings "
                     "RESTART IDENTITY CASCADE"
+
                 )
             )
             user = User(telegram_id=uuid.uuid4().int % 10**12)
