@@ -1,4 +1,5 @@
 import logging
+from uuid import uuid4
 
 from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
@@ -62,7 +63,6 @@ async def show_user_balance_menu(
         f"🎁 Бонусный баланс: <b>{bonus_rub} ₽</b>\n\n"
         f"Выберите действие ниже:"
     )
-
 
     try:
         await callback.message.edit_text(
@@ -309,7 +309,8 @@ async def process_balance_reason(
         return
 
     reason = message.text.strip() if message.text and message.text.strip() != "-" else "Корректировка администратором"
-    await state.update_data(reason=reason)
+    adjustment_id = uuid4().hex
+    await state.update_data(reason=reason, adjustment_id=adjustment_id)
 
     user = await get_user_by_telegram_id(session, telegram_id)
     if not user:
@@ -370,8 +371,9 @@ async def apply_user_balance_change(
     amount = data.get("amount")
     action_type = data.get("action_type")
     reason = data.get("reason", "Корректировка администратором")
+    adjustment_id = data.get("adjustment_id")
 
-    if not telegram_id or not amount or not action_type:
+    if not telegram_id or not amount or not action_type or not adjustment_id:
         await callback.answer("Ошибка: данные устарели.", show_alert=True)
         await state.clear()
         return
@@ -383,7 +385,7 @@ async def apply_user_balance_change(
         return
 
     signed_amount = amount if action_type == "topup" else -amount
-    idempotency_key = f"admin_adj_{callback.message.chat.id}_{callback.from_user.id}_{user.id}_{action_type}_{amount}"
+    idempotency_key = f"admin_adj:{adjustment_id}"
 
     try:
         await create_admin_adjustment(
@@ -410,7 +412,6 @@ async def apply_user_balance_change(
         audit_desc,
     )
 
-    # Уведомление пользователю
     try:
         builder = InlineKeyboardBuilder()
         builder.button(text="💳 В баланс", callback_data="menu_balance")
@@ -446,4 +447,3 @@ async def apply_user_balance_change(
         get_back_button(f"admin_user_card:{user.telegram_id}"),
         parse_mode="HTML",
     )
-
