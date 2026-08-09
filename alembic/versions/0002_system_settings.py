@@ -21,7 +21,8 @@ def upgrade() -> None:
         sa.Column('key', sa.String(length=100), nullable=False),
         sa.Column('value', sa.Text(), nullable=True),
         sa.Column('updated_by', sa.BigInteger(), nullable=True),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text('now()')),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text("TIMEZONE('utc', CURRENT_TIMESTAMP)")),
+
         sa.PrimaryKeyConstraint('key')
     )
 

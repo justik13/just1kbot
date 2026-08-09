@@ -274,7 +274,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    bind.exec_driver_sql("DROP TABLE IF EXISTS public.system_settings CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.provider_refund_operations CASCADE")
+
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_disputes CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.account_ledger_allocations CASCADE")
     bind.exec_driver_sql("DROP TABLE IF EXISTS public.payment_refunds CASCADE")
