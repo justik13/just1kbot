@@ -300,7 +300,7 @@ async def _run_mass_bonus_background(
                     logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
                     continue
 
-                if tg_id:
+                if tg_id and tg_id != admin_id:
                     try:
                         await global_send_limiter.acquire()
                         await bot.send_message(
@@ -329,12 +329,19 @@ async def _run_mass_bonus_background(
 
     try:
         header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
-        await bot.send_message(
+        builder = InlineKeyboardBuilder()
+        builder.button(text="🎁 Новый массовый бонус", callback_data="admin_mass_bonus")
+        builder.button(text="🏠 В админ-меню", callback_data="admin_menu")
+        builder.adjust(1)
+
+        await render_hub(
+            bot,
             admin_id,
             f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
             f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
             f"• Ошибок: <b>{fail_count}</b>\n"
             f"• Заблокировали бота: <b>{blocked_count}</b>",
+            reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
     except Exception as e:
