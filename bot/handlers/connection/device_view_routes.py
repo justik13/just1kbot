@@ -38,6 +38,7 @@ from .common import _format_protocol
 router = Router()
 logger = logging.getLogger(__name__)
 
+
 async def _get_safe_device_name(session: AsyncSession, profile) -> str:
     server = await get_server_by_id(session, profile.server_id)
     server_name = server.name if server else "server"
@@ -70,15 +71,15 @@ async def manage_device(
 
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
-    country_display = get_country_display(flag, default_text="🌐")
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
+    location_display = f"{flag} {safe(server_name)}"
     protocol = _format_protocol(server.protocol if server else None)
 
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         flag=flag,
-        country_display=country_display,
-        server_name=safe(server_name),
+        country_display=location_display,
+        server_name="",
         protocol=protocol,
         traffic_total=format_traffic(profile.traffic_down + profile.traffic_up),
         last_connected=(
@@ -97,9 +98,7 @@ async def manage_device(
                           and bool(profile.peer_id) and bool(profile.raw_config)),
         )
     else:
-        rendered += (
-            texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
-        )
+        rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
 
         builder = InlineKeyboardBuilder()
         builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
@@ -108,7 +107,17 @@ async def manage_device(
         builder.adjust(1)
         keyboard = builder.as_markup()
 
-    await render_hub(callback.bot, callback.message.chat.id, rendered, keyboard)
+    # Pass the exact clicked message to render_hub. The hub cache can lag
+    # immediately after device creation; relying only on cached hub IDs can
+    # make the first device card render without its keyboard. Editing the
+    # callback message directly makes the controls deterministic.
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        rendered,
+        keyboard,
+        trigger_message_id=callback.message.message_id,
+    )
 
 
 @router.callback_query(F.data.startswith("show_config:"))
@@ -183,6 +192,7 @@ async def show_config(
             raw_config=safe(display_key),
         ),
         get_back_button(f"manage_device:{profile.id}"),
+        trigger_message_id=callback.message.message_id,
     )
 
 
@@ -220,6 +230,7 @@ async def download_conf(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
             get_back_button(f"manage_device:{profile.id}"),
+            trigger_message_id=callback.message.message_id,
         )
         return
 
@@ -229,6 +240,7 @@ async def download_conf(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
             get_back_button(f"manage_device:{profile.id}"),
+            trigger_message_id=callback.message.message_id,
         )
         return
 
@@ -254,6 +266,7 @@ async def download_conf(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
             get_back_button(f"manage_device:{profile.id}"),
+            trigger_message_id=callback.message.message_id,
         )
         return
 
