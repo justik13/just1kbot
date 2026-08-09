@@ -53,7 +53,14 @@ def get_hub_keyboard(
             callback_data="menu_admin",
         )
 
-    builder.adjust(1, 2, 2, 1 if mtproto_url else 0, 1 if is_admin else 0)
+    sizes = [1, 2, 2]
+    if mtproto_url:
+        sizes.append(1)
+    if is_admin:
+        sizes.append(1)
+
+    builder.adjust(*sizes)
+
 
     return builder.as_markup()
 
