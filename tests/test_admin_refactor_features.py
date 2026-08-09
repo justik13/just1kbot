@@ -47,12 +47,15 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         server.api_key = "secret"
 
         client_mock = AsyncMock()
-        client_mock.healthcheck.return_value = True
-        client_mock.get_server_load.return_value = {"disk_percent": 92.5}
+        client_mock.healthcheck = AsyncMock(return_value=True)
+        client_mock.get_server_load = AsyncMock(return_value={"disk_percent": 92.5})
+
+        mock_scope = AsyncMock()
+        mock_scope.__aenter__.return_value = AsyncMock()
 
         with (
-            patch("services.workers.node_monitor.session_scope"),
-            patch("services.workers.node_monitor.get_active_servers", return_value=[server]),
+            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
+            patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings") as mock_settings,
             patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
@@ -60,8 +63,6 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             settings_obj = MagicMock()
             settings_obj.ADMIN_IDS = [999]
             mock_settings.return_value = settings_obj
-
-
 
             await check_node_resources_and_alerts(bot)
 
@@ -79,11 +80,14 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         server.api_key = "secret"
 
         client_mock = AsyncMock()
-        client_mock.healthcheck.return_value = False
+        client_mock.healthcheck = AsyncMock(return_value=False)
+
+        mock_scope = AsyncMock()
+        mock_scope.__aenter__.return_value = AsyncMock()
 
         with (
-            patch("services.workers.node_monitor.session_scope"),
-            patch("services.workers.node_monitor.get_active_servers", return_value=[server]),
+            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
+            patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings") as mock_settings,
             patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
@@ -98,6 +102,7 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             call_kwargs = bot.send_message.call_args[1]
             self.assertEqual(call_kwargs["chat_id"], 888)
             self.assertIn("VPN-нода недоступна", call_kwargs["text"])
+
 
 
     async def test_amnezia_client_get_server_load(self):
