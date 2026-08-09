@@ -293,7 +293,9 @@ async def back_to_main_menu(
         callback.message.chat.id,
         text,
         kb,
+        trigger_message_id=callback.message.message_id,
     )
+
 
 
 @router.callback_query(F.data == "ignore")
