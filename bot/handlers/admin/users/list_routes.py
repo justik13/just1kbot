@@ -164,7 +164,6 @@ async def users_pagination(
         logger.debug(f"users_pagination edit_text failed: {e}")
 
 
-
 @router.callback_query(F.data == "admin_users_search")
 async def start_search_user(
     callback: CallbackQuery,
@@ -230,7 +229,6 @@ async def process_search_user(
 
     await _show_user_card_edit(message, user, session)
     await state.clear()
-
 
 
 @router.callback_query(F.data.startswith("admin_user_card:"))
@@ -345,7 +343,9 @@ async def show_user_audit(
         for item in logs:
             dt = format_datetime(item.created_at)
             action_text = action_map.get(item.action, item.action or "Действие")
-            details_text = format_audit_details(item.details)
+            # Audit details may contain user/admin-controlled text. Escape the
+            # rendered values before inserting them into an HTML Telegram message.
+            details_text = safe(format_audit_details(item.details))
             lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
