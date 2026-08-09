@@ -55,11 +55,12 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             patch("services.workers.node_monitor.get_active_servers", return_value=[server]),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings") as mock_settings,
+            patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
         ):
-
             settings_obj = MagicMock()
             settings_obj.ADMIN_IDS = [999]
             mock_settings.return_value = settings_obj
+
 
 
             await check_node_resources_and_alerts(bot)

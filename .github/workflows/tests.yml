@@ -134,23 +134,12 @@ jobs:
       - run: alembic upgrade head
       - name: Run full test suite
         id: unittests
-        run: |
-          python -m unittest discover -s tests -v > /tmp/unittest.log 2>&1 || {
-            echo "=================== UNIT TEST FAILURE LOG ==================="
-            cat /tmp/unittest.log
-            exit 1
-          }
+        run: python -m unittest discover -s tests -v
         env:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
 
-      - name: Test Alembic downgrade to base
-        run: |
-          alembic downgrade base || {
-            echo "=================== ALEMBIC DOWNGRADE FAILURE ==================="
-            exit 1
-          }
-
+      - run: alembic downgrade base
       - name: Verify downgrade leaves no application tables
         run: |
           PGPASSWORD=projectx psql -h localhost -U projectx -d projectx_test \
@@ -161,13 +150,9 @@ jobs:
             printf 'Application tables remain after downgrade:\n%s\n' "$remaining" >&2
             exit 1
           fi
-
-      - name: Re-apply Alembic migrations
-        run: alembic upgrade head
-
+      - run: alembic upgrade head
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic tests
+      - run: git diff --check
 
-      - name: Check for trailing whitespace and formatting issues
-        run: git diff --check
 
