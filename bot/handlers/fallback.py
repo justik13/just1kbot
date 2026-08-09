@@ -23,7 +23,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
         pass
 
 
-async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 10.0) -> None:
+async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
     import asyncio
     await asyncio.sleep(delay)
     try:
@@ -45,21 +45,22 @@ async def handle_unknown_text(message: Message, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
-    builder.button(text="✅ Прочитать", callback_data="dismiss_notification")
-    builder.adjust(2)
+    builder.adjust(1)
 
     try:
         temp_msg = await message.answer(
             "🤖 <b>Я не понимаю произвольный текст.</b>\n\n"
-            "Пожалуйста, используйте кнопки управления ниже или команду /start.",
+            "Пожалуйста, используйте кнопки управления ниже или команду /start.\n\n"
+            "⏱ <i>Сообщение удалится автоматически через 5 сек.</i>",
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
         asyncio.create_task(
-            _auto_delete_delay(message.bot, message.chat.id, temp_msg.message_id, delay=10.0)
+            _auto_delete_delay(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
         )
     except Exception:
         pass
+
 
 
 
