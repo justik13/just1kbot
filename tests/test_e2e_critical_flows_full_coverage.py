@@ -1,5 +1,7 @@
 import os
 import unittest
+from unittest.mock import patch
+
 from decimal import Decimal
 
 from sqlalchemy import text
@@ -24,6 +26,28 @@ DB = os.getenv("TEST_DATABASE_URL")
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "DATABASE_URL": os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test"),
+            },
+        )
+        self.env_patcher.start()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
@@ -34,14 +58,17 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
                     "tariff_quotes, tariff_versions, payments, vpn_profiles, "
-                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings "
+                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings, payment_disputes "
                     "RESTART IDENTITY CASCADE"
-
                 )
             )
 
     async def asyncTearDown(self):
+        from config.settings import get_settings
+        get_settings.cache_clear()
+        self.env_patcher.stop()
         await self.engine.dispose()
+
 
     async def test_e2e_user_onboarding_topup_purchase_device_flow(self):
         async with self.sessions.begin() as session:

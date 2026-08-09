@@ -30,6 +30,22 @@ async def get_active_servers(
     return result.scalars().all()
 
 
+async def get_server_peer_counts(
+    session: AsyncSession,
+) -> dict[int, int]:
+    """
+    Возвращает словарь {server_id: count} с количеством активных профилей из БД.
+    """
+    counts_stmt = select(
+        VPNProfile.server_id,
+        func.count(VPNProfile.id),
+    ).group_by(VPNProfile.server_id)
+
+    counts_result = await session.execute(counts_stmt)
+    return {row[0]: row[1] for row in counts_result.all()}
+
+
+
 async def get_available_servers(
     session: AsyncSession,
 ) -> List[Server]:

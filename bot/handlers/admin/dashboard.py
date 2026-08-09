@@ -93,20 +93,26 @@ async def _get_dead_queues_count(session: AsyncSession) -> int:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
-    from database.repositories.servers_repo import get_active_servers
-    servers = await get_active_servers(session)
+    from database.repositories.servers_repo import get_active_servers, get_server_peer_counts
+    from services.slots_cache import get_cached_peer_count
 
+    servers = await get_active_servers(session)
     if not servers:
         return "<i>Серверов пока нет</i>"
+
+    db_counts = await get_server_peer_counts(session)
     lines = []
     for s in servers:
         flag = s.country_flag or "🌐"
-        used = getattr(s, "current_clients_count", 0) or 0
+        used = get_cached_peer_count(s.id)
+        if used is None:
+            used = db_counts.get(s.id, 0)
         total = s.max_clients or 240
         pct = int((used / total) * 100) if total > 0 else 0
         status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
         lines.append(f"{status_icon} {flag} <b>{safe(s.name)}</b>: {used}/{total} ({pct}%)")
     return "\n".join(lines)
+
 
 
 async def _show_admin_dashboard(
