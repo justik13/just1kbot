@@ -53,17 +53,17 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         mock_scope = AsyncMock()
         mock_scope.__aenter__.return_value = AsyncMock()
 
+        settings_obj = MagicMock()
+        settings_obj.ADMIN_IDS = [999]
+
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
-            patch("services.workers.node_monitor.get_settings") as mock_settings,
+            patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
+            patch("config.settings.get_settings", return_value=settings_obj),
             patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
         ):
-            settings_obj = MagicMock()
-            settings_obj.ADMIN_IDS = [999]
-            mock_settings.return_value = settings_obj
-
             await check_node_resources_and_alerts(bot)
 
             bot.send_message.assert_called_once()
@@ -85,23 +85,24 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         mock_scope = AsyncMock()
         mock_scope.__aenter__.return_value = AsyncMock()
 
+        settings_obj = MagicMock()
+        settings_obj.ADMIN_IDS = [888]
+
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
-            patch("services.workers.node_monitor.get_settings") as mock_settings,
+            patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
+            patch("config.settings.get_settings", return_value=settings_obj),
             patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
         ):
-            settings_obj = MagicMock()
-            settings_obj.ADMIN_IDS = [888]
-            mock_settings.return_value = settings_obj
-
             await check_node_resources_and_alerts(bot)
 
             bot.send_message.assert_called_once()
             call_kwargs = bot.send_message.call_args[1]
             self.assertEqual(call_kwargs["chat_id"], 888)
             self.assertIn("VPN-нода недоступна", call_kwargs["text"])
+
 
 
 

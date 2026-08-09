@@ -93,7 +93,8 @@ async def check_node_resources_and_alerts(bot: Bot):
                     )
 
         except Exception as exc:
-            logger.warning("Error checking node monitor for server %s: %s", server.id, exc)
+            logger.warning("Error checking node monitor for server %s: %s", server.id, exc, exc_info=True)
+
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
