@@ -12,6 +12,7 @@ from bot import texts
 from bot.keyboards import get_admin_server_card_keyboard
 from database.repositories.servers_repo import (
     get_server_count,
+    get_server_peer_counts,
     get_servers_paginated,
 )
 from utils.telegram import safe
@@ -104,7 +105,12 @@ async def _show_server_card(
     from utils.formatters import format_admin_breadcrumbs
     flag = server.country_flag or "🌐"
     status = "🟢 Активен" if server.is_active else "🔴 Отключен"
-    used_clients = getattr(server, "current_clients_count", 0) or 0
+
+    # current_clients_count is not a persisted Server field and therefore was
+    # always falling back to zero. Use the same DB-backed profile count that
+    # the server repository uses for capacity calculations instead.
+    peer_counts = await get_server_peer_counts(session)
+    used_clients = peer_counts.get(server.id, 0)
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs("🖥 Серверы", f"{flag} {server.name}")
 
@@ -112,7 +118,7 @@ async def _show_server_card(
         f"{header}"
         f"🖥 <b>Карточка VPN-сервера {flag} {safe(server.name)}</b> (ID: {server.id})\n\n"
         f"• Статус в боте: <b>{status}</b>\n"
-        f"• Протокол: <code>{server.protocol}</code>\n"
+        f"• Протокол: <code>{safe(server.protocol)}</code>\n"
         f"• Заполненность слотов: <b>{used_clients} / {max_clients}</b>\n"
         f"• API URL: <code>{safe(server.api_url)}</code>\n"
     )
@@ -130,4 +136,3 @@ async def _show_server_card(
         )
     except TelegramBadRequest as e:
         logger.debug(f"_show_server_card edit_text failed: {e}")
-
