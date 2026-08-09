@@ -296,11 +296,16 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
             ),
             (1, 0),
         )
+        async with self.sessions.begin() as session:
+            row = await session.get(APIOperation, operation.id)
+            row.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+
         second = (
             await claim_api_operations(
                 worker_id="same-worker", session_factory=self.sessions
             )
         )[0]
+
         self.assertEqual(second.attempt_number, 2)
 
         with self.assertRaises(APIOperationOwnershipError):
