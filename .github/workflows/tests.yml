@@ -141,9 +141,10 @@ jobs:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
       - name: Show unittest log on failure
-        if: failure() && steps.unittests.outcome == 'failure'
+        if: failure()
         run: |
           cat /tmp/unittest.log
+
       - name: Upload failing unittest log
         if: failure() && steps.unittests.outcome == 'failure'
         uses: actions/upload-artifact@v4

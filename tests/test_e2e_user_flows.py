@@ -114,9 +114,15 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             "ADMIN_IDS": "[123456789]",
             "SUPPORT_USERNAME": "test_support",
             "DOMAIN": "test.domain",
+            "SSL_EMAIL": "test@domain.com",
+            "YOOKASSA_SHOP_ID": "123456",
+            "YOOKASSA_SECRET_KEY": "test_secret",
+            "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+            "YOOKASSA_WEBHOOK_PORT": "8080",
             "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-            "DATABASE_URL": "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test",
+            "DATABASE_URL": os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test"),
         })
+
         self.env_patcher.start()
         
         async def mock_throttle(handler, event, data):
