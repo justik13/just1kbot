@@ -4,7 +4,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -101,6 +101,13 @@ async def cmd_start(
 ):
     await state.clear()
 
+    # Clear legacy ReplyKeyboard if present from previous bot versions
+    try:
+        tmp_msg = await message.answer("🧹", reply_markup=ReplyKeyboardRemove())
+        await message.bot.delete_message(message.chat.id, tmp_msg.message_id)
+    except Exception:
+        pass
+
     telegram_id = message.from_user.id
 
     ref_id = parse_referral_id(command.args) if command.args else None
@@ -142,6 +149,71 @@ async def cmd_start(
         builder.as_markup(),
         force_new=True,
     )
+
+
+@router.message(F.text & F.text.in_({
+    "👤 Профиль",
+    "💳 Купить / Продлить",
+    "🔑 Подключение",
+    "🆘 Поддержка",
+    "Профиль",
+    "Купить / Продлить",
+    "Подключение",
+    "Поддержка",
+    "Главное меню",
+    "🏠 Главное меню",
+}))
+async def handle_legacy_reply_keyboard(
+    message: Message,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    await state.clear()
+    try:
+        tmp_msg = await message.answer("🧹", reply_markup=ReplyKeyboardRemove())
+        await message.bot.delete_message(message.chat.id, tmp_msg.message_id)
+        await message.bot.delete_message(message.chat.id, message.message_id)
+    except Exception:
+        pass
+
+    db_user = await SubscriptionService.process_onboarding(
+        session,
+        message.from_user.id,
+        message.from_user.username,
+        message.from_user.first_name,
+        None,
+    )
+    if not db_user:
+        await message.answer(texts.ERROR_USER_NOT_FOUND)
+        return
+
+    is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
+    is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
+    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
+    balance = await get_account_balance(session, user_id=db_user.id)
+    text = texts.HUB_HEADER.format(
+        name=name,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
+    )
+
+    from database.repositories.system_settings_repo import get_system_setting
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+
+    kb = get_hub_keyboard(
+        is_admin=is_admin,
+        is_active=is_active,
+        mtproto_url=mtproto_url,
+    )
+
+    await render_hub(
+        message.bot,
+        message.chat.id,
+        text,
+        kb,
+        force_new=True,
+    )
+
 
 
 
