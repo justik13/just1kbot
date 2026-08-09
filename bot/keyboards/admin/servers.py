@@ -10,6 +10,10 @@ def get_admin_server_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
+        text="⚡ Проверить доступность (Ping)",
+        callback_data=f"admin_server_ping:{server_id}",
+    )
+    builder.button(
         text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L12_1,
         callback_data=f"admin_server_edit_name:{server_id}",
     )
@@ -48,8 +52,9 @@ def get_admin_server_card_keyboard(
         callback_data="admin_servers",
     )
 
-    builder.adjust(1, 1, 1, 1, 1, 1, 1, 1)
+    builder.adjust(1)
     return builder.as_markup()
+
 
 
 def get_server_delete_confirm_keyboard(

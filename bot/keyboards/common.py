@@ -6,6 +6,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 def get_hub_keyboard(
     is_admin: bool = False,
     is_active: bool = False,
+    mtproto_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -40,18 +41,29 @@ def get_hub_keyboard(
         callback_data="menu_support",
     )
 
+    if mtproto_url:
+        builder.button(
+            text="🚀 MTProto Proxy",
+            url=mtproto_url,
+        )
+
     if is_admin:
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_COMMON_L44_1,
             callback_data="menu_admin",
         )
 
+    sizes = [1, 2, 2]
+    if mtproto_url:
+        sizes.append(1)
     if is_admin:
-        builder.adjust(1, 2, 2)
-    else:
-        builder.adjust(1, 2, 1)
+        sizes.append(1)
+
+    builder.adjust(*sizes)
+
 
     return builder.as_markup()
+
 
 
 def get_back_button(

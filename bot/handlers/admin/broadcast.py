@@ -86,9 +86,13 @@ async def start_broadcast(
         return
     await callback.answer(show_alert=False)
     await state.clear()
+
+    from utils.formatters import format_admin_breadcrumbs
+    header = format_admin_breadcrumbs("📢 Рассылка", "Шаг 1: Выбор аудитории")
+
     try:
         await callback.message.edit_text(
-            "📢 <b>Рассылка › Шаг 1: Выберите аудиторию</b>\n\nКому отправить сообщение?",
+            f"{header}<b>Выберите аудиторию для рассылки:</b>\n\nКому отправить сообщение?",
             reply_markup=get_broadcast_audience_keyboard(),
             parse_mode="HTML",
         )
@@ -117,6 +121,7 @@ async def select_broadcast_audience(
         )
     except TelegramBadRequest as e:
         logger.debug(f"select_broadcast_audience edit_text failed: {e}")
+
 
 
 @router.message(AdminStates.entering_broadcast_message)

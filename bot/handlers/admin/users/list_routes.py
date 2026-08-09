@@ -11,15 +11,18 @@ from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.repositories.users_repo import (
+    get_filtered_user_count,
     get_filtered_users_count,
     get_filtered_users_paginated,
+    get_filtered_users_paginated_with_profiles,
     get_user_by_telegram_id,
     get_user_count,
     get_users_paginated_with_profiles,
 )
+
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 
 from .common import (
     USERS_PER_PAGE,
@@ -40,19 +43,16 @@ async def show_users_list(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
     await state.clear()
 
-    total_users = await get_user_count(session)
+    total_users = await get_filtered_users_count(session, filter_type="all")
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
-    users = await get_users_paginated_with_profiles(
-        session, page=1, per_page=USERS_PER_PAGE
+    users = await get_filtered_users_paginated(
+        session, filter_type="all", filter_param=None, page=1, per_page=USERS_PER_PAGE
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
@@ -60,11 +60,7 @@ async def show_users_list(
     )
 
     try:
-        await callback.message.edit_text(
-            rendered,
-            reply_markup=kb.as_markup(),
-            parse_mode="HTML",
-        )
+        await callback.message.edit_text(rendered, reply_markup=kb.as_markup(), parse_mode="HTML")
     except TelegramBadRequest as e:
         logger.debug(f"show_users_list edit_text failed: {e}")
 
@@ -80,11 +76,23 @@ async def users_filter_pagination(
         return
 
     parts = callback.data.split(":")
-    filter_type = parts[1] if len(parts) > 1 else "all"
-    filter_param = parts[2] if len(parts) > 2 else "none"
-    try:
-        page = int(parts[3]) if len(parts) > 3 else 1
-    except ValueError:
+    if len(parts) == 3:
+        filter_type = parts[1]
+        filter_param = "none"
+        try:
+            page = int(parts[2])
+        except ValueError:
+            page = 1
+    elif len(parts) >= 4:
+        filter_type = parts[1]
+        filter_param = parts[2]
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 1
+    else:
+        filter_type = "all"
+        filter_param = "none"
         page = 1
 
     await callback.answer(show_alert=False)
@@ -131,22 +139,19 @@ async def users_pagination(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     page = parse_callback_id(callback.data, 1) or 1
     await callback.answer(show_alert=False)
     await state.clear()
 
-    total_users = await get_user_count(session)
+    total_users = await get_filtered_users_count(session, filter_type="all")
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
     page = min(max(1, page), total_pages)
 
-    users = await get_users_paginated_with_profiles(
-        session, page=page, per_page=USERS_PER_PAGE
+    users = await get_filtered_users_paginated(
+        session, filter_type="all", page=page, per_page=USERS_PER_PAGE
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
@@ -161,6 +166,7 @@ async def users_pagination(
         )
     except TelegramBadRequest as e:
         logger.debug(f"users_pagination edit_text failed: {e}")
+
 
 
 @router.callback_query(F.data == "admin_users_search")
@@ -203,7 +209,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_NUMERIC_ID,
+            "⚠️ Введите @username, Telegram ID или ID пользователя для поиска.",
             get_back_button("admin_users"),
         )
         return
@@ -212,34 +218,23 @@ async def process_search_user(
         await state.clear()
         return
 
-    try:
-        telegram_id = int(message.text.strip())
-    except ValueError:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            texts.ERROR_NUMERIC_ID,
-            get_back_button("admin_users"),
-        )
-        return
-
-    user = await get_user_by_telegram_id(session, telegram_id)
+    from database.repositories.users_repo import search_user_flexible
+    user = await search_user_flexible(session, message.text)
 
     if not user:
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L204_1.format(value_0=telegram_id),
+            f"🔍 Пользователь по запросу <b>{safe(message.text)}</b> не найден.",
             get_back_button("admin_users"),
+            parse_mode="HTML",
         )
-
         await state.clear()
-
         return
 
     await _show_user_card_edit(message, user, session)
-
     await state.clear()
+
 
 
 @router.callback_query(F.data.startswith("admin_user_card:"))

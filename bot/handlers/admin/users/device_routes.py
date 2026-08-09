@@ -59,24 +59,44 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
+    from utils.formatters import format_admin_breadcrumbs, format_traffic
+    from utils.datetime_helpers import now_utc
+
+    header = format_admin_breadcrumbs("👥 Пользователи", f"ID {telegram_id}", "📱 Устройства")
+    now = now_utc()
+
     if not profiles:
         text = (
-            texts.ADMIN_USER_DEVICES_HEADER.format(
-                telegram_id=telegram_id
-            )
-            + "\n"
-            + texts.ADMIN_USER_DEVICES_EMPTY
+            f"{header}"
+            f"📱 <b>Устройства пользователя ID {telegram_id}:</b>\n\n"
+            f"<i>У пользователя пока нет созданных устройств.</i>"
         )
     else:
-        text = texts.ADMIN_USER_DEVICES_HEADER.format(
-            telegram_id=telegram_id
-        )
+        lines = [f"{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>\n"]
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
-                or texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L77_1.format(value_0=profile.id)
+                or f"Устройство #{profile.id}"
             )
-            text += texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L79_1.format(value_0=safe(name))
+            # Статус по last_handshake_at
+            last_hs = getattr(profile, "last_handshake_at", None) or getattr(profile, "updated_at", None)
+            is_online = False
+            if last_hs:
+                if last_hs.tzinfo is None:
+                    last_hs = last_hs.replace(tzinfo=now.tzinfo)
+                delta_sec = (now - last_hs).total_seconds()
+                if delta_sec <= 180:  # Рукопожатие за последние 3 минуты
+                    is_online = True
+
+            status_hs = "🟢 <b>В сети (онлайн)</b>" if is_online else "🔴 <b>Офлайн</b>"
+            traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
+
+            lines.append(
+                f"• 📱 <b>{safe(name)}</b> (ID: {profile.id})\n"
+                f"   Состояние: {status_hs}\n"
+                f"   Трафик: <code>{traffic_total}</code>\n"
+            )
+        text = "\n".join(lines)
 
     try:
         await callback.message.edit_text(
@@ -89,6 +109,7 @@ async def admin_user_devices(
         )
     except TelegramBadRequest as e:
         logger.debug(f"admin_user_devices edit_text failed: {e}")
+
 
 
 @router.callback_query(F.data.startswith("admin_delete_device:"))

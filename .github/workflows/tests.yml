@@ -136,22 +136,27 @@ jobs:
         id: unittests
         run: |
           set -o pipefail
-          python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log
+          python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log || {
+            echo "=================== FAILED TEST LOG ==================="
+            cat /tmp/unittest.log | grep -E '^(FAIL|ERROR|AssertionError|Traceback|  File)' -A 5 -B 2 || cat /tmp/unittest.log
+            exit 1
+          }
         env:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
-      - name: Show unittest log on failure
-        if: failure() && steps.unittests.outcome == 'failure'
-        run: |
-          cat /tmp/unittest.log
+
       - name: Upload failing unittest log
-        if: failure() && steps.unittests.outcome == 'failure'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: unittest-log-${{ github.sha }}
           path: /tmp/unittest.log
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
+
+
+
+
       - run: alembic downgrade base
       - name: Verify downgrade leaves no application tables
         run: |
@@ -167,3 +172,5 @@ jobs:
       - name: Compile all tracked Python trees
         run: python -m compileall -q bot config database services utils alembic tests
       - run: git diff --check
+
+

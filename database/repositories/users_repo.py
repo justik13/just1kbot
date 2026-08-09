@@ -221,15 +221,53 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
     return result.scalar_one() or 0
 
 
+async def get_user_by_username(session: AsyncSession, username: str) -> Optional[User]:
+    clean = username.lstrip("@").strip()
+    stmt = (
+        select(User)
+        .where(User.username.ilike(clean), User.is_deleted.is_(False))
+        .options(selectinload(User.profiles))
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def search_user_flexible(session: AsyncSession, query: str) -> Optional[User]:
+    query_str = query.strip()
+    if not query_str:
+        return None
+
+    if query_str.isdigit():
+        num_id = int(query_str)
+        user = await get_user_by_telegram_id(session, num_id)
+        if user:
+            return user
+        stmt = select(User).where(User.id == num_id, User.is_deleted.is_(False)).options(selectinload(User.profiles))
+        result = await session.execute(stmt)
+        user = result.scalar_one_or_none()
+        if user:
+            return user
+
+    return await get_user_by_username(session, query_str)
+
+
 def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     now = now_utc()
-    if filter_type == "new_24h":
+    if filter_type == "new" or filter_type == "new_24h":
         stmt = stmt.where(User.created_at >= now - timedelta(hours=24))
     elif filter_type == "expiring_3d":
         stmt = stmt.where(
             User.subscription_end > now,
             User.subscription_end <= now + timedelta(days=3),
         )
+    elif filter_type == "active":
+        stmt = stmt.where(User.subscription_end > now)
+    elif filter_type == "expired":
+        stmt = stmt.where(User.subscription_end.is_not(None), User.subscription_end <= now)
+    elif filter_type == "no_sub":
+        stmt = stmt.where(User.subscription_end.is_(None))
+    elif filter_type == "problem":
+        stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
     elif filter_type == "server" and filter_param is not None:
         from database.models import Profile
         stmt = stmt.where(User.profiles.any(Profile.server_id == int(filter_param)))
@@ -239,6 +277,10 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "tariff" and filter_param is not None:
         stmt = stmt.where(User.current_tariff_id == int(filter_param))
     return stmt
+
+
+async def get_filtered_user_count(session: AsyncSession, filter_type: str = "all") -> int:
+    return await get_filtered_users_count(session, filter_type=filter_type)
 
 
 async def get_filtered_users_count(
@@ -270,4 +312,10 @@ async def get_filtered_users_paginated(
     )
     result = await session.execute(stmt)
     return list(result.scalars().unique().all())
+
+
+async def get_filtered_users_paginated_with_profiles(
+    session: AsyncSession, filter_type: str = "all", page: int = 1, per_page: int = 10
+) -> list[User]:
+    return await get_filtered_users_paginated(session, filter_type=filter_type, page=page, per_page=per_page)
 

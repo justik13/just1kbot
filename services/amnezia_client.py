@@ -803,6 +803,19 @@ class AmneziaClient:
             )
         ) is not None
 
+    async def get_server_load(self) -> Optional[dict]:
+        """
+        Запрашивает метрики загрузки сервера (/server/load или /server).
+        Возвращает словарь с cpu_percent, ram_percent, disk_percent, uptime_seconds и т.д.
+        """
+        res = await self._request("GET", "/server/load", semantics=RequestSemantics.READ)
+        if not res:
+            res = await self._request("GET", "/server", semantics=RequestSemantics.READ)
+        if isinstance(res, dict):
+            return res
+        return None
+
+
     async def get_all_clients(
         self,
     ) -> Optional[List[AmneziaClientListItem]]:

@@ -20,6 +20,8 @@ from .queue_health import queue_health_loop
 from .payments import stale_payments_checker_loop
 from .traffic import traffic_sync_loop
 
+from .node_monitor import node_monitor_loop
+
 logger = logging.getLogger(__name__)
 shutdown_event = asyncio.Event()
 
@@ -69,6 +71,7 @@ def _api_operations(bot): return api_operations_loop(shutdown_event)
 def _account_balance(bot): return account_balance_notifications_loop(bot, shutdown_event)
 def _payment_pipeline(bot): return payment_pipeline_loop(bot, shutdown_event)
 def _queue_health(bot): return queue_health_loop(bot, shutdown_event)
+def _node_monitor(bot): return node_monitor_loop(bot, shutdown_event)
 
 
 WORKERS: tuple[WorkerDefinition, ...] = (
@@ -79,9 +82,11 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("account_balance", _account_balance, False),
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("queue_health", _queue_health, False),
+    WorkerDefinition("node_monitor", _node_monitor, False),
     WorkerDefinition("api_operations", _api_operations, True),
     WorkerDefinition("payment_pipeline", _payment_pipeline, True),
 )
+
 _WORKERS_BY_NAME = {definition.name: definition for definition in WORKERS}
 
 

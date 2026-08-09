@@ -36,7 +36,9 @@ TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
     "account_balance_reservations, "
     "account_ledger_allocations, account_ledger_entries, "
-    "payment_events, audit_logs, payments, users RESTART IDENTITY CASCADE"
+    "payment_events, audit_logs, payments, users, system_settings, payment_disputes RESTART IDENTITY CASCADE"
+
+
 )
 
 

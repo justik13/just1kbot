@@ -22,7 +22,8 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, system_settings, payment_disputes "
+
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -44,7 +45,8 @@ class FulfillmentPipelinePostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, system_settings, payment_disputes "
+
                     "RESTART IDENTITY CASCADE"
                 )
             )

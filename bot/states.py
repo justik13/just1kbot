@@ -31,5 +31,15 @@ class AdminStates(StatesGroup):
     admin_grant_custom_days = State()
     entering_user_balance_topup = State()
     entering_user_balance_deduct = State()
+    entering_user_balance_reason = State()
+    confirming_user_balance = State()
+    entering_mass_bonus_amount = State()
+    entering_mass_bonus_reason = State()
+    confirming_mass_bonus = State()
+    editing_broadcast_text = State()
+    editing_broadcast_url_text = State()
+    editing_broadcast_url = State()
+    editing_mtproto_proxy_url = State()
     sending_user_message = State()
+
 

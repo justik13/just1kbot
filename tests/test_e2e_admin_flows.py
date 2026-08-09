@@ -26,8 +26,9 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs "
+                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings "
                     "RESTART IDENTITY CASCADE"
+
                 )
             )
             # Create the admin user
@@ -65,10 +66,16 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 "ADMIN_IDS": "[123456789, 999999999]",
                 "SUPPORT_USERNAME": "test_support",
                 "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "DATABASE_URL": os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test"),
             },
         )
+
         self.env_patcher.start()
 
         from config.settings import get_settings
@@ -144,7 +151,8 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             for req in reversed(self.session.requests)
             if req.__class__.__name__ == "EditMessageText"
         )
-        self.assertIn("Админ-панель", req.text)
+        self.assertIn("Админка", req.text)
+
 
     async def test_admin_flow_user_management(self):
         update = self._create_callback_update("admin_users")
