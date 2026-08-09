@@ -235,8 +235,6 @@ async def _build_users_list_text_and_kb(
 
     return rendered, builder
 
-    return rendered, builder
-
 
 
 async def _render_user_card(

@@ -110,6 +110,8 @@ async def select_broadcast_audience(
         return
 
     audience = callback.data.split(":", 1)[1]
+    if audience == "test":
+        audience = f"test_{callback.from_user.id}"
     await callback.answer(show_alert=False)
     await state.update_data(target_audience=audience)
     await state.set_state(AdminStates.entering_broadcast_message)
@@ -121,7 +123,6 @@ async def select_broadcast_audience(
         )
     except TelegramBadRequest as e:
         logger.debug(f"select_broadcast_audience edit_text failed: {e}")
-
 
 
 @router.message(AdminStates.entering_broadcast_message)
@@ -191,6 +192,7 @@ async def process_broadcast_message(
         logger.warning(f"Failed to send test preview to admin: {e}")
 
     # Count recipients
+    from datetime import timedelta
     count_stmt = select(func.count(User.id)).where(
         User.is_deleted.is_(False),
         User.is_bot_blocked.is_(False),
@@ -202,7 +204,7 @@ async def process_broadcast_message(
     elif target_audience == "expiring_3d":
         count_stmt = count_stmt.where(
             User.subscription_end > current_time,
-            User.subscription_end <= current_time + asyncio.subprocess.timedelta(days=3) if hasattr(asyncio, "subprocess") else current_time,
+            User.subscription_end <= current_time + timedelta(days=3),
         )
     elif target_audience == "expired":
         count_stmt = count_stmt.where(
@@ -217,17 +219,7 @@ async def process_broadcast_message(
     total_count = 1
     if session:
         try:
-            from datetime import timedelta
-            if target_audience == "expiring_3d":
-                count_stmt = select(func.count(User.id)).where(
-                    User.is_deleted.is_(False),
-                    User.is_bot_blocked.is_(False),
-                    User.is_banned.is_(False),
-                    User.subscription_end > current_time,
-                    User.subscription_end <= current_time + timedelta(days=3),
-                )
             result = await session.execute(count_stmt)
-            total_count = result.scalar_one() or 0
         except Exception as e:
             logger.warning(f"Failed to count recipients in session: {e}")
 
@@ -345,6 +337,12 @@ async def _get_next_batch(
     current_time = now_utc()
     if audience == "active":
         stmt = stmt.where(User.subscription_end > current_time)
+    elif audience == "expiring_3d":
+        from datetime import timedelta
+        stmt = stmt.where(
+            User.subscription_end > current_time,
+            User.subscription_end <= current_time + timedelta(days=3),
+        )
     elif audience == "expired":
         stmt = stmt.where(
             User.subscription_end.is_not(None),
@@ -725,6 +723,12 @@ async def _start_broadcast_process(
         count_stmt = count_stmt.where(
             User.subscription_end > current_time,
         )
+    elif audience == "expiring_3d":
+        from datetime import timedelta
+        count_stmt = count_stmt.where(
+            User.subscription_end > current_time,
+            User.subscription_end <= current_time + timedelta(days=3),
+        )
     elif audience == "expired":
         count_stmt = count_stmt.where(
             User.subscription_end.is_not(None),
@@ -755,6 +759,7 @@ async def _start_broadcast_process(
     label_map = {
         "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
         "active": texts.BROADCAST_ACTIVE_LABEL,
+        "expiring_3d": "⏳ Истекают < 3 дней",
         "expired": "🔴 Истекшие подписки",
         "never": "🆕 Без подписок",
     }
