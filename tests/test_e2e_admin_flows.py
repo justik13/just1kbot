@@ -145,7 +145,8 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             for req in reversed(self.session.requests)
             if req.__class__.__name__ == "EditMessageText"
         )
-        self.assertIn("Админ-панель", req.text)
+        self.assertIn("Админка", req.text)
+
 
     async def test_admin_flow_user_management(self):
         update = self._create_callback_update("admin_users")
