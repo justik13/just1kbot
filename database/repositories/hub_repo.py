@@ -19,9 +19,16 @@ async def add_hub_message_id(
     chat_id: int,
     message_id: int,
 ) -> None:
-    hub_message = HubMessage(chat_id=chat_id, message_id=message_id)
-    session.add(hub_message)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    stmt = (
+        pg_insert(HubMessage)
+        .values(chat_id=chat_id, message_id=message_id)
+        .on_conflict_do_nothing()
+    )
+    await session.execute(stmt)
     await session.flush()
+
 
 
 async def remove_hub_message_ids(

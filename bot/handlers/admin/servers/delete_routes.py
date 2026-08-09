@@ -190,12 +190,17 @@ async def confirm_delete_server(
                 api_key_snapshot=api_key, peer_id=profile.peer_id,
                 client_name=profile.client_name, audit_reason="server_delete")
 
+    for profile in profiles:
+        await session.delete(profile)
+
     deleted_profiles = await delete_profiles_by_server_id(
         session,
         server_id,
     )
 
     await delete_server(session, server)
+    session.expire_all()
+
 
     cleanup_server_circuit_breakers(api_url)
 
