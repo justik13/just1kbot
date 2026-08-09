@@ -228,7 +228,7 @@ async def render_hub(
     force_new: bool = False,
     trigger_message_id: Optional[int] = None,
 ) -> int:
-    """Render a single navigable hub, editing the current text message first."""
+    """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
 
     lock = _get_hub_render_lock(chat_id)
@@ -236,52 +236,56 @@ async def render_hub(
         old_ids = await _load_hub_ids_from_db(chat_id)
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
 
+        target_edit_id = None
+        if not force_new and len(text_parts) == 1:
+            if trigger_message_id:
+                target_edit_id = trigger_message_id
+            elif old_ids:
+                target_edit_id = old_ids[-1]
+
+        edited = False
+        if target_edit_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=target_edit_id,
+                    text=text_parts[0],
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                )
+                edited = True
+            except TelegramBadRequest as exc:
+                error = str(exc).lower()
+                if "message is not modified" in error:
+                    edited = True
+                else:
+                    logger.debug(
+                        "Hub edit unavailable for chat %s message %s: %s",
+                        chat_id,
+                        target_edit_id,
+                        exc,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Unexpected hub edit failure for chat %s message %s: %s",
+                    chat_id,
+                    target_edit_id,
+                    type(exc).__name__,
+                )
+
+        if edited and target_edit_id:
+            stale_ids = [mid for mid in old_ids if mid != target_edit_id]
+            if stale_ids:
+                await _delete_hub_messages(bot, chat_id, stale_ids)
+            _hub_cache[chat_id] = {"ids": [target_edit_id]}
+            await _store_hub_id_in_db(chat_id, target_edit_id)
+            return target_edit_id
+
         if trigger_message_id and trigger_message_id not in old_ids:
             try:
                 await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
             except Exception:
                 pass
-
-        # Most bot screens fit in one Telegram message. Editing the existing hub
-        # avoids visible flicker, preserves scroll position, and removes stale
-        # payment buttons immediately. Media/multipart screens fall back to send.
-        if not force_new and len(text_parts) == 1 and old_ids:
-            current_id = old_ids[-1]
-            try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=current_id,
-                    text=text_parts[0],
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                )
-            except TelegramBadRequest as exc:
-                error = str(exc).lower()
-                if "message is not modified" in error:
-                    pass
-                else:
-                    logger.debug(
-                        "Hub edit unavailable for chat %s message %s: %s",
-                        chat_id,
-                        current_id,
-                        exc,
-                    )
-                    current_id = 0
-            except Exception as exc:
-                logger.warning(
-                    "Unexpected hub edit failure for chat %s message %s: %s",
-                    chat_id,
-                    current_id,
-                    type(exc).__name__,
-                )
-                current_id = 0
-
-            if current_id:
-                stale_ids = [message_id for message_id in old_ids if message_id != current_id]
-                if stale_ids:
-                    await _delete_hub_messages(bot, chat_id, stale_ids)
-                _hub_cache[chat_id] = {"ids": [current_id]}
-                return current_id
 
         sent_ids: list[int] = []
         for index, part in enumerate(text_parts):
@@ -315,6 +319,7 @@ async def render_hub(
         for message_id in sent_ids:
             await _store_hub_id_in_db(chat_id, message_id)
         return sent_ids[-1]
+
 
 
 async def send_hub_photo(
