@@ -24,6 +24,11 @@ _last_alert_time: Dict[str, float] = {}
 
 async def _send_admin_alert(bot: Bot, text: str, alert_key: str):
     now = time.monotonic()
+    # Periodic cleanup of expired alert keys
+    expired_keys = [k for k, v in _last_alert_time.items() if now - v > ALERT_COOLDOWN_SECONDS * 2]
+    for k in expired_keys:
+        _last_alert_time.pop(k, None)
+
     last_time = _last_alert_time.get(alert_key, 0.0)
     if now - last_time < ALERT_COOLDOWN_SECONDS:
         return
@@ -31,7 +36,7 @@ async def _send_admin_alert(bot: Bot, text: str, alert_key: str):
     _last_alert_time[alert_key] = now
     settings = get_settings()
 
-    for admin_id in settings.admin_ids:
+    for admin_id in settings.ADMIN_IDS:
         try:
             await bot.send_message(
                 chat_id=admin_id,
@@ -40,6 +45,7 @@ async def _send_admin_alert(bot: Bot, text: str, alert_key: str):
             )
         except Exception as e:
             logger.error("Failed to send node monitor alert to admin %s: %s", admin_id, e)
+
 
 
 async def check_node_resources_and_alerts(bot: Bot):

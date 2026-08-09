@@ -214,7 +214,6 @@ async def process_mass_bonus_reason(
 async def apply_mass_bonus(
     callback: CallbackQuery,
     state: FSMContext,
-    session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
@@ -226,15 +225,46 @@ async def apply_mass_bonus(
     reason = data.get("reason", "Массовый бонус")
 
     await state.clear()
-    await callback.answer("🚀 Начисление запущено!", show_alert=True)
+    await callback.answer("🚀 Массовое начисление запущено в фоне!", show_alert=True)
 
     header = format_admin_breadcrumbs("🎁 Массовый бонус", "Результат")
     await callback.message.edit_text(
-        f"{header}⏳ <b>Выполняется массовое начисление бонусов по {amount} ₽...</b>",
+        f"{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>\n\n"
+        f"По завершении операции вам придет уведомление со статистикой.",
         parse_mode="HTML",
     )
 
-    # Выборка юзеров
+    import time
+    batch_id = int(time.time())
+    import asyncio
+    asyncio.create_task(
+        _run_mass_bonus_background(
+            bot=callback.bot,
+            admin_id=callback.from_user.id,
+            target_aud=target_aud,
+            amount=amount,
+            reason=reason,
+            batch_id=batch_id,
+        )
+    )
+
+
+async def _run_mass_bonus_background(
+    bot,
+    admin_id: int,
+    target_aud: str,
+    amount: int,
+    reason: str,
+    batch_id: int,
+):
+    from aiogram.exceptions import TelegramForbiddenError
+    from database.connection import session_scope
+    from utils.rate_limiter import global_send_limiter
+
+    success_count = 0
+    fail_count = 0
+    blocked_count = 0
+
     now = now_utc()
     stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
     if target_aud == "active":
@@ -242,46 +272,67 @@ async def apply_mass_bonus(
     elif target_aud == "expired":
         stmt = stmt.where(User.subscription_end <= now)
 
-    users = (await session.execute(stmt)).all()
+    async with session_scope() as session:
+        result = await session.execute(stmt)
+        users = result.all()
 
-    success_count = 0
-    for uid, tg_id in users:
-        try:
-            idempotency_key = f"mass_bonus_{callback.from_user.id}_{uid}_{amount}"
-            await create_admin_adjustment(
-                session,
-                user_id=uid,
-                signed_amount=amount,
-                idempotency_key=idempotency_key,
-                metadata={"admin_id": callback.from_user.id, "reason": reason, "mass": True},
-            )
-            success_count += 1
-            # Попытка уведомления
-            try:
-                await callback.bot.send_message(
-                    tg_id,
-                    f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-                    f"Причина: <i>{safe(reason)}</i>",
-                    parse_mode="HTML",
-                )
-            except Exception:
-                pass
-        except Exception as exc:
-            logger.error("Failed mass bonus for user %s: %s", uid, exc)
+    CHUNK_SIZE = 50
+    for i in range(0, len(users), CHUNK_SIZE):
+        chunk = users[i : i + CHUNK_SIZE]
+        async with session_scope() as session:
+            for uid, tg_id in chunk:
+                try:
+                    idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
+                    await create_admin_adjustment(
+                        session,
+                        user_id=uid,
+                        signed_amount=amount,
+                        idempotency_key=idempotency_key,
+                        metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
+                    )
+                    success_count += 1
+                except Exception as exc:
+                    fail_count += 1
+                    logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
+                    continue
 
-    await AuditService.log_action(
-        session,
-        callback.from_user.id,
-        "MASS_BONUS_GRANTED",
-        "User",
-        0,
-        f"Granted +{amount} RUB bonus to {success_count} users. Reason: {reason}",
-    )
+                if tg_id:
+                    try:
+                        await global_send_limiter.acquire()
+                        await bot.send_message(
+                            tg_id,
+                            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
+                            f"Причина: <i>{safe(reason)}</i>",
+                            parse_mode="HTML",
+                        )
+                    except TelegramForbiddenError:
+                        blocked_count += 1
+                        db_user = await session.get(User, uid)
+                        if db_user:
+                            db_user.is_bot_blocked = True
+                    except Exception as e:
+                        logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
 
-    await render_hub(
-        callback.bot,
-        callback.message.chat.id,
-        f"{header}✅ <b>Массовое начисление завершено!</b>\n\nУспешно обработано: <b>{success_count} пользователей</b>.",
-        get_back_button("admin_menu"),
-        parse_mode="HTML",
-    )
+    async with session_scope() as session:
+        await AuditService.log_action(
+            session,
+            admin_id,
+            "MASS_BONUS_GRANTED",
+            "User",
+            0,
+            f"Granted +{amount} RUB bonus to {success_count} users (batch {batch_id}). Reason: {reason}",
+        )
+
+    try:
+        header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
+        await bot.send_message(
+            admin_id,
+            f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
+            f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
+            f"• Ошибок: <b>{fail_count}</b>\n"
+            f"• Заблокировали бота: <b>{blocked_count}</b>",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error("Failed to notify admin of mass bonus completion: %s", e)
+

@@ -17,7 +17,9 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_settings_repo(self):
         session = AsyncMock()
+        session.add = MagicMock()
         session.get.return_value = None
+
 
         with patch("database.repositories.system_settings_repo.now_utc"):
             await set_system_setting(session, "mtproto_proxy_url", "https://t.me/proxy?server=127.0.0.1", updated_by=123)
@@ -56,8 +58,9 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         ):
 
             settings_obj = MagicMock()
-            settings_obj.admin_ids = [999]
+            settings_obj.ADMIN_IDS = [999]
             mock_settings.return_value = settings_obj
+
 
             await check_node_resources_and_alerts(bot)
 
