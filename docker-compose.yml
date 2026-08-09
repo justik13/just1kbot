@@ -70,6 +70,12 @@ services:
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
       JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
+    # The bot does not need Linux capabilities. These restrictions reduce the
+    # impact of a dependency or application compromise inside the container.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
