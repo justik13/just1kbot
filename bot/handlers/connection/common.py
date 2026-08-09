@@ -147,16 +147,16 @@ async def _build_connections_screen(
             server = profile.server
 
             flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L140_1
-            country_display = get_country_display(flag, default_text="🌐")
             server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L141_1
+            location_label = f"{flag} {safe(server_name)}"
 
-            btn_text = f"{flag} {safe(profile.device_name)}"
+            btn_text = f"{location_label} — {safe(profile.device_name)}"
             builder.button(
                 text=btn_text,
                 callback_data=f"manage_device:{profile.id}",
             )
 
-            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({country_display} — {safe(server_name)})"
+            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})"
             labels = {
                 "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
                 "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,
@@ -265,4 +265,5 @@ async def _render_connections(
         target.chat.id,
         rendered,
         builder.as_markup(),
+        trigger_message_id=getattr(target, "message_id", None),
     )
