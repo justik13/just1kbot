@@ -334,7 +334,9 @@ async def choose_topup_amount(
         )
         return
     tariffs = await get_active_tariffs(session)
-    amounts = topup_presets(tariffs)
+    preset_defaults = [100, 250, 500, 1000]
+    tariff_amounts = topup_presets(tariffs)
+    amounts = sorted(list(set(preset_defaults + tariff_amounts)))
     balance = await get_account_balance(session, user_id=db_user.id)
     balance_lines = f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
     if balance.bonus_available > 0:

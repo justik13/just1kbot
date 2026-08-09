@@ -5,18 +5,22 @@ from aiogram import Router, F
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from database.models import Server, Tariff
 from database.repositories.users_repo import (
-    get_filtered_user_count,
-    get_filtered_users_paginated_with_profiles,
+    get_filtered_users_count,
+    get_filtered_users_paginated,
 )
 
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
+from utils.formatters import format_audit_details
 from utils.telegram import render_hub, safe
 
 from .common import (
@@ -29,7 +33,6 @@ from .common import (
 
 router = Router()
 logger = logging.getLogger(__name__)
-
 
 
 @router.callback_query(F.data == "admin_users")
@@ -45,11 +48,15 @@ async def show_users_list(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    total_users = await get_filtered_user_count(session, filter_type="all")
+    total_users = await get_filtered_users_count(session, filter_type="all")
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
-    users = await get_filtered_users_paginated_with_profiles(session, filter_type="all", page=1, per_page=USERS_PER_PAGE)
+    users = await get_filtered_users_paginated(
+        session, filter_type="all", filter_param=None, page=1, per_page=USERS_PER_PAGE
+    )
 
-    rendered, kb = await _build_users_list_text_and_kb(users, 1, total_pages, total_users, filter_type="all")
+    rendered, kb = await _build_users_list_text_and_kb(
+        users, 1, total_pages, total_users, filter_type="all", filter_param="none"
+    )
 
     try:
         await callback.message.edit_text(rendered, reply_markup=kb.as_markup(), parse_mode="HTML")
@@ -57,8 +64,74 @@ async def show_users_list(
         logger.debug(f"show_users_list edit_text failed: {e}")
 
 
+@router.callback_query(F.data.startswith("admin_users_filter_menu:"))
+async def show_extended_filter_menu(
+    callback: CallbackQuery,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    filter_type = callback.data.split(":", 1)[1]
+    builder = InlineKeyboardBuilder()
+
+    if filter_type == "server":
+        rows = (await session.scalars(select(Server).order_by(Server.name))).all()
+        if not rows:
+            await callback.answer("Серверов нет", show_alert=True)
+            return
+        for server in rows:
+            builder.button(
+                text=f"🖥 {server.name}",
+                callback_data=f"admin_users_filter:server:{server.id}:1",
+            )
+        title = "🖥 <b>Выберите сервер:</b>"
+    elif filter_type == "country":
+        rows = (
+            await session.execute(
+                select(Server.country_flag)
+                .where(Server.country_flag.is_not(None))
+                .distinct()
+                .order_by(Server.country_flag)
+            )
+        ).scalars().all()
+        if not rows:
+            await callback.answer("Стран нет", show_alert=True)
+            return
+        for country in rows:
+            builder.button(
+                text=f"🌐 {country}",
+                callback_data=f"admin_users_filter:country:{country}:1",
+            )
+        title = "🌐 <b>Выберите страну:</b>"
+    elif filter_type == "tariff":
+        rows = (await session.scalars(select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.device_limit, Tariff.id))).all()
+        if not rows:
+            await callback.answer("Тарифов нет", show_alert=True)
+            return
+        for tariff in rows:
+            label = getattr(tariff, "name", None) or f"Тариф #{tariff.id}"
+            builder.button(
+                text=f"💎 {label}",
+                callback_data=f"admin_users_filter:tariff:{tariff.id}:1",
+            )
+        title = "💎 <b>Выберите тариф:</b>"
+    else:
+        await callback.answer("Неизвестный фильтр", show_alert=True)
+        return
+
+    builder.button(text="🔙 Назад", callback_data="admin_users")
+    builder.adjust(1)
+    await callback.answer(show_alert=False)
+    try:
+        await callback.message.edit_text(title, reply_markup=builder.as_markup(), parse_mode="HTML")
+    except TelegramBadRequest as e:
+        logger.debug(f"show_extended_filter_menu edit_text failed: {e}")
+
+
 @router.callback_query(F.data.startswith("admin_users_filter:"))
-async def users_filtered_pagination(
+async def users_filter_pagination(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
@@ -68,29 +141,100 @@ async def users_filtered_pagination(
         return
 
     parts = callback.data.split(":")
-    filter_type = parts[1] if len(parts) > 1 else "all"
-    page = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 1
+    if len(parts) == 3:
+        filter_type = parts[1]
+        filter_param = "none"
+        try:
+            page = int(parts[2])
+        except ValueError:
+            page = 1
+    elif len(parts) >= 4:
+        filter_type = parts[1]
+        filter_param = parts[2]
+        try:
+            page = int(parts[3])
+        except ValueError:
+            page = 1
+    else:
+        filter_type = "all"
+        filter_param = "none"
+        page = 1
 
     await callback.answer(show_alert=False)
     await state.clear()
 
-    total_users = await get_filtered_user_count(session, filter_type=filter_type)
+    param_val = None if filter_param == "none" else filter_param
+    if filter_type in {"server", "tariff"} and param_val is not None and not str(param_val).isdigit():
+        await callback.answer("Некорректный параметр фильтра", show_alert=True)
+        return
+
+    total_users = await get_filtered_users_count(
+        session, filter_type=filter_type, filter_param=param_val
+    )
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
     page = min(max(1, page), total_pages)
 
-    users = await get_filtered_users_paginated_with_profiles(
-        session, filter_type=filter_type, page=page, per_page=USERS_PER_PAGE
+    users = await get_filtered_users_paginated(
+        session,
+        filter_type=filter_type,
+        filter_param=param_val,
+        page=page,
+        per_page=USERS_PER_PAGE,
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
-        users, page, total_pages, total_users, filter_type=filter_type
+        users,
+        page,
+        total_pages,
+        total_users,
+        filter_type=filter_type,
+        filter_param=filter_param,
     )
 
     try:
-        await callback.message.edit_text(rendered, reply_markup=kb.as_markup(), parse_mode="HTML")
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+        )
     except TelegramBadRequest as e:
-        logger.debug(f"users_filtered_pagination edit_text failed: {e}")
+        logger.debug(f"users_filter_pagination edit_text failed: {e}")
 
+
+@router.callback_query(F.data.startswith("admin_users_page:"))
+async def users_pagination(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+
+    page = parse_callback_id(callback.data, 1) or 1
+    await callback.answer(show_alert=False)
+    await state.clear()
+
+    total_users = await get_filtered_users_count(session, filter_type="all")
+    total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
+    page = min(max(1, page), total_pages)
+
+    users = await get_filtered_users_paginated(
+        session, filter_type="all", page=page, per_page=USERS_PER_PAGE
+    )
+
+    rendered, kb = await _build_users_list_text_and_kb(
+        users, page, total_pages, total_users, filter_type="all", filter_param="none"
+    )
+
+    try:
+        await callback.message.edit_text(
+            rendered,
+            reply_markup=kb.as_markup(),
+            parse_mode="HTML",
+        )
+    except TelegramBadRequest as e:
+        logger.debug(f"users_pagination edit_text failed: {e}")
 
 
 @router.callback_query(F.data == "admin_users_search")
@@ -99,10 +243,7 @@ async def start_search_user(
     state: FSMContext,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -160,7 +301,6 @@ async def process_search_user(
     await state.clear()
 
 
-
 @router.callback_query(F.data.startswith("admin_user_card:"))
 async def show_user_card(
     callback: CallbackQuery,
@@ -168,19 +308,13 @@ async def show_user_card(
     session: AsyncSession,
 ):
     if not is_admin(callback.from_user.id):
-        await callback.answer(
-            texts.ERROR_ACCESS_DENIED,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
     telegram_id = parse_callback_id(callback.data, 1)
 
     if telegram_id is None:
-        await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L234_1,
-            show_alert=True,
-        )
+        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L234_1, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -188,10 +322,7 @@ async def show_user_card(
 
     user = await _get_user_with_profiles(session, telegram_id)
     if not user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     await _render_user_card(callback, user, session)
@@ -225,23 +356,15 @@ async def show_user_audit(
         return
 
     import math
-    from aiogram.utils.keyboard import InlineKeyboardBuilder
-    from database.repositories.audit_repo import (
-        get_user_audit_logs,
-        get_user_audit_logs_count,
-    )
+    from database.repositories.audit_repo import get_user_audit_logs, get_user_audit_logs_count
     from utils.formatters import format_datetime
 
     page_size = 10
-    offset = (page - 1) * page_size
     total_count = await get_user_audit_logs_count(session, user_id=user.id)
     total_pages = max(1, math.ceil(total_count / page_size))
     page = min(max(1, page), total_pages)
     offset = (page - 1) * page_size
-
-    logs = await get_user_audit_logs(
-        session, user_id=user.id, offset=offset, limit=page_size
-    )
+    logs = await get_user_audit_logs(session, user_id=user.id, offset=offset, limit=page_size)
 
     action_map = {
         "ACCOUNT_TARIFF_CHANGE_SETTLED": "🔄 Смена тарифа",
@@ -272,46 +395,26 @@ async def show_user_audit(
     else:
         for item in logs:
             dt = format_datetime(item.created_at)
-            action_text = action_map.get(item.action, item.action or "Действие")
-            details_text = ""
-            if item.details:
-                if "debit=" in item.details and "conversion=" in item.details:
-                    details_text = ""
-                else:
-                    details_text = f" — {item.details}"
+            action_text = safe(action_map.get(item.action, item.action or "Действие"))
+            details_text = safe(format_audit_details(item.details))
             lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
     if total_pages > 1:
         if page > 1:
-            builder.button(
-                text="◀️ Назад",
-                callback_data=f"admin_user_audit:{telegram_id}:{page - 1}",
-            )
+            builder.button(text="◀️ Назад", callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-
-        builder.button(
-            text=f"Стр {page}/{total_pages}",
-            callback_data="ignore",
-        )
-
+        builder.button(text=f"Стр {page}/{total_pages}", callback_data="ignore")
         if page < total_pages:
-            builder.button(
-                text="Вперед ▶️",
-                callback_data=f"admin_user_audit:{telegram_id}:{page + 1}",
-            )
+            builder.button(text="Вперед ▶️", callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-
         builder.adjust(3, 1)
     else:
         builder.adjust(1)
 
-    builder.button(
-        text="🔙 К карточке пользователя",
-        callback_data=f"admin_user_card:{telegram_id}",
-    )
+    builder.button(text="🔙 К карточке пользователя", callback_data=f"admin_user_card:{telegram_id}")
 
     try:
         await callback.message.edit_text(

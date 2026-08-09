@@ -28,6 +28,7 @@ from services.referral_bonus import get_referral_bonus_balance
 from services.subscription import SubscriptionService
 from utils.formatters import (
     format_datetime,
+    format_days_left,
     format_traffic,
 )
 from utils.tariff_names import get_tariff_display_name
@@ -81,7 +82,10 @@ async def _render_profile(
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
             tariff_name=tariff_name,
+            valid_until=format_datetime(user.subscription_end),
+            days_left=format_days_left(user.subscription_end),
             devices_count=profiles_count,
+            device_limit=device_limit,
             total_traffic=format_traffic(total_traffic),
             referrals_count=referrals_count,
             balance=int(balance.real_available),
@@ -98,25 +102,24 @@ async def _render_profile(
             referral_bonus_balance=int(balance.bonus_available),
         )
 
-
         builder = InlineKeyboardBuilder()
         builder.button(
             text=texts.UI_BOT_HANDLERS_PROFILE_L103_1,
             callback_data="menu_buy",
         )
         builder.button(
-            text=texts.UI_BOT_HANDLERS_PROFILE_L111_1,
-            callback_data="referral",
+            text="💳 Пополнить баланс",
+            callback_data="menu_balance",
         )
         builder.button(
-            text=texts.UI_BOT_HANDLERS_PROFILE_L115_1,
-            callback_data="user_history",
+            text="🎁 Пригласить друга (+10%)",
+            callback_data="referral",
         )
         builder.button(
             text=texts.UI_BOT_HANDLERS_PROFILE_L119_1,
             callback_data="back_to_main_menu",
         )
-        builder.adjust(1, 1, 1, 1)
+        builder.adjust(1)
         kb = builder.as_markup()
 
     await render_hub(

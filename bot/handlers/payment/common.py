@@ -130,6 +130,25 @@ async def _show_hub(
         devices_count=len(profiles),
         device_limit=device_limit,
     )
+
+    tariffs = await get_active_tariffs(session)
+    if tariffs:
+        grouped: dict[int, list] = {}
+        for t in tariffs:
+            limit = getattr(t, "device_limit", 2)
+            if limit not in grouped:
+                grouped[limit] = []
+            grouped[limit].append(t)
+
+        tariff_lines = []
+        for limit in sorted(grouped.keys()):
+            min_price = min(int(t.price_rub) for t in grouped[limit])
+            name = get_tariff_display_name(limit)
+            tariff_lines.append(f"• <b>{name}</b> ({limit} уст.) — от <b>{min_price} ₽</b>")
+
+        if tariff_lines:
+            text += "\n\n💡 <b>Доступные варианты тарифов:</b>\n" + "\n".join(tariff_lines)
+
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.UI_BOT_HANDLERS_PAYMENT_COMMON_L125_1, callback_data="payment_quick_renew"

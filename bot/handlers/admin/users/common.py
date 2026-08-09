@@ -132,16 +132,23 @@ async def _build_users_list_text_and_kb(
     total_pages: int,
     total: int,
     filter_type: str = "all",
+    filter_param: str = "none",
 ) -> tuple[str, InlineKeyboardBuilder]:
     from utils.formatters import format_admin_breadcrumbs
-    filter_names = {
+
+    filter_labels = {
         "all": "Все",
-        "new": "🆕 Новенькие (<7д)",
+        "new": "🆕 Новенькие (<24ч)",
+        "new_24h": "🆕 Новые (24ч)",
+        "expiring_3d": "⏳ < 3 дней",
         "active": "⚡ С подпиской",
-        "expired": "⏳ Без подписки",
+        "expired": "🔴 Истекшие",
         "problem": "🚫 Проблемные",
+        "server": f"Сервер #{filter_param}",
+        "country": f"Страна {filter_param}",
+        "tariff": f"Тариф #{filter_param}",
     }
-    cur_filter_name = filter_names.get(filter_type, "Все")
+    cur_filter_name = filter_labels.get(filter_type, filter_type)
     header = format_admin_breadcrumbs("👥 Пользователи", f"Фильтр: {cur_filter_name}")
 
     rendered = (
@@ -151,22 +158,27 @@ async def _build_users_list_text_and_kb(
 
     builder = InlineKeyboardBuilder()
 
-    # Фильтры
     filters = [
-        ("all", "Все"),
-        ("new", "🆕 Новые"),
-        ("active", "⚡ Активные"),
-        ("expired", "⏳ Истекшие"),
-        ("problem", "🚫 Баны"),
+        ("all", "Все", "none"),
+        ("new_24h", "🆕 Новые", "none"),
+        ("expiring_3d", "⏳ < 3 дней", "none"),
+        ("active", "⚡ Активные", "none"),
+        ("expired", "🔴 Истекшие", "none"),
     ]
 
-    for f_code, f_name in filters:
+    for f_code, f_name, f_param in filters:
         label = f"• {f_name} •" if f_code == filter_type else f_name
         builder.button(
             text=label,
-            callback_data=f"admin_users_filter:{f_code}:1",
+            callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
-    builder.adjust(3, 2)
+
+    # These filters are backed by real DB values and open a selection menu.
+    # Keeping the parameter out of the main list callback avoids arbitrary
+    # admin-supplied SQL parameters while still exposing the repository filters.
+    builder.button(text="🖥 По серверам", callback_data="admin_users_filter_menu:server")
+    builder.button(text="🌐 По странам", callback_data="admin_users_filter_menu:country")
+    builder.button(text="💎 По тарифам", callback_data="admin_users_filter_menu:tariff")
 
     if not users:
         rendered += "<i>Пользователи не найдены.</i>"
@@ -179,15 +191,11 @@ async def _build_users_list_text_and_kb(
                 if user.subscription_end and user.subscription_end > current_time
                 else "🔴"
             )
-
             ban = " [БАН]" if user.is_banned else (" [Блок бота]" if user.is_bot_blocked else "")
-
             username = (
                 f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
             )
-
             days = format_days_left(user.subscription_end)
-
             profiles_count = len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in ("deleting", "create_cleanup_pending")]) if user.profiles else 0
 
             button_text = truncate_button_text(
@@ -199,20 +207,20 @@ async def _build_users_list_text_and_kb(
                 callback_data=f"admin_user_card:{user.telegram_id}",
             )
 
-    nav_buttons = []
+    nav_buttons = 0
     if page > 1:
         builder.button(
             text="◀️ Назад",
-            callback_data=f"admin_users_filter:{filter_type}:{page - 1}",
+            callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page - 1}",
         )
-        nav_buttons.append(1)
+        nav_buttons += 1
 
     if page < total_pages:
         builder.button(
             text="Вперед ▶️",
-            callback_data=f"admin_users_filter:{filter_type}:{page + 1}",
+            callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page + 1}",
         )
-        nav_buttons.append(1)
+        nav_buttons += 1
 
     builder.button(
         text="🔍 Поиск по @username / ID",
@@ -224,16 +232,15 @@ async def _build_users_list_text_and_kb(
         callback_data="admin_menu",
     )
 
-    # Применение макета кнопок
-    item_count = len(users)
-    nav_row = len(nav_buttons)
-    if nav_row > 0:
-        builder.adjust(3, 2, *([1] * item_count), nav_row, 1, 1)
-    else:
-        builder.adjust(3, 2, *([1] * item_count), 1, 1)
+    item_count = len(users) if users else 0
+    adjust_pattern = [3, 3] + ([1] * item_count)
+    if nav_buttons > 0:
+        adjust_pattern.append(nav_buttons)
+    adjust_pattern.extend([1, 1])
+
+    builder.adjust(*adjust_pattern)
 
     return rendered, builder
-
 
 
 async def _render_user_card(
@@ -315,4 +322,3 @@ async def _show_user_card_edit(
         ),
         trigger_message_id=trigger_message_id,
     )
-

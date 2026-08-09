@@ -64,6 +64,82 @@ def format_user_card_text(
 
 
 
+def get_country_display(country_flag: Optional[str], default_text: str = "🌐") -> str:
+    """Return country flag string configured on the server, or default fallback."""
+    if not country_flag:
+        return default_text
+    return country_flag.strip()
+
+
+def format_audit_details(details: Optional[str]) -> str:
+    """Format audit log raw JSON / key-value details into human-readable Russian text."""
+    if not details:
+        return ""
+    
+    import json
+    
+    # Try parsing JSON first
+    parsed = None
+    if details.strip().startswith("{") and details.strip().endswith("}"):
+        try:
+            parsed = json.loads(details)
+        except Exception:
+            parsed = None
+
+    if isinstance(parsed, dict):
+        kv_pairs = parsed
+    else:
+        # Key-value string like "debit=100, credit=0, conversion=True"
+        kv_pairs = {}
+        for part in details.split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                kv_pairs[k.strip()] = v.strip()
+
+    if not kv_pairs:
+        return f" ({details})"
+
+    labels = {
+        "amount": "Сумма",
+        "days": "Срок",
+        "reason": "Причина",
+        "tariff_name": "Тариф",
+        "tariff_id": "ID тарифа",
+        "server_name": "Сервер",
+        "server_id": "ID сервера",
+        "device_name": "Устройство",
+        "device_id": "ID устройства",
+        "debit": "Списано",
+        "credit": "Зачислено",
+        "conversion": "Перерасчет",
+        "force": "Принудительно",
+        "audit_reason": "Причина",
+        "success_count": "Успешно",
+        "fail_count": "Ошибок",
+        "target_audience": "Аудитория",
+    }
+
+    formatted_parts = []
+    for k, v in kv_pairs.items():
+        if k in ("debit", "credit") and str(v).isdigit():
+            val = f"{v} ₽"
+        elif k == "amount" and str(v).isdigit():
+            val = f"{v} ₽"
+        elif k == "days" and str(v).isdigit():
+            val = f"{v} дн."
+        elif k == "conversion":
+            val = "Да" if str(v).lower() in ("true", "1") else "Нет"
+        elif k == "force":
+            val = "Да" if str(v).lower() in ("true", "1") else "Нет"
+        else:
+            val = str(v)
+
+        label = labels.get(k, k)
+        formatted_parts.append(f"{label}: {val}")
+
+    return f" ({', '.join(formatted_parts)})"
+
+
 def format_connection_device_card(
     profile,
     server_flag: str,
@@ -74,10 +150,12 @@ def format_connection_device_card(
     from utils.telegram import safe
 
     traffic_total = format_traffic(profile.traffic_down + profile.traffic_up)
+    country_display = get_country_display(server_flag, default_text="🌐")
 
     return texts.DEVICE_CARD.format(
         device_name=safe(profile.device_name),
         flag=server_flag,
+        country_display=country_display,
         server_name=safe(server_name),
         last_connected_text=last_connected_text,
         traffic_down=format_traffic(profile.traffic_down),

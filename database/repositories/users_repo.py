@@ -237,27 +237,29 @@ async def search_user_flexible(session: AsyncSession, query: str) -> Optional[Us
     if not query_str:
         return None
 
-    # Попытка поиска по числовому Telegram ID или DB ID
     if query_str.isdigit():
         num_id = int(query_str)
         user = await get_user_by_telegram_id(session, num_id)
         if user:
             return user
-        # Поиск по внутреннему DB id
         stmt = select(User).where(User.id == num_id, User.is_deleted.is_(False)).options(selectinload(User.profiles))
         result = await session.execute(stmt)
         user = result.scalar_one_or_none()
         if user:
             return user
 
-    # Поиск по @username
     return await get_user_by_username(session, query_str)
 
 
-async def _apply_user_filter(stmt, filter_type: str):
+def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     now = now_utc()
-    if filter_type == "new":
-        stmt = stmt.where(User.created_at >= now - timedelta(days=7))
+    if filter_type == "new" or filter_type == "new_24h":
+        stmt = stmt.where(User.created_at >= now - timedelta(hours=24))
+    elif filter_type == "expiring_3d":
+        stmt = stmt.where(
+            User.subscription_end > now,
+            User.subscription_end <= now + timedelta(days=3),
+        )
     elif filter_type == "active":
         stmt = stmt.where(User.subscription_end > now)
     elif filter_type == "expired":
@@ -266,28 +268,54 @@ async def _apply_user_filter(stmt, filter_type: str):
         stmt = stmt.where(User.subscription_end.is_(None))
     elif filter_type == "problem":
         stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
+    elif filter_type == "server" and filter_param is not None:
+        from database.models import Profile
+        stmt = stmt.where(User.profiles.any(Profile.server_id == int(filter_param)))
+    elif filter_type == "country" and filter_param:
+        from database.models import Profile, Server
+        stmt = stmt.where(User.profiles.any(Profile.server.has(Server.country_flag == str(filter_param))))
+    elif filter_type == "tariff" and filter_param is not None:
+        stmt = stmt.where(User.current_tariff_id == int(filter_param))
     return stmt
 
 
 async def get_filtered_user_count(session: AsyncSession, filter_type: str = "all") -> int:
-    stmt = select(func.count(User.id)).where(User.is_deleted.is_(False))
-    stmt = await _apply_user_filter(stmt, filter_type)
+    return await get_filtered_users_count(session, filter_type=filter_type)
+
+
+async def get_filtered_users_count(
+    session: AsyncSession,
+    filter_type: str = "all",
+    filter_param=None,
+) -> int:
+    stmt = select(func.count(User.id.distinct())).where(User.is_deleted.is_(False))
+    stmt = _apply_user_filters(stmt, filter_type, filter_param)
     result = await session.execute(stmt)
     return result.scalar_one() or 0
+
+
+async def get_filtered_users_paginated(
+    session: AsyncSession,
+    filter_type: str = "all",
+    filter_param=None,
+    page: int = 1,
+    per_page: int = 10,
+) -> list[User]:
+    offset = (page - 1) * per_page
+    stmt = select(User).where(User.is_deleted.is_(False))
+    stmt = _apply_user_filters(stmt, filter_type, filter_param)
+    stmt = (
+        stmt.options(selectinload(User.profiles))
+        .order_by(User.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().unique().all())
 
 
 async def get_filtered_users_paginated_with_profiles(
     session: AsyncSession, filter_type: str = "all", page: int = 1, per_page: int = 10
 ) -> list[User]:
-    offset = (page - 1) * per_page
-    stmt = (
-        select(User)
-        .where(User.is_deleted.is_(False))
-        .options(selectinload(User.profiles))
-        .order_by(User.created_at.desc())
-    )
-    stmt = await _apply_user_filter(stmt, filter_type)
-    stmt = stmt.offset(offset).limit(per_page)
-    result = await session.execute(stmt)
-    return result.scalars().unique().all()
+    return await get_filtered_users_paginated(session, filter_type=filter_type, page=page, per_page=per_page)
 

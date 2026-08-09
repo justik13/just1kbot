@@ -8,7 +8,7 @@ x-logging: &default-logging
 
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     container_name: just1kbot_db
     restart: unless-stopped
     logging: *default-logging
@@ -30,7 +30,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     container_name: just1kbot_redis
     restart: unless-stopped
     logging: *default-logging
@@ -50,6 +50,31 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: just1kbot_migrate
+    restart: "no"
+    logging: *default-logging
+    env_file:
+      - .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      DOCKER_DEPLOYMENT: "true"
+      POSTGRES_HOST: "db"
+      REDIS_HOST: "redis"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   bot:
     build:
       context: .
@@ -63,26 +88,32 @@ services:
       PYTHONUNBUFFERED: "1"
       DOCKER_DEPLOYMENT: "true"
       YOOKASSA_WEBHOOK_PORT: "8080"
-      # Bind to all interfaces so Caddy can reach bot:8080 over the Docker
-      # bridge network. The code default (127.0.0.1) is intentionally kept
-      # for non-Docker / bare-metal deployments.
       WEBHOOK_HOST: "0.0.0.0"
       POSTGRES_HOST: "db"
       REDIS_HOST: "redis"
       JUST1KBOT_HEARTBEAT_FILE: "/tmp/heartbeat"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     deploy:
       resources:
         limits:
           cpus: "2.0"
           memory: "2G"
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.4-alpine@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
     container_name: just1kbot_caddy
     restart: unless-stopped
     logging: *default-logging
@@ -93,7 +124,7 @@ services:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -110,6 +141,8 @@ services:
       - ./backups:/backups
     environment:
       BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?BACKUP_AGE_RECIPIENT is required}
+      BACKUP_REMOTE_URI: ${BACKUP_REMOTE_URI:-}
+      BACKUP_REMOTE_TOKEN: ${BACKUP_REMOTE_TOKEN:-}
       POSTGRES_HOST: "db"
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_USER: ${POSTGRES_USER:-just1kbot}

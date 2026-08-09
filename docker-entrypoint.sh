@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # Generate DATABASE_URL and REDIS_URL with URL-encoded passwords and validate
-# all environment variables required by the application before migrations or
-# the bot process starts.
-eval "$(python -c '
+# all environment variables required by the application before the process
+# starts. Do not use eval here: secrets must never become shell source code.
+readarray -t _runtime_urls < <(python -c '
+import base64
 import os
 import sys
 import urllib.parse
@@ -15,15 +16,10 @@ def check_var(name):
     if isinstance(val, str):
         val = val.strip().strip("\x27\x22")
     if not val or "CHANGE_ME" in val.upper():
-        print(f"echo \"CRITICAL ERROR: {name} is missing or contains a placeholder!\" >&2")
-        print("exit 1")
+        print(f"CRITICAL ERROR: {name} is missing or contains a placeholder!", file=sys.stderr)
         sys.exit(1)
     return val
 
-
-# Validate every required runtime setting. Pydantic will perform the detailed
-# type/format validation later; this check provides an early, readable failure
-# before Alembic or the bot starts.
 check_var("BOT_TOKEN")
 check_var("ADMIN_IDS")
 check_var("SUPPORT_USERNAME")
@@ -41,27 +37,36 @@ check_var("SSL_EMAIL")
 pg_host = os.environ.get("POSTGRES_HOST", "db")
 redis_host = os.environ.get("REDIS_HOST", "redis")
 
-# URL-encode credentials exactly once after stripping any surrounding quotes.
-# PostgreSQL and Redis receive raw passwords, while the application
-# connection URLs receive encoded values.
 pg_pass_encoded = urllib.parse.quote(pg_pass_raw, safe="")
 redis_pass_encoded = urllib.parse.quote(redis_pass_raw, safe="")
-
 pg_user_encoded = urllib.parse.quote(pg_user_raw, safe="")
 pg_db_encoded = urllib.parse.quote(pg_db_raw, safe="")
 
 db_url = f"postgresql+asyncpg://{pg_user_encoded}:{pg_pass_encoded}@{pg_host}:5432/{pg_db_encoded}"
 redis_url = f"redis://:{redis_pass_encoded}@{redis_host}:6379/0"
 
-print(f"export DATABASE_URL=\"{db_url}\"")
-print(f"export REDIS_URL=\"{redis_url}\"")
-')"
+for value in (db_url, redis_url):
+    print(base64.b64encode(value.encode()).decode())
+')
 
-if [ "${1:-}" = "bot" ]; then
-    echo "Running database migrations..."
-    alembic upgrade head
+if [ "${#_runtime_urls[@]}" -ne 2 ]; then
+    echo "CRITICAL ERROR: failed to construct runtime connection URLs" >&2
+    exit 1
+fi
 
-    echo "Starting bot..."
+export DATABASE_URL="$(printf '%s' "${_runtime_urls[0]}" | base64 -d)"
+export REDIS_URL="$(printf '%s' "${_runtime_urls[1]}" | base64 -d)"
+unset _runtime_urls
+
+# Migrations are deliberately executed by the dedicated Compose `migrate`
+# service. Keeping them out of the long-running bot process prevents a bot
+# restart from implicitly mutating the production schema.
+#
+# `CMD ["bot"]` is a logical application command, not an executable path.
+# Resolve it explicitly so `exec "$@"` cannot try to execute the /app/bot
+# package directory. Other commands (for example `alembic upgrade head` in
+# the dedicated migration service) are executed unchanged.
+if [ "$#" -eq 1 ] && [ "$1" = "bot" ]; then
     exec python -m bot.main
 fi
 
