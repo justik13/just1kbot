@@ -16,9 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import TELEGRAM_MESSAGE_LIMIT
-from bot.keyboards import get_back_button, get_broadcast_confirm_keyboard
+from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
+    get_broadcast_audience_keyboard,
     get_broadcast_close_keyboard,
+    get_broadcast_launch_keyboard,
     get_broadcast_result_keyboard,
 )
 from bot.states import AdminStates
@@ -28,7 +30,7 @@ from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import broadcast_send_limiter
-from utils.telegram import render_hub, send_hub_document, send_hub_photo, safe
+from utils.telegram import render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -64,14 +66,6 @@ def _get_stop_event(admin_id: int) -> asyncio.Event:
 
 def _cleanup_stop_event(admin_id: int) -> None:
     _broadcast_stop_events.pop(admin_id, None)
-
-
-from bot.keyboards.admin.broadcast import (
-    get_broadcast_audience_keyboard,
-    get_broadcast_close_keyboard,
-    get_broadcast_launch_keyboard,
-    get_broadcast_result_keyboard,
-)
 
 @router.callback_query(F.data == "admin_broadcast")
 async def start_broadcast(
@@ -219,7 +213,8 @@ async def process_broadcast_message(
     total_count = 1
     if session:
         try:
-            result = await session.execute(count_stmt)
+            res = await session.execute(count_stmt)
+            total_count = res.scalar_one() or 0
         except Exception as e:
             logger.warning(f"Failed to count recipients in session: {e}")
 

@@ -11,17 +11,13 @@ from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.repositories.users_repo import (
-    get_filtered_user_count,
     get_filtered_users_count,
     get_filtered_users_paginated,
-    get_filtered_users_paginated_with_profiles,
-    get_user_by_telegram_id,
-    get_user_count,
-    get_users_paginated_with_profiles,
 )
 
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
+from utils.formatters import format_audit_details
 from utils.telegram import render_hub, safe
 
 from .common import (

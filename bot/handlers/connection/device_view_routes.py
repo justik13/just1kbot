@@ -15,7 +15,7 @@ from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_datetime, format_traffic
+from utils.formatters import format_datetime, format_traffic, get_country_display
 from utils.telegram import (
     append_hub_document,
     append_hub_message,
