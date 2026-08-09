@@ -61,4 +61,13 @@ unset _runtime_urls
 # Migrations are deliberately executed by the dedicated Compose `migrate`
 # service. Keeping them out of the long-running bot process prevents a bot
 # restart from implicitly mutating the production schema.
+#
+# `CMD ["bot"]` is a logical application command, not an executable path.
+# Resolve it explicitly so `exec "$@"` cannot try to execute the /app/bot
+# package directory. Other commands (for example `alembic upgrade head` in
+# the dedicated migration service) are executed unchanged.
+if [ "$#" -eq 1 ] && [ "$1" = "bot" ]; then
+    exec python -m bot.main
+fi
+
 exec "$@"
