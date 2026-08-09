@@ -234,11 +234,13 @@ class ActionLockMiddleware(BaseMiddleware):
         if not _is_locked_action(callback_data):
             try:
                 return await handler(event, data)
-            except (ValueError, IndexError, TypeError):
+            except (ValueError, IndexError, TypeError) as exc:
                 logger.warning(
-                    "Invalid callback data or parse error: user=%s, data=%s",
+                    "Invalid callback data or parse error: user=%s, data=%s: %s",
                     user_id,
                     callback_data[:80],
+                    exc,
+                    exc_info=True,
                 )
 
                 try:
@@ -273,11 +275,13 @@ class ActionLockMiddleware(BaseMiddleware):
         async with lock:
             try:
                 return await handler(event, data)
-            except (ValueError, IndexError, TypeError):
+            except (ValueError, IndexError, TypeError) as exc:
                 logger.warning(
-                    "Invalid callback data or parse error: user=%s, data=%s",
+                    "Invalid callback data or parse error: user=%s, data=%s: %s",
                     user_id,
                     callback_data[:80],
+                    exc,
+                    exc_info=True,
                 )
 
                 try:

@@ -204,10 +204,17 @@ async def back_to_main_menu(
     )
 
 
+    mtproto_url = None
+    if session is not None:
+        from database.repositories.system_settings_repo import get_system_setting
+        mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+
     kb = get_hub_keyboard(
         is_admin=is_admin,
         is_active=is_active,
+        mtproto_url=mtproto_url,
     )
+
 
     await render_hub(
         callback.bot,
