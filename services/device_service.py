@@ -154,6 +154,7 @@ class DeviceService:
                 api_url=server.api_url,
                 api_key=server.api_key,
                 max_clients=server.max_clients,
+                live_client_count=len(snapshot.peer_ids),
             )
         except ServerAtCapacity as exc:
             raise ServerUnavailable("Server is full") from exc
