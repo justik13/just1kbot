@@ -11,6 +11,7 @@ from bot import texts
 from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
 from database.models import User
+from .common import _render_connections
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
@@ -66,7 +67,9 @@ async def manage_device(
 
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        await callback.answer("Устройство не найдено или было удалено", show_alert=True)
+        if db_user:
+            await _render_connections(callback.message, db_user, session)
         return
 
     server = await get_server_by_id(session, profile.server_id)

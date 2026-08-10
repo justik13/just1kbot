@@ -16,12 +16,18 @@ async def ensure_server_capacity(
     api_url: str,
     api_key: str,
     max_clients: int,
+    live_client_count: int | None = None,
 ) -> None:
-    client = AmneziaClient(api_url, api_key)
-    clients = await client.get_all_clients()
-    if clients is None:
-        raise ServerCapacityUnavailable(
-            "Unable to verify live Amnezia capacity"
-        )
-    if len(clients) >= max_clients:
+    if live_client_count is not None:
+        count = live_client_count
+    else:
+        client = AmneziaClient(api_url, api_key)
+        clients = await client.get_all_clients()
+        if clients is None:
+            raise ServerCapacityUnavailable(
+                "Unable to verify live Amnezia capacity"
+            )
+        count = len(clients)
+
+    if count >= max_clients:
         raise ServerAtCapacity("Server is full")
