@@ -15,17 +15,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           sudo apt-get update
           sudo apt-get install -y age
-
           age-keygen -o ci-key.txt
           PUBKEY="$(sed -n 's/^# public key: //p' ci-key.txt)"
           test -n "$PUBKEY"
-
           DB_PASS='Pg_@#%^&*()_pass'
           REDIS_PASS='Redis_!@#%_pass'
-
           cat > .env <<EOF
           BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
           ADMIN_IDS=[123456,654321]
@@ -43,7 +39,6 @@ jobs:
           SSL_EMAIL=ci@example.test
           BACKUP_AGE_RECIPIENT=$PUBKEY
           EOF
-
           echo "DB_PASS=$DB_PASS" >> "$GITHUB_ENV"
           echo "REDIS_PASS=$REDIS_PASS" >> "$GITHUB_ENV"
 
@@ -63,11 +58,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           echo "Waiting for containers to become healthy..."
           timeout_seconds=120
           elapsed=0
-
           while [ "$elapsed" -lt "$timeout_seconds" ]; do
             states="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.State}}')"
             if printf '%s\n' "$states" | grep -Eq 'Restarting|Exited|Dead'; then
@@ -75,8 +68,9 @@ jobs:
               docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
               docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
               diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+              bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
               migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
-              echo "::error title=Container diagnostics::services=$diag migrate=$migrate_state"
+              echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs migrate=$migrate_state"
               exit 1
             fi
 
@@ -84,29 +78,22 @@ jobs:
             REDIS_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
             BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
             CADDY_STATE="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo missing)"
-
             echo "db=$DB_HEALTH redis=$REDIS_HEALTH bot=$BOT_HEALTH caddy=$CADDY_STATE"
 
-            if [ "$DB_HEALTH" = healthy ] \
-              && [ "$REDIS_HEALTH" = healthy ] \
-              && [ "$BOT_HEALTH" = healthy ] \
-              && [ "$CADDY_STATE" = running ]; then
+            if [ "$DB_HEALTH" = healthy ] && [ "$REDIS_HEALTH" = healthy ] && [ "$BOT_HEALTH" = healthy ] && [ "$CADDY_STATE" = running ]; then
               echo "All services are healthy and Caddy is running."
               break
             fi
 
-            if [ "$DB_HEALTH" = unhealthy ] \
-              || [ "$REDIS_HEALTH" = unhealthy ] \
-              || [ "$BOT_HEALTH" = unhealthy ] \
-              || [ "$CADDY_STATE" = exited ] \
-              || [ "$CADDY_STATE" = dead ]; then
+            if [ "$DB_HEALTH" = unhealthy ] || [ "$REDIS_HEALTH" = unhealthy ] || [ "$BOT_HEALTH" = unhealthy ] || [ "$CADDY_STATE" = exited ] || [ "$CADDY_STATE" = dead ]; then
               echo "A service became unhealthy or stopped!"
               docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
               docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
               diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+              bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
               bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
               migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
-              echo "::error title=Container diagnostics::services=$diag bot_health=$bot_health_log migrate=$migrate_state"
+              echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs bot_health=$bot_health_log migrate=$migrate_state"
               exit 1
             fi
 
@@ -119,9 +106,10 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
             docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
             diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+            bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
             bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
             migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
-            echo "::error title=Container diagnostics::services=$diag bot_health=$bot_health_log migrate=$migrate_state"
+            echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs bot_health=$bot_health_log migrate=$migrate_state"
             exit 1
           fi
 
@@ -135,78 +123,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql \
-            -U just1kbot \
-            -d just1kbot_bot \
-            -v ON_ERROR_STOP=1 \
-            -c "DROP TABLE IF EXISTS ci_backup_probe; CREATE TABLE ci_backup_probe (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO ci_backup_probe (id, marker) VALUES (1, 'pr78-backup-restore');"
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql -U just1kbot -d just1kbot_bot -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS ci_backup_probe; CREATE TABLE ci_backup_probe (id integer PRIMARY KEY, marker text NOT NULL); INSERT INTO ci_backup_probe (id, marker) VALUES (1, 'pr78-backup-restore');"
 
       - name: Test Backup and Restore
         shell: bash
         run: |
           set -euo pipefail
-
           docker compose --profile tools run --rm backup
-
           BACKUP_FILE="$(find backups -maxdepth 1 -type f -name '*.sql.gz.age' -print -quit)"
           test -n "$BACKUP_FILE"
-
-          if find backups -maxdepth 1 -type f -name '*.sql.gz' -print -quit | grep -q .; then
-            echo "Plaintext backup was not cleaned up!"
-            exit 1
-          fi
-
+          if find backups -maxdepth 1 -type f -name '*.sql.gz' -print -quit | grep -q .; then echo "Plaintext backup was not cleaned up!"; exit 1; fi
           age -d -i ci-key.txt "$BACKUP_FILE" > backup-restored.sql.gz
           test -s backup-restored.sql.gz
           gunzip backup-restored.sql.gz
           test -s backup-restored.sql
-
           docker compose exec -T -e PGPASSWORD="$DB_PASS" db dropdb -U just1kbot --if-exists just1kbot_restore
           docker compose exec -T -e PGPASSWORD="$DB_PASS" db createdb -U just1kbot just1kbot_restore
-
           docker cp backup-restored.sql just1kbot_db:/tmp/restore.sql
-          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql \
-            -U just1kbot \
-            -d just1kbot_restore \
-            -v ON_ERROR_STOP=1 \
-            -f /tmp/restore.sql
-
+          docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql -U just1kbot -d just1kbot_restore -v ON_ERROR_STOP=1 -f /tmp/restore.sql
           RESTORE_MARKER="$(docker compose exec -T -e PGPASSWORD="$DB_PASS" db psql -U just1kbot -d just1kbot_restore -Atc "SELECT marker FROM ci_backup_probe WHERE id = 1;")"
           test "$RESTORE_MARKER" = "pr78-backup-restore"
-
           docker compose exec -T -e PGPASSWORD="$DB_PASS" db dropdb -U just1kbot --if-exists just1kbot_restore
 
       - name: Test Alembic Idempotency Through Real Bot Restart
         shell: bash
         run: |
           set -euo pipefail
-
           docker compose restart bot
-
           timeout_seconds=120
           elapsed=0
           while [ "$elapsed" -lt "$timeout_seconds" ]; do
             BOT_STATE="$(docker inspect --format='{{.State.Status}}' just1kbot_app 2>/dev/null || echo missing)"
             BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
             echo "bot_state=$BOT_STATE bot_health=$BOT_HEALTH"
-
-            if [ "$BOT_STATE" = running ] && [ "$BOT_HEALTH" = healthy ]; then
-              break
-            fi
-
-            if [ "$BOT_STATE" = exited ] || [ "$BOT_STATE" = dead ] || [ "$BOT_HEALTH" = unhealthy ]; then
-              docker compose logs --no-color bot
-              exit 1
-            fi
-
+            if [ "$BOT_STATE" = running ] && [ "$BOT_HEALTH" = healthy ]; then break; fi
+            if [ "$BOT_STATE" = exited ] || [ "$BOT_STATE" = dead ] || [ "$BOT_HEALTH" = unhealthy ]; then docker compose logs --no-color bot; exit 1; fi
             sleep 2
             elapsed=$((elapsed + 2))
           done
-
-          if [ "$elapsed" -ge "$timeout_seconds" ]; then
-            docker compose logs --no-color bot
-            exit 1
-          fi
+          if [ "$elapsed" -ge "$timeout_seconds" ]; then docker compose logs --no-color bot; exit 1; fi
 
       - name: View logs (if failure)
         if: failure()
