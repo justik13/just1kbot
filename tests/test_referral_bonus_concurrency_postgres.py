@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import User, Payment, AccountLedgerEntry
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import settle_succeeded_topup
+from services.referral_bonus import reverse_referral_bonus_for_topup
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -142,3 +143,52 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             self.assertIsNone(credited)
+
+    async def test_concurrent_referral_refund_reversal_is_idempotent(self):
+        async with self.sessions() as session:
+            async with session.begin():
+                payment = await session.get(Payment, self.payment_a_id)
+                await settle_succeeded_topup(session, payment=payment, source="test")
+
+        async def reverse_once():
+            async with self.sessions() as session:
+                async with session.begin():
+                    return await reverse_referral_bonus_for_topup(
+                        session, payment_id=self.payment_a_id
+                    )
+
+        first, second = await asyncio.gather(reverse_once(), reverse_once())
+
+        async with self.sessions() as session:
+            referrer_reversals = await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == self.referrer.id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.amount < 0,
+                    AccountLedgerEntry.idempotency_key
+                    == f"referral-bonus-reversal:topup:{self.payment_a_id}:{self.referrer.id}",
+                )
+            )
+            purchaser_reversals = await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == self.purchaser.id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.amount < 0,
+                    AccountLedgerEntry.idempotency_key
+                    == f"referral-bonus-reversal:first-topup-welcome:{self.payment_a_id}:{self.purchaser.id}",
+                )
+            )
+
+            self.assertEqual(first, Decimal("200.00"))
+            self.assertEqual(second, Decimal("200.00"))
+            self.assertEqual(len(referrer_reversals.all()), 1)
+            self.assertEqual(len(purchaser_reversals.all()), 1)
+
+            referrer_balance = await get_account_balance(
+                session, user_id=self.referrer.id
+            )
+            purchaser_balance = await get_account_balance(
+                session, user_id=self.purchaser.id
+            )
+            self.assertEqual(referrer_balance.bonus_position, Decimal("0.00"))
+            self.assertEqual(purchaser_balance.bonus_position, Decimal("0.00"))
