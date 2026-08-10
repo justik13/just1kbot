@@ -11,6 +11,7 @@ from bot import texts
 from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
 from database.models import User
+from .common import _render_connections
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
