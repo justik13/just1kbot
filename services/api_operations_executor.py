@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 
 
 def _is_usable_created_config(config: str | None) -> bool:
+    """
+    ВАЖНОЕ ПРАВИЛО СОВМЕСТИМОСТИ С AMNEZIA API (kyoresuas/amnezia-api):
+    
+    amnezia-api при POST /clients возвращает созданный ключ в формате 'vpn://...' URI,
+    либо в виде сырого WireGuard/AWG INI ('[Interface]...'), либо других протоколов (VLESS/SS).
+    
+    НЕЛЬЗЯ удалять созданный пир и отменять операцию только из-за того, что build_conf_file
+    возвращает None или не строит .conf (например, если протокол не AWG или .conf опционален).
+    Любая непустая валидная конфигурация от API должна успешно приниматься ботом.
+    """
     from utils.vpn_parser import is_valid_vpn_uri
     if not config or not isinstance(config, str):
         return False
