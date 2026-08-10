@@ -341,9 +341,27 @@ async def choose_topup_amount(
     balance_lines = f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
     if balance.bonus_available > 0:
         balance_lines += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
+
+    from services.referral_bonus import is_first_topup_eligible
+    is_first_eligible = await is_first_topup_eligible(session, user_id=db_user.id)
+
+    bonus_notice = ""
+    if is_first_eligible:
+        bonus_lines = "\n".join(
+            f"• {amt} ₽ ➡️ <b>+{amt // 10} ₽</b> на бонусный баланс"
+            for amt in amounts
+        )
+        bonus_notice = (
+            f"\n🎁 <b>Бонус на первое пополнение:</b>\n"
+            f"Вы получите <b>+10%</b> от суммы пополнения на бонусный баланс!\n"
+            f"<i>(подробнее в меню «Пригласить друга»)</i>\n\n"
+            f"💡 <b>Расчет бонуса к сумме:</b>\n{bonus_lines}\n"
+        )
+
     text = (
         f"➕ <b>Пополнение баланса</b>\n\n"
-        f"{balance_lines}\n\n"
+        f"{balance_lines}\n"
+        f"{bonus_notice}\n"
         f"Выберите сумму или укажите другую целую сумму в рублях."
     )
     await render_hub(

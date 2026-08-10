@@ -279,11 +279,8 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
         val = int(filter_param)
-        matching_tariff_ids = (
-            select(Tariff.id).where(
-                (Tariff.device_limit == val)
-                | (Tariff.device_limit == select(Tariff.device_limit).where(Tariff.id == val).scalar_subquery())
-            )
+        matching_tariff_ids = select(Tariff.id).where(
+            (Tariff.device_limit == val) | (Tariff.id == val)
         )
         stmt = stmt.where(User.current_tariff_id.in_(matching_tariff_ids))
     return stmt
