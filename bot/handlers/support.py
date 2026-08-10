@@ -14,11 +14,11 @@ router = Router()
 AMNEZIA_DOWNLOAD_MIRROR = "https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads"
 AMNEZIA_GITHUB_LATEST = "https://github.com/amnezia-vpn/amnezia-client/releases/latest"
 AMNEZIA_OFFICIAL_SITE = "https://storage.googleapis.com/amnezia/amnezia.org"
-AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs"
+AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
 AMNEZIA_SPLIT_TUNNELING = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/vpn-split-tunneling/"
-AMNEZIA_IOS_RU = "https://storage.googleapis.com/amnezia/docs%3Fm-path%3D/ru/documentation/instructions/installing-amneziavpn-on-ios/"
-AMNEZIA_WIN_INSTALL = "https://storage.googleapis.com/amnezia/docs%3Fm-path%3D/ru/documentation/instructions/installing-app-on-windows/"
-AMNEZIA_WIN_UPDATE = "https://storage.googleapis.com/amnezia/docs%3Fm-path%3D/ru/documentation/instructions/application-update-on-windows/"
+AMNEZIA_IOS_RU = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-ios/"
+AMNEZIA_WIN_INSTALL = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/"
+AMNEZIA_WIN_UPDATE = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/"
 
 
 def _support_keyboard(username: str, telegram_id: int | None = None):

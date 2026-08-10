@@ -138,13 +138,15 @@ async def _build_users_list_text_and_kb(
 
     filter_labels = {
         "all": "Все",
-        "new": "🆕 Новенькие (<24ч)",
-        "new_24h": "🆕 Новые (24ч)",
+        "new": "🆕 Новые (7д)",
+        "new_24h": "🆕 Новые (7д)",
+        "new_7d": "🆕 Новые (7д)",
         "expiring_3d": "⏳ < 3 дней",
         "active": "⚡ С подпиской",
-        "expired": "🔴 Истекшие",
+        "expired": "🔴 Без подписки",
+        "no_sub": "🔴 Без подписки",
         "banned": "🚫 Забаненные",
-        "problem": "🚫 Проблемные",
+        "problem": "🚫 Забаненные",
         "server": f"Сервер #{filter_param}",
         "tariff": f"Тариф #{filter_param}",
     }
@@ -163,10 +165,10 @@ async def _build_users_list_text_and_kb(
 
     filters = [
         ("all", "Все", "none"),
-        ("new_24h", "🆕 Новые", "none"),
+        ("new_7d", "🆕 Новые (7д)", "none"),
         ("expiring_3d", "⏳ < 3 дней", "none"),
         ("active", "⚡ Активные", "none"),
-        ("expired", "🔴 Истекшие", "none"),
+        ("expired", "🔴 Без подписки", "none"),
         ("banned", "🚫 Забаненные", "none"),
     ]
 

@@ -20,9 +20,36 @@ from services.api_operations_finalizer import (
     finalize_delete_success, finalize_existing_create_success,
     finalize_update_success, prepare_create_cleanup,
 )
-from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
 
 logger = logging.getLogger(__name__)
+
+
+def _is_usable_created_config(config: str | None) -> bool:
+    """
+    ВАЖНОЕ ПРАВИЛО СОВМЕСТИМОСТИ С AMNEZIA API (kyoresuas/amnezia-api):
+    
+    amnezia-api при POST /clients возвращает созданный ключ в формате 'vpn://...' URI,
+    либо в виде сырого WireGuard/AWG INI ('[Interface]...'), либо других протоколов (VLESS/SS).
+    
+    НЕЛЬЗЯ удалять созданный пир и отменять операцию только из-за того, что build_conf_file
+    возвращает None или не строит .conf (например, если протокол не AWG или .conf опционален).
+    Любая непустая валидная конфигурация от API должна успешно приниматься ботом.
+    """
+    from utils.vpn_parser import is_valid_vpn_uri
+    if not config or not isinstance(config, str):
+        return False
+    conf = config.strip()
+    if not conf or conf.lower() == "invalid":
+        return False
+    if is_valid_vpn_uri(conf):
+        return True
+    if conf.startswith("vpn://") or "[Interface]" in conf:
+        return True
+    if any(conf.startswith(prefix) for prefix in ("vless://", "vmess://", "ss://", "trojan://", "shadowsocks://")):
+        return True
+    if len(conf) > 20:
+        return True
+    return False
 
 
 class _ServerEndpointChanged(RuntimeError):
@@ -179,17 +206,7 @@ async def _execute_create(op, client):
         code = "create_ambiguous_reconcile" if result.ambiguous else _error_code(result)
         return await _fail(op, retryable=result.retryable or result.ambiguous, code=code)
     created = result.value
-    valid = False
-    if created and created.id:
-        try:
-            valid = bool(is_valid_vpn_uri(created.config) and build_conf_file(created.config))
-        except Exception:
-            logger.warning(
-                "Created peer returned an unusable vpn config: operation_id=%s peer_id=%s",
-                op.id,
-                created.id,
-                exc_info=True,
-            )
+    valid = _is_usable_created_config(created.config) if (created and created.id) else False
     if not valid:
         cleanup = None
         if created and created.id:

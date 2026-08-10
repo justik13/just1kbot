@@ -50,10 +50,37 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             for row in markup.inline_keyboard
             for btn in row
         ]
+        self.assertIn("admin_users_filter:new_7d:none:1", all_callbacks)
+        self.assertIn("admin_users_filter:expiring_3d:none:1", all_callbacks)
+        self.assertIn("admin_users_filter:active:none:1", all_callbacks)
+        self.assertIn("admin_users_filter:expired:none:1", all_callbacks)
         self.assertIn("admin_users_filter:banned:none:1", all_callbacks)
         self.assertIn("admin_users_filter_menu:server", all_callbacks)
         self.assertIn("admin_users_filter_menu:tariff", all_callbacks)
 
+    def test_apply_user_filters_logic(self):
+        from database.repositories.users_repo import _apply_user_filters
+        from sqlalchemy import select
+
+        stmt_all = _apply_user_filters(select(User), "all")
+        stmt_new = _apply_user_filters(select(User), "new_7d")
+        stmt_expiring = _apply_user_filters(select(User), "expiring_3d")
+        stmt_active = _apply_user_filters(select(User), "active")
+        stmt_expired = _apply_user_filters(select(User), "expired")
+        stmt_banned = _apply_user_filters(select(User), "banned")
+        stmt_server = _apply_user_filters(select(User), "server", filter_param="1")
+        stmt_tariff = _apply_user_filters(select(User), "tariff", filter_param="2")
+
+        self.assertIn("select users.id", str(stmt_all).lower())
+        self.assertIn("created_at >=", str(stmt_new))
+        self.assertIn("subscription_end >", str(stmt_expiring))
+        self.assertIn("subscription_end <=", str(stmt_expiring))
+        self.assertIn("subscription_end >", str(stmt_active))
+        self.assertIn("subscription_end is null", str(stmt_expired).lower())
+        self.assertIn("is_banned is true", str(stmt_banned).lower())
+        self.assertIn("is_bot_blocked is true", str(stmt_banned).lower())
+        self.assertIn("server_id =", str(stmt_server).lower())
+        self.assertIn("current_tariff_id in", str(stmt_tariff).lower())
     async def test_purchases_repo_mocked(self):
         session = AsyncMock()
 
