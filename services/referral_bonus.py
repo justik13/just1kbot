@@ -229,27 +229,39 @@ async def reverse_referral_bonus_for_topup(
         )
         if existing is None:
             reversal_amount = -abs(Decimal(matching_credit.amount))
-            session.add(
-                AccountLedgerEntry(
-                    user_id=matching_credit.user_id,
-                    entry_type="admin_adjustment",
-                    amount=reversal_amount,
-                    currency="RUB",
-                    payment_id=None,
-                    quote_id=None,
-                    reversal_of_id=None,
-                    idempotency_key=idempotency_key,
-                    metadata_={
-                        "source_type": REFERRAL_BONUS_SOURCE,
-                        "reason": "topup_refund_reversal",
-                        "topup_payment_id": payment_id,
-                        "original_credit_id": matching_credit.id,
-                    },
-                )
+            entry = AccountLedgerEntry(
+                user_id=matching_credit.user_id,
+                entry_type="admin_adjustment",
+                amount=reversal_amount,
+                currency="RUB",
+                payment_id=None,
+                quote_id=None,
+                reversal_of_id=None,
+                idempotency_key=idempotency_key,
+                metadata_={
+                    "source_type": REFERRAL_BONUS_SOURCE,
+                    "reason": "topup_refund_reversal",
+                    "topup_payment_id": payment_id,
+                    "original_credit_id": matching_credit.id,
+                },
             )
+            session.add(entry)
+            await session.flush()
+            from database.models import AccountLedgerAllocation
+            session.add(AccountLedgerAllocation(
+                user_id=matching_credit.user_id,
+                credit_entry_id=matching_credit.id,
+                debit_entry_id=entry.id,
+                amount=abs(reversal_amount),
+                idempotency_key=f"alloc:{idempotency_key}"
+            ))
+            print(f"DEBUG REVERSAL ADDED for referrer {matching_credit.user_id} amt {reversal_amount}")
             total_reversed += abs(reversal_amount)
         else:
+            print("DEBUG REVERSAL EXISTING for referrer")
             total_reversed += Decimal(abs(existing.amount))
+    else:
+        print("DEBUG REVERSAL NO MATCHING CREDIT for referrer")
 
     # 2. Reverse purchaser welcome bonus for this top-up if present
     purchaser_credits = (
@@ -280,27 +292,39 @@ async def reverse_referral_bonus_for_topup(
         )
         if existing_purchaser_rev is None:
             p_reversal_amount = -abs(Decimal(matching_purchaser_credit.amount))
-            session.add(
-                AccountLedgerEntry(
-                    user_id=purchaser.id,
-                    entry_type="admin_adjustment",
-                    amount=p_reversal_amount,
-                    currency="RUB",
-                    payment_id=None,
-                    quote_id=None,
-                    reversal_of_id=None,
-                    idempotency_key=purchaser_rev_key,
-                    metadata_={
-                        "source_type": REFERRAL_BONUS_SOURCE,
-                        "reason": "topup_refund_reversal",
-                        "topup_payment_id": payment_id,
-                        "original_credit_id": matching_purchaser_credit.id,
-                    },
-                )
+            p_entry = AccountLedgerEntry(
+                user_id=purchaser.id,
+                entry_type="admin_adjustment",
+                amount=p_reversal_amount,
+                currency="RUB",
+                payment_id=None,
+                quote_id=None,
+                reversal_of_id=None,
+                idempotency_key=purchaser_rev_key,
+                metadata_={
+                    "source_type": REFERRAL_BONUS_SOURCE,
+                    "reason": "topup_refund_reversal",
+                    "topup_payment_id": payment_id,
+                    "original_credit_id": matching_purchaser_credit.id,
+                },
             )
+            session.add(p_entry)
+            await session.flush()
+            from database.models import AccountLedgerAllocation
+            session.add(AccountLedgerAllocation(
+                user_id=purchaser.id,
+                credit_entry_id=matching_purchaser_credit.id,
+                debit_entry_id=p_entry.id,
+                amount=abs(p_reversal_amount),
+                idempotency_key=f"alloc:{purchaser_rev_key}"
+            ))
+            print(f"DEBUG REVERSAL ADDED for purchaser {purchaser.id} amt {p_reversal_amount}")
             total_reversed += abs(p_reversal_amount)
         else:
+            print("DEBUG REVERSAL EXISTING for purchaser")
             total_reversed += Decimal(abs(existing_purchaser_rev.amount))
+    else:
+        print("DEBUG REVERSAL NO MATCHING CREDIT for purchaser")
 
     await session.flush()
     return total_reversed

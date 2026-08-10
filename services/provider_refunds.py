@@ -539,6 +539,7 @@ async def finalize(
             ):
                 raise BalanceRefundError("provider_refund_economics_mismatch")
         except BalanceRefundError as exc:
+            print(f"FINALIZE: Caught BalanceRefundError: {exc.code}")
             result = YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.INVALID_RESPONSE,
@@ -559,6 +560,7 @@ async def finalize(
                 event_key=f"provider-operation:{operation.operation_id}",
             )
             if status == "succeeded":
+                print("FINALIZE: calling apply_balance_topup_refund_success")
                 await apply_balance_topup_refund_success(
                     session,
                     payment=payment,
@@ -570,9 +572,11 @@ async def finalize(
                     operation=operation,
                 )
             elif status == "pending":
+                print("FINALIZE: status is pending")
                 operation.status = "retry"
                 operation.next_attempt_at = now_utc() + timedelta(seconds=10)
             else:
+                print("FINALIZE: status is", status)
                 await resolve_reservation(
                     session,
                     reservation_id=operation.reservation_id,
