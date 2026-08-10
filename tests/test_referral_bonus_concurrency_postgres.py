@@ -29,18 +29,18 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
             await session.execute(text(TRUNCATE_SQL))
-            
+
             self.referrer = User(telegram_id=int(uuid.uuid4().int % 1000000000))
             session.add(self.referrer)
             await session.flush()
 
             self.purchaser = User(
-                telegram_id=int(uuid.uuid4().int % 1000000000), 
+                telegram_id=int(uuid.uuid4().int % 1000000000),
                 referred_by=self.referrer.telegram_id
             )
             session.add(self.purchaser)
             await session.flush()
-            
+
             # 2 payments for purchaser
             self.payment_a = Payment(
                 user_id=self.purchaser.id,
@@ -84,8 +84,9 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             await self.engine.dispose()
 
     async def test_concurrent_first_topup(self):
-        # We need to simulate two concurrent settle_succeeded_topup calls.
-        
+        # Simulate two concurrent settle_succeeded_topup calls for the same purchaser.
+        # Exactly one welcome bonus must be granted regardless of which payment settles first.
+
         async def process_payment(payment_id):
             async with self.sessions() as session:
                 async with session.begin():
@@ -101,14 +102,11 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             referrer_balance = await get_account_balance(session, user_id=self.referrer.id)
             purchaser_balance = await get_account_balance(session, user_id=self.purchaser.id)
-            
-            print(f"Referrer balance: {referrer_balance}")
-            print(f"Purchaser balance: {purchaser_balance}")
 
             # Referrer gets 10% of BOTH (100 + 200 = 300)
             self.assertEqual(referrer_balance.bonus_position, Decimal("300.00"))
 
-            # Purchaser gets 10% of ONLY ONE (First to commit gets it)
+            # Purchaser gets 10% of ONLY ONE first topup (first to commit gets it)
             result = await session.execute(
                 select(AccountLedgerEntry).where(
                     AccountLedgerEntry.user_id == self.purchaser.id,
@@ -116,11 +114,11 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             welcome_entries = result.scalars().all()
-            
+
             self.assertEqual(len(welcome_entries), 1, "Exactly one welcome bonus must be granted")
-            
+
             welcome_amount = welcome_entries[0].amount
             self.assertIn(welcome_amount, [Decimal("100.00"), Decimal("200.00")])
-            
+
             self.assertEqual(purchaser_balance.real_position, Decimal("3000.00"))
             self.assertEqual(purchaser_balance.bonus_position, welcome_amount)
