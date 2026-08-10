@@ -175,6 +175,16 @@ async def get_account_balance(
             bonus_available = max(ZERO, bonus_available - rem_res)
 
     available = max(ZERO, real_available + bonus_available)
+    accounting_available = max(ZERO, position - reserved)
+    if available > accounting_available:
+        reduction = available - accounting_available
+        if bonus_available >= reduction:
+            bonus_available -= reduction
+        else:
+            reduction -= bonus_available
+            bonus_available = ZERO
+            real_available = max(ZERO, real_available - reduction)
+        available = accounting_available
 
     return AccountBalanceSnapshot(
         accounting_position=position,
@@ -248,8 +258,6 @@ async def credit_succeeded_topup(
     # documented Payment -> User order so concurrent confirmations serialize.
     if payment.user_id != user.id:
         raise AccountLedgerConflictError("topup_owner_changed")
-    if False:
-        raise AccountLedgerConflictError("payment_is_not_balance_topup")
     if payment.provider_status != "succeeded":
         raise AccountLedgerConflictError("topup_provider_not_succeeded")
     if payment.currency != "RUB":

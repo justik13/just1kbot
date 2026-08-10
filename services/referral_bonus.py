@@ -9,7 +9,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
-from database.repositories.account_ledger_repo import get_account_balance
+from database.repositories.account_ledger_repo import (
+    _credit_capacity,
+    get_account_balance,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -261,13 +264,18 @@ async def reverse_referral_bonus_for_topup(
             )
             session.add(entry)
             await session.flush()
-            session.add(AccountLedgerAllocation(
-                user_id=matching_credit.user_id,
-                credit_entry_id=matching_credit.id,
-                debit_entry_id=entry.id,
-                amount=abs(reversal_amount),
-                idempotency_key=f"alloc:{idempotency_key}"
-            ))
+            reversal_capacity = await _credit_capacity(session, matching_credit)
+            allocation_amount = min(abs(reversal_amount), reversal_capacity)
+            if allocation_amount > 0:
+                session.add(
+                    AccountLedgerAllocation(
+                        user_id=matching_credit.user_id,
+                        credit_entry_id=matching_credit.id,
+                        debit_entry_id=entry.id,
+                        amount=allocation_amount,
+                        idempotency_key=f"alloc:{idempotency_key}",
+                    )
+                )
             _logger.debug(
                 "Referral bonus reversal created for referrer user_id=%s, payment_id=%s, amount=%s",
                 matching_credit.user_id, payment_id, reversal_amount,
@@ -330,13 +338,20 @@ async def reverse_referral_bonus_for_topup(
             )
             session.add(p_entry)
             await session.flush()
-            session.add(AccountLedgerAllocation(
-                user_id=purchaser.id,
-                credit_entry_id=matching_purchaser_credit.id,
-                debit_entry_id=p_entry.id,
-                amount=abs(p_reversal_amount),
-                idempotency_key=f"alloc:{purchaser_rev_key}"
-            ))
+            p_reversal_capacity = await _credit_capacity(
+                session, matching_purchaser_credit
+            )
+            p_allocation_amount = min(abs(p_reversal_amount), p_reversal_capacity)
+            if p_allocation_amount > 0:
+                session.add(
+                    AccountLedgerAllocation(
+                        user_id=purchaser.id,
+                        credit_entry_id=matching_purchaser_credit.id,
+                        debit_entry_id=p_entry.id,
+                        amount=p_allocation_amount,
+                        idempotency_key=f"alloc:{purchaser_rev_key}",
+                    )
+                )
             _logger.debug(
                 "Welcome bonus reversal created for purchaser user_id=%s, payment_id=%s, amount=%s",
                 purchaser.id, payment_id, p_reversal_amount,
@@ -377,6 +392,25 @@ async def get_referral_bonus_balance(
         return Decimal("0")
 
     credit_ids = [credit.id for credit in credits]
+    reversal_rows = (
+        await session.scalars(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == user_id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount < 0,
+                AccountLedgerEntry.metadata_["source_type"].as_string()
+                == REFERRAL_BONUS_SOURCE,
+                AccountLedgerEntry.metadata_["reason"].as_string()
+                == "topup_refund_reversal",
+            )
+        )
+    ).all()
+    fully_reversed_credit_ids: set[int] = set()
+    for reversal in reversal_rows:
+        original_credit_id = (reversal.metadata_ or {}).get("original_credit_id")
+        if original_credit_id in credit_ids:
+            fully_reversed_credit_ids.add(int(original_credit_id))
+
     allocations = (
         await session.execute(
             select(
@@ -403,6 +437,8 @@ async def get_referral_bonus_balance(
 
     used_by_credit: dict[int, Decimal] = {}
     for row in allocations:
+        if row.credit_entry_id in fully_reversed_credit_ids:
+            continue
         if row.debit_entry_id in reversed_debits:
             continue
         used_by_credit[row.credit_entry_id] = (
@@ -413,7 +449,9 @@ async def get_referral_bonus_balance(
     remaining = sum(
         max(
             Decimal("0"),
-            Decimal(credit.amount)
+            Decimal("0")
+            if credit.id in fully_reversed_credit_ids
+            else Decimal(credit.amount)
             - used_by_credit.get(credit.id, Decimal("0")),
         )
         for credit in credits

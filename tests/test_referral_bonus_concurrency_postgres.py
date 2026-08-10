@@ -13,7 +13,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import User, Payment, AccountLedgerEntry
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import settle_succeeded_topup
-from services.referral_bonus import reverse_referral_bonus_for_topup
+from services.referral_bonus import (
+    get_referral_bonus_balance,
+    reverse_referral_bonus_for_topup,
+)
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -190,5 +193,13 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             purchaser_balance = await get_account_balance(
                 session, user_id=self.purchaser.id
             )
+            referrer_referral_balance = await get_referral_bonus_balance(
+                session, user_id=self.referrer.id
+            )
+            purchaser_referral_balance = await get_referral_bonus_balance(
+                session, user_id=self.purchaser.id
+            )
             self.assertEqual(referrer_balance.bonus_position, Decimal("0.00"))
             self.assertEqual(purchaser_balance.bonus_position, Decimal("0.00"))
+            self.assertEqual(referrer_referral_balance, Decimal("0"))
+            self.assertEqual(purchaser_referral_balance, Decimal("0"))
