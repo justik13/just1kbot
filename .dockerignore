@@ -1,17 +1,42 @@
+# VCS metadata and local environment files are not needed in container images.
 .git
 .github
+.gitignore
 .env
+.env.*
+!.env.example
 .venv
 venv
-__pycache__
-*.pyc
-*.pyo
-# tests/
-docs/
 
+# Python/runtime caches are generated locally and should not enter production images.
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Development-only assets are excluded from production build contexts.
+tests/
+docs/
+README.md
+
+# Local editor, OS, logs, backups, and temporary files.
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.tmp
+*.swp
+*~
+backups/
+
+# Host-only deployment/configuration files are mounted by Compose or used by CI, not copied into app images.
 .shellcheckrc
 .pip-tools.toml
 docker-compose.yml
 Caddyfile
 Caddyfile.ci
-backups/
