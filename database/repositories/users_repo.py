@@ -5,7 +5,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import User
+from database.models import Server, User, VPNProfile
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -269,11 +269,14 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "problem":
         stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
     elif filter_type == "server" and filter_param is not None:
-        from database.models import Profile
-        stmt = stmt.where(User.profiles.any(Profile.server_id == int(filter_param)))
+        stmt = stmt.where(
+            User.profiles.any(
+                (VPNProfile.server_id == int(filter_param))
+                & (VPNProfile.provisioning_status.notin_(("deleting", "create_cleanup_pending")))
+            )
+        )
     elif filter_type == "country" and filter_param:
-        from database.models import Profile, Server
-        stmt = stmt.where(User.profiles.any(Profile.server.has(Server.country_flag == str(filter_param))))
+        stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
         stmt = stmt.where(User.current_tariff_id == int(filter_param))
     return stmt
@@ -318,4 +321,3 @@ async def get_filtered_users_paginated_with_profiles(
     session: AsyncSession, filter_type: str = "all", page: int = 1, per_page: int = 10
 ) -> list[User]:
     return await get_filtered_users_paginated(session, filter_type=filter_type, page=page, per_page=per_page)
-
