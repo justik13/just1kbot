@@ -62,9 +62,11 @@ class PendingThenSucceededTransport:
     @classmethod
     async def get_refund_result(cls, refund_id):
         cls.get_calls += 1
-        # Fallback to defaults if no payload saved (for isolated get_refund_result tests)
-        saved = cls._last_payload.get("pay_refund_test", {}) if not cls._last_payload else list(cls._last_payload.values())[-1]
-
+        saved = (
+            cls._last_payload.get("pay_refund_test", {})
+            if not cls._last_payload
+            else list(cls._last_payload.values())[-1]
+        )
         return YooKassaResult(
             True,
             value={
@@ -93,7 +95,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
                 user_id=user.id,
                 amount=Decimal("100"),
                 currency="RUB",
-                    public_order_id="topup_" + uuid.uuid4().hex,
+                public_order_id="topup_" + uuid.uuid4().hex,
                 provider_idempotency_key=uuid.uuid4().hex,
                 provider_status="succeeded",
                 fulfillment_status="succeeded",
@@ -222,14 +224,16 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refund_reverses_referral_bonuses(self):
         from services.account_topup import settle_succeeded_topup
-        from database.models import AccountLedgerEntry, AccountLedgerAllocation
 
         async with self.sessions.begin() as session:
             referrer = User(telegram_id=uuid.uuid4().int % 10**12)
             session.add(referrer)
             await session.flush()
 
-            purchaser = User(telegram_id=uuid.uuid4().int % 10**12, referred_by=referrer.telegram_id)
+            purchaser = User(
+                telegram_id=uuid.uuid4().int % 10**12,
+                referred_by=referrer.telegram_id,
+            )
             session.add(purchaser)
             await session.flush()
 
@@ -284,7 +288,6 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # Advance time to allow retry
         async with self.sessions.begin() as session:
-            from sqlalchemy import text
             await session.execute(text(
                 "UPDATE provider_refund_operations "
                 "SET next_attempt_at = next_attempt_at - interval '10 minutes'"
@@ -320,6 +323,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             reversal_list = [
                 r for r in reversals.all()
-                if r.metadata_ and r.metadata_.get("topup_payment_id") == self.payment_id_bonus
+                if r.metadata_
+                and r.metadata_.get("topup_payment_id") == self.payment_id_bonus
             ]
             self.assertEqual(len(reversal_list), 2)
