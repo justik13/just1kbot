@@ -269,7 +269,12 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "problem":
         stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
     elif filter_type == "server" and filter_param is not None:
-        stmt = stmt.where(User.profiles.any(VPNProfile.server_id == int(filter_param)))
+        stmt = stmt.where(
+            User.profiles.any(
+                (VPNProfile.server_id == int(filter_param))
+                & (VPNProfile.provisioning_status.notin_(("deleting", "create_cleanup_pending")))
+            )
+        )
     elif filter_type == "country" and filter_param:
         stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:

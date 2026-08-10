@@ -1,6 +1,6 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select
 
@@ -23,6 +23,32 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("vpn_profiles", sql)
         self.assertIn("server_id", sql)
+        self.assertIn("PROVISIONING_STATUS", sql.upper())
+
+    async def test_extended_filter_menu_server_buttons_include_country_flag(self):
+        from bot.handlers.admin.users.list_routes import show_extended_filter_menu
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_users_filter_menu:server",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        server = SimpleNamespace(id=7, name="DE-1", country_flag="🇩🇪")
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [server]
+        session = AsyncMock()
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True):
+            await show_extended_filter_menu(callback, session)
+
+        call_args = callback.message.edit_text.call_args
+        reply_markup = call_args.kwargs["reply_markup"]
+        buttons = [btn.text for row in reply_markup.inline_keyboard for btn in row]
+
+        self.assertIn("🖥 🇩🇪 DE-1", buttons)
 
     async def test_users_keyboard_exposes_server_filter_but_not_country_filter(self):
         from bot.handlers.admin.users.common import _build_users_list_text_and_kb

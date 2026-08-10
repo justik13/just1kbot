@@ -82,8 +82,9 @@ async def show_extended_filter_menu(
             await callback.answer("Серверов нет", show_alert=True)
             return
         for server in rows:
+            flag = server.country_flag or "🌐"
             builder.button(
-                text=f"🖥 {server.name}",
+                text=f"🖥 {flag} {server.name}",
                 callback_data=f"admin_users_filter:server:{server.id}:1",
             )
         title = "🖥 <b>Выберите сервер:</b>"
