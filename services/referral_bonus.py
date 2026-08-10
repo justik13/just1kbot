@@ -108,7 +108,7 @@ async def grant_referral_bonus_for_topup(
                 entry_type="admin_adjustment",
                 amount=bonus,
                 currency="RUB",
-                payment_id=None,        # admin_adjustment requires payment_id IS NULL per DB constraint
+                payment_id=None,
                 quote_id=None,
                 reversal_of_id=None,
                 idempotency_key=idempotency_key,
@@ -185,25 +185,36 @@ async def reverse_referral_bonus_for_topup(
     payment_id: int,
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
-    from database.models import Payment, User
+    from database.models import Payment
 
     payment = await session.get(Payment, payment_id)
     if payment is None or payment.user_id is None:
         return Decimal("0")
 
-    purchaser = await session.get(User, payment.user_id)
+    # Refund processing can race with another refund finalizer or with a top-up
+    # bonus grant. Use the same purchaser -> referrer lock order as the grant
+    # path so the matching credit and its reversal are observed atomically.
+    purchaser = await session.scalar(
+        select(User)
+        .where(User.id == payment.user_id)
+        .with_for_update()
+    )
     if purchaser is None or not purchaser.referred_by:
         return Decimal("0")
 
     referrer = await session.scalar(
-        select(User).where(User.telegram_id == purchaser.referred_by)
+        select(User)
+        .where(User.telegram_id == purchaser.referred_by)
+        .with_for_update()
     )
     if referrer is None:
         return Decimal("0")
 
     total_reversed = Decimal("0")
 
-    # 1. Reverse referrer bonus for this top-up if present
+    # 1. Reverse referrer bonus for this top-up if present. The purchaser and
+    # referrer row locks serialize this lookup with bonus creation, preventing
+    # two refund finalizers from both attempting the same unique reversal.
     candidate_credits = (
         await session.scalars(
             select(AccountLedgerEntry).where(
@@ -250,7 +261,6 @@ async def reverse_referral_bonus_for_topup(
             )
             session.add(entry)
             await session.flush()
-            from database.models import AccountLedgerAllocation
             session.add(AccountLedgerAllocation(
                 user_id=matching_credit.user_id,
                 credit_entry_id=matching_credit.id,
@@ -320,7 +330,6 @@ async def reverse_referral_bonus_for_topup(
             )
             session.add(p_entry)
             await session.flush()
-            from database.models import AccountLedgerAllocation
             session.add(AccountLedgerAllocation(
                 user_id=purchaser.id,
                 credit_entry_id=matching_purchaser_credit.id,
@@ -345,7 +354,6 @@ async def reverse_referral_bonus_for_topup(
 
     await session.flush()
     return total_reversed
-
 
 
 async def get_referral_bonus_balance(
