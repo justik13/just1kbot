@@ -49,7 +49,7 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
 
         buttons = [
             button
-            for row in builder.inline_keyboard
+            for row in builder.as_markup().inline_keyboard
             for button in row
         ]
         labels = {button.text for button in buttons}
