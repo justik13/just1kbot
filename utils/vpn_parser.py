@@ -190,17 +190,29 @@ def build_conf_file_from_dict(data: dict) -> Optional[str]:
 
 
 def build_vpn_file(uri: str) -> Optional[str]:
-    data = decode_vpn_uri_to_json(uri)
-    if data is None:
+    if not uri or not isinstance(uri, str):
         return None
-    return build_vpn_file_from_dict(data)
+    try:
+        data = decode_vpn_uri_to_json(uri)
+        if data is None:
+            return None
+        return build_vpn_file_from_dict(data)
+    except Exception:
+        return None
 
 
 def build_conf_file(uri: str) -> Optional[str]:
-    data = decode_vpn_uri_to_json(uri)
-    if data is None:
+    if not uri or not isinstance(uri, str):
         return None
-    return build_conf_file_from_dict(data)
+    try:
+        data = decode_vpn_uri_to_json(uri)
+        if data is not None:
+            return build_conf_file_from_dict(data)
+    except Exception:
+        pass
+    if _looks_like_wireguard_conf(uri):
+        return uri
+    return None
 
 
 def is_valid_vpn_uri(uri: str) -> bool:
@@ -224,7 +236,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
         if _looks_like_wireguard_conf(fallback_conf):
             return True
         return False
-    except VPNConfigParseError:
+    except Exception:
         return False
 
 
@@ -302,16 +314,22 @@ def customize_vpn_uri(
     dns2: str = "8.8.4.4",
     mtu: str = "1280",
 ) -> str:
-    data = decode_vpn_uri_to_json(uri)
-    if not data:
+    if not uri or not isinstance(uri, str):
+        return uri or ""
+    try:
+        data = decode_vpn_uri_to_json(uri)
+        if not data:
+            return uri
+        customized = customize_vpn_config_dict(
+            data,
+            description=description,
+            dns1=dns1,
+            dns2=dns2,
+            mtu=mtu,
+        )
+        return encode_json_to_vpn_uri(customized)
+    except Exception as e:
+        logger.debug("customize_vpn_uri skipped for non-vpn:// format: %s", e)
         return uri
-    customized = customize_vpn_config_dict(
-        data,
-        description=description,
-        dns1=dns1,
-        dns2=dns2,
-        mtu=mtu,
-    )
-    return encode_json_to_vpn_uri(customized)
 
 
