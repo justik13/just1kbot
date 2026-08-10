@@ -17,7 +17,6 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from utils.formatters import get_country_display
 from utils.telegram import render_hub, safe
 from bot.constants import GRACE_PERIOD_HOURS
 

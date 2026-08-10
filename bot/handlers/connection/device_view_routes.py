@@ -15,7 +15,7 @@ from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_datetime, format_traffic, get_country_display
+from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
     append_hub_document,
     append_hub_message,
@@ -93,11 +93,10 @@ async def manage_device(
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
 
     if has_access:
-        keyboard = get_device_keyboard(
-            profile.id,
-            config_ready=(profile.provisioning_status == "active"
-                          and bool(profile.peer_id) and bool(profile.raw_config)),
-        )
+        # Keep configuration actions visible while provisioning is pending.
+        # The action handlers remain authoritative and return the existing
+        # unavailable response until the profile is fully provisioned.
+        keyboard = get_device_keyboard(profile.id, config_ready=True)
     else:
         rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
 
