@@ -148,6 +148,9 @@ async def _build_users_list_text_and_kb(
         "tariff": f"Тариф #{filter_param}",
     }
     cur_filter_name = filter_labels.get(filter_type, filter_type)
+    if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
+        from utils.tariff_names import get_tariff_group_name
+        cur_filter_name = get_tariff_group_name(int(filter_param))
     header = format_admin_breadcrumbs("👥 Пользователи", f"Фильтр: {cur_filter_name}")
 
     rendered = (

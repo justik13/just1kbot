@@ -111,6 +111,48 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIn("37 / 240", rendered)
         self.assertNotIn("0 / 240", rendered)
 
+    async def test_show_extended_filter_menu_groups_tariffs_by_family(self):
+        from bot.handlers.admin.users.list_routes import show_extended_filter_menu
+
+        callback = SimpleNamespace(
+            data="admin_users_filter_menu:tariff",
+            from_user=SimpleNamespace(id=123456789),
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        session = AsyncMock()
+
+        tariffs = [
+            SimpleNamespace(id=1, name="Базовый", device_limit=2, duration_days=7, is_active=True),
+            SimpleNamespace(id=2, name="Базовый", device_limit=2, duration_days=30, is_active=True),
+            SimpleNamespace(id=3, name="Базовый", device_limit=2, duration_days=90, is_active=True),
+            SimpleNamespace(id=4, name="Семейный", device_limit=5, duration_days=30, is_active=True),
+            SimpleNamespace(id=5, name="Pro", device_limit=10, duration_days=30, is_active=True),
+        ]
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = tariffs
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True):
+            await show_extended_filter_menu(callback, session)
+
+        call_args = callback.message.edit_text.call_args
+        title, reply_markup = call_args.args[0], call_args.kwargs["reply_markup"]
+        self.assertIn("Выберите тариф", title)
+
+        buttons = [btn for row in reply_markup.inline_keyboard for btn in row]
+        button_texts = [btn.text for btn in buttons]
+        callback_datas = [btn.callback_data for btn in buttons]
+
+        self.assertIn("💎 📱 Базовый (2 устр.)", button_texts)
+        self.assertIn("💎 👨‍👩‍👧‍👦 Семейный (5 устр.)", button_texts)
+        self.assertIn("💎 🚀 Pro (10 устр.)", button_texts)
+        self.assertEqual(button_texts.count("💎 📱 Базовый (2 устр.)"), 1)
+
+        self.assertIn("admin_users_filter:tariff:2:1", callback_datas)
+        self.assertIn("admin_users_filter:tariff:5:1", callback_datas)
+        self.assertIn("admin_users_filter:tariff:10:1", callback_datas)
+
 
 if __name__ == "__main__":
     unittest.main()
