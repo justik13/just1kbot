@@ -442,7 +442,7 @@ async def apply_balance_topup_refund_success(
         event_key=event_key,
     )
     async with session.begin_nested():
-        await create_payment_debit(
+        debit, created = await create_payment_debit(
             session,
             payment_id=payment.id,
             entry_type="refund_debit",
@@ -454,15 +454,21 @@ async def apply_balance_topup_refund_success(
                 "source": "provider_refund",
             },
         )
-        await _consume_matching_reservation(
-            session,
-            payment_id=payment.id,
-            amount=amount,
-            reservation_id=reservation_id,
-        )
-        await _update_topup_after_refund(session, payment)
-        from services.referral_bonus import reverse_referral_bonus_for_topup
-        await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
+        if created:
+            await _consume_matching_reservation(
+                session,
+                payment_id=payment.id,
+                amount=amount,
+                reservation_id=reservation_id,
+            )
+            await _update_topup_after_refund(session, payment)
+            from services.referral_bonus import reverse_referral_bonus_for_topup
+            await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
+            
+            from database.repositories.account_ledger_repo import get_account_balance
+            balance = await get_account_balance(session, user_id=payment.user_id)
+            if balance.debt > 0:
+                await place_financial_hold(session, payment=payment, reason="chargeback_debt")
     if operation is not None:
         operation.provider_refund_id = provider_refund_id
         operation.provider_status = "succeeded"
@@ -472,16 +478,17 @@ async def apply_balance_topup_refund_success(
         operation.last_error = None
         operation.locked_at = None
         operation.locked_by = None
-    session.add(
-        PaymentEvent(
-            payment_id=payment.id,
-            event_type="balance_refund_applied",
-            provider_status="succeeded",
-            reason="provider_refund_confirmed",
-            source="provider_refund",
-            details=f"refund={provider_refund_id}; amount={int(amount)} RUB",
+    if created:
+        session.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="balance_refund_applied",
+                provider_status="succeeded",
+                reason="provider_refund_confirmed",
+                source="provider_refund",
+                details=f"refund={provider_refund_id}; amount={int(amount)} RUB",
+            )
         )
-    )
     return refund
 
 
