@@ -1,6 +1,7 @@
 import asyncio
 import os
 import unittest
+import uuid
 from decimal import Decimal
 
 from sqlalchemy import select, text
