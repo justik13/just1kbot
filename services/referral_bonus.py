@@ -131,7 +131,7 @@ async def grant_referral_bonus_for_topup(
         )
     )
     if (prev_credited or 0) == 0:
-        purchaser_key = f"referral-bonus:first-topup-welcome:{payment_id}:{purchaser.id}"
+        purchaser_key = f"referral-bonus:first-topup-welcome:{purchaser.id}"
         existing_purchaser = await session.scalar(
             select(AccountLedgerEntry).where(
                 AccountLedgerEntry.idempotency_key == purchaser_key
