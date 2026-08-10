@@ -2,6 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import select
+
 
 class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
     async def test_admin_users_router_imports_cleanly(self):
@@ -11,6 +13,49 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(list_routes.router)
         self.assertTrue(callable(list_routes.users_filter_pagination))
+
+    async def test_server_user_filter_builds_without_runtime_import_error(self):
+        from database.models import User
+        from database.repositories.users_repo import _apply_user_filters
+
+        stmt = _apply_user_filters(select(User), "server", "7")
+        sql = str(stmt)
+
+        self.assertIn("vpn_profiles", sql)
+        self.assertIn("server_id", sql)
+
+    async def test_users_keyboard_exposes_server_filter_but_not_country_filter(self):
+        from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+
+        user = SimpleNamespace(
+            telegram_id=700,
+            username="tester",
+            subscription_end=None,
+            is_banned=False,
+            is_bot_blocked=False,
+            profiles=[],
+        )
+
+        with patch(
+            "bot.handlers.admin.users.common.format_days_left",
+            return_value="—",
+        ):
+            _, builder = await _build_users_list_text_and_kb(
+                [user],
+                page=1,
+                total_pages=1,
+                total=1,
+            )
+
+        buttons = [
+            button
+            for row in builder.inline_keyboard
+            for button in row
+        ]
+        labels = {button.text for button in buttons}
+
+        self.assertIn("🖥 По VPN серверам", labels)
+        self.assertNotIn("🌐 По странам", labels)
 
     async def test_server_card_uses_database_peer_count_not_missing_model_field(self):
         from bot.handlers.admin.servers import common
