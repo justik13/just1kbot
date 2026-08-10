@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal, ROUND_DOWN
 
 from sqlalchemy import select
@@ -9,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import get_account_balance
+
+_logger = logging.getLogger(__name__)
 
 REFERRAL_BONUS_RATE = Decimal("0.10")
 REFERRAL_BONUS_SOURCE = "referral_bonus"
@@ -255,13 +258,20 @@ async def reverse_referral_bonus_for_topup(
                 amount=abs(reversal_amount),
                 idempotency_key=f"alloc:{idempotency_key}"
             ))
-            print(f"DEBUG REVERSAL ADDED for referrer {matching_credit.user_id} amt {reversal_amount}")
+            _logger.debug(
+                "Referral bonus reversal created for referrer user_id=%s, payment_id=%s, amount=%s",
+                matching_credit.user_id, payment_id, reversal_amount,
+            )
             total_reversed += abs(reversal_amount)
         else:
-            print("DEBUG REVERSAL EXISTING for referrer")
+            _logger.debug(
+                "Referral bonus reversal already exists for referrer, payment_id=%s", payment_id
+            )
             total_reversed += Decimal(abs(existing.amount))
     else:
-        print("DEBUG REVERSAL NO MATCHING CREDIT for referrer")
+        _logger.debug(
+            "No referral bonus credit found for referrer, payment_id=%s", payment_id
+        )
 
     # 2. Reverse purchaser welcome bonus for this top-up if present
     purchaser_credits = (
@@ -318,13 +328,20 @@ async def reverse_referral_bonus_for_topup(
                 amount=abs(p_reversal_amount),
                 idempotency_key=f"alloc:{purchaser_rev_key}"
             ))
-            print(f"DEBUG REVERSAL ADDED for purchaser {purchaser.id} amt {p_reversal_amount}")
+            _logger.debug(
+                "Welcome bonus reversal created for purchaser user_id=%s, payment_id=%s, amount=%s",
+                purchaser.id, payment_id, p_reversal_amount,
+            )
             total_reversed += abs(p_reversal_amount)
         else:
-            print("DEBUG REVERSAL EXISTING for purchaser")
+            _logger.debug(
+                "Welcome bonus reversal already exists for purchaser, payment_id=%s", payment_id
+            )
             total_reversed += Decimal(abs(existing_purchaser_rev.amount))
     else:
-        print("DEBUG REVERSAL NO MATCHING CREDIT for purchaser")
+        _logger.debug(
+            "No welcome bonus credit found for purchaser, payment_id=%s", payment_id
+        )
 
     await session.flush()
     return total_reversed
