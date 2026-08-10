@@ -58,7 +58,6 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("admin_users_filter_menu:server", all_callbacks)
         self.assertIn("admin_users_filter_menu:tariff", all_callbacks)
 
-<<<<<<< HEAD
     def test_apply_user_filters_logic(self):
         from database.repositories.users_repo import _apply_user_filters
         from sqlalchemy import select
@@ -82,9 +81,6 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("is_bot_blocked is true", str(stmt_banned).lower())
         self.assertIn("server_id =", str(stmt_server).lower())
         self.assertIn("current_tariff_id in", str(stmt_tariff).lower())
-
-=======
->>>>>>> origin/main
     async def test_purchases_repo_mocked(self):
         session = AsyncMock()
 
