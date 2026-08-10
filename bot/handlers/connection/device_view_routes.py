@@ -119,6 +119,14 @@ async def manage_device(
     )
 
 
+def _get_device_config_keyboard(profile_id: int):
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📖 Инструкция и помощь", callback_data="support_help")
+    builder.button(text=texts.UI_BOT_KEYBOARDS_COMMON_L7_1, callback_data=f"manage_device:{profile_id}")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 @router.callback_query(F.data.startswith("show_config:"))
 async def show_config(
     callback: CallbackQuery,

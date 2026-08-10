@@ -1,7 +1,6 @@
 import unittest
-from datetime import datetime
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from database.models import (
     AuditLog,
@@ -11,13 +10,7 @@ from database.models import (
     User,
 )
 from database.repositories.purchases_repo import (
-    PurchaseLogEntry,
-    get_purchase_log_by_id,
     get_purchase_logs_paginated,
-)
-from database.repositories.users_repo import (
-    get_filtered_users_count,
-    get_filtered_users_paginated,
 )
 from bot.handlers.admin.users.common import _build_users_list_text_and_kb
 from bot.keyboards.admin.dashboard import get_admin_menu
