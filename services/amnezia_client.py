@@ -681,17 +681,24 @@ class AmneziaClient:
         )
         if not result.ok:
             return result
-        if isinstance(result.value, dict) and "client" in result.value:
+
+        client_data = None
+        if isinstance(result.value, dict):
+            if "client" in result.value and isinstance(result.value["client"], dict):
+                client_data = result.value["client"]
+            elif "id" in result.value:
+                client_data = result.value
+
+        if client_data:
             try:
-                client = AmneziaClientCreateResponse(
-                    **result.value["client"]
-                )
+                client = AmneziaClientCreateResponse(**client_data)
                 return self._success(client, result.status_code)
             except Exception as error:
                 logger.error(
                     "Failed to parse create_user response: %s",
                     type(error).__name__,
                 )
+
         return self._failure(
             AmneziaErrorKind.INVALID_RESPONSE,
             RequestSemantics.CREATE,

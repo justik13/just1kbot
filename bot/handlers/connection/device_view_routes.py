@@ -66,7 +66,9 @@ async def manage_device(
 
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        await callback.answer("Устройство не найдено или было удалено", show_alert=True)
+        if db_user:
+            await _render_connections(callback.message, db_user, session)
         return
 
     server = await get_server_by_id(session, profile.server_id)
