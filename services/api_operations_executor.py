@@ -179,8 +179,17 @@ async def _execute_create(op, client):
         code = "create_ambiguous_reconcile" if result.ambiguous else _error_code(result)
         return await _fail(op, retryable=result.retryable or result.ambiguous, code=code)
     created = result.value
-    valid = bool(created and created.id and is_valid_vpn_uri(created.config)
-                 and build_conf_file(created.config))
+    valid = False
+    if created and created.id:
+        try:
+            valid = bool(is_valid_vpn_uri(created.config) and build_conf_file(created.config))
+        except Exception:
+            logger.warning(
+                "Created peer returned an unusable vpn config: operation_id=%s peer_id=%s",
+                op.id,
+                created.id,
+                exc_info=True,
+            )
     if not valid:
         cleanup = None
         if created and created.id:
