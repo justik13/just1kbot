@@ -23,7 +23,6 @@ jobs:
           PUBKEY="$(sed -n 's/^# public key: //p' ci-key.txt)"
           test -n "$PUBKEY"
 
-          # Exercise URL encoding with characters that are significant in URIs.
           DB_PASS='Pg_@#%^&*()_pass'
           REDIS_PASS='Redis_!@#%_pass'
 
@@ -75,6 +74,9 @@ jobs:
               echo "A container crashed or is restarting!"
               docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
               docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+              diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+              migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+              echo "::error title=Container diagnostics::services=$diag migrate=$migrate_state"
               exit 1
             fi
 
@@ -101,6 +103,10 @@ jobs:
               echo "A service became unhealthy or stopped!"
               docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
               docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+              diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+              bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
+              migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+              echo "::error title=Container diagnostics::services=$diag bot_health=$bot_health_log migrate=$migrate_state"
               exit 1
             fi
 
@@ -112,6 +118,10 @@ jobs:
             echo "Timeout waiting for healthy status."
             docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
             docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+            diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+            bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
+            migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+            echo "::error title=Container diagnostics::services=$diag bot_health=$bot_health_log migrate=$migrate_state"
             exit 1
           fi
 
@@ -136,25 +146,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Running encrypted backup..."
           docker compose --profile tools run --rm backup
 
           BACKUP_FILE="$(find backups -maxdepth 1 -type f -name '*.sql.gz.age' -print -quit)"
           test -n "$BACKUP_FILE"
-          echo "Backup created: $BACKUP_FILE"
 
           if find backups -maxdepth 1 -type f -name '*.sql.gz' -print -quit | grep -q .; then
             echo "Plaintext backup was not cleaned up!"
             exit 1
           fi
 
-          echo "Decrypting backup..."
           age -d -i ci-key.txt "$BACKUP_FILE" > backup-restored.sql.gz
           test -s backup-restored.sql.gz
           gunzip backup-restored.sql.gz
           test -s backup-restored.sql
 
-          echo "Creating temporary restore database..."
           docker compose exec -T -e PGPASSWORD="$DB_PASS" db dropdb -U just1kbot --if-exists just1kbot_restore
           docker compose exec -T -e PGPASSWORD="$DB_PASS" db createdb -U just1kbot just1kbot_restore
 
