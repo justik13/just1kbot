@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
@@ -29,6 +30,7 @@ from services.audit_service import AuditService
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult, YooKassaService
 from utils.datetime_helpers import now_utc
 
+_logger = logging.getLogger(__name__)
 
 REFUND_LEASE_SECONDS = 60
 ACTIVE_STATUSES = ("pending", "processing", "retry")
@@ -464,7 +466,7 @@ async def apply_balance_topup_refund_success(
             await _update_topup_after_refund(session, payment)
             from services.referral_bonus import reverse_referral_bonus_for_topup
             await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
-            
+
             from database.repositories.account_ledger_repo import get_account_balance
             balance = await get_account_balance(session, user_id=payment.user_id)
             if balance.debt > 0:
@@ -546,7 +548,7 @@ async def finalize(
             ):
                 raise BalanceRefundError("provider_refund_economics_mismatch")
         except BalanceRefundError as exc:
-            print(f"FINALIZE: Caught BalanceRefundError: {exc.code}")
+            _logger.warning("FINALIZE: BalanceRefundError during parse: %s", exc.code)
             result = YooKassaResult(
                 False,
                 error_kind=YooKassaErrorKind.INVALID_RESPONSE,
@@ -567,7 +569,7 @@ async def finalize(
                 event_key=f"provider-operation:{operation.operation_id}",
             )
             if status == "succeeded":
-                print("FINALIZE: calling apply_balance_topup_refund_success")
+                _logger.debug("FINALIZE: applying refund success, operation_id=%s", operation.id)
                 await apply_balance_topup_refund_success(
                     session,
                     payment=payment,
@@ -579,11 +581,11 @@ async def finalize(
                     operation=operation,
                 )
             elif status == "pending":
-                print("FINALIZE: status is pending")
+                _logger.debug("FINALIZE: provider refund still pending, operation_id=%s", operation.id)
                 operation.status = "retry"
                 operation.next_attempt_at = now_utc() + timedelta(seconds=10)
             else:
-                print("FINALIZE: status is", status)
+                _logger.debug("FINALIZE: provider refund status=%s, operation_id=%s", status, operation.id)
                 await resolve_reservation(
                     session,
                     reservation_id=operation.reservation_id,
