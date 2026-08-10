@@ -38,6 +38,20 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+async def _get_inviter_line(session: AsyncSession, user: User) -> str:
+    if not user.referred_by:
+        return ""
+    from database.repositories.users_repo import get_user_by_telegram_id
+    referrer = await get_user_by_telegram_id(session, user.referred_by)
+    if referrer:
+        name = safe(referrer.first_name) if referrer.first_name else ""
+        username_str = f" (@{safe(referrer.username)})" if referrer.username else ""
+        if name or username_str:
+            return f"\n🤝 Вас пригласил: {name}{username_str} (ID: <code>{referrer.telegram_id}</code>)"
+        return f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
+    return f"\n🤝 Вас пригласил: ID <code>{user.referred_by}</code>"
+
+
 async def _render_profile(
     target,
     user: User,
@@ -59,6 +73,7 @@ async def _render_profile(
         await get_user_referrals(session, user.telegram_id)
     )
     balance = await get_account_balance(session, user_id=user.id)
+    inviter_line = await _get_inviter_line(session, user)
 
     if has_access:
         device_limit = user.device_limit or 0
@@ -81,6 +96,7 @@ async def _render_profile(
             name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L80_1),
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
+            inviter_line=inviter_line,
             tariff_name=tariff_name,
             valid_until=format_datetime(user.subscription_end),
             days_left=format_days_left(user.subscription_end),
@@ -97,6 +113,7 @@ async def _render_profile(
             name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L93_1),
             username_line=(f" (@{safe(user.username)})" if user.username else ""),
             telegram_id=user.telegram_id,
+            inviter_line=inviter_line,
             referrals_count=referrals_count,
             balance=int(balance.real_available),
             referral_bonus_balance=int(balance.bonus_available),
@@ -263,6 +280,9 @@ async def show_referral(
     )
 
     invited_count = len(referrals)
+    inviter_line = await _get_inviter_line(session, db_user)
+    if inviter_line:
+        inviter_line = f"\n{inviter_line}\n"
 
     await render_hub(
         callback.bot,
@@ -271,6 +291,7 @@ async def show_referral(
             referral_link=referral_link,
             invited_count=invited_count,
             bonus_balance=int(bonus_balance),
+            inviter_line=inviter_line,
         ),
         get_referral_keyboard(referral_link),
     )

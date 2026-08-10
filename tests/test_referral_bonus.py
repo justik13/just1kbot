@@ -66,7 +66,7 @@ class TestReferralBonusLedgerEntryShape:
                 captured_entry["obj"] = entry
 
         session = AsyncMock()
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -145,4 +145,95 @@ class TestReferralBonusLedgerEntryShape:
         assert entry.amount == Decimal("-10")
         assert entry.reversal_of_id is None
         assert entry.payment_id is None
+
+
+def test_first_topup_bonus_credits_both_purchaser_and_referrer():
+    import asyncio
+    from services.referral_bonus import grant_referral_bonus_for_topup
+    from database.models import AccountLedgerEntry
+
+    added_entries = []
+
+    referrer = MagicMock()
+    referrer.id = 10
+    referrer.telegram_id = 1000
+    referrer.is_banned = False
+
+    purchaser = MagicMock()
+    purchaser.id = 20
+    purchaser.telegram_id = 2000
+    purchaser.referred_by = 1000
+
+    def fake_add(entry):
+        if isinstance(entry, AccountLedgerEntry):
+            added_entries.append(entry)
+
+    session = AsyncMock()
+    # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (0), 5. existing purchaser bonus check (None)
+    session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
+    session.add = fake_add
+    session.flush = AsyncMock()
+
+    asyncio.run(
+        grant_referral_bonus_for_topup(
+            session,
+            purchaser_user_id=20,
+            payment_id=101,
+            topup_amount=500,
+        )
+    )
+
+    assert len(added_entries) == 2
+    referrer_entry = added_entries[0]
+    purchaser_entry = added_entries[1]
+
+    assert referrer_entry.user_id == 10
+    assert referrer_entry.amount == Decimal("50")
+
+    assert purchaser_entry.user_id == 20
+    assert purchaser_entry.amount == Decimal("50")
+    assert purchaser_entry.metadata_["reason"] == "first_topup_welcome"
+
+
+def test_second_topup_credits_only_referrer():
+    import asyncio
+    from services.referral_bonus import grant_referral_bonus_for_topup
+    from database.models import AccountLedgerEntry
+
+    added_entries = []
+
+    referrer = MagicMock()
+    referrer.id = 10
+    referrer.telegram_id = 1000
+    referrer.is_banned = False
+
+    purchaser = MagicMock()
+    purchaser.id = 20
+    purchaser.telegram_id = 2000
+    purchaser.referred_by = 1000
+
+    def fake_add(entry):
+        if isinstance(entry, AccountLedgerEntry):
+            added_entries.append(entry)
+
+    session = AsyncMock()
+    # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (1 = previous topup exists)
+    session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 1])
+    session.add = fake_add
+    session.flush = AsyncMock()
+
+    asyncio.run(
+        grant_referral_bonus_for_topup(
+            session,
+            purchaser_user_id=20,
+            payment_id=102,
+            topup_amount=1000,
+        )
+    )
+
+    assert len(added_entries) == 1
+    referrer_entry = added_entries[0]
+    assert referrer_entry.user_id == 10
+    assert referrer_entry.amount == Decimal("100")
+
 

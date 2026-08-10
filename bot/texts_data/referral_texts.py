@@ -2,7 +2,7 @@ REFERRAL_TEXTS = {
     "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE": """👤 <b>Личный кабинет</b>
 
 {name}{username_line}
-🆔 Ваш ID: <code>{telegram_id}</code>
+🆔 Ваш ID: <code>{telegram_id}</code>{inviter_line}
 
 💎 <b>Тариф:</b> {tariff_name}
 ⏳ <b>Действует до:</b> {valid_until} ({days_left})
@@ -16,7 +16,7 @@ REFERRAL_TEXTS = {
     "PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE": """👤 <b>Личный кабинет</b>
 
 {name}{username_line}
-🆔 Ваш ID: <code>{telegram_id}</code>
+🆔 Ваш ID: <code>{telegram_id}</code>{inviter_line}
 
 🔴 <b>Статус:</b> Нет активной подписки
 
@@ -32,7 +32,7 @@ REFERRAL_TEXTS = {
     "PROFILE_TEXT_ACTIVE": """👤 <b>Личный кабинет</b>
 
 {name}{username_line}
-🆔 Ваш ID: <code>{telegram_id}</code>
+🆔 Ваш ID: <code>{telegram_id}</code>{inviter_line}
 
 💎 <b>Тариф:</b> {tariff_name}
 ⏳ <b>Действует до:</b> {valid_until} ({days_left})
@@ -46,7 +46,7 @@ REFERRAL_TEXTS = {
     "PROFILE_TEXT_INACTIVE": """👤 <b>Личный кабинет</b>
 
 {name}{username_line}
-🆔 Ваш ID: <code>{telegram_id}</code>
+🆔 Ваш ID: <code>{telegram_id}</code>{inviter_line}
 
 🔴 <b>Статус:</b> Нет активной подписки
 
@@ -54,21 +54,23 @@ REFERRAL_TEXTS = {
 🎁 <b>Бонусный баланс:</b> {referral_bonus_balance} ₽
 
 👥 <b>Приглашено друзей:</b> {referrals_count}""",
-    "REFERRAL_TEXT_BALANCE": """🎁 <b>Пригласи друга — получай 10% за каждое пополнение!</b>
+    "REFERRAL_TEXT_BALANCE": """🎁 <b>Пригласи друга — получайте бонусы вместе!</b>
 
-Делитесь ссылкой с друзьями. Каждый раз, когда ваш друг пополняет баланс в боте, вы мгновенно получаете <b>10% от суммы каждого его пополнения</b> на бонусный баланс!
+Делитесь ссылкой с друзьями:
+• Вы получаете <b>10% от суммы каждого пополнения</b> вашего друга на ваш бонусный баланс!
+• Ваш друг получает <b>+10% бонуса</b> на баланс при своем <b>первом пополнении</b>!
 
 🔗 <b>Ваша реферальная ссылка:</b>
 <code>{referral_link}</code>
 
 💡 <i>Нажмите на ссылку, чтобы скопировать.</i>
-
+{inviter_line}
 ━━━━━━━━━━━━━━━━━━
 
 📊 <b>Как это работает:</b>
 1. Отправьте ссылку другу.
-2. Друг пополняет баланс (при каждом пополнении).
-3. Вы получаете <b>10% от суммы каждого пополнения</b> на свой бонусный баланс.
+2. При <b>первом пополнении</b> друг получает <b>+10% бонуса</b> на баланс.
+3. Вы получаете <b>10% от суммы каждого пополнения</b> друга на свой бонусный баланс.
 4. Бонусный баланс автоматически расходуется на покупку и продление подписки.
 
 👥 Приглашено друзей: <b>{invited_count}</b>
