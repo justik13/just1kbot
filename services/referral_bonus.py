@@ -67,10 +67,12 @@ async def grant_referral_bonus_for_topup(
         return Decimal("0")
 
     purchaser = await session.scalar(
-        select(User).where(
+        select(User)
+        .where(
             User.id == purchaser_user_id,
             User.is_deleted.is_(False),
         )
+        .with_for_update()
     )
     if purchaser is None or purchaser.referred_by is None:
         return Decimal("0")
@@ -196,6 +198,9 @@ async def reverse_referral_bonus_for_topup(
     if referrer is None:
         return Decimal("0")
 
+    total_reversed = Decimal("0")
+
+    # 1. Reverse referrer bonus for this top-up if present
     candidate_credits = (
         await session.scalars(
             select(AccountLedgerEntry).where(
@@ -215,39 +220,90 @@ async def reverse_referral_bonus_for_topup(
         None,
     )
 
-    if matching_credit is None:
-        return Decimal("0")
-
-    idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
-    existing = await session.scalar(
-        select(AccountLedgerEntry).where(
-            AccountLedgerEntry.idempotency_key == idempotency_key
+    if matching_credit is not None:
+        idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
+        existing = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.idempotency_key == idempotency_key
+            )
         )
-    )
-    if existing is not None:
-        return Decimal(abs(existing.amount))
+        if existing is None:
+            reversal_amount = -abs(Decimal(matching_credit.amount))
+            session.add(
+                AccountLedgerEntry(
+                    user_id=matching_credit.user_id,
+                    entry_type="admin_adjustment",
+                    amount=reversal_amount,
+                    currency="RUB",
+                    payment_id=None,
+                    quote_id=None,
+                    reversal_of_id=None,
+                    idempotency_key=idempotency_key,
+                    metadata_={
+                        "source_type": REFERRAL_BONUS_SOURCE,
+                        "reason": "topup_refund_reversal",
+                        "topup_payment_id": payment_id,
+                        "original_credit_id": matching_credit.id,
+                    },
+                )
+            )
+            total_reversed += abs(reversal_amount)
+        else:
+            total_reversed += Decimal(abs(existing.amount))
 
-    reversal_amount = -abs(Decimal(matching_credit.amount))
-    session.add(
-        AccountLedgerEntry(
-            user_id=matching_credit.user_id,
-            entry_type="admin_adjustment",
-            amount=reversal_amount,
-            currency="RUB",
-            payment_id=None,
-            quote_id=None,
-            reversal_of_id=None,
-            idempotency_key=idempotency_key,
-            metadata_={
-                "source_type": REFERRAL_BONUS_SOURCE,
-                "reason": "topup_refund_reversal",
-                "topup_payment_id": payment_id,
-                "original_credit_id": matching_credit.id,
-            },
+    # 2. Reverse purchaser welcome bonus for this top-up if present
+    purchaser_credits = (
+        await session.scalars(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.user_id == purchaser.id,
+                AccountLedgerEntry.entry_type == "admin_adjustment",
+                AccountLedgerEntry.amount > 0,
+                AccountLedgerEntry.reversal_of_id.is_(None),
+            )
         )
+    ).all()
+    matching_purchaser_credit = next(
+        (
+            c for c in purchaser_credits
+            if (c.metadata_ or {}).get("topup_payment_id") == payment_id
+            and (c.metadata_ or {}).get("reason") == "first_topup_welcome"
+        ),
+        None,
     )
+
+    if matching_purchaser_credit is not None:
+        purchaser_rev_key = f"referral-bonus-reversal:first-topup-welcome:{payment_id}:{purchaser.id}"
+        existing_purchaser_rev = await session.scalar(
+            select(AccountLedgerEntry).where(
+                AccountLedgerEntry.idempotency_key == purchaser_rev_key
+            )
+        )
+        if existing_purchaser_rev is None:
+            p_reversal_amount = -abs(Decimal(matching_purchaser_credit.amount))
+            session.add(
+                AccountLedgerEntry(
+                    user_id=purchaser.id,
+                    entry_type="admin_adjustment",
+                    amount=p_reversal_amount,
+                    currency="RUB",
+                    payment_id=None,
+                    quote_id=None,
+                    reversal_of_id=None,
+                    idempotency_key=purchaser_rev_key,
+                    metadata_={
+                        "source_type": REFERRAL_BONUS_SOURCE,
+                        "reason": "topup_refund_reversal",
+                        "topup_payment_id": payment_id,
+                        "original_credit_id": matching_purchaser_credit.id,
+                    },
+                )
+            )
+            total_reversed += abs(p_reversal_amount)
+        else:
+            total_reversed += Decimal(abs(existing_purchaser_rev.amount))
+
     await session.flush()
-    return abs(reversal_amount)
+    return total_reversed
 
 
 
