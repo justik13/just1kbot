@@ -272,8 +272,9 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transition.outcome, "applied")
         self.assertEqual(payment.provider_status, "succeeded")
         self.assertEqual(payment.reconciliation_status, "mismatch")
+        self.assertEqual(payment.fulfillment_status, "manual_review")
         self.assertEqual(len(session.added), 1)
-        self.assertEqual(session.added[0].reason, "late_success_after_hidden_checkout")
+        self.assertEqual(session.added[0].reason, "canceled_to_succeeded")
 
     async def test_late_canceled_webhook_conflicts(self):
         from services.payment_provider_state import apply_provider_transition

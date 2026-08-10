@@ -95,7 +95,19 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             )
             return ProviderTransition("conflict", observed, "succeeded_after_refund")
         payment.provider_status = "succeeded"
-        if payment.checkout_status == "abandoned":
+        if current == "canceled":
+            payment.reconciliation_status = "mismatch"
+            payment.fulfillment_status = "manual_review"
+            session.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="provider_transition_conflict",
+                    provider_status=observed,
+                    reason="canceled_to_succeeded",
+                    source=source,
+                )
+            )
+        elif payment.checkout_status == "abandoned":
             payment.reconciliation_status = "mismatch"
             session.add(
                 PaymentEvent(
