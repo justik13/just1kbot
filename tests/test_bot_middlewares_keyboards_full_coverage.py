@@ -124,8 +124,16 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
         self.assertIsNotNone(kb_ref)
 
     def test_device_keyboards(self):
-        kb_dev = device_kb.get_device_keyboard(profile_id=1, config_ready=True)
-        self.assertIsNotNone(kb_dev)
+        kb_ready = device_kb.get_device_keyboard(profile_id=1, config_ready=True)
+        kb_pending = device_kb.get_device_keyboard(profile_id=1, config_ready=False)
+
+        self.assertIsNotNone(kb_ready)
+        self.assertEqual(
+            kb_ready.model_dump(),
+            kb_pending.model_dump(),
+            "Device actions must remain visible while provisioning is pending; "
+            "the callback handlers perform the authoritative readiness check.",
+        )
 
     def test_payment_keyboards(self):
         kb_bal = payment_kb.get_balance_keyboard()
