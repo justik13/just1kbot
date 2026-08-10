@@ -143,6 +143,7 @@ async def _build_users_list_text_and_kb(
         "expiring_3d": "⏳ < 3 дней",
         "active": "⚡ С подпиской",
         "expired": "🔴 Истекшие",
+        "banned": "🚫 Забаненные",
         "problem": "🚫 Проблемные",
         "server": f"Сервер #{filter_param}",
         "tariff": f"Тариф #{filter_param}",
@@ -166,6 +167,7 @@ async def _build_users_list_text_and_kb(
         ("expiring_3d", "⏳ < 3 дней", "none"),
         ("active", "⚡ Активные", "none"),
         ("expired", "🔴 Истекшие", "none"),
+        ("banned", "🚫 Забаненные", "none"),
     ]
 
     for f_code, f_name, f_param in filters:
@@ -175,8 +177,11 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    builder.button(text="🖥 По VPN серверам", callback_data="admin_users_filter_menu:server")
-    builder.button(text="💎 По тарифам", callback_data="admin_users_filter_menu:tariff")
+    server_label = "• 🖥 По VPN серверам •" if filter_type == "server" else "🖥 По VPN серверам"
+    tariff_label = "• 💎 По тарифам •" if filter_type == "tariff" else "💎 По тарифам"
+
+    builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
+    builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
 
     if not users:
         rendered += "<i>Пользователи не найдены.</i>"
@@ -231,7 +236,7 @@ async def _build_users_list_text_and_kb(
     )
 
     item_count = len(users) if users else 0
-    adjust_pattern = [3, 3] + ([1] * item_count)
+    adjust_pattern = [3, 3, 2] + ([1] * item_count)
     if nav_buttons > 0:
         adjust_pattern.append(nav_buttons)
     adjust_pattern.extend([1, 1])

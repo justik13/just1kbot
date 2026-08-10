@@ -318,6 +318,7 @@ class TariffVersion(Base):
         DateTime(timezone=True), nullable=False, default=now_utc,
         server_default=text("now()")
     )
+    tariff = relationship("Tariff", foreign_keys=[tariff_id])
 
 
 class TariffQuote(Base):
@@ -366,6 +367,10 @@ class TariffQuote(Base):
     purchase_notified_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
+
+    user = relationship("User", foreign_keys=[user_id])
+    target_tariff_version = relationship("TariffVersion", foreign_keys=[target_tariff_version_id])
+    source_tariff_version = relationship("TariffVersion", foreign_keys=[source_tariff_version_id])
 
 
 class PaidValueLedgerEntry(Base):

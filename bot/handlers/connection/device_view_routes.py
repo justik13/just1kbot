@@ -178,7 +178,7 @@ async def show_config(
             callback.message.chat.id,
             document=key_file,
             caption=caption,
-            reply_markup=get_back_button(f"manage_device:{profile.id}"),
+            reply_markup=_get_device_config_keyboard(profile.id),
             parse_mode="HTML",
         )
         return
@@ -190,7 +190,7 @@ async def show_config(
             device_name=safe(profile.device_name),
             raw_config=safe(display_key),
         ),
-        get_back_button(f"manage_device:{profile.id}"),
+        _get_device_config_keyboard(profile.id),
         trigger_message_id=callback.message.message_id,
     )
 
@@ -298,7 +298,7 @@ async def download_conf(
         await append_hub_message(
             callback.bot, callback.message.chat.id,
             text=texts.DEVICE_CONFIG_INSTRUCTION,
-            reply_markup=get_back_button(f"manage_device:{profile.id}"),
+            reply_markup=_get_device_config_keyboard(profile.id),
             parse_mode="HTML",
         )
     except Exception as e:
