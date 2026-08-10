@@ -8,7 +8,6 @@ import pytest
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
-from config.settings import get_settings
 from database.models import User, Payment, AccountLedgerEntry
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import settle_succeeded_topup

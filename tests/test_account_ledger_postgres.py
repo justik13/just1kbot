@@ -680,7 +680,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_ledger_balance_mathematical_invariant_with_refunds(self):
-        from database.models import User, AccountLedgerEntry
+        from database.models import AccountLedgerEntry
         from sqlalchemy import select, func
         
         async with self.sessions.begin() as session:

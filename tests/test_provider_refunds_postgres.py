@@ -264,7 +264,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             
         # Request refund
         async with self.sessions.begin() as session:
-            request = await request_balance_topup_refund(
+            await request_balance_topup_refund(
                 session,
                 payment_id=self.payment_id_bonus,
                 requested_by_admin_id=123,
