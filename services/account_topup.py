@@ -249,7 +249,7 @@ async def cancel_all_unfinished_topups(
             )
         )
         count += 1
-    
+
     if count > 0:
         await session.flush()
     return count
@@ -343,7 +343,6 @@ async def settle_succeeded_topup(
                     topup_amount=payment.amount,
                 )
         except Exception as e:
-            print("ERROR GRANTING BONUS:", repr(e))
             import logging
             logging.getLogger(__name__).error(
                 f"Failed to grant referral bonus for topup {payment.id}: {e}"
