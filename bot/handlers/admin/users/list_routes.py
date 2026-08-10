@@ -111,11 +111,17 @@ async def show_extended_filter_menu(
         if not rows:
             await callback.answer("Тарифов нет", show_alert=True)
             return
+        from utils.tariff_names import get_tariff_group_name
+        seen_limits = set()
         for tariff in rows:
-            label = getattr(tariff, "name", None) or f"Тариф #{tariff.id}"
+            limit = tariff.device_limit
+            if limit in seen_limits:
+                continue
+            seen_limits.add(limit)
+            label = get_tariff_group_name(limit)
             builder.button(
                 text=f"💎 {label}",
-                callback_data=f"admin_users_filter:tariff:{tariff.id}:1",
+                callback_data=f"admin_users_filter:tariff:{limit}:1",
             )
         title = "💎 <b>Выберите тариф:</b>"
     else:

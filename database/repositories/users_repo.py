@@ -5,7 +5,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import Server, User, VPNProfile
+from database.models import Server, Tariff, User, VPNProfile
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -278,7 +278,14 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     elif filter_type == "country" and filter_param:
         stmt = stmt.where(User.profiles.any(VPNProfile.server.has(Server.country_flag == str(filter_param))))
     elif filter_type == "tariff" and filter_param is not None:
-        stmt = stmt.where(User.current_tariff_id == int(filter_param))
+        val = int(filter_param)
+        matching_tariff_ids = (
+            select(Tariff.id).where(
+                (Tariff.device_limit == val)
+                | (Tariff.device_limit == select(Tariff.device_limit).where(Tariff.id == val).scalar_subquery())
+            )
+        )
+        stmt = stmt.where(User.current_tariff_id.in_(matching_tariff_ids))
     return stmt
 
 
