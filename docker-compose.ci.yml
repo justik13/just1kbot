@@ -1,4 +1,14 @@
 services:
+  db:
+    ports:
+      # CI-only compatibility for host-side smoke-test tooling. Production
+      # compose intentionally does not publish PostgreSQL.
+      - "5432:5432"
+  redis:
+    ports:
+      # CI-only compatibility for host-side smoke-test tooling. Production
+      # compose intentionally does not publish Redis.
+      - "6379:6379"
   bot:
     environment:
       # Run the application startup path without making real Telegram API
