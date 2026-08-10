@@ -24,6 +24,24 @@ from services.api_operations_finalizer import (
 logger = logging.getLogger(__name__)
 
 
+def _is_usable_created_config(config: str | None) -> bool:
+    from utils.vpn_parser import is_valid_vpn_uri
+    if not config or not isinstance(config, str):
+        return False
+    conf = config.strip()
+    if not conf or conf.lower() == "invalid":
+        return False
+    if is_valid_vpn_uri(conf):
+        return True
+    if conf.startswith("vpn://") or "[Interface]" in conf:
+        return True
+    if any(conf.startswith(prefix) for prefix in ("vless://", "vmess://", "ss://", "trojan://", "shadowsocks://")):
+        return True
+    if len(conf) > 20:
+        return True
+    return False
+
+
 class _ServerEndpointChanged(RuntimeError):
     """Stored operation identity no longer matches the current server."""
 
@@ -178,7 +196,7 @@ async def _execute_create(op, client):
         code = "create_ambiguous_reconcile" if result.ambiguous else _error_code(result)
         return await _fail(op, retryable=result.retryable or result.ambiguous, code=code)
     created = result.value
-    valid = bool(created and created.id and created.config and str(created.config).strip())
+    valid = _is_usable_created_config(created.config) if (created and created.id) else False
     if not valid:
         cleanup = None
         if created and created.id:
