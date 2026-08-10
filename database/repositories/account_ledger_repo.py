@@ -128,14 +128,40 @@ async def get_account_balance(
 
     real_available = ZERO
     bonus_available = ZERO
+    real_negative = ZERO
+    bonus_negative = ZERO
 
     capacities = await _batch_credit_capacities(session, list(credits))
     for credit in credits:
         cap = capacities.get(credit.id, ZERO)
-        if credit.entry_type == "payment_credit":
-            real_available += cap
-        elif credit.entry_type == "admin_adjustment":
-            bonus_available += cap
+        if cap < ZERO:
+            if credit.entry_type == "payment_credit":
+                real_negative += -cap
+            elif credit.entry_type == "admin_adjustment":
+                bonus_negative += -cap
+        else:
+            if credit.entry_type == "payment_credit":
+                real_available += cap
+            elif credit.entry_type == "admin_adjustment":
+                bonus_available += cap
+
+    # Deduct real_negative from real_available, then bonus_available
+    if real_negative > ZERO:
+        if real_available >= real_negative:
+            real_available -= real_negative
+        else:
+            rem = real_negative - real_available
+            real_available = ZERO
+            bonus_available = max(ZERO, bonus_available - rem)
+            
+    # Deduct bonus_negative from bonus_available, then real_available
+    if bonus_negative > ZERO:
+        if bonus_available >= bonus_negative:
+            bonus_available -= bonus_negative
+        else:
+            rem = bonus_negative - bonus_available
+            bonus_available = ZERO
+            real_available = max(ZERO, real_available - rem)
 
     real_position = real_available
     bonus_position = bonus_available
@@ -149,6 +175,16 @@ async def get_account_balance(
             bonus_available = max(ZERO, bonus_available - rem_res)
 
     available = max(ZERO, real_available + bonus_available)
+    accounting_available = max(ZERO, position - reserved)
+    if available > accounting_available:
+        reduction = available - accounting_available
+        if bonus_available >= reduction:
+            bonus_available -= reduction
+        else:
+            reduction -= bonus_available
+            bonus_available = ZERO
+            real_available = max(ZERO, real_available - reduction)
+        available = accounting_available
 
     return AccountBalanceSnapshot(
         accounting_position=position,
@@ -222,17 +258,11 @@ async def credit_succeeded_topup(
     # documented Payment -> User order so concurrent confirmations serialize.
     if payment.user_id != user.id:
         raise AccountLedgerConflictError("topup_owner_changed")
-    if False:
-        raise AccountLedgerConflictError("payment_is_not_balance_topup")
     if payment.provider_status != "succeeded":
         raise AccountLedgerConflictError("topup_provider_not_succeeded")
     if payment.currency != "RUB":
         raise AccountLedgerConflictError("topup_currency_mismatch")
     amount = whole_rubles(payment.amount)
-    before = await get_account_balance(
-        session, user_id=user.id, for_update=False, locked_user=user
-    )
-    debt_offset = min(amount, before.debt)
     values = {
         "user_id": user.id,
         "entry_type": "payment_credit",
@@ -242,10 +272,7 @@ async def credit_succeeded_topup(
         "quote_id": None,
         "reversal_of_id": None,
         "idempotency_key": f"payment-credit:{payment.id}",
-        "metadata_": {
-            **(metadata or {}),
-            "debt_offset_rub": str(debt_offset),
-        },
+        "metadata_": metadata or {},
     }
     entry, created = await _insert_or_get_entry(
         session,
@@ -371,16 +398,13 @@ async def _batch_credit_capacities(
 
     capacities: dict[int, Decimal] = {}
     for credit in credits:
-        debt_offset = Decimal(str((credit.metadata_ or {}).get("debt_offset_rub", "0")))
         used = used_by_credit.get(credit.id, ZERO)
         ext_debit = (
             external_debits_by_payment.get(credit.payment_id, ZERO)
             if credit.payment_id is not None
             else ZERO
         )
-        capacities[credit.id] = max(
-            ZERO, Decimal(credit.amount) - debt_offset - used - ext_debit
-        )
+        capacities[credit.id] = Decimal(credit.amount) - used - ext_debit
 
     return capacities
 
@@ -389,7 +413,7 @@ async def _credit_capacity(
     session: AsyncSession, credit: AccountLedgerEntry
 ) -> Decimal:
     res = await _batch_credit_capacities(session, [credit])
-    return res.get(credit.id, ZERO)
+    return max(ZERO, res.get(credit.id, ZERO))
 
 
 async def _allocate_fifo(

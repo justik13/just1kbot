@@ -34,7 +34,8 @@ TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
     "payment_provider_operations, "
     "account_balance_reservations, account_ledger_allocations, "
-    "account_ledger_entries, payment_events, audit_logs, payments, users "
+    "account_ledger_entries, payment_events, audit_logs, payments, users, "
+    "system_settings, payment_disputes "
     "RESTART IDENTITY CASCADE"
 )
 
@@ -61,9 +62,11 @@ class PendingThenSucceededTransport:
     @classmethod
     async def get_refund_result(cls, refund_id):
         cls.get_calls += 1
-        # Fallback to defaults if no payload saved (for isolated get_refund_result tests)
-        saved = cls._last_payload.get("pay_refund_test", {}) if not cls._last_payload else list(cls._last_payload.values())[-1]
-        
+        saved = (
+            cls._last_payload.get("pay_refund_test", {})
+            if not cls._last_payload
+            else list(cls._last_payload.values())[-1]
+        )
         return YooKassaResult(
             True,
             value={
@@ -92,7 +95,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
                 user_id=user.id,
                 amount=Decimal("100"),
                 currency="RUB",
-                    public_order_id="topup_" + uuid.uuid4().hex,
+                public_order_id="topup_" + uuid.uuid4().hex,
                 provider_idempotency_key=uuid.uuid4().hex,
                 provider_status="succeeded",
                 fulfillment_status="succeeded",
@@ -221,17 +224,19 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_refund_reverses_referral_bonuses(self):
         from services.account_topup import settle_succeeded_topup
-        from database.models import AccountLedgerEntry
 
         async with self.sessions.begin() as session:
             referrer = User(telegram_id=uuid.uuid4().int % 10**12)
             session.add(referrer)
             await session.flush()
-            
-            purchaser = User(telegram_id=uuid.uuid4().int % 10**12, referred_by=referrer.telegram_id)
+
+            purchaser = User(
+                telegram_id=uuid.uuid4().int % 10**12,
+                referred_by=referrer.telegram_id,
+            )
             session.add(purchaser)
             await session.flush()
-            
+
             payment = Payment(
                 user_id=purchaser.id,
                 amount=Decimal("1000.00"),
@@ -248,88 +253,77 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(payment)
             await session.flush()
-            
+
             await settle_succeeded_topup(session, payment=payment, source="test")
             self.payment_id_bonus = payment.id
             self.referrer_id = referrer.id
             self.purchaser_id = purchaser.id
-            
+
         async with self.sessions.begin() as session:
             referrer_balance = await get_account_balance(session, user_id=self.referrer_id)
             purchaser_balance = await get_account_balance(session, user_id=self.purchaser_id)
-            
-            self.assertEqual(referrer_balance.bonus_position, Decimal("100.00")) # 10%
+
+            self.assertEqual(referrer_balance.bonus_position, Decimal("100.00"))  # 10%
             self.assertEqual(purchaser_balance.real_position, Decimal("1000.00"))
-            self.assertEqual(purchaser_balance.bonus_position, Decimal("100.00")) # 10%
-            
+            self.assertEqual(purchaser_balance.bonus_position, Decimal("100.00"))  # 10%
+
         # Request refund
         async with self.sessions.begin() as session:
-            request = await request_balance_topup_refund(
+            await request_balance_topup_refund(
                 session,
                 payment_id=self.payment_id_bonus,
                 requested_by_admin_id=123,
             )
-        
-        # Process refund
+
+        # Process refund (first pass — pending)
         async with self.sessions.begin() as session:
             claim_op = await claim(session, "refund-worker")
-        
+
         result = await perform_http(
             claim_op, transport=PendingThenSucceededTransport
         )
-        print(f"RESULT 1 STATUS: {result.value.get('status') if result.ok else 'ERR'}")
-        
-        # Finalize refund
+
         async with self.sessions.begin() as session:
             await finalize(session, claim_op, result)
-            
-        # Advance time
+
+        # Advance time to allow retry
         async with self.sessions.begin() as session:
-            from sqlalchemy import text
-            await session.execute(text("UPDATE provider_refund_operations SET next_attempt_at = next_attempt_at - interval '10 minutes'"))
-            
+            await session.execute(text(
+                "UPDATE provider_refund_operations "
+                "SET next_attempt_at = next_attempt_at - interval '10 minutes'"
+            ))
+
         # Second pass (succeeded)
         async with self.sessions.begin() as session:
             claim_op2 = await claim(session, "refund-worker")
-            
+
         result2 = await perform_http(
             claim_op2, transport=PendingThenSucceededTransport
         )
-        print(f"RESULT 2 STATUS: {result2.value.get('status') if result2.ok else 'ERR'}")
-        
+
         async with self.sessions.begin() as session:
             await finalize(session, claim_op2, result2)
-            
-        # Check balances
+
+        # Verify balances after refund
         async with self.sessions.begin() as session:
-            from database.models import AccountLedgerAllocation, AccountLedgerEntry
-            entries = await session.scalars(select(AccountLedgerEntry).where(AccountLedgerEntry.payment_id == self.payment_id_bonus))
-            for e in entries.all():
-                print(f"ENTRY END payment {e.payment_id}: {e.user_id}, {e.entry_type}, {e.amount}")
-                
-            entries = await session.scalars(select(AccountLedgerEntry).where(AccountLedgerEntry.user_id.in_([self.referrer_id, self.purchaser_id])))
-            for e in entries.all():
-                print(f"ENTRY END all: {e.user_id}, {e.entry_type}, {e.amount}")
-                
-            allocs = await session.scalars(select(AccountLedgerAllocation))
-            for a in allocs.all():
-                print(f"ALLOC: c_id={a.credit_entry_id}, d_id={a.debit_entry_id}, amt={a.amount}")
-                
             referrer_balance = await get_account_balance(session, user_id=self.referrer_id)
-            print(f"REFERRER BONUS POS: {referrer_balance.bonus_position}")
             self.assertEqual(referrer_balance.bonus_position, Decimal("0.00"))
             self.assertEqual(referrer_balance.real_position, Decimal("0.00"))
-            
+
             purchaser_balance = await get_account_balance(session, user_id=self.purchaser_id)
             self.assertEqual(purchaser_balance.real_position, Decimal("0.00"))
             self.assertEqual(purchaser_balance.bonus_position, Decimal("0.00"))
-            
-            # Verify reversal entries
+
+            # Verify exactly 2 reversal entries were created (referrer + purchaser)
             reversals = await session.scalars(
                 select(AccountLedgerEntry).where(
                     AccountLedgerEntry.entry_type == "admin_adjustment",
                     AccountLedgerEntry.amount < 0
                 )
             )
-            reversal_list = [r for r in reversals.all() if r.metadata_ and r.metadata_.get("topup_payment_id") == self.payment_id_bonus]
+            reversal_list = [
+                r for r in reversals.all()
+                if r.metadata_
+                and r.metadata_.get("topup_payment_id") == self.payment_id_bonus
+            ]
             self.assertEqual(len(reversal_list), 2)

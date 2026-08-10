@@ -50,14 +50,25 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result)
             session.delete.assert_called_once_with(profile)
 
-    async def test_repo_excludes_deleting_profiles(self):
-        """get_user_profiles should exclude deleting profiles by default."""
-        p_active = VPNProfile(id=1, user_id=1, provisioning_status="active")
+    async def test_repo_excludes_deleting_but_keeps_create_cleanup_pending_profiles(self):
+        """Problem create states should remain visible instead of disappearing."""
+        p_cleanup = VPNProfile(id=1, user_id=1, provisioning_status="create_cleanup_pending")
 
         session = AsyncMock()
-        session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[p_active])))))
+        session.execute = AsyncMock(
+            return_value=MagicMock(
+                scalars=MagicMock(
+                    return_value=MagicMock(all=MagicMock(return_value=[p_cleanup]))
+                )
+            )
+        )
 
         profiles = await get_user_profiles(session, user_id=1)
+
+        stmt = session.execute.call_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("provisioning_status != 'deleting'", compiled)
+        self.assertNotIn("create_cleanup_pending", compiled)
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0].id, 1)
 

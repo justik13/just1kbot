@@ -1,9 +1,8 @@
-```python
 # Compiled Python files
-*.pyc
+*.py[cod]
 __pycache__/
 
-# Dependencies
+# Dependencies and virtual environments
 .venv/
 venv/
 node_modules/
@@ -12,17 +11,23 @@ node_modules/
 *.log
 *.tmp
 *.swp
+*~
+.DS_Store
 
-# Environment
+# Environment and local secrets
 .env
 .env.local
 *.env.*
+!.env.example
 
 # Editors
 .vscode/
 .idea/
 
-# Coverage reports
+# Tool caches and coverage reports
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
 .coverage
 coverage/
 htmlcov/
@@ -31,6 +36,9 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Runtime backup output
+backups/
 
 # Dev scripts and local tools
 find_missing.py

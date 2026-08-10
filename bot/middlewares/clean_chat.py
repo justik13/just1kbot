@@ -10,6 +10,16 @@ _delete_queue: asyncio.Queue | None = None
 _delete_worker_task: asyncio.Task | None = None
 _DELETE_RATE = 10
 _DELETE_BATCH_SIZE = 5
+_QUEUE_STOP_DRAIN_TIMEOUT = 5.0
+
+
+async def _delete_message(bot, chat_id: int, message_id: int) -> None:
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        logger.debug(
+            f"Failed to delete message {message_id} in {chat_id}: {e}"
+        )
 
 
 async def _delete_worker():
@@ -25,15 +35,8 @@ async def _delete_worker():
                 except asyncio.TimeoutError:
                     break
             for bot, chat_id, message_id in batch:
-                try:
-                    await bot.delete_message(
-                        chat_id=chat_id, message_id=message_id
-                    )
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to delete message "
-                        f"{message_id} in {chat_id}: {e}"
-                    )
+                await _delete_message(bot, chat_id, message_id)
+                _delete_queue.task_done()
             await asyncio.sleep(1.0 / _DELETE_RATE * _DELETE_BATCH_SIZE)
         except asyncio.CancelledError:
             break
@@ -52,6 +55,15 @@ def _ensure_worker_started():
 
 async def stop_clean_chat_worker():
     global _delete_worker_task, _delete_queue
+    if _delete_queue is not None:
+        try:
+            await asyncio.wait_for(
+                _delete_queue.join(), timeout=_QUEUE_STOP_DRAIN_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "CleanChat worker stopped before all queued deletions were drained"
+            )
     if _delete_worker_task and not _delete_worker_task.done():
         _delete_worker_task.cancel()
         try:
@@ -93,16 +105,16 @@ class CleanChatMiddleware(BaseMiddleware):
 
             _ensure_worker_started()
             try:
-                await asyncio.wait_for(
-                    _delete_queue.put(
-                        (event.bot, event.chat.id, event.message_id)
-                    ),
-                    timeout=1.0,
+                _delete_queue.put_nowait(
+                    (event.bot, event.chat.id, event.message_id)
                 )
-            except asyncio.TimeoutError:
+            except asyncio.QueueFull:
                 logger.warning(
-                    f"CleanChat queue full, skipping deletion "
-                    f"of message {event.message_id} in {event.chat.id}"
+                    f"CleanChat queue full, deleting message "
+                    f"{event.message_id} in {event.chat.id} without queue"
+                )
+                asyncio.create_task(
+                    _delete_message(event.bot, event.chat.id, event.message_id)
                 )
             except Exception as e:
                 logger.debug(f"Failed to enqueue message deletion: {e}")
