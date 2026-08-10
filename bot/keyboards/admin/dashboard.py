@@ -30,6 +30,10 @@ def get_admin_menu(
         text="💳 Платежи",
         callback_data="admin_payments",
     )
+    builder.button(
+        text="🛒 Покупки",
+        callback_data="admin_purchases",
+    )
 
     dispute_label = f"⚠️ Диспуты ({disputes_count})" if disputes_count > 0 else "⚖️ Диспуты"
     builder.button(

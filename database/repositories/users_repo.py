@@ -266,6 +266,8 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(User.subscription_end.is_not(None), User.subscription_end <= now)
     elif filter_type == "no_sub":
         stmt = stmt.where(User.subscription_end.is_(None))
+    elif filter_type == "banned":
+        stmt = stmt.where(User.is_banned.is_(True))
     elif filter_type == "problem":
         stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
     elif filter_type == "server" and filter_param is not None:

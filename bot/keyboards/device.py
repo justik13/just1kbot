@@ -16,6 +16,11 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
         builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L15_1, callback_data=f"download_conf:{profile_id}")
 
     builder.button(
+        text="📖 Инструкция и помощь",
+        callback_data="support_help",
+    )
+
+    builder.button(
         text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
         callback_data=f"request_delete_device:{profile_id}",
     )
@@ -30,7 +35,7 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1, 1, 2)
+    builder.adjust(1, 1, 1, 1, 1, 2)
 
     return builder.as_markup()
 
