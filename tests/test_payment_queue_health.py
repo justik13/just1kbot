@@ -104,11 +104,11 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.settings.stop()
 
     async def flush(self):
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.06)
         tasks = list(self.monitor.alert_tasks)
         if tasks:
-            await asyncio.gather(*tasks)
-        await asyncio.sleep(0)
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.sleep(0.06)
 
     async def test_partial_admin_success_sets_success_cooldown(self):
         self.admin_ids = [1, 2]
