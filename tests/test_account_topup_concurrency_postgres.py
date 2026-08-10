@@ -1,9 +1,7 @@
 import asyncio
 import os
-import uuid
-from decimal import Decimal
 import unittest
-import pytest
+from decimal import Decimal
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
@@ -14,8 +12,6 @@ from services.account_topup import settle_succeeded_topup
 from utils import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
-if not DB:
-    pytest.skip("No TEST_DATABASE_URL found", allow_module_level=True)
 
 TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
@@ -24,6 +20,7 @@ TRUNCATE_SQL = (
     "payment_events, audit_logs, payments, users, system_settings, payment_disputes RESTART IDENTITY CASCADE"
 )
 
+@unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class AccountTopupConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(DB, pool_size=5)
