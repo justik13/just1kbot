@@ -2,8 +2,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot.handlers.admin.users import device_routes
 from bot import texts
+from bot.handlers.admin.users import device_routes
 
 
 class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
@@ -83,6 +83,22 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
             texts.ERROR_ACCESS_DENIED,
             show_alert=True,
         )
+
+    async def test_profile_count_excludes_all_non_visible_deletion_states(self):
+        from database.repositories.profiles_repo import get_user_profiles_count
+
+        result = MagicMock()
+        result.scalar_one.return_value = 2
+        session = MagicMock()
+        session.execute = AsyncMock(return_value=result)
+
+        await get_user_profiles_count(session, user_id=7)
+
+        stmt = session.execute.await_args.args[0]
+        sql = str(stmt)
+        self.assertIn("provisioning_status", sql)
+        self.assertIn("deleting", sql)
+        self.assertIn("create_cleanup_pending", sql)
 
 
 if __name__ == "__main__":
