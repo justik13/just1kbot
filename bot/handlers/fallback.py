@@ -79,6 +79,11 @@ async def dismiss_notification(callback: CallbackQuery):
         pass
 
 
+@router.callback_query(F.data == "ignore")
+async def ignore_callback(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+
+
 @router.callback_query()
 async def stale_callback_fallback(
     callback: CallbackQuery,
