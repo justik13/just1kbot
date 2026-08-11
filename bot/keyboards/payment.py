@@ -242,7 +242,7 @@ def get_topup_payment_keyboard(
 
 
 def get_balance_purchase_start_keyboard(
-    quote_public_id: str,
+    quote_public_id: str, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -258,7 +258,7 @@ def get_balance_purchase_start_keyboard(
 
 
 def get_balance_purchase_confirm_keyboard(
-    quote_public_id: str,
+    quote_public_id: str, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -311,7 +311,7 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_balance_shortage_keyboard(
-    quote_public_id: str, exact_amount: int
+    quote_public_id: str, exact_amount: int, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
