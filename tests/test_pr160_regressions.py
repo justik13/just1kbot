@@ -133,6 +133,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             username="ref",
         )
         balance = SimpleNamespace(real_available=123, bonus_available=7)
+        settings = SimpleNamespace(ADMIN_IDS=set())
 
         with (
             patch.object(start.SubscriptionService, "check_access", new=AsyncMock(return_value=True)),
@@ -146,6 +147,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
                 "database.repositories.system_settings_repo.get_system_setting",
                 new=AsyncMock(return_value=None),
             ),
+            patch.object(start, "get_settings", return_value=settings),
             patch.object(start, "get_hub_keyboard", return_value=MagicMock()),
         ):
             text, _ = await start._build_hub_text_and_kb(MagicMock(), user)
