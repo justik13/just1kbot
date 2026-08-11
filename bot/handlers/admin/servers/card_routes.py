@@ -247,7 +247,7 @@ async def ping_server(
     await _show_server_card(callback, session, server, ping_result=ping_res)
 
 
-@router.callback_query(F.data == "admin_dismiss_alert")
+@router.callback_query(F.data.startswith("admin_dismiss_alert"))
 async def dismiss_admin_alert(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)

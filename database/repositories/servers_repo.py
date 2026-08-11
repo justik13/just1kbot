@@ -21,6 +21,12 @@ class ServerUpdateFields(TypedDict, total=False):
     disabled_reason: str | None
     disabled_at: datetime | None
     last_successful_check: datetime | None
+    health_state: str
+    problem_started_at: datetime | None
+    next_check_at: datetime | None
+    consecutive_fails: int
+    consecutive_successes: int
+    recovery_notice_sent: bool
 
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}

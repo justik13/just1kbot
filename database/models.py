@@ -270,6 +270,13 @@ class Server(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_successful_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    health_state: Mapped[str] = mapped_column(String(30), default="ONLINE", server_default="ONLINE")
+    problem_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consecutive_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    consecutive_successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    recovery_notice_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 

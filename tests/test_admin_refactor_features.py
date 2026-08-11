@@ -58,6 +58,9 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
 
         server.is_active = True
         server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.problem_started_at = None
+        server.next_check_at = None
 
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
@@ -83,6 +86,9 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         server.api_key = "secret"
         server.is_active = True
         server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.problem_started_at = None
+        server.next_check_at = None
 
         client_mock = AsyncMock()
         client_mock.healthcheck = AsyncMock(return_value=False)
@@ -100,8 +106,18 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
             patch("config.settings.get_settings", return_value=settings_obj),
-            patch("services.workers.node_monitor.asyncio.sleep", new_callable=AsyncMock),
         ):
+            # Tick 1: FAIL #1 -> WAITING_CONFIRMATION
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Fast-forward 30s confirmation window
+            from services.workers.node_monitor import get_server_monitor_state
+            import time
+            st = get_server_monitor_state(2)
+            st.next_check_at = time.monotonic() - 1.0
+
+            # Tick 2: FAIL #2 -> PROBLEM alert
             await check_node_resources_and_alerts(bot)
 
             bot.send_message.assert_called_once()
