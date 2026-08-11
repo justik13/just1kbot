@@ -14,6 +14,14 @@ FORBIDDEN_USER_WORDING = (
     "не фиксируем и не храним истории подключений",
     "Pro: до 10 устройств",
     "в один клик",
+    "LTE",
+    "обход блокировок",
+    "обход блокировки",
+    "обход блокиров",
+    "глушил",
+    "белый список",
+    "белые списки",
+    "белых списков",
 )
 
 
@@ -28,10 +36,10 @@ def _effective_user_text_values() -> list[str]:
     return values
 
 
-def test_effective_user_texts_do_not_contain_known_legacy_wording():
-    effective_text = "\n".join(_effective_user_text_values())
-    for legacy in FORBIDDEN_USER_WORDING:
-        assert legacy not in effective_text
+def test_effective_user_texts_do_not_contain_known_legacy_or_restricted_wording():
+    effective_text = "\n".join(_effective_user_text_values()).casefold()
+    for forbidden in FORBIDDEN_USER_WORDING:
+        assert forbidden.casefold() not in effective_text
 
 
 def test_generic_vpn_wording_is_not_used_in_user_facing_texts():
