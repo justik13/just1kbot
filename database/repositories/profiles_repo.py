@@ -14,6 +14,13 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
+# These lifecycle states represent profiles that are being removed or are
+# waiting for cleanup and therefore must not count as active user devices.
+NON_VISIBLE_PROFILE_STATUSES = (
+    "deleting",
+    "create_cleanup_pending",
+)
+
 
 def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
     def _extract_slot_num(p: VPNProfile) -> int:
@@ -32,10 +39,7 @@ async def get_user_profiles(
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_([
-                "deleting",
-                "create_cleanup_pending",
-            ])
+            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
         )
     stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)
@@ -91,10 +95,7 @@ async def get_user_profiles_count(
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_([
-                "deleting",
-                "create_cleanup_pending",
-            ])
+            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
         )
     result = await session.execute(stmt)
     return result.scalar_one()
