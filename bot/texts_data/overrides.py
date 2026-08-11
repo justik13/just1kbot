@@ -6,92 +6,110 @@ OVERRIDES = {
         "🔗 Введите API URL сервера "
         "(например: https://api.example.com:8443):"
     ),
+
     "ERROR_INVALID_URL": """⚠️ Некорректный формат URL.
 
 URL должен начинаться с <code>https://</code>
 
 Пример: <code>https://api.example.com:8443</code>""",
-    "ADMIN_BAN_CONFIRM": "Вы уверены, что хотите забанить пользователя?",
-    "ADMIN_BAN_FAILED": "❌ Ошибка при попытке забанить пользователя.",
-    "ADMIN_BAN_SUCCESS": "✅ Пользователь успешно забанен.",
-    "ADMIN_DELETE_DEVICE_CONFIRM": "Вы уверены, что хотите удалить устройство?",
-    "ADMIN_DELETE_DEVICE_ERROR": "❌ Произошла ошибка при удалении устройства.",
-    "ADMIN_DELETE_DEVICE_FAILED": "❌ Не удалось удалить устройство.",
-    "ADMIN_DELETE_DEVICE_SUCCESS": "✅ Устройство успешно удалено.",
-    "ADMIN_MANUAL_GRANT_USER_BANNED": "❌ Невозможно выдать подписку: пользователь забанен.",
-    "ADMIN_MANUAL_GRANT_USER_DELETED": "❌ Невозможно выдать подписку: пользователь удален.",
-    "ADMIN_SERVER_ADDED": "✅ Сервер успешно добавлен.",
-    "ADMIN_SERVER_CARD": "{flag} <b>Сервер:</b> {name} (ID: {id})\nСтатус: {status}\nПротокол: {protocol}\nURL: {api_url}\nМакс. клиентов: {max_clients}",
-    "ADMIN_SERVER_CHECKING": "🔄 Проверка сервера...",
-    "ADMIN_SERVER_DELETE_CONFIRM": "Вы уверены, что хотите удалить этот сервер?",
-    "ADMIN_SERVER_EDIT_KEY_PROMPT": "Введите новый ключ для сервера:",
-    "ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT": "Введите максимальное количество клиентов для сервера:",
-    "ADMIN_SERVER_EDIT_URL_PROMPT": "Введите новый URL сервера:",
-    "ADMIN_SERVER_FLAG_PROMPT": "Выберите флаг для сервера:",
-    "ADMIN_SERVER_FLAG_PROMPT_EDIT": "Выберите новый флаг для сервера:",
-    "ADMIN_SERVER_FLAG_TOO_LONG": "❌ Флаг слишком длинный.",
-    "ADMIN_SERVER_FLAG_UPDATED": "✅ Флаг сервера обновлен.",
-    "ADMIN_SERVER_KEY_PROMPT": "Введите ключ доступа:",
-    "ADMIN_SERVER_KEY_UPDATED": "✅ Ключ сервера обновлен.",
-    "ADMIN_SERVER_MAX_CLIENTS_UPDATED": "✅ Макс. количество клиентов обновлено.",
-    "ADMIN_SERVER_MAX_CLIENTS_WARNING": "⚠️ Внимание: на сервере уже больше клиентов, чем новый лимит.",
-    "ADMIN_SERVER_NAME_PROMPT": "Введите название сервера:",
-    "ADMIN_SERVER_RENAMED": "✅ Сервер успешно переименован.",
-    "ADMIN_SERVER_RENAME_PROMPT": "Введите новое имя сервера:",
-    "ADMIN_SERVER_STATE_DISABLED": "🔴 Отключен",
-    "ADMIN_SERVER_STATE_ENABLED": "🟢 Включен",
-    "ADMIN_SERVER_TOGGLE_DISABLE_CONFIRM": "Вы уверены, что хотите отключить сервер?",
-    "ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM": "Вы уверены, что хотите включить сервер?",
-    "ADMIN_SERVER_TOGGLE_SUCCESS": "✅ Статус сервера изменен.",
-    "ADMIN_SERVER_URL_UPDATED": "✅ URL сервера обновлен.",
-    "ADMIN_SUBSCRIPTION_HEADER": "💳 Управление подпиской пользователя",
-    "ADMIN_SUB_CHANGE_FAILED": "❌ Ошибка при изменении подписки.",
-    "ADMIN_SUB_CHANGE_TARIFF_HEADER": "Выберите новый тариф:",
-    "ADMIN_SUB_CONFIRM_EXTEND": "Вы уверены, что хотите продлить подписку?",
-    "ADMIN_SUB_CONFIRM_GRANT": "Вы уверены, что хотите выдать подписку?",
-    "ADMIN_SUB_CONFIRM_REDUCE": "Вы уверены, что хотите сократить подписку?",
-    "ADMIN_SUB_CONFIRM_TARIFF": "Вы уверены, что хотите сменить тариф?",
-    "ADMIN_SUB_DOWNGRADE_BLOCKED": "❌ Нельзя понизить тариф (превышен лимит устройств).",
-    "ADMIN_SUB_EXTEND_FAILED": "❌ Не удалось продлить подписку.",
-    "ADMIN_SUB_EXTEND_HEADER": "Продление подписки",
-    "ADMIN_SUB_EXTEND_PROMPT": "На сколько дней продлить подписку?",
-    "ADMIN_SUB_EXTEND_SUCCESS": "✅ Подписка успешно продлена.",
-    "ADMIN_SUB_GRANT_CUSTOM_PROMPT": "Введите количество дней:",
-    "ADMIN_SUB_GRANT_DAYS_HEADER": "На какой срок выдать подписку?",
-    "ADMIN_SUB_GRANT_FAILED": "❌ Ошибка при выдаче подписки.",
-    "ADMIN_SUB_GRANT_HEADER": "Выдача новой подписки",
-    "ADMIN_SUB_GRANT_SUCCESS": "✅ Подписка успешно выдана.",
-    "ADMIN_SUB_GROUP_NOT_FOUND": "❌ Группа тарифов не найдена.",
-    "ADMIN_SUB_NO_SUBSCRIPTION": "У пользователя нет активной подписки.",
-    "ADMIN_SUB_PERMANENT_LABEL": "Навсегда",
-    "ADMIN_SUB_REDUCED": "✅ Подписка успешно сокращена.",
-    "ADMIN_SUB_REDUCE_FAILED": "❌ Не удалось сократить подписку.",
-    "ADMIN_SUB_REDUCE_PROMPT": "На сколько дней сократить подписку?",
-    "ADMIN_SUB_STATUS_ACTIVE": "Активна",
-    "ADMIN_SUB_STATUS_INACTIVE": "Неактивна",
-    "ADMIN_SUB_STATUS_NONE": "Отсутствует",
-    "ADMIN_SUB_TARIFF_ALREADY_SELECTED": "❌ Этот тариф уже активен.",
-    "ADMIN_SUB_TARIFF_CHANGED": "✅ Тариф успешно изменен.",
-    "ADMIN_TARIFF_EDIT_RUB_PROMPT": "Введите новую цену в рублях:",
-    "ADMIN_TARIFF_EDIT_RUB_SUCCESS": "✅ Цена тарифа успешно обновлена.",
-    "ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING": "❌ Нельзя отключить тариф, есть незавершенные платежи.",
-    "ADMIN_TARIFF_TOGGLE_SUCCESS_DISABLED": "✅ Тариф отключен.",
-    "ADMIN_TARIFF_TOGGLE_SUCCESS_ENABLED": "✅ Тариф включен.",
-    "ADMIN_UNBAN_CONFIRM": "Вы уверены, что хотите разбанить пользователя?",
-    "ADMIN_USER_DEVICES_EMPTY": "Нет подключенных устройств.",
-    "ADMIN_USER_DEVICES_HEADER": "📱 Устройства пользователя",
-    "ALERT_CRITICAL_BOT_ERROR": "❌ Произошла критическая ошибка бота.",
-    "ERROR_SERVER_DUPLICATE_URL": "❌ Сервер с таким URL уже существует.",
-    "PAYMENT_STATUS_NAMES": {"completed": "Выполнен", "cancelled": "Отменен", "failed": "Ошибка", "refunded": "Возврат", "requires_manual_review": "Ручная проверка", "pending": "Ожидание", "paid_processing": "Обработка"},
-    "ADMIN_PAYMENT_USER_WITH_USERNAME": "@{username}",
-    "ADMIN_PAYMENT_USER_WITH_ID": "ID: {user_id}",
-    "PAYMENT_SUBSCRIPTION_INACTIVE": "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\nВаша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа.",
-    "PAYMENT_CURRENT_TARIFF_UNKNOWN": "⚠️ Смена тарифа возможна только при действующей подписке.\n\nПерейдите в раздел «Купить подписку» для оформления нового тарифа.",
-    "PAYMENT_ACTIVE_CHECKOUT_EXISTS": "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже.",
-    "PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS": "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его.",
-    "PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB": "⚠️ <b>Смена тарифа недоступна</b>\n\nСмена тарифа с перерасчётом доступна только при наличии действующей подписки.\nУ вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже.",
 }
 
+OVERRIDES['ADMIN_BAN_CONFIRM'] = 'Вы уверены, что хотите забанить пользователя?'
+OVERRIDES['ADMIN_BAN_FAILED'] = '❌ Ошибка при попытке забанить пользователя.'
+OVERRIDES['ADMIN_BAN_SUCCESS'] = '✅ Пользователь успешно забанен.'
+OVERRIDES['ADMIN_DELETE_DEVICE_CONFIRM'] = 'Вы уверены, что хотите удалить устройство?'
+OVERRIDES['ADMIN_DELETE_DEVICE_ERROR'] = '❌ Произошла ошибка при удалении устройства.'
+OVERRIDES['ADMIN_DELETE_DEVICE_FAILED'] = '❌ Не удалось удалить устройство.'
+OVERRIDES['ADMIN_DELETE_DEVICE_SUCCESS'] = '✅ Устройство успешно удалено.'
+OVERRIDES['ADMIN_MANUAL_GRANT_USER_BANNED'] = '❌ Невозможно выдать подписку: пользователь забанен.'
+OVERRIDES['ADMIN_MANUAL_GRANT_USER_DELETED'] = '❌ Невозможно выдать подписку: пользователь удален.'
+OVERRIDES['ADMIN_SERVER_ADDED'] = '✅ Сервер успешно добавлен.'
+OVERRIDES['ADMIN_SERVER_CARD'] = '{flag} <b>Сервер:</b> {name} (ID: {id})\nСтатус: {status}\nПротокол: {protocol}\nURL: {api_url}\nМакс. клиентов: {max_clients}'
+OVERRIDES['ADMIN_SERVER_CHECKING'] = '🔄 Проверка сервера...'
+OVERRIDES['ADMIN_SERVER_DELETE_CONFIRM'] = 'Вы уверены, что хотите удалить этот сервер?'
+OVERRIDES['ADMIN_SERVER_EDIT_KEY_PROMPT'] = 'Введите новый ключ для сервера:'
+OVERRIDES['ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT'] = 'Введите максимальное количество клиентов для сервера:'
+OVERRIDES['ADMIN_SERVER_EDIT_URL_PROMPT'] = 'Введите новый URL сервера:'
+OVERRIDES['ADMIN_SERVER_FLAG_PROMPT'] = 'Выберите флаг для сервера:'
+OVERRIDES['ADMIN_SERVER_FLAG_PROMPT_EDIT'] = 'Выберите новый флаг для сервера:'
+OVERRIDES['ADMIN_SERVER_FLAG_TOO_LONG'] = '❌ Флаг слишком длинный.'
+OVERRIDES['ADMIN_SERVER_FLAG_UPDATED'] = '✅ Флаг сервера обновлен.'
+OVERRIDES['ADMIN_SERVER_KEY_PROMPT'] = 'Введите ключ доступа:'
+OVERRIDES['ADMIN_SERVER_KEY_UPDATED'] = '✅ Ключ сервера обновлен.'
+OVERRIDES['ADMIN_SERVER_MAX_CLIENTS_UPDATED'] = '✅ Макс. количество клиентов обновлено.'
+OVERRIDES['ADMIN_SERVER_MAX_CLIENTS_WARNING'] = '⚠️ Внимание: на сервере уже больше клиентов, чем новый лимит.'
+OVERRIDES['ADMIN_SERVER_NAME_PROMPT'] = 'Введите название сервера:'
+OVERRIDES['ADMIN_SERVER_RENAMED'] = '✅ Сервер успешно переименован.'
+OVERRIDES['ADMIN_SERVER_RENAME_PROMPT'] = 'Введите новое имя сервера:'
+OVERRIDES['ADMIN_SERVER_STATE_DISABLED'] = '🔴 Отключен'
+OVERRIDES['ADMIN_SERVER_STATE_ENABLED'] = '🟢 Включен'
+OVERRIDES['ADMIN_SERVER_TOGGLE_DISABLE_CONFIRM'] = 'Вы уверены, что хотите отключить сервер?'
+OVERRIDES['ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM'] = 'Вы уверены, что хотите включить сервер?'
+OVERRIDES['ADMIN_SERVER_TOGGLE_SUCCESS'] = '✅ Статус сервера изменен.'
+OVERRIDES['ADMIN_SERVER_URL_UPDATED'] = '✅ URL сервера обновлен.'
+OVERRIDES['ADMIN_SUBSCRIPTION_HEADER'] = '💳 Управление подпиской пользователя'
+OVERRIDES['ADMIN_SUB_CHANGE_FAILED'] = '❌ Ошибка при изменении подписки.'
+OVERRIDES['ADMIN_SUB_CHANGE_TARIFF_HEADER'] = 'Выберите новый тариф:'
+OVERRIDES['ADMIN_SUB_CONFIRM_EXTEND'] = 'Вы уверены, что хотите продлить подписку?'
+OVERRIDES['ADMIN_SUB_CONFIRM_GRANT'] = 'Вы уверены, что хотите выдать подписку?'
+OVERRIDES['ADMIN_SUB_CONFIRM_REDUCE'] = 'Вы уверены, что хотите сократить подписку?'
+OVERRIDES['ADMIN_SUB_CONFIRM_TARIFF'] = 'Вы уверены, что хотите сменить тариф?'
+OVERRIDES['ADMIN_SUB_DOWNGRADE_BLOCKED'] = '❌ Нельзя понизить тариф (превышен лимит устройств).'
+OVERRIDES['ADMIN_SUB_EXTEND_FAILED'] = '❌ Не удалось продлить подписку.'
+OVERRIDES['ADMIN_SUB_EXTEND_HEADER'] = 'Продление подписки'
+OVERRIDES['ADMIN_SUB_EXTEND_PROMPT'] = 'На сколько дней продлить подписку?'
+OVERRIDES['ADMIN_SUB_EXTEND_SUCCESS'] = '✅ Подписка успешно продлена.'
+OVERRIDES['ADMIN_SUB_GRANT_CUSTOM_PROMPT'] = 'Введите количество дней:'
+OVERRIDES['ADMIN_SUB_GRANT_DAYS_HEADER'] = 'На какой срок выдать подписку?'
+OVERRIDES['ADMIN_SUB_GRANT_FAILED'] = '❌ Ошибка при выдаче подписки.'
+OVERRIDES['ADMIN_SUB_GRANT_HEADER'] = 'Выдача новой подписки'
+OVERRIDES['ADMIN_SUB_GRANT_SUCCESS'] = '✅ Подписка успешно выдана.'
+OVERRIDES['ADMIN_SUB_GROUP_NOT_FOUND'] = '❌ Группа тарифов не найдена.'
+OVERRIDES['ADMIN_SUB_NO_SUBSCRIPTION'] = 'У пользователя нет активной подписки.'
+OVERRIDES['ADMIN_SUB_PERMANENT_LABEL'] = 'Навсегда'
+OVERRIDES['ADMIN_SUB_REDUCED'] = '✅ Подписка успешно сокращена.'
+OVERRIDES['ADMIN_SUB_REDUCE_FAILED'] = '❌ Не удалось сократить подписку.'
+OVERRIDES['ADMIN_SUB_REDUCE_PROMPT'] = 'На сколько дней сократить подписку?'
+OVERRIDES['ADMIN_SUB_STATUS_ACTIVE'] = 'Активна'
+OVERRIDES['ADMIN_SUB_STATUS_INACTIVE'] = 'Неактивна'
+OVERRIDES['ADMIN_SUB_STATUS_NONE'] = 'Отсутствует'
+OVERRIDES['ADMIN_SUB_TARIFF_ALREADY_SELECTED'] = '❌ Этот тариф уже активен.'
+OVERRIDES['ADMIN_SUB_TARIFF_CHANGED'] = '✅ Тариф успешно изменен.'
+OVERRIDES['ADMIN_TARIFF_EDIT_RUB_PROMPT'] = 'Введите новую цену в рублях:'
+OVERRIDES['ADMIN_TARIFF_EDIT_RUB_SUCCESS'] = '✅ Цена тарифа успешно обновлена.'
+OVERRIDES['ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING'] = '❌ Нельзя отключить тариф, есть незавершенные платежи.'
+OVERRIDES['ADMIN_TARIFF_TOGGLE_SUCCESS_DISABLED'] = '✅ Тариф отключен.'
+OVERRIDES['ADMIN_TARIFF_TOGGLE_SUCCESS_ENABLED'] = '✅ Тариф включен.'
+OVERRIDES['ADMIN_UNBAN_CONFIRM'] = 'Вы уверены, что хотите разбанить пользователя?'
+OVERRIDES['ADMIN_USER_DEVICES_EMPTY'] = 'Нет подключенных устройств.'
+OVERRIDES['ADMIN_USER_DEVICES_HEADER'] = '📱 Устройства пользователя'
+OVERRIDES['ALERT_CRITICAL_BOT_ERROR'] = '❌ Произошла критическая ошибка бота.'
+OVERRIDES['ERROR_SERVER_DUPLICATE_URL'] = '❌ Сервер с таким URL уже существует.'
+OVERRIDES['PAYMENT_STATUS_NAMES'] = {'completed': 'Выполнен', 'cancelled': 'Отменен', 'failed': 'Ошибка', 'refunded': 'Возврат', 'requires_manual_review': 'Ручная проверка', 'pending': 'Ожидание', 'paid_processing': 'Обработка'}
+OVERRIDES['ADMIN_PAYMENT_USER_WITH_USERNAME'] = '@{username}'
+OVERRIDES['ADMIN_PAYMENT_USER_WITH_ID'] = 'ID: {user_id}'
+OVERRIDES['PAYMENT_SUBSCRIPTION_INACTIVE'] = (
+    "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
+    "Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+)
+OVERRIDES['PAYMENT_CURRENT_TARIFF_UNKNOWN'] = (
+    "⚠️ Смена тарифа возможна только при действующей подписке.\n\n"
+    "Перейдите в раздел «Купить подписку» для оформления нового тарифа."
+)
+OVERRIDES['PAYMENT_ACTIVE_CHECKOUT_EXISTS'] = (
+    "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
+)
+OVERRIDES['PAYMENT_ACTIVE_CHANGE_QUOTE_EXISTS'] = (
+    "⚠️ У вас уже создан запрос на смену тарифа. Нажмите назад и выберите его."
+)
+OVERRIDES['PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB'] = (
+    "⚠️ <b>Смена тарифа недоступна</b>\n\n"
+    "Смена тарифа с перерасчётом доступна только при наличии действующей подписки.\n"
+    "У вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже."
+)
+
+# Main Hub: the profile is displayed as account information in the hub,
+# while navigation actions remain in the keyboard.
 OVERRIDES["HUB_HEADER"] = """🏠 <b>Главное меню</b>
 
 👋 Привет, <b>{name}</b>!
@@ -106,6 +124,7 @@ OVERRIDES["HUB_HEADER"] = """🏠 <b>Главное меню</b>
 
 Выберите нужный раздел:"""
 
+# Device connection methods: key is primary, file is the fallback.
 OVERRIDES["DEVICE_MANAGE_HEADER"] = """📱 <b>Управление устройством</b>
 
 <b>{device_name}</b>
@@ -196,4 +215,6 @@ OVERRIDES["FAQ_TEXT"] = """❓ <b>Частые вопросы (FAQ)</b>
 • Мы придерживаемся строгой политики No-Logs (не фиксируем и не храним истории подключений).
 • Весь трафик надежно шифруется современными устойчивыми протоколами."""
 
+# These are the only legal URLs used by the bot.
+OVERRIDES["TOS_AGREEMENT_URL"] = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
 OVERRIDES["PRIVACY_POLICY_URL"] = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
