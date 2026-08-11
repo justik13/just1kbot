@@ -84,8 +84,13 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
 
                     self.assertEqual(callbacks[-1], "white_internet")
                     self.assertEqual(len(callbacks), len(set(callbacks)))
+
+                    url_buttons = [button for button in buttons if button.url]
                     if mtproto_url:
-                        self.assertEqual(buttons[-2].url, mtproto_url)
+                        self.assertEqual(len(url_buttons), 1)
+                        self.assertEqual(url_buttons[0].url, mtproto_url)
+                    else:
+                        self.assertEqual(url_buttons, [])
 
     def test_device_download_file_action_is_preserved(self):
         ready = get_device_keyboard(profile_id=123, config_ready=True)
@@ -118,7 +123,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("👤 Профиль", texts.FAQ_TEXT)
         self.assertIn("🤝 Пригласить друга", texts.FAQ_TEXT)
 
-    async def test_hub_renders_referrer_without_breaking_missing_referrer(self):
+    async def test_hub_renders_referrer(self):
         user = SimpleNamespace(
             id=10,
             telegram_id=100,
