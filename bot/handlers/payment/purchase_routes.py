@@ -21,6 +21,7 @@ from config.settings import get_settings
 from database.models import TariffQuote, User
 from services.account_purchase import (
     AccountPurchaseError,
+    cancel_account_purchase_quote,
     get_account_purchase_intent,
     prepare_account_purchase,
     settle_account_purchase,
@@ -143,6 +144,51 @@ async def review_purchase(
         await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
         return
     await _render_purchase_review(callback, session, db_user, quote_id)
+
+
+@router.callback_query(F.data.startswith("balance_purchase_cancel:"))
+async def cancel_purchase(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None = None,
+) -> None:
+    quote_id = _uuid_from_callback(callback.data)
+    if db_user is None or quote_id is None:
+        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
+        return
+
+    try:
+        quote = await cancel_account_purchase_quote(
+            session,
+            user_id=db_user.id,
+            quote_public_id=quote_id,
+        )
+    except AccountPurchaseError as exc:
+        logger.warning(
+            "Balance purchase cancellation failed: code=%s, user_id=%s, quote_public_id=%s",
+            exc.code,
+            db_user.id,
+            quote_id,
+        )
+        await callback.answer(
+            PURCHASE_ERRORS.get(
+                exc.code,
+                texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L79_1,
+            ),
+            show_alert=True,
+        )
+        return
+
+    # Re-enter the normal tariff screen instead of merely navigating away.
+    # This guarantees the active quote is gone before another purchase starts.
+    if quote.operation_type == "renew":
+        from .showcase_routes import show_quick_renew
+
+        await show_quick_renew(callback, session, db_user)
+    else:
+        from .showcase_routes import show_tariff_showcase_callback
+
+        await show_tariff_showcase_callback(callback, session)
 
 
 @router.callback_query(F.data.startswith("balance_purchase_confirm:"))
