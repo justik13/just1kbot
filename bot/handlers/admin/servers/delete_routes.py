@@ -213,6 +213,8 @@ async def confirm_delete_server(
 
 
     cleanup_server_circuit_breakers(api_url)
+    from services.workers.node_monitor import clear_server_monitor_state
+    clear_server_monitor_state(server_id)
 
     await AuditService.log_action(
         session,

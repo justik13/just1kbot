@@ -7,6 +7,9 @@ from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
 
 
+from datetime import datetime
+
+
 class ServerUpdateFields(TypedDict, total=False):
     name: str
     country_flag: str | None
@@ -15,9 +18,20 @@ class ServerUpdateFields(TypedDict, total=False):
     protocol: str
     max_clients: int
     is_active: bool
+    disabled_reason: str | None
+    disabled_at: datetime | None
+    last_successful_check: datetime | None
 
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}
+
+
+async def get_all_servers(
+    session: AsyncSession,
+) -> List[Server]:
+    stmt = select(Server).order_by(Server.name)
+    result = await session.execute(stmt)
+    return result.scalars().all()
 
 
 async def get_active_servers(

@@ -103,12 +103,26 @@ async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
     from utils.formatters import format_admin_breadcrumbs
-    flag = server.country_flag or "🌐"
-    status = "🟢 Активен" if server.is_active else "🔴 Отключен"
+    from utils.datetime_helpers import format_datetime_user
 
-    # current_clients_count is not a persisted Server field and therefore was
-    # always falling back to zero. Use the same DB-backed profile count that
-    # the server repository uses for capacity calculations instead.
+    flag = server.country_flag or "🌐"
+
+    if server.is_active:
+        status_line = "🟢 <b>Активен</b>"
+        extra_status_info = ""
+    elif server.disabled_reason == "AUTO_UNAVAILABLE":
+        status_line = "🔴 <b>Автоматически отключён</b>"
+        disabled_at_str = format_datetime_user(server.disabled_at) if server.disabled_at else "—"
+        last_check_str = format_datetime_user(server.last_successful_check) if server.last_successful_check else "—"
+        extra_status_info = (
+            f"• Причина: <b>API недоступен / нестабильное соединение</b>\n"
+            f"• Отключён: <code>{disabled_at_str}</code>\n"
+            f"• Последний отклик: <code>{last_check_str}</code>\n"
+        )
+    else:
+        status_line = "🔴 <b>Отключён вручную</b>"
+        extra_status_info = ""
+
     peer_counts = await get_server_peer_counts(session)
     used_clients = peer_counts.get(server.id, 0)
     max_clients = server.max_clients or 240
@@ -117,7 +131,8 @@ async def _show_server_card(
     rendered = (
         f"{header}"
         f"🖥 <b>Карточка VPN-сервера {flag} {safe(server.name)}</b> (ID: {server.id})\n\n"
-        f"• Статус в боте: <b>{status}</b>\n"
+        f"• Статус в боте: {status_line}\n"
+        f"{extra_status_info}"
         f"• Протокол: <code>{safe(server.protocol)}</code>\n"
         f"• Заполненность слотов: <b>{used_clients} / {max_clients}</b>\n"
         f"• API URL: <code>{safe(server.api_url)}</code>\n"

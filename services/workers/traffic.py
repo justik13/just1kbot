@@ -89,12 +89,15 @@ async def traffic_sync_loop(shutdown_event: asyncio.Event):
 async def _traffic_sync_once():
     servers = []
     async with session_scope() as session:
-        stmt = select(
-            Server.id,
-            Server.api_url,
-            Server.api_key,
-            Server.name,
-            Server.is_active,
+        stmt = (
+            select(
+                Server.id,
+                Server.api_url,
+                Server.api_key,
+                Server.name,
+                Server.is_active,
+            )
+            .where(Server.is_active.is_(True))
         )
         result = await session.execute(stmt)
         servers = [

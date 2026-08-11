@@ -158,11 +158,27 @@ async def toggle_server_apply(
 
     new_status = not server.is_active
 
-    await update_server(
-        session,
-        server,
-        is_active=new_status,
-    )
+    from utils.datetime_helpers import now_utc
+    from services.workers.node_monitor import reset_server_monitor_state, ServerHealthState
+
+    if new_status:
+        await update_server(
+            session,
+            server,
+            is_active=True,
+            disabled_reason=None,
+            disabled_at=None,
+        )
+        reset_server_monitor_state(server_id, ServerHealthState.ONLINE)
+    else:
+        await update_server(
+            session,
+            server,
+            is_active=False,
+            disabled_reason="MANUAL",
+            disabled_at=now_utc(),
+        )
+        reset_server_monitor_state(server_id, ServerHealthState.MANUAL_DISABLED)
 
     await AuditService.log_action(
         session,
@@ -229,3 +245,15 @@ async def ping_server(
         ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
 
     await _show_server_card(callback, session, server, ping_result=ping_res)
+
+
+@router.callback_query(F.data == "admin_dismiss_alert")
+async def dismiss_admin_alert(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await callback.answer("Удалено", show_alert=False)
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.debug(f"Failed to delete alert message: {e}")
