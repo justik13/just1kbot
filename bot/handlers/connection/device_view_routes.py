@@ -55,6 +55,54 @@ async def _get_safe_device_name(session: AsyncSession, profile) -> str:
     ).strip().replace(" ", "_") or "client"
 
 
+async def render_device_screen(
+    bot,
+    chat_id: int,
+    profile,
+    user: User,
+    session: AsyncSession,
+):
+    server = await get_server_by_id(session, profile.server_id)
+    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
+    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
+    protocol = _format_protocol(server.protocol if server else None)
+
+    rendered = texts.DEVICE_MANAGE_HEADER.format(
+        device_name=safe(profile.device_name),
+        flag=flag,
+        country_display=server_name,
+        server_name=flag,
+        protocol=protocol,
+        traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
+        last_connected=(
+            format_datetime(profile.last_connected)
+            if getattr(profile, "last_connected", None)
+            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L73_1
+        ),
+    )
+
+    has_access = await SubscriptionService.check_access(session, user.telegram_id)
+
+    if has_access:
+        keyboard = get_device_keyboard(profile.id, config_ready=True)
+    else:
+        rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
+
+        builder = InlineKeyboardBuilder()
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
+        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
+        builder.adjust(1)
+        keyboard = builder.as_markup()
+
+    await render_hub(
+        bot,
+        chat_id,
+        rendered,
+        keyboard,
+    )
+
+
 @router.callback_query(F.data.startswith("manage_device:"))
 async def manage_device(
     callback: CallbackQuery,
@@ -77,50 +125,12 @@ async def manage_device(
             await _render_connections(callback.message, db_user, session)
         return
 
-    server = await get_server_by_id(session, profile.server_id)
-    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
-    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
-    protocol = _format_protocol(server.protocol if server else None)
-
-    rendered = texts.DEVICE_MANAGE_HEADER.format(
-        device_name=safe(profile.device_name),
-        flag=flag,
-        # The server name is the actual location label; keep the country flag
-        # as a compact suffix instead of rendering the same location twice.
-        country_display=server_name,
-        server_name=flag,
-        protocol=protocol,
-        traffic_total=format_traffic(profile.traffic_down + profile.traffic_up),
-        last_connected=(
-            format_datetime(profile.last_connected)
-            if profile.last_connected
-            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L73_1
-        ),
-    )
-
-    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
-
-    if has_access:
-        # Keep configuration actions visible while provisioning is pending.
-        # The action handlers remain authoritative and return the existing
-        # unavailable response until the profile is fully provisioned.
-        keyboard = get_device_keyboard(profile.id, config_ready=True)
-    else:
-        rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
-
-        builder = InlineKeyboardBuilder()
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
-        builder.adjust(1)
-        keyboard = builder.as_markup()
-
-    await render_hub(
+    await render_device_screen(
         callback.bot,
         callback.message.chat.id,
-        rendered,
-        keyboard,
-        trigger_message_id=callback.message.message_id,
+        profile,
+        db_user,
+        session,
     )
 
 

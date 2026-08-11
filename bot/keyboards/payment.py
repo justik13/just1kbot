@@ -141,11 +141,15 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
             callback_data="balance_topup",
         )
     builder.button(
-        text=texts.BUTTON_BALANCE_HISTORY,
+        text="🧾 История пополнений",
+        callback_data="user_history",
+    )
+    builder.button(
+        text="📊 История операций",
         callback_data="balance_history",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="back_to_main_menu")
-    builder.adjust(1)
+    builder.adjust(1, 2, 1)
     return builder.as_markup()
 
 
