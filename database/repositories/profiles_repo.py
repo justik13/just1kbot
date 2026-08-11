@@ -22,7 +22,7 @@ def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
                 return int(match.group(1))
         return p.id or 0
 
-    return sorted(profiles, key=lambda p: (_extract_slot_num(p), p.created_at or 0, p.id or 0))
+    return sorted(profiles, key=lambda p: (_extract_slot_num(p), p.created_at or 0, p.id or 0), reverse=True)
 
 
 async def get_user_profiles(
