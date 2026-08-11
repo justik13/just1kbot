@@ -13,6 +13,7 @@ FORBIDDEN_USER_WORDING = (
     "👥 Реферальная система",
     "не фиксируем и не храним истории подключений",
     "Pro: до 10 устройств",
+    "в один клик",
 )
 
 
@@ -33,10 +34,10 @@ def test_effective_user_texts_do_not_contain_known_legacy_wording():
         assert legacy not in effective_text
 
 
-def test_generic_vpn_wording_is_not_used_in_faq():
-    faq = texts.FAQ_TEXT
-    assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", faq) is None
-    assert "ВПН" not in faq.upper()
+def test_generic_vpn_wording_is_not_used_in_user_facing_texts():
+    effective_text = "\n".join(_effective_user_text_values())
+    assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", effective_text) is None
+    assert "ВПН" not in effective_text.upper()
 
 
 def test_technical_connection_identifiers_are_preserved():
@@ -58,3 +59,10 @@ def test_faq_uses_dynamic_device_limit_wording():
     faq = texts.FAQ_TEXT
     assert "Количество доступных устройств зависит от выбранного тарифа." in faq
     assert "до 10 устройств" not in faq
+
+
+def test_active_user_facing_claims_are_neutralized():
+    assert "в один клик" not in texts.WELCOME_TEXT.lower()
+    assert "24 часа" not in texts.SUPPORT_TEXT
+    assert "максимальной скорости" not in texts.PAYMENT_SHOWCASE_HEADER
+    assert "Мы постараемся помочь как можно скорее." in texts.SUPPORT_TEXT
