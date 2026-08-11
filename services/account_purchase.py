@@ -164,6 +164,48 @@ async def get_account_purchase_intent(
     )
 
 
+async def cancel_account_purchase_quote(
+    session: AsyncSession,
+    *,
+    user_id: int,
+    quote_public_id,
+) -> TariffQuote:
+    """Cancel an active balance-purchase quote before settlement.
+
+    The quote is locked before changing its status. A quote that already has
+    a purchase debit is never cancelled here: that would hide a financial
+    operation from the settlement/idempotency machinery.
+    """
+    quote = await session.scalar(
+        select(TariffQuote)
+        .where(
+            TariffQuote.public_id == quote_public_id,
+            TariffQuote.user_id == user_id,
+        )
+        .with_for_update()
+    )
+    if quote is None:
+        raise AccountPurchaseError("quote_not_found")
+    if quote.operation_type not in {"purchase", "renew"}:
+        raise AccountPurchaseError("quote_operation_mismatch")
+    if quote.status != "active":
+        raise AccountPurchaseError("quote_not_active")
+
+    existing_debit = await session.scalar(
+        select(AccountLedgerEntry.id).where(
+            AccountLedgerEntry.entry_type == "purchase_debit",
+            AccountLedgerEntry.quote_id == quote.id,
+        )
+    )
+    if existing_debit is not None:
+        raise AccountPurchaseError("active_quote_has_existing_debit")
+
+    quote.status = "cancelled"
+    quote.diagnostic_reason = "cancelled_by_user"
+    await session.flush()
+    return quote
+
+
 async def _get_or_create_entitlement(
     session: AsyncSession,
     *,
