@@ -7,9 +7,40 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Awaitable, Callable
 
+import aiohttp
 from aiogram import Bot
 
 from config.settings import get_settings
+
+
+class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
+    """Keep expected healthcheck network failures out of WARNING logs.
+
+    The node monitor converts a failed healthcheck into a state-machine event.
+    aiohttp/timeout failures are therefore expected operational outcomes, not
+    application warnings. Unexpected exception types still pass through.
+    """
+
+    _EXPECTED = (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError, OSError)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "services.workers.node_monitor" or record.levelno < logging.WARNING:
+            return True
+        if record.msg in {
+            "Healthcheck exception for server %s (%s): %s",
+            "Error reading server load for server %s: %s",
+        }:
+            args = record.args
+            exc = args[-1] if args else None
+            if isinstance(exc, self._EXPECTED):
+                return False
+        return True
+
+
+_node_monitor_logger = logging.getLogger("services.workers.node_monitor")
+if not any(isinstance(f, _ExpectedNodeMonitorNetworkWarningFilter) for f in _node_monitor_logger.filters):
+    _node_monitor_logger.addFilter(_ExpectedNodeMonitorNetworkWarningFilter())
+
 from .api_operations import api_operations_loop
 from .account_balance import account_balance_notifications_loop
 from .cleanup import cleanup_dangling_peers_loop
@@ -19,7 +50,6 @@ from .payment_pipeline import payment_pipeline_loop
 from .queue_health import queue_health_loop
 from .payments import stale_payments_checker_loop
 from .traffic import traffic_sync_loop
-
 from .node_monitor import node_monitor_loop
 
 logger = logging.getLogger(__name__)
