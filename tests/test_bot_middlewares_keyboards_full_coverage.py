@@ -117,6 +117,11 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
     def test_user_keyboards(self):
         kb_history = user_kb.get_history_keyboard()
         self.assertIsNotNone(kb_history)
+        self.assertEqual(
+            [button.callback_data for row in kb_history.inline_keyboard for button in row],
+            ["back_to_main_menu"],
+        )
+
         kb_ref = user_kb.get_referral_keyboard(referral_link="https://t.me/bot?start=123")
         self.assertIsNotNone(kb_ref)
 
@@ -131,6 +136,16 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
     def test_common_keyboards(self):
         btn_back = common_kb.get_back_button("main_menu")
         self.assertIsNotNone(btn_back)
+
+        hub = common_kb.get_hub_keyboard()
+        callbacks = [
+            button.callback_data
+            for row in hub.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        self.assertIn("white_internet", callbacks)
+        self.assertEqual(len(callbacks), len(set(callbacks)))
 
     def test_admin_keyboards(self):
         kb_admin_menu = admin_dashboard_kb.get_admin_menu()
