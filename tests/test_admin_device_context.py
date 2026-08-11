@@ -95,7 +95,7 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
         await get_user_profiles_count(session, user_id=7)
 
         stmt = session.execute.await_args.args[0]
-        sql = str(stmt)
+        sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("provisioning_status", sql)
         self.assertIn("deleting", sql)
         self.assertIn("create_cleanup_pending", sql)
