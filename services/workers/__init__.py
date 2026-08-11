@@ -13,7 +13,7 @@ from config.settings import get_settings
 from .api_operations import api_operations_loop
 from .account_balance import account_balance_notifications_loop
 from .cleanup import cleanup_dangling_peers_loop
-from .heartbeat import heartbeat_loop, set_bot_ref
+from .heartbeat import heartbeat_loop
 from .notifications import subscription_notifications_loop
 from .payment_pipeline import payment_pipeline_loop
 from .queue_health import queue_health_loop
@@ -269,7 +269,6 @@ def _supervisor_done(task: asyncio.Task, bot: Bot) -> None:
 async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
     global _supervisor_task, _fatal_shutdown, _supervisor_healthy, _started_at
     shutdown_event.clear()
-    set_bot_ref(bot)
     _worker_tasks.clear()
     _worker_health.clear()
     _alert_keys.clear()

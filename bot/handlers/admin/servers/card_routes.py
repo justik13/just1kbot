@@ -245,13 +245,15 @@ async def ping_server(
 
     client = AmneziaClient(server.api_url, server.api_key)
     start_t = time.monotonic()
-    is_healthy = await client.healthcheck()
-    duration_ms = int((time.monotonic() - start_t) * 1000)
-
-    if is_healthy:
-        ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
-    else:
-        ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
+    try:
+        is_healthy = await client.healthcheck()
+        duration_ms = int((time.monotonic() - start_t) * 1000)
+        if is_healthy:
+            ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
+        else:
+            ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
+    except Exception as exc:
+        ping_res = f"🔴 <b>API недоступен / ошибка соединения</b> ({type(exc).__name__})"
 
     await _show_server_card(callback, session, server, ping_result=ping_res)
 

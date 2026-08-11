@@ -42,7 +42,6 @@ from services.workers import (
     stop_background_workers,
     shutdown_event,
 )
-from services.workers.heartbeat import set_bot_ref
 from utils.logging_security import (
     install_sensitive_data_filter,
     sanitize_short,
@@ -349,7 +348,6 @@ async def main():
         )
 
         bot, dp = await setup_bot()
-        set_bot_ref(bot)
 
         webhook_runner = await start_webhook_server(
             settings.YOOKASSA_WEBHOOK_PORT
@@ -445,8 +443,6 @@ async def main():
                 await webhook_runner.cleanup()
             except Exception as e:
                 logger.error("Failed to clean up webhook server: %s", e)
-
-        set_bot_ref(None)
 
         if dp is not None:
             try:

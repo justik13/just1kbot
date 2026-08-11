@@ -23,10 +23,6 @@ def get_heartbeat_file() -> Path:
 HEARTBEAT_FILE = get_heartbeat_file()
 HEARTBEAT_INTERVAL = 60.0
 
-# Отслеживание серверов с активным алертом для исключения спама
-_active_open_cb_alerts: set[str] = set()
-_bot_ref = None
-
 
 async def heartbeat_loop(
     shutdown_event: asyncio.Event,
@@ -66,31 +62,14 @@ async def heartbeat_loop(
 async def _check_circuit_breakers():
     for api_url, cb in list(_circuit_breakers.items()):
         safe_target = safe_url_target(api_url)
-
         if cb.is_open:
-            if api_url in _active_open_cb_alerts:
-                continue
-
             logger.warning(
                 "CircuitBreaker OPEN for server endpoint '%s' (recovery_timeout=%.0fs).",
                 safe_target,
                 cb.recovery_timeout,
             )
-            _active_open_cb_alerts.add(api_url)
         else:
-            if api_url in _active_open_cb_alerts:
-                _active_open_cb_alerts.remove(api_url)
-                logger.info("CircuitBreaker CLOSED / recovered for server endpoint '%s'", safe_target)
-
-
-def set_bot_ref(bot):
-    global _bot_ref
-
-    _bot_ref = bot
-
-
-def get_bot_ref():
-    return _bot_ref
+            logger.debug("CircuitBreaker CLOSED / healthy for server endpoint '%s'", safe_target)
 
 
 def _write_heartbeat(final: bool = False):
