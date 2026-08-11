@@ -3,35 +3,23 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import (
     get_history_keyboard,
-    get_profile_keyboard,
     get_referral_keyboard,
     get_referrals_list_keyboard,
 )
-
 from database.models import User
-from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.payments_repo import get_user_payments
-from database.repositories.profiles_repo import get_user_profiles
-from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     get_user_referrals,
     get_user_with_referrals,
 )
 from services.payment_status import payment_display_status
 from services.referral_bonus import get_referral_bonus_balance
-from services.subscription import SubscriptionService
-from utils.formatters import (
-    format_datetime,
-    format_days_left,
-    format_traffic,
-)
-from utils.tariff_names import get_tariff_display_name
+from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
 
 router = Router()
@@ -50,112 +38,6 @@ async def _get_inviter_line(session: AsyncSession, user: User) -> str:
             return f"\n🤝 Вас пригласил: {name}{username_str} (ID: <code>{referrer.telegram_id}</code>)"
         return f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
     return f"\n🤝 Вас пригласил: ID <code>{user.referred_by}</code>"
-
-
-async def _render_profile(
-    target,
-    user: User,
-    session: AsyncSession,
-):
-    profiles = await get_user_profiles(session, user.id)
-    profiles_count = len(profiles)
-    total_traffic = sum(
-        p.traffic_down + p.traffic_up
-        for p in profiles
-    )
-
-    has_access = await SubscriptionService.check_access(
-        session,
-        user.telegram_id,
-    )
-
-    referrals_count = len(
-        await get_user_referrals(session, user.telegram_id)
-    )
-    balance = await get_account_balance(session, user_id=user.id)
-    inviter_line = await _get_inviter_line(session, user)
-
-    if has_access:
-        device_limit = user.device_limit or 0
-        tariff_name = (
-            texts.RUNTIME_BOT_HANDLERS_PROFILE_L63_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
-        ) if device_limit else texts.RUNTIME_BOT_HANDLERS_PROFILE_L65_1
-
-        if user.current_tariff_id:
-            tariff = await get_tariff_by_id(
-                session,
-                user.current_tariff_id,
-            )
-            if tariff:
-                device_limit = tariff.device_limit
-                tariff_name = (
-                    texts.RUNTIME_BOT_HANDLERS_PROFILE_L75_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
-                )
-
-        rendered = texts.PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE.format(
-            name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L80_1),
-            username_line=(f" (@{safe(user.username)})" if user.username else ""),
-            telegram_id=user.telegram_id,
-            inviter_line=inviter_line,
-            tariff_name=tariff_name,
-            valid_until=format_datetime(user.subscription_end),
-            days_left=format_days_left(user.subscription_end),
-            devices_count=profiles_count,
-            device_limit=device_limit,
-            total_traffic=format_traffic(total_traffic),
-            referrals_count=referrals_count,
-            balance=int(balance.real_available),
-            referral_bonus_balance=int(balance.bonus_available),
-        )
-        kb = get_profile_keyboard()
-    else:
-        rendered = texts.PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE.format(
-            name=safe(user.first_name or texts.RUNTIME_BOT_HANDLERS_PROFILE_L93_1),
-            username_line=(f" (@{safe(user.username)})" if user.username else ""),
-            telegram_id=user.telegram_id,
-            inviter_line=inviter_line,
-            referrals_count=referrals_count,
-            balance=int(balance.real_available),
-            referral_bonus_balance=int(balance.bonus_available),
-        )
-
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text=texts.UI_BOT_HANDLERS_PROFILE_L103_1,
-            callback_data="menu_buy",
-        )
-        builder.button(
-            text="💳 Пополнить баланс",
-            callback_data="menu_balance",
-        )
-        builder.button(
-            text="🎁 Пригласить друга (+10%)",
-            callback_data="referral",
-        )
-        builder.button(
-            text=texts.UI_BOT_HANDLERS_PROFILE_L119_1,
-            callback_data="back_to_main_menu",
-        )
-        builder.adjust(1)
-        kb = builder.as_markup()
-
-    await render_hub(
-        target.bot,
-        target.chat.id,
-        rendered,
-        kb,
-    )
-
-
-@router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
-async def back_to_profile_redirect(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession = None,
-    db_user: User | None = None,
-):
-    from bot.handlers.start import back_to_main_menu
-    await back_to_main_menu(callback, state, db_user, session)
 
 
 @router.callback_query(F.data == "user_history")
@@ -185,12 +67,10 @@ async def show_history(
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.RUNTIME_BOT_HANDLERS_PROFILE_L208_1,
+                "❔",
             )
-            date = format_datetime(
-                payment.paid_at or payment.created_at
-            )
-            currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
+            date = format_datetime(payment.paid_at or payment.created_at)
+            currency = "RUB"
             rendered += (
                 f"{status_icon} {date} | "
                 f"{payment.amount} {currency}\n"
@@ -322,4 +202,3 @@ async def show_referrals_list(
         rendered,
         get_referrals_list_keyboard(page=page, total_pages=total_pages),
     )
-
