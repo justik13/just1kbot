@@ -3,8 +3,10 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from database.models import User
 
 router = Router()
 
@@ -34,7 +36,6 @@ async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0)
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
     except Exception:
         pass
-
 
 
 @router.message()
@@ -67,12 +68,9 @@ async def handle_unknown_text(message: Message, state: FSMContext):
         pass
 
 
-
-
 @router.callback_query(F.data == "dismiss_notification")
 async def dismiss_notification(callback: CallbackQuery):
     await callback.answer(show_alert=False)
-
     try:
         await callback.message.delete()
     except TelegramBadRequest:
@@ -82,6 +80,18 @@ async def dismiss_notification(callback: CallbackQuery):
 @router.callback_query(F.data == "ignore")
 async def ignore_callback(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
+async def legacy_profile_callback(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    """Compatibility for old inline keyboards from pre-hub profile versions."""
+    from bot.handlers.start import back_to_main_menu
+    await back_to_main_menu(callback, state, db_user, session)
 
 
 @router.callback_query(F.data == "white_internet")
