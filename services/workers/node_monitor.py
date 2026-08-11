@@ -63,32 +63,30 @@ class ServerMonitorState:
             else:
                 self.health_state = ServerHealthState.MANUAL_DISABLED
             self.problem_started_at = None
-            self.next_check_at = None
             self.consecutive_fails = getattr(server, "consecutive_fails", 0) or 0
             self.consecutive_successes = getattr(server, "consecutive_successes", 0) or 0
             rec_sent = getattr(server, "recovery_notice_sent", False)
             self.recovery_notice_sent = rec_sent if isinstance(rec_sent, bool) else False
-            return
-
-        db_state = getattr(server, "health_state", None) or ServerHealthState.ONLINE
-        if db_state == ServerHealthState.MANUAL_DISABLED:
-            db_state = ServerHealthState.ONLINE
-
-        self.health_state = db_state
-        self.consecutive_fails = getattr(server, "consecutive_fails", 0) or 0
-        self.consecutive_successes = getattr(server, "consecutive_successes", 0) or 0
-        rec_sent = getattr(server, "recovery_notice_sent", False)
-        self.recovery_notice_sent = rec_sent if isinstance(rec_sent, bool) else False
-
-        # Восстановление timestamp начала проблемы из БД
-        problem_dt = getattr(server, "problem_started_at", None)
-        if isinstance(problem_dt, datetime):
-            if problem_dt.tzinfo is None:
-                problem_dt = problem_dt.replace(tzinfo=timezone.utc)
-            elapsed_sec = (now_utc() - problem_dt).total_seconds()
-            self.problem_started_at = time.monotonic() - elapsed_sec
         else:
-            self.problem_started_at = None
+            db_state = getattr(server, "health_state", None) or ServerHealthState.ONLINE
+            if db_state == ServerHealthState.MANUAL_DISABLED:
+                db_state = ServerHealthState.ONLINE
+
+            self.health_state = db_state
+            self.consecutive_fails = getattr(server, "consecutive_fails", 0) or 0
+            self.consecutive_successes = getattr(server, "consecutive_successes", 0) or 0
+            rec_sent = getattr(server, "recovery_notice_sent", False)
+            self.recovery_notice_sent = rec_sent if isinstance(rec_sent, bool) else False
+
+            # Восстановление timestamp начала проблемы из БД
+            problem_dt = getattr(server, "problem_started_at", None)
+            if isinstance(problem_dt, datetime):
+                if problem_dt.tzinfo is None:
+                    problem_dt = problem_dt.replace(tzinfo=timezone.utc)
+                elapsed_sec = (now_utc() - problem_dt).total_seconds()
+                self.problem_started_at = time.monotonic() - elapsed_sec
+            else:
+                self.problem_started_at = None
 
         # Восстановление timestamp следующей проверки из БД
         next_check_dt = getattr(server, "next_check_at", None)
@@ -96,7 +94,10 @@ class ServerMonitorState:
             if next_check_dt.tzinfo is None:
                 next_check_dt = next_check_dt.replace(tzinfo=timezone.utc)
             rem_sec = (next_check_dt - now_utc()).total_seconds()
-            self.next_check_at = time.monotonic() + max(0.0, rem_sec)
+            if rem_sec > 0:
+                self.next_check_at = time.monotonic() + rem_sec
+            else:
+                self.next_check_at = None
         else:
             self.next_check_at = None
 
@@ -187,24 +188,35 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = None
                 st.recovery_notice_sent = False
 
+                async with session_scope() as session:
+                    db_server = await get_server_by_id(session, server.id)
+                    if db_server:
+                        await update_server(
+                            session,
+                            db_server,
+                            health_state=ServerHealthState.ONLINE,
+                            consecutive_fails=0,
+                            consecutive_successes=0,
+                            problem_started_at=None,
+                            next_check_at=None,
+                            recovery_notice_sent=False,
+                            disabled_reason=None,
+                            disabled_at=None,
+                        )
+
         # 2. Игнорируем сервера, отключенные вручную
         if st.health_state == ServerHealthState.MANUAL_DISABLED:
             continue
 
-        # 3. Неблокирующая проверка паузы в WAITING_CONFIRMATION (30 сек)
-        if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
+        # 3. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION или AUTO_DISABLED)
+        if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED):
             if st.next_check_at and now_m < st.next_check_at:
-                continue
-
-        # 4. Проверка 15-минутного интервала в режиме AUTO_DISABLED
-        if st.health_state == ServerHealthState.AUTO_DISABLED:
-            if st.last_check_monotonic > 0 and (now_m - st.last_check_monotonic < AUTO_DISABLED_CHECK_INTERVAL):
                 continue
 
         st.last_check_monotonic = now_m
         client = AmneziaClient(server.api_url, server.api_key)
 
-        # 5. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
+        # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         try:
             is_healthy = await client.healthcheck()
@@ -284,6 +296,9 @@ async def check_node_resources_and_alerts(bot: Bot):
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
                 st.consecutive_successes += 1
+                # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
+                st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
+
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
                     st.recovery_notice_sent = True
                     kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
@@ -336,6 +351,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                 if elapsed_problem_sec >= PROBLEM_OBSERVATION_TIMEOUT:
                     st.health_state = ServerHealthState.AUTO_DISABLED
+                    st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
                     kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
                     alert_to_send = {
                         "text": (
@@ -351,9 +367,9 @@ async def check_node_resources_and_alerts(bot: Bot):
                     }
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
-                pass
+                st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
-        # 6. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
+        # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
         update_kwargs = {
             "health_state": st.health_state,
             "consecutive_fails": st.consecutive_fails,
@@ -367,7 +383,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
 
-        if st.health_state == ServerHealthState.WAITING_CONFIRMATION and st.next_check_at:
+        if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED) and st.next_check_at:
             rem = st.next_check_at - now_m
             next_dt = datetime.fromtimestamp(time.time() + max(0.0, rem), tz=timezone.utc)
             update_kwargs["next_check_at"] = next_dt
@@ -386,7 +402,7 @@ async def check_node_resources_and_alerts(bot: Bot):
             if db_server:
                 await update_server(session, db_server, **update_kwargs)
 
-        # 7. Отправка алерта (если создан)
+        # 6. Отправка алерта (если создан)
         if alert_to_send:
             await _send_admin_alert_msg(
                 bot,

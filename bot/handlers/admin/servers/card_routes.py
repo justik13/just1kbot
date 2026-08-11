@@ -168,6 +168,12 @@ async def toggle_server_apply(
             is_active=True,
             disabled_reason=None,
             disabled_at=None,
+            health_state=ServerHealthState.ONLINE,
+            consecutive_fails=0,
+            consecutive_successes=0,
+            problem_started_at=None,
+            next_check_at=None,
+            recovery_notice_sent=False,
         )
         reset_server_monitor_state(server_id, ServerHealthState.ONLINE)
     else:
@@ -177,6 +183,9 @@ async def toggle_server_apply(
             is_active=False,
             disabled_reason="MANUAL",
             disabled_at=now_utc(),
+            health_state=ServerHealthState.MANUAL_DISABLED,
+            problem_started_at=None,
+            next_check_at=None,
         )
         reset_server_monitor_state(server_id, ServerHealthState.MANUAL_DISABLED)
 
