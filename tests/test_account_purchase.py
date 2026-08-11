@@ -33,26 +33,30 @@ class AccountPurchaseContractTests(unittest.TestCase):
         self.assertEqual(start[0], f"balance_purchase_review:{quote_id}")
         self.assertEqual(confirm[0], f"balance_purchase_confirm:{quote_id}")
         self.assertNotEqual(start[0], confirm[0])
-        self.assertEqual(
-            start[1], f"balance_purchase_cancel:{quote_id}"
-        )
-        self.assertEqual(
-            confirm[1], f"balance_purchase_cancel:{quote_id}"
-        )
+        self.assertEqual(start[1], f"balance_purchase_cancel:{quote_id}")
+        self.assertEqual(confirm[1], f"balance_purchase_cancel:{quote_id}")
         self.assertTrue(all(len(item.encode()) <= 64 for item in start + confirm))
 
-    def test_shortage_back_cancels_purchase_quote(self):
+    def test_shortage_flow_has_exact_and_custom_options(self):
         quote_id = str(uuid.uuid4())
-        markup = get_balance_shortage_keyboard(
-            quote_id, 200, "payment_showcase"
-        )
         self.assertEqual(
-            callbacks(markup),
+            callbacks(
+                get_balance_shortage_keyboard(
+                    quote_id, 200, "payment_showcase"
+                )
+            )[:2],
             [
                 f"bal_short_exact:{quote_id}",
                 f"bal_short_custom:{quote_id}",
-                f"balance_purchase_cancel:{quote_id}",
             ],
+        )
+        self.assertEqual(
+            callbacks(
+                get_balance_shortage_keyboard(
+                    quote_id, 200, "payment_showcase"
+                )
+            )[2],
+            f"balance_purchase_cancel:{quote_id}",
         )
 
     def test_topup_credit_can_resume_but_never_auto_purchases(self):
