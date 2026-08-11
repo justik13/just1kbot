@@ -62,10 +62,16 @@ async def show_history(
         rendered = texts.HISTORY_HEADER
         for payment in payments[:10]:
             display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(display_status, "❔")
+            status_icon = texts.PAYMENT_STATUS_ICONS.get(
+                display_status,
+                texts.RUNTIME_BOT_HANDLERS_PROFILE_L208_1,
+            )
             date = format_datetime(payment.paid_at or payment.created_at)
-            currency = "RUB"
-            rendered += f"{status_icon} {date} | {payment.amount} {currency}\n"
+            currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
+            rendered += (
+                f"{status_icon} {date} | "
+                f"{payment.amount} {currency}\n"
+            )
 
         if len(payments) > 10:
             rendered += texts.HISTORY_LIMIT_NOTE.format(count=len(payments))
