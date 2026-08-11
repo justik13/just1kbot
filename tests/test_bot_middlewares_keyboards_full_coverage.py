@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -67,6 +68,28 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
 
         res = await middleware(handler, msg, data)
         self.assertEqual(res, "OK")
+
+    async def test_clean_chat_queue_full_uses_direct_delete_fallback(self):
+        middleware = CleanChatMiddleware()
+        handler = AsyncMock(return_value="OK")
+        bot = AsyncMock()
+        msg = Message(message_id=11, date=123, chat=Chat(id=100, type="private"))
+
+        direct_delete = AsyncMock()
+        with patch("bot.middlewares.clean_chat._ensure_worker_started"), patch(
+            "bot.middlewares.clean_chat._delete_queue",
+            new=asyncio.Queue(maxsize=1),
+        ), patch(
+            "bot.middlewares.clean_chat._delete_message", direct_delete
+        ):
+            from bot.middlewares import clean_chat
+
+            clean_chat._delete_queue.put_nowait((bot, 100, 10))
+            res = await middleware(handler, msg, {"bot": bot})
+            await asyncio.sleep(0.1)
+
+        self.assertEqual(res, "OK")
+        direct_delete.assert_awaited_once_with(msg.bot, 100, 11)
 
     async def test_correlation_middleware(self):
         middleware = CorrelationMiddleware()

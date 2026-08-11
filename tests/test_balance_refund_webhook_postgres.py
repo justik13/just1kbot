@@ -195,6 +195,16 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
                 ),
                 1,
             )
+            from database.models import PaymentEvent
+            self.assertEqual(
+                await session.scalar(
+                    select(func.count(PaymentEvent.id)).where(
+                        PaymentEvent.payment_id == payment.id,
+                        PaymentEvent.event_type == "balance_refund_applied",
+                    )
+                ),
+                1,
+            )
 
     async def test_refund_after_spending_creates_debt_instead_of_free_money(self):
         async with self.sessions.begin() as session:
@@ -218,7 +228,12 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(balance.accounting_position, Decimal("-80.00"))
             self.assertEqual(balance.available, Decimal("0"))
             self.assertEqual(balance.debt, Decimal("80.00"))
-            self.assertEqual(payment.fulfillment_status, "reversed")
+            self.assertEqual(payment.fulfillment_status, "manual_review")
+            self.assertEqual(payment.manual_review_reason, "chargeback_debt")
+
+            user = await session.get(User, self.user_id)
+            self.assertTrue(user.financial_hold)
+            self.assertTrue(user.topup_blocked)
 
     async def test_webhook_completes_matching_outbox_before_worker_claim(self):
         async with self.sessions.begin() as session:

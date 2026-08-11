@@ -71,6 +71,6 @@ async def get_user_profiles_count(
 ) -> int:
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
-        stmt = stmt.where(VPNProfile.provisioning_status.notin_(["deleting", "create_cleanup_pending"]))
+        stmt = stmt.where(VPNProfile.provisioning_status != "deleting")
     result = await session.execute(stmt)
     return result.scalar_one()

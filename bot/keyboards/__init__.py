@@ -51,7 +51,6 @@ from .admin.servers import (
 )
 from .admin.tariffs import get_admin_tariff_card_keyboard
 from .admin.broadcast import (
-    get_broadcast_confirm_keyboard,
     get_broadcast_result_keyboard,
     get_broadcast_close_keyboard,
 )
@@ -110,7 +109,6 @@ __all__ = [
     # admin tariffs
     "get_admin_tariff_card_keyboard",
     # admin broadcast
-    "get_broadcast_confirm_keyboard",
     "get_broadcast_result_keyboard",
     "get_broadcast_close_keyboard",
 ]

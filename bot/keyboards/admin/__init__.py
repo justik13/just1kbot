@@ -19,7 +19,6 @@ from .servers import (
 )
 from .tariffs import get_admin_tariff_card_keyboard
 from .broadcast import (
-    get_broadcast_confirm_keyboard,
     get_broadcast_result_keyboard,
     get_broadcast_close_keyboard,
 )
@@ -44,7 +43,6 @@ __all__ = [
     # tariffs
     "get_admin_tariff_card_keyboard",
     # broadcast
-    "get_broadcast_confirm_keyboard",
     "get_broadcast_result_keyboard",
     "get_broadcast_close_keyboard",
 ]

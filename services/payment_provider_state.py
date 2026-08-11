@@ -57,8 +57,11 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             return ProviderTransition("retry", observed, "captured_at_requires_verified_get")
         try:
             captured_at = parse_provider_captured_at(data.get("captured_at"))
-        except ValueError:
-            captured_at = now_utc()  # Use current UTC timestamp fallback when captured_at is missing/invalid
+        except ValueError as exc:
+            # Never synthesize a provider confirmation timestamp. A successful
+            # payment without a valid provider timestamp is not safe to credit;
+            # retry after a verified GET instead.
+            return ProviderTransition("retry", observed, str(exc))
         if payment.provider_confirmed_at and payment.provider_confirmed_at != captured_at:
             payment.provider_status = "succeeded"
             payment.paid_at = payment.paid_at or now_utc()
@@ -95,7 +98,19 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             )
             return ProviderTransition("conflict", observed, "succeeded_after_refund")
         payment.provider_status = "succeeded"
-        if payment.checkout_status == "abandoned":
+        if current == "canceled":
+            payment.reconciliation_status = "mismatch"
+            payment.fulfillment_status = "manual_review"
+            session.add(
+                PaymentEvent(
+                    payment_id=payment.id,
+                    event_type="provider_transition_conflict",
+                    provider_status=observed,
+                    reason="canceled_to_succeeded",
+                    source=source,
+                )
+            )
+        elif payment.checkout_status == "abandoned":
             payment.reconciliation_status = "mismatch"
             session.add(
                 PaymentEvent(

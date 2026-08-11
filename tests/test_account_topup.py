@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from database.models import Payment
 from services.payment_provider_operations import create_payload
@@ -70,15 +70,28 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             datetime(2026, 8, 2, 6, tzinfo=timezone.utc),
         )
 
-    async def test_missing_capture_fallbacks_to_now_utc(self):
+    async def test_missing_capture_never_synthesizes_confirmation(self):
         payment = topup()
         data = provider_snapshot(payment)
         data.pop("captured_at")
-        session = MagicMock()
         transition = await apply_provider_transition(
-            session, payment, data, source="provider_get_payment"
+            AsyncMock(), payment, data, source="provider_get_payment"
         )
-        self.assertEqual(transition.outcome, "applied")
+        self.assertEqual(transition.outcome, "retry")
+        self.assertEqual(transition.reason, "captured_at_missing")
+        self.assertEqual(payment.provider_status, "pending")
+        self.assertIsNone(payment.provider_confirmed_at)
+
+    async def test_invalid_capture_never_synthesizes_confirmation(self):
+        payment = topup()
+        data = provider_snapshot(payment, captured_at="not-a-timestamp")
+        transition = await apply_provider_transition(
+            AsyncMock(), payment, data, source="provider_get_payment"
+        )
+        self.assertEqual(transition.outcome, "retry")
+        self.assertEqual(transition.reason, "captured_at_invalid")
+        self.assertEqual(payment.provider_status, "pending")
+        self.assertIsNone(payment.provider_confirmed_at)
 
     def test_topup_model_has_no_subscription_checkout_fields(self):
         columns = Payment.__table__.c

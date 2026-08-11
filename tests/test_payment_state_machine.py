@@ -230,3 +230,89 @@ class ProviderCapturedAtTests(unittest.TestCase):
         for value in (None, "", "not-a-date", "2026-07-29T12:34:56"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_provider_captured_at(value)
+
+class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
+    async def test_late_succeeded_webhook_applies_with_mismatch(self):
+        from services.payment_provider_state import apply_provider_transition
+        from database.models import Payment
+        from decimal import Decimal
+        
+        payment = Payment(
+            id=1,
+            user_id=1,
+            external_id="p",
+            public_order_id="pay_x",
+            amount=Decimal("100"),
+            currency="RUB",
+            provider_status="canceled",
+            checkout_status="abandoned",
+        )
+        
+        # We need a mock session that can capture session.add() calls
+        class MockSession:
+            def __init__(self):
+                self.added = []
+            def add(self, obj):
+                self.added.append(obj)
+                
+        session = MockSession()
+        transition = await apply_provider_transition(
+            session,
+            payment=payment,
+            data={
+                "status": "succeeded", 
+                "captured_at": "2026-07-29T12:34:56.123+03:00",
+                "id": "p",
+                "amount": {"value": "100.00", "currency": "RUB"},
+                "metadata": {"order_id": "pay_x", "local_payment_id": "1"},
+            },
+            source="webhook"
+        )
+        
+        self.assertEqual(transition.outcome, "applied")
+        self.assertEqual(payment.provider_status, "succeeded")
+        self.assertEqual(payment.reconciliation_status, "mismatch")
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+        self.assertEqual(len(session.added), 1)
+        self.assertEqual(session.added[0].reason, "canceled_to_succeeded")
+
+    async def test_late_canceled_webhook_conflicts(self):
+        from services.payment_provider_state import apply_provider_transition
+        from database.models import Payment
+        from decimal import Decimal
+        
+        payment = Payment(
+            id=1,
+            user_id=1,
+            external_id="p",
+            public_order_id="pay_x",
+            amount=Decimal("100"),
+            currency="RUB",
+            provider_status="succeeded",
+            fulfillment_status="succeeded"
+        )
+        
+        class MockSession:
+            def __init__(self):
+                self.added = []
+            def add(self, obj):
+                self.added.append(obj)
+                
+        session = MockSession()
+        transition = await apply_provider_transition(
+            session,
+            payment=payment,
+            data={
+                "status": "canceled",
+                "id": "p",
+                "amount": {"value": "100.00", "currency": "RUB"},
+                "metadata": {"order_id": "pay_x", "local_payment_id": "1"},
+            },
+            source="webhook"
+        )
+        
+        self.assertEqual(transition.outcome, "conflict")
+        self.assertEqual(transition.reason, "terminal_regression")
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+        self.assertEqual(len(session.added), 1)
+        self.assertEqual(session.added[0].reason, "succeeded_to_canceled")

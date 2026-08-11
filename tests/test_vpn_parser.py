@@ -143,6 +143,18 @@ class VPNParserTests(unittest.TestCase):
         self.assertEqual(result["dns1"], "8.8.8.8")
         self.assertEqual(result["dns2"], "8.8.4.4")
 
+    def test_customize_vpn_uri_safe_with_raw_text(self):
+        from utils.vpn_parser import customize_vpn_uri
+        raw_key = "[Interface]\nPrivateKey = abc\n[Peer]\nPublicKey = def"
+        res = customize_vpn_uri(raw_key, description="Test")
+        self.assertEqual(res, raw_key)
+
+    def test_build_conf_file_returns_raw_wireguard_conf(self):
+        from utils.vpn_parser import build_conf_file
+        raw_key = "[Interface]\nPrivateKey = abc\n[Peer]\nPublicKey = def"
+        res = build_conf_file(raw_key)
+        self.assertEqual(res, raw_key)
+
 
 if __name__ == "__main__":
     unittest.main()

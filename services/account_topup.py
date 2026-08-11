@@ -144,7 +144,6 @@ async def create_balance_topup(
     if unfinished >= cfg.BALANCE_MAX_UNFINISHED_TOPUPS:
         raise AccountTopupError("too_many_unfinished_topups")
 
-
     pending = await _pending_topup_exposure(session, user.id)
     projected_position = balance.real_position + pending + rubles
     if max(Decimal("0"), projected_position) > Decimal(
@@ -249,7 +248,7 @@ async def cancel_all_unfinished_topups(
             )
         )
         count += 1
-    
+
     if count > 0:
         await session.flush()
     return count
@@ -263,15 +262,17 @@ async def settle_succeeded_topup(
     settings=None,
     bot=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
-    """Credit a verified top-up and close its non-subscription lifecycle."""
+    """Credit a verified top-up and close its non-subscription lifecycle.
+
+    Referral bonus settlement is part of the same transaction as the top-up.
+    A referral-bonus failure must abort the settlement so the provider event can
+    be retried rather than silently crediting money without its attributable bonus.
+    """
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
 
     user = await lock_checkout_user(session, payment.user_id)
     if user is not None:
-        # Hard top-up blocks must never be bypassed. A chargeback debt hold is
-        # intentionally recoverable: the user needs to top up in order to settle
-        # the debt that caused the hold.
         hard_block = user.topup_blocked
         recovery_topup = (
             user.financial_hold
@@ -333,36 +334,32 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
-        try:
-            async with session.begin_nested():
-                from services.referral_bonus import grant_referral_bonus_for_topup
-                granted_bonus = await grant_referral_bonus_for_topup(
-                    session,
-                    purchaser_user_id=payment.user_id,
-                    payment_id=payment.id,
-                    topup_amount=payment.amount,
+        # Do not isolate this in a SAVEPOINT and continue on failure. The
+        # top-up, referral bonus and ledger state must commit atomically.
+        # If this raises, the caller's transaction rolls back and the durable
+        # provider operation remains retryable.
+        from services.referral_bonus import grant_referral_bonus_for_topup
+        granted_bonus = await grant_referral_bonus_for_topup(
+            session,
+            purchaser_user_id=payment.user_id,
+            payment_id=payment.id,
+            topup_amount=payment.amount,
+        )
+        if granted_bonus > 0 and bot is not None and user is not None and user.referred_by:
+            try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from utils.telegram import render_hub
+                b_builder = InlineKeyboardBuilder()
+                b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                await render_hub(
+                    bot,
+                    user.referred_by,
+                    f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс.",
+                    b_builder.as_markup(),
                 )
-                if granted_bonus > 0 and bot is not None and user is not None and user.referred_by:
-                    try:
-                        from aiogram.utils.keyboard import InlineKeyboardBuilder
-                        from utils.telegram import render_hub
-                        b_builder = InlineKeyboardBuilder()
-                        b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                        await render_hub(
-                            bot,
-                            user.referred_by,
-                            f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс.",
-                            b_builder.as_markup(),
-                        )
-                    except Exception as exc:
-                        import logging
-                        logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", user.referred_by, exc)
-        except Exception as e:
-            print("ERROR GRANTING BONUS:", repr(e))
-            import logging
-            logging.getLogger(__name__).error(
-                f"Failed to grant referral bonus for topup {payment.id}: {e}"
-            )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", user.referred_by, exc)
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
@@ -464,54 +461,3 @@ async def settle_succeeded_topup_by_id(
     return await settle_succeeded_topup(
         session, payment=payment, source=source, settings=settings
     )
-
-
-async def request_topup_status_refresh(
-    session: AsyncSession,
-    *,
-    payment_id: int,
-    source: str = "user_refresh",
-) -> Payment:
-    """Queue provider reconciliation and recover a verified but uncredited top-up."""
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise AccountTopupError("topup_not_found")
-    user = await lock_checkout_user(session, payment.user_id)
-    if user is not None:
-        recovery_topup = (
-            user.financial_hold
-            and user.financial_block_reason == "chargeback_debt"
-        )
-        if user.topup_blocked or (user.financial_hold and not recovery_topup):
-            payment.fulfillment_status = "manual_review"
-            payment.reconciliation_status = "manual_review"
-            payment.manual_review_reason = "user_financially_blocked"
-            return payment
-
-    if payment.external_id and payment.provider_status not in {
-        "refunded",
-        "canceled",
-    }:
-        from services.payment_provider_operations import (
-            ensure_reconcile_payment_operation,
-        )
-
-        await ensure_reconcile_payment_operation(
-            session,
-            payment,
-            reason=source,
-        )
-    if (
-        payment.provider_status == "succeeded"
-        and payment.provider_confirmed_at is not None
-        and payment.fulfillment_status
-        not in {"succeeded", "reversed", "manual_review"}
-    ):
-        await settle_succeeded_topup(
-            session,
-            payment=payment,
-            source=f"{source}_recovery",
-        )
-    return payment

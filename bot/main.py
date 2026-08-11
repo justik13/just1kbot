@@ -235,6 +235,9 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     from bot.handlers.admin.payment_queues import (
         router as admin_payment_queues_router,
     )
+    from bot.handlers.admin.purchases import (
+        router as admin_purchases_router,
+    )
     from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
@@ -254,6 +257,7 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         admin_tariffs_router,
         admin_broadcast_router,
         admin_payments_router,
+        admin_purchases_router,
         admin_payment_queues_router,
         fallback_router,
     ]:

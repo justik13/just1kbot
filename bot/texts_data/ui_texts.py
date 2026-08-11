@@ -547,7 +547,7 @@ TEXTS = {
     # bot/keyboards/device.py:14
     'UI_BOT_KEYBOARDS_DEVICE_L14_1': '🔑 Показать ключ',
     # bot/keyboards/device.py:15
-    'UI_BOT_KEYBOARDS_DEVICE_L15_1': '📥 Скачать .conf',
+    'UI_BOT_KEYBOARDS_DEVICE_L15_1': '📥 Скачать файлом',
     # bot/keyboards/device.py:18
     'UI_BOT_KEYBOARDS_DEVICE_L18_1': '🗑 Удалить устройство',
     # bot/keyboards/device.py:23

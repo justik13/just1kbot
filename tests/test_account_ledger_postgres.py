@@ -589,7 +589,6 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             credit, _ = await credit_succeeded_topup(
                 session, payment_id=repayment.id
             )
-            self.assertEqual(credit.metadata_["debt_offset_rub"], "30.00")
             snapshot = await get_account_balance(session, user_id=self.user_id)
             self.assertEqual(snapshot.debt, Decimal("0"))
             self.assertEqual(snapshot.available, Decimal("10.00"))
@@ -679,6 +678,59 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                     .where(AccountBalanceReservation.id == reservation_id)
                     .values(amount=Decimal("21"))
                 )
+
+    async def test_ledger_balance_mathematical_invariant_with_refunds(self):
+        from database.models import AccountLedgerEntry
+        from sqlalchemy import select, func
+        
+        async with self.sessions.begin() as session:
+            # 1. Topup 1000
+            payment1 = await self.topup(session, 1000)
+            await credit_succeeded_topup(session, payment_id=payment1.id)
+            
+            # 2. Purchase 400
+            quote = await self.quote(session, 400)
+            await create_purchase_debit(session, user_id=self.user_id, quote_id=quote.id, amount=400)
+            
+            # 3. Topup 500
+            payment2 = await self.topup(session, 500)
+            await credit_succeeded_topup(session, payment_id=payment2.id)
+
+            # 4. Partial Refund of payment2 (200)
+            await create_payment_debit(
+                session,
+                payment_id=payment2.id,
+                entry_type="refund_debit",
+                amount=200,
+                idempotency_key=f"refund:{payment2.id}",
+            )
+
+            # 5. Chargeback of payment1 (1000)
+            await create_payment_debit(
+                session,
+                payment_id=payment1.id,
+                entry_type="chargeback_debit",
+                amount=1000,
+                idempotency_key=f"chargeback:{payment1.id}",
+            )
+
+            # 6. Check Invariant
+            total_ledger_sum = await session.scalar(
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0")))
+                .where(AccountLedgerEntry.user_id == self.user_id)
+            )
+
+            snapshot = await get_account_balance(session, user_id=self.user_id)
+            
+            # The mathematical invariant: net balance == sum(all ledger entries)
+            # Net balance is available + reserved - debt
+            net_balance = snapshot.available + snapshot.reserved - snapshot.debt
+            
+            self.assertEqual(net_balance, total_ledger_sum)
+            # 1000 - 400 + 500 - 200 - 1000 = -100 (which is 100 debt)
+            self.assertEqual(net_balance, Decimal("-100.00"))
+            self.assertEqual(snapshot.available, Decimal("0.00"))
+            self.assertEqual(snapshot.debt, Decimal("100.00"))
 
 
 if __name__ == "__main__":

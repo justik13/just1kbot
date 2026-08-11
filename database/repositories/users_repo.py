@@ -253,21 +253,27 @@ async def search_user_flexible(session: AsyncSession, query: str) -> Optional[Us
 
 def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     now = now_utc()
-    if filter_type == "new" or filter_type == "new_24h":
-        stmt = stmt.where(User.created_at >= now - timedelta(hours=24))
+    if filter_type in ("new_7d", "new", "new_24h"):
+        stmt = stmt.where(User.created_at >= now - timedelta(days=7))
     elif filter_type == "expiring_3d":
         stmt = stmt.where(
+            User.subscription_end.is_not(None),
             User.subscription_end > now,
             User.subscription_end <= now + timedelta(days=3),
         )
     elif filter_type == "active":
-        stmt = stmt.where(User.subscription_end > now)
-    elif filter_type == "expired":
-        stmt = stmt.where(User.subscription_end.is_not(None), User.subscription_end <= now)
-    elif filter_type == "no_sub":
-        stmt = stmt.where(User.subscription_end.is_(None))
-    elif filter_type == "problem":
-        stmt = stmt.where((User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True)))
+        stmt = stmt.where(
+            User.subscription_end.is_not(None),
+            User.subscription_end > now,
+        )
+    elif filter_type in ("expired", "no_sub"):
+        stmt = stmt.where(
+            (User.subscription_end.is_(None)) | (User.subscription_end <= now)
+        )
+    elif filter_type in ("banned", "problem"):
+        stmt = stmt.where(
+            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+        )
     elif filter_type == "server" and filter_param is not None:
         stmt = stmt.where(
             User.profiles.any(
@@ -311,9 +317,17 @@ async def get_filtered_users_paginated(
     offset = (page - 1) * per_page
     stmt = select(User).where(User.is_deleted.is_(False))
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
+
+    if filter_type in ("new_7d", "new", "new_24h"):
+        order_clause = User.created_at.asc()
+    elif filter_type == "expiring_3d":
+        order_clause = User.subscription_end.asc()
+    else:
+        order_clause = User.created_at.desc()
+
     stmt = (
         stmt.options(selectinload(User.profiles))
-        .order_by(User.created_at.desc(), User.id.desc())
+        .order_by(order_clause, User.id.desc())
         .offset(offset)
         .limit(per_page)
     )

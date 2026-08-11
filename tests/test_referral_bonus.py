@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.referral_bonus import calculate_referral_bonus
 
@@ -129,14 +129,18 @@ class TestReferralBonusLedgerEntryShape:
 
         session = AsyncMock()
         session.get = AsyncMock(side_effect=fake_get)
-        session.scalar = AsyncMock(side_effect=[referrer, None])
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
         session.scalars = AsyncMock(return_value=scalars_mock)
         session.add = fake_add
         session.flush = AsyncMock()
 
-        reversed_amount = asyncio.run(
-            reverse_referral_bonus_for_topup(session, payment_id=42)
-        )
+        with patch(
+            "services.referral_bonus._credit_capacity",
+            AsyncMock(return_value=Decimal("10")),
+        ):
+            reversed_amount = asyncio.run(
+                reverse_referral_bonus_for_topup(session, payment_id=42)
+            )
 
         assert reversed_amount == Decimal("10")
         entry = captured_entry.get("obj")
@@ -248,7 +252,10 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     referrer_credit.id = 100
     referrer_credit.user_id = 10
     referrer_credit.amount = Decimal("50")
-    referrer_credit.metadata_ = {"topup_payment_id": 101, "source_type": "referral_bonus"}
+    referrer_credit.metadata_ = {
+        "topup_payment_id": 101,
+        "source_type": "referral_bonus",
+    }
 
     purchaser_credit = MagicMock()
     purchaser_credit.id = 101
@@ -285,14 +292,20 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
 
     session = AsyncMock()
     session.get = AsyncMock(side_effect=fake_get)
-    session.scalar = AsyncMock(side_effect=[referrer, None, None])
-    session.scalars = AsyncMock(side_effect=[scalars_mock_referrer, scalars_mock_purchaser])
+    session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None])
+    session.scalars = AsyncMock(
+        side_effect=[scalars_mock_referrer, scalars_mock_purchaser]
+    )
     session.add = fake_add
     session.flush = AsyncMock()
 
-    reversed_amount = asyncio.run(
-        reverse_referral_bonus_for_topup(session, payment_id=101)
-    )
+    with patch(
+        "services.referral_bonus._credit_capacity",
+        AsyncMock(return_value=Decimal("50")),
+    ):
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, payment_id=101)
+        )
 
     assert reversed_amount == Decimal("100")
     assert len(added_entries) == 2
@@ -302,4 +315,62 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     assert added_entries[1].amount == Decimal("-50")
 
 
+def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
+    import asyncio
+    from services.referral_bonus import reverse_referral_bonus_for_topup
+    from database.models import AccountLedgerAllocation, AccountLedgerEntry
 
+    added_entries = []
+    added_allocations = []
+
+    referrer_credit = MagicMock()
+    referrer_credit.id = 100
+    referrer_credit.user_id = 10
+    referrer_credit.amount = Decimal("50")
+    referrer_credit.metadata_ = {
+        "topup_payment_id": 101,
+        "source_type": "referral_bonus",
+    }
+
+    payment = MagicMock()
+    payment.user_id = 20
+
+    purchaser = MagicMock()
+    purchaser.id = 20
+    purchaser.referred_by = 1000
+
+    referrer = MagicMock()
+    referrer.id = 10
+
+    def fake_add(entry):
+        if isinstance(entry, AccountLedgerEntry):
+            added_entries.append(entry)
+        if isinstance(entry, AccountLedgerAllocation):
+            added_allocations.append(entry)
+
+    scalars_mock_referrer = MagicMock()
+    scalars_mock_referrer.all.return_value = [referrer_credit]
+    scalars_mock_purchaser = MagicMock()
+    scalars_mock_purchaser.all.return_value = []
+
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=payment)
+    session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
+    session.scalars = AsyncMock(
+        side_effect=[scalars_mock_referrer, scalars_mock_purchaser]
+    )
+    session.add = fake_add
+    session.flush = AsyncMock()
+
+    with patch(
+        "services.referral_bonus._credit_capacity",
+        AsyncMock(return_value=Decimal("0")),
+    ):
+        reversed_amount = asyncio.run(
+            reverse_referral_bonus_for_topup(session, payment_id=101)
+        )
+
+    assert reversed_amount == Decimal("50")
+    assert len(added_entries) == 1
+    assert added_entries[0].amount == Decimal("-50")
+    assert added_allocations == []

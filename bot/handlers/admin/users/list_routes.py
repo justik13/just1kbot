@@ -421,11 +421,11 @@ async def show_user_audit(
             builder.button(text="Вперед ▶️", callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
+    builder.button(text="🔙 К карточке пользователя", callback_data=f"admin_user_card:{telegram_id}")
+    if total_pages > 1:
         builder.adjust(3, 1)
     else:
         builder.adjust(1)
-
-    builder.button(text="🔙 К карточке пользователя", callback_data=f"admin_user_card:{telegram_id}")
 
     try:
         await callback.message.edit_text(

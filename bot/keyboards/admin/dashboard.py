@@ -68,6 +68,7 @@ def get_admin_cat_finance_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="💳 История платежей", callback_data="admin_payments")
+    builder.button(text="🛒 Журнал покупок", callback_data="admin_purchases")
     dispute_label = f"⚠️ Диспуты ({disputes_count})" if disputes_count > 0 else "⚖️ Диспуты"
     builder.button(text=dispute_label, callback_data="admin_disputes")
     queue_label = f"🚨 Очереди ({dead_queues_count})" if dead_queues_count > 0 else "🔄 Очереди задач"
