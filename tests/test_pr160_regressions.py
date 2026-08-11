@@ -1,5 +1,6 @@
 import re
 import unittest
+import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -141,6 +142,66 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         )
         state.clear.assert_not_awaited()
         show_dashboard.assert_not_awaited()
+
+    async def test_balance_purchase_back_cancels_quote_before_returning(self):
+        from bot.handlers.payment import purchase_routes
+
+        quote_id = uuid.uuid4()
+        user = SimpleNamespace(id=42)
+        quote = SimpleNamespace(operation_type="purchase")
+        callback = MagicMock()
+        callback.data = f"balance_purchase_cancel:{quote_id}"
+        callback.answer = AsyncMock()
+        session = MagicMock()
+
+        with (
+            patch.object(
+                purchase_routes,
+                "cancel_account_purchase_quote",
+                new=AsyncMock(return_value=quote),
+            ) as cancel_quote,
+            patch.object(
+                purchase_routes,
+                "show_tariff_showcase_callback",
+                new=AsyncMock(),
+            ) as show_showcase,
+        ):
+            await purchase_routes.cancel_purchase(callback, session, user)
+
+        cancel_quote.assert_awaited_once_with(
+            session,
+            user_id=42,
+            quote_public_id=quote_id,
+        )
+        show_showcase.assert_awaited_once_with(callback, session)
+
+    async def test_balance_purchase_back_does_not_navigate_when_cancel_fails(self):
+        from bot.handlers.payment import purchase_routes
+        from services.account_purchase import AccountPurchaseError
+
+        quote_id = uuid.uuid4()
+        user = SimpleNamespace(id=42)
+        callback = MagicMock()
+        callback.data = f"balance_purchase_cancel:{quote_id}"
+        callback.answer = AsyncMock()
+        session = MagicMock()
+
+        with (
+            patch.object(
+                purchase_routes,
+                "cancel_account_purchase_quote",
+                new=AsyncMock(side_effect=AccountPurchaseError("quote_not_active")),
+            ),
+            patch.object(
+                purchase_routes,
+                "show_tariff_showcase_callback",
+                new=AsyncMock(),
+            ) as show_showcase,
+        ):
+            await purchase_routes.cancel_purchase(callback, session, user)
+
+        callback.answer.assert_awaited()
+        show_showcase.assert_not_awaited()
 
     async def test_hub_renders_admin_button_only_for_configured_admin(self):
         admin = SimpleNamespace(
