@@ -37,6 +37,8 @@ def format_user_card_text(
     now: datetime,
     real_balance: int = 0,
     bonus_balance: int = 0,
+    tariff_info: str = "—",
+    referrer_info: str = "—",
 ) -> str:
     from bot import texts
     from utils.telegram import safe
@@ -52,12 +54,14 @@ def format_user_card_text(
         first_name=safe(user.first_name),
         status=("🟢 Активен" if has_access else "🔴 Неактивен"),
         ban=("🚫 ЗАБАНЕН" if user.is_banned else "✅ Не забанен"),
+        tariff_info=safe(tariff_info),
+        referrer_info=safe(referrer_info),
         real_balance=real_balance,
         bonus_balance=bonus_balance,
         valid_until=format_datetime(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
         devices_count=len(profiles),
-        device_limit=user.device_limit,
+        device_limit=user.device_limit or 0,
         referrals_count=len(referrals),
         created_at=format_datetime(user.created_at),
     )

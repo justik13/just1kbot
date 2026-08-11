@@ -76,6 +76,11 @@ async def rename_device_process(
     session: AsyncSession,
     db_user: User | None = None,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not message.text or message.text.startswith("/"):
         await state.clear()
         return

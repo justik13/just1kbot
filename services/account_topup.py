@@ -334,19 +334,32 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
-
         # Do not isolate this in a SAVEPOINT and continue on failure. The
         # top-up, referral bonus and ledger state must commit atomically.
         # If this raises, the caller's transaction rolls back and the durable
         # provider operation remains retryable.
         from services.referral_bonus import grant_referral_bonus_for_topup
-        await grant_referral_bonus_for_topup(
+        granted_bonus = await grant_referral_bonus_for_topup(
             session,
             purchaser_user_id=payment.user_id,
             payment_id=payment.id,
             topup_amount=payment.amount,
         )
-
+        if granted_bonus > 0 and bot is not None and user is not None and user.referred_by:
+            try:
+                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                from utils.telegram import render_hub
+                b_builder = InlineKeyboardBuilder()
+                b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                await render_hub(
+                    bot,
+                    user.referred_by,
+                    f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс.",
+                    b_builder.as_markup(),
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", user.referred_by, exc)
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")

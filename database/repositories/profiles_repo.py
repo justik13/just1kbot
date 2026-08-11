@@ -18,14 +18,14 @@ async def get_user_profiles(
 ) -> list[VPNProfile]:
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
-        stmt = stmt.where(VPNProfile.provisioning_status != "deleting")
-    stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.desc())
+        stmt = stmt.where(VPNProfile.provisioning_status.notin_(["deleting", "create_cleanup_pending"]))
+    stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)
     return list(result.scalars().all())
 
 
 async def get_profile_by_id(session: AsyncSession, profile_id: int) -> VPNProfile | None:
-    stmt = select(VPNProfile).where(VPNProfile.id == profile_id)
+    stmt = select(VPNProfile).where(VPNProfile.id == profile_id).options(selectinload(VPNProfile.server))
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 

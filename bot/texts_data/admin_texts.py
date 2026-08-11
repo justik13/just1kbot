@@ -182,17 +182,17 @@ Admin <code>{admin_id}</code>
 
     "ADMIN_USER_CARD": """🛠 Админка › 👥 Пользователи › 👤 <b>Карточка</b>
 
-<b>ID:</b> <code>{telegram_id}</code>
+<b>Telegram ID:</b> <code>{telegram_id}</code>
 <b>Username:</b> @{username}
 <b>Имя:</b> {first_name}
-<b>Статус:</b> {status}
-<b>Бан:</b> {ban}
+<b>Статус:</b> {status} | {ban}
+💎 <b>Тариф:</b> {tariff_info}
+🤝 <b>Кто пригласил:</b> {referrer_info}
 <b>💰 Баланс:</b> {real_balance} ₽
 <b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
-<b>Действует до:</b> {valid_until}
-<b>Осталось:</b> {days_left}
+<b>Действует до:</b> {valid_until} ({days_left})
 <b>Устройств:</b> {devices_count}/{device_limit}
-<b>Рефералов:</b> {referrals_count}
+<b>Приглашено рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}""",
 
 

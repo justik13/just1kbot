@@ -26,6 +26,11 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
     )
 
     builder.button(
+        text="📖 Инструкция и помощь",
+        callback_data=f"support_help:device_{profile_id}",
+    )
+
+    builder.button(
         text=texts.UI_BOT_KEYBOARDS_DEVICE_L23_1,
         callback_data="back_to_connections",
     )

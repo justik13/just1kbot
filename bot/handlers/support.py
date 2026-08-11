@@ -82,9 +82,20 @@ async def hub_menu_support(
     )
 
 
-@router.callback_query(F.data == "support_help")
+def _extract_device_id(data: str) -> int | None:
+    if ":" in data and "device_" in data:
+        parts = data.split(":")
+        for p in parts:
+            if p.startswith("device_") and p.replace("device_", "").isdigit():
+                return int(p.replace("device_", ""))
+    return None
+
+
+@router.callback_query(F.data.startswith("support_help"))
 async def show_support_help(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    suffix = f":device_{device_id}" if device_id else ""
 
     text = (
         "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
@@ -98,28 +109,34 @@ async def show_support_help(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(
         text="📥 Скачать клиент Amnezia",
-        callback_data="help_download",
+        callback_data=f"help_download{suffix}",
     )
     builder.button(
         text="🍏 Инструкция iOS (для РФ)",
-        callback_data="help_ios",
+        callback_data=f"help_ios{suffix}",
     )
     builder.button(
         text="💻 Инструкции Windows",
-        callback_data="help_windows",
+        callback_data=f"help_windows{suffix}",
     )
     builder.button(
         text="🔀 Раздельное Туннелирование",
-        callback_data="help_split",
+        callback_data=f"help_split{suffix}",
     )
     builder.button(
         text="📚 Документация Amnezia",
         url=AMNEZIA_DOCS,
     )
-    builder.button(
-        text="← Назад в поддержку",
-        callback_data="menu_support",
-    )
+    if device_id:
+        builder.button(
+            text="← Назад в устройство",
+            callback_data=f"manage_device:{device_id}",
+        )
+    else:
+        builder.button(
+            text="← Назад в поддержку",
+            callback_data="menu_support",
+        )
     builder.adjust(1, 1, 1, 1, 1, 1)
 
     await render_hub(
@@ -130,9 +147,11 @@ async def show_support_help(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == "help_download")
+@router.callback_query(F.data.startswith("help_download"))
 async def show_help_download(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
         "📥 <b>Скачать клиент Amnezia для подключения</b>\n\n"
@@ -157,7 +176,7 @@ async def show_help_download(callback: CallbackQuery):
     )
     builder.button(
         text="← Назад",
-        callback_data="support_help",
+        callback_data=back_cb,
     )
     builder.adjust(1, 1, 1, 1)
 
@@ -169,9 +188,11 @@ async def show_help_download(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == "help_ios")
+@router.callback_query(F.data.startswith("help_ios"))
 async def show_help_ios(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
         "🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>\n\n"
@@ -185,7 +206,7 @@ async def show_help_ios(callback: CallbackQuery):
     )
     builder.button(
         text="← Назад",
-        callback_data="support_help",
+        callback_data=back_cb,
     )
     builder.adjust(1, 1)
 
@@ -197,9 +218,11 @@ async def show_help_ios(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == "help_windows")
+@router.callback_query(F.data.startswith("help_windows"))
 async def show_help_windows(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
         "💻 <b>Инструкции для Windows</b>\n\n"
@@ -217,7 +240,7 @@ async def show_help_windows(callback: CallbackQuery):
     )
     builder.button(
         text="← Назад",
-        callback_data="support_help",
+        callback_data=back_cb,
     )
     builder.adjust(1, 1, 1)
 
@@ -229,9 +252,11 @@ async def show_help_windows(callback: CallbackQuery):
     )
 
 
-@router.callback_query(F.data == "help_split")
+@router.callback_query(F.data.startswith("help_split"))
 async def show_help_split(callback: CallbackQuery):
     await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
         "🔀 <b>Инструкция для Раздельного Туннелирования</b>\n\n"
@@ -245,7 +270,7 @@ async def show_help_split(callback: CallbackQuery):
     )
     builder.button(
         text="← Назад",
-        callback_data="support_help",
+        callback_data=back_cb,
     )
     builder.adjust(1, 1)
 

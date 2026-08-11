@@ -327,7 +327,7 @@ async def get_filtered_users_paginated(
 
     stmt = (
         stmt.options(selectinload(User.profiles))
-        .order_by(order_clause)
+        .order_by(order_clause, User.id.desc())
         .offset(offset)
         .limit(per_page)
     )
