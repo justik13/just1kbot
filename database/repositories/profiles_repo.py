@@ -14,6 +14,7 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
+
 def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
     def _extract_slot_num(p: VPNProfile) -> int:
         if p.device_name:
@@ -30,7 +31,12 @@ async def get_user_profiles(
 ) -> list[VPNProfile]:
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
-        stmt = stmt.where(VPNProfile.provisioning_status.notin_(["deleting", "create_cleanup_pending"]))
+        stmt = stmt.where(
+            VPNProfile.provisioning_status.notin_([
+                "deleting",
+                "create_cleanup_pending",
+            ])
+        )
     stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)
     profiles = list(result.scalars().all())
@@ -84,6 +90,11 @@ async def get_user_profiles_count(
 ) -> int:
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
-        stmt = stmt.where(VPNProfile.provisioning_status != "deleting")
+        stmt = stmt.where(
+            VPNProfile.provisioning_status.notin_([
+                "deleting",
+                "create_cleanup_pending",
+            ])
+        )
     result = await session.execute(stmt)
     return result.scalar_one()
