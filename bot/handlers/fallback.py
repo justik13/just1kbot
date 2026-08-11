@@ -84,6 +84,11 @@ async def ignore_callback(callback: CallbackQuery):
     await callback.answer(show_alert=False)
 
 
+@router.callback_query(F.data == "white_internet")
+async def white_internet_callback(callback: CallbackQuery):
+    await callback.answer("🔨 Раздел находится в разработке", show_alert=True)
+
+
 @router.callback_query()
 async def stale_callback_fallback(
     callback: CallbackQuery,

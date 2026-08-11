@@ -53,14 +53,19 @@ def get_hub_keyboard(
             callback_data="menu_admin",
         )
 
+    builder.button(
+        text="⚪️ Белый Интернет",
+        callback_data="white_internet",
+    )
+
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
     if is_admin:
         sizes.append(1)
+    sizes.append(1)
 
     builder.adjust(*sizes)
-
 
     return builder.as_markup()
 
