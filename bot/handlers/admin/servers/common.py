@@ -103,7 +103,7 @@ async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
     from utils.formatters import format_admin_breadcrumbs
-    from utils.datetime_helpers import format_datetime_user
+    from utils.datetime_helpers import format_datetime_msk
 
     flag = server.country_flag or "🌐"
 
@@ -112,8 +112,8 @@ async def _show_server_card(
         extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
         status_line = "🔴 <b>Автоматически отключён</b>"
-        disabled_at_str = format_datetime_user(server.disabled_at) if server.disabled_at else "—"
-        last_check_str = format_datetime_user(server.last_successful_check) if server.last_successful_check else "—"
+        disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"
+        last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
         extra_status_info = (
             f"• Причина: <b>API недоступен / нестабильное соединение</b>\n"
             f"• Отключён: <code>{disabled_at_str}</code>\n"
