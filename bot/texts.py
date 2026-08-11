@@ -23,6 +23,23 @@ from bot.texts_data import overrides as _overrides_module
 
 logger = logging.getLogger(__name__)
 
+# Legacy user-facing wording can survive in overrides even after the source
+# text is corrected. Keep these replacements narrowly scoped to the affected
+# message so technical identifiers such as AmneziaVPN, .vpn and vpn:// remain
+# untouched.
+_LEGACY_USER_TEXT_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "FAQ_TEXT": (
+        (
+            "Что делать, если VPN не подключается или медленно работает?",
+            "Что делать, если подключение не работает или работает медленно?",
+        ),
+        (
+            "Что делать, если ВПН не подключается или медленно работает?",
+            "Что делать, если подключение не работает или работает медленно?",
+        ),
+    ),
+}
+
 
 def _validate_key(key: Any) -> None:
     if not isinstance(key, str):
@@ -34,6 +51,19 @@ def _validate_key(key: Any) -> None:
         raise RuntimeError(
             f"Text key must be a valid Python identifier: {key!r}"
         )
+
+
+def _apply_legacy_user_text_replacements(merged: dict[str, Any]) -> None:
+    """Normalize known stale user wording after all text sources are merged."""
+    for key, replacements in _LEGACY_USER_TEXT_REPLACEMENTS.items():
+        value = merged.get(key)
+        if not isinstance(value, str):
+            continue
+
+        for old, new in replacements:
+            value = value.replace(old, new)
+
+        merged[key] = value
 
 
 def _merge_texts() -> dict[str, Any]:
@@ -61,6 +91,7 @@ def _merge_texts() -> dict[str, Any]:
         _validate_key(key)
         merged[key] = value
 
+    _apply_legacy_user_text_replacements(merged)
     return merged
 
 
