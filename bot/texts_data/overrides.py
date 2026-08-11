@@ -218,3 +218,22 @@ OVERRIDES["FAQ_TEXT"] = """❓ <b>Частые вопросы (FAQ)</b>
 # These are the only legal URLs used by the bot.
 OVERRIDES["TOS_AGREEMENT_URL"] = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
 OVERRIDES["PRIVACY_POLICY_URL"] = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
+
+# Neutral user-facing copy for active texts that still existed in the legacy base catalogue.
+OVERRIDES["WELCOME_TEXT"] = """👋 <b>Добро пожаловать!</b>
+
+🔐 Здесь вы можете подключить свои устройства к <b>just1kbot</b> и управлять подключениями в одном месте.
+
+ℹ️ <i>Используя сервис, вы автоматически соглашаетесь с <a href=\"https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48\">Условиями использования</a> и <a href=\"https://telegra.ph/Politika-konfidencialnosti-07-23-84\">Политикой конфиденциальности</a>.</i>"""
+
+OVERRIDES["SUPPORT_TEXT"] = """💬 <b>Поддержка</b>
+
+Если у вас возникли вопросы, напишите нашему оператору:
+
+👤 {support_username}
+
+Мы постараемся помочь как можно скорее."""
+
+OVERRIDES["PAYMENT_SHOWCASE_HEADER"] = """🛡 <b>Выберите формат подписки</b>
+
+Выберите тариф, который подходит под ваши задачи."""
