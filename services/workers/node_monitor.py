@@ -64,8 +64,10 @@ class ServerMonitorState:
                 self.health_state = ServerHealthState.MANUAL_DISABLED
             self.problem_started_at = None
             self.next_check_at = None
-            self.consecutive_fails = 0
-            self.recovery_notice_sent = getattr(server, "recovery_notice_sent", False)
+            self.consecutive_fails = getattr(server, "consecutive_fails", 0) or 0
+            self.consecutive_successes = getattr(server, "consecutive_successes", 0) or 0
+            rec_sent = getattr(server, "recovery_notice_sent", False)
+            self.recovery_notice_sent = rec_sent if isinstance(rec_sent, bool) else False
             return
 
         db_state = getattr(server, "health_state", None) or ServerHealthState.ONLINE
@@ -75,7 +77,8 @@ class ServerMonitorState:
         self.health_state = db_state
         self.consecutive_fails = getattr(server, "consecutive_fails", 0) or 0
         self.consecutive_successes = getattr(server, "consecutive_successes", 0) or 0
-        self.recovery_notice_sent = getattr(server, "recovery_notice_sent", False) or False
+        rec_sent = getattr(server, "recovery_notice_sent", False)
+        self.recovery_notice_sent = rec_sent if isinstance(rec_sent, bool) else False
 
         # Восстановление timestamp начала проблемы из БД
         problem_dt = getattr(server, "problem_started_at", None)
@@ -209,39 +212,22 @@ async def check_node_resources_and_alerts(bot: Bot):
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
 
-        if is_healthy:
-            # Запись успешной проверки в БД
-            async with session_scope() as session:
-                db_server = await get_server_by_id(session, server.id)
-                if db_server:
-                    await update_server(
-                        session,
-                        db_server,
-                        last_successful_check=now_utc(),
-                        health_state=st.health_state,
-                        consecutive_fails=0,
-                        next_check_at=None,
-                    )
+        alert_to_send: Optional[dict] = None
 
-            if st.health_state in (ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION):
+        if is_healthy:
+            if st.health_state == ServerHealthState.WAITING_CONFIRMATION:
+                # Восстановление после кратковременной ошибки (FAIL #1)
                 st.health_state = ServerHealthState.ONLINE
+                st.consecutive_fails = 0
+                st.consecutive_successes = 0
+                st.next_check_at = None
+                st.problem_started_at = None
+
+            elif st.health_state == ServerHealthState.ONLINE:
                 st.consecutive_fails = 0
                 st.consecutive_successes += 1
                 st.next_check_at = None
-
-                # Асинхронное обновление БД
-                async with session_scope() as session:
-                    db_server = await get_server_by_id(session, server.id)
-                    if db_server:
-                        await update_server(
-                            session,
-                            db_server,
-                            health_state=ServerHealthState.ONLINE,
-                            consecutive_fails=0,
-                            consecutive_successes=st.consecutive_successes,
-                            problem_started_at=None,
-                            next_check_at=None,
-                        )
+                st.problem_started_at = None
 
                 # Проверка диска (с 1-часовым кулдауном)
                 try:
@@ -262,14 +248,15 @@ async def check_node_resources_and_alerts(bot: Bot):
 
                                 if should_alert:
                                     kb = _build_alert_keyboard(server.id).as_markup()
-                                    await _send_admin_alert_msg(
-                                        bot,
-                                        f"⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>\n\n"
-                                        f"Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                                        f"Использование диска: <b>{disk_percent:.1f}%</b>\n"
-                                        f"Рекомендуется очистить логи или расширить диск.",
-                                        reply_markup=kb,
-                                    )
+                                    alert_to_send = {
+                                        "text": (
+                                            f"⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>\n\n"
+                                            f"Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                                            f"Использование диска: <b>{disk_percent:.1f}%</b>\n"
+                                            f"Рекомендуется очистить логи или расширить диск."
+                                        ),
+                                        "reply_markup": kb,
+                                    }
                                     st.disk_alert_last_sent = now_m
                             elif disk_percent <= 80.0:
                                 st.disk_alert_last_sent = None
@@ -285,51 +272,30 @@ async def check_node_resources_and_alerts(bot: Bot):
                     st.problem_started_at = None
                     st.next_check_at = None
 
-                    async with session_scope() as session:
-                        db_server = await get_server_by_id(session, server.id)
-                        if db_server:
-                            await update_server(
-                                session,
-                                db_server,
-                                health_state=ServerHealthState.ONLINE,
-                                consecutive_fails=0,
-                                consecutive_successes=st.consecutive_successes,
-                                problem_started_at=None,
-                                next_check_at=None,
-                            )
-
                     kb = _build_alert_keyboard(server.id).as_markup()
-                    await _send_admin_alert_msg(
-                        bot,
-                        f"✅ <b>VPN-сервер восстановлен</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"API снова стабильно доступен.",
-                        reply_markup=kb,
-                    )
+                    alert_to_send = {
+                        "text": (
+                            f"✅ <b>VPN-сервер восстановлен</b>\n\n"
+                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                            f"API снова стабильно доступен."
+                        ),
+                        "reply_markup": kb,
+                    }
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
                 st.consecutive_successes += 1
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
                     st.recovery_notice_sent = True
-                    async with session_scope() as session:
-                        db_server = await get_server_by_id(session, server.id)
-                        if db_server:
-                            await update_server(
-                                session,
-                                db_server,
-                                recovery_notice_sent=True,
-                                consecutive_successes=st.consecutive_successes,
-                            )
-
                     kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
-                    await _send_admin_alert_msg(
-                        bot,
-                        f"✅ <b>Сервер восстановлен</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"API стабильно отвечает.\n\n"
-                        f"Сервер остаётся отключённым. При необходимости включите его вручную.",
-                        reply_markup=kb,
-                    )
+                    alert_to_send = {
+                        "text": (
+                            f"✅ <b>Сервер восстановлен</b>\n\n"
+                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                            f"API стабильно отвечает.\n\n"
+                            f"Сервер остаётся отключённым. При необходимости включите его вручную."
+                        ),
+                        "reply_markup": kb,
+                    }
 
         else:
             # Ошибка проверки (FAIL)
@@ -341,18 +307,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.consecutive_fails = 1
                 st.next_check_at = now_m + CONFIRMATION_DELAY_SECONDS
 
-                next_check_dt = datetime.fromtimestamp(time.time() + CONFIRMATION_DELAY_SECONDS, tz=timezone.utc)
-                async with session_scope() as session:
-                    db_server = await get_server_by_id(session, server.id)
-                    if db_server:
-                        await update_server(
-                            session,
-                            db_server,
-                            health_state=ServerHealthState.WAITING_CONFIRMATION,
-                            consecutive_fails=1,
-                            next_check_at=next_check_dt,
-                        )
-
             elif st.health_state == ServerHealthState.WAITING_CONFIRMATION:
                 # 30 секунд прошли, FAIL #2 подтвержден -> Переход в PROBLEM!
                 st.health_state = ServerHealthState.PROBLEM
@@ -360,78 +314,85 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.problem_started_at = now_m
                 st.next_check_at = None
 
-                problem_dt = now_utc()
-                async with session_scope() as session:
-                    db_server = await get_server_by_id(session, server.id)
-                    if db_server:
-                        await update_server(
-                            session,
-                            db_server,
-                            health_state=ServerHealthState.PROBLEM,
-                            consecutive_fails=2,
-                            problem_started_at=problem_dt,
-                            next_check_at=None,
-                        )
-
                 kb = _build_alert_keyboard(server.id).as_markup()
-                await _send_admin_alert_msg(
-                    bot,
-                    f"⚠️ <b>Проблема с VPN-сервером</b>\n\n"
-                    f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                    f"API не отвечает после повторной проверки.\n\n"
-                    f"Возможна недоступность или нестабильное соединение.\n\n"
-                    f"🔍 <b>Проверьте сервер.</b>\n"
-                    f"Автоматический мониторинг продолжается.",
-                    reply_markup=kb,
-                )
+                alert_to_send = {
+                    "text": (
+                        f"⚠️ <b>Проблема с VPN-сервером</b>\n\n"
+                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                        f"API не отвечает после повторной проверки.\n\n"
+                        f"Возможна недоступность или нестабильное соединение.\n\n"
+                        f"🔍 <b>Проверьте сервер.</b>\n"
+                        f"Автоматический мониторинг продолжается."
+                    ),
+                    "reply_markup": kb,
+                }
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails += 1
 
-                # Расчёт прошедшего времени от problem_started_at
                 elapsed_problem_sec = 0.0
                 if st.problem_started_at:
                     elapsed_problem_sec = now_m - st.problem_started_at
 
                 if elapsed_problem_sec >= PROBLEM_OBSERVATION_TIMEOUT:
                     st.health_state = ServerHealthState.AUTO_DISABLED
-                    async with session_scope() as session:
-                        db_server = await get_server_by_id(session, server.id)
-                        if db_server:
-                            await update_server(
-                                session,
-                                db_server,
-                                is_active=False,
-                                disabled_reason="AUTO_UNAVAILABLE",
-                                disabled_at=now_utc(),
-                                health_state=ServerHealthState.AUTO_DISABLED,
-                                consecutive_fails=st.consecutive_fails,
-                            )
                     kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
-                    await _send_admin_alert_msg(
-                        bot,
-                        f"🔴 <b>Сервер автоматически отключён</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"Сервер не восстановил стабильное соединение в течение 15 минут.\n\n"
-                        f"Причина: API недоступен / соединение нестабильно.\n"
-                        f"Сервер исключён из работы.\n\n"
-                        f"🔕 Повторных уведомлений не будет.\n"
-                        f"Доступность будет проверяться автоматически каждые 15 минут.",
-                        reply_markup=kb,
-                    )
-                else:
-                    async with session_scope() as session:
-                        db_server = await get_server_by_id(session, server.id)
-                        if db_server:
-                            await update_server(
-                                session,
-                                db_server,
-                                consecutive_fails=st.consecutive_fails,
-                            )
+                    alert_to_send = {
+                        "text": (
+                            f"🔴 <b>Сервер автоматически отключён</b>\n\n"
+                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                            f"Сервер не восстановил стабильное соединение в течение 15 минут.\n\n"
+                            f"Причина: API недоступен / соединение нестабильно.\n"
+                            f"Сервер исключён из работы.\n\n"
+                            f"🔕 Повторных уведомлений не будет.\n"
+                            f"Доступность будет проверяться автоматически каждые 15 минут."
+                        ),
+                        "reply_markup": kb,
+                    }
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
-                # В режиме AUTO_DISABLED при FAIL полная тишина
                 pass
+
+        # 6. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
+        update_kwargs = {
+            "health_state": st.health_state,
+            "consecutive_fails": st.consecutive_fails,
+            "consecutive_successes": st.consecutive_successes,
+            "recovery_notice_sent": st.recovery_notice_sent,
+        }
+
+        if is_healthy:
+            update_kwargs["last_successful_check"] = now_utc()
+            if st.health_state == ServerHealthState.ONLINE:
+                update_kwargs["problem_started_at"] = None
+                update_kwargs["next_check_at"] = None
+
+        if st.health_state == ServerHealthState.WAITING_CONFIRMATION and st.next_check_at:
+            rem = st.next_check_at - now_m
+            next_dt = datetime.fromtimestamp(time.time() + max(0.0, rem), tz=timezone.utc)
+            update_kwargs["next_check_at"] = next_dt
+
+        if st.health_state == ServerHealthState.PROBLEM and st.consecutive_fails == 2:
+            update_kwargs["problem_started_at"] = now_utc()
+            update_kwargs["next_check_at"] = None
+
+        if st.health_state == ServerHealthState.AUTO_DISABLED and not is_healthy:
+            update_kwargs["is_active"] = False
+            update_kwargs["disabled_reason"] = "AUTO_UNAVAILABLE"
+            update_kwargs["disabled_at"] = now_utc()
+
+        async with session_scope() as session:
+            db_server = await get_server_by_id(session, server.id)
+            if db_server:
+                await update_server(session, db_server, **update_kwargs)
+
+        # 7. Отправка алерта (если создан)
+        if alert_to_send:
+            await _send_admin_alert_msg(
+                bot,
+                alert_to_send["text"],
+                reply_markup=alert_to_send["reply_markup"],
+            )
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):
