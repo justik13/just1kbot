@@ -14,7 +14,7 @@ from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.users_repo import get_user_referrals
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_days_left, format_user_card_text
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)

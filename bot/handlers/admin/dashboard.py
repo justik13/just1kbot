@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import timedelta
 
 from aiogram import Router, F
@@ -24,7 +25,6 @@ from bot.keyboards import (
 from bot.states import AdminStates
 from database.models import Payment
 from database.repositories.audit_repo import (
-    get_recent_audit_logs,
     get_all_audit_logs_paginated,
     get_total_audit_logs_count,
 )

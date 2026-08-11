@@ -13,7 +13,6 @@ from database.repositories.purchases_repo import (
     get_purchase_logs_paginated,
 )
 from bot.handlers.admin.users.common import _build_users_list_text_and_kb
-from bot.keyboards.admin.dashboard import get_admin_menu
 from bot.keyboards.device import get_device_keyboard
 from utils.datetime_helpers import now_utc
 
