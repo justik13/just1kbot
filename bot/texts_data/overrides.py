@@ -36,7 +36,7 @@ OVERRIDES['ADMIN_SERVER_FLAG_TOO_LONG'] = '❌ Флаг слишком длин�
 OVERRIDES['ADMIN_SERVER_FLAG_UPDATED'] = '✅ Флаг сервера обновлен.'
 OVERRIDES['ADMIN_SERVER_KEY_PROMPT'] = 'Введите ключ доступа:'
 OVERRIDES['ADMIN_SERVER_KEY_UPDATED'] = '✅ Ключ сервера обновлен.'
-OVERRIDES['ADMIN_SERVER_MAX_CLIENTS_UPDATED'] = '✅ Макс. клиентов обновлено.'
+OVERRIDES['ADMIN_SERVER_MAX_CLIENTS_UPDATED'] = '✅ Макс. количество клиентов обновлено.'
 OVERRIDES['ADMIN_SERVER_MAX_CLIENTS_WARNING'] = '⚠️ Внимание: на сервере уже больше клиентов, чем новый лимит.'
 OVERRIDES['ADMIN_SERVER_NAME_PROMPT'] = 'Введите название сервера:'
 OVERRIDES['ADMIN_SERVER_RENAMED'] = '✅ Сервер успешно переименован.'
@@ -157,11 +157,13 @@ OVERRIDES["DEVICE_CONFIG_VPN_CAPTION"] = """📁 <b>Файл для AmneziaVPN</
 📱 Устройство: <b>{device_name}</b>
 
 <i>Файл конфигурации (.vpn) — дополнительный способ подключения, если ключ не подходит.</i>"""
+
 OVERRIDES["DEVICE_CONFIG_CONF_CAPTION"] = """📁 <b>Файл для AmneziaWG</b>
 
 📱 Устройство: <b>{device_name}</b>
 
 <i>Файл конфигурации (.conf) — дополнительный способ подключения, если ключ не подходит.</i>"""
+
 OVERRIDES["DEVICE_CONFIG_INSTRUCTION"] = """✅ <b>Файлы конфигурации отправлены!</b>
 
 📥 <b>Резервный способ подключения:</b>
@@ -172,6 +174,7 @@ OVERRIDES["DEVICE_CONFIG_INSTRUCTION"] = """✅ <b>Файлы конфигура
 💡 Основной способ — «🔑 Показать ключ». Используйте файлы, если ключ не работает или не поддерживается приложением.
 
 <i>Нажмите на прикреплённый файл выше, чтобы открыть его в приложении.</i>"""
+
 OVERRIDES["DOWNLOAD_CONF_FALLBACK"] = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 
 Используйте основной способ — кнопку «🔑 Показать ключ» для импорта в приложение <b>AmneziaVPN / AmneziaWG</b> или обратитесь в <b>💬 Поддержку</b>."""
