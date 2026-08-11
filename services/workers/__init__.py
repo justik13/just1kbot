@@ -14,12 +14,7 @@ from config.settings import get_settings
 
 
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
-    """Keep expected healthcheck network failures out of WARNING logs.
-
-    The node monitor converts a failed healthcheck into a state-machine event.
-    aiohttp/timeout failures are therefore expected operational outcomes, not
-    application warnings. Unexpected exception types still pass through.
-    """
+    """Keep expected healthcheck network failures out of WARNING logs."""
 
     _EXPECTED = (aiohttp.ClientError, asyncio.TimeoutError, ConnectionError, OSError)
 
@@ -38,8 +33,7 @@ class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
 
 
 _node_monitor_logger = logging.getLogger("services.workers.node_monitor")
-if not any(isinstance(f, _ExpectedNodeMonitorNetworkWarningFilter) for f in _node_monitor_logger.filters):
-    _node_monitor_logger.addFilter(_ExpectedNodeMonitorNetworkWarningFilter())
+
 
 from .api_operations import api_operations_loop
 from .account_balance import account_balance_notifications_loop
@@ -51,6 +45,10 @@ from .queue_health import queue_health_loop
 from .payments import stale_payments_checker_loop
 from .traffic import traffic_sync_loop
 from .node_monitor import node_monitor_loop
+
+
+if not any(isinstance(f, _ExpectedNodeMonitorNetworkWarningFilter) for f in _node_monitor_logger.filters):
+    _node_monitor_logger.addFilter(_ExpectedNodeMonitorNetworkWarningFilter())
 
 logger = logging.getLogger(__name__)
 shutdown_event = asyncio.Event()
@@ -148,9 +146,7 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
-    message = (
-        texts.RUNTIME_SERVICES_WORKERS_INIT_L119_1.format(value_0=title, value_1=worker, value_2=failure_count, value_3=error_type)
-    )
+    message = texts.RUNTIME_SERVICES_WORKERS_INIT_L119_1.format(value_0=title, value_1=worker, value_2=failure_count, value_3=error_type)
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
@@ -164,7 +160,6 @@ async def _send_alert(bot: Bot, title: str, worker: str,
 def _schedule_alert(bot: Bot, key: str, title: str, worker: str,
                     failure_count: int, error_type: str, *,
                     timeout: float | None = None) -> None:
-    """Atomically deduplicate and deliver an alert outside supervisor flow."""
     if key in _alert_keys:
         return
     _alert_keys.add(key)
@@ -172,20 +167,13 @@ def _schedule_alert(bot: Bot, key: str, title: str, worker: str,
 
     async def deliver() -> None:
         try:
-            await asyncio.wait_for(
-                _send_alert(bot, title, worker, failure_count, error_type),
-                timeout=delivery_timeout,
-            )
+            await asyncio.wait_for(_send_alert(bot, title, worker, failure_count, error_type), timeout=delivery_timeout)
         except asyncio.TimeoutError:
             logger.warning("Worker alert delivery timed out: key=%s", key)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            logger.error(
-                "Worker alert delivery failed: key=%s type=%s",
-                key,
-                type(error).__name__,
-            )
+            logger.error("Worker alert delivery failed: key=%s type=%s", key, type(error).__name__)
 
     task = asyncio.create_task(deliver(), name=f"worker_alert_{key}")
     _alert_tasks.add(task)
@@ -199,19 +187,15 @@ def _fatal(bot: Bot, worker: str, count: int, error_type: str) -> None:
     _fatal_shutdown = True
     _supervisor_healthy = False
     shutdown_event.set()
-    logger.critical("Fatal background failure: worker=%s failures=%s type=%s",
-                    worker, count, error_type)
-    _schedule_alert(bot, "fatal", texts.RUNTIME_SERVICES_WORKERS_INIT_L174_1,
-                    worker, count, error_type)
+    logger.critical("Fatal background failure: worker=%s failures=%s type=%s", worker, count, error_type)
+    _schedule_alert(bot, "fatal", texts.RUNTIME_SERVICES_WORKERS_INIT_L174_1, worker, count, error_type)
 
 
 def _spawn(definition: WorkerDefinition, bot: Bot, now: float) -> None:
     health = _worker_health[definition.name]
     health.state = "running"
     health.last_started_at = now
-    _worker_tasks[definition.name] = asyncio.create_task(
-        definition.factory(bot), name=f"worker_{definition.name}"
-    )
+    _worker_tasks[definition.name] = asyncio.create_task(definition.factory(bot), name=f"worker_{definition.name}")
 
 
 async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
@@ -258,10 +242,8 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
             health.last_error_type = error_type
             health.state = "backoff"
             count = health.consecutive_failures
-            logger.critical("Worker %s died unexpectedly: %s (failure %s)",
-                            name, error_type, count)
-            _schedule_alert(bot, f"crash:{name}", texts.RUNTIME_SERVICES_WORKERS_INIT_L233_1,
-                            name, count, error_type)
+            logger.critical("Worker %s died unexpectedly: %s (failure %s)", name, error_type, count)
+            _schedule_alert(bot, f"crash:{name}", texts.RUNTIME_SERVICES_WORKERS_INIT_L233_1, name, count, error_type)
 
             if count > definition.max_consecutive_failures:
                 health.state = "failed"
@@ -272,8 +254,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 _worker_tasks.pop(name, None)
                 continue
 
-            backoff = (backoff_delay(count) if backoff_delay is not None
-                       else min(30.0, 2.0 ** count))
+            backoff = (backoff_delay(count) if backoff_delay is not None else min(30.0, 2.0 ** count))
             try:
                 await asyncio.wait_for(shutdown_event.wait(), timeout=backoff)
                 break
@@ -306,9 +287,7 @@ async def start_background_workers(bot: Bot) -> list[asyncio.Task]:
     _supervisor_healthy = True
     _started_at = time.monotonic()
     for definition in WORKERS:
-        _worker_health[definition.name] = WorkerHealth(
-            "starting", None, None, 0, None, definition.critical
-        )
+        _worker_health[definition.name] = WorkerHealth("starting", None, None, 0, None, definition.critical)
         _spawn(definition, bot, _started_at)
     _supervisor_task = asyncio.create_task(_supervise_workers(bot), name="worker_supervisor")
     _supervisor_task.add_done_callback(lambda task: _supervisor_done(task, bot))
@@ -333,8 +312,7 @@ async def stop_background_workers(*, alert_grace_timeout: float | None = None) -
             health.state = "stopped"
     alerts = list(_alert_tasks)
     if alerts:
-        grace = (_ALERT_SHUTDOWN_GRACE if alert_grace_timeout is None
-                 else alert_grace_timeout)
+        grace = _ALERT_SHUTDOWN_GRACE if alert_grace_timeout is None else alert_grace_timeout
         _, pending = await asyncio.wait(alerts, timeout=grace)
         for task in pending:
             task.cancel()
