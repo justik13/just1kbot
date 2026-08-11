@@ -29,7 +29,20 @@ async def create_audit_log(
 async def get_recent_audit_logs(session: AsyncSession, limit: int = 10) -> List[AuditLog]:
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
     result = await session.execute(stmt)
-    return result.scalars().all()
+    return list(result.scalars().all())
+
+
+async def get_all_audit_logs_paginated(
+    session: AsyncSession, offset: int = 0, limit: int = 10
+) -> List[AuditLog]:
+    stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_total_audit_logs_count(session: AsyncSession) -> int:
+    stmt = select(func.count(AuditLog.id))
+    return int(await session.scalar(stmt) or 0)
 
 
 async def clear_audit_logs(session: AsyncSession, older_than_days: int = 30) -> int:

@@ -167,9 +167,6 @@ async def users_filter_pagination(
         filter_param = "none"
         page = 1
 
-    await callback.answer(show_alert=False)
-    await state.clear()
-
     param_val = None if filter_param == "none" else filter_param
     if filter_type in {"server", "tariff"} and param_val is not None and not str(param_val).isdigit():
         await callback.answer("Некорректный параметр фильтра", show_alert=True)
@@ -178,6 +175,13 @@ async def users_filter_pagination(
     total_users = await get_filtered_users_count(
         session, filter_type=filter_type, filter_param=param_val
     )
+
+    if total_users == 0:
+        await callback.answer("Пользователи не найдены по фильтру", show_alert=True)
+    else:
+        await callback.answer(show_alert=False)
+    await state.clear()
+
     total_pages = max(1, math.ceil(total_users / USERS_PER_PAGE))
     page = min(max(1, page), total_pages)
 

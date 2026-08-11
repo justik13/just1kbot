@@ -28,6 +28,10 @@ from .payment import (
 )
 from .admin.dashboard import (
     get_admin_menu,
+    get_admin_cat_users_keyboard,
+    get_admin_cat_infra_keyboard,
+    get_admin_cat_finance_keyboard,
+    get_admin_cat_system_keyboard,
     get_audit_keyboard,
     get_maintenance_confirm_keyboard,
 )
@@ -85,6 +89,10 @@ __all__ = [
     "get_topup_credit_keyboard",
     # admin dashboard
     "get_admin_menu",
+    "get_admin_cat_users_keyboard",
+    "get_admin_cat_infra_keyboard",
+    "get_admin_cat_finance_keyboard",
+    "get_admin_cat_system_keyboard",
     "get_audit_keyboard",
     "get_maintenance_confirm_keyboard",
     # admin users

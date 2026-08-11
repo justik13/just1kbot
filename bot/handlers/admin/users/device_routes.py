@@ -53,13 +53,14 @@ async def admin_user_devices(
     user = await _get_user_with_profiles(session, telegram_id)
     if not user:
         await callback.message.edit_text(
-            texts.ERROR_USER_NOT_FOUND
+            texts.ERROR_USER_NOT_FOUND,
+            reply_markup=get_back_button("admin_users"),
         )
         return
 
     profiles = await get_user_profiles(session, user.id)
 
-    from utils.formatters import format_admin_breadcrumbs, format_traffic
+    from utils.formatters import format_admin_breadcrumbs, format_traffic, format_datetime
     from utils.datetime_helpers import now_utc
 
     header = format_admin_breadcrumbs("👥 Пользователи", f"ID {telegram_id}", "📱 Устройства")
@@ -90,11 +91,13 @@ async def admin_user_devices(
 
             status_hs = "🟢 <b>В сети (онлайн)</b>" if is_online else "🔴 <b>Офлайн</b>"
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
+            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было подключения"
 
             lines.append(
-                f"• 📱 <b>{safe(name)}</b> (ID: {profile.id})\n"
+                f"• 📱 <b>{safe(name)}</b> (ID устройства: {profile.id})\n"
                 f"   Состояние: {status_hs}\n"
                 f"   Трафик: <code>{traffic_total}</code>\n"
+                f"   Активность: <i>{last_conn}</i>\n"
             )
         text = "\n".join(lines)
 

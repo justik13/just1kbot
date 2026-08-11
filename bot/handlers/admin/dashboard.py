@@ -13,13 +13,21 @@ from bot import texts
 from bot.handlers.admin.disputes import router as disputes_router
 from bot.keyboards import (
     get_admin_menu,
+    get_admin_cat_users_keyboard,
+    get_admin_cat_infra_keyboard,
+    get_admin_cat_finance_keyboard,
+    get_admin_cat_system_keyboard,
     get_audit_keyboard,
     get_back_button,
     get_maintenance_confirm_keyboard,
 )
 from bot.states import AdminStates
 from database.models import Payment
-from database.repositories.audit_repo import get_recent_audit_logs
+from database.repositories.audit_repo import (
+    get_recent_audit_logs,
+    get_all_audit_logs_paginated,
+    get_total_audit_logs_count,
+)
 from database.repositories.servers_repo import get_total_free_ips
 from database.repositories.system_settings_repo import get_system_setting, set_system_setting
 from database.repositories.users_repo import get_dashboard_stats
@@ -197,7 +205,70 @@ async def show_admin_menu(
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data == "admin_audit")
+@router.callback_query(F.data == "admin_cat_users")
+async def show_admin_cat_users(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await state.clear()
+    header = format_admin_breadcrumbs("👥 Пользователи и Рассылки")
+    text = f"{header}👥 <b>Управление пользователями и рассылками:</b>\n\nВыберите нужный раздел:"
+    try:
+        await callback.message.edit_text(text, reply_markup=get_admin_cat_users_keyboard(), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "admin_cat_infra")
+async def show_admin_cat_infra(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await state.clear()
+    header = format_admin_breadcrumbs("⚙️ Серверы и Тарифы")
+    text = f"{header}⚙️ <b>Управление VPN-серверами и тарифами:</b>\n\nВыберите нужный раздел:"
+    try:
+        await callback.message.edit_text(text, reply_markup=get_admin_cat_infra_keyboard(), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "admin_cat_finance")
+async def show_admin_cat_finance(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await state.clear()
+    disputes_count = await _get_disputes_count(session)
+    dead_queues_count = await _get_dead_queues_count(session)
+    header = format_admin_breadcrumbs("💰 Финансы и Очереди")
+    text = f"{header}💰 <b>Финансы, Очереди и Платежные споры:</b>\n\nВыберите нужный раздел:"
+    try:
+        await callback.message.edit_text(text, reply_markup=get_admin_cat_finance_keyboard(dead_queues_count, disputes_count), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data == "admin_cat_system")
+async def show_admin_cat_system(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await state.clear()
+    maintenance_enabled = await MaintenanceService.is_enabled(session)
+    header = format_admin_breadcrumbs("🛠 Система и Настройки")
+    text = f"{header}🛠 <b>Системные настройки и логи:</b>\n\nВыберите нужный раздел:"
+    try:
+        await callback.message.edit_text(text, reply_markup=get_admin_cat_system_keyboard(maintenance_enabled), parse_mode="HTML")
+    except TelegramBadRequest:
+        pass
+    await callback.answer(show_alert=False)
+
+
+@router.callback_query(F.data.startswith("admin_audit"))
 async def show_admin_audit(
     callback: CallbackQuery,
     state: FSMContext,
@@ -212,9 +283,23 @@ async def show_admin_audit(
 
     await state.clear()
 
-    logs = await get_recent_audit_logs(session, limit=10)
+    page = 1
+    if ":" in callback.data:
+        try:
+            page = int(callback.data.split(":")[1])
+        except (ValueError, IndexError):
+            page = 1
 
-    text = texts.AUDIT_LOG_HEADER
+    per_page = 10
+    total_count = await get_total_audit_logs_count(session)
+    total_pages = max(1, math.ceil(total_count / per_page))
+    page = min(max(1, page), total_pages)
+    offset = (page - 1) * per_page
+
+    logs = await get_all_audit_logs_paginated(session, offset=offset, limit=per_page)
+
+    header = format_admin_breadcrumbs("🛠 Система", "📜 Аудит-лог")
+    text = f"{header}📜 <b>Аудит-лог действий администраторов</b> (Стр. {page}/{total_pages}, всего: {total_count})\n\n"
 
     if not logs:
         text += texts.AUDIT_LOG_EMPTY
@@ -227,9 +312,10 @@ async def show_admin_audit(
 
             target = ""
             if log.target_type:
-                target = texts.RUNTIME_BOT_HANDLERS_ADMIN_DASHBOARD_L111_1.format(value_0=safe(log.target_type))
+                target = f" ({safe(log.target_type)}"
                 if log.target_id:
                     target += f" #{log.target_id}"
+                target += ")"
 
             details = ""
             if log.details:
@@ -247,7 +333,7 @@ async def show_admin_audit(
     try:
         await callback.message.edit_text(
             text,
-            reply_markup=get_audit_keyboard(),
+            reply_markup=get_audit_keyboard(page=page, total_pages=total_pages),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:

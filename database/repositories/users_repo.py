@@ -313,7 +313,7 @@ async def get_filtered_users_paginated(
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
     stmt = (
         stmt.options(selectinload(User.profiles))
-        .order_by(User.created_at.desc())
+        .order_by(User.created_at.desc(), User.id.desc())
         .offset(offset)
         .limit(per_page)
     )

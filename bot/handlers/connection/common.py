@@ -17,6 +17,7 @@ from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
 from bot.constants import GRACE_PERIOD_HOURS
 
@@ -155,7 +156,10 @@ async def _build_connections_screen(
                 callback_data=f"manage_device:{profile.id}",
             )
 
-            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})"
+            traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
+            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было активностей"
+
+            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})\n   └ 📊 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
             labels = {
                 "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
                 "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,

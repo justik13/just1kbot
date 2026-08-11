@@ -241,6 +241,33 @@ async def _build_users_list_text_and_kb(
     return rendered, builder
 
 
+async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
+    from database.repositories.tariffs_repo import get_tariff_by_id
+    from database.repositories.users_repo import get_user_by_telegram_id
+    from utils.tariff_names import get_tariff_display_name
+
+    tariff_info = "Не активирован"
+    if user.current_tariff_id:
+        tariff = await get_tariff_by_id(session, user.current_tariff_id)
+        if tariff:
+            tariff_info = f"{tariff.name} (до {tariff.device_limit} устр.)"
+    elif user.device_limit:
+        t_name = get_tariff_display_name(user.device_limit)
+        tariff_info = f"{t_name} (до {user.device_limit} устр.)"
+
+    referrer_info = "Прямой переход"
+    if user.referred_by:
+        referrer = await get_user_by_telegram_id(session, user.referred_by)
+        if referrer:
+            r_name = safe(referrer.first_name) if referrer.first_name else ""
+            r_username = f" (@{safe(referrer.username)})" if referrer.username else ""
+            referrer_info = f"{r_name}{r_username} (ID: {referrer.telegram_id})"
+        else:
+            referrer_info = f"ID: {user.referred_by}"
+
+    return tariff_info, referrer_info
+
+
 async def _render_user_card(
     callback: CallbackQuery,
     user: User,
@@ -254,6 +281,7 @@ async def _render_user_card(
         user.telegram_id,
     )
     balance = await get_account_balance(session, user_id=user.id)
+    tariff_info, referrer_info = await _get_user_card_details(session, user)
 
     current_time = now_utc()
 
@@ -264,6 +292,8 @@ async def _render_user_card(
         current_time,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
+        tariff_info=tariff_info,
+        referrer_info=referrer_info,
     )
 
     try:
@@ -293,6 +323,7 @@ async def _show_user_card_edit(
         user.telegram_id,
     )
     balance = await get_account_balance(session, user_id=user.id)
+    tariff_info, referrer_info = await _get_user_card_details(session, user)
 
     current_time = now_utc()
 
@@ -303,6 +334,8 @@ async def _show_user_card_edit(
         current_time,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
+        tariff_info=tariff_info,
+        referrer_info=referrer_info,
     )
 
     if notice:

@@ -174,6 +174,14 @@ async def confirm_delete_server(
             texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L177_1,
             show_alert=True,
         )
+        try:
+            await callback.message.edit_text(
+                "⚠️ <b>Удаление сервера отменено:</b>\n\nНа сервере присутствуют незавершенные операции создания или фоновые обновления. Дождитесь их завершения.",
+                reply_markup=get_back_button(f"admin_server_card:{server.id}"),
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest:
+            pass
         return
     for operation in operations:
         if operation.operation_type in {"create_peer", "update_peer"}:

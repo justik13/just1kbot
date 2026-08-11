@@ -130,7 +130,10 @@ async def show_disputes(
             )
         ).all()
     )
-    lines = [texts.RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L143_1, ""]
+    lines = [
+        "⚖️ <b>Управление платежными спорами (Disputes)</b>\n",
+        "ℹ️ <i>Диспуты возникают при обращении клиентов в банк или платёжный провайдер (чарджбэк). Здесь вы можете просмотреть детали спора и урегулировать вопрос.</i>\n",
+    ]
     builder = _list_keyboard()
     for dispute in rows:
         lines.append(

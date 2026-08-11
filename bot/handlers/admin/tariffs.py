@@ -436,7 +436,7 @@ async def start_edit_tariff_rub(
     try:
         await callback.message.edit_text(
             texts.ADMIN_TARIFF_EDIT_RUB_PROMPT,
-            reply_markup=get_back_button("admin_tariffs"),
+            reply_markup=get_back_button(f"admin_tariff_card:{tariff_id}"),
         )
     except TelegramBadRequest as e:
         logger.debug(
@@ -452,6 +452,11 @@ async def process_edit_tariff_rub(
     state: FSMContext,
     session: AsyncSession,
 ):
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     if not is_admin(message.from_user.id):
         await state.clear()
         return
