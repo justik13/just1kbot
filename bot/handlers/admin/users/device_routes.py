@@ -73,12 +73,25 @@ async def admin_user_devices(
             f"<i>У пользователя пока нет созданных устройств.</i>"
         )
     else:
+        # Resolve server names in one pass so the admin can immediately see
+        # where every device is provisioned without exposing internal IDs only.
+        server_ids = {profile.server_id for profile in profiles if profile.server_id is not None}
+        servers = {}
+        for server_id in server_ids:
+            server = await get_server_by_id(session, server_id)
+            if server:
+                servers[server_id] = server
+
         lines = [f"{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>\n"]
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
                 or f"Устройство #{profile.id}"
             )
+            server = servers.get(profile.server_id)
+            server_name = safe(server.name) if server else "Неизвестный сервер"
+            server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
+
             # Статус по last_handshake_at
             last_hs = getattr(profile, "last_handshake_at", None) or getattr(profile, "updated_at", None)
             is_online = False
@@ -94,7 +107,9 @@ async def admin_user_devices(
             last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было подключения"
 
             lines.append(
-                f"• 📱 <b>{safe(name)}</b> (ID устройства: {profile.id})\n"
+                f"• 📱 <b>{safe(name)}</b>\n"
+                f"   🆔 ID устройства: <code>{profile.id}</code>\n"
+                f"   🖥 Сервер: {server_flag} <b>{server_name}</b>\n"
                 f"   Состояние: {status_hs}\n"
                 f"   Трафик: <code>{traffic_total}</code>\n"
                 f"   Активность: <i>{last_conn}</i>\n"
@@ -112,7 +127,6 @@ async def admin_user_devices(
         )
     except TelegramBadRequest as e:
         logger.debug(f"admin_user_devices edit_text failed: {e}")
-
 
 
 @router.callback_query(F.data.startswith("admin_delete_device:"))
