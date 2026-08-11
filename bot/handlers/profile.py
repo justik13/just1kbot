@@ -13,10 +13,7 @@ from bot.keyboards import (
 )
 from database.models import User
 from database.repositories.payments_repo import get_user_payments
-from database.repositories.users_repo import (
-    get_user_referrals,
-    get_user_with_referrals,
-)
+from database.repositories.users_repo import get_user_with_referrals
 from services.payment_status import payment_display_status
 from services.referral_bonus import get_referral_bonus_balance
 from utils.formatters import format_datetime
@@ -65,21 +62,13 @@ async def show_history(
         rendered = texts.HISTORY_HEADER
         for payment in payments[:10]:
             display_status = payment_display_status(payment)
-            status_icon = texts.PAYMENT_STATUS_ICONS.get(
-                display_status,
-                "❔",
-            )
+            status_icon = texts.PAYMENT_STATUS_ICONS.get(display_status, "❔")
             date = format_datetime(payment.paid_at or payment.created_at)
             currency = "RUB"
-            rendered += (
-                f"{status_icon} {date} | "
-                f"{payment.amount} {currency}\n"
-            )
+            rendered += f"{status_icon} {date} | {payment.amount} {currency}\n"
 
         if len(payments) > 10:
-            rendered += texts.HISTORY_LIMIT_NOTE.format(
-                count=len(payments),
-            )
+            rendered += texts.HISTORY_LIMIT_NOTE.format(count=len(payments))
 
     await render_hub(
         callback.bot,
@@ -100,27 +89,14 @@ async def show_referral(
     await state.clear()
 
     if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    _, referrals = await get_user_with_referrals(
-        session,
-        db_user.telegram_id,
-    )
-
-    bonus_balance = await get_referral_bonus_balance(
-        session,
-        user_id=db_user.id,
-    )
+    _, referrals = await get_user_with_referrals(session, db_user.telegram_id)
+    bonus_balance = await get_referral_bonus_balance(session, user_id=db_user.id)
 
     bot_info = await callback.bot.get_me()
-    referral_link = (
-        f"https://t.me/{bot_info.username}"
-        f"?start=ref_{db_user.telegram_id}"
-    )
+    referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
 
     invited_count = len(referrals)
     inviter_line = await _get_inviter_line(session, db_user)
@@ -151,10 +127,7 @@ async def show_referrals_list(
     await state.clear()
 
     if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     page = 1
@@ -164,10 +137,7 @@ async def show_referrals_list(
         except (ValueError, IndexError):
             page = 1
 
-    _, referrals = await get_user_with_referrals(
-        session,
-        db_user.telegram_id,
-    )
+    _, referrals = await get_user_with_referrals(session, db_user.telegram_id)
 
     if not referrals:
         rendered = texts.REFERRAL_LIST_EMPTY
@@ -192,9 +162,7 @@ async def show_referrals_list(
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
             rendered += f"\n{idx}. <b>{safe_user}</b> ({created_str})"
 
-        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(
-            count=total_count,
-        )
+        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(count=total_count)
 
     await render_hub(
         callback.bot,
