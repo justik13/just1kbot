@@ -1,3 +1,4 @@
+import re
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -112,27 +113,24 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("download_conf:123", pending_callbacks)
 
     def test_legal_urls_and_faq_match_current_navigation(self):
-        allowed_urls = {
-            "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48",
-            "https://telegra.ph/Politika-konfidencialnosti-07-23-84",
-        }
-        self.assertEqual(texts.TOS_AGREEMENT_URL, next(iter(allowed_urls)))
-        self.assertEqual(
-            texts.PRIVACY_POLICY_URL,
-            "https://telegra.ph/Politika-konfidencialnosti-07-23-84",
-        )
+        tos_url = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"
+        privacy_url = "https://telegra.ph/Politika-konfidencialnosti-07-23-84"
+        allowed_urls = {tos_url, privacy_url}
+
+        self.assertEqual(texts.TOS_AGREEMENT_URL, tos_url)
+        self.assertEqual(texts.PRIVACY_POLICY_URL, privacy_url)
         self.assertNotIn("👤 Профиль", texts.FAQ_TEXT)
         self.assertIn("🤝 Пригласить друга", texts.FAQ_TEXT)
 
         for key in texts.get_all_text_keys():
             value = texts.get_text(key)
-            if not isinstance(value, str) or "telegra.ph/" not in value:
+            if not isinstance(value, str):
                 continue
-            for token in value.split():
-                if "telegra.ph/" not in token:
-                    continue
-                normalized = token.strip("<>\"'()[]{}.,!?\n")
-                self.assertIn(normalized, allowed_urls, msg=f"Unexpected legal URL in {key}: {normalized}")
+            found_urls = re.findall(r"https://telegra\.ph/[A-Za-z0-9_-]+", value)
+            self.assertTrue(
+                set(found_urls).issubset(allowed_urls),
+                msg=f"Unexpected legal URL in {key}: {found_urls}",
+            )
 
     async def test_hub_renders_referrer(self):
         user = SimpleNamespace(
