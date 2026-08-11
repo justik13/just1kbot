@@ -33,19 +33,25 @@ class AccountPurchaseContractTests(unittest.TestCase):
         self.assertEqual(start[0], f"balance_purchase_review:{quote_id}")
         self.assertEqual(confirm[0], f"balance_purchase_confirm:{quote_id}")
         self.assertNotEqual(start[0], confirm[0])
+        self.assertEqual(
+            start[1], f"balance_purchase_cancel:{quote_id}"
+        )
+        self.assertEqual(
+            confirm[1], f"balance_purchase_cancel:{quote_id}"
+        )
         self.assertTrue(all(len(item.encode()) <= 64 for item in start + confirm))
 
-    def test_shortage_flow_has_exact_and_custom_options(self):
+    def test_shortage_back_cancels_purchase_quote(self):
         quote_id = str(uuid.uuid4())
+        markup = get_balance_shortage_keyboard(
+            quote_id, 200, "payment_showcase"
+        )
         self.assertEqual(
-            callbacks(
-                get_balance_shortage_keyboard(
-                    quote_id, 200, "payment_showcase"
-                )
-            )[:2],
+            callbacks(markup),
             [
                 f"bal_short_exact:{quote_id}",
                 f"bal_short_custom:{quote_id}",
+                f"balance_purchase_cancel:{quote_id}",
             ],
         )
 
@@ -86,6 +92,14 @@ class AccountPurchaseContractTests(unittest.TestCase):
         self.assertLess(debit, entitlement)
         self.assertLess(entitlement, activation)
         self.assertLess(activation, consumed)
+
+    def test_cancel_service_is_explicit_and_financially_safe(self):
+        source = inspect.getsource(account_purchase.cancel_account_purchase_quote)
+        self.assertIn('quote.status != "active"', source)
+        self.assertIn('quote.operation_type not in {"purchase", "renew"}', source)
+        self.assertIn('entry_type == "purchase_debit"', source)
+        self.assertIn('quote.status = "cancelled"', source)
+        self.assertIn('quote.diagnostic_reason = "cancelled_by_user"', source)
 
 
 if __name__ == "__main__":
