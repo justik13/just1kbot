@@ -132,10 +132,8 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         inviter_line=inviter_line,
     )
 
-    mtproto_url = None
-    if session is not None:
-        from database.repositories.system_settings_repo import get_system_setting
-        mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+    from database.repositories.system_settings_repo import get_system_setting
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
 
     kb = get_hub_keyboard(
         is_admin=is_admin,
@@ -286,13 +284,18 @@ async def back_to_main_menu(
         )
         return
 
-    await callback.answer(show_alert=False)
-
-    if session is not None:
-        await _ensure_bot_unblocked(
-            session,
-            db_user.telegram_id,
+    if session is None:
+        await callback.answer(
+            texts.ERROR_USER_NOT_FOUND,
+            show_alert=True,
         )
+        return
+
+    await callback.answer(show_alert=False)
+    await _ensure_bot_unblocked(
+        session,
+        db_user.telegram_id,
+    )
 
     text, kb = await _build_hub_text_and_kb(session, db_user)
 
