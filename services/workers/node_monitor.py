@@ -12,7 +12,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Server
 from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,

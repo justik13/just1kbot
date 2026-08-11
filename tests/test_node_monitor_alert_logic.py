@@ -14,7 +14,6 @@ os.environ.setdefault("YOOKASSA_WEBHOOK_PORT", "8080")
 os.environ.setdefault("DOMAIN", "myrealdomain.com")
 os.environ.setdefault("SSL_EMAIL", "admin@myrealdomain.com")
 
-import asyncio
 import time
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,14 +23,9 @@ from aiogram.types import CallbackQuery
 
 from database.models import Server
 from services.workers.node_monitor import (
-    AUTO_DISABLED_CHECK_INTERVAL,
-    PROBLEM_OBSERVATION_TIMEOUT,
-    REQUIRED_STABLE_SUCCESSES,
     ServerHealthState,
     check_node_resources_and_alerts,
-    clear_server_monitor_state,
     get_server_monitor_state,
-    reset_server_monitor_state,
 )
 from bot.handlers.admin.servers.card_routes import dismiss_admin_alert
 
@@ -83,7 +77,7 @@ async def test_healthy_server_no_alerts(mock_bot):
     with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
          patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
          patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
-         patch("services.workers.node_monitor.update_server") as mock_update_server:
+         patch("services.workers.node_monitor.update_server"):
 
         client_instance = mock_client_cls.return_value
         client_instance.healthcheck = AsyncMock(return_value=True)

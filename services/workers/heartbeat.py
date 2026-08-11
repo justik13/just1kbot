@@ -1,4 +1,3 @@
-from bot import texts
 import asyncio
 import logging
 import os
@@ -6,7 +5,6 @@ import time
 from pathlib import Path
 
 from services.amnezia_client import _circuit_breakers
-from config.settings import get_settings
 from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
