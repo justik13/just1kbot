@@ -32,6 +32,22 @@ class ServerUpdateFields(TypedDict, total=False):
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}
 
+# Health fields are updated by the node monitor and can be stale when another
+# worker/admin action changed the same Server between read and write.
+HEALTH_UPDATE_FIELDS = {
+    "is_active",
+    "disabled_reason",
+    "disabled_at",
+    "last_successful_check",
+    "health_state",
+    "problem_started_at",
+    "next_check_at",
+    "consecutive_fails",
+    "consecutive_successes",
+    "recovery_notice_sent",
+    "last_alert_sent_state",
+}
+
 
 async def get_all_servers(
     session: AsyncSession,
@@ -64,7 +80,6 @@ async def get_server_peer_counts(
 
     counts_result = await session.execute(counts_stmt)
     return {row[0]: row[1] for row in counts_result.all()}
-
 
 
 async def get_available_servers(
@@ -151,17 +166,53 @@ async def update_server(
     server: Server,
     **kwargs: ServerUpdateFields,
 ) -> Server:
+    """Update a server without allowing stale health state to win a race.
+
+    The node monitor reads a Server, performs a network healthcheck, and then
+    writes the resulting state in a later transaction.  Another worker or an
+    admin action can change the row during that gap.  Lock and refresh the
+    current row before applying the update; if the caller's health snapshot is
+    stale, keep the newer DB health state instead of overwriting it.
+    """
+    original_health_snapshot = {
+        field: getattr(server, field, None)
+        for field in HEALTH_UPDATE_FIELDS
+    }
+
+    locked_result = await session.execute(
+        select(Server)
+        .where(Server.id == server.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    current_server = locked_result.scalar_one_or_none()
+    if current_server is None:
+        return server
+
+    health_snapshot_is_stale = any(
+        original_health_snapshot[field] != getattr(current_server, field, None)
+        for field in HEALTH_UPDATE_FIELDS
+        if field in kwargs
+    )
+
+    if health_snapshot_is_stale:
+        kwargs = {
+            key: value
+            for key, value in kwargs.items()
+            if key not in HEALTH_UPDATE_FIELDS
+        }
+
     for key, value in kwargs.items():
         if key in PROTECTED_SERVER_FIELDS:
             continue
 
-        if hasattr(server, key):
-            setattr(server, key, value)
+        if hasattr(current_server, key):
+            setattr(current_server, key, value)
 
     await session.flush()
-    await session.refresh(server)
+    await session.refresh(current_server)
 
-    return server
+    return current_server
 
 
 async def delete_server(
