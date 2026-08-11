@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional, TypedDict
 
 from sqlalchemy import func, select
@@ -5,9 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
-
-
-from datetime import datetime
 
 
 class ServerUpdateFields(TypedDict, total=False):
@@ -32,106 +30,47 @@ class ServerUpdateFields(TypedDict, total=False):
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}
 
-# Health fields are updated by the node monitor and can be stale when another
-# worker/admin action changed the same Server between read and write.
-HEALTH_UPDATE_FIELDS = {
-    "is_active",
-    "disabled_reason",
-    "disabled_at",
-    "last_successful_check",
-    "health_state",
-    "problem_started_at",
-    "next_check_at",
-    "consecutive_fails",
-    "consecutive_successes",
-    "recovery_notice_sent",
-    "last_alert_sent_state",
-}
 
-
-async def get_all_servers(
-    session: AsyncSession,
-) -> List[Server]:
+async def get_all_servers(session: AsyncSession) -> List[Server]:
     stmt = select(Server).order_by(Server.name)
     result = await session.execute(stmt)
     return result.scalars().all()
 
 
-async def get_active_servers(
-    session: AsyncSession,
-) -> List[Server]:
+async def get_active_servers(session: AsyncSession) -> List[Server]:
     stmt = select(Server).where(Server.is_active.is_(True)).order_by(Server.name)
-
     result = await session.execute(stmt)
-
     return result.scalars().all()
 
 
-async def get_server_peer_counts(
-    session: AsyncSession,
-) -> dict[int, int]:
-    """
-    Возвращает словарь {server_id: count} с количеством активных профилей из БД.
-    """
-    counts_stmt = select(
-        VPNProfile.server_id,
-        func.count(VPNProfile.id),
-    ).group_by(VPNProfile.server_id)
-
+async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
+    counts_stmt = select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     counts_result = await session.execute(counts_stmt)
     return {row[0]: row[1] for row in counts_result.all()}
 
 
-async def get_available_servers(
-    session: AsyncSession,
-) -> List[Server]:
-    """
-    Возвращает активные серверы, на которых есть свободные слоты.
-
-    Важно:
-    - сначала используем реальное количество пиров из slots_cache,
-      если оно доступно;
-    - если реальных данных нет, используем количество профилей в БД.
-
-    Это уменьшает риск показать пользователю сервер как свободный,
-    когда API реально уже заполнен.
-    """
+async def get_available_servers(session: AsyncSession) -> List[Server]:
     servers = await get_active_servers(session)
-
     if not servers:
         return []
 
-    counts_stmt = select(
-        VPNProfile.server_id,
-        func.count(VPNProfile.id),
-    ).group_by(VPNProfile.server_id)
-
+    counts_stmt = select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     counts_result = await session.execute(counts_stmt)
-
     db_counts = {row[0]: row[1] for row in counts_result.all()}
 
     available: List[Server] = []
-
     for server in servers:
         real_count = get_cached_peer_count(server.id)
-
         if real_count is None:
             real_count = db_counts.get(server.id, 0)
-
         if real_count < server.max_clients:
             available.append(server)
-
     return available
 
 
-async def get_server_by_id(
-    session: AsyncSession,
-    server_id: int,
-) -> Optional[Server]:
+async def get_server_by_id(session: AsyncSession, server_id: int) -> Optional[Server]:
     stmt = select(Server).where(Server.id == server_id)
-
     result = await session.execute(stmt)
-
     return result.scalar_one_or_none()
 
 
@@ -152,12 +91,9 @@ async def create_server(
         protocol=protocol,
         max_clients=max_clients,
     )
-
     session.add(server)
-
     await session.flush()
     await session.refresh(server)
-
     return server
 
 
@@ -166,101 +102,80 @@ async def update_server(
     server: Server,
     **kwargs: ServerUpdateFields,
 ) -> Server:
-    """Update a server without allowing stale health state to win a race.
+    """Update ordinary server/admin fields without imposing monitor locks."""
+    for key, value in kwargs.items():
+        if key in PROTECTED_SERVER_FIELDS:
+            continue
+        if hasattr(server, key):
+            setattr(server, key, value)
 
-    The node monitor reads a Server, performs a network healthcheck, and then
-    writes the resulting state in a later transaction.  Another worker or an
-    admin action can change the row during that gap.  Lock and refresh the
-    current row before applying the update; if the caller's health snapshot is
-    stale, keep the newer DB health state instead of overwriting it.
+    await session.flush()
+    await session.refresh(server)
+    return server
+
+
+async def update_server_health(
+    session: AsyncSession,
+    server: Server,
+    expected: dict[str, object],
+    **kwargs: ServerUpdateFields,
+) -> Optional[Server]:
+    """Atomically apply a monitor snapshot only if it is still current.
+
+    The lock is deliberately isolated to the monitor path. Ordinary admin CRUD
+    must not acquire a row lock merely because this repository is shared with
+    the node monitor.
     """
-    original_health_snapshot = {
-        field: getattr(server, field, None)
-        for field in HEALTH_UPDATE_FIELDS
-    }
-
-    locked_result = await session.execute(
+    result = await session.execute(
         select(Server)
         .where(Server.id == server.id)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    current_server = locked_result.scalar_one_or_none()
+    current_server = result.scalar_one_or_none()
     if current_server is None:
-        return server
+        return None
 
-    health_snapshot_is_stale = any(
-        original_health_snapshot[field] != getattr(current_server, field, None)
-        for field in HEALTH_UPDATE_FIELDS
-        if field in kwargs
-    )
-
-    if health_snapshot_is_stale:
-        kwargs = {
-            key: value
-            for key, value in kwargs.items()
-            if key not in HEALTH_UPDATE_FIELDS
-        }
+    if any(getattr(current_server, field, None) != value for field, value in expected.items()):
+        return current_server
 
     for key, value in kwargs.items():
         if key in PROTECTED_SERVER_FIELDS:
             continue
-
         if hasattr(current_server, key):
             setattr(current_server, key, value)
 
     await session.flush()
     await session.refresh(current_server)
-
     return current_server
 
 
-async def delete_server(
-    session: AsyncSession,
-    server: Server,
-) -> None:
+async def delete_server(session: AsyncSession, server: Server) -> None:
     await session.delete(server)
     await session.flush()
 
 
-async def get_total_free_ips(
-    session: AsyncSession,
-) -> int:
+async def get_total_free_ips(session: AsyncSession) -> int:
     active_servers = await get_active_servers(session)
-
     if not active_servers:
         return 0
 
-    counts_stmt = select(
-        VPNProfile.server_id,
-        func.count(VPNProfile.id),
-    ).group_by(VPNProfile.server_id)
-
+    counts_stmt = select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     counts_result = await session.execute(counts_stmt)
-
     db_counts = {row[0]: row[1] for row in counts_result.all()}
 
     total_free = 0
-
     for server in active_servers:
         real_count = get_cached_peer_count(server.id)
-
         if real_count is None:
             real_count = db_counts.get(server.id, 0)
-
-        free_slots = server.max_clients - real_count
-        total_free += max(0, free_slots)
-
+        total_free += max(0, server.max_clients - real_count)
     return total_free
 
 
-async def get_server_count(
-    session: AsyncSession,
-) -> int:
+async def get_server_count(session: AsyncSession) -> int:
     stmt = select(func.count(Server.id))
-
     result = await session.execute(stmt)
-
     return result.scalar_one()
 
 
@@ -270,37 +185,22 @@ async def get_servers_paginated(
     per_page: int = 10,
 ) -> list[Server]:
     offset = (page - 1) * per_page
-
     result = await session.execute(
         select(Server).order_by(Server.name).offset(offset).limit(per_page)
     )
-
     return result.scalars().all()
 
 
-async def get_server_by_api_url(
-    session: AsyncSession,
-    api_url: str,
-) -> Optional[Server]:
+async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Optional[Server]:
     stmt = select(Server).where(Server.api_url == api_url)
-
     result = await session.execute(stmt)
-
     return result.scalar_one_or_none()
 
 
-async def delete_profiles_by_server_id(
-    session: AsyncSession,
-    server_id: int,
-) -> int:
+async def delete_profiles_by_server_id(session: AsyncSession, server_id: int) -> int:
     from sqlalchemy import delete as sql_delete
 
-    stmt = sql_delete(VPNProfile).where(
-        VPNProfile.server_id == server_id,
-    )
-
+    stmt = sql_delete(VPNProfile).where(VPNProfile.server_id == server_id)
     result = await session.execute(stmt)
-
     await session.flush()
-
     return result.rowcount
