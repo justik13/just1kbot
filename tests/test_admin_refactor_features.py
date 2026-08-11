@@ -56,14 +56,19 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         settings_obj = MagicMock()
         settings_obj.ADMIN_IDS = [999]
 
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.problem_started_at = None
+        server.next_check_at = None
+
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
-            patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
-            patch("database.repositories.servers_repo.get_active_servers", AsyncMock(return_value=[server])),
+            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server])),
+            patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
             patch("config.settings.get_settings", return_value=settings_obj),
-            patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
         ):
             await check_node_resources_and_alerts(bot)
 
@@ -79,6 +84,11 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         server.name = "NL-1"
         server.api_url = "http://127.0.0.1:3001"
         server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.problem_started_at = None
+        server.next_check_at = None
 
         client_mock = AsyncMock()
         client_mock.healthcheck = AsyncMock(return_value=False)
@@ -91,19 +101,29 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
-            patch("services.workers.node_monitor.get_active_servers", AsyncMock(return_value=[server])),
-            patch("database.repositories.servers_repo.get_active_servers", AsyncMock(return_value=[server])),
+            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server])),
+            patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
             patch("services.workers.node_monitor.get_settings", return_value=settings_obj),
             patch("config.settings.get_settings", return_value=settings_obj),
-            patch.dict("services.workers.node_monitor._last_alert_time", {}, clear=True),
         ):
+            # Tick 1: FAIL #1 -> WAITING_CONFIRMATION
+            await check_node_resources_and_alerts(bot)
+            bot.send_message.assert_not_called()
+
+            # Fast-forward 30s confirmation window
+            from services.workers.node_monitor import get_server_monitor_state
+            import time
+            st = get_server_monitor_state(2)
+            st.next_check_at = time.monotonic() - 1.0
+
+            # Tick 2: FAIL #2 -> PROBLEM alert
             await check_node_resources_and_alerts(bot)
 
             bot.send_message.assert_called_once()
             call_kwargs = bot.send_message.call_args[1]
             self.assertEqual(call_kwargs["chat_id"], 888)
-            self.assertIn("VPN-нода недоступна", call_kwargs["text"])
+            self.assertIn("Проблема с VPN-сервером", call_kwargs["text"])
 
 
 

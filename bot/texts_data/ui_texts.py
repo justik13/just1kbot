@@ -108,7 +108,7 @@ TEXTS = {
     # bot/handlers/admin/payments.py:50
     'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L50_1': '↩️ Вернуть доступный остаток',
     # bot/handlers/admin/payments.py:56
-    'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L56_1': '👤 Профиль клиента',
+    'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L56_1': '👤 Карточка клиента',
     # bot/handlers/admin/payments.py:61
     'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L61_1': '← К списку платежей',
     # bot/handlers/admin/payments.py:105
@@ -166,7 +166,7 @@ TEXTS = {
     # bot/handlers/admin/servers/delete_routes.py:134
     'UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L134_1': 'Некорректный запрос',
     # bot/handlers/admin/servers/delete_routes.py:177
-    'UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L177_1': 'На сервере есть незавершённое создание VPN-клиента. Дождитесь reconciliation и повторите удаление.',
+    'UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L177_1': 'На сервере есть незавершённое создание клиента. Дождитесь reconciliation и повторите удаление.',
     # bot/handlers/admin/servers/delete_routes.py:216
     'UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L216_1': '✅ Сервер {value_0} удалён ({value_1} устр.)',
     # bot/handlers/admin/servers/edit_routes.py:50
@@ -536,8 +536,6 @@ TEXTS = {
     'UI_BOT_KEYBOARDS_COMMON_L23_1': '🔌 Подключения',
     # bot/keyboards/common.py:28
     'UI_BOT_KEYBOARDS_COMMON_L28_1': '💰 Баланс',
-    # bot/keyboards/common.py:33
-    'UI_BOT_KEYBOARDS_COMMON_L33_1': '👤 Профиль',
     # bot/keyboards/common.py:38
     'UI_BOT_KEYBOARDS_COMMON_L38_1': '💬 Поддержка',
     # bot/keyboards/common.py:44
@@ -613,5 +611,5 @@ TEXTS = {
     # services/workers/notifications.py:420
     'UI_SERVICES_WORKERS_NOTIFICATIONS_L420_1': '✅ Прочитано (убрать)',
     # services/workers/traffic.py:319
-    'UI_SERVICES_WORKERS_TRAFFIC_L319_1': '👤 Профиль пользователя',
+    'UI_SERVICES_WORKERS_TRAFFIC_L319_1': '👤 Карточка пользователя',
 }

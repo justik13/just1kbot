@@ -1,4 +1,3 @@
-from bot import texts
 import asyncio
 import logging
 import os
@@ -6,7 +5,6 @@ import time
 from pathlib import Path
 
 from services.amnezia_client import _circuit_breakers
-from config.settings import get_settings
 from utils.logging_security import safe_url_target
 
 logger = logging.getLogger("BackgroundWorker")
@@ -24,10 +22,6 @@ def get_heartbeat_file() -> Path:
 
 HEARTBEAT_FILE = get_heartbeat_file()
 HEARTBEAT_INTERVAL = 60.0
-
-# Отслеживание серверов с активным алертом для исключения спама
-_active_open_cb_alerts: set[str] = set()
-_bot_ref = None
 
 
 async def heartbeat_loop(
@@ -66,85 +60,16 @@ async def heartbeat_loop(
 
 
 async def _check_circuit_breakers():
-    from database.connection import session_scope
-    from database.repositories.servers_repo import get_server_by_api_url
-
-    settings = get_settings()
-
     for api_url, cb in list(_circuit_breakers.items()):
         safe_target = safe_url_target(api_url)
-
         if cb.is_open:
-            if api_url in _active_open_cb_alerts:
-                continue
-
-            server_name = safe_target
-            try:
-                async with session_scope() as session:
-                    server = await get_server_by_api_url(session, api_url)
-                    if server:
-                        server_name = server.name
-            except Exception:
-                pass
-
-            alert_msg = (
-                texts.RUNTIME_SERVICES_WORKERS_HEARTBEAT_L99_1.format(
-                    value_0=server_name,
-                    value_1=safe_target,
-                    value_2=cb.recovery_timeout,
-                )
+            logger.warning(
+                "CircuitBreaker OPEN for server endpoint '%s' (recovery_timeout=%.0fs).",
+                safe_target,
+                cb.recovery_timeout,
             )
-
-            if _bot_ref is not None:
-                for admin_id in settings.ADMIN_IDS:
-                    try:
-                        await _bot_ref.send_message(admin_id, alert_msg, parse_mode="HTML")
-                    except Exception as e:
-                        logger.warning("Failed to send CB alert to admin %s: %s", admin_id, e)
-            else:
-                logger.warning(
-                    "CircuitBreaker OPEN for server '%s' (%s). bot_ref is None.",
-                    server_name,
-                    safe_target,
-                )
-
-            _active_open_cb_alerts.add(api_url)
         else:
-            if api_url in _active_open_cb_alerts:
-                _active_open_cb_alerts.remove(api_url)
-
-                server_name = safe_target
-                try:
-                    async with session_scope() as session:
-                        server = await get_server_by_api_url(session, api_url)
-                        if server:
-                            server_name = server.name
-                except Exception:
-                    pass
-
-                recovery_msg = (
-                    f"✅ <b>Связь с сервером Amnezia восстановлена!</b>\n"
-                    f"🌍 <b>{server_name}</b>\n"
-                    f"🔗 <code>{safe_target}</code>"
-                )
-
-                if _bot_ref is not None:
-                    for admin_id in settings.ADMIN_IDS:
-                        try:
-                            await _bot_ref.send_message(admin_id, recovery_msg, parse_mode="HTML")
-                        except Exception as e:
-                            logger.warning("Failed to send CB recovery alert to admin %s: %s", admin_id, e)
-                logger.info("CircuitBreaker recovered for server '%s' (%s)", server_name, safe_target)
-
-
-def set_bot_ref(bot):
-    global _bot_ref
-
-    _bot_ref = bot
-
-
-def get_bot_ref():
-    return _bot_ref
+            logger.debug("CircuitBreaker CLOSED / healthy for server endpoint '%s'", safe_target)
 
 
 def _write_heartbeat(final: bool = False):

@@ -266,6 +266,18 @@ class Server(Base):
     max_clients: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    disabled_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_successful_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    health_state: Mapped[str] = mapped_column(String(30), default="ONLINE", server_default="ONLINE")
+    problem_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consecutive_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    consecutive_successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    recovery_notice_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    last_alert_sent_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
