@@ -1,6 +1,5 @@
 from .common import get_hub_keyboard, get_back_button
 from .user import (
-    get_profile_keyboard,
     get_history_keyboard,
     get_referral_keyboard,
     get_referrals_list_keyboard,
@@ -60,7 +59,6 @@ __all__ = [
     "get_hub_keyboard",
     "get_back_button",
     # user
-    "get_profile_keyboard",
     "get_history_keyboard",
     "get_referral_keyboard",
     "get_referrals_list_keyboard",
@@ -112,4 +110,3 @@ __all__ = [
     "get_broadcast_result_keyboard",
     "get_broadcast_close_keyboard",
 ]
-
