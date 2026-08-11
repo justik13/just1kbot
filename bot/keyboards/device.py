@@ -8,7 +8,6 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
 
     if config_ready:
         builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L14_1, callback_data=f"show_config:{profile_id}")
-        builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L15_1, callback_data=f"download_conf:{profile_id}")
 
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_DEVICE_L9_1,
@@ -33,7 +32,7 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
     )
 
     if config_ready:
-        builder.adjust(1, 1, 1, 1, 1, 2)
+        builder.adjust(1, 1, 1, 1, 2)
     else:
         builder.adjust(1, 1, 1, 2)
 

@@ -10,14 +10,14 @@ TEXTS = {
 
     "HUB_HEADER": """🏠 <b>Главное меню</b>
 
-👋 Привет, <b>{name}</b>!
+👋 Привет, <b>{name}</b>! (ID: <code>{telegram_id}</code>)
 
 <b>📊 Статус подписки:</b> {status}
 <b>⏳ Действует до:</b> {valid_until} ({days_left})
 <b>📱 Подключено устройств:</b> {devices_count}/{device_limit}
 
 <b>💰 Баланс:</b> {real_balance} ₽
-<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
+<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽{inviter_info}
 
 Выберите нужный раздел:""",
 

@@ -147,7 +147,7 @@ async def _render_profile(
     )
 
 
-@router.callback_query(F.data == "menu_profile")
+@router.callback_query(F.data.in_({"menu_profile", "back_to_profile"}))
 async def hub_menu_profile(
     callback: CallbackQuery,
     state: FSMContext,
@@ -157,42 +157,9 @@ async def hub_menu_profile(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
-        return
-
-    await _render_profile(
-        callback.message,
-        db_user,
-        session,
-    )
-
-
-@router.callback_query(F.data == "back_to_profile")
-async def back_to_profile(
-    callback: CallbackQuery,
-    state: FSMContext,
-    session: AsyncSession,
-    db_user: User | None = None,
-):
-    await callback.answer(show_alert=False)
-    await state.clear()
-
-    if not db_user:
-        await callback.answer(
-            texts.ERROR_USER_NOT_FOUND,
-            show_alert=True,
-        )
-        return
-
-    await _render_profile(
-        callback.message,
-        db_user,
-        session,
-    )
+    if db_user:
+        from bot.handlers.start import back_to_main_menu
+        await back_to_main_menu(callback, state, db_user=db_user, session=session)
 
 
 @router.callback_query(F.data == "user_history")

@@ -86,8 +86,7 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             for row in rendered_keyboards[0].inline_keyboard
             for button in row
         }
-        self.assertIn("show_config:1", callback_data)
-        self.assertIn("download_conf:1", callback_data)
+        self.assertIn("support_help:device_1", callback_data)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,17 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else "—"
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else "0 дней"
 
+    inviter_info = ""
+    if db_user.referred_by:
+        from database.repositories.users_repo import get_user_by_telegram_id
+        referrer = await get_user_by_telegram_id(session, db_user.referred_by)
+        if referrer:
+            r_name = safe(referrer.first_name) if referrer.first_name else ""
+            r_user = f" (@{safe(referrer.username)})" if referrer.username else ""
+            inviter_info = f"\n<b>🤝 Вас пригласил:</b> {r_name}{r_user} (ID: <code>{referrer.telegram_id}</code>)"
+        else:
+            inviter_info = f"\n<b>🤝 Вас пригласил:</b> ID <code>{db_user.referred_by}</code>"
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
@@ -116,6 +127,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         device_limit=db_user.device_limit or 0,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
+        inviter_info=inviter_info,
     )
 
     mtproto_url = None
@@ -130,6 +142,11 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     )
 
     return text, kb
+
+
+@router.callback_query(F.data == "white_internet")
+async def show_white_internet_notice(callback: CallbackQuery) -> None:
+    await callback.answer("🚧 Раздел «Белый Интернет» находится в разработке", show_alert=True)
 
 
 @router.message(CommandStart())
