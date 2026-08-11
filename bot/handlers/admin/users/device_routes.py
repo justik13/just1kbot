@@ -12,7 +12,6 @@ from bot.keyboards.admin.users import (
     get_admin_user_devices_keyboard,
 )
 from database.repositories.profiles_repo import get_profile_by_id, get_user_profiles
-from database.repositories.servers_repo import get_server_by_id
 from services.device_service import DeviceService
 from utils.admin import is_admin
 from utils.callbacks import (
@@ -20,6 +19,8 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
+from utils.datetime_helpers import now_utc
+from utils.formatters import format_admin_breadcrumbs, format_datetime, format_traffic
 from utils.telegram import safe
 
 from .common import _get_user_with_profiles
@@ -60,9 +61,6 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
-    from utils.formatters import format_admin_breadcrumbs, format_traffic, format_datetime
-    from utils.datetime_helpers import now_utc
-
     header = format_admin_breadcrumbs("👥 Пользователи", f"ID {telegram_id}", "📱 Устройства")
     now = now_utc()
 
@@ -85,17 +83,21 @@ async def admin_user_devices(
             server_name = safe(server.name) if server else "Неизвестный сервер"
             server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
 
-            # Статус по last_handshake_at
-            last_hs = getattr(profile, "last_handshake_at", None) or getattr(profile, "updated_at", None)
+            # VPNProfile does not have a last_handshake_at column. The traffic
+            # worker persists the provider's lastHandshake/lastSeen/updatedAt
+            # into last_connected, so use that field as the only available
+            # activity timestamp instead of silently treating updated_at as a
+            # handshake signal.
+            last_activity = getattr(profile, "last_connected", None)
             is_online = False
-            if last_hs:
-                if last_hs.tzinfo is None:
-                    last_hs = last_hs.replace(tzinfo=now.tzinfo)
-                delta_sec = (now - last_hs).total_seconds()
-                if delta_sec <= 180:  # Рукопожатие за последние 3 минуты
+            if last_activity:
+                if last_activity.tzinfo is None:
+                    last_activity = last_activity.replace(tzinfo=now.tzinfo)
+                delta_sec = (now - last_activity).total_seconds()
+                if 0 <= delta_sec <= 180:
                     is_online = True
 
-            status_hs = "🟢 <b>В сети (онлайн)</b>" if is_online else "🔴 <b>Офлайн</b>"
+            status_hs = "🟢 <b>В сети (активность ≤ 3 мин)</b>" if is_online else "🔴 <b>Офлайн</b>"
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
             last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было подключения"
 
@@ -162,7 +164,18 @@ async def admin_delete_device_confirm(
         )
         return
 
-    server = await get_server_by_id(session, profile.server_id)
+    # The Telegram user id is part of the callback contract. Do not trust it
+    # merely for navigation: verify that the selected profile actually belongs
+    # to that user before exposing or deleting the device.
+    user = await _get_user_with_profiles(session, telegram_id)
+    if not user or profile.user_id != user.id:
+        await callback.answer(
+            texts.ERROR_PROFILE_NOT_FOUND,
+            show_alert=True,
+        )
+        return
+
+    server = getattr(profile, "server", None)
     flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L135_1
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L136_1
 
@@ -228,6 +241,16 @@ async def admin_delete_device_apply(
     try:
         profile = await get_profile_by_id(session, profile_id)
         if not profile:
+            await callback.answer(
+                texts.ERROR_PROFILE_NOT_FOUND,
+                show_alert=True,
+            )
+            return
+
+        # Re-check ownership at the destructive boundary. A Telegram callback
+        # can be forged or stale, so the confirmation step is not sufficient.
+        user = await _get_user_with_profiles(session, telegram_id)
+        if not user or profile.user_id != user.id:
             await callback.answer(
                 texts.ERROR_PROFILE_NOT_FOUND,
                 show_alert=True,
