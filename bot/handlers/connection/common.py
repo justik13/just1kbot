@@ -161,10 +161,13 @@ async def _build_connections_screen(
 
             rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})\n   └ 📊 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
             labels = {
-                "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1, "pending_update": texts.PROVISIONING_UPDATING,
-                "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1, "create_failed": texts.PROVISIONING_CREATE_FAILED,
+                "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1,
+                "pending_update": texts.PROVISIONING_UPDATING,
+                "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1,
+                "create_failed": texts.PROVISIONING_CREATE_FAILED,
                 "create_cleanup_pending": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L173_1,
-                "update_failed": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L174_1, "delete_failed": texts.PROVISIONING_DELETE_FAILED,
+                "update_failed": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L174_1,
+                "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
                 rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
@@ -227,10 +230,6 @@ async def _render_connections(
                 text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L223_1,
                 callback_data="menu_buy",
             )
-            builder.button(
-                text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L227_1,
-                callback_data="back_to_main_menu",
-            )
             builder.adjust(1)
 
             await render_hub(
@@ -265,12 +264,6 @@ async def _render_connections(
         session,
         read_only=False,
     )
-
-    builder.button(
-        text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L266_1,
-        callback_data="back_to_main_menu",
-    )
-    builder.adjust(1)
 
     await render_hub(
         target.bot,
