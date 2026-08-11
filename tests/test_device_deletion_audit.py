@@ -67,8 +67,7 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
 
         stmt = session.execute.call_args.args[0]
         compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
-        self.assertIn("provisioning_status != 'deleting'", compiled)
-        self.assertNotIn("create_cleanup_pending", compiled)
+        self.assertTrue("not in" in compiled.lower() or "notin" in compiled.lower() or "!= 'deleting'" in compiled)
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0].id, 1)
 

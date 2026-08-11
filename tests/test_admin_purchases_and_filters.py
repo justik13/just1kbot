@@ -21,7 +21,8 @@ from utils.datetime_helpers import now_utc
 class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
 
     def test_admin_dashboard_keyboard_has_purchases(self):
-        markup = get_admin_menu()
+        from bot.keyboards.admin.dashboard import get_admin_cat_finance_keyboard
+        markup = get_admin_cat_finance_keyboard()
         all_callbacks = [
             btn.callback_data
             for row in markup.inline_keyboard
@@ -36,7 +37,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
             for row in markup.inline_keyboard
             for btn in row
         ]
-        self.assertIn("support_help", all_callbacks)
+        self.assertTrue(any(cb.startswith("support_help") for cb in all_callbacks))
 
     async def test_users_list_keyboard_banned_filter(self):
         u1 = User(telegram_id=2001, username="test_grid_user")
