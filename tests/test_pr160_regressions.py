@@ -112,16 +112,27 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("download_conf:123", pending_callbacks)
 
     def test_legal_urls_and_faq_match_current_navigation(self):
-        self.assertEqual(
-            texts.TOS_AGREEMENT_URL,
+        allowed_urls = {
             "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48",
-        )
+            "https://telegra.ph/Politika-konfidencialnosti-07-23-84",
+        }
+        self.assertEqual(texts.TOS_AGREEMENT_URL, next(iter(allowed_urls)))
         self.assertEqual(
             texts.PRIVACY_POLICY_URL,
             "https://telegra.ph/Politika-konfidencialnosti-07-23-84",
         )
         self.assertNotIn("👤 Профиль", texts.FAQ_TEXT)
         self.assertIn("🤝 Пригласить друга", texts.FAQ_TEXT)
+
+        for key in texts.get_all_text_keys():
+            value = texts.get_text(key)
+            if not isinstance(value, str) or "telegra.ph/" not in value:
+                continue
+            for token in value.split():
+                if "telegra.ph/" not in token:
+                    continue
+                normalized = token.strip("<>\"'()[]{}.,!?\n")
+                self.assertIn(normalized, allowed_urls, msg=f"Unexpected legal URL in {key}: {normalized}")
 
     async def test_hub_renders_referrer(self):
         user = SimpleNamespace(
