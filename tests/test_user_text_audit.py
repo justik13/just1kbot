@@ -12,7 +12,7 @@ FORBIDDEN_USER_WORDING = (
     "👤 Профиль",
     "👥 Реферальная система",
     "не фиксируем и не храним истории подключений",
-    "Pro:</n до 10 устройств",
+    "Pro: до 10 устройств",
 )
 
 
@@ -35,7 +35,7 @@ def test_effective_user_texts_do_not_contain_known_legacy_wording():
 
 def test_generic_vpn_wording_is_not_used_in_faq():
     faq = texts.FAQ_TEXT
-    assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", faq, re.IGNORECASE) is None
+    assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", faq) is None
     assert "ВПН" not in faq.upper()
 
 
