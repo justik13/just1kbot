@@ -47,6 +47,13 @@ def get_hub_keyboard(
             url=mtproto_url,
         )
 
+    # White Internet stays directly above the admin-only action so the
+    # admin action remains the final button for administrators.
+    builder.button(
+        text="⚪️ Белый Интернет",
+        callback_data="white_internet",
+    )
+
     if is_admin:
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_COMMON_L44_1,
@@ -56,11 +63,11 @@ def get_hub_keyboard(
     sizes = [1, 2, 2]
     if mtproto_url:
         sizes.append(1)
+    sizes.append(1)  # White Internet
     if is_admin:
-        sizes.append(1)
+        sizes.append(1)  # Admin
 
     builder.adjust(*sizes)
-
 
     return builder.as_markup()
 

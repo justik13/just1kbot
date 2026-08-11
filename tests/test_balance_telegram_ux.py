@@ -63,9 +63,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
 
     def test_balance_history_keyboard_pagination(self):
         from bot.keyboards import get_balance_history_keyboard
-        # Single page -> only back button
         self.assertEqual(callbacks(get_balance_history_keyboard(1, 1)), ["menu_balance"])
-        # Multiple pages -> back, indicator, forward, back to menu
         self.assertEqual(
             callbacks(get_balance_history_keyboard(1, 3)),
             ["ignore", "ignore", "balance_history:2", "menu_balance"],
@@ -84,7 +82,6 @@ class BalanceTelegramUXTests(unittest.TestCase):
         )
 
     def test_amount_keyboard_always_has_custom_amount(self):
-
         values = callbacks(get_balance_amounts_keyboard([149, 499]))
         self.assertEqual(
             values,
@@ -99,25 +96,20 @@ class BalanceTelegramUXTests(unittest.TestCase):
     def test_topup_controls_match_hidden_payment_semantics(self):
         waiting = callbacks(get_topup_waiting_keyboard(42))
         ready = callbacks(get_topup_payment_keyboard("https://example.com", 42))
-        # "Return later" button removed — it caused UX confusion.
-        # Waiting keyboard: Check + Cancel
-        expected_waiting = [
+        expected = [
             "balance_check:42",
             "balance_cancel:42",
         ]
-        # Payment keyboard: URL button (not a callback) + Check + Cancel
-        expected_ready = [
-            "balance_check:42",
-            "balance_cancel:42",
-        ]
-        self.assertEqual(waiting, expected_waiting)
-        self.assertEqual(ready, expected_ready)
+        self.assertEqual(waiting, expected)
+        self.assertEqual(ready, expected)
 
-    def test_main_and_profile_templates_require_visible_balance(self):
-        for key in ("HUB_HEADER", "PROFILE_TEXT_ACTIVE", "PROFILE_TEXT_INACTIVE"):
-            text = get_text(key)
-            self.assertTrue("{balance}" in text or "{real_balance}" in text)
+    def test_main_hub_template_requires_visible_balance(self):
+        text = get_text("HUB_HEADER")
+        self.assertTrue("{real_balance}" in text or "{balance}" in text)
 
+    def test_obsolete_profile_text_aliases_are_removed(self):
+        self.assertIsNone(get_text("PROFILE_TEXT_ACTIVE"))
+        self.assertIsNone(get_text("PROFILE_TEXT_INACTIVE"))
 
     def test_payment_url_delivery_has_durable_marker(self):
         self.assertIn("payment_url_notified_at", Payment.__table__.c)
@@ -139,16 +131,15 @@ class BalanceTelegramUXTests(unittest.TestCase):
             (Path(__file__).parents[1] / "services" / "payment_service").exists()
         )
 
+
 class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_and_render_topup_handles_callback_and_none_targets(self):
         from unittest.mock import AsyncMock, MagicMock
         from aiogram.types import CallbackQuery
         from bot.handlers.payment.balance_routes import _create_and_render_topup
 
-        # target is None
         await _create_and_render_topup(None, MagicMock(), MagicMock(), 100)
 
-        # target is CallbackQuery with None message
         cb = MagicMock(spec=CallbackQuery)
         cb.bot = MagicMock()
         cb.bot.get_me = AsyncMock(return_value=MagicMock(username="test"))

@@ -106,6 +106,19 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else "—"
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else "0 дней"
 
+    inviter_line = ""
+    if db_user.referred_by:
+        referrer = await get_user_by_telegram_id(session, db_user.referred_by)
+        if referrer:
+            ref_name = safe(referrer.first_name) if referrer.first_name else ""
+            ref_username = f" (@{safe(referrer.username)})" if referrer.username else ""
+            if ref_name or ref_username:
+                inviter_line = f"\n🤝 Вас пригласил: {ref_name}{ref_username} (ID: <code>{referrer.telegram_id}</code>)"
+            else:
+                inviter_line = f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
+        else:
+            inviter_line = f"\n🤝 Вас пригласил: ID <code>{db_user.referred_by}</code>"
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
@@ -116,12 +129,11 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         device_limit=db_user.device_limit or 0,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
+        inviter_line=inviter_line,
     )
 
-    mtproto_url = None
-    if session is not None:
-        from database.repositories.system_settings_repo import get_system_setting
-        mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+    from database.repositories.system_settings_repo import get_system_setting
+    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
 
     kb = get_hub_keyboard(
         is_admin=is_admin,
@@ -272,13 +284,18 @@ async def back_to_main_menu(
         )
         return
 
-    await callback.answer(show_alert=False)
-
-    if session is not None:
-        await _ensure_bot_unblocked(
-            session,
-            db_user.telegram_id,
+    if session is None:
+        await callback.answer(
+            texts.ERROR_USER_NOT_FOUND,
+            show_alert=True,
         )
+        return
+
+    await callback.answer(show_alert=False)
+    await _ensure_bot_unblocked(
+        session,
+        db_user.telegram_id,
+    )
 
     text, kb = await _build_hub_text_and_kb(session, db_user)
 
@@ -289,7 +306,6 @@ async def back_to_main_menu(
         kb,
         trigger_message_id=callback.message.message_id,
     )
-
 
 
 @router.callback_query(F.data == "ignore")

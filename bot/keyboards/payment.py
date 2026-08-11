@@ -242,27 +242,33 @@ def get_topup_payment_keyboard(
 
 
 def get_balance_purchase_start_keyboard(
-    quote_public_id: str, back_callback: str
+    quote_public_id: str, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L206_1,
         callback_data=f"balance_purchase_review:{quote_public_id}",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(
+        text=texts.BUTTON_BACK,
+        callback_data=f"balance_purchase_cancel:{quote_public_id}",
+    )
     builder.adjust(1)
     return builder.as_markup()
 
 
 def get_balance_purchase_confirm_keyboard(
-    quote_public_id: str, back_callback: str
+    quote_public_id: str, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L219_1,
         callback_data=f"balance_purchase_confirm:{quote_public_id}",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(
+        text=texts.BUTTON_BACK,
+        callback_data=f"balance_purchase_cancel:{quote_public_id}",
+    )
     builder.adjust(1)
     return builder.as_markup()
 
@@ -305,7 +311,7 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_balance_shortage_keyboard(
-    quote_public_id: str, exact_amount: int, back_callback: str
+    quote_public_id: str, exact_amount: int, _back_callback: str | None = None
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -316,7 +322,10 @@ def get_balance_shortage_keyboard(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L273_1,
         callback_data=f"bal_short_custom:{quote_public_id}",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(
+        text=texts.BUTTON_BACK,
+        callback_data=f"balance_purchase_cancel:{quote_public_id}",
+    )
     builder.adjust(1)
     return builder.as_markup()
 
