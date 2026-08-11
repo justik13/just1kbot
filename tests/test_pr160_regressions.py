@@ -63,35 +63,135 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
             show_alert=True,
         )
 
-    def test_hub_keyboard_all_variants_have_white_internet_last(self):
+    def test_hub_keyboard_admin_and_non_admin_access(self):
         for is_active in (False, True):
-            for is_admin in (False, True):
-                for mtproto_url in (None, "https://example.test/mtproto"):
-                    keyboard = get_hub_keyboard(
-                        is_admin=is_admin,
-                        is_active=is_active,
-                        mtproto_url=mtproto_url,
-                    )
-                    buttons = [
-                        button
-                        for row in keyboard.inline_keyboard
-                        for button in row
-                    ]
-                    callbacks = [
-                        button.callback_data
-                        for button in buttons
-                        if button.callback_data is not None
-                    ]
+            for mtproto_url in (None, "https://example.test/mtproto"):
+                admin_keyboard = get_hub_keyboard(
+                    is_admin=True,
+                    is_active=is_active,
+                    mtproto_url=mtproto_url,
+                )
+                admin_buttons = [
+                    button
+                    for row in admin_keyboard.inline_keyboard
+                    for button in row
+                ]
+                admin_callbacks = [
+                    button.callback_data
+                    for button in admin_buttons
+                    if button.callback_data is not None
+                ]
+                self.assertIn("menu_admin", admin_callbacks)
+                self.assertEqual(
+                    admin_callbacks[-2:],
+                    ["white_internet", "menu_admin"],
+                )
+                self.assertEqual(
+                    len(admin_callbacks),
+                    len(set(admin_callbacks)),
+                )
 
-                    self.assertEqual(callbacks[-1], "white_internet")
-                    self.assertEqual(len(callbacks), len(set(callbacks)))
+                user_keyboard = get_hub_keyboard(
+                    is_admin=False,
+                    is_active=is_active,
+                    mtproto_url=mtproto_url,
+                )
+                user_buttons = [
+                    button
+                    for row in user_keyboard.inline_keyboard
+                    for button in row
+                ]
+                user_callbacks = [
+                    button.callback_data
+                    for button in user_buttons
+                    if button.callback_data is not None
+                ]
+                self.assertNotIn("menu_admin", user_callbacks)
+                self.assertEqual(user_callbacks[-1], "white_internet")
+                self.assertEqual(
+                    len(user_callbacks),
+                    len(set(user_callbacks)),
+                )
 
-                    url_buttons = [button for button in buttons if button.url]
-                    if mtproto_url:
-                        self.assertEqual(len(url_buttons), 1)
-                        self.assertEqual(url_buttons[0].url, mtproto_url)
-                    else:
-                        self.assertEqual(url_buttons, [])
+                url_buttons = [button for button in user_buttons if button.url]
+                if mtproto_url:
+                    self.assertEqual(len(url_buttons), 1)
+                    self.assertEqual(url_buttons[0].url, mtproto_url)
+                else:
+                    self.assertEqual(url_buttons, [])
+
+    async def test_admin_menu_callback_rejects_non_admin(self):
+        from bot.handlers.admin import dashboard
+
+        callback = MagicMock()
+        callback.from_user.id = 123456
+        callback.answer = AsyncMock()
+        state = MagicMock()
+        state.clear = AsyncMock()
+        session = MagicMock()
+
+        with patch.object(dashboard, "is_admin", return_value=False), patch.object(
+            dashboard, "_show_admin_dashboard", new=AsyncMock()
+        ) as show_dashboard:
+            await dashboard.show_admin_menu(callback, state, session)
+
+        callback.answer.assert_awaited_once_with(
+            texts.ERROR_ACCESS_DENIED,
+            show_alert=True,
+        )
+        state.clear.assert_not_awaited()
+        show_dashboard.assert_not_awaited()
+
+    async def test_hub_renders_admin_button_only_for_configured_admin(self):
+        admin = SimpleNamespace(
+            id=10,
+            telegram_id=100,
+            first_name="Admin",
+            referred_by=None,
+            subscription_end=None,
+            device_limit=2,
+        )
+        user = SimpleNamespace(
+            id=11,
+            telegram_id=101,
+            first_name="User",
+            referred_by=None,
+            subscription_end=None,
+            device_limit=2,
+        )
+        balance = SimpleNamespace(real_available=123, bonus_available=7)
+        settings = SimpleNamespace(ADMIN_IDS={100})
+
+        with (
+            patch.object(start.SubscriptionService, "check_access", new=AsyncMock(return_value=True)),
+            patch.object(start, "get_account_balance", new=AsyncMock(return_value=balance)),
+            patch(
+                "database.repositories.profiles_repo.get_user_profiles",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "database.repositories.system_settings_repo.get_system_setting",
+                new=AsyncMock(return_value=None),
+            ),
+            patch.object(start, "get_settings", return_value=settings),
+        ):
+            _, admin_kb = await start._build_hub_text_and_kb(MagicMock(), admin)
+            _, user_kb = await start._build_hub_text_and_kb(MagicMock(), user)
+
+        admin_callbacks = [
+            button.callback_data
+            for row in admin_kb.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        user_callbacks = [
+            button.callback_data
+            for row in user_kb.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        self.assertIn("menu_admin", admin_callbacks)
+        self.assertNotIn("menu_admin", user_callbacks)
 
     def test_device_download_file_action_is_preserved(self):
         ready = get_device_keyboard(profile_id=123, config_ready=True)
@@ -162,15 +262,21 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=None),
             ),
             patch.object(start, "get_settings", return_value=settings),
-            patch.object(start, "get_hub_keyboard", return_value=MagicMock()),
         ):
-            text, _ = await start._build_hub_text_and_kb(MagicMock(), user)
+            text, kb = await start._build_hub_text_and_kb(MagicMock(), user)
 
+        callbacks = [
+            button.callback_data
+            for row in kb.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
         self.assertIn("Telegram ID:", text)
         self.assertIn("🤝 Вас пригласил: Referrer (@ref) (ID: <code>200</code>)", text)
         self.assertIn("1/2", text)
         self.assertIn("123 ₽", text)
         self.assertIn("7 ₽", text)
+        self.assertNotIn("menu_admin", callbacks)
 
 
 if __name__ == "__main__":
