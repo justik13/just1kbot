@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,6 +14,16 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
+def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
+    def _extract_slot_num(p: VPNProfile) -> int:
+        if p.device_name:
+            match = re.search(r'#(\d+)', p.device_name)
+            if match:
+                return int(match.group(1))
+        return p.id or 0
+
+    return sorted(profiles, key=lambda p: (_extract_slot_num(p), p.created_at or 0, p.id or 0))
+
 
 async def get_user_profiles(
     session: AsyncSession, user_id: int, include_deleting: bool = False
@@ -21,7 +33,8 @@ async def get_user_profiles(
         stmt = stmt.where(VPNProfile.provisioning_status.notin_(["deleting", "create_cleanup_pending"]))
     stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    profiles = list(result.scalars().all())
+    return sort_profiles_naturally(profiles)
 
 
 async def get_profile_by_id(session: AsyncSession, profile_id: int) -> VPNProfile | None:

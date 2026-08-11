@@ -6,18 +6,20 @@ TEXTS = {
 
 🔐 Здесь вы можете подключить свои устройства к <b>just1kbot</b> в один клик.
 
-ℹ️ <i>Используя сервис, вы автоматически соглашаетесь с <a href="https://storage.googleapis.com/amnezia/terms">Условиями использования</a> и <a href="https://storage.googleapis.com/amnezia/privacy">Политикой конфиденциальности</a>.</i>""",
+ℹ️ <i>Используя сервис, вы автоматически соглашаетесь с <a href="https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48">Условиями использования</a> и <a href="https://telegra.ph/Politika-konfidencialnosti-07-23-84">Политикой конфиденциальности</a>.</i>""",
 
     "HUB_HEADER": """🏠 <b>Главное меню</b>
 
 👋 Привет, <b>{name}</b>!
 
-💰 <b>Баланс:</b> {real_balance} ₽
-🎁 <b>Бонусный баланс:</b> {bonus_balance} ₽
+<b>📊 Статус подписки:</b> {status}
+<b>⏳ Действует до:</b> {valid_until} ({days_left})
+<b>📱 Подключено устройств:</b> {devices_count}/{device_limit}
 
-Выберите нужный раздел:
+<b>💰 Баланс:</b> {real_balance} ₽
+<b>🎁 Бонусный баланс:</b> {bonus_balance} ₽
 
-<i>Используя бот, вы автоматически соглашаетесь с <a href="https://storage.googleapis.com/amnezia/terms">Условиями сервиса</a> и <a href="https://storage.googleapis.com/amnezia/privacy">Политикой конфиденциальности</a>.</i>""",
+Выберите нужный раздел:""",
 
 
     "FALLBACK_MEDIA_TEXT": """🤖 Я текстовый ассистент и пока не умею распознавать картинки, голосовые сообщения, стикеры или видео-кружочки.

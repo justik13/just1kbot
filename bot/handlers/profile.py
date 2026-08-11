@@ -246,7 +246,7 @@ async def show_history(
     )
 
 
-@router.callback_query(F.data == "referral")
+@router.callback_query(F.data.in_({"referral", "menu_referral"}))
 async def show_referral(
     callback: CallbackQuery,
     state: FSMContext,

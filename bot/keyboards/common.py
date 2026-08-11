@@ -32,8 +32,8 @@ def get_hub_keyboard(
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_COMMON_L33_1,
-        callback_data="menu_profile",
+        text="🤝 Пригласить друга",
+        callback_data="menu_referral",
     )
 
     builder.button(

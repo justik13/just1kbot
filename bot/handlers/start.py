@@ -4,7 +4,7 @@ import re
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +90,46 @@ async def _ensure_bot_unblocked(
         "User %s unblocked bot flag reset on user action",
         telegram_id,
     )
+
+
+async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
+    from database.repositories.profiles_repo import get_user_profiles
+    from utils.formatters import format_datetime, format_days_left
+
+    is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
+    is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
+    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
+    balance = await get_account_balance(session, user_id=db_user.id)
+    profiles = await get_user_profiles(session, db_user.id)
+
+    status_str = "🟢 Активна" if is_active else "🔴 Неактивна"
+    valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else "—"
+    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else "0 дней"
+
+    text = texts.HUB_HEADER.format(
+        name=name,
+        telegram_id=db_user.telegram_id,
+        status=status_str,
+        valid_until=valid_until_str,
+        days_left=days_left_str,
+        devices_count=len(profiles),
+        device_limit=db_user.device_limit or 0,
+        real_balance=int(balance.real_available),
+        bonus_balance=int(balance.bonus_available),
+    )
+
+    mtproto_url = None
+    if session is not None:
+        from database.repositories.system_settings_repo import get_system_setting
+        mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
+
+    kb = get_hub_keyboard(
+        is_admin=is_admin,
+        is_active=is_active,
+        mtproto_url=mtproto_url,
+    )
+
+    return text, kb
 
 
 @router.message(CommandStart())
@@ -187,24 +227,7 @@ async def handle_legacy_reply_keyboard(
         await message.answer(texts.ERROR_USER_NOT_FOUND)
         return
 
-    is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
-    is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
-    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
-    balance = await get_account_balance(session, user_id=db_user.id)
-    text = texts.HUB_HEADER.format(
-        name=name,
-        real_balance=int(balance.real_available),
-        bonus_balance=int(balance.bonus_available),
-    )
-
-    from database.repositories.system_settings_repo import get_system_setting
-    mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
-
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-        mtproto_url=mtproto_url,
-    )
+    text, kb = await _build_hub_text_and_kb(session, db_user)
 
     await render_hub(
         message.bot,
@@ -213,8 +236,6 @@ async def handle_legacy_reply_keyboard(
         kb,
         force_new=True,
     )
-
-
 
 
 @router.callback_query(F.data == "back_to_main_menu")
@@ -259,34 +280,7 @@ async def back_to_main_menu(
             db_user.telegram_id,
         )
 
-    is_active = await SubscriptionService.check_access(
-        session,
-        db_user.telegram_id,
-    )
-
-    is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
-
-    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
-
-    balance = await get_account_balance(session, user_id=db_user.id)
-    text = texts.HUB_HEADER.format(
-        name=name,
-        real_balance=int(balance.real_available),
-        bonus_balance=int(balance.bonus_available),
-    )
-
-
-    mtproto_url = None
-    if session is not None:
-        from database.repositories.system_settings_repo import get_system_setting
-        mtproto_url = await get_system_setting(session, "mtproto_proxy_url")
-
-    kb = get_hub_keyboard(
-        is_admin=is_admin,
-        is_active=is_active,
-        mtproto_url=mtproto_url,
-    )
-
+    text, kb = await _build_hub_text_and_kb(session, db_user)
 
     await render_hub(
         callback.bot,
@@ -301,4 +295,3 @@ async def back_to_main_menu(
 @router.callback_query(F.data == "ignore")
 async def ignore_callback(callback: CallbackQuery) -> None:
     await callback.answer()
-

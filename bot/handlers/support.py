@@ -29,7 +29,7 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_SUPPORT_L18_1.format(value_0=username),
+        text="💬 Написать в поддержку",
         url=support_url,
     )
 

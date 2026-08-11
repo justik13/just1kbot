@@ -177,6 +177,15 @@ async def _build_connections_screen(
             callback_data="add_device",
         )
 
+    builder.button(
+        text="🌐 Статус серверов",
+        url="https://stats.uptimerobot.com/de5q3DNc95",
+    )
+    builder.button(
+        text=texts.BUTTON_MAIN_MENU,
+        callback_data="back_to_main_menu",
+    )
+
     builder.adjust(1)
 
     return rendered, builder

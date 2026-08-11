@@ -287,11 +287,12 @@ async def _process_server_selection(
             parse_mode="HTML",
         )
 
+        new_profile = None
         try:
             db_user_id = user.id
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
-            await DeviceService.create_device(
+            new_profile = await DeviceService.create_device(
                 session,
                 user_id=db_user_id,
                 server_id=server_id,
@@ -394,7 +395,11 @@ async def _process_server_selection(
             return
 
         await state.clear()
-        await _render_connections(callback.message, user, session)
+        if new_profile:
+            from .device_view_routes import render_device_screen
+            await render_device_screen(callback.bot, callback.message.chat.id, new_profile, user, session)
+        else:
+            await _render_connections(callback.message, user, session)
 
     finally:
         _creating_devices.pop(telegram_user_id, None)
