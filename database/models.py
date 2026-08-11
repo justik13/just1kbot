@@ -276,6 +276,7 @@ class Server(Base):
     consecutive_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     consecutive_successes: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     recovery_notice_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    last_alert_sent_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 

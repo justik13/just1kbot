@@ -53,10 +53,12 @@ class ServerMonitorState:
         self.next_check_at: Optional[float] = None
         self.last_check_monotonic: float = 0.0
         self.recovery_notice_sent = False
+        self.last_alert_sent_state: Optional[str] = None
         self.disk_alert_last_sent: Optional[float] = None
 
     def sync_from_db_server(self, server: Server) -> None:
         """Синхронизирует состояние в памяти с записью из базы данных."""
+        self.last_alert_sent_state = getattr(server, "last_alert_sent_state", None)
         if not server.is_active:
             if server.disabled_reason == "AUTO_UNAVAILABLE":
                 self.health_state = ServerHealthState.AUTO_DISABLED
@@ -126,6 +128,7 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
     st.problem_started_at = None
     st.next_check_at = None
     st.recovery_notice_sent = False
+    st.last_alert_sent_state = None
     st.disk_alert_last_sent = None
 
 
@@ -148,8 +151,11 @@ def _build_alert_keyboard(server_id: int, include_enable_button: bool = False) -
     return builder
 
 
-async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None):
+async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     settings = get_settings()
+    if not settings.ADMIN_IDS:
+        return True
+    sent_any = False
     for admin_id in settings.ADMIN_IDS:
         try:
             await bot.send_message(
@@ -158,8 +164,10 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None):
                 reply_markup=reply_markup,
                 parse_mode="HTML",
             )
+            sent_any = True
         except Exception as e:
             logger.error("Failed to send node monitor alert to admin %s: %s", admin_id, e)
+    return sent_any
 
 
 async def check_node_resources_and_alerts(bot: Bot):
@@ -187,6 +195,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.problem_started_at = None
                 st.next_check_at = None
                 st.recovery_notice_sent = False
+                st.last_alert_sent_state = None
 
                 async with session_scope() as session:
                     db_server = await get_server_by_id(session, server.id)
@@ -200,6 +209,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             problem_started_at=None,
                             next_check_at=None,
                             recovery_notice_sent=False,
+                            last_alert_sent_state=None,
                             disabled_reason=None,
                             disabled_at=None,
                         )
@@ -240,6 +250,18 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.consecutive_successes += 1
                 st.next_check_at = None
                 st.problem_started_at = None
+
+                if st.last_alert_sent_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
+                    kb = _build_alert_keyboard(server.id).as_markup()
+                    alert_to_send = {
+                        "text": (
+                            f"✅ <b>VPN-сервер восстановлен</b>\n\n"
+                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                            f"API снова стабильно доступен."
+                        ),
+                        "reply_markup": kb,
+                        "target_alert_state": ServerHealthState.ONLINE,
+                    }
 
                 # Проверка диска (с 1-часовым кулдауном)
                 try:
@@ -292,6 +314,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             f"API снова стабильно доступен."
                         ),
                         "reply_markup": kb,
+                        "target_alert_state": ServerHealthState.ONLINE,
                     }
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
@@ -300,7 +323,6 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
-                    st.recovery_notice_sent = True
                     kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
                     alert_to_send = {
                         "text": (
@@ -310,6 +332,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             f"Сервер остаётся отключённым. При необходимости включите его вручную."
                         ),
                         "reply_markup": kb,
+                        "is_recovery_notice": True,
                     }
 
         else:
@@ -340,6 +363,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         f"Автоматический мониторинг продолжается."
                     ),
                     "reply_markup": kb,
+                    "target_alert_state": ServerHealthState.PROBLEM,
                 }
 
             elif st.health_state == ServerHealthState.PROBLEM:
@@ -364,17 +388,72 @@ async def check_node_resources_and_alerts(bot: Bot):
                             f"Доступность будет проверяться автоматически каждые 15 минут."
                         ),
                         "reply_markup": kb,
+                        "target_alert_state": ServerHealthState.AUTO_DISABLED,
                     }
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
-        # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
+        # Повторная попытка отправки не доставленных алертов
+        if not alert_to_send:
+            if st.health_state == ServerHealthState.PROBLEM and st.last_alert_sent_state != ServerHealthState.PROBLEM:
+                kb = _build_alert_keyboard(server.id).as_markup()
+                alert_to_send = {
+                    "text": (
+                        f"⚠️ <b>Проблема с VPN-сервером</b>\n\n"
+                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                        f"API не отвечает после повторной проверки.\n\n"
+                        f"Возможна недоступность или нестабильное соединение.\n\n"
+                        f"🔍 <b>Проверьте сервер.</b>\n"
+                        f"Автоматический мониторинг продолжается."
+                    ),
+                    "reply_markup": kb,
+                    "target_alert_state": ServerHealthState.PROBLEM,
+                }
+            elif st.health_state == ServerHealthState.AUTO_DISABLED and st.last_alert_sent_state != ServerHealthState.AUTO_DISABLED:
+                kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
+                alert_to_send = {
+                    "text": (
+                        f"🔴 <b>Сервер автоматически отключён</b>\n\n"
+                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
+                        f"Сервер не восстановил стабильное соединение в течение 15 минут.\n\n"
+                        f"Причина: API недоступен / соединение нестабильно.\n"
+                        f"Сервер исключён из работы.\n\n"
+                        f"🔕 Повторных уведомлений не будет.\n"
+                        f"Доступность будет проверяться автоматически каждые 15 минут."
+                    ),
+                    "reply_markup": kb,
+                    "target_alert_state": ServerHealthState.AUTO_DISABLED,
+                }
+
+        # 5. Гарантированная отправка Telegram-уведомления: подтверждаем отправку перед фиксацией last_alert_sent_state
+        if alert_to_send:
+            target_state = alert_to_send.get("target_alert_state")
+            is_rec_notice = alert_to_send.get("is_recovery_notice", False)
+            sent_ok = False
+            try:
+                sent_ok = await _send_admin_alert_msg(
+                    bot,
+                    alert_to_send["text"],
+                    reply_markup=alert_to_send["reply_markup"],
+                )
+            except Exception as e:
+                logger.error("Failed to deliver node monitor alert: %s", e)
+                sent_ok = False
+
+            if sent_ok:
+                if target_state:
+                    st.last_alert_sent_state = target_state
+                if is_rec_notice:
+                    st.recovery_notice_sent = True
+
+        # 6. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
         update_kwargs = {
             "health_state": st.health_state,
             "consecutive_fails": st.consecutive_fails,
             "consecutive_successes": st.consecutive_successes,
             "recovery_notice_sent": st.recovery_notice_sent,
+            "last_alert_sent_state": st.last_alert_sent_state,
         }
 
         if is_healthy:
@@ -401,14 +480,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             db_server = await get_server_by_id(session, server.id)
             if db_server:
                 await update_server(session, db_server, **update_kwargs)
-
-        # 6. Отправка алерта (если создан)
-        if alert_to_send:
-            await _send_admin_alert_msg(
-                bot,
-                alert_to_send["text"],
-                reply_markup=alert_to_send["reply_markup"],
-            )
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):

@@ -149,6 +149,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         server.problem_started_at = now_utc() - timedelta(minutes=5)
         server.next_check_at = None
         server.recovery_notice_sent = False
+        server.last_alert_sent_state = "PROBLEM"
 
         async def fake_update_server(session, db_srv, **kwargs):
             for k, v in kwargs.items():
@@ -378,6 +379,66 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
             callback.answer.assert_called_once_with("Удалено", show_alert=False)
             callback.message.delete.assert_called_once()
+
+
+    async def test_telegram_send_failure_retries_until_delivered(self):
+        """If Telegram message delivery fails, node_monitor retries on subsequent ticks until delivered."""
+        server = MagicMock(spec=Server)
+        server.id = 101
+        server.name = "Retry-Alert-Node"
+        server.api_url = "https://vpn101.example.com"
+        server.api_key = "secret"
+        server.is_active = True
+        server.disabled_reason = None
+        server.health_state = "ONLINE"
+        server.consecutive_fails = 0
+        server.consecutive_successes = 0
+        server.problem_started_at = None
+        server.next_check_at = None
+        server.recovery_notice_sent = False
+        server.last_alert_sent_state = None
+
+        async def fake_update_server(session, db_srv, **kwargs):
+            for k, v in kwargs.items():
+                setattr(db_srv, k, v)
+            return db_srv
+
+        with patch("services.workers.node_monitor.get_all_servers", return_value=[server]), \
+             patch("services.workers.node_monitor.AmneziaClient") as mock_client_cls, \
+             patch("services.workers.node_monitor.get_server_by_id", return_value=server), \
+             patch("services.workers.node_monitor.update_server", side_effect=fake_update_server):
+
+            client_instance = mock_client_cls.return_value
+            client_instance.healthcheck = AsyncMock(return_value=False)
+
+            st = get_server_monitor_state(101, server)
+
+            # Tick 1: FAIL #1 -> WAITING_CONFIRMATION
+            await check_node_resources_and_alerts(self.mock_bot)
+            self.assertEqual(st.health_state, ServerHealthState.WAITING_CONFIRMATION)
+
+            # Fast-forward 30s: FAIL #2 -> PROBLEM
+            st.next_check_at = time.monotonic() - 1.0
+
+            # Simulate Telegram API error on delivery attempt (e.g. exception thrown)
+            self.mock_bot.send_message = AsyncMock(side_effect=Exception("Telegram Network Error"))
+
+            await check_node_resources_and_alerts(self.mock_bot)
+
+            # Health state is PROBLEM, BUT last_alert_sent_state remains None because Telegram failed!
+            self.assertEqual(st.health_state, ServerHealthState.PROBLEM)
+            self.assertNotEqual(st.last_alert_sent_state, ServerHealthState.PROBLEM)
+            self.assertNotEqual(server.last_alert_sent_state, ServerHealthState.PROBLEM)
+
+            # Tick 3 (15s later): Telegram API recovers!
+            self.mock_bot.send_message = AsyncMock(return_value=True)
+
+            await check_node_resources_and_alerts(self.mock_bot)
+
+            # Telegram alert WAS successfully retried and delivered!
+            self.assertEqual(self.mock_bot.send_message.call_count, 1)
+            self.assertEqual(st.last_alert_sent_state, ServerHealthState.PROBLEM)
+            self.assertEqual(server.last_alert_sent_state, ServerHealthState.PROBLEM)
 
 
 if __name__ == "__main__":

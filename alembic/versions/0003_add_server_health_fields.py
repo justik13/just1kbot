@@ -25,9 +25,11 @@ def upgrade() -> None:
     op.add_column('servers', sa.Column('consecutive_fails', sa.Integer(), nullable=False, server_default='0'))
     op.add_column('servers', sa.Column('consecutive_successes', sa.Integer(), nullable=False, server_default='0'))
     op.add_column('servers', sa.Column('recovery_notice_sent', sa.Boolean(), nullable=False, server_default='false'))
+    op.add_column('servers', sa.Column('last_alert_sent_state', sa.String(length=30), nullable=True))
 
 
 def downgrade() -> None:
+    op.drop_column('servers', 'last_alert_sent_state')
     op.drop_column('servers', 'recovery_notice_sent')
     op.drop_column('servers', 'consecutive_successes')
     op.drop_column('servers', 'consecutive_fails')

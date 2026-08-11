@@ -174,6 +174,7 @@ async def toggle_server_apply(
             problem_started_at=None,
             next_check_at=None,
             recovery_notice_sent=False,
+            last_alert_sent_state=None,
         )
         reset_server_monitor_state(server_id, ServerHealthState.ONLINE)
     else:

@@ -27,6 +27,7 @@ class ServerUpdateFields(TypedDict, total=False):
     consecutive_fails: int
     consecutive_successes: int
     recovery_notice_sent: bool
+    last_alert_sent_state: str | None
 
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}
