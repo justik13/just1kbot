@@ -7,6 +7,8 @@ from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
+
 from bot import texts
 from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
@@ -35,6 +37,9 @@ from utils.vpn_parser import (
 )
 
 from .common import _format_protocol
+
+# Kept in sync with bot/handlers/support.py::AMNEZIA_DOCS
+_AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -120,11 +125,64 @@ async def manage_device(
 
 
 def _get_device_config_keyboard(profile_id: int):
+    # NOTE: this keyboard is shown after "Скачать файлом" and "Показать ключ".
+    # - "Инструкция и помощь" uses device_help:{profile_id} (NOT support_help/menu_support)
+    #   so the user stays in the device flow with a contextual back button to manage_device.
+    # - Back button returns directly to the device card.
+    #   DO NOT use texts.UI_BOT_KEYBOARDS_COMMON_L7_1 — that key does not exist in ui_texts.py.
     builder = InlineKeyboardBuilder()
-    builder.button(text="📖 Инструкция и помощь", callback_data="support_help")
-    builder.button(text=texts.UI_BOT_KEYBOARDS_COMMON_L7_1, callback_data=f"manage_device:{profile_id}")
+    builder.button(text="📖 Инструкция и помощь", callback_data=f"device_help:{profile_id}")
+    builder.button(text="← К устройству", callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
     return builder.as_markup()
+
+
+@router.callback_query(F.data.startswith("device_help:"))
+async def device_help(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
+    """Contextual help screen shown after 'Скачать файлом' / 'Показать ключ'.
+
+    Intentionally uses manage_device:{profile_id} as the back button so the
+    user returns to their device card, not to the generic support menu.
+    DO NOT replace the back button with menu_support — that breaks the device flow.
+    """
+    await callback.answer(show_alert=False)
+
+    profile_id = parse_callback_id(callback.data, 1)
+    if profile_id is None:
+        await callback.answer("Некорректный запрос", show_alert=True)
+        return
+
+    text = (
+        "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
+        "В этом разделе вы найдёте руководства по подключению, "
+        "скачиванию клиента и настройке сервиса.\n\n"
+        "⚠️ <b>Правила и особенности работы:</b>\n"
+        "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
+        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n\n"
+        "Выберите нужную тему ниже:"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="📥 Скачать клиент Amnezia", callback_data="help_download")
+    builder.button(text="🍏 Инструкция iOS (для РФ)", callback_data="help_ios")
+    builder.button(text="💻 Инструкции Windows", callback_data="help_windows")
+    builder.button(text="🔀 Раздельное Туннелирование", callback_data="help_split")
+    builder.button(text="📚 Документация Amnezia", url=_AMNEZIA_DOCS)
+    builder.button(text="← К устройству", callback_data=f"manage_device:{profile_id}")
+    builder.adjust(1)
+
+    await render_hub(
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
+        trigger_message_id=callback.message.message_id,
+    )
 
 
 @router.callback_query(F.data.startswith("show_config:"))
