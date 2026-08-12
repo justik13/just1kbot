@@ -13,6 +13,18 @@ from aiogram import Bot
 from config.settings import get_settings
 
 
+from .api_operations import api_operations_loop
+from .account_balance import account_balance_notifications_loop
+from .cleanup import cleanup_dangling_peers_loop
+from .heartbeat import heartbeat_loop
+from .notifications import subscription_notifications_loop
+from .payment_pipeline import payment_pipeline_loop
+from .queue_health import queue_health_loop
+from .payments import stale_payments_checker_loop
+from .traffic import traffic_sync_loop
+from .node_monitor import node_monitor_loop
+
+
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
     """Keep expected healthcheck network failures out of WARNING logs."""
 
@@ -33,18 +45,6 @@ class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):
 
 
 _node_monitor_logger = logging.getLogger("services.workers.node_monitor")
-
-
-from .api_operations import api_operations_loop
-from .account_balance import account_balance_notifications_loop
-from .cleanup import cleanup_dangling_peers_loop
-from .heartbeat import heartbeat_loop
-from .notifications import subscription_notifications_loop
-from .payment_pipeline import payment_pipeline_loop
-from .queue_health import queue_health_loop
-from .payments import stale_payments_checker_loop
-from .traffic import traffic_sync_loop
-from .node_monitor import node_monitor_loop
 
 
 if not any(isinstance(f, _ExpectedNodeMonitorNetworkWarningFilter) for f in _node_monitor_logger.filters):
