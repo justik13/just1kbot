@@ -37,7 +37,10 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
         )
         current = SimpleNamespace(**stale.__dict__)
         current.health_state = "PROBLEM"
-        session.execute.return_value.scalar_one_or_none.return_value = current
+        from unittest.mock import MagicMock
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = current
+        session.execute.return_value = exec_result
 
         result = await update_server(
             session,

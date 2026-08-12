@@ -160,6 +160,7 @@ async def toggle_server_apply(
 
     from utils.datetime_helpers import now_utc
     from services.workers.node_monitor import reset_server_monitor_state, ServerHealthState
+    from services.amnezia_client import cleanup_server_circuit_breakers
 
     if new_status:
         await update_server(
@@ -189,6 +190,7 @@ async def toggle_server_apply(
             next_check_at=None,
         )
         reset_server_monitor_state(server_id, ServerHealthState.MANUAL_DISABLED)
+        cleanup_server_circuit_breakers(server.api_url)
 
     await AuditService.log_action(
         session,
