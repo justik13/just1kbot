@@ -65,6 +65,7 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server])),
+            patch("services.workers.node_monitor.get_server_by_id", AsyncMock(return_value=server)),
             patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server, True))),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
@@ -103,6 +104,7 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
             patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server])),
+            patch("services.workers.node_monitor.get_server_by_id", AsyncMock(return_value=server)),
             patch("database.repositories.servers_repo.get_all_servers", AsyncMock(return_value=[server])),
             patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server, True))),
             patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),

@@ -227,6 +227,7 @@ async def check_node_resources_and_alerts(bot: Bot):
         # Захватываем ожидаемое состояние ТОЧНО перед выполнением сетевой проверки
         expected_health_state = st.health_state
         expected_consecutive_fails = st.consecutive_fails
+        expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
         client = AmneziaClient(server.api_url, server.api_key)
@@ -466,6 +467,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                 server.id,
                 expected_health_state=expected_health_state,
                 expected_consecutive_fails=expected_consecutive_fails,
+                expected_consecutive_successes=expected_consecutive_successes,
                 new_health_state=st.health_state,
                 **update_kwargs,
             )
@@ -493,11 +495,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if is_rec_notice:
                     st.recovery_notice_sent = True
 
-                if db_server and getattr(db_server, "is_active", True):
-                    async with session_scope() as session:
+                async with session_scope() as session:
+                    fresh_server = await get_server_by_id(session, server.id)
+                    if fresh_server and fresh_server.is_active and fresh_server.health_state != ServerHealthState.MANUAL_DISABLED:
                         await update_server(
                             session,
-                            db_server,
+                            fresh_server,
                             last_alert_sent_state=st.last_alert_sent_state,
                             recovery_notice_sent=st.recovery_notice_sent,
                         )

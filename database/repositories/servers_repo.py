@@ -135,6 +135,7 @@ async def update_server_health_snapshot(
     expected_health_state: str,
     new_health_state: str,
     expected_consecutive_fails: Optional[int] = None,
+    expected_consecutive_successes: Optional[int] = None,
     **health_kwargs: ServerUpdateFields,
 ) -> tuple[Optional[Server], bool]:
     """
@@ -142,7 +143,7 @@ async def update_server_health_snapshot(
 
     - Admin action (is_active == False or MANUAL_DISABLED) always takes precedence.
     - If current health_state != expected_health_state, the update is rejected as stale.
-    - If expected_consecutive_fails is provided and current.consecutive_fails != expected_consecutive_fails, rejected as stale.
+    - If expected_consecutive_fails or expected_consecutive_successes is provided and DB mismatches, rejected as stale.
     - Returns (current_db_server, applied_successfully).
     """
     result = await session.execute(
@@ -164,6 +165,9 @@ async def update_server_health_snapshot(
         return current, False
 
     if expected_consecutive_fails is not None and current.consecutive_fails != expected_consecutive_fails:
+        return current, False
+
+    if expected_consecutive_successes is not None and current.consecutive_successes != expected_consecutive_successes:
         return current, False
 
     # 3. Apply health updates

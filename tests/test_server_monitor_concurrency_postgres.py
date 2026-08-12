@@ -168,6 +168,100 @@ class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(monitor_result["current"].health_state, "MANUAL_DISABLED")
         self.assertFalse(monitor_result["current"].is_active)
 
+    async def test_monitor_vs_manual_enable_on_postgres(self):
+        async with self.sessions.begin() as s:
+            server = Server(
+                name="Node PG-4",
+                api_url="http://127.0.0.1:8446",
+                api_key="secret",
+                is_active=False,
+                disabled_reason="AUTO_UNAVAILABLE",
+                health_state="AUTO_DISABLED",
+                consecutive_fails=5,
+            )
+            s.add(server)
+            await s.flush()
+            server_id = server.id
+
+        # 1. Admin re-enables server in DB
+        async with self.sessions.begin() as s_admin:
+            srv = await s_admin.get(Server, server_id)
+            await update_server(
+                s_admin,
+                srv,
+                is_active=True,
+                disabled_reason=None,
+                disabled_at=None,
+                health_state="ONLINE",
+                consecutive_fails=0,
+                consecutive_successes=0,
+            )
+
+        # 2. First monitor healthcheck post-enable expected_health_state="ONLINE", expected_consecutive_fails=0
+        async with self.sessions.begin() as s_mon:
+            curr, applied = await update_server_health_snapshot(
+                s_mon,
+                server_id,
+                expected_health_state="ONLINE",
+                expected_consecutive_fails=0,
+                expected_consecutive_successes=0,
+                new_health_state="ONLINE",
+                consecutive_successes=1,
+            )
+
+        self.assertTrue(applied)
+        self.assertTrue(curr.is_active)
+        self.assertEqual(curr.health_state, "ONLINE")
+        self.assertEqual(curr.consecutive_successes, 1)
+
+    async def test_rollback_and_retry_on_postgres(self):
+        async with self.sessions.begin() as s:
+            server = Server(
+                name="Node PG-5",
+                api_url="http://127.0.0.1:8447",
+                api_key="secret",
+                is_active=True,
+                health_state="ONLINE",
+                consecutive_fails=0,
+            )
+            s.add(server)
+            await s.flush()
+            server_id = server.id
+
+        # Transaction 1: Aborts due to simulated exception after lock
+        try:
+            async with self.sessions.begin() as s_err:
+                curr, applied = await update_server_health_snapshot(
+                    s_err,
+                    server_id,
+                    expected_health_state="ONLINE",
+                    new_health_state="WAITING_CONFIRMATION",
+                    consecutive_fails=1,
+                )
+                raise RuntimeError("Simulated network/DB transient crash after lock")
+        except RuntimeError:
+            pass
+
+        # Verify DB remained in ONLINE state after rollback
+        async with self.sessions() as s_check:
+            srv_check = await s_check.get(Server, server_id)
+            self.assertEqual(srv_check.health_state, "ONLINE")
+            self.assertEqual(srv_check.consecutive_fails, 0)
+
+        # Transaction 2: Retry succeeds cleanly
+        async with self.sessions.begin() as s_retry:
+            curr_retry, applied_retry = await update_server_health_snapshot(
+                s_retry,
+                server_id,
+                expected_health_state="ONLINE",
+                expected_consecutive_fails=0,
+                new_health_state="WAITING_CONFIRMATION",
+                consecutive_fails=1,
+            )
+
+        self.assertTrue(applied_retry)
+        self.assertEqual(curr_retry.health_state, "WAITING_CONFIRMATION")
+
 
 if __name__ == "__main__":
     unittest.main()

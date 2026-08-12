@@ -76,6 +76,37 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(applied)
         self.assertEqual(current.consecutive_fails, 3)
 
+    async def test_health_update_rejects_consecutive_successes_mismatch(self):
+        session = AsyncMock()
+        current = SimpleNamespace(
+            id=4,
+            name="node-4",
+            is_active=True,
+            disabled_reason=None,
+            disabled_at=None,
+            health_state="ONLINE",
+            consecutive_fails=0,
+            consecutive_successes=5,
+        )
+
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = current
+        session.execute.return_value = exec_result
+
+        result_server, applied = await update_server_health_snapshot(
+            session,
+            server_id=4,
+            expected_health_state="ONLINE",
+            expected_consecutive_fails=0,
+            expected_consecutive_successes=4,  # Mismatched consecutive_successes (DB has 5)
+            new_health_state="ONLINE",
+            consecutive_successes=6,
+        )
+
+        self.assertIs(result_server, current)
+        self.assertFalse(applied)
+        self.assertEqual(current.consecutive_successes, 5)
+
 
 if __name__ == "__main__":
     unittest.main()
