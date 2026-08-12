@@ -263,7 +263,9 @@ async def _cleanup_dangling_peers():
     db_server_peers = set()
 
     async with session_scope() as session:
-        servers_result = await session.execute(select(Server))
+        servers_result = await session.execute(
+            select(Server).where(Server.is_active.is_(True))
+        )
         servers = servers_result.scalars().all()
 
         result = await session.execute(select(VPNProfile.server_id, VPNProfile.peer_id))
