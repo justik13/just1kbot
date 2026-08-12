@@ -19,6 +19,7 @@ from database.repositories.servers_repo import (
     get_all_servers,
     get_server_by_id,
     update_server,
+    update_server_health_snapshot,
 )
 
 from services.amnezia_client import AmneziaClient
@@ -178,6 +179,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     for server in servers:
         st = get_server_monitor_state(server.id, server)
+        expected_health_state = st.health_state
 
         # 1. Проверка ручного/автоматического отключения
         if not server.is_active:
@@ -477,9 +479,15 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["disabled_at"] = now_utc()
 
         async with session_scope() as session:
-            db_server = await get_server_by_id(session, server.id)
-            if db_server:
-                await update_server(session, db_server, **update_kwargs)
+            db_server, applied = await update_server_health_snapshot(
+                session,
+                server.id,
+                expected_health_state=expected_health_state,
+                new_health_state=st.health_state,
+                **update_kwargs,
+            )
+            if db_server and not applied:
+                st.sync_from_db_server(db_server)
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):

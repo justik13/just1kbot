@@ -1,8 +1,8 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
-from database.repositories.servers_repo import update_server
+from database.repositories.servers_repo import update_server, update_server_health_snapshot
 
 
 class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
@@ -20,40 +20,32 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_health_update_uses_locked_current_row_and_rejects_stale_snapshot(self):
         session = AsyncMock()
-        stale = SimpleNamespace(
+        current = SimpleNamespace(
             id=2,
             name="node",
             is_active=True,
             disabled_reason=None,
             disabled_at=None,
-            last_successful_check=None,
-            health_state="ONLINE",
-            problem_started_at=None,
-            next_check_at=None,
-            consecutive_fails=0,
-            consecutive_successes=0,
-            recovery_notice_sent=False,
-            last_alert_sent_state=None,
+            health_state="PROBLEM",
+            consecutive_fails=2,
         )
-        current = SimpleNamespace(**stale.__dict__)
-        current.health_state = "PROBLEM"
-        from unittest.mock import MagicMock
+
         exec_result = MagicMock()
         exec_result.scalar_one_or_none.return_value = current
         session.execute.return_value = exec_result
 
-        result = await update_server(
+        result_server, applied = await update_server_health_snapshot(
             session,
-            stale,
-            health_state="ONLINE",
+            server_id=2,
+            expected_health_state="ONLINE",
+            new_health_state="ONLINE",
             consecutive_fails=0,
         )
 
-        self.assertIs(result, current)
+        self.assertIs(result_server, current)
+        self.assertFalse(applied)
         self.assertEqual(current.health_state, "PROBLEM")
         session.execute.assert_awaited_once()
-        session.flush.assert_awaited_once()
-        session.refresh.assert_awaited_once_with(current)
 
 
 if __name__ == "__main__":

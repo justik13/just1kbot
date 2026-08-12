@@ -116,48 +116,62 @@ async def update_server(
     server: Server,
     **kwargs: ServerUpdateFields,
 ) -> Server:
-    """Update a server; serialize only monitor health writes."""
-    if any(key in HEALTH_UPDATE_FIELDS for key in kwargs):
-        original_health = {
-            field: getattr(server, field, None)
-            for field in HEALTH_UPDATE_FIELDS
-        }
-        result = await session.execute(
-            select(Server)
-            .where(Server.id == server.id)
-            .with_for_update()
-            .execution_options(populate_existing=True)
-        )
-        current_server = result.scalar_one_or_none()
-        if current_server is None:
-            return server
-
-        # The monitor performed a network request outside this transaction.
-        # If another writer changed any health field meanwhile, this snapshot
-        # is stale. Keep the newer DB health state rather than overwriting it.
-        if any(
-            original_health[field] != getattr(current_server, field, None)
-            for field in HEALTH_UPDATE_FIELDS
-            if field in kwargs
-        ):
-            kwargs = {
-                key: value
-                for key, value in kwargs.items()
-                if key not in HEALTH_UPDATE_FIELDS
-            }
-        target = current_server
-    else:
-        target = server
-
+    """Update a server's fields directly without side-effects."""
     for key, value in kwargs.items():
         if key in PROTECTED_SERVER_FIELDS:
             continue
-        if hasattr(target, key):
-            setattr(target, key, value)
+        if hasattr(server, key):
+            setattr(server, key, value)
 
     await session.flush()
-    await session.refresh(target)
-    return target
+    await session.refresh(server)
+    return server
+
+
+async def update_server_health_snapshot(
+    session: AsyncSession,
+    server_id: int,
+    *,
+    expected_health_state: str,
+    new_health_state: str,
+    **health_kwargs: ServerUpdateFields,
+) -> tuple[Optional[Server], bool]:
+    """
+    Safely update server health state from the node monitor using CAS.
+
+    - Admin action (is_active == False or MANUAL_DISABLED) always takes precedence.
+    - If current health_state != expected_health_state, the update is rejected as stale.
+    - Returns (current_db_server, applied_successfully).
+    """
+    result = await session.execute(
+        select(Server)
+        .where(Server.id == server_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    current = result.scalar_one_or_none()
+    if current is None:
+        return None, False
+
+    # 1. Admin disable takes absolute precedence: never overwrite an inactive/MANUAL_DISABLED server
+    if not current.is_active or current.health_state == "MANUAL_DISABLED":
+        return current, False
+
+    # 2. Compare-and-Swap (CAS) guard: reject stale monitor snapshot
+    if current.health_state != expected_health_state:
+        return current, False
+
+    # 3. Apply health updates
+    kwargs = {"health_state": new_health_state, **health_kwargs}
+    for key, value in kwargs.items():
+        if key in PROTECTED_SERVER_FIELDS:
+            continue
+        if hasattr(current, key):
+            setattr(current, key, value)
+
+    await session.flush()
+    await session.refresh(current)
+    return current, True
 
 
 async def delete_server(session: AsyncSession, server: Server) -> None:

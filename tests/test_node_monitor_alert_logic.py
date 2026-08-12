@@ -25,6 +25,7 @@ from aiogram.types import CallbackQuery
 from utils.datetime_helpers import now_utc
 
 from database.models import Server
+from database.repositories.servers_repo import get_all_servers
 from services.workers.node_monitor import (
     ServerHealthState,
     _server_states,
@@ -53,11 +54,32 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
 
         self.patcher_scope = patch("services.workers.node_monitor.session_scope", side_effect=dummy_scope)
 
+        async def mock_update_snapshot(session, server_id, expected_health_state, new_health_state, **kwargs):
+            from services.workers.node_monitor import get_all_servers as node_get_all_servers
+            servers = await node_get_all_servers(session)
+            target = next((s for s in servers if s.id == server_id), None) if servers else None
+            if target:
+                for k, v in kwargs.items():
+                    setattr(target, k, v)
+                target.health_state = new_health_state
+                return target, True
+            dummy = MagicMock()
+            dummy.is_active = True
+            dummy.health_state = new_health_state
+            return dummy, True
+
+        self.patcher_snapshot = patch(
+            "services.workers.node_monitor.update_server_health_snapshot",
+            side_effect=mock_update_snapshot,
+        )
+
         self.patcher_settings_1.start()
         self.patcher_settings_2.start()
         self.patcher_scope.start()
+        self.patcher_snapshot.start()
 
     def tearDown(self):
+        self.patcher_snapshot.stop()
         self.patcher_scope.stop()
         self.patcher_settings_2.stop()
         self.patcher_settings_1.stop()
