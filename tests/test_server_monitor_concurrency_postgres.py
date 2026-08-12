@@ -111,6 +111,63 @@ class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(app2)
         self.assertEqual(curr2.health_state, "PROBLEM")
 
+    async def test_concurrent_blocking_transactions_on_postgres(self):
+        import asyncio
+        from sqlalchemy import select
+
+        async with self.sessions.begin() as s:
+            server = Server(
+                name="Node PG-3",
+                api_url="http://127.0.0.1:8445",
+                api_key="secret",
+                is_active=True,
+                health_state="ONLINE",
+                consecutive_fails=0,
+            )
+            s.add(server)
+            await s.flush()
+            server_id = server.id
+
+        admin_locked = asyncio.Event()
+        admin_can_commit = asyncio.Event()
+        monitor_result = {}
+
+        async def admin_task():
+            async with self.sessions.begin() as s_admin:
+                srv = (
+                    await s_admin.execute(
+                        select(Server).where(Server.id == server_id).with_for_update()
+                    )
+                ).scalar_one()
+                srv.is_active = False
+                srv.health_state = "MANUAL_DISABLED"
+                srv.disabled_reason = "MANUAL"
+                await s_admin.flush()
+
+                admin_locked.set()
+                await admin_can_commit.wait()
+
+        async def monitor_task():
+            await admin_locked.wait()
+            async with self.sessions.begin() as s_mon:
+                admin_can_commit.set()
+                curr, applied = await update_server_health_snapshot(
+                    s_mon,
+                    server_id,
+                    expected_health_state="ONLINE",
+                    expected_consecutive_fails=0,
+                    new_health_state="PROBLEM",
+                    consecutive_fails=1,
+                )
+                monitor_result["current"] = curr
+                monitor_result["applied"] = applied
+
+        await asyncio.gather(admin_task(), monitor_task())
+
+        self.assertFalse(monitor_result["applied"])
+        self.assertEqual(monitor_result["current"].health_state, "MANUAL_DISABLED")
+        self.assertFalse(monitor_result["current"].is_active)
+
 
 if __name__ == "__main__":
     unittest.main()

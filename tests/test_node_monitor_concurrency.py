@@ -128,6 +128,65 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
             # RAM state must be resynced immediately from server_disabled_in_db!
             self.assertEqual(st.health_state, "MANUAL_DISABLED")
 
+    async def test_node_monitor_skips_telegram_alert_when_cas_write_is_rejected(self):
+        bot = AsyncMock()
+        server_initial = SimpleNamespace(
+            id=200,
+            name="FR-Node",
+            api_url="http://127.0.0.1:3001",
+            api_key="secret",
+            is_active=True,
+            disabled_reason=None,
+            health_state="WAITING_CONFIRMATION",
+            problem_started_at=None,
+            next_check_at=None,
+            consecutive_fails=1,
+            consecutive_successes=0,
+            recovery_notice_sent=False,
+            last_alert_sent_state=None,
+        )
+
+        st = get_server_monitor_state(200, server_initial)
+
+        # Healthcheck fails -> state machine generates PROBLEM alert
+        client_mock = AsyncMock()
+        client_mock.healthcheck.return_value = False
+
+        mock_scope = AsyncMock()
+        mock_scope.__aenter__.return_value = AsyncMock()
+
+        # Admin disabled server in DB while healthcheck was running -> CAS returns applied=False
+        server_disabled_in_db = SimpleNamespace(
+            id=200,
+            name="FR-Node",
+            api_url="http://127.0.0.1:3001",
+            api_key="secret",
+            is_active=False,
+            disabled_reason="MANUAL",
+            health_state="MANUAL_DISABLED",
+            problem_started_at=None,
+            next_check_at=None,
+            consecutive_fails=0,
+            consecutive_successes=0,
+            recovery_notice_sent=False,
+            last_alert_sent_state=None,
+        )
+
+        send_alert_mock = AsyncMock()
+
+        with (
+            patch("services.workers.node_monitor.session_scope", return_value=mock_scope),
+            patch("services.workers.node_monitor.get_all_servers", AsyncMock(return_value=[server_initial])),
+            patch("services.workers.node_monitor.update_server_health_snapshot", AsyncMock(return_value=(server_disabled_in_db, False))),
+            patch("services.workers.node_monitor._send_admin_alert_msg", send_alert_mock),
+            patch("services.workers.node_monitor.AmneziaClient", return_value=client_mock),
+        ):
+            await check_node_resources_and_alerts(bot)
+
+            # Verification: Because CAS returned applied=False, Telegram alert WAS NOT SENT!
+            send_alert_mock.assert_not_called()
+            self.assertEqual(st.health_state, "MANUAL_DISABLED")
+
 
 if __name__ == "__main__":
     unittest.main()

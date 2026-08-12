@@ -179,7 +179,6 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     for server in servers:
         st = get_server_monitor_state(server.id, server)
-        expected_health_state = st.health_state
 
         # 1. Проверка ручного/автоматического отключения
         if not server.is_active:
@@ -224,6 +223,10 @@ async def check_node_resources_and_alerts(bot: Bot):
         if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED):
             if st.next_check_at and now_m < st.next_check_at:
                 continue
+
+        # Захватываем ожидаемое состояние ТОЧНО перед выполнением сетевой проверки
+        expected_health_state = st.health_state
+        expected_consecutive_fails = st.consecutive_fails
 
         st.last_check_monotonic = now_m
         client = AmneziaClient(server.api_url, server.api_key)
@@ -428,28 +431,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                     "target_alert_state": ServerHealthState.AUTO_DISABLED,
                 }
 
-        # 5. Гарантированная отправка Telegram-уведомления: подтверждаем отправку перед фиксацией last_alert_sent_state
-        if alert_to_send:
-            target_state = alert_to_send.get("target_alert_state")
-            is_rec_notice = alert_to_send.get("is_recovery_notice", False)
-            sent_ok = False
-            try:
-                sent_ok = await _send_admin_alert_msg(
-                    bot,
-                    alert_to_send["text"],
-                    reply_markup=alert_to_send["reply_markup"],
-                )
-            except Exception as e:
-                logger.error("Failed to deliver node monitor alert: %s", e)
-                sent_ok = False
-
-            if sent_ok:
-                if target_state:
-                    st.last_alert_sent_state = target_state
-                if is_rec_notice:
-                    st.recovery_notice_sent = True
-
-        # 6. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ
+        # 5. ЕДИНСТВЕННОЕ АТОМАРНОЕ ОБНОВЛЕНИЕ БД НА КАЖДУЮ ПРОВЕРКУ (СНАЧАЛА CAS UPDATE)
         update_kwargs = {
             "health_state": st.health_state,
             "consecutive_fails": st.consecutive_fails,
@@ -483,11 +465,42 @@ async def check_node_resources_and_alerts(bot: Bot):
                 session,
                 server.id,
                 expected_health_state=expected_health_state,
+                expected_consecutive_fails=expected_consecutive_fails,
                 new_health_state=st.health_state,
                 **update_kwargs,
             )
             if db_server and not applied:
                 st.sync_from_db_server(db_server)
+
+        # 6. ВНЕШНИЕ ПОБОЧНЫЕ ЭФФЕКТЫ (TELEGRAM ALERT) ВЫПОЛНЯЮТСЯ СТРОГО ПОСЛЕ УСПЕШНОГО CAS
+        if applied and alert_to_send:
+            target_state = alert_to_send.get("target_alert_state")
+            is_rec_notice = alert_to_send.get("is_recovery_notice", False)
+            sent_ok = False
+            try:
+                sent_ok = await _send_admin_alert_msg(
+                    bot,
+                    alert_to_send["text"],
+                    reply_markup=alert_to_send["reply_markup"],
+                )
+            except Exception as e:
+                logger.error("Failed to deliver node monitor alert: %s", e)
+                sent_ok = False
+
+            if sent_ok:
+                if target_state:
+                    st.last_alert_sent_state = target_state
+                if is_rec_notice:
+                    st.recovery_notice_sent = True
+
+                if db_server and getattr(db_server, "is_active", True):
+                    async with session_scope() as session:
+                        await update_server(
+                            session,
+                            db_server,
+                            last_alert_sent_state=st.last_alert_sent_state,
+                            recovery_notice_sent=st.recovery_notice_sent,
+                        )
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):

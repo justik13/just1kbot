@@ -47,6 +47,35 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current.health_state, "PROBLEM")
         session.execute.assert_awaited_once()
 
+    async def test_health_update_rejects_consecutive_fails_mismatch(self):
+        session = AsyncMock()
+        current = SimpleNamespace(
+            id=3,
+            name="node-3",
+            is_active=True,
+            disabled_reason=None,
+            disabled_at=None,
+            health_state="PROBLEM",
+            consecutive_fails=3,
+        )
+
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = current
+        session.execute.return_value = exec_result
+
+        result_server, applied = await update_server_health_snapshot(
+            session,
+            server_id=3,
+            expected_health_state="PROBLEM",  # Matching health_state
+            expected_consecutive_fails=2,     # Mismatched consecutive_fails (DB has 3)
+            new_health_state="PROBLEM",
+            consecutive_fails=4,
+        )
+
+        self.assertIs(result_server, current)
+        self.assertFalse(applied)
+        self.assertEqual(current.consecutive_fails, 3)
+
 
 if __name__ == "__main__":
     unittest.main()
