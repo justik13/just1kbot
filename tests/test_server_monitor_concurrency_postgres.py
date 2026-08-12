@@ -6,7 +6,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import Server
 from database.repositories.servers_repo import update_server, update_server_health_snapshot
 
-TRUNCATE_SQL = "TRUNCATE vpn_profiles, users, servers RESTART IDENTITY CASCADE"
+TRUNCATE_SQL = (
+    "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
+    "account_balance_reservations, account_ledger_allocations, account_ledger_entries, "
+    "entitlement_entries, paid_value_ledger, tariff_quotes, tariff_versions, "
+    "payment_events, audit_logs, payments, api_operations, vpn_profiles, users, servers, system_settings, payment_disputes "
+    "RESTART IDENTITY CASCADE"
+)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
