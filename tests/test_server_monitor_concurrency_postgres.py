@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import Server
 from database.repositories.servers_repo import update_server, update_server_health_snapshot
 
+TRUNCATE_SQL = "TRUNCATE vpn_profiles, users, servers RESTART IDENTITY CASCADE"
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
@@ -13,27 +15,11 @@ class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
 
     async def asyncTearDown(self):
         async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
+            await s.execute(text(TRUNCATE_SQL))
         await self.engine.dispose()
 
     async def test_admin_disable_always_overrides_in_flight_monitor_check_on_postgres(self):
