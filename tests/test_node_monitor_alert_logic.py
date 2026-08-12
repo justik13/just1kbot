@@ -25,7 +25,6 @@ from aiogram.types import CallbackQuery
 from utils.datetime_helpers import now_utc
 
 from database.models import Server
-from database.repositories.servers_repo import get_all_servers
 from services.workers.node_monitor import (
     ServerHealthState,
     _server_states,
