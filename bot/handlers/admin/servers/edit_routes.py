@@ -603,8 +603,9 @@ async def process_edit_server_key(
     new_key = message.text.strip()
     try:
         await message.delete()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Failed to delete secret message %s: %s", message.message_id, e)
+
 
     if not new_key or len(new_key) < 8:
         await render_hub(

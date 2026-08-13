@@ -190,8 +190,9 @@ async def process_add_server(
         api_key = message.text.strip()
         try:
             await message.delete()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Failed to delete secret message %s: %s", message.message_id, e)
+
 
         if not api_key or len(api_key) < 8:
             await render_hub(
