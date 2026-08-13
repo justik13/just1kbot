@@ -72,10 +72,10 @@ cmd_status() {
     echo -e "\n${BOLD}${BLUE}=== 💻 ИСПОЛЬЗОВАНИЕ РЕСУРСОВ ===${NC}\n"
     docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}" | grep -E "NAME|just1kbot" || true
 
-    echo -e "\n${BOLD}${BLUE}=== 💾 РЕЗЕРВНЫЕ КОПИИ ===${NC}\n"
+    mkdir -p backups
     local backup_count
-    backup_count=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | wc -l || echo 0)
-    if [ "$backup_count" -gt 0 ]; then
+    backup_count=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | wc -l | tr -d '[:space:]')
+    if [[ "$backup_count" =~ ^[0-9]+$ ]] && [ "$backup_count" -gt 0 ]; then
         log "Найдено активных бэкапов: ${BOLD}${backup_count}${NC}"
         # shellcheck disable=SC2012
         ls -lh backups/*.sql.gz.age 2>/dev/null | tail -5 | awk '{print "   • " $9 " (" $5 ", " $6 " " $7 " " $8 ")"}'
