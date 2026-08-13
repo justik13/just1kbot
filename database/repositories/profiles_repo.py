@@ -19,6 +19,8 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
 NON_VISIBLE_PROFILE_STATUSES = (
     "deleting",
     "create_cleanup_pending",
+    "delete_failed",
+    "create_failed",
 )
 
 
