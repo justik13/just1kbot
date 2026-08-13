@@ -18,9 +18,30 @@ router = Router()
     StateFilter("*"),
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
+    import asyncio
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
     await state.clear()
     try:
         await message.delete()
+    except Exception:
+        pass
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
+    builder.adjust(1)
+
+    try:
+        temp_msg = await message.answer(
+            "🤖 <b>Неподдерживаемый тип сообщения.</b>\n\n"
+            "Пожалуйста, используйте кнопки управления или текстовые команды.\n\n"
+            "⏱ <i>Сообщение удалится автоматически через 5 сек.</i>",
+            reply_markup=builder.as_markup(),
+            parse_mode="HTML",
+        )
+        asyncio.create_task(
+            _auto_delete_delay(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
+        )
     except Exception:
         pass
 
