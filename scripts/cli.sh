@@ -187,6 +187,30 @@ cmd_backup() {
     echo -e "\n${BOLD}${BLUE}=== 💾 СОЗДАНИЕ ЗАШИФРОВАННОГО БЭКАПА БД ===${NC}\n"
     mkdir -p backups
 
+    # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
+    if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
+        local age_recipient
+        age_recipient=$(grep -E "^BACKUP_AGE_RECIPIENT=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        if [[ -n "$age_recipient" ]]; then
+            info "Создание зашифрованного дампа PostgreSQL..."
+            local ts
+            ts=$(date +%Y%m%d_%H%M%S)
+            local backup_file="backups/just1kbot_${ts}.sql.gz.age"
+            local tmp_gz="/tmp/backup_${ts}.sql.gz"
+
+            if docker compose exec -T db sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null | gzip > "$tmp_gz"; then
+                if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
+                    rm -f "$tmp_gz"
+                    log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
+                    ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+                    return 0
+                fi
+            fi
+            rm -f "$tmp_gz"
+        fi
+    fi
+
+    # Способ 2: Через отдельный контейнер backup (compose profile tools)
     if docker compose --profile tools run --rm backup; then
         local latest_backup
         # shellcheck disable=SC2012
@@ -194,11 +218,12 @@ cmd_backup() {
         if [[ -n "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+            return 0
         fi
-    else
-        error "Ошибка при создании бэкапа базы данных."
-        return 1
     fi
+
+    error "Ошибка при создании бэкапа базы данных."
+    return 1
 }
 
 # --- 5. Безопасное восстановление из бэкапа ---
