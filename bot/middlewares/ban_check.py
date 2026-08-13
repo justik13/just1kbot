@@ -72,7 +72,13 @@ class BanCheckMiddleware(BaseMiddleware):
                     db_user.telegram_id if db_user else "unknown",
                     type(event).__name__,
                 )
+                if isinstance(event, CallbackQuery):
+                    try:
+                        await event.answer()
+                    except Exception:
+                        pass
 
             return None
+
 
         return await handler(event, data)

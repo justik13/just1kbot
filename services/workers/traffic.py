@@ -4,7 +4,7 @@ import logging
 from datetime import datetime, timezone
 
 from cachetools import TTLCache
-from sqlalchemy import select, update
+from sqlalchemy import bindparam, select, update
 
 from bot.constants import (
     TRAFFIC_SYNC_INTERVAL,
@@ -270,20 +270,27 @@ async def _process_server_traffic(server_info, api_clients):
                 )
 
         if updates_data:
-            for profile_id, data in updates_data.items():
-                values = {}
-                if "traffic_down" in data:
-                    values["traffic_down"] = data["traffic_down"]
-                if "traffic_up" in data:
-                    values["traffic_up"] = data["traffic_up"]
-                if "last_connected" in data:
-                    values["last_connected"] = data["last_connected"]
-                if values:
-                    await session.execute(
-                        update(VPNProfile)
-                        .where(VPNProfile.id == profile_id)
-                        .values(**values)
-                    )
+            bulk_params = [
+                {
+                    "b_id": profile_id,
+                    "traffic_down": data.get("traffic_down"),
+                    "traffic_up": data.get("traffic_up"),
+                    "last_connected": data.get("last_connected"),
+                }
+                for profile_id, data in updates_data.items()
+            ]
+            if bulk_params:
+                await session.execute(
+                    update(VPNProfile)
+                    .where(VPNProfile.id == bindparam("b_id"))
+                    .values(
+                        traffic_down=bindparam("traffic_down"),
+                        traffic_up=bindparam("traffic_up"),
+                        last_connected=bindparam("last_connected"),
+                    ),
+                    bulk_params,
+                )
+
 
 
 async def _send_quota_alert(

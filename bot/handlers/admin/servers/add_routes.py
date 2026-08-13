@@ -188,6 +188,10 @@ async def process_add_server(
 
     elif step == "api_key":
         api_key = message.text.strip()
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
         if not api_key or len(api_key) < 8:
             await render_hub(
@@ -199,6 +203,7 @@ async def process_add_server(
             return
 
         await state.update_data(api_key=api_key)
+
 
         all_data = await state.get_data()
 
