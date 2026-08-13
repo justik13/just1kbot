@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 import re
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,7 +34,10 @@ async def get_purchase_logs_paginated(
     page: int = 1,
     per_page: int = 10,
 ) -> tuple[list[PurchaseLogEntry], int]:
-    # 1. Fetch consumed TariffQuotes
+    offset = max(0, (page - 1) * per_page)
+    needed = offset + per_page
+
+    # 1. Fetch consumed TariffQuotes (bounded by needed count)
     quote_stmt = (
         select(TariffQuote)
         .where(TariffQuote.status == "consumed")
@@ -44,19 +47,23 @@ async def get_purchase_logs_paginated(
                 TariffVersion.tariff
             ),
         )
+        .order_by(TariffQuote.consumed_at.desc().nullslast(), TariffQuote.created_at.desc())
+        .limit(needed)
     )
     quote_results = (await session.execute(quote_stmt)).scalars().all()
 
-    # 2. Fetch admin sub grants/extensions from AuditLog
-    audit_stmt = select(AuditLog).where(
-        AuditLog.action.in_(
-            [
-                "ADMIN_SUB_GRANT",
-                "ADMIN_SUB_EXTEND",
-                "ADMIN_SUB_CHANGE",
-                "ADMIN_SUB_REDUCE",
-            ]
-        )
+    # 2. Fetch admin sub grants/extensions from AuditLog (bounded by needed count)
+    audit_actions = [
+        "ADMIN_SUB_GRANT",
+        "ADMIN_SUB_EXTEND",
+        "ADMIN_SUB_CHANGE",
+        "ADMIN_SUB_REDUCE",
+    ]
+    audit_stmt = (
+        select(AuditLog)
+        .where(AuditLog.action.in_(audit_actions))
+        .order_by(AuditLog.created_at.desc())
+        .limit(needed)
     )
     audit_results = (await session.execute(audit_stmt)).scalars().all()
 
@@ -170,8 +177,25 @@ async def get_purchase_logs_paginated(
 
     entries.sort(key=lambda x: x.created_at, reverse=True)
 
-    total = len(entries)
-    offset = (page - 1) * per_page
+    if len(quote_results) < needed and len(audit_results) < needed:
+        total = len(entries)
+    else:
+        quote_count = (
+            await session.scalar(
+                select(func.count(TariffQuote.id)).where(
+                    TariffQuote.status == "consumed"
+                )
+            )
+        ) or 0
+        audit_count = (
+            await session.scalar(
+                select(func.count(AuditLog.id)).where(
+                    AuditLog.action.in_(audit_actions)
+                )
+            )
+        ) or 0
+        total = quote_count + audit_count
+
     paged_entries = entries[offset : offset + per_page]
 
     return paged_entries, total

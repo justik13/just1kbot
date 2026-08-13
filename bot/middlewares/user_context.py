@@ -32,11 +32,7 @@ def invalidate_user_cache(telegram_id: int) -> None:
 
 
 def clear_user_cache() -> None:
-    """Полная очистка кэша пользователей.
-
-    Используется при массовых изменениях (например, смена device_limit тарифа),
-    когда дешевле очистить весь кэш, чем вызывать pop() для каждого пользователя.
-    """
+    """Полная очистка кэша пользователей."""
     _user_cache.clear()
 
 
@@ -56,15 +52,6 @@ class UserContextMiddleware(BaseMiddleware):
 
         if telegram_id is None:
             data["db_user"] = None
-            return await handler(event, data)
-
-        cached = _user_cache.get(telegram_id, _SENTINEL)
-        if cached is not _SENTINEL:
-            session: AsyncSession | None = data.get("session")
-            if cached is not None and session is not None:
-                cached = await session.merge(cached)
-                _user_cache[telegram_id] = cached
-            data["db_user"] = cached
             return await handler(event, data)
 
         session: AsyncSession | None = data.get("session")
@@ -113,6 +100,6 @@ class UserContextMiddleware(BaseMiddleware):
                     else:
                         user = None
 
-        _user_cache[telegram_id] = user
         data["db_user"] = user
         return await handler(event, data)
+

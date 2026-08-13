@@ -270,20 +270,22 @@ async def _process_server_traffic(server_info, api_clients):
                 )
 
         if updates_data:
-            for profile_id, data in updates_data.items():
-                values = {}
-                if "traffic_down" in data:
-                    values["traffic_down"] = data["traffic_down"]
-                if "traffic_up" in data:
-                    values["traffic_up"] = data["traffic_up"]
-                if "last_connected" in data:
-                    values["last_connected"] = data["last_connected"]
-                if values:
-                    await session.execute(
-                        update(VPNProfile)
-                        .where(VPNProfile.id == profile_id)
-                        .values(**values)
-                    )
+            bulk_params = [
+                {
+                    "id": profile_id,
+                    "traffic_down": data.get("traffic_down"),
+                    "traffic_up": data.get("traffic_up"),
+                    "last_connected": data.get("last_connected"),
+                }
+                for profile_id, data in updates_data.items()
+            ]
+            if bulk_params:
+                await session.execute(
+                    update(VPNProfile),
+                    bulk_params,
+                )
+
+
 
 
 async def _send_quota_alert(
