@@ -44,7 +44,6 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -91,36 +90,96 @@ cmd_logs() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== 📜 ЛОГИ СЕРВИСА: ${service} (Ctrl+C для выхода) ===${NC}\n"
 
-    if [[ "$service" == "all" ]]; then
-        docker compose logs -f --tail=100
-    else
-        docker compose logs -f --tail=100 "$service"
-    fi
+    # Запуск логов в subshell для перехвата SIGINT без прерывания скрипта
+    (
+        trap 'echo ""' INT
+        if [[ "$service" == "all" ]]; then
+            docker compose logs -f --tail=100 || true
+        else
+            docker compose logs -f --tail=100 "$service" || true
+        fi
+    )
 }
 
 # --- 3. Безопасное обновление ---
 cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
 
-    info "Шаг 1/4. Создание страховочной резервной копии базы данных..."
+    # Проверка наличия локальных незакоммиченных изменений
+    local dirty_changes
+    dirty_changes=$(git status --porcelain 2>/dev/null || true)
+    if [[ -n "$dirty_changes" ]]; then
+        warn "Обнаружены незакоммиченные локальные изменения:"
+        git status -s
+        echo ""
+        read -r -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm
+        if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
+            git stash
+            log "Локальные изменения сохранены в git stash."
+        else
+            info "Обновление отменено пользователем."
+            return 0
+        fi
+    fi
+
+    info "Шаг 1/5. Создание страховочного бэкапа базы данных..."
     cmd_backup
 
-    info "Шаг 2/4. Получение свежих обновлений из Git (origin/main)..."
-    git fetch origin
-    git pull origin main
+    local current_branch
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    info "Шаг 2/5. Получение обновлений из Git (ветка: $current_branch)..."
+    git fetch origin "$current_branch"
+    git pull origin "$current_branch"
 
-    info "Шаг 3/4. Пересборка и запуск обновленных контейнеров..."
+    info "Шаг 3/5. Пересборка и запуск контейнеров..."
     docker compose up -d --build
 
-    info "Шаг 4/4. Проверка состояния сервисов..."
-    sleep 3
-    docker compose ps
+    info "Шаг 4/5. Проверка статуса здоровья сервисов (Healthcheck)..."
+    local timeout=60
+    local elapsed=0
+    local update_ok=false
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        local db_h
+        local redis_h
+        local bot_h
+        local caddy_s
+        local migrate_s
+
+        db_h="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
+        redis_h="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
+        bot_h="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
+        caddy_s="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
+        migrate_s="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+
+        if [[ "$migrate_s" == "exited/"* ]] && [[ "$migrate_s" != "exited/0" ]]; then
+            echo ""
+            error "Ошибка миграции базы данных после обновления: $migrate_s"
+            docker compose logs migrate
+            return 1
+        fi
+
+        if [ "$db_h" = "healthy" ] && [ "$redis_h" = "healthy" ] && [ "$bot_h" = "healthy" ] && [ "$caddy_s" = "running" ]; then
+            update_ok=true
+            break
+        fi
+
+        printf "."
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
 
     echo ""
-    log "Обновление завершено! Просмотр свежих логов бота:"
+    if [ "$update_ok" = "true" ]; then
+        log "Все сервисы успешно обновлены и работают (Healthy)!"
+    else
+        warn "Таймаут ожидания статуса healthy. Проверьте состояние:"
+        docker compose ps
+    fi
+
+    info "Шаг 5/5. Просмотр последних логов бота:"
     echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
-    sleep 2
-    docker compose logs -f --tail=30 bot || true
+    cmd_logs "bot"
 }
 
 # --- 4. Создание бэкапа ---
@@ -130,7 +189,8 @@ cmd_backup() {
 
     if docker compose --profile tools run --rm backup; then
         local latest_backup
-        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -printf '%T@ %p\n' 2>/dev/null | sort -k 1nr | head -1 | cut -d' ' -f2-)
+        # shellcheck disable=SC2012
+        latest_backup=$(ls -t backups/*.sql.gz.age 2>/dev/null | head -1 || true)
         if [[ -n "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
@@ -141,13 +201,17 @@ cmd_backup() {
     fi
 }
 
-# --- 5. Восстановление из бэкапа ---
+# --- 5. Безопасное восстановление из бэкапа ---
 cmd_restore() {
-    echo -e "\n${BOLD}${RED}=== ⚠️ ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ ИЗ БЭКАПА ===${NC}\n"
+    echo -e "\n${BOLD}${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${RED}║                 ⚠️  ВНИМАНИЕ: ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ                    ║${NC}"
+    echo -e "${BOLD}${RED}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
+    echo -e "${BOLD}${RED}║ Данная операция ПОЛНОСТЬЮ УДАЛИТ текущую базу данных и перезапишет её        ║${NC}"
+    echo -e "${BOLD}${RED}║ данными из выбранной резервной копии!                                        ║${NC}"
+    echo -e "${BOLD}${RED}╚══════════════════════════════════════════════════════════════════════════════╝${NC}\n"
 
-    warn "ВНИМАНИЕ: Восстановление базы данных полностью перезапишет текущие данные в PostgreSQL!"
-    read -r -p "Вы действительно хотите продолжить? (yes/N): " confirm_restore
-    if [[ "$confirm_restore" != "yes" ]]; then
+    read -r -p "Для подтверждения введите слово 'RESTORE' заглавными буквами: " confirm_code
+    if [[ "$confirm_code" != "RESTORE" ]]; then
         info "Восстановление отменено."
         return 0
     fi
@@ -180,7 +244,7 @@ cmd_restore() {
     fi
 
     local selected_backup="${backups_list[$((choice_idx-1))]}"
-    info "Выбран файл: $selected_backup"
+    info "Выбран файл для восстановления: $selected_backup"
 
     # Запрос приватного ключа age
     local age_key_file=""
@@ -193,7 +257,7 @@ cmd_restore() {
     fi
 
     if [[ -z "$age_key_file" ]]; then
-        read -r -p "Укажите путь к файлу с приватным age-ключом: " custom_key_path
+        read -r -p "Укажите путь к файлу с приватным age-ключом (например /root/key.txt): " custom_key_path
         if [[ -f "$custom_key_path" ]]; then
             age_key_file="$custom_key_path"
         else
@@ -202,41 +266,55 @@ cmd_restore() {
         fi
     fi
 
-    # Временные файлы расшифровки
-    local tmp_decrypted="/tmp/restore_$(date +%s).sql"
-    local tmp_gz="/tmp/restore_$(date +%s).sql.gz"
+    # Изолированная временная директория с гарантированной очисткой
+    local tmp_dir
+    tmp_dir=$(mktemp -d -t just1kbot-restore-XXXXXX)
+    local tmp_gz="${tmp_dir}/dump.sql.gz"
+    local tmp_sql="${tmp_dir}/dump.sql"
 
-    info "Расшифровка резервной копии утилитой age..."
+    # Гарантируем запуск бота и удаление временных файлов при любых ошибках
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp_dir'; docker compose start bot >/dev/null 2>&1 || true" EXIT INT TERM
+
+    info "1/5. Расшифровка бэкапа ключом age..."
     if ! age -d -i "$age_key_file" "$selected_backup" > "$tmp_gz"; then
-        rm -f "$tmp_gz"
-        error "Не удалось расшифровать бэкап. Проверьте правильность приватного age ключа."
+        error "Ошибка расшифровки: неверный приватный ключ age."
         return 1
     fi
 
-    info "Распаковка архива gzip..."
-    gunzip -c "$tmp_gz" > "$tmp_decrypted"
+    info "2/5. Распаковка архива gzip..."
+    gunzip -c "$tmp_gz" > "$tmp_sql"
     rm -f "$tmp_gz"
 
-    info "Остановка бота перед накатом дампа..."
+    info "3/5. Остановка бота перед восстановлением..."
     docker compose stop bot
 
-    info "Копирование дампа в PostgreSQL контейнер..."
-    docker cp "$tmp_decrypted" just1kbot_db:/tmp/restore.sql
-    rm -f "$tmp_decrypted"
+    info "4/5. Полная переинициализация базы данных и накат дампа..."
+    # Очищаем целевую БД и создаем заново для предотвращения конфликтов схем/таблиц
+    local pg_user="${POSTGRES_USER:-just1kbot}"
+    local pg_db="${POSTGRES_DB:-just1kbot_bot}"
 
-    info "Применение SQL дампа в базу данных..."
-    # shellcheck disable=SC2016
-    docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f /tmp/restore.sql'
+    docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
+    docker compose exec -T db createdb -U "$pg_user" "$pg_db"
 
-    docker compose exec -T db rm -f /tmp/restore.sql
+    docker cp "$tmp_sql" just1kbot_db:/tmp/restore.sql
+    rm -f "$tmp_sql"
 
-    info "Запуск контейнера бота..."
+    if ! docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/restore.sql'; then
+        docker compose exec -T db rm -f /tmp/restore.sql 2>/dev/null || true
+        error "Ошибка при накате SQL дампа в PostgreSQL!"
+        return 1
+    fi
+
+    docker compose exec -T db rm -f /tmp/restore.sql 2>/dev/null || true
+
+    info "5/5. Запуск контейнера бота..."
     docker compose start bot
 
     log "База данных успешно восстановлена из $selected_backup!"
 }
 
-# --- 6. Управление питанием сервисов ---
+# --- 6. Управление сервисами ---
 cmd_restart() {
     local service="${1:-bot}"
     echo -e "\n${BOLD}${BLUE}=== ⚡ ПЕРЕЗАПУСК СЕРВИСА: ${service} ===${NC}\n"
@@ -270,10 +348,11 @@ cmd_config() {
     "$editor" "${PROJECT_DIR}/.env"
 
     echo ""
-    read -r -p "Перезапустить бота для применения изменений? (y/N): " apply_restart
-    if [[ "$apply_restart" =~ ^[Yy]$ ]]; then
-        docker compose restart bot
-        log "Бот перезапущен с новыми параметрами."
+    read -r -p "Применить изменения и пересоздать контейнеры (docker compose up -d --force-recreate)? (Y/n): " apply_restart
+    if [[ ! "$apply_restart" =~ ^[Nn]$ ]]; then
+        info "Пересоздание контейнеров с новыми переменными окружения..."
+        docker compose up -d --force-recreate
+        log "Конфигурация успешно применена ко всем контейнерам."
     fi
 }
 
@@ -281,14 +360,14 @@ cmd_config() {
 cmd_doctor() {
     echo -e "\n${BOLD}${BLUE}=== 🩺 ДИАГНОСТИКА СИСТЕМЫ JUST1KBOT ===${NC}\n"
 
-    # 1. Docker daemon
+    # 1. Docker демон и сокет
     if docker info >/dev/null 2>&1; then
         log "Docker демон активен и отвечает."
     else
-        error "Docker демон недоступен!"
+        error "Docker демон недоступен (проверьте права пользователя или 'systemctl status docker')!"
     fi
 
-    # 2. Порты
+    # 2. Прослушивание портов
     for port in 80 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
             log "Порт $port слушается веб-сервером (Caddy)."
@@ -297,27 +376,27 @@ cmd_doctor() {
         fi
     done
 
-    # 3. Чтение .env
+    # 3. Чтение .env параметров
     if [[ -f "${PROJECT_DIR}/.env" ]]; then
         local domain
         domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
         local bot_token
         bot_token=$(grep -E "^BOT_TOKEN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
 
-        # 4. Проверка DNS
+        # 4. Проверка DNS домена
         if [[ -n "$domain" ]]; then
             local dom_ip
             dom_ip=$(dig +short @8.8.8.8 "$domain" A 2>/dev/null | tail -1 || true)
             local srv_ip
             srv_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
-            if [[ "$dom_ip" == "$srv_ip" ]]; then
+            if [[ -n "$dom_ip" ]] && [[ "$dom_ip" == "$srv_ip" ]]; then
                 log "DNS резолвинг домена: $domain -> $srv_ip (OK)"
             else
                 warn "DNS домена: $domain указывает на '$dom_ip', IP сервера: '$srv_ip'"
             fi
         fi
 
-        # 5. Проверка Telegram Bot API
+        # 5. Проверка Telegram API
         if [[ -n "$bot_token" ]]; then
             local me_resp
             me_resp=$(curl -s --max-time 5 "https://api.telegram.org/bot${bot_token}/getMe" || true)
@@ -358,7 +437,7 @@ interactive_menu() {
         echo -e "  [${BOLD}3${NC}] 🔄 ${BOLD}Безопасное обновление${NC} (Auto-backup -> Git pull -> Rebuild)"
         echo -e "  [${BOLD}4${NC}] 💾 ${BOLD}Управление бэкапами${NC} (Создать бэкап сейчас / Восстановить БД)"
         echo -e "  [${BOLD}5${NC}] ⚡ ${BOLD}Перезапуск сервисов${NC} (Restart Bot / Restart All)"
-        echo -e "  [${BOLD}6${NC}] 🔑 ${BOLD}Конфигурация${NC} (Редактировать .env файл)"
+        echo -e "  [${BOLD}6${NC}] 🔑 ${BOLD}Конфигурация${NC} (Редактировать .env файл с reload)"
         echo -e "  [${BOLD}7${NC}] 🩺 ${BOLD}Диагностика (Doctor)${NC} (Проверка DNS, SSL, портов и Telegram API)"
         echo -e "  [${BOLD}8${NC}] 🧹 ${BOLD}Очистить дисковый кэш${NC} (Docker image prune)"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"

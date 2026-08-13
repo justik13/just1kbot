@@ -3,7 +3,7 @@
 # JUST1KBOT - Интерактивный установщик и мастер первичной настройки
 # =============================================================================
 #
-# Быстрый запуск на сервере:
+# Быстрый запуск на сервере (Ubuntu 20.04/22.04/24.04 или Debian 11/12):
 #   git clone https://github.com/justik13/just1kbot.git
 #   cd just1kbot
 #   sudo bash ./scripts/setup.sh
@@ -53,22 +53,42 @@ check_root() {
     fi
 }
 
+# --- Проверка повторной установки (Idempotency) ---
+check_existing_install() {
+    if [[ -f "${PROJECT_DIR}/.env" ]]; then
+        warn "Обнаружен существующий файл конфигурации ${PROJECT_DIR}/.env."
+        read -r -p "Перезаписать конфигурацию и перенастроить проект заново? (y/N): " confirm_reinstall
+        if [[ ! "$confirm_reinstall" =~ ^[Yy]$ ]]; then
+            info "Установка прервана по запросу пользователя. Существующий .env сохранен."
+            exit 0
+        fi
+        log "Будет создана новая конфигурация .env."
+    fi
+}
+
 # --- Проверка ОС и установка системных пакетов ---
 install_dependencies() {
     title "1/6. Проверка окружения и зависимостей"
 
-    if [[ -f /etc/os-release ]]; then
-        # shellcheck disable=SC1091
-        . /etc/os-release
-        log "Определена операционная система: ${PRETTY_NAME:-$ID}"
-    else
-        warn "Не удалось точно определить ОС через /etc/os-release. Продолжаем..."
+    if [[ ! -f /etc/os-release ]]; then
+        error "Не найден файл /etc/os-release. Автоматическая установка поддерживает только Ubuntu и Debian."
     fi
+
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    local os_id="${ID:-}"
+    local os_like="${ID_LIKE:-}"
+
+    if [[ "$os_id" != "ubuntu" ]] && [[ "$os_id" != "debian" ]] && [[ "$os_like" != *"debian"* ]] && [[ "$os_like" != *"ubuntu"* ]]; then
+        error "Автоматический установщик поддерживает только Ubuntu (20.04/22.04/24.04) и Debian (11/12). Ваша ОС: ${PRETTY_NAME:-$os_id}."
+    fi
+
+    log "Определена операционная система: ${PRETTY_NAME:-$os_id}"
 
     log "Обновление списков пакетов и установка системных утилит..."
     apt-get update -qq
-    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg >/dev/null 2>&1
-    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git)."
+    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 >/dev/null 2>&1
+    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3)."
 
     # Проверка / установка Docker
     if ! command -v docker >/dev/null 2>&1; then
@@ -92,10 +112,9 @@ install_dependencies() {
     fi
     log "Docker Compose готов к работе: $(docker compose version)"
 
-    # Проверка занятости портов 80 и 443
+    # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
-            # Проверяем, не docker ли занимает порт
             local proc
             proc=$(ss -tlnp 2>/dev/null | grep ":${port} " || true)
             if echo "$proc" | grep -qv "docker"; then
@@ -116,7 +135,7 @@ install_dependencies() {
 run_interactive_wizard() {
     title "2/6. Настройка параметров Telegram и YooKassa"
 
-    echo -e "Пожалуйста, ответьте на несколько вопросов для генерации рабочей конфигурации.\n"
+    echo -e "Пожалуйста, введите параметры конфигурации бота.\n"
 
     # 1. Telegram Bot Token
     while true; do
@@ -155,7 +174,6 @@ run_interactive_wizard() {
             continue
         fi
 
-        # Парсим числа
         local valid_ids=()
         IFS=',' read -ra ADDR <<< "$ADMIN_RAW"
         local parse_error=false
@@ -172,9 +190,6 @@ run_interactive_wizard() {
         done
 
         if [[ "$parse_error" == "false" ]] && [ "${#valid_ids[@]}" -gt 0 ]; then
-            # Собираем в JSON-массив
-            ADMIN_IDS="[$(IFS=,; echo "${valid_ids[*]}") ]"
-            # Форматируем компактно
             ADMIN_IDS="[$(echo "${valid_ids[*]}" | tr ' ' ',')]"
             log "Администраторы: $ADMIN_IDS"
             break
@@ -193,7 +208,7 @@ run_interactive_wizard() {
             continue
         fi
 
-        if [[ "$SUPPORT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] && [[ "$SUPPORT_USERNAME" != "support" ]]; then
+        if [[ "$SUPPORT_USERNAME" =~ ^[A-Za-z][A-Za-z0-9_]{0,31}$ ]] && [[ "$SUPPORT_USERNAME" != "support" ]] && [[ "$SUPPORT_USERNAME" != "change_me_support_username" ]]; then
             log "Контакт поддержки: @$SUPPORT_USERNAME"
             break
         else
@@ -213,7 +228,7 @@ run_interactive_wizard() {
         read -r -p "Введите ваш привязанный домен (например vpn.example.com): " DOMAIN
         DOMAIN="$(echo "$DOMAIN" | tr -d " '\"" | tr '[:upper:]' '[:lower:]')"
 
-        if [[ ! "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]]; then
+        if [[ ! "$DOMAIN" =~ ^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$ ]]; then
             warn "Некорректный формат домена: '$DOMAIN'."
             continue
         fi
@@ -272,11 +287,11 @@ run_interactive_wizard() {
         read -r -p "Введите YooKassa Shop ID (число): " YOOKASSA_SHOP_ID
         YOOKASSA_SHOP_ID="$(echo "$YOOKASSA_SHOP_ID" | tr -d " '\"")"
 
-        if [[ -n "$YOOKASSA_SHOP_ID" ]] && [[ ! "$YOOKASSA_SHOP_ID" =~ [Cc][Hh][Aa][Nn][Gg][Ee] ]]; then
+        if [[ "$YOOKASSA_SHOP_ID" =~ ^[0-9]+$ ]] && [ "$YOOKASSA_SHOP_ID" -gt 0 ]; then
             log "Shop ID: $YOOKASSA_SHOP_ID"
             break
         else
-            warn "Shop ID обязателен для запуска бота."
+            warn "Shop ID должен быть положительным числом (например, 123456)."
         fi
     done
 
@@ -285,11 +300,11 @@ run_interactive_wizard() {
         echo ""
         YOOKASSA_SECRET_KEY="$(echo "$YOOKASSA_SECRET_KEY" | tr -d " '\"")"
 
-        if [[ -n "$YOOKASSA_SECRET_KEY" ]] && [[ ! "$YOOKASSA_SECRET_KEY" =~ [Cc][Hh][Aa][Nn][Gg][Ee] ]]; then
+        if [[ -n "$YOOKASSA_SECRET_KEY" ]] && [[ "$YOOKASSA_SECRET_KEY" =~ ^(test_|live_)?[A-Za-z0-9_-]{16,}$ ]] && [[ ! "$YOOKASSA_SECRET_KEY" =~ [Cc][Hh][Aa][Nn][Gg][Ee] ]]; then
             log "Secret Key принят."
             break
         else
-            warn "Secret Key обязателен для запуска бота."
+            warn "Некорректный Secret Key (должен содержать не менее 16 символов без пробелов)."
         fi
     done
 
@@ -301,8 +316,9 @@ run_interactive_wizard() {
 generate_secrets() {
     title "5/6. Автоматическая генерация криптографических ключей"
 
-    log "Генерация 32-байтного ключа шифрования базы данных (DB_ENCRYPTION_KEY)..."
-    DB_ENCRYPTION_KEY=$(openssl rand -base64 32)
+    log "Генерация 32-байтного URL-safe Fernet ключа шифрования БД (DB_ENCRYPTION_KEY)..."
+    # Гарантируем URL-safe Base64 для Fernet через Python
+    DB_ENCRYPTION_KEY=$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())" 2>/dev/null || openssl rand -base64 32 | tr '+/' '-_')
 
     log "Генерация паролей для PostgreSQL и Redis..."
     POSTGRES_PASSWORD=$(openssl rand -hex 16)
@@ -328,16 +344,22 @@ generate_secrets() {
     echo -e "${YELLOW}║                     🔐 ВАЖНО: ПРИВАТНЫЙ КЛЮЧ ДЛЯ БЭКАПОВ                     ║${NC}"
     echo -e "${YELLOW}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
     echo -e "${YELLOW}║ Сохраните этот ключ на свой локальный ПК прямо сейчас!                      ║${NC}"
-    echo -e "${YELLOW}║ Без него восстановить базу данных из зашифрованных бэкапов будет невозможно:║${NC}"
+    echo -e "${YELLOW}║ Без него расшифровать бэкапы базы данных в случае аварии будет невозможно:   ║${NC}"
     echo -e "${YELLOW}║                                                                              ║${NC}"
     while IFS= read -r line; do
         echo -e "${BOLD}${GREEN}  $line${NC}"
     done < "$AGE_KEY_FILE"
     echo -e "${YELLOW}║                                                                              ║${NC}"
-    echo -e "${YELLOW}║ Копия ключа временно сохранена в: ${BOLD}${AGE_KEY_FILE}${NC}${YELLOW}   ║${NC}"
-    echo -e "${YELLOW}║ Скачайте этот файл к себе и удалите его с сервера!                           ║${NC}"
     echo -e "${YELLOW}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
+
+    read -r -p "Вы скопировали приватный ключ? Удалить файл backup_private_key.txt с сервера в целях безопасности? (Y/n): " confirm_delete_key
+    if [[ ! "$confirm_delete_key" =~ ^[Nn]$ ]]; then
+        rm -f "$AGE_KEY_FILE"
+        log "Локальный файл приватного ключа удален с сервера."
+    else
+        warn "Файл приватного ключа сохранен в: $AGE_KEY_FILE (chmod 600). Обязательно скачайте и удалите его вручную!"
+    fi
 }
 
 # --- Запись .env и регистрация утилит ---
@@ -359,6 +381,8 @@ SUPPORT_USERNAME='${SUPPORT_USERNAME}'
 
 # ------------------------------------------------------------
 # База данных PostgreSQL
+# При запуске в Docker Compose параметры хостов автоматически
+# переопределяются на db:5432 и redis:6379 скриптом docker-entrypoint.sh.
 # ------------------------------------------------------------
 DATABASE_URL='postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}'
 POSTGRES_USER='${POSTGRES_USER}'
@@ -366,7 +390,7 @@ POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'
 POSTGRES_DB='${POSTGRES_DB}'
 
 # ------------------------------------------------------------
-# Шифрование чувствительных данных в БД
+# Шифрование чувствительных данных в БД (URL-safe Fernet)
 # ------------------------------------------------------------
 DB_ENCRYPTION_KEY='${DB_ENCRYPTION_KEY}'
 
@@ -422,7 +446,6 @@ EOF
     log "Настройка расписания автоматических бэкапов (cron)..."
     local cron_job="0 2 * * * flock -n /tmp/just1kbot-backup.lock sh -c 'cd ${PROJECT_DIR} && docker compose --profile tools run --rm backup >> ${PROJECT_DIR}/backups/backup.log 2>&1'"
 
-    # Проверяем, есть ли уже такая запись
     if ! crontab -l 2>/dev/null | grep -Fq "just1kbot-backup.lock"; then
         (crontab -l 2>/dev/null || true; echo "$cron_job") | crontab -
         log "Cron задача для бэкапов в 02:00 успешно установлена."
@@ -458,34 +481,41 @@ start_project() {
 
     local timeout=90
     local elapsed=0
+    local success=false
 
     while [ "$elapsed" -lt "$timeout" ]; do
         local db_health
         local redis_health
         local bot_health
         local caddy_status
+        local migrate_state
 
         db_health="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
         redis_health="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
         bot_health="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
         caddy_status="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
+        migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+
+        # Проверка на ошибку миграции
+        if [[ "$migrate_state" == "exited/"* ]] && [[ "$migrate_state" != "exited/0" ]]; then
+            echo ""
+            error "Сервис миграций (migrate) завершился с ошибкой: $migrate_state. Проверьте: docker compose logs migrate"
+        fi
+
+        # Проверка на падение постоянных сервисов
+        if [ "$db_health" = "unhealthy" ] || [ "$redis_health" = "unhealthy" ] || [ "$bot_health" = "unhealthy" ] || [ "$caddy_status" = "exited" ] || [ "$caddy_status" = "dead" ]; then
+            echo ""
+            docker compose ps
+            echo ""
+            docker compose logs --tail=50
+            error "Один из ключевых сервисов завершился аварийно или не прошел healthcheck."
+        fi
 
         if [ "$db_health" = "healthy" ] && [ "$redis_health" = "healthy" ] && [ "$bot_health" = "healthy" ] && [ "$caddy_status" = "running" ]; then
             echo ""
             log "Все сервисы успешно запущены и находятся в статусе Healthy!"
+            success=true
             break
-        fi
-
-        # Проверка на падение контейнеров
-        local failed_containers
-        failed_containers=$(docker compose ps --status exited --format "{{.Service}}" 2>/dev/null || true)
-        if [[ -n "$failed_containers" ]] && ! echo "$failed_containers" | grep -q "^migrate$"; then
-            echo ""
-            warn "Один или несколько контейнеров завершились с ошибкой: $failed_containers"
-            docker compose ps
-            echo ""
-            docker compose logs --tail=30
-            error "Запуск завершился ошибкой. Проверьте логи выше."
         fi
 
         printf "."
@@ -493,10 +523,12 @@ start_project() {
         elapsed=$((elapsed + 3))
     done
 
-    if [ "$elapsed" -ge "$timeout" ]; then
+    if [ "$success" = "false" ]; then
         echo ""
-        warn "Таймаут ожидания статуса healthy. Текущее состояние контейнеров:"
         docker compose ps
+        echo ""
+        docker compose logs --tail=50
+        error "Таймаут ожидания перехода сервисов в статус healthy. Проверьте логи выше."
     fi
 
     # Финальный баннер
@@ -523,6 +555,7 @@ start_project() {
 
 main() {
     check_root
+    check_existing_install
     install_dependencies
     run_interactive_wizard
     generate_secrets
