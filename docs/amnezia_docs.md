@@ -62,11 +62,13 @@
 
 ### Рекомендация для бота
 
-Отдавать пользователю **оба файла одним пакетом**:
-- `device.vpn` — для AmneziaVPN (полный JSON)
-- `device.conf` — для AmneziaWG (WireGuard INI + AWG 2.0)
+В интерфейсе бота используется двухуровневая модель предоставления доступа:
+1. **Основной способ (быстрый):** Кнопка **«🔑 Показать ключ»** — выводит `vpn://` URI в моноширинном блоке для копирования в один клик.
+2. **Резервный способ (файлы):** Кнопка **«📥 Скачать файлом»** — генерирует и отправляет два файла:
+   - `device.vpn` — для AmneziaVPN (полный JSON с `containers`, `awg`, `last_config`);
+   - `device.conf` — для AmneziaWG / DefaultVPN (WireGuard INI + AWG 2.0 параметры).
 
-Плюс краткая инструкция, какой файл для какого приложения.
+Плюс подробная контекстная справка по настройке клиентов.
 
 ---
 
@@ -460,12 +462,28 @@ def build_conf_file(vpn_uri: str) -> str:
 ### Отправка в Telegram
 
 ```python
-# 1. Отправить .vpn
-await send_hub_document(bot, chat_id, vpn_file, caption="...", ...)
-# 2. Сразу отправить .conf (отдельным сообщением)
-await bot.send_document(chat_id, conf_file, caption="...")
-# 3. Отправить текстовый хаб с инструкцией
-await render_hub(bot, chat_id, INSTRUCTION_TEXT, back_keyboard)
+# Пользователь нажимает "📥 Скачать файлом":
+# 1. Прикрепить .vpn файл к хабу сообщений
+await append_hub_document(
+    bot, chat_id, document=vpn_file,
+    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
+    parse_mode="HTML",
+)
+# 2. Прикрепить .conf файл к хабу сообщений
+await append_hub_document(
+    bot, chat_id, document=conf_file,
+    caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
+    parse_mode="HTML",
+)
+# 3. Отправить текстовый хаб с инструкцией и клавиатурой возврата к устройству
+await append_hub_message(
+    bot, chat_id,
+    text=texts.DEVICE_CONFIG_INSTRUCTION,
+    reply_markup=_get_device_config_keyboard(profile.id),
+    parse_mode="HTML",
+)
+# 4. Удалить предыдущие сообщения хаба для сохранения чистоты экрана
+await delete_hub_ids(bot, chat_id, old_hub_ids)
 ```
 
 ---
@@ -476,10 +494,10 @@ await render_hub(bot, chat_id, INSTRUCTION_TEXT, back_keyboard)
 2. **Никогда не отдавать `.vpn` с INI-содержимым** — AmneziaVPN не откроет
 3. **H1-H4 в AWG 2.0 — это строки-диапазоны** (`"min-max"`), не `int`
 4. **В `.conf` файле CPS = `h1`-`h5` (lowercase!)**, хотя в JSON это `I1`-`I5`
-5. **Не трогать MTU** — использовать значение из `last_config.mtu` (обычно 1376)
+5. **Оптимизация MTU и DNS:** Для стабильной работы на мобильных сетях РФ бот через `customize_vpn_config_dict` принудительно выставляет `MTU = 1280` (устранение фрагментации/дропов пакетов) и Google DNS `8.8.8.8, 8.8.4.4` (обход замедления Cloudflare 1.1.1.1)
 6. **Всегда сохранять `vpn://` URI в БД** (поле `raw_config`) — это единственный источник истины
 7. **При пересоздании устройства** — новый `vpn://`, новые ключи, новый `last_config`
-8. **Не менять параметры AWG 2.0** — они валидны от API, изменения сломают конфиг
+8. **Не менять параметры AWG 2.0 (Jc, S1-S4, H1-H4, CPS)** — они генерируются API, ручные изменения сломают handshake
 9. **Для `protocol` всегда использовать `"amneziawg2"`** — никаких `"amneziawg"` (это AWG 1.0)
 10. **Имя клиента в API** — формат `tg_{telegram_id}_{device_name}_{4-char-hash}` для трассируемости
 
