@@ -70,6 +70,10 @@ class MockedSession(BaseSession):
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from utils.telegram import _hub_cache, _hub_render_locks
+
+        _hub_cache.clear()
+        _hub_render_locks.clear()
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
@@ -78,10 +82,10 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings, payment_disputes "
+                    "tariff_quotes, tariff_versions, payments, "
+                    "hub_messages, vpn_profiles, maintenance_mode, audit_logs, "
+                    "users, tariffs, system_settings, payment_disputes "
                     "RESTART IDENTITY CASCADE"
-
-
                 )
             )
             self.db_user = DBUser(telegram_id=123456789)
@@ -158,11 +162,14 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         from database.connection import close_db
         from bot.middlewares.clean_chat import stop_clean_chat_worker
         from config.settings import get_settings
+        from utils.telegram import _hub_cache, _hub_render_locks
         await close_db()
         await stop_clean_chat_worker()
         self.env_patcher.stop()
         self.throttle_patcher.stop()
         get_settings.cache_clear()
+        _hub_cache.clear()
+        _hub_render_locks.clear()
         await self.dp.storage.close()
         # Detach module-level routers from this dispatcher so subsequent
         # test methods can call setup_bot cleanly without aiogram raising
@@ -217,14 +224,22 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         update = self._create_callback_update("menu_balance")
         await self.dp.feed_update(bot=self.bot, update=update)
         
-        req = self.session.get_request()
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ == "EditMessageText"
+        )
         self.assertEqual(req.__class__.__name__, "EditMessageText")
         self.assertIn("Баланс:", req.text)
         
         # 3. User tries to buy tariff from showcase
         update = self._create_callback_update("payment_showcase")
         await self.dp.feed_update(bot=self.bot, update=update)
-        req = self.session.get_request()
+        req = next(
+            r
+            for r in reversed(self.session.requests)
+            if r.__class__.__name__ == "EditMessageText"
+        )
         self.assertIn("Базовый", str(req.reply_markup))
         
         # Emulate clicking on the tariff to quote
