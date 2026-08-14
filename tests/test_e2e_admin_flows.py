@@ -18,6 +18,10 @@ DB = os.getenv("TEST_DATABASE_URL")
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from utils.telegram import _hub_cache, _hub_render_locks
+
+        _hub_cache.clear()
+        _hub_render_locks.clear()
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
@@ -26,9 +30,10 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings "
+                    "tariff_quotes, tariff_versions, payments, "
+                    "hub_messages, vpn_profiles, maintenance_mode, audit_logs, "
+                    "users, tariffs, system_settings, payment_disputes "
                     "RESTART IDENTITY CASCADE"
-
                 )
             )
             # Create the admin user
@@ -101,12 +106,20 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         from bot.middlewares.clean_chat import stop_clean_chat_worker
         from config.settings import get_settings
         from database.connection import close_db
+        from utils.telegram import _hub_cache, _hub_render_locks
 
         await close_db()
         await stop_clean_chat_worker()
         self.env_patcher.stop()
         get_settings.cache_clear()
+        _hub_cache.clear()
+        _hub_render_locks.clear()
         await self.dp.storage.close()
+        # Detach module-level routers from this dispatcher so subsequent
+        # test methods can call setup_bot cleanly without aiogram raising
+        # "Router is already included in ...".
+        for router in self.dp.sub_routers[:]:
+            router._parent_router = None
         await self.bot.session.close()
         await self.engine.dispose()
 
