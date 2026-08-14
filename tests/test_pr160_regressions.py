@@ -340,6 +340,72 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         self.assertIn("123 ₽", text)
         self.assertIn("7 ₽", text)
 
+    async def test_select_tariff_type_renders_successfully(self):
+        from bot.handlers.payment import showcase_routes
+
+        callback = MagicMock()
+        callback.data = "select_tariff_type:2:showcase"
+        callback.bot = MagicMock()
+        callback.message = MagicMock()
+        callback.message.chat.id = 12345
+        callback.from_user.id = 780425805
+        callback.answer = AsyncMock()
+
+        session = MagicMock()
+        db_user = SimpleNamespace(id=1, current_tariff_id=None)
+
+        tariff_30d = SimpleNamespace(id=1, device_limit=2, duration_days=30, price_rub=150, is_active=True)
+        tariff_90d = SimpleNamespace(id=2, device_limit=2, duration_days=90, price_rub=400, is_active=True)
+        active_tariffs = [tariff_30d, tariff_90d]
+
+        with (
+            patch("bot.handlers.payment.showcase_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.payment.showcase_routes.get_user_profiles_count", new=AsyncMock(return_value=1)),
+            patch("bot.handlers.payment.showcase_routes.get_active_tariffs", new=AsyncMock(return_value=active_tariffs)),
+            patch("bot.handlers.payment.showcase_routes.render_hub", new=AsyncMock()) as mock_render_hub,
+        ):
+            await showcase_routes.select_tariff_type(
+                callback=callback,
+                session=session,
+                db_user=db_user,
+            )
+
+        callback.answer.assert_awaited_once_with(show_alert=False)
+        mock_render_hub.assert_awaited_once()
+        args = mock_render_hub.call_args[0]
+        rendered_text = args[2]
+        self.assertIn("Базовый", rendered_text)
+        self.assertIn("На какой срок открываем доступ?", rendered_text)
+
+    def test_all_codebase_text_references_exist(self):
+        import ast
+        import os
+        from bot import texts
+
+        available = set(dir(texts))
+        missing = []
+        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        for root, _dirs, files in os.walk(root_dir):
+            if any(part in root for part in (".venv", "venv", ".git")):
+                continue
+            for file in files:
+                if file.endswith(".py"):
+                    filepath = os.path.join(root, file)
+                    try:
+                        with open(filepath, "r", encoding="utf-8") as f:
+                            tree = ast.parse(f.read(), filename=filepath)
+                    except Exception:
+                        continue
+                    for node in ast.walk(tree):
+                        if isinstance(node, ast.Attribute):
+                            if isinstance(node.value, ast.Name) and node.value.id == "texts":
+                                attr = node.attr
+                                if not attr.startswith("_") and attr not in available:
+                                    missing.append((os.path.relpath(filepath, root_dir), node.lineno, attr))
+
+        self.assertEqual(missing, [], f"Found unresolved texts attributes: {missing}")
+
 
 if __name__ == "__main__":
     unittest.main()
