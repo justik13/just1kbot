@@ -28,7 +28,7 @@ from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name
+from utils.tariff_names import get_tariff_display_name, get_tariff_group_name
 from utils.telegram import render_hub
 
 from .common import (
@@ -543,7 +543,9 @@ async def select_tariff_type(
         )
         return
 
-    description = texts.PAYMENT_TARIFF_DESCRIPTION.get(device_limit, "")
+    description = texts.get_text("PAYMENT_TARIFF_DESCRIPTION", {}).get(device_limit)
+    if not description:
+        description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
     text = description + texts.PAYMENT_DURATION_HEADER
 
     keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
