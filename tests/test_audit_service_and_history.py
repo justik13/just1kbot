@@ -288,6 +288,77 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             import bot.handlers.admin.users.device_routes as dr
             self.assertFalse(hasattr(dr, "AuditService"))
 
+    async def test_admin_delete_device_full_flow_exactly_one_audit_record(self):
+        """End-to-end test from admin handler down through DeviceService ensuring exactly 1 audit record."""
+        from bot.handlers.admin.users.device_routes import admin_delete_device_apply
+        from database.models import Server, VPNProfile
+
+        callback = AsyncMock()
+        admin_id = 777
+        callback.from_user.id = admin_id
+        callback.data = "admin_delete_device_apply:888:42"
+        callback.message.edit_text = AsyncMock()
+
+        user = User(id=15, telegram_id=888, username="client")
+        server = Server(id=1, name="NL-Node-1", api_url="https://vpn.test", api_key="secret")
+        profile = VPNProfile(
+            id=42,
+            user_id=15,
+            server_id=1,
+            device_name="iPhone",
+            peer_id="peer-123",
+            client_name="tg_888_p42",
+            provisioning_status="active",
+            server=server,
+        )
+
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = profile
+        session.execute.return_value = mock_result
+        session.get.return_value = server
+
+        with (
+            patch("bot.handlers.admin.users.device_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.device_routes._get_user_with_profiles", return_value=user),
+            patch("bot.handlers.admin.users.device_routes.get_profile_by_id", return_value=profile),
+            patch("services.device_service.is_admin", return_value=True),
+            patch("services.device_service.ensure_delete_operation", new_callable=AsyncMock),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            await admin_delete_device_apply(callback, session)
+
+            # Assert create_audit_log was called EXACTLY ONCE in the entire execution
+            self.assertEqual(mock_create_audit.call_count, 1)
+            kwargs = mock_create_audit.call_args.kwargs
+            self.assertEqual(kwargs["admin_id"], admin_id)
+            self.assertEqual(kwargs["action"], "ADMIN_DEVICE_DELETE")
+            self.assertEqual(kwargs["target_type"], "user")
+            self.assertEqual(kwargs["target_id"], 15)
+            parsed_details = json.loads(kwargs["details"])
+            self.assertEqual(parsed_details["device_name"], "iPhone")
+            self.assertEqual(parsed_details["profile_id"], 42)
+            self.assertEqual(parsed_details["server_name"], "NL-Node-1")
+            self.assertTrue(parsed_details["force"])
+
+    async def test_audit_service_error_resilience(self):
+        """Verify AuditService logs exception without crashing caller on DB/audit failure."""
+        session = AsyncMock()
+        with (
+            patch("services.audit_service.create_audit_log", side_effect=RuntimeError("DB disconnect")),
+            patch("services.audit_service.logger.error") as mock_logger_error,
+        ):
+            # Should not raise exception
+            await AuditService.log_action(
+                session,
+                admin_id=1,
+                action="TEST_FAIL",
+                target_type="user",
+                target_id=1,
+                details="test",
+            )
+            mock_logger_error.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
