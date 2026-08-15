@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select, func
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -170,7 +170,7 @@ async def process_mass_bonus_reason(
     if target_aud == "active":
         stmt = stmt.where(User.subscription_end > now)
     elif target_aud == "expired":
-        stmt = stmt.where(User.subscription_end <= now)
+        stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
 
     user_count = int((await session.scalar(stmt)) or 0)
     total_budget = user_count * amount
@@ -274,7 +274,7 @@ async def _run_mass_bonus_background(
     if target_aud == "active":
         stmt = stmt.where(User.subscription_end > now)
     elif target_aud == "expired":
-        stmt = stmt.where(User.subscription_end <= now)
+        stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
 
     async with session_scope() as session:
         result = await session.execute(stmt)

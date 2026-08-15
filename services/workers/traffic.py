@@ -3,6 +3,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from aiogram import Bot
+
 from cachetools import TTLCache
 from sqlalchemy import select, update
 
@@ -36,11 +38,22 @@ def _start_background_task(coro) -> asyncio.Task:
     return task
 
 
-async def traffic_sync_loop(shutdown_event: asyncio.Event):
+async def traffic_sync_loop(
+    bot_or_shutdown: Bot | asyncio.Event | None = None,
+    shutdown_event: asyncio.Event | None = None,
+):
     global _consecutive_crashes
+
+    if isinstance(bot_or_shutdown, asyncio.Event):
+        event = bot_or_shutdown
+        bot = None
+    else:
+        bot = bot_or_shutdown
+        event = shutdown_event or asyncio.Event()
+
     try:
         await asyncio.wait_for(
-            shutdown_event.wait(), timeout=WORKER_START_DELAY
+            event.wait(), timeout=WORKER_START_DELAY
         )
         logger.info(
             "Traffic sync worker stopped during start delay (shutdown)"
@@ -49,9 +62,9 @@ async def traffic_sync_loop(shutdown_event: asyncio.Event):
     except asyncio.TimeoutError:
         pass
 
-    while not shutdown_event.is_set():
+    while not event.is_set():
         try:
-            await _traffic_sync_once()
+            await _traffic_sync_once(bot)
             _consecutive_crashes = 0
         except asyncio.CancelledError:
             logger.info("Traffic sync worker cancelled")
@@ -70,14 +83,14 @@ async def traffic_sync_loop(shutdown_event: asyncio.Event):
                 e,
                 exc_info=True,
             )
-            if shutdown_event.is_set():
+            if event.is_set():
                 break
             await asyncio.sleep(backoff)
             continue
 
         try:
             await asyncio.wait_for(
-                shutdown_event.wait(), timeout=TRAFFIC_SYNC_INTERVAL
+                event.wait(), timeout=TRAFFIC_SYNC_INTERVAL
             )
             break
         except asyncio.TimeoutError:
@@ -86,7 +99,7 @@ async def traffic_sync_loop(shutdown_event: asyncio.Event):
     logger.info("Traffic sync worker stopped gracefully")
 
 
-async def _traffic_sync_once():
+async def _traffic_sync_once(bot: Bot | None = None):
     servers = []
     async with session_scope() as session:
         stmt = (
@@ -262,6 +275,7 @@ async def _process_server_traffic(server_info, api_clients):
                 _quota_alerted[p_id] = True
                 _start_background_task(
                     _send_quota_alert(
+                        bot,
                         tg_id,
                         server_info["name"],
                         total_traffic,
@@ -289,15 +303,13 @@ async def _process_server_traffic(server_info, api_clients):
 
 
 async def _send_quota_alert(
+    bot: Bot | None,
     telegram_id: int,
     server_name: str,
     total_bytes: int,
     profile_id: int,
 ):
     try:
-        from services.workers.heartbeat import get_bot_ref
-
-        bot = get_bot_ref()
         if not bot:
             return
         settings = get_settings()
