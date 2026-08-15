@@ -4,6 +4,9 @@ from unittest.mock import MagicMock
 
 from aiogram import Bot
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 from database.repositories.users_repo import ALLOWED_USER_UPDATE_FIELDS
 from services.device_service import RESERVING_STATUSES
 from services.workers.cleanup import cleanup_dangling_peers_loop
@@ -11,6 +14,12 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
+    def test_alembic_head_is_0004_entitlement_constraints(self):
+        scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        self.assertEqual(scripts.get_heads(), ["0004_update_entitlement_entries_constraints"])
+        rev_0004 = scripts.get_revision("0004_update_entitlement_entries_constraints")
+        self.assertEqual(rev_0004.down_revision, "0003_add_server_health_fields")
+
     def test_users_repo_allowed_fields_no_referral_days(self):
         self.assertNotIn("referral_days", ALLOWED_USER_UPDATE_FIELDS)
         self.assertIn("device_limit", ALLOWED_USER_UPDATE_FIELDS)

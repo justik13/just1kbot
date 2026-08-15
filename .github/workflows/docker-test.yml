@@ -69,6 +69,20 @@ jobs:
               exit 1
             fi
 
+            for svc_container in just1kbot_db just1kbot_redis just1kbot_app just1kbot_caddy; do
+              svc_status="$(docker inspect --format='{{.State.Status}}' "$svc_container" 2>/dev/null || echo missing)"
+              if [ "$svc_status" = "restarting" ] || [ "$svc_status" = "exited" ] || [ "$svc_status" = "dead" ]; then
+                echo "Container $svc_container crashed or is restarting: status=$svc_status"
+                docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
+                docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
+                diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
+                bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
+                bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
+                echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs bot_health=$bot_health_log migrate=$migrate_state"
+                exit 1
+              fi
+            done
+
             DB_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
             REDIS_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
             BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
@@ -80,14 +94,13 @@ jobs:
               break
             fi
 
-            if [ "$DB_HEALTH" = unhealthy ] || [ "$REDIS_HEALTH" = unhealthy ] || [ "$BOT_HEALTH" = unhealthy ] || [ "$CADDY_STATE" = exited ] || [ "$CADDY_STATE" = dead ]; then
-              echo "A service became unhealthy or stopped!"
+            if [ "$DB_HEALTH" = unhealthy ] || [ "$REDIS_HEALTH" = unhealthy ] || [ "$BOT_HEALTH" = unhealthy ]; then
+              echo "A service became unhealthy!"
               docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
               docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
               diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
               bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
               bot_health_log="$(docker inspect --format='{{.State.Status}}/{{.State.Health.Status}} {{range .State.Health.Log}}{{.Output}}{{end}}' just1kbot_app 2>/dev/null | tr '\n' ' ' || true)"
-              migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
               echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs bot_health=$bot_health_log migrate=$migrate_state"
               exit 1
             fi

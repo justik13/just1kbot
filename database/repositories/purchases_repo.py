@@ -77,7 +77,8 @@ async def get_purchase_logs_paginated(
         for log in audit_results
         if log.target_id and log.target_type in ("User", "user")
     }
-    users_by_id = {}
+    users_by_id: dict[int, User] = {}
+    users_by_tg_id: dict[int, User] = {}
     if audit_user_ids:
         users = (
             await session.scalars(
@@ -91,7 +92,7 @@ async def get_purchase_logs_paginated(
         ).all()
         for u in users:
             users_by_id[u.id] = u
-            users_by_id[u.telegram_id] = u
+            users_by_tg_id[u.telegram_id] = u
 
     entries: list[PurchaseLogEntry] = []
 
@@ -153,7 +154,7 @@ async def get_purchase_logs_paginated(
         "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
     }
     for log in audit_results:
-        u = users_by_id.get(log.target_id)
+        u = users_by_tg_id.get(log.target_id) or users_by_id.get(log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
@@ -285,13 +286,10 @@ async def get_purchase_log_by_id(
         u = None
         if log.target_id:
             u = await session.scalar(
-                select(User).where(
-                    or_(
-                        User.id == log.target_id,
-                        User.telegram_id == log.target_id,
-                    )
-                )
+                select(User).where(User.telegram_id == log.target_id)
             )
+            if not u:
+                u = await session.get(User, log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
