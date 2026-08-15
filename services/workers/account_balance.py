@@ -212,7 +212,7 @@ async def process_balance_notifications(bot: Bot) -> int:
             )
             if payment is None or payment.credit_notified_at is not None:
                 continue
-            if (payment.topup_context or {}).get("auto_fulfill_action") in {"purchase", "tariff_change"}:
+            if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
                 payment.credit_notified_at = now_utc()
                 continue
             balance = await get_account_balance(

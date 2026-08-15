@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -114,6 +115,8 @@ async def dismiss_notification(
             if callback.message:
                 await callback.message.delete()
                 return
+        except (TelegramBadRequest, TelegramAPIError):
+            pass
         except Exception:
             pass
 

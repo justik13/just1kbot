@@ -31,10 +31,12 @@ fi
 # 2. Если не найдено, определяем реальный путь к скрипту с раскрытием всех симлинков
 if [[ -z "$PROJECT_DIR" ]]; then
     SOURCE="${BASH_SOURCE[0]}"
-    while [ -h "$SOURCE" ]; do
+    max_links=20
+    while [ -h "$SOURCE" ] && [ "$max_links" -gt 0 ]; do
         DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
         SOURCE="$(readlink "$SOURCE")"
         [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+        ((max_links--))
     done
     SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 

@@ -388,6 +388,7 @@ async def settle_succeeded_topup(
                             quote_public_id=quote_uuid,
                         )
                         auto_fulfilled_action = "tariff_change"
+                        payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "succeeded"}
                         logging.getLogger(__name__).info("Auto-fulfilled tariff change for payment %s, user_id=%s", payment.id, payment.user_id)
                     elif auto_action == "purchase":
                         from services.account_purchase import settle_account_purchase
@@ -397,10 +398,13 @@ async def settle_succeeded_topup(
                             quote_public_id=quote_uuid,
                         )
                         auto_fulfilled_action = "purchase"
+                        payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "succeeded"}
                         logging.getLogger(__name__).info("Auto-fulfilled purchase for payment %s, user_id=%s", payment.id, payment.user_id)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning("Auto-fulfillment failed for topup payment %s: %s", payment.id, e)
+            if payment.topup_context and isinstance(payment.topup_context, dict):
+                payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "failed", "auto_fulfill_error": str(e)}
 
         if bot is not None and user is not None and user.telegram_id:
             try:
