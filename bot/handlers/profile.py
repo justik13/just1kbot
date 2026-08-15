@@ -148,7 +148,7 @@ async def show_referrals_list(
             page = 1
 
     page_size = 10
-    page_referrals, total_count = await get_user_referrals_paginated(
+    page_referrals, total_count, page = await get_user_referrals_paginated(
         session, db_user.telegram_id, page=page, per_page=page_size
     )
 
@@ -157,7 +157,6 @@ async def show_referrals_list(
         total_pages = 1
     else:
         total_pages = max(1, (total_count + page_size - 1) // page_size)
-        page = max(1, min(page, total_pages))
 
         start_idx = (page - 1) * page_size
         rendered = texts.REFERRAL_LIST_HEADER

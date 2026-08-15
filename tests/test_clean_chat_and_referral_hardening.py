@@ -314,6 +314,73 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payment.topup_context.get("referrer_bonus"), 100)
 
 
+class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
+    async def test_get_user_referrals_paginated_clamps_out_of_bounds_page(self):
+        from database.repositories.users_repo import get_user_referrals_paginated
+
+        session = AsyncMock()
+        # Mock count = 21 (3 pages of 10 items)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [User(id=21, telegram_id=2021, username="ref21")]
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+
+        with patch("database.repositories.users_repo.get_user_referrals_count", AsyncMock(return_value=21)):
+            session.execute = AsyncMock(return_value=mock_result)
+
+            # Request page 999
+            items, total_count, normalized_page = await get_user_referrals_paginated(
+                session, telegram_id=1000, page=999, per_page=10
+            )
+
+        self.assertEqual(total_count, 21)
+        self.assertEqual(normalized_page, 3, "Page 999 must be clamped to last page 3")
+        self.assertEqual(len(items), 1)
+
+        # Verify offset in query was (3 - 1) * 10 = 20
+        executed_stmt = session.execute.call_args[0][0]
+        self.assertEqual(executed_stmt._offset, 20)
+        self.assertEqual(executed_stmt._limit, 10)
+
+    async def test_show_referrals_list_renders_last_page_on_out_of_bounds_page(self):
+        from aiogram.types import CallbackQuery
+        from bot.handlers.profile import show_referrals_list
+
+        callback = MagicMock(spec=CallbackQuery)
+        callback.data = "referrals_list:999"
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=1000)
+        callback.message.message_id = 555
+        callback.answer = AsyncMock()
+        callback.bot = MagicMock()
+
+        state = MagicMock(spec=FSMContext)
+        state.clear = AsyncMock()
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=1000, username="owner")
+
+        last_page_referral = User(id=21, telegram_id=2021, username="ref21")
+        rendered_texts = []
+
+        async def fake_render(bot, chat_id, text, reply_markup, trigger_message_id=None):
+            rendered_texts.append((text, reply_markup))
+
+        with patch("bot.handlers.profile.get_user_referrals_paginated", AsyncMock(return_value=([last_page_referral], 21, 3))), \
+             patch("bot.handlers.profile.render_hub", side_effect=fake_render):
+            await show_referrals_list(callback, state, session, db_user=db_user)
+
+        self.assertEqual(len(rendered_texts), 1)
+        text, markup = rendered_texts[0]
+        self.assertIn("@ref21", text)
+        self.assertIn("21. ", text)
+        self.assertIn("Всего приглашено: 21", text)
+
+        # Verify pagination button shows 3/3
+        buttons = [btn for row in markup.inline_keyboard for btn in row]
+        page_btn = next((b for b in buttons if "3/3" in b.text), None)
+        self.assertIsNotNone(page_btn, "Pagination indicator must show 3/3")
+
+
 class TestShareButtonAndKeyboards(unittest.TestCase):
     def test_referral_keyboard_includes_encoded_share_button(self):
         link = "https://t.me/mybot?start=ref_12345"
