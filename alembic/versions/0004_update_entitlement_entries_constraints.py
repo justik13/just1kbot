@@ -37,13 +37,12 @@ def downgrade() -> None:
     op.drop_constraint('ck_entitlement_entries_type', 'entitlement_entries', type_='check')
 
     # Re-apply baseline constraints with NOT VALID so existing referral rows don't cause rollback failure or data loss
-    bind = op.get_bind()
-    bind.exec_driver_sql(
+    op.execute(
         "ALTER TABLE public.entitlement_entries "
         "ADD CONSTRAINT ck_entitlement_entries_type "
         "CHECK (entry_type IN ('account_purchase_grant', 'manual_grant', 'tariff_change')) NOT VALID"
     )
-    bind.exec_driver_sql(
+    op.execute(
         "ALTER TABLE public.entitlement_entries "
         "ADD CONSTRAINT ck_entitlement_entries_shape "
         "CHECK ((((entry_type IN ('account_purchase_grant', 'manual_grant')) AND (days_delta > 0) AND (reversed_entry_id IS NULL) AND ((hours_delta IS NULL) OR (hours_delta = (days_delta * 24)))) OR ((entry_type = 'tariff_change') AND (source_type = 'quote') AND (days_delta = 0) AND (hours_delta > 0) AND (reversed_entry_id IS NULL)))) NOT VALID"
