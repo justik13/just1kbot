@@ -202,7 +202,10 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
             self.assertEqual(operation.operation_type, "create_payment")
-            self.assertEqual(operation.payload["description"], "Пополнение баланса")
+            self.assertEqual(
+                operation.payload["description"],
+                "Предоставление доступа к информационному сервису Just1k",
+            )
             self.assertEqual(operation.payload["amount"]["value"], "499.00")
 
     async def test_hidden_topup_can_be_replaced_but_remains_financially_live(self):

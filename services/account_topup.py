@@ -23,6 +23,18 @@ from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
 
 
+def get_topup_description(context: dict | None = None) -> str:
+    ctx = context or {}
+    action = ctx.get("auto_fulfill_action")
+    operation = ctx.get("operation")
+
+    if action == "purchase" and operation == "renew":
+        return "Продление доступа к информационному сервису Just1k"
+    if action == "tariff_change":
+        return "Изменение параметров доступа к сервису Just1k"
+    return "Предоставление доступа к информационному сервису Just1k"
+
+
 UNFINISHED_TOPUP_PROVIDER_STATUSES = (
     "not_created",
     "creating",
@@ -173,7 +185,7 @@ async def create_balance_topup(
     await enqueue_create(
         session,
         payment,
-        description="Пополнение баланса",
+        description=get_topup_description(context),
         return_url=return_url,
     )
     session.add(
