@@ -383,6 +383,8 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
 
 class TestShareButtonAndKeyboards(unittest.TestCase):
     def test_referral_keyboard_includes_encoded_share_button(self):
+        from bot import texts
+
         link = "https://t.me/mybot?start=ref_12345"
         kb = get_referral_keyboard(referral_link=link)
         self.assertIsNotNone(kb)
@@ -392,6 +394,8 @@ class TestShareButtonAndKeyboards(unittest.TestCase):
         self.assertIsNotNone(share_btn, "Share button must be present in referral keyboard")
         self.assertIn("https://t.me/share/url?url=", share_btn.url)
         self.assertIn(quote(link, safe=""), share_btn.url)
+        self.assertIn("&text=", share_btn.url)
+        self.assertIn(quote(texts.REFERRAL_SHARE_TEXT, safe=""), share_btn.url)
 
 
 if __name__ == "__main__":

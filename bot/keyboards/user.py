@@ -28,7 +28,8 @@ def get_referral_keyboard(
         text=texts.BUTTON_COPY_REFERRAL,
         copy_text=CopyTextButton(text=referral_link),
     )
-    share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}"
+    share_text = getattr(texts, "REFERRAL_SHARE_TEXT", "🎁 Приглашаю в just1kbot! При первом пополнении получишь +10% бонуса на баланс:")
+    share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
     builder.button(
         text="↗️ Поделиться",
         url=share_url,
