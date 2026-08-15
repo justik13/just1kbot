@@ -212,6 +212,31 @@ async def process_balance_notifications(bot: Bot) -> int:
             )
             if payment is None or payment.credit_notified_at is not None:
                 continue
+
+            # Durable retry for pending referrer bonus notification
+            ref_id = (payment.topup_context or {}).get("referrer_telegram_id")
+            ref_bonus = (payment.topup_context or {}).get("referrer_bonus", 0)
+            if ref_id and ref_bonus > 0 and (payment.topup_context or {}).get("referrer_notified_at") is None:
+                try:
+                    await global_send_limiter.acquire()
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    b_builder = InlineKeyboardBuilder()
+                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(ref_bonus)} ₽</b> бонусов на баланс."
+                    await render_hub(bot, int(ref_id), ref_text, b_builder.as_markup())
+                    payment.topup_context = {
+                        **payment.topup_context,
+                        "referrer_notified_at": now_utc().isoformat(),
+                    }
+                except TelegramForbiddenError:
+                    payment.topup_context = {
+                        **payment.topup_context,
+                        "referrer_notified_at": now_utc().isoformat(),
+                        "referrer_bot_blocked": True,
+                    }
+                except Exception as exc:
+                    logger.warning("Failed to deliver durable referrer push to %s: %s", ref_id, exc)
+
             if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
                 quote_raw = (payment.topup_context or {}).get("quote_public_id")
                 if quote_raw:
@@ -222,10 +247,10 @@ async def process_balance_notifications(bot: Bot) -> int:
                         quote = await session.scalar(
                             select(TariffQuote).where(TariffQuote.public_id == quote_uuid)
                         )
-                        if quote and quote.purchase_notified_at is None:
+                        if quote is not None and quote.purchase_notified_at is None:
                             continue
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning("Error checking quote for auto-fulfilled payment %s: %s", payment.id, exc)
                 payment.credit_notified_at = now_utc()
                 continue
             balance = await get_account_balance(

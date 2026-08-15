@@ -472,16 +472,82 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 bot=bot,
                 settings=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000),
             )
-            self.assertTrue(created)
-            # Two callbacks queued: one for referrer push, one for user topup push
-            self.assertEqual(len(queued_callbacks), 2)
+            self.assertEqual(p.topup_context.get("referrer_telegram_id"), 99999)
+            self.assertEqual(p.topup_context.get("referrer_bonus"), 50)
+            self.assertIsNone(p.topup_context.get("referrer_notified_at"))
 
-            with patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub:
+            db_p = topup()
+            db_p.topup_context = dict(p.topup_context)
+            mock_session = AsyncMock()
+            mock_session.get.return_value = db_p
+
+            class DummyContext:
+                async def __aenter__(self):
+                    return mock_session
+                async def __aexit__(self, *args):
+                    pass
+
+            with (
+                patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub,
+                patch("database.connection.session_scope", return_value=DummyContext()),
+            ):
                 # Execute referrer push callback
                 await queued_callbacks[0]()
                 mock_hub.assert_awaited_once()
                 self.assertEqual(mock_hub.call_args[0][1], 99999)
                 self.assertIn("Ваш реферал пополнил баланс", mock_hub.call_args[0][2])
+                self.assertIsNotNone(db_p.topup_context.get("referrer_notified_at"))
+
+    async def test_worker_delivers_durable_referrer_notification_when_post_commit_push_was_lost(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from services.workers.account_balance import process_balance_notifications
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        p = topup()
+        p.id = 5555
+        p.user_id = 99
+        p.credit_notified_at = None
+        p.topup_context = {
+            "referrer_telegram_id": 88888,
+            "referrer_bonus": 35,
+            "referrer_notified_at": None,  # Lost post-commit push!
+        }
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(5555, 777)]))
+        mock_session.scalar.return_value = p
+
+        class DummyContext:
+            async def __aenter__(self):
+                return mock_session
+            async def __aexit__(self, *args):
+                pass
+
+        bot = MagicMock()
+
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
+            patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
+            patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
+                accounting_position=Decimal("350"),
+                available=Decimal("350"),
+                reserved=Decimal("0"),
+                debt=Decimal("0"),
+                real_position=Decimal("350"),
+                real_available=Decimal("350"),
+                bonus_position=Decimal("0"),
+                bonus_available=Decimal("0"),
+            ))),
+        ):
+            await process_balance_notifications(bot)
+            self.assertIsNotNone(p.credit_notified_at)
+            self.assertIsNotNone(p.topup_context.get("referrer_notified_at"))
+            # Both referrer notification and user balance notification were delivered
+            self.assertEqual(mock_hub.await_count, 2)
+            called_recipients = [call[0][1] for call in mock_hub.call_args_list]
+            self.assertIn(88888, called_recipients)
+            self.assertIn(777, called_recipients)
 
 
 if __name__ == "__main__":

@@ -357,28 +357,46 @@ async def settle_succeeded_topup(
             payment_id=payment.id,
             topup_amount=payment.amount,
         )
-        if granted_bonus > 0 and bot is not None and user is not None and user.referred_by:
-            try:
-                from aiogram.utils.keyboard import InlineKeyboardBuilder
-                b_builder = InlineKeyboardBuilder()
-                b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс."
-                ref_markup = b_builder.as_markup()
-                ref_target = user.referred_by
+        if granted_bonus > 0 and user is not None and user.referred_by:
+            ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
+            payment.topup_context = {
+                **ctx,
+                "referrer_telegram_id": user.referred_by,
+                "referrer_bonus": int(granted_bonus),
+                "referrer_notified_at": None,
+            }
+            if bot is not None:
+                try:
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    b_builder = InlineKeyboardBuilder()
+                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс."
+                    ref_markup = b_builder.as_markup()
+                    ref_target = user.referred_by
+                    target_payment_id = payment.id
 
-                async def _send_ref_push():
-                    try:
-                        from utils.telegram import render_hub
-                        await render_hub(bot, ref_target, ref_text, ref_markup)
-                    except Exception as exc:
-                        import logging
-                        logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", ref_target, exc)
+                    async def _send_ref_push():
+                        try:
+                            from utils.telegram import render_hub
+                            await render_hub(bot, ref_target, ref_text, ref_markup)
+                            from database.connection import session_scope
+                            async with session_scope() as notify_session:
+                                p = await notify_session.get(Payment, target_payment_id)
+                                if p and p.topup_context and isinstance(p.topup_context, dict):
+                                    if p.topup_context.get("referrer_notified_at") is None:
+                                        p.topup_context = {
+                                            **p.topup_context,
+                                            "referrer_notified_at": now_utc().isoformat(),
+                                        }
+                        except Exception as exc:
+                            import logging
+                            logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", ref_target, exc)
 
-                from database.connection import queue_post_commit_task
-                queue_post_commit_task(session, _send_ref_push)
-            except Exception as exc:
-                import logging
-                logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
+                    from database.connection import queue_post_commit_task
+                    queue_post_commit_task(session, _send_ref_push)
+                except Exception as exc:
+                    import logging
+                    logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
