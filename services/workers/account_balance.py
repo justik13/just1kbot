@@ -247,10 +247,11 @@ async def process_balance_notifications(bot: Bot) -> int:
                         quote = await session.scalar(
                             select(TariffQuote).where(TariffQuote.public_id == quote_uuid)
                         )
-                        if quote is not None and quote.purchase_notified_at is None:
+                        if quote is None or quote.purchase_notified_at is None:
                             continue
                     except Exception as exc:
                         logger.warning("Error checking quote for auto-fulfilled payment %s: %s", payment.id, exc)
+                        continue
                 payment.credit_notified_at = now_utc()
                 continue
             balance = await get_account_balance(

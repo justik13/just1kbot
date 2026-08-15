@@ -416,13 +416,59 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         bot = MagicMock()
 
-        # Step 1: When quote.purchase_notified_at is None, payment.credit_notified_at is NOT marked
+        # Step 1a: When quote lookup fails with exception, payment.credit_notified_at is NOT marked
+        call_count_1 = 0
+        def _scalar_err(query):
+            nonlocal call_count_1
+            call_count_1 += 1
+            if call_count_1 == 1:
+                return p
+            raise RuntimeError("DB query failed")
+
+        mock_session.scalar.side_effect = _scalar_err
+        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+            await process_balance_notifications(bot)
+            self.assertIsNone(p.credit_notified_at)
+
+        # Step 1b: When quote is None (not found), payment.credit_notified_at is NOT marked
+        call_count_2 = 0
+        def _scalar_none(query):
+            nonlocal call_count_2
+            call_count_2 += 1
+            if call_count_2 == 1:
+                return p
+            return None
+
+        mock_session.scalar.side_effect = _scalar_none
+        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+            await process_balance_notifications(bot)
+            self.assertIsNone(p.credit_notified_at)
+
+        # Step 1c: When quote.purchase_notified_at is None, payment.credit_notified_at is NOT marked
+        call_count_3 = 0
+        def _scalar_unnotified(query):
+            nonlocal call_count_3
+            call_count_3 += 1
+            if call_count_3 == 1:
+                return p
+            return mock_quote
+
+        mock_session.scalar.side_effect = _scalar_unnotified
         with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
             await process_balance_notifications(bot)
             self.assertIsNone(p.credit_notified_at)
 
         # Step 2: Once quote.purchase_notified_at is set, payment.credit_notified_at is marked
         mock_quote.purchase_notified_at = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+        call_count_4 = 0
+        def _scalar_notified(query):
+            nonlocal call_count_4
+            call_count_4 += 1
+            if call_count_4 == 1:
+                return p
+            return mock_quote
+
+        mock_session.scalar.side_effect = _scalar_notified
         with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
             await process_balance_notifications(bot)
             self.assertIsNotNone(p.credit_notified_at)
