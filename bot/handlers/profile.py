@@ -13,7 +13,10 @@ from bot.keyboards import (
 )
 from database.models import User
 from database.repositories.payments_repo import get_user_payments
-from database.repositories.users_repo import get_user_with_referrals
+from database.repositories.users_repo import (
+    get_user_referrals_count,
+    get_user_referrals_paginated,
+)
 from services.payment_status import payment_display_status
 from services.referral_bonus import get_referral_bonus_balance
 from utils.formatters import format_datetime
@@ -81,6 +84,7 @@ async def show_history(
         callback.message.chat.id,
         rendered,
         get_history_keyboard(),
+        trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
 
@@ -98,13 +102,12 @@ async def show_referral(
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    _, referrals = await get_user_with_referrals(session, db_user.telegram_id)
+    invited_count = await get_user_referrals_count(session, db_user.telegram_id)
     bonus_balance = await get_referral_bonus_balance(session, user_id=db_user.id)
 
     bot_info = await callback.bot.get_me()
     referral_link = f"https://t.me/{bot_info.username}?start=ref_{db_user.telegram_id}"
 
-    invited_count = len(referrals)
     inviter_line = await _get_inviter_line(session, db_user)
     if inviter_line:
         inviter_line = f"\n{inviter_line}\n"
@@ -119,6 +122,7 @@ async def show_referral(
             inviter_line=inviter_line,
         ),
         get_referral_keyboard(referral_link),
+        trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
 
@@ -143,21 +147,19 @@ async def show_referrals_list(
         except (ValueError, IndexError):
             page = 1
 
-    _, referrals = await get_user_with_referrals(session, db_user.telegram_id)
+    page_size = 10
+    page_referrals, total_count = await get_user_referrals_paginated(
+        session, db_user.telegram_id, page=page, per_page=page_size
+    )
 
-    if not referrals:
+    if total_count == 0:
         rendered = texts.REFERRAL_LIST_EMPTY
         total_pages = 1
     else:
-        page_size = 10
-        total_count = len(referrals)
         total_pages = max(1, (total_count + page_size - 1) // page_size)
         page = max(1, min(page, total_pages))
 
         start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        page_referrals = referrals[start_idx:end_idx]
-
         rendered = texts.REFERRAL_LIST_HEADER
         for idx, referral in enumerate(page_referrals, start=start_idx + 1):
             safe_user = (
@@ -175,4 +177,5 @@ async def show_referrals_list(
         callback.message.chat.id,
         rendered,
         get_referrals_list_keyboard(page=page, total_pages=total_pages),
+        trigger_message_id=callback.message.message_id if callback.message else None,
     )

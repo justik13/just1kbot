@@ -30,9 +30,18 @@ def parse_referral_id(command_args: str) -> int | None:
     if not command_args:
         return None
 
-    match = re.match(r"^(?:ref_)?(\d+)$", command_args)
+    match = re.match(r"^(?:ref_)?(\d{1,19})$", command_args.strip())
+    if not match:
+        return None
 
-    return int(match.group(1)) if match else None
+    try:
+        val = int(match.group(1))
+        if 0 < val <= 9_223_372_036_854_775_807:
+            return val
+    except (ValueError, OverflowError):
+        pass
+
+    return None
 
 
 async def _update_user_profile_if_changed(
@@ -152,6 +161,11 @@ async def cmd_start(
     session: AsyncSession,
 ):
     await state.clear()
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     # Clear legacy ReplyKeyboard if present from previous bot versions
     try:

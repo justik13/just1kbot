@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 from aiogram.types import InlineKeyboardMarkup, CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -26,6 +28,11 @@ def get_referral_keyboard(
         text=texts.BUTTON_COPY_REFERRAL,
         copy_text=CopyTextButton(text=referral_link),
     )
+    share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}"
+    builder.button(
+        text="↗️ Поделиться",
+        url=share_url,
+    )
     builder.button(
         text=texts.BUTTON_REFERRAL_LIST,
         callback_data="referrals_list",
@@ -35,7 +42,7 @@ def get_referral_keyboard(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1)
+    builder.adjust(1, 1, 1, 1)
 
     return builder.as_markup()
 

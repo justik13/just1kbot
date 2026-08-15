@@ -32,6 +32,9 @@ from utils.datetime_helpers import (
 logger = logging.getLogger(__name__)
 
 
+MAX_REFERRAL_CHAIN_DEPTH = 50
+
+
 class SubscriptionService:
     @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
@@ -64,10 +67,18 @@ class SubscriptionService:
 
         current_id = ref_id
         chain_visited = {telegram_id, ref_id}
+        depth = 0
 
-        for _ in range(5):
-            if not current_id:
-                break
+        while current_id:
+            depth += 1
+            if depth >= MAX_REFERRAL_CHAIN_DEPTH:
+                logger.warning(
+                    "Referral chain max depth %s exceeded for user %s, ref_id %s",
+                    MAX_REFERRAL_CHAIN_DEPTH,
+                    telegram_id,
+                    ref_id,
+                )
+                return False
 
             current_user = await get_user_by_telegram_id(session, current_id)
 
@@ -128,20 +139,29 @@ class SubscriptionService:
                 )
 
             if ref_id is not None and user.referred_by is None:
-                is_valid = await SubscriptionService._validate_referral(
-                    session,
-                    telegram_id,
-                    ref_id,
-                )
+                from database.repositories.payments_repo import has_successful_topup
 
-                if is_valid:
-                    user.referred_by = ref_id
-                    changed = True
-
-                    logger.info(
-                        "Late referral binding: user %s bound to referrer %s",
+                has_paid = await has_successful_topup(session, user_id=user.id)
+                if not has_paid:
+                    is_valid = await SubscriptionService._validate_referral(
+                        session,
                         telegram_id,
                         ref_id,
+                    )
+
+                    if is_valid:
+                        user.referred_by = ref_id
+                        changed = True
+
+                        logger.info(
+                            "Late referral binding: user %s bound to referrer %s",
+                            telegram_id,
+                            ref_id,
+                        )
+                else:
+                    logger.info(
+                        "Late referral binding rejected for user %s: already has top-up history",
+                        telegram_id,
                     )
 
             if changed:

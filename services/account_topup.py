@@ -359,11 +359,18 @@ async def settle_succeeded_topup(
         )
         if granted_bonus > 0 and user is not None and user.referred_by:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
+            purchaser_welcomed = any(
+                isinstance(obj, AccountLedgerEntry)
+                and getattr(obj, "user_id", None) == user.id
+                and (getattr(obj, "metadata_", {}) or {}).get("reason") == "first_topup_welcome"
+                for obj in session.new
+            )
             payment.topup_context = {
                 **ctx,
                 "referrer_telegram_id": user.referred_by,
                 "referrer_bonus": int(granted_bonus),
                 "referrer_notified_at": None,
+                "purchaser_welcome_bonus": int(granted_bonus) if purchaser_welcomed else 0,
             }
             if bot is not None:
                 try:
@@ -457,6 +464,16 @@ async def settle_succeeded_topup(
                     )
                     if balance.bonus_available > 0:
                         text += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
+                    if (
+                        payment.topup_context
+                        and isinstance(payment.topup_context, dict)
+                        and payment.topup_context.get("purchaser_welcome_bonus", 0) > 0
+                    ):
+                        wb = payment.topup_context["purchaser_welcome_bonus"]
+                        text += (
+                            f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
+                            f"за первое пополнение по приглашению!</b>"
+                        )
                     builder.button(text="💰 Мой баланс", callback_data="menu_balance")
                     builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
                     builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")

@@ -412,6 +412,11 @@ async def accept_custom_amount(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     raw = (message.text or "").strip()
     if not raw.isascii() or not raw.isdigit():
         await render_hub(
