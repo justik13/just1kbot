@@ -132,14 +132,7 @@ jobs:
           test "$(python -c 'import sys; print("%s.%s" % sys.version_info[:2])')" = 3.12
       - name: ShellCheck repository scripts
         run: find . -type f -name '*.sh' -print0 | xargs -0 shellcheck --severity=error
-      - name: Run alembic upgrade head
-        run: |
-          alembic upgrade head 2>&1 | tee /tmp/alembic_upgrade.log || {
-            echo "=== ALEMBIC UPGRADE FAILED ==="
-            cat /tmp/alembic_upgrade.log
-            curl -d "@/tmp/alembic_upgrade.log" https://ntfy.sh/justik13_diff_1234567890 || true
-            exit 1
-          }
+      - run: alembic upgrade head
       - name: Run full test suite
         id: unittests
         run: |

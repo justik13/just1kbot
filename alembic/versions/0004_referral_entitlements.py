@@ -1,6 +1,6 @@
 """Update entitlement_entries check constraints for referral bonuses.
 
-Revision ID: 0004_update_entitlement_entries_constraints
+Revision ID: 0004_referral_entitlements
 Revises: 0003_add_server_health_fields
 Create Date: 2026-08-15 08:00:00.000000
 """
@@ -9,8 +9,8 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-revision: str = '0004_update_entitlement_entries_constraints'
-down_revision: str = '0003_add_server_health_fields'
+revision: str = "0004_referral_entitlements"
+down_revision: str = "0003_add_server_health_fields"
 branch_labels = None
 depends_on = None
 

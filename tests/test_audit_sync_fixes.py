@@ -16,8 +16,8 @@ from services.workers.traffic import traffic_sync_loop
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
     def test_alembic_head_is_0004_entitlement_constraints(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0004_update_entitlement_entries_constraints"])
-        rev_0004 = scripts.get_revision("0004_update_entitlement_entries_constraints")
+        self.assertEqual(scripts.get_heads(), ["0004_referral_entitlements"])
+        rev_0004 = scripts.get_revision("0004_referral_entitlements")
         self.assertEqual(rev_0004.down_revision, "0003_add_server_health_fields")
 
     def test_users_repo_allowed_fields_no_referral_days(self):
