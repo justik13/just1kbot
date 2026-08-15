@@ -213,6 +213,19 @@ async def process_balance_notifications(bot: Bot) -> int:
             if payment is None or payment.credit_notified_at is not None:
                 continue
             if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
+                quote_raw = (payment.topup_context or {}).get("quote_public_id")
+                if quote_raw:
+                    import uuid
+                    from database.models import TariffQuote
+                    try:
+                        quote_uuid = uuid.UUID(str(quote_raw))
+                        quote = await session.scalar(
+                            select(TariffQuote).where(TariffQuote.public_id == quote_uuid)
+                        )
+                        if quote and quote.purchase_notified_at is None:
+                            continue
+                    except Exception:
+                        pass
                 payment.credit_notified_at = now_utc()
                 continue
             balance = await get_account_balance(

@@ -441,6 +441,7 @@ async def settle_succeeded_topup(
                 push_markup = builder.as_markup()
                 target_user_id = user.telegram_id
                 target_payment_id = payment.id
+                target_quote_uuid = quote_uuid if auto_fulfilled_action else None
 
                 async def _send_topup_push():
                     try:
@@ -451,6 +452,14 @@ async def settle_succeeded_topup(
                             p = await notify_session.get(Payment, target_payment_id)
                             if p and p.credit_notified_at is None:
                                 p.credit_notified_at = now_utc()
+                            if target_quote_uuid:
+                                from database.models import TariffQuote
+                                from sqlalchemy import select
+                                q = await notify_session.scalar(
+                                    select(TariffQuote).where(TariffQuote.public_id == target_quote_uuid)
+                                )
+                                if q and q.purchase_notified_at is None:
+                                    q.purchase_notified_at = now_utc()
                     except Exception as exc:
                         import logging
                         logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
