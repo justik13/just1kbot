@@ -139,7 +139,7 @@ def _maybe_cleanup_cache() -> None:
         )
 
 
-async def _load_hub_ids_from_db(chat_id: int) -> List[int]:
+async def _load_hub_ids_from_db(chat_id: int) -> List[int] | None:
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         return list(cached["ids"])
@@ -151,7 +151,7 @@ async def _load_hub_ids_from_db(chat_id: int) -> List[int]:
             return list(ids)
     except Exception as e:
         logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
-        return []
+        return None
 
 
 async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:

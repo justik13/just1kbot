@@ -360,18 +360,25 @@ async def settle_succeeded_topup(
         if granted_bonus > 0 and bot is not None and user is not None and user.referred_by:
             try:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
-                from utils.telegram import render_hub
                 b_builder = InlineKeyboardBuilder()
                 b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                await render_hub(
-                    bot,
-                    user.referred_by,
-                    f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс.",
-                    b_builder.as_markup(),
-                )
+                ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс."
+                ref_markup = b_builder.as_markup()
+                ref_target = user.referred_by
+
+                async def _send_ref_push():
+                    try:
+                        from utils.telegram import render_hub
+                        await render_hub(bot, ref_target, ref_text, ref_markup)
+                    except Exception as exc:
+                        import logging
+                        logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", ref_target, exc)
+
+                from database.connection import queue_post_commit_task
+                queue_post_commit_task(session, _send_ref_push)
             except Exception as exc:
                 import logging
-                logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", user.referred_by, exc)
+                logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")

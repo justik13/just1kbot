@@ -211,7 +211,26 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
             await dismiss_notification(cb, state, session, db_user)
             cb.answer.assert_awaited_once_with(show_alert=False)
             mock_hub.assert_awaited_once_with(cb, state, db_user, session)
-            cb.message.delete.assert_not_called()
+    async def test_dismiss_notification_deletes_standalone_message_when_no_hub_exists(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.fallback import dismiss_notification
+
+        cb = MagicMock()
+        cb.from_user.id = 123
+        cb.message.chat.id = 123
+        cb.message.message_id = 888
+        cb.message.delete = AsyncMock()
+        cb.answer = AsyncMock()
+
+        state = MagicMock()
+        session = AsyncMock()
+        db_user = MagicMock()
+
+        # When chat has no hubs in DB at all, it returns []
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])):
+            await dismiss_notification(cb, state, session, db_user)
+            cb.answer.assert_awaited_once_with(show_alert=False)
+            cb.message.delete.assert_awaited_once()
 
 
 if __name__ == "__main__":

@@ -101,16 +101,16 @@ async def dismiss_notification(
     msg_id = callback.message.message_id if callback.message else None
 
     # Determine if message is confirmed to be a standalone message (not the hub)
-    hub_ids: list[int] = []
+    hub_ids: list[int] | None = None
     if msg_id:
         try:
             from utils.telegram import _load_hub_ids_from_db
             hub_ids = await _load_hub_ids_from_db(chat_id)
         except Exception:
-            hub_ids = []
+            hub_ids = None
 
-    # If hub_ids was successfully loaded and msg_id is definitely not a hub message, delete standalone message
-    if msg_id and hub_ids and msg_id not in hub_ids:
+    # If hub_ids was successfully loaded (including empty list) and msg_id is not in hub_ids, delete standalone message
+    if msg_id and hub_ids is not None and msg_id not in hub_ids:
         try:
             if callback.message:
                 await callback.message.delete()

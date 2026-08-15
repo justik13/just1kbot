@@ -427,6 +427,62 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             await process_balance_notifications(bot)
             self.assertIsNotNone(p.credit_notified_at)
 
+    async def test_settle_succeeded_topup_queues_referrer_push_post_commit(self):
+        from unittest.mock import MagicMock, patch
+        from services.account_topup import settle_succeeded_topup
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        p = topup()
+        p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
+        p.credit_notified_at = None
+
+        user = MagicMock()
+        user.id = p.user_id
+        user.telegram_id = 777
+        user.topup_blocked = False
+        user.financial_hold = False
+        user.referred_by = 99999
+
+        bot = MagicMock()
+        queued_callbacks = []
+
+        with (
+            patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
+                accounting_position=Decimal("499"),
+                available=Decimal("499"),
+                reserved=Decimal("0"),
+                debt=Decimal("0"),
+                real_position=Decimal("499"),
+                real_available=Decimal("499"),
+                bonus_position=Decimal("0"),
+                bonus_available=Decimal("0"),
+            ))),
+            patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
+            patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=Decimal("50"))),
+            patch("database.connection.queue_post_commit_task", side_effect=lambda s, cb: queued_callbacks.append(cb)),
+        ):
+            created, balance = await settle_succeeded_topup(
+                session,
+                payment=p,
+                source="test",
+                bot=bot,
+                settings=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000),
+            )
+            self.assertTrue(created)
+            # Two callbacks queued: one for referrer push, one for user topup push
+            self.assertEqual(len(queued_callbacks), 2)
+
+            with patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub:
+                # Execute referrer push callback
+                await queued_callbacks[0]()
+                mock_hub.assert_awaited_once()
+                self.assertEqual(mock_hub.call_args[0][1], 99999)
+                self.assertIn("Ваш реферал пополнил баланс", mock_hub.call_args[0][2])
+
 
 if __name__ == "__main__":
     unittest.main()
