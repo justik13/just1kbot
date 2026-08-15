@@ -219,7 +219,7 @@ def _refund_payload(claim: ProviderRefundClaim) -> dict:
             "value": format(claim.amount, ".2f"),
             "currency": claim.currency,
         },
-        "description": f"Возврат пополнения #{claim.payment_id}",
+        "description": f"Возврат средств по заказу #{claim.payment_id}",
     }
 
 

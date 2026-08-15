@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from database.models import Payment
+from services.account_topup import get_topup_description
 from services.payment_provider_operations import create_payload
 from services.payment_provider_state import apply_provider_transition
 from services.payment_provider_validation import validate_provider_payment
@@ -107,13 +108,43 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
     def test_provider_payload_preserves_whole_ruble_contract(self):
         payment = topup()
-        payload = create_payload(payment, "Пополнение баланса", "https://t.me/bot")
+        description = get_topup_description(payment.topup_context)
+        payload = create_payload(payment, description, "https://t.me/bot")
         self.assertEqual(payload["amount"]["value"], "499.00")
         self.assertEqual(payload["amount"]["currency"], "RUB")
-        self.assertEqual(payload["description"], "Пополнение баланса")
+        self.assertEqual(
+            payload["description"],
+            "Предоставление доступа к информационному сервису Just1k",
+        )
         self.assertEqual(
             payload["metadata"],
             {"order_id": "topup_public", "local_payment_id": "17"},
+        )
+
+    def test_get_topup_description_variants(self):
+        self.assertEqual(
+            get_topup_description(None),
+            "Предоставление доступа к информационному сервису Just1k",
+        )
+        self.assertEqual(
+            get_topup_description({}),
+            "Предоставление доступа к информационному сервису Just1k",
+        )
+        self.assertEqual(
+            get_topup_description(
+                {"auto_fulfill_action": "purchase", "operation": "new"}
+            ),
+            "Предоставление доступа к информационному сервису Just1k",
+        )
+        self.assertEqual(
+            get_topup_description(
+                {"auto_fulfill_action": "purchase", "operation": "renew"}
+            ),
+            "Продление доступа к информационному сервису Just1k",
+        )
+        self.assertEqual(
+            get_topup_description({"auto_fulfill_action": "tariff_change"}),
+            "Изменение параметров доступа к сервису Just1k",
         )
 
     def test_durable_notification_worker_is_registered(self):
