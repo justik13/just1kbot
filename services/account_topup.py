@@ -346,6 +346,19 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
+        from services.audit_service import AuditService
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action="PAYMENT_SUCCESS",
+            target_type="user",
+            target_id=payment.user_id,
+            details={
+                "amount": int(payment.amount),
+                "provider": getattr(payment, "provider", "yookassa"),
+                "payment_id": payment.id,
+            },
+        )
         # Do not isolate this in a SAVEPOINT and continue on failure. The
         # top-up, referral bonus and ledger state must commit atomically.
         # If this raises, the caller's transaction rolls back and the durable

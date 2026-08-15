@@ -332,11 +332,15 @@ async def admin_sub_apply_tariff(
 
         await AuditService.log_action(
             session,
-            callback.from_user.id,
-            "CHANGE_TARIFF",
-            "User",
-            telegram_id,
-            f"tariff -> {tariff_name}",
+            admin_id=callback.from_user.id,
+            action="ADMIN_SUB_CHANGE",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "tariff_name": tariff_name,
+                "device_limit": new_tariff.device_limit,
+                "tariff_id": new_tariff.id,
+            },
         )
 
         text = texts.ADMIN_SUB_TARIFF_CHANGED.format(

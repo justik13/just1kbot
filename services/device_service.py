@@ -14,6 +14,7 @@ from services.amnezia_capacity import (
     ensure_server_capacity,
 )
 from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
+from services.audit_service import AuditService
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
 from utils.datetime_helpers import is_expired, now_msk
@@ -209,6 +210,19 @@ class DeviceService:
         )
         if not is_admin(user.telegram_id):
             user.device_creations_today += 1
+
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action="DEVICE_CREATE",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "device_name": profile.device_name,
+                "server_name": server.name,
+                "profile_id": profile.id,
+            },
+        )
         return profile
 
     @staticmethod
@@ -227,9 +241,16 @@ class DeviceService:
             return True
         if profile.provisioning_status == "pending_create" and not force:
             raise DeviceStillCreating("Устройство ещё создаётся")
+
+        # Capture server and device info for audit before deletion
+        server = await session.get(Server, profile.server_id)
+        server_name = server.name if server else ""
+        device_name = profile.device_name
+        profile_id = profile.id
+        user_id = profile.user_id
+
         if not profile.peer_id or force:
             if profile.peer_id:
-                server = await session.get(Server, profile.server_id)
                 try:
                     await ensure_delete_operation(
                         session,
@@ -246,9 +267,23 @@ class DeviceService:
                 except Exception as exc:
                     logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
             await session.delete(profile)
+            action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
+            admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
+            await AuditService.log_action(
+                session,
+                admin_id=admin_id,
+                action=action,
+                target_type="user",
+                target_id=user_id,
+                details={
+                    "device_name": device_name,
+                    "profile_id": profile_id,
+                    "server_name": server_name,
+                    "force": force,
+                },
+            )
             return True
 
-        server = await session.get(Server, profile.server_id)
         profile.provisioning_status = "deleting"
         await ensure_delete_operation(
             session,
@@ -263,5 +298,21 @@ class DeviceService:
             audit_reason="device_delete",
         )
         if not server:
-            session.delete(profile)
+            await session.delete(profile)
+
+        action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
+        admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
+        await AuditService.log_action(
+            session,
+            admin_id=admin_id,
+            action=action,
+            target_type="user",
+            target_id=user_id,
+            details={
+                "device_name": device_name,
+                "profile_id": profile_id,
+                "server_name": server_name,
+                "force": force,
+            },
+        )
         return True

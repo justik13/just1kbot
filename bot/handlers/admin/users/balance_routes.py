@@ -401,15 +401,18 @@ async def apply_user_balance_change(
         await state.clear()
         return
 
-    audit_action = "TOPUP_USER_BALANCE" if action_type == "topup" else "DEDUCT_USER_BALANCE"
-    audit_desc = f"{action_type.title()} {signed_amount} RUB to user {user.telegram_id}. Reason: {reason}"
+    audit_action = "ADMIN_BALANCE_TOPUP" if action_type == "topup" else "ADMIN_BALANCE_DEDUCT"
     await AuditService.log_action(
         session,
-        callback.from_user.id,
-        audit_action,
-        "User",
-        user.id,
-        audit_desc,
+        admin_id=callback.from_user.id,
+        action=audit_action,
+        target_type="user",
+        target_id=user.id,
+        details={
+            "amount": abs(int(signed_amount)),
+            "reason": reason,
+            "signed_amount": int(signed_amount),
+        },
     )
 
     try:

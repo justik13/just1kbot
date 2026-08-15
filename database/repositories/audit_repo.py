@@ -1,3 +1,4 @@
+import inspect
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import AuditLog
@@ -20,7 +21,9 @@ async def create_audit_log(
         target_id=target_id,
         details=details
     )
-    session.add(log)
+    res = session.add(log)
+    if inspect.isawaitable(res):
+        await res
     await session.flush()
     await session.refresh(log)
     return log
@@ -59,15 +62,26 @@ async def clear_audit_logs(session: AsyncSession, older_than_days: int = 30) -> 
 async def get_user_audit_logs(
     session: AsyncSession,
     user_id: int,
+    telegram_id: Optional[int] = None,
     offset: int = 0,
     limit: int = 10,
 ) -> List[AuditLog]:
+    from sqlalchemy import or_
+
+    conditions = [func.lower(AuditLog.target_type) == "user"]
+    if telegram_id is not None and telegram_id != user_id:
+        conditions.append(
+            or_(
+                AuditLog.target_id == user_id,
+                AuditLog.target_id == telegram_id,
+            )
+        )
+    else:
+        conditions.append(AuditLog.target_id == user_id)
+
     stmt = (
         select(AuditLog)
-        .where(
-            func.lower(AuditLog.target_type) == "user",
-            AuditLog.target_id == user_id,
-        )
+        .where(*conditions)
         .order_by(AuditLog.created_at.desc())
         .offset(offset)
         .limit(limit)
@@ -79,12 +93,23 @@ async def get_user_audit_logs(
 async def get_user_audit_logs_count(
     session: AsyncSession,
     user_id: int,
+    telegram_id: Optional[int] = None,
 ) -> int:
+    from sqlalchemy import or_
+
+    conditions = [func.lower(AuditLog.target_type) == "user"]
+    if telegram_id is not None and telegram_id != user_id:
+        conditions.append(
+            or_(
+                AuditLog.target_id == user_id,
+                AuditLog.target_id == telegram_id,
+            )
+        )
+    else:
+        conditions.append(AuditLog.target_id == user_id)
+
     stmt = (
         select(func.count(AuditLog.id))
-        .where(
-            func.lower(AuditLog.target_type) == "user",
-            AuditLog.target_id == user_id,
-        )
+        .where(*conditions)
     )
     return int(await session.scalar(stmt) or 0)

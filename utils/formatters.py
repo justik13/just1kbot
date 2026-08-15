@@ -80,14 +80,15 @@ def format_audit_details(details: Optional[str]) -> str:
     """Format audit log raw JSON / key-value details into human-readable Russian text."""
     if not details:
         return ""
-    
+
     import json
-    
+
     # Try parsing JSON first
     parsed = None
-    if details.strip().startswith("{") and details.strip().endswith("}"):
+    trimmed = details.strip()
+    if trimmed.startswith("{") and trimmed.endswith("}"):
         try:
-            parsed = json.loads(details)
+            parsed = json.loads(trimmed)
         except Exception:
             parsed = None
 
@@ -110,10 +111,22 @@ def format_audit_details(details: Optional[str]) -> str:
         "reason": "Причина",
         "tariff_name": "Тариф",
         "tariff_id": "ID тарифа",
+        "device_limit": "Лимит устройств",
         "server_name": "Сервер",
         "server_id": "ID сервера",
         "device_name": "Устройство",
         "device_id": "ID устройства",
+        "profile_id": "ID устройства",
+        "old_name": "Старое имя",
+        "new_name": "Новое имя",
+        "provider": "Провайдер",
+        "payment_id": "ID платежа",
+        "referrer_id": "ID пригласившего",
+        "referrer_telegram_id": "Telegram ID пригласившего",
+        "referred_by": "Пригласил",
+        "from_user_id": "От пользователя",
+        "telegram_id": "Telegram ID",
+        "username": "Username",
         "debit": "Списано",
         "credit": "Зачислено",
         "conversion": "Перерасчет",
@@ -122,20 +135,32 @@ def format_audit_details(details: Optional[str]) -> str:
         "success_count": "Успешно",
         "fail_count": "Ошибок",
         "target_audience": "Аудитория",
+        "batch_id": "Пакет",
+        "text": "Текст",
+        "target_telegram_id": "Telegram ID",
+        "outcome": "Результат",
+        "note": "Заметка",
+        "case": "Кейс",
+        "operation": "Операция",
+        "profiles_deleted": "Удалено устройств",
+        "payments_closed": "Закрыто платежей",
+        "devices_restored": "Устройства восстановлены",
+        "new_end": "Новый срок",
     }
 
     formatted_parts = []
     for k, v in kv_pairs.items():
-        if k in ("debit", "credit") and str(v).isdigit():
-            val = f"{v} ₽"
-        elif k == "amount" and str(v).isdigit():
+        if k in ("debit", "credit", "amount") and str(v).isdigit():
             val = f"{v} ₽"
         elif k == "days" and str(v).isdigit():
             val = f"{v} дн."
-        elif k == "conversion":
+        elif k in ("conversion", "force", "devices_restored"):
             val = "Да" if str(v).lower() in ("true", "1") else "Нет"
-        elif k == "force":
-            val = "Да" if str(v).lower() in ("true", "1") else "Нет"
+        elif k == "text":
+            text_str = str(v)
+            val = f'"{text_str[:40]}..."' if len(text_str) > 40 else f'"{text_str}"'
+        elif k == "username":
+            val = f"@{v}" if v and not str(v).startswith("@") else str(v or "—")
         else:
             val = str(v)
 

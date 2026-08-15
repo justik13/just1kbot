@@ -181,6 +181,19 @@ async def grant_referral_bonus_for_topup(
             )
         )
         referrer_bonus_granted = bonus
+        from services.audit_service import AuditService
+        await AuditService.log_action(
+            session,
+            admin_id=0,
+            action="REFERRAL_BONUS_GRANTED",
+            target_type="user",
+            target_id=referrer.id,
+            details={
+                "amount": int(bonus),
+                "from_user_id": purchaser.id,
+                "payment_id": payment_id,
+            },
+        )
     else:
         referrer_bonus_granted = existing.amount
 
@@ -226,6 +239,18 @@ async def grant_referral_bonus_for_topup(
                 )
             )
             purchaser_welcome_granted = bonus
+            from services.audit_service import AuditService
+            await AuditService.log_action(
+                session,
+                admin_id=0,
+                action="WELCOME_BONUS_GRANTED",
+                target_type="user",
+                target_id=purchaser.id,
+                details={
+                    "amount": int(bonus),
+                    "payment_id": payment_id,
+                },
+            )
         else:
             purchaser_welcome_granted = existing_purchaser.amount
 
