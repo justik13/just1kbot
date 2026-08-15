@@ -359,6 +359,130 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             )
             mock_logger_error.assert_called_once()
 
+    async def test_onboarding_new_user_logs_user_register(self):
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        session.begin_nested = MagicMock()
+        session.begin_nested.return_value.__aenter__ = AsyncMock()
+        session.begin_nested.return_value.__aexit__ = AsyncMock()
+        new_user = User(id=20, telegram_id=555, username="alice", first_name="Alice")
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", return_value=None),
+            patch("services.subscription.create_user", new_callable=AsyncMock, return_value=new_user),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice")
+            self.assertEqual(res, new_user)
+            self.assertEqual(mock_create_audit.call_count, 1)
+            kwargs = mock_create_audit.call_args.kwargs
+            self.assertEqual(kwargs["action"], "USER_REGISTER")
+            self.assertEqual(kwargs["target_id"], 20)
+            self.assertEqual(kwargs["admin_id"], 0)
+
+    async def test_onboarding_existing_user_does_not_log_user_register(self):
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        existing_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=False)
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", return_value=existing_user),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice")
+            self.assertEqual(res, existing_user)
+            mock_create_audit.assert_not_called()
+
+    async def test_onboarding_concurrent_integrity_error_does_not_log_user_register(self):
+        from sqlalchemy.exc import IntegrityError
+
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        session.begin_nested = MagicMock()
+        session.begin_nested.return_value.__aenter__ = AsyncMock()
+        session.begin_nested.return_value.__aexit__ = AsyncMock(return_value=None)
+        existing_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=False)
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", side_effect=[None, existing_user]),
+            patch("services.subscription.create_user", side_effect=IntegrityError("statement", {}, Exception("duplicate key"))),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice")
+            self.assertEqual(res, existing_user)
+            mock_create_audit.assert_not_called()
+
+    async def test_onboarding_restored_soft_deleted_user_logs_user_restored_only(self):
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        deleted_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=True)
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", return_value=deleted_user),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice")
+            self.assertEqual(res, deleted_user)
+            self.assertFalse(deleted_user.is_deleted)
+            self.assertEqual(mock_create_audit.call_count, 1)
+            kwargs = mock_create_audit.call_args.kwargs
+            self.assertEqual(kwargs["action"], "USER_RESTORED")
+            self.assertEqual(kwargs["target_id"], 20)
+
+    async def test_onboarding_integrity_error_restored_soft_deleted_user_logs_user_restored_only(self):
+        from sqlalchemy.exc import IntegrityError
+
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        session.begin_nested = MagicMock()
+        session.begin_nested.return_value.__aenter__ = AsyncMock()
+        session.begin_nested.return_value.__aexit__ = AsyncMock(return_value=None)
+        deleted_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=True)
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", side_effect=[None, deleted_user]),
+            patch("services.subscription.create_user", side_effect=IntegrityError("statement", {}, Exception("duplicate key"))),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice")
+            self.assertEqual(res, deleted_user)
+            self.assertFalse(deleted_user.is_deleted)
+            self.assertEqual(mock_create_audit.call_count, 1)
+            kwargs = mock_create_audit.call_args.kwargs
+            self.assertEqual(kwargs["action"], "USER_RESTORED")
+            self.assertEqual(kwargs["target_id"], 20)
+
+    async def test_onboarding_late_referral_binding_logs_referral_attached(self):
+        from services.subscription import SubscriptionService
+
+        session = AsyncMock()
+        existing_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", referred_by=None, is_deleted=False)
+
+        with (
+            patch("services.subscription.get_user_by_telegram_id_any", return_value=existing_user),
+            patch("database.repositories.payments_repo.has_successful_topup", new_callable=AsyncMock, return_value=False),
+            patch.object(SubscriptionService, "_validate_referral", new_callable=AsyncMock, return_value=True),
+            patch("services.subscription.invalidate_user_cache"),
+            patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create_audit,
+        ):
+            res = await SubscriptionService.process_onboarding(session, 555, "alice", "Alice", ref_id=777)
+            self.assertEqual(res, existing_user)
+            self.assertEqual(existing_user.referred_by, 777)
+            self.assertEqual(mock_create_audit.call_count, 1)
+            kwargs = mock_create_audit.call_args.kwargs
+            self.assertEqual(kwargs["action"], "REFERRAL_ATTACHED")
+            self.assertEqual(kwargs["target_id"], 20)
+
 
 if __name__ == "__main__":
     unittest.main()

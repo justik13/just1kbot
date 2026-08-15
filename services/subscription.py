@@ -204,6 +204,7 @@ class SubscriptionService:
 
                 logger.info("New user %s referred by %s", telegram_id, ref_id)
 
+        created = False
         try:
             async with session.begin_nested():
                 user = await create_user(
@@ -213,6 +214,7 @@ class SubscriptionService:
                     first_name,
                     referred_by,
                 )
+                created = True
         except IntegrityError:
             user = await get_user_by_telegram_id_any(session, telegram_id)
 
@@ -223,13 +225,29 @@ class SubscriptionService:
 
                 await session.flush()
 
+                from services.audit_service import AuditService
+                await AuditService.log_action(
+                    session,
+                    admin_id=0,
+                    action="USER_RESTORED",
+                    target_type="user",
+                    target_id=user.id,
+                    details={"telegram_id": telegram_id},
+                )
+
+                logger.info(
+                    "process_onboarding: IntegrityError caught for telegram_id=%s, "
+                    "restored soft-deleted user",
+                    telegram_id,
+                )
+            else:
                 logger.info(
                     "process_onboarding: IntegrityError caught for telegram_id=%s, "
                     "re-read existing user",
                     telegram_id,
                 )
 
-        if user is not None:
+        if created and user is not None:
             from services.audit_service import AuditService
             await AuditService.log_action(
                 session,
