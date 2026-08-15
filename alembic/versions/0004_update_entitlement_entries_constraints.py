@@ -45,6 +45,8 @@ def downgrade() -> None:
     op.drop_constraint('ck_entitlement_entries_shape', 'entitlement_entries', type_='check')
     op.drop_constraint('ck_entitlement_entries_type', 'entitlement_entries', type_='check')
 
+    op.execute("TRUNCATE TABLE entitlement_entries CASCADE")
+
     op.create_check_constraint(
         'ck_entitlement_entries_type',
         'entitlement_entries',

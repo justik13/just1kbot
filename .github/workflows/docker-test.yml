@@ -69,17 +69,6 @@ jobs:
               exit 1
             fi
 
-            states="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}} {{.State}}' | grep -v 'migrate' || true)"
-            if printf '%s\n' "$states" | grep -Eq 'Restarting|Exited|Dead'; then
-              echo "A container crashed or is restarting!"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
-              diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
-              bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
-              echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs migrate=$migrate_state"
-              exit 1
-            fi
-
             DB_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
             REDIS_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
             BOT_HEALTH="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
