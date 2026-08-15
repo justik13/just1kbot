@@ -258,6 +258,7 @@ async def admin_delete_device_apply(
             )
             return
 
+        device_name = profile.device_name
         server = getattr(profile, "server", None)
         server_name = server.name if server else ""
 
