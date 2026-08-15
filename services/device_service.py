@@ -298,7 +298,7 @@ class DeviceService:
             audit_reason="device_delete",
         )
         if not server:
-            session.delete(profile)
+            await session.delete(profile)
 
         action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
