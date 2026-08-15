@@ -146,6 +146,49 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
         cb.message = None
         await _create_and_render_topup(cb, MagicMock(), MagicMock(), 100)
 
+    async def test_dismiss_notification_renders_hub_when_message_is_hub(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.fallback import dismiss_notification
+
+        cb = MagicMock()
+        cb.from_user.id = 123
+        cb.message.chat.id = 123
+        cb.message.message_id = 999
+        cb.answer = AsyncMock()
+
+        state = MagicMock()
+        session = AsyncMock()
+        db_user = MagicMock()
+
+        with (
+            patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[999])),
+            patch("bot.handlers.start.back_to_main_menu", new=AsyncMock()) as mock_hub,
+        ):
+            await dismiss_notification(cb, state, session, db_user)
+            cb.answer.assert_awaited_once_with(show_alert=False)
+            mock_hub.assert_awaited_once_with(cb, state, db_user, session)
+            cb.message.delete.assert_not_called()
+
+    async def test_dismiss_notification_deletes_standalone_message(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.fallback import dismiss_notification
+
+        cb = MagicMock()
+        cb.from_user.id = 123
+        cb.message.chat.id = 123
+        cb.message.message_id = 888
+        cb.message.delete = AsyncMock()
+        cb.answer = AsyncMock()
+
+        state = MagicMock()
+        session = AsyncMock()
+        db_user = MagicMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[999])):
+            await dismiss_notification(cb, state, session, db_user)
+            cb.answer.assert_awaited_once_with(show_alert=False)
+            cb.message.delete.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

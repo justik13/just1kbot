@@ -424,10 +424,13 @@ async def settle_succeeded_topup(
                 else:
                     text = (
                         f"✅ <b>Баланс пополнен на +{int(payment.amount)} ₽!</b>\n\n"
-                        f"💰 Баланс: <b>{int(balance.real_position)} ₽</b>"
+                        f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
                     )
+                    if balance.bonus_available > 0:
+                        text += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
                     builder.button(text="💰 Мой баланс", callback_data="menu_balance")
                     builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
+                    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
 
                 builder.adjust(1)
                 push_text = text
@@ -444,9 +447,12 @@ async def settle_succeeded_topup(
 
                 from database.connection import queue_post_commit_task
                 queue_post_commit_task(session, _send_topup_push)
+                payment.credit_notified_at = now_utc()
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)
+        elif auto_fulfilled_action:
+            payment.credit_notified_at = now_utc()
 
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None

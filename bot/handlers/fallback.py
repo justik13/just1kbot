@@ -90,12 +90,36 @@ async def handle_unknown_text(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "dismiss_notification")
-async def dismiss_notification(callback: CallbackQuery):
+async def dismiss_notification(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
     await callback.answer(show_alert=False)
-    try:
-        await callback.message.delete()
-    except TelegramBadRequest:
-        pass
+    chat_id = callback.message.chat.id if callback.message and callback.message.chat else callback.from_user.id
+    msg_id = callback.message.message_id if callback.message else None
+
+    is_hub = False
+    if msg_id:
+        try:
+            from utils.telegram import _load_hub_ids_from_db
+            hub_ids = await _load_hub_ids_from_db(chat_id)
+            if msg_id in hub_ids:
+                is_hub = True
+        except Exception:
+            pass
+
+    if is_hub:
+        from bot.handlers.start import back_to_main_menu
+        await back_to_main_menu(callback, state, db_user, session)
+    else:
+        try:
+            if callback.message:
+                await callback.message.delete()
+        except Exception:
+            from bot.handlers.start import back_to_main_menu
+            await back_to_main_menu(callback, state, db_user, session)
 
 
 @router.callback_query(F.data == "ignore")
