@@ -153,6 +153,80 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('WorkerDefinition("account_balance", _account_balance, False)', source)
 
+    async def test_settle_succeeded_topup_does_not_set_credit_notified_at_prematurely(self):
+        from unittest.mock import MagicMock, patch
+        from services.account_topup import settle_succeeded_topup
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        p = topup()
+        p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
+        p.credit_notified_at = None
+
+        user = MagicMock()
+        user.id = p.user_id
+        user.telegram_id = 777
+        user.topup_blocked = False
+        user.financial_hold = False
+        user.referred_by = None
+
+        bot = MagicMock()
+        queued_callbacks = []
+
+        with (
+            patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
+                accounting_position=Decimal("499"),
+                available=Decimal("499"),
+                reserved=Decimal("0"),
+                debt=Decimal("0"),
+                real_position=Decimal("499"),
+                real_available=Decimal("499"),
+                bonus_position=Decimal("0"),
+                bonus_available=Decimal("0"),
+            ))),
+            patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
+            patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=0)),
+            patch("database.connection.queue_post_commit_task", side_effect=lambda s, cb: queued_callbacks.append(cb)),
+        ):
+            created, balance = await settle_succeeded_topup(
+                session,
+                payment=p,
+                source="test",
+                bot=bot,
+                settings=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000),
+            )
+            self.assertTrue(created)
+            # Must NOT set credit_notified_at in session before commit
+            self.assertIsNone(p.credit_notified_at)
+            self.assertEqual(len(queued_callbacks), 1)
+
+            # Test 1: Callback fails -> credit_notified_at remains None
+            with patch("utils.telegram.render_hub", side_effect=Exception("Telegram unavailable")):
+                await queued_callbacks[0]()
+                self.assertIsNone(p.credit_notified_at)
+
+            # Test 2: Callback succeeds -> sets credit_notified_at in DB
+            db_p = topup()
+            db_p.credit_notified_at = None
+            mock_session = AsyncMock()
+            mock_session.get.return_value = db_p
+
+            class DummyContext:
+                async def __aenter__(self):
+                    return mock_session
+                async def __aexit__(self, *args):
+                    pass
+
+            with (
+                patch("utils.telegram.render_hub", new=AsyncMock()),
+                patch("database.connection.session_scope", return_value=DummyContext()),
+            ):
+                await queued_callbacks[0]()
+                self.assertIsNotNone(db_p.credit_notified_at)
+
 
 if __name__ == "__main__":
     unittest.main()

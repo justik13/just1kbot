@@ -151,7 +151,6 @@ async def _load_hub_ids_from_db(chat_id: int) -> List[int]:
             return list(ids)
     except Exception as e:
         logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
-        _hub_cache[chat_id] = {"ids": []}
         return []
 
 

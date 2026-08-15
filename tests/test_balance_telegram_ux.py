@@ -189,6 +189,30 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
             cb.answer.assert_awaited_once_with(show_alert=False)
             cb.message.delete.assert_awaited_once()
 
+    async def test_dismiss_notification_renders_hub_when_db_fails_to_load_hub_ids(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.fallback import dismiss_notification
+
+        cb = MagicMock()
+        cb.from_user.id = 123
+        cb.message.chat.id = 123
+        cb.message.message_id = 999
+        cb.message.delete = AsyncMock()
+        cb.answer = AsyncMock()
+
+        state = MagicMock()
+        session = AsyncMock()
+        db_user = MagicMock()
+
+        with (
+            patch("utils.telegram._load_hub_ids_from_db", side_effect=Exception("DB unavailable")),
+            patch("bot.handlers.start.back_to_main_menu", new=AsyncMock()) as mock_hub,
+        ):
+            await dismiss_notification(cb, state, session, db_user)
+            cb.answer.assert_awaited_once_with(show_alert=False)
+            mock_hub.assert_awaited_once_with(cb, state, db_user, session)
+            cb.message.delete.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

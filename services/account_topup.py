@@ -436,23 +436,26 @@ async def settle_succeeded_topup(
                 push_text = text
                 push_markup = builder.as_markup()
                 target_user_id = user.telegram_id
+                target_payment_id = payment.id
 
                 async def _send_topup_push():
                     try:
                         from utils.telegram import render_hub
                         await render_hub(bot, target_user_id, push_text, push_markup)
+                        from database.connection import session_scope
+                        async with session_scope() as notify_session:
+                            p = await notify_session.get(Payment, target_payment_id)
+                            if p and p.credit_notified_at is None:
+                                p.credit_notified_at = now_utc()
                     except Exception as exc:
                         import logging
                         logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
 
                 from database.connection import queue_post_commit_task
                 queue_post_commit_task(session, _send_topup_push)
-                payment.credit_notified_at = now_utc()
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)
-        elif auto_fulfilled_action:
-            payment.credit_notified_at = now_utc()
 
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None
