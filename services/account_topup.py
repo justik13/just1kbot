@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
-from database.models import AccountLedgerEntry, Payment, PaymentEvent
+from database.models import Payment, PaymentEvent
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     credit_succeeded_topup,
@@ -351,33 +351,30 @@ async def settle_succeeded_topup(
         # If this raises, the caller's transaction rolls back and the durable
         # provider operation remains retryable.
         from services.referral_bonus import grant_referral_bonus_for_topup
-        granted_bonus = await grant_referral_bonus_for_topup(
+        bonus_result = await grant_referral_bonus_for_topup(
             session,
             purchaser_user_id=payment.user_id,
             payment_id=payment.id,
             topup_amount=payment.amount,
         )
-        if granted_bonus > 0 and user is not None and user.referred_by:
+        referrer_bonus_amount = getattr(bonus_result, "referrer_bonus", bonus_result)
+        purchaser_welcome_amount = getattr(bonus_result, "purchaser_welcome_bonus", Decimal("0"))
+
+        if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
-            purchaser_welcomed = any(
-                isinstance(obj, AccountLedgerEntry)
-                and getattr(obj, "user_id", None) == user.id
-                and (getattr(obj, "metadata_", {}) or {}).get("reason") == "first_topup_welcome"
-                for obj in session.new
-            )
             payment.topup_context = {
                 **ctx,
                 "referrer_telegram_id": user.referred_by,
-                "referrer_bonus": int(granted_bonus),
+                "referrer_bonus": int(referrer_bonus_amount),
                 "referrer_notified_at": None,
-                "purchaser_welcome_bonus": int(granted_bonus) if purchaser_welcomed else 0,
+                "purchaser_welcome_bonus": int(purchaser_welcome_amount),
             }
             if bot is not None:
                 try:
                     from aiogram.utils.keyboard import InlineKeyboardBuilder
                     b_builder = InlineKeyboardBuilder()
                     b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(granted_bonus)} ₽</b> бонусов на баланс."
+                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(referrer_bonus_amount)} ₽</b> бонусов на баланс."
                     ref_markup = b_builder.as_markup()
                     ref_target = user.referred_by
                     target_payment_id = payment.id

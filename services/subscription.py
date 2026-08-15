@@ -71,7 +71,7 @@ class SubscriptionService:
 
         while current_id:
             depth += 1
-            if depth >= MAX_REFERRAL_CHAIN_DEPTH:
+            if depth > MAX_REFERRAL_CHAIN_DEPTH:
                 logger.warning(
                     "Referral chain max depth %s exceeded for user %s, ref_id %s",
                     MAX_REFERRAL_CHAIN_DEPTH,

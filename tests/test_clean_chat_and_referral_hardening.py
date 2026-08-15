@@ -177,22 +177,141 @@ class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(is_valid, "Deep circular referral chain (>5 levels) must be detected and rejected")
 
-    async def test_max_chain_depth_limit(self):
+    async def test_chain_depth_boundaries_49_50_51(self):
         session = AsyncMock()
 
-        # Create 60 chained users without cycle
+        # Build 52 chained users: 1 -> 2 -> 3 -> ... -> 52 -> None
         users = {
-            i: User(id=i, telegram_id=i, referred_by=i + 1)
-            for i in range(1, 65)
+            i: User(id=i, telegram_id=i, referred_by=i + 1 if i < 52 else None)
+            for i in range(1, 53)
         }
 
         async def fake_get_user(s, tg_id):
             return users.get(tg_id)
 
         with patch("services.subscription.get_user_by_telegram_id", side_effect=fake_get_user):
-            is_valid = await SubscriptionService._validate_referral(session, telegram_id=100, ref_id=1)
+            # 49 hops: user 100 referred by user 4 (chain from 4 to 52 has 48 hops)
+            valid_49 = await SubscriptionService._validate_referral(session, telegram_id=100, ref_id=4)
+            self.assertTrue(valid_49, "49-hop chain must be valid")
 
-        self.assertFalse(is_valid, "Chains exceeding MAX_REFERRAL_CHAIN_DEPTH must be rejected")
+            # 50 hops: user 100 referred by user 3 (chain from 3 to 52 has 49 hops)
+            valid_50 = await SubscriptionService._validate_referral(session, telegram_id=100, ref_id=3)
+            self.assertTrue(valid_50, "50-hop chain must be valid")
+
+            # 51 hops: user 100 referred by user 1 (chain from 1 to 52 has 51 hops)
+            valid_51 = await SubscriptionService._validate_referral(session, telegram_id=100, ref_id=1)
+            self.assertFalse(valid_51, "51-hop chain must exceed MAX_REFERRAL_CHAIN_DEPTH=50 and be rejected")
+
+
+class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
+    async def test_first_topup_push_includes_welcome_bonus_celebration(self):
+        from decimal import Decimal
+        from database.models import Payment
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
+        from services.referral_bonus import ReferralBonusGrantResult
+        from utils.datetime_helpers import now_utc
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        payment = Payment(
+            id=100,
+            user_id=20,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="pending",
+            credited_at=None,
+            topup_context={},
+        )
+        user = User(
+            id=20,
+            telegram_id=2000,
+            referred_by=1000,
+            is_deleted=False,
+            is_bot_blocked=False,
+        )
+
+        bot = MagicMock()
+
+        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB="100000")
+
+        with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
+        patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
+            accounting_position=Decimal("550"),
+            available=Decimal("550"),
+            reserved=Decimal("0"),
+            debt=Decimal("0"),
+            real_position=Decimal("500"),
+            bonus_position=Decimal("50"),
+            real_available=Decimal("500"),
+            bonus_available=Decimal("50"),
+        ))), \
+        patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
+        patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
+        patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
+            referrer_bonus=Decimal("50"),
+            purchaser_welcome_bonus=Decimal("50"),
+        ))):
+            await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
+
+        self.assertEqual(payment.topup_context.get("purchaser_welcome_bonus"), 50)
+        self.assertEqual(payment.topup_context.get("referrer_bonus"), 50)
+
+    async def test_subsequent_topup_push_excludes_welcome_bonus(self):
+        from decimal import Decimal
+        from database.models import Payment
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
+        from services.referral_bonus import ReferralBonusGrantResult
+        from utils.datetime_helpers import now_utc
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        payment = Payment(
+            id=101,
+            user_id=20,
+            amount=Decimal("1000"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="pending",
+            credited_at=None,
+            topup_context={},
+        )
+        user = User(
+            id=20,
+            telegram_id=2000,
+            referred_by=1000,
+            is_deleted=False,
+            is_bot_blocked=False,
+        )
+
+        bot = MagicMock()
+        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB="100000")
+
+        with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
+        patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
+            accounting_position=Decimal("1550"),
+            available=Decimal("1550"),
+            reserved=Decimal("0"),
+            debt=Decimal("0"),
+            real_position=Decimal("1500"),
+            bonus_position=Decimal("50"),
+            real_available=Decimal("1500"),
+            bonus_available=Decimal("50"),
+        ))), \
+        patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
+        patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
+        patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
+            referrer_bonus=Decimal("100"),
+            purchaser_welcome_bonus=Decimal("0"),
+        ))):
+            await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
+
+        self.assertEqual(payment.topup_context.get("purchaser_welcome_bonus"), 0)
+        self.assertEqual(payment.topup_context.get("referrer_bonus"), 100)
 
 
 class TestShareButtonAndKeyboards(unittest.TestCase):
