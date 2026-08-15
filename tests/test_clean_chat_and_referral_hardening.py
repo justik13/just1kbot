@@ -1,25 +1,15 @@
-"""Tests for clean chat message deletion, late binding hardening, cycle detection, and SQL pagination."""
-
-import asyncio
-from decimal import Decimal
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote
 
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, Chat, Message, User as TelegramUser
+from aiogram.types import Message, User as TelegramUser
 
 from bot.handlers.payment.balance_routes import accept_custom_amount
 from bot.handlers.start import cmd_start, parse_referral_id
 from bot.keyboards.user import get_referral_keyboard
-from bot.states import BalanceStates
 from database.models import User
-from database.repositories.payments_repo import has_successful_topup
-from database.repositories.users_repo import (
-    get_user_referrals_count,
-    get_user_referrals_paginated,
-)
-from services.subscription import MAX_REFERRAL_CHAIN_DEPTH, SubscriptionService
+from services.subscription import SubscriptionService
 
 
 class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):

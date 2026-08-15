@@ -11,7 +11,11 @@ from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from database.models import Tariff, User
 from database.repositories.profiles_repo import get_user_profiles
-from database.repositories.users_repo import get_user_referrals_count
+from database.repositories.tariffs_repo import get_tariff_by_id
+from database.repositories.users_repo import (
+    get_user_by_telegram_id,
+    get_user_referrals_count,
+)
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_days_left, format_user_card_text
 from utils.telegram import render_hub, safe
