@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal, ROUND_DOWN
 
 from sqlalchemy import select
@@ -18,6 +19,47 @@ _logger = logging.getLogger(__name__)
 
 REFERRAL_BONUS_RATE = Decimal("0.10")
 REFERRAL_BONUS_SOURCE = "referral_bonus"
+
+
+@dataclass(frozen=True)
+class ReferralBonusGrantResult:
+    referrer_bonus: Decimal = Decimal("0")
+    purchaser_welcome_bonus: Decimal = Decimal("0")
+
+    def __iter__(self):
+        yield self.referrer_bonus
+        yield self.purchaser_welcome_bonus
+
+    def __int__(self) -> int:
+        return int(self.referrer_bonus)
+
+    def __float__(self) -> float:
+        return float(self.referrer_bonus)
+
+    def __eq__(self, other):
+        if isinstance(other, Decimal):
+            return self.referrer_bonus == other
+        if isinstance(other, (int, float)):
+            return self.referrer_bonus == Decimal(str(other))
+        if isinstance(other, tuple) and len(other) == 2:
+            return (self.referrer_bonus, self.purchaser_welcome_bonus) == other
+        if isinstance(other, ReferralBonusGrantResult):
+            return (
+                self.referrer_bonus == other.referrer_bonus
+                and self.purchaser_welcome_bonus == other.purchaser_welcome_bonus
+            )
+        return False
+
+    def __hash__(self):
+        return hash((self.referrer_bonus, self.purchaser_welcome_bonus))
+
+    def __add__(self, other):
+        if isinstance(other, ReferralBonusGrantResult):
+            return self.referrer_bonus + other.referrer_bonus
+        return self.referrer_bonus + other
+
+    def __radd__(self, other):
+        return other + self.referrer_bonus
 
 
 def calculate_referral_bonus(purchase_amount: object) -> Decimal:
@@ -66,11 +108,14 @@ async def grant_referral_bonus_for_topup(
     purchaser_user_id: int,
     payment_id: int,
     topup_amount: object,
-) -> Decimal:
+) -> ReferralBonusGrantResult:
     """Credit the referrer with 10% of a top-up, and credit the purchaser with 10% if it is their first top-up."""
     bonus = calculate_referral_bonus(topup_amount)
     if bonus <= 0:
-        return Decimal("0")
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal("0"),
+            purchaser_welcome_bonus=Decimal("0"),
+        )
 
     purchaser = await session.scalar(
         select(User)
@@ -81,10 +126,16 @@ async def grant_referral_bonus_for_topup(
         .with_for_update()
     )
     if purchaser is None or purchaser.referred_by is None:
-        return Decimal("0")
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal("0"),
+            purchaser_welcome_bonus=Decimal("0"),
+        )
 
     if purchaser.referred_by == purchaser.telegram_id:
-        return Decimal("0")
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal("0"),
+            purchaser_welcome_bonus=Decimal("0"),
+        )
 
     referrer = await session.scalar(
         select(User)
@@ -95,9 +146,13 @@ async def grant_referral_bonus_for_topup(
         .with_for_update()
     )
     if referrer is None or referrer.is_banned:
-        return Decimal("0")
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal("0"),
+            purchaser_welcome_bonus=Decimal("0"),
+        )
 
     # 1. Grant 10% bonus to referrer for every top-up
+    referrer_bonus_granted = Decimal("0")
     idempotency_key = f"referral-bonus:topup:{payment_id}:{referrer.id}"
     existing = await session.scalar(
         select(AccountLedgerEntry).where(
@@ -125,8 +180,12 @@ async def grant_referral_bonus_for_topup(
                 },
             )
         )
+        referrer_bonus_granted = bonus
+    else:
+        referrer_bonus_granted = existing.amount
 
     # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +10% bonus as well.
+    purchaser_welcome_granted = Decimal("0")
     from database.models import Payment
     from sqlalchemy import func
 
@@ -166,9 +225,15 @@ async def grant_referral_bonus_for_topup(
                     },
                 )
             )
+            purchaser_welcome_granted = bonus
+        else:
+            purchaser_welcome_granted = existing_purchaser.amount
 
     await session.flush()
-    return bonus
+    return ReferralBonusGrantResult(
+        referrer_bonus=referrer_bonus_granted,
+        purchaser_welcome_bonus=purchaser_welcome_granted,
+    )
 
 
 async def grant_referral_bonus_for_purchase(

@@ -33,7 +33,7 @@ def format_days_left(dt: Optional[datetime]) -> str:
 def format_user_card_text(
     user,
     profiles: list,
-    referrals: list,
+    referrals,
     now: datetime,
     real_balance: int = 0,
     bonus_balance: int = 0,
@@ -47,6 +47,7 @@ def format_user_card_text(
         now = now.replace(tzinfo=timezone.utc)
 
     has_access = user.subscription_end and user.subscription_end > now
+    referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     return texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
@@ -62,7 +63,7 @@ def format_user_card_text(
         days_left=format_days_left(user.subscription_end),
         devices_count=len(profiles),
         device_limit=user.device_limit or 0,
-        referrals_count=len(referrals),
+        referrals_count=referrals_count,
         created_at=format_datetime(user.created_at),
     )
 

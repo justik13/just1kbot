@@ -1,10 +1,27 @@
 from typing import Optional, List
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import Payment, PaymentEvent
+
+
+async def has_successful_topup(
+    session: AsyncSession,
+    *,
+    user_id: int,
+) -> bool:
+    """Return True if user has ever had at least one credited top-up payment."""
+    stmt = (
+        select(func.count(Payment.id))
+        .where(
+            Payment.user_id == user_id,
+            Payment.credited_at.is_not(None),
+        )
+    )
+    count = await session.scalar(stmt)
+    return (count or 0) > 0
 
 
 

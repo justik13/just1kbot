@@ -269,6 +269,16 @@ async def process_balance_notifications(bot: Bot) -> int:
                 value_2=int(balance.bonus_available),
                 value_3=suffix,
             )
+            if (
+                payment.topup_context
+                and isinstance(payment.topup_context, dict)
+                and payment.topup_context.get("purchaser_welcome_bonus", 0) > 0
+            ):
+                wb = payment.topup_context["purchaser_welcome_bonus"]
+                message += (
+                    f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
+                    f"за первое пополнение по приглашению!</b>"
+                )
 
             try:
                 await global_send_limiter.acquire()

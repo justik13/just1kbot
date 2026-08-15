@@ -595,6 +595,64 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(88888, called_recipients)
             self.assertIn(777, called_recipients)
 
+    async def test_worker_delivers_durable_purchaser_welcome_bonus_notification_when_post_commit_push_was_lost(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from services.workers.account_balance import process_balance_notifications
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from utils.datetime_helpers import now_utc
+
+        p = topup()
+        p.id = 6666
+        p.user_id = 99
+        p.credit_notified_at = None  # Lost post-commit push!
+        p.amount = Decimal("500")
+        p.topup_context = {
+            "referrer_telegram_id": 88888,
+            "referrer_bonus": 50,
+            "referrer_notified_at": now_utc(),  # Referrer push succeeded earlier
+            "purchaser_welcome_bonus": 50,
+        }
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(6666, 777)]))
+        mock_session.scalar.return_value = p
+
+        class DummyContext:
+            async def __aenter__(self):
+                return mock_session
+            async def __aexit__(self, *args):
+                pass
+
+        bot = MagicMock()
+
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
+            patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
+            patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
+                accounting_position=Decimal("550"),
+                available=Decimal("550"),
+                reserved=Decimal("0"),
+                debt=Decimal("0"),
+                real_position=Decimal("500"),
+                real_available=Decimal("500"),
+                bonus_position=Decimal("50"),
+                bonus_available=Decimal("50"),
+            ))),
+        ):
+            await process_balance_notifications(bot)
+            self.assertIsNotNone(p.credit_notified_at)
+            self.assertEqual(mock_hub.await_count, 1)
+
+            call_args = mock_hub.call_args_list[0][0]
+            target_chat_id = call_args[1]
+            message_text = call_args[2]
+
+            self.assertEqual(target_chat_id, 777)
+            self.assertIn("Вам начислен приветственный бонус +50 ₽", message_text)
+            self.assertIn("Баланс: <b>500 ₽</b>", message_text)
+            self.assertIn("Бонусный баланс: <b>50 ₽</b>", message_text)
+
 
 if __name__ == "__main__":
     unittest.main()

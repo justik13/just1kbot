@@ -169,11 +169,47 @@ async def get_users_paginated_with_profiles(
     return result.scalars().unique().all()
 
 
+async def get_user_referrals_count(session: AsyncSession, telegram_id: int) -> int:
+    stmt = (
+        select(func.count(User.id))
+        .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
+    )
+    result = await session.scalar(stmt)
+    return result or 0
+
+
+async def get_user_referrals_paginated(
+    session: AsyncSession,
+    telegram_id: int,
+    page: int = 1,
+    per_page: int = 10,
+) -> tuple[list[User], int, int]:
+    """Return (items, total_count, normalized_page)."""
+    count = await get_user_referrals_count(session, telegram_id)
+    if count == 0:
+        return [], 0, 1
+
+    per_page = min(max(1, per_page), 100)
+    total_pages = max(1, (count + per_page - 1) // per_page)
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+
+    stmt = (
+        select(User)
+        .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
+        .order_by(User.created_at.desc(), User.id.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all(), count, page
+
+
 async def get_user_referrals(session: AsyncSession, telegram_id: int) -> list[User]:
     stmt = (
         select(User)
         .where(User.referred_by == telegram_id, User.is_deleted.is_(False))
-        .order_by(User.created_at.desc())
+        .order_by(User.created_at.desc(), User.id.desc())
     )
     result = await session.execute(stmt)
     return result.scalars().all()

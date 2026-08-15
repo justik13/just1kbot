@@ -11,7 +11,11 @@ from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from database.models import Tariff, User
 from database.repositories.profiles_repo import get_user_profiles
-from database.repositories.users_repo import get_user_referrals
+from database.repositories.tariffs_repo import get_tariff_by_id
+from database.repositories.users_repo import (
+    get_user_by_telegram_id,
+    get_user_referrals_count,
+)
 from utils.datetime_helpers import is_expired, now_utc
 from utils.formatters import format_days_left, format_user_card_text
 from utils.telegram import render_hub, safe
@@ -249,8 +253,6 @@ async def _build_users_list_text_and_kb(
 
 
 async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
-    from database.repositories.tariffs_repo import get_tariff_by_id
-    from database.repositories.users_repo import get_user_by_telegram_id
     from utils.tariff_names import get_tariff_display_name
 
     tariff_info = "Не активирован"
@@ -283,7 +285,7 @@ async def _render_user_card(
     from database.repositories.account_ledger_repo import get_account_balance
     profiles = await get_user_profiles(session, user.id)
 
-    referrals = await get_user_referrals(
+    referrals_count = await get_user_referrals_count(
         session,
         user.telegram_id,
     )
@@ -295,7 +297,7 @@ async def _render_user_card(
     rendered = format_user_card_text(
         user,
         profiles,
-        referrals,
+        referrals_count,
         current_time,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
@@ -325,7 +327,7 @@ async def _show_user_card_edit(
     from database.repositories.account_ledger_repo import get_account_balance
     profiles = await get_user_profiles(session, user.id)
 
-    referrals = await get_user_referrals(
+    referrals_count = await get_user_referrals_count(
         session,
         user.telegram_id,
     )
@@ -337,7 +339,7 @@ async def _show_user_card_edit(
     rendered = format_user_card_text(
         user,
         profiles,
-        referrals,
+        referrals_count,
         current_time,
         real_balance=int(balance.real_available),
         bonus_balance=int(balance.bonus_available),
