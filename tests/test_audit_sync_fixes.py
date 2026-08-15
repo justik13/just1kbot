@@ -1,16 +1,9 @@
 import asyncio
-from decimal import Decimal
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 from aiogram import Bot
-from sqlalchemy import or_, select
 
-from database.models import AuditLog, Tariff, User, VPNProfile
-from database.repositories.purchases_repo import (
-    get_purchase_log_by_id,
-    get_purchase_logs_paginated,
-)
 from database.repositories.users_repo import ALLOWED_USER_UPDATE_FIELDS
 from services.device_service import RESERVING_STATUSES
 from services.workers.cleanup import cleanup_dangling_peers_loop

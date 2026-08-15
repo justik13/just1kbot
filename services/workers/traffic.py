@@ -162,10 +162,10 @@ async def _traffic_sync_once(bot: Bot | None = None):
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
         update_cached_peer_count(server_id, len(api_clients))
 
-        await _process_server_traffic(server_info, api_clients)
+        await _process_server_traffic(server_info, api_clients, bot)
 
 
-async def _process_server_traffic(server_info, api_clients):
+async def _process_server_traffic(server_info, api_clients, bot: Bot | None = None):
     server_id = server_info["id"]
     updates_data = {}
     current_time = now_utc()
