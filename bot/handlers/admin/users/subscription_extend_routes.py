@@ -258,11 +258,11 @@ async def admin_sub_apply_extend(
 
         await AuditService.log_action(
             session,
-            callback.from_user.id,
-            "EXTEND",
-            "User",
-            telegram_id,
-            f"+{days_text}",
+            admin_id=callback.from_user.id,
+            action="ADMIN_SUB_EXTEND",
+            target_type="user",
+            target_id=user.id,
+            details={"days": days_text},
         )
 
         new_end_str = (

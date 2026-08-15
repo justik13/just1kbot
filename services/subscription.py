@@ -116,6 +116,16 @@ class SubscriptionService:
             await session.flush()
             invalidate_user_cache(telegram_id)
 
+            from services.audit_service import AuditService
+            await AuditService.log_action(
+                session,
+                admin_id=0,
+                action="USER_RESTORED",
+                target_type="user",
+                target_id=user.id,
+                details={"telegram_id": telegram_id},
+            )
+
             logger.info("Restored soft-deleted user %s on onboarding", telegram_id)
 
         if user is not None:
@@ -152,6 +162,16 @@ class SubscriptionService:
                     if is_valid:
                         user.referred_by = ref_id
                         changed = True
+
+                        from services.audit_service import AuditService
+                        await AuditService.log_action(
+                            session,
+                            admin_id=0,
+                            action="REFERRAL_ATTACHED",
+                            target_type="user",
+                            target_id=user.id,
+                            details={"referrer_telegram_id": ref_id},
+                        )
 
                         logger.info(
                             "Late referral binding: user %s bound to referrer %s",
@@ -208,6 +228,21 @@ class SubscriptionService:
                     "re-read existing user",
                     telegram_id,
                 )
+
+        if user is not None:
+            from services.audit_service import AuditService
+            await AuditService.log_action(
+                session,
+                admin_id=0,
+                action="USER_REGISTER",
+                target_type="user",
+                target_id=user.id,
+                details={
+                    "telegram_id": telegram_id,
+                    "username": username or "",
+                    "referred_by": referred_by,
+                },
+            )
 
         invalidate_user_cache(telegram_id)
 

@@ -232,11 +232,14 @@ async def admin_sub_apply_reduce(
 
         await AuditService.log_action(
             session,
-            callback.from_user.id,
-            "REDUCE",
-            "User",
-            telegram_id,
-            f"-{days} days -> {format_datetime(new_end)}",
+            admin_id=callback.from_user.id,
+            action="ADMIN_SUB_REDUCE",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "days": days,
+                "new_end": format_datetime(new_end),
+            },
         )
 
         text = texts.ADMIN_SUB_REDUCED.format(

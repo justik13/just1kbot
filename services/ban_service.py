@@ -171,15 +171,15 @@ class BanService:
 
         await AuditService.log_action(
             session,
-            admin_id,
-            "BAN",
-            "User",
-            telegram_id,
-            (
-                f"profiles_deleted={deleted_profiles}, "
-                f"payments_closed={payments_closed}, "
-                f"reconciliations_queued={reconciliations_queued}"
-            ),
+            admin_id=admin_id,
+            action="BAN_USER",
+            target_type="user",
+            target_id=locked_user.id,
+            details={
+                "profiles_deleted": deleted_profiles,
+                "payments_closed": payments_closed,
+                "reconciliations_queued": reconciliations_queued,
+            },
         )
 
         invalidate_user_cache(telegram_id)
@@ -211,11 +211,11 @@ class BanService:
 
         await AuditService.log_action(
             session,
-            admin_id,
-            "UNBAN",
-            "User",
-            telegram_id,
-            "devices_not_restored",
+            admin_id=admin_id,
+            action="UNBAN_USER",
+            target_type="user",
+            target_id=user.id,
+            details={"devices_restored": False},
         )
 
         invalidate_user_cache(telegram_id)

@@ -523,11 +523,15 @@ async def admin_sub_grant_apply(
 
         await AuditService.log_action(
             session,
-            callback.from_user.id,
-            "GRANT",
-            "User",
-            telegram_id,
-            f"{tariff_name} / {days_text}",
+            admin_id=callback.from_user.id,
+            action="ADMIN_SUB_GRANT",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "tariff_name": tariff_name,
+                "days": days_text,
+                "tariff_id": tariff.id,
+            },
         )
 
         user = await get_user_by_telegram_id(

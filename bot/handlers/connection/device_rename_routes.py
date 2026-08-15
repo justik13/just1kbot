@@ -154,10 +154,25 @@ async def rename_device_process(
             )
             return
 
+    old_name = profile.device_name
     await update_profile(
         session,
         profile,
         device_name=new_name,
+    )
+
+    from services.audit_service import AuditService
+    await AuditService.log_action(
+        session,
+        admin_id=0,
+        action="DEVICE_RENAME",
+        target_type="user",
+        target_id=db_user.id,
+        details={
+            "old_name": old_name,
+            "new_name": new_name,
+            "profile_id": profile.id,
+        },
     )
 
     await render_hub(

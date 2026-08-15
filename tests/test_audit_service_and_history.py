@@ -1,0 +1,160 @@
+import json
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from database.models import AuditLog, User
+from database.repositories.audit_repo import (
+    create_audit_log,
+    get_user_audit_logs,
+    get_user_audit_logs_count,
+)
+from services.audit_service import AuditService
+from utils.formatters import format_audit_details
+
+
+class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_audit_service_dict_serialization(self):
+        session = AsyncMock()
+        with patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create:
+            await AuditService.log_action(
+                session,
+                admin_id=123,
+                action="TEST_ACTION",
+                target_type="User",
+                target_id=456,
+                details={"amount": 500, "reason": "bonus"},
+            )
+            mock_create.assert_called_once()
+            kwargs = mock_create.call_args.kwargs
+            self.assertEqual(kwargs["admin_id"], 123)
+            self.assertEqual(kwargs["action"], "TEST_ACTION")
+            self.assertEqual(kwargs["target_type"], "user")
+            self.assertEqual(kwargs["target_id"], 456)
+            parsed = json.loads(kwargs["details"])
+            self.assertEqual(parsed, {"amount": 500, "reason": "bonus"})
+
+    async def test_audit_service_helpers(self):
+        session = AsyncMock()
+        with patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create:
+            await AuditService.log_user_action(
+                session,
+                user_id=10,
+                action="USER_REGISTER",
+                details={"telegram_id": 999},
+            )
+            self.assertEqual(mock_create.call_args.kwargs["target_type"], "user")
+            self.assertEqual(mock_create.call_args.kwargs["target_id"], 10)
+            self.assertEqual(mock_create.call_args.kwargs["action"], "USER_REGISTER")
+
+        with patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create:
+            await AuditService.log_admin_action(
+                session,
+                admin_id=777,
+                action="EDIT_SERVER",
+                target_type="server",
+                target_id=2,
+                details={"server_name": "Node 1"},
+            )
+            self.assertEqual(mock_create.call_args.kwargs["admin_id"], 777)
+            self.assertEqual(mock_create.call_args.kwargs["target_type"], "server")
+            self.assertEqual(mock_create.call_args.kwargs["target_id"], 2)
+
+    def test_format_audit_details_json(self):
+        details_json = json.dumps({
+            "amount": 490,
+            "days": 30,
+            "tariff_name": "Стандарт",
+            "server_name": "Нидерланды",
+            "conversion": True,
+            "username": "durov",
+        })
+        formatted = format_audit_details(details_json)
+        self.assertIn("Сумма: 490 ₽", formatted)
+        self.assertIn("Срок: 30 дн.", formatted)
+        self.assertIn("Тариф: Стандарт", formatted)
+        self.assertIn("Сервер: Нидерланды", formatted)
+        self.assertIn("Перерасчет: Да", formatted)
+        self.assertIn("Username: @durov", formatted)
+
+    def test_format_audit_details_plain_and_kv(self):
+        # Key-value format
+        kv = "amount=200, days=15, reason=test"
+        res = format_audit_details(kv)
+        self.assertIn("Сумма: 200 ₽", res)
+        self.assertIn("Срок: 15 дн.", res)
+        self.assertIn("Причина: test", res)
+
+        # Plain text
+        plain = "some raw info"
+        self.assertEqual(format_audit_details(plain), " (some raw info)")
+
+        # Empty
+        self.assertEqual(format_audit_details(None), "")
+        self.assertEqual(format_audit_details(""), "")
+
+    async def test_get_user_audit_logs_query_building(self):
+        session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value.all.return_value = []
+        session.execute.return_value = mock_result
+
+        # Call with user_id and telegram_id
+        await get_user_audit_logs(session, user_id=5, telegram_id=500000, offset=0, limit=10)
+        session.execute.assert_called_once()
+        stmt = session.execute.call_args.args[0]
+        compiled = str(stmt.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("audit_logs", compiled.lower())
+        self.assertIn("5", compiled)
+        self.assertIn("500000", compiled)
+
+    async def test_show_user_audit_handler_rendering(self):
+        from bot.handlers.admin.users.list_routes import show_user_audit
+        from utils.datetime_helpers import now_utc
+
+        callback = AsyncMock()
+        callback.from_user.id = 111
+        callback.data = "admin_user_audit:999:1"
+        callback.message.edit_text = AsyncMock()
+
+        user = User(id=15, telegram_id=999, username="test_user")
+        now = now_utc()
+        log1 = AuditLog(
+            id=1,
+            admin_id=111,
+            action="ADMIN_SUB_GRANT",
+            target_type="user",
+            target_id=15,
+            details=json.dumps({"tariff_name": "VIP", "days": "30 дн."}),
+            created_at=now,
+        )
+        log2 = AuditLog(
+            id=2,
+            admin_id=0,
+            action="PAYMENT_SUCCESS",
+            target_type="user",
+            target_id=15,
+            details=json.dumps({"amount": 490, "provider": "yookassa"}),
+            created_at=now,
+        )
+
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.list_routes._get_user_with_profiles", return_value=user),
+            patch("database.repositories.audit_repo.get_user_audit_logs_count", return_value=2),
+            patch("database.repositories.audit_repo.get_user_audit_logs", return_value=[log1, log2]),
+        ):
+            await show_user_audit(callback, session)
+
+            callback.message.edit_text.assert_called_once()
+            text_rendered = callback.message.edit_text.call_args.args[0]
+            self.assertIn("История действий пользователя ID 999", text_rendered)
+            self.assertIn("Выдача подписки админом", text_rendered)
+            self.assertIn("Пополнение баланса", text_rendered)
+            self.assertIn("Тариф: VIP", text_rendered)
+            self.assertIn("Сумма: 490 ₽", text_rendered)
+
+
+if __name__ == "__main__":
+    unittest.main()

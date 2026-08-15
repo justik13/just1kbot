@@ -12,6 +12,7 @@ from bot.keyboards.admin.users import (
     get_admin_user_devices_keyboard,
 )
 from database.repositories.profiles_repo import get_profile_by_id, get_user_profiles
+from services.audit_service import AuditService
 from services.device_service import DeviceService
 from utils.admin import is_admin
 from utils.callbacks import (
@@ -257,7 +258,8 @@ async def admin_delete_device_apply(
             )
             return
 
-        device_name = profile.device_name
+        server = getattr(profile, "server", None)
+        server_name = server.name if server else ""
 
         success = await DeviceService.delete_device(
             session,
@@ -272,6 +274,19 @@ async def admin_delete_device_apply(
                 show_alert=True,
             )
             return
+
+        await AuditService.log_action(
+            session,
+            admin_id=callback.from_user.id,
+            action="ADMIN_DEVICE_DELETE",
+            target_type="user",
+            target_id=user.id,
+            details={
+                "device_name": device_name,
+                "profile_id": profile_id,
+                "server_name": server_name,
+            },
+        )
 
         text = texts.ADMIN_DELETE_DEVICE_SUCCESS.format(
             telegram_id=telegram_id,

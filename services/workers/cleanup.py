@@ -188,6 +188,18 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 if deleted > 0:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
+                    from services.audit_service import AuditService
+                    await AuditService.log_action(
+                        session,
+                        admin_id=0,
+                        action="CLEANUP_DEVICE_DELETE",
+                        target_type="user",
+                        target_id=user.id,
+                        details={
+                            "profiles_deleted": deleted,
+                            "reason": "grace_delete",
+                        },
+                    )
                     logger.info(
                         "Grace cleanup: removed %s expired profiles "
                         "for user_id=%s (subscription_end=%s)",
