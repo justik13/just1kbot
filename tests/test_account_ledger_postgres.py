@@ -208,6 +208,54 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(operation.payload["amount"]["value"], "499.00")
 
+    async def test_topup_creation_sets_contextual_renewal_and_tariff_change_descriptions(self):
+        async with self.sessions.begin() as session:
+            renew_topup = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=200,
+                bot_username="renew_bot",
+                context={
+                    "auto_fulfill_action": "purchase",
+                    "operation": "renew",
+                    "tariff_id": self.tariff_id,
+                },
+                settings=self.topup_settings(),
+            )
+            op_renew = await session.scalar(
+                select(PaymentProviderOperation).where(
+                    PaymentProviderOperation.payment_id == renew_topup.payment.id
+                )
+            )
+            self.assertEqual(
+                op_renew.payload["description"],
+                "Продление доступа к информационному сервису Just1k",
+            )
+            await hide_balance_topup(
+                session, user_id=self.user_id, payment_id=renew_topup.payment.id
+            )
+
+            change_topup = await create_balance_topup(
+                session,
+                user_id=self.user_id,
+                amount=300,
+                bot_username="change_bot",
+                context={
+                    "auto_fulfill_action": "tariff_change",
+                    "operation": "change",
+                },
+                settings=self.topup_settings(),
+            )
+            op_change = await session.scalar(
+                select(PaymentProviderOperation).where(
+                    PaymentProviderOperation.payment_id == change_topup.payment.id
+                )
+            )
+            self.assertEqual(
+                op_change.payload["description"],
+                "Изменение параметров доступа к сервису Just1k",
+            )
+
     async def test_hidden_topup_can_be_replaced_but_remains_financially_live(self):
         async with self.sessions.begin() as session:
             first = await create_balance_topup(
