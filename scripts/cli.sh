@@ -21,19 +21,45 @@
 set -euo pipefail
 
 # Определение рабочей директории проекта
+PROJECT_DIR=""
+
+# 1. Проверяем переменную окружения JUST1KBOT_DIR
 if [[ -n "${JUST1KBOT_DIR:-}" ]] && [[ -f "${JUST1KBOT_DIR}/docker-compose.yml" ]]; then
     PROJECT_DIR="${JUST1KBOT_DIR}"
-else
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+
+# 2. Если не найдено, определяем реальный путь к скрипту с раскрытием всех симлинков
+if [[ -z "$PROJECT_DIR" ]]; then
+    SOURCE="${BASH_SOURCE[0]}"
+    max_links=20
+    while [ -h "$SOURCE" ] && [ "$max_links" -gt 0 ]; do
+        DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+        SOURCE="$(readlink "$SOURCE")"
+        [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+        ((max_links--))
+    done
+    SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+
     if [[ -f "${SCRIPT_DIR}/../docker-compose.yml" ]]; then
-        PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-    else
-        PROJECT_DIR="$(pwd)"
+        PROJECT_DIR="$(cd -P "${SCRIPT_DIR}/.." && pwd)"
+    elif [[ -f "${SCRIPT_DIR}/docker-compose.yml" ]]; then
+        PROJECT_DIR="${SCRIPT_DIR}"
     fi
 fi
 
-if [[ ! -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
-    echo -e "\033[0;31m[✗] Ошибка: Не удалось найти проект Just1kBot (отсутствует docker-compose.yml в ${PROJECT_DIR}).\033[0m" >&2
+# 3. Если все еще не найдено, проверяем стандартные директории установки
+if [[ -z "$PROJECT_DIR" ]]; then
+    for candidate in /opt/just1kbot /root/just1kbot /home/*/just1kbot /var/www/just1kbot "$(pwd)"; do
+        if [[ -d "$candidate" ]] && [[ -f "${candidate}/docker-compose.yml" ]]; then
+            PROJECT_DIR="$(cd -P "$candidate" && pwd)"
+            break
+        fi
+    done
+fi
+
+if [[ -z "$PROJECT_DIR" ]] || [[ ! -f "${PROJECT_DIR}/docker-compose.yml" ]]; then
+    echo -e "\033[0;31m[✗] Ошибка: Не удалось найти проект Just1kBot (отсутствует docker-compose.yml в ${PROJECT_DIR:-$(pwd)}).\033[0m" >&2
+    echo -e "\033[0;33m[!] Убедитесь, что проект установлен в /opt/just1kbot, /root/just1kbot или задайте переменную JUST1KBOT_DIR=/путь/к/проекту\033[0m" >&2
     exit 1
 fi
 

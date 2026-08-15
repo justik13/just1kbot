@@ -1,5 +1,5 @@
 from aiogram import Router, F
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -90,12 +90,39 @@ async def handle_unknown_text(message: Message, state: FSMContext):
 
 
 @router.callback_query(F.data == "dismiss_notification")
-async def dismiss_notification(callback: CallbackQuery):
+async def dismiss_notification(
+    callback: CallbackQuery,
+    state: FSMContext,
+    session: AsyncSession,
+    db_user: User | None = None,
+):
     await callback.answer(show_alert=False)
-    try:
-        await callback.message.delete()
-    except TelegramBadRequest:
-        pass
+    chat_id = callback.message.chat.id if callback.message and callback.message.chat else callback.from_user.id
+    msg_id = callback.message.message_id if callback.message else None
+
+    # Determine if message is confirmed to be a standalone message (not the hub)
+    hub_ids: list[int] | None = None
+    if msg_id:
+        try:
+            from utils.telegram import _load_hub_ids_from_db
+            hub_ids = await _load_hub_ids_from_db(chat_id)
+        except Exception:
+            hub_ids = None
+
+    # If hub_ids was successfully loaded (including empty list) and msg_id is not in hub_ids, delete standalone message
+    if msg_id and hub_ids is not None and msg_id not in hub_ids:
+        try:
+            if callback.message:
+                await callback.message.delete()
+                return
+        except (TelegramBadRequest, TelegramAPIError):
+            pass
+        except Exception:
+            pass
+
+    # In all other cases (it IS the hub, or hub could not be determined), safely restore main menu
+    from bot.handlers.start import back_to_main_menu
+    await back_to_main_menu(callback, state, db_user, session)
 
 
 @router.callback_query(F.data == "ignore")
