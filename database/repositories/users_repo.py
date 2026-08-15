@@ -17,7 +17,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "is_banned",
     "is_bot_blocked",
     "referred_by",
-    "referral_days",
     "device_creations_today",
     "last_creation_date",
     "last_payment_at",

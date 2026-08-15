@@ -610,7 +610,7 @@ main() {
                 cmd_clean
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|logs|update|backup|restore|restart|start|stop|doctor|clean]"
+                echo -e "Использование: just1kbot [status|logs|update|backup|restore|restart|start|stop|config|doctor|clean]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."

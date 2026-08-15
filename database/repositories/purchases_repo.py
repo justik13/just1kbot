@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 import re
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -54,9 +54,13 @@ async def get_purchase_logs_paginated(
 
     # 2. Fetch admin sub grants/extensions from AuditLog (bounded by needed count)
     audit_actions = [
+        "GRANT",
         "ADMIN_SUB_GRANT",
+        "EXTEND",
         "ADMIN_SUB_EXTEND",
+        "CHANGE_TARIFF",
         "ADMIN_SUB_CHANGE",
+        "REDUCE",
         "ADMIN_SUB_REDUCE",
     ]
     audit_stmt = (
@@ -73,16 +77,22 @@ async def get_purchase_logs_paginated(
         for log in audit_results
         if log.target_id and log.target_type in ("User", "user")
     }
-    users_by_id = {}
+    users_by_id: dict[int, User] = {}
+    users_by_tg_id: dict[int, User] = {}
     if audit_user_ids:
         users = (
             await session.scalars(
-                select(User).where(User.id.in_(audit_user_ids))
+                select(User).where(
+                    or_(
+                        User.id.in_(audit_user_ids),
+                        User.telegram_id.in_(audit_user_ids),
+                    )
+                )
             )
         ).all()
         for u in users:
             users_by_id[u.id] = u
-            users_by_id[u.telegram_id] = u
+            users_by_tg_id[u.telegram_id] = u
 
     entries: list[PurchaseLogEntry] = []
 
@@ -134,13 +144,17 @@ async def get_purchase_logs_paginated(
 
     # Map AuditLog manual admin actions
     op_audit_map = {
+        "GRANT": ("grant", "🎁 Выдача админом"),
         "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
+        "EXTEND": ("extend", "⏳ Продление админом"),
         "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
+        "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
         "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
+        "REDUCE": ("reduce", "✂️ Сокращение админом"),
         "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
     }
     for log in audit_results:
-        u = users_by_id.get(log.target_id)
+        u = users_by_tg_id.get(log.target_id) or users_by_id.get(log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
@@ -153,9 +167,9 @@ async def get_purchase_logs_paginated(
         dev_limit = 1
         dur_days = 30
         if log.details:
-            days_match = re.search(r"days?=(\d+)", log.details)
+            days_match = re.search(r"days?=(\d+)|(\d+)\s*(?:дн|day)", log.details, re.IGNORECASE)
             if days_match:
-                dur_days = int(days_match.group(1))
+                dur_days = int(days_match.group(1) or days_match.group(2))
 
         entries.append(
             PurchaseLogEntry(
@@ -271,14 +285,22 @@ async def get_purchase_log_by_id(
             return None
         u = None
         if log.target_id:
-            u = await session.get(User, log.target_id)
+            u = await session.scalar(
+                select(User).where(User.telegram_id == log.target_id)
+            )
+            if not u:
+                u = await session.get(User, log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
         op_audit_map = {
+            "GRANT": ("grant", "🎁 Выдача админом"),
             "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
+            "EXTEND": ("extend", "⏳ Продление админом"),
             "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
+            "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
             "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
+            "REDUCE": ("reduce", "✂️ Сокращение админом"),
             "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
         }
         op_type, op_title = op_audit_map.get(
@@ -288,9 +310,9 @@ async def get_purchase_log_by_id(
         dev_limit = 1
         dur_days = 30
         if log.details:
-            days_match = re.search(r"days?=(\d+)", log.details)
+            days_match = re.search(r"days?=(\d+)|(\d+)\s*(?:дн|day)", log.details, re.IGNORECASE)
             if days_match:
-                dur_days = int(days_match.group(1))
+                dur_days = int(days_match.group(1) or days_match.group(2))
 
         return PurchaseLogEntry(
             id=f"audit_{log.id}",

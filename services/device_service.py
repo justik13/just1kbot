@@ -23,6 +23,7 @@ RESERVING_STATUSES = (
     "pending_create",
     "active",
     "pending_update",
+    "update_failed",
 )
 
 

@@ -23,21 +23,21 @@ jobs:
           DB_PASS='Pg_@#%^&*()_pass'
           REDIS_PASS='Redis_!@#%_pass'
           cat > .env <<EOF
-          BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
-          ADMIN_IDS=[123456,654321]
-          SUPPORT_USERNAME=ci_support_bot
-          DB_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
-          POSTGRES_USER=just1kbot
-          POSTGRES_PASSWORD=$DB_PASS
-          POSTGRES_DB=just1kbot_bot
-          REDIS_PASSWORD=$REDIS_PASS
-          YOOKASSA_SHOP_ID=123456
-          YOOKASSA_SECRET_KEY=ci_test_secret
-          YOOKASSA_RETURN_URL=https://t.me/{bot_username}
-          YOOKASSA_WEBHOOK_PORT=8080
-          DOMAIN=vpn.example.test
-          SSL_EMAIL=ci@example.test
-          BACKUP_AGE_RECIPIENT=$PUBKEY
+          BOT_TOKEN='123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11'
+          ADMIN_IDS='[123456,654321]'
+          SUPPORT_USERNAME='ci_support_bot'
+          DB_ENCRYPTION_KEY='MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA='
+          POSTGRES_USER='just1kbot'
+          POSTGRES_PASSWORD='$DB_PASS'
+          POSTGRES_DB='just1kbot_bot'
+          REDIS_PASSWORD='$REDIS_PASS'
+          YOOKASSA_SHOP_ID='123456'
+          YOOKASSA_SECRET_KEY='ci_test_secret'
+          YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
+          YOOKASSA_WEBHOOK_PORT='8080'
+          DOMAIN='vpn.example.test'
+          SSL_EMAIL='ci@example.test'
+          BACKUP_AGE_RECIPIENT='$PUBKEY'
           EOF
           echo "DB_PASS=$DB_PASS" >> "$GITHUB_ENV"
           echo "REDIS_PASS=$REDIS_PASS" >> "$GITHUB_ENV"
@@ -62,15 +62,10 @@ jobs:
           timeout_seconds=120
           elapsed=0
           while [ "$elapsed" -lt "$timeout_seconds" ]; do
-            states="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.State}}')"
-            if printf '%s\n' "$states" | grep -Eq 'Restarting|Exited|Dead'; then
-              echo "A container crashed or is restarting!"
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a
-              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color
-              diag="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml ps -a --format '{{.Service}}={{.State}}' | tr '\n' ';')"
-              bot_logs="$(docker compose -f docker-compose.yml -f docker-compose.ci.yml logs --no-color --tail=30 bot 2>&1 | tr '\n' ' ' | cut -c1-3000)"
-              migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
-              echo "::error title=Container diagnostics::services=$diag bot_logs=$bot_logs migrate=$migrate_state"
+            migrate_state="$(docker inspect --format='{{.State.Status}}/{{.State.ExitCode}}' just1kbot_migrate 2>/dev/null || echo missing)"
+            if [[ "$migrate_state" == "exited/"* ]] && [[ "$migrate_state" != "exited/0" ]]; then
+              echo "Migration container failed: $migrate_state"
+              docker compose -f docker-compose.yml -f docker-compose.ci.yml logs migrate
               exit 1
             fi
 

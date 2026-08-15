@@ -308,7 +308,7 @@ run_interactive_wizard() {
         fi
     done
 
-    YOOKASSA_RETURN_URL="https://t.me/${BOT_USERNAME:-{bot_username}}"
+    YOOKASSA_RETURN_URL='https://t.me/{bot_username}'
     YOOKASSA_WEBHOOK_PORT=8080
 }
 

@@ -90,8 +90,8 @@ _ALERT_DELIVERY_TIMEOUT = 5.0
 _ALERT_SHUTDOWN_GRACE = 1.0
 
 
-def _traffic(bot): return traffic_sync_loop(shutdown_event)
-def _cleanup(bot): return cleanup_dangling_peers_loop(shutdown_event)
+def _traffic(bot): return traffic_sync_loop(bot, shutdown_event)
+def _cleanup(bot): return cleanup_dangling_peers_loop(bot, shutdown_event)
 def _stale_payments(bot): return stale_payments_checker_loop(bot, shutdown_event)
 def _notifications(bot): return subscription_notifications_loop(bot, shutdown_event)
 def _heartbeat(bot): return heartbeat_loop(shutdown_event, heartbeat_allowed)

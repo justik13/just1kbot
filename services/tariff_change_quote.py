@@ -123,6 +123,10 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
                 select(Tariff.id).where(
                     Tariff.device_limit == user.device_limit,
                     Tariff.is_active.is_(True),
+                ).order_by(
+                    Tariff.duration_days.asc(),
+                    Tariff.sort_order.asc(),
+                    Tariff.id.asc(),
                 ).limit(1)
             )
             if matched_tariff_id is not None:

@@ -4,6 +4,7 @@ import logging
 import time
 from datetime import timedelta
 
+from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import delete, select, update
@@ -68,12 +69,22 @@ def _safe_log_value(value, limit=64):
     return sanitized[:limit]
 
 
-async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
+async def cleanup_dangling_peers_loop(
+    bot_or_shutdown: Bot | asyncio.Event | None = None,
+    shutdown_event: asyncio.Event | None = None,
+):
     global _last_old_cleanup
+
+    if isinstance(bot_or_shutdown, asyncio.Event):
+        event = bot_or_shutdown
+        bot = None
+    else:
+        bot = bot_or_shutdown
+        event = shutdown_event or asyncio.Event()
 
     try:
         await asyncio.wait_for(
-            shutdown_event.wait(),
+            event.wait(),
             timeout=CLEANUP_START_DELAY,
         )
         logger.info("Cleanup worker stopped during start delay (shutdown)")
@@ -81,10 +92,10 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
     except asyncio.TimeoutError:
         pass
 
-    while not shutdown_event.is_set():
+    while not event.is_set():
         try:
             await _cleanup_stuck_profiles()
-            await _cleanup_expired_profiles_grace()
+            await _cleanup_expired_profiles_grace(bot)
             await _cleanup_dangling_peers()
 
             now = time.monotonic()
@@ -101,11 +112,11 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
                 e,
                 exc_info=True,
             )
-            if shutdown_event.is_set():
+            if event.is_set():
                 break
             try:
                 await asyncio.wait_for(
-                    shutdown_event.wait(),
+                    event.wait(),
                     timeout=CLEANUP_LOOP_INTERVAL,
                 )
                 break
@@ -115,7 +126,7 @@ async def cleanup_dangling_peers_loop(shutdown_event: asyncio.Event):
     logger.info("Cleanup worker stopped gracefully")
 
 
-async def _cleanup_expired_profiles_grace():
+async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
     current_time = now_utc()
     threshold = current_time - timedelta(hours=GRACE_PERIOD_HOURS)
 
@@ -186,11 +197,8 @@ async def _cleanup_expired_profiles_grace():
                     )
 
                     # Уведомить пользователя об удалении устройств
-                    try:
-                        from services.workers.heartbeat import get_bot_ref
-
-                        bot = get_bot_ref()
-                        if bot:
+                    if bot:
+                        try:
                             builder = InlineKeyboardBuilder()
                             builder.button(
                                 text="🛒 Купить подписку",
@@ -208,19 +216,19 @@ async def _cleanup_expired_profiles_grace():
                                 reply_markup=builder.as_markup(),
                                 parse_mode="HTML",
                             )
-                    except TelegramForbiddenError:
-                        user.is_bot_blocked = True
-                        logger.info(
-                            "User %s blocked the bot (grace cleanup notification)",
-                            user.telegram_id,
-                        )
+                        except TelegramForbiddenError:
+                            user.is_bot_blocked = True
+                            logger.info(
+                                "User %s blocked the bot (grace cleanup notification)",
+                                user.telegram_id,
+                            )
 
-                    except Exception as e:
-                        logger.warning(
-                            "Failed to send grace cleanup notification to user %s: %s",
-                            user.telegram_id,
-                            e,
-                        )
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to send grace cleanup notification to user %s: %s",
+                                user.telegram_id,
+                                e,
+                            )
 
         except Exception as e:
             logger.error(
