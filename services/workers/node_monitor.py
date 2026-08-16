@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 15.0  # Частота тиков фонового воркера
 CONFIRMATION_DELAY_SECONDS = 30.0  # Пауза между FAIL #1 и FAIL #2 (неблокирующая)
 PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения за сервером в статусе PROBLEM
-AUTO_DISABLED_CHECK_INTERVAL = 3600.0  # 1 час между тихими проверками в режиме AUTO_DISABLED
+AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
 
@@ -134,6 +134,10 @@ def _build_alert_keyboard(server_id: int, include_enable_button: bool = False) -
     kb.button(
         text="📋 Список серверов",
         callback_data="admin_servers_list",
+    )
+    kb.button(
+        text="🗑 Прочитано",
+        callback_data=f"admin_dismiss_alert:{server_id}",
     )
     kb.adjust(1)
     return kb
@@ -401,7 +405,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         f"Причина: API недоступен / соединение нестабильно.\n"
                         f"Сервер исключён из работы.\n\n"
                         f"🔕 Повторных уведомлений не будет.\n"
-                        f"Доступность будет проверяться автоматически каждый 1 час."
+                        f"Доступность будет проверяться автоматически каждые 15 минут."
                     ),
                     "reply_markup": kb,
                     "target_alert_state": ServerHealthState.AUTO_DISABLED,

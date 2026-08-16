@@ -341,7 +341,12 @@ async def _consume_matching_reservation(
     if reservation_id is not None:
         reservation = await session.scalar(
             select(AccountBalanceReservation)
-            .where(AccountBalanceReservation.id == reservation_id)
+            .where(
+                AccountBalanceReservation.id == reservation_id,
+                AccountBalanceReservation.payment_id == payment_id,
+                AccountBalanceReservation.reservation_type == "refund",
+                AccountBalanceReservation.status == "active",
+            )
             .with_for_update()
         )
     if reservation is None:

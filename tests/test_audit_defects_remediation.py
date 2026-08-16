@@ -61,8 +61,17 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("aq:x:", LOCKED_ACTION_PREFIXES)
         self.assertIn("aq:x:", STALE_ACTION_PREFIXES)
 
-    def test_auto_disabled_check_interval_is_one_hour(self):
-        self.assertEqual(AUTO_DISABLED_CHECK_INTERVAL, 3600.0)
+    def test_auto_disabled_check_interval_is_fifteen_minutes(self):
+        self.assertEqual(AUTO_DISABLED_CHECK_INTERVAL, 900.0)
+
+    def test_alert_keyboard_has_dismiss_button(self):
+        from services.workers.node_monitor import _build_alert_keyboard
+        kb = _build_alert_keyboard(server_id=5, include_enable_button=True).as_markup()
+        callbacks = [btn.callback_data for row in kb.inline_keyboard for btn in row]
+        self.assertIn("admin_dismiss_alert:5", callbacks)
+        self.assertIn("admin_server_toggle_apply:5", callbacks)
+        self.assertIn("admin_server_card:5", callbacks)
+        self.assertIn("admin_servers_list", callbacks)
 
     def test_get_real_ip_forwarded_for(self):
         # Loopback remote -> reads X-Forwarded-For first element
