@@ -225,11 +225,15 @@ cmd_backup() {
             local tmp_gz="/tmp/backup_${ts}.sql.gz"
 
             if docker compose exec -T db sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null | gzip > "$tmp_gz"; then
-                if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
-                    rm -f "$tmp_gz"
-                    log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
-                    ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
-                    return 0
+                if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
+                    if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
+                        rm -f "$tmp_gz"
+                        log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
+                        ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+                        return 0
+                    fi
+                else
+                    warn "Дамп PostgreSQL пуст или поврежден (gzip integrity check failed)."
                 fi
             fi
             rm -f "$tmp_gz"

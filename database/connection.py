@@ -172,7 +172,7 @@ async def session_scope():
         yield session
         await session.commit()
         await _run_post_commit_tasks(session)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         await session.rollback()
         session.info.pop("post_commit_tasks", None)
         raise

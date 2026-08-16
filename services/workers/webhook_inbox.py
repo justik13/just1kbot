@@ -379,8 +379,8 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
     ).all()
     resolved_count = 0
     for row in rows:
-        # Safe to auto-heal: canceled payments and refunds for untracked payments
-        if row.event_type in {"payment.canceled", "refund.succeeded", "refund.canceled"}:
+        # Safe to auto-heal: canceled payments and canceled refunds for untracked payments
+        if row.event_type in {"payment.canceled", "refund.canceled"}:
             row.status = "succeeded"
             row.processed_at = now_utc()
             row.locked_at = None

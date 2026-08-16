@@ -19,6 +19,8 @@ class ServerPeerSnapshot:
 
 async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
     from database.connection import session_scope
+    from services.device_service import ServerUnavailable
+
     async with session_scope() as session:
         server = await session.get(Server, server_id)
         if not server:
@@ -26,9 +28,12 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         endpoint = (server.api_url, server.api_key)
     clients = await AmneziaClient(*endpoint).get_all_clients()
     if clients is None:
-        raise RuntimeError("server peer snapshot unavailable")
-    return ServerPeerSnapshot(server_id, frozenset(item.id for item in clients),
-                              datetime.now(timezone.utc))
+        raise ServerUnavailable("server peer snapshot unavailable")
+    return ServerPeerSnapshot(
+        server_id,
+        frozenset(item.id for item in clients),
+        datetime.now(timezone.utc),
+    )
 
 _slots_cache = TTLCache(maxsize=100, ttl=300)
 _locks: dict[int, tuple[asyncio.Lock, float]] = {}

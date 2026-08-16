@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -42,8 +43,8 @@ API_OPERATION_STATUSES = (
     "dead",
     "cancelled",
 )
-PAYMENT_PROVIDER_STATUSES = ("not_created", "creating", "pending", "succeeded", "canceled", "refunded", "unknown", "manual_review")
-PAYMENT_FULFILLMENT_STATUSES = ("not_ready", "pending", "processing", "succeeded", "failed", "reversal_pending", "reversed", "manual_review")
+PAYMENT_PROVIDER_STATUSES = ("not_created", "creating", "pending", "waiting_for_capture", "succeeded", "canceled", "refunded", "unknown", "manual_review")
+PAYMENT_FULFILLMENT_STATUSES = ("not_ready", "processing", "succeeded", "failed", "reversed", "manual_review")
 PAYMENT_RECONCILIATION_STATUSES = ("ok", "required", "mismatch", "manual_review")
 PAYMENT_QUEUE_STATUSES = ("pending", "processing", "retry", "succeeded", "dead", "cancelled")
 ACCOUNT_LEDGER_ENTRY_TYPES = (
@@ -350,7 +351,7 @@ class TariffQuote(Base):
         Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    public_id: Mapped[object] = mapped_column(UUID(as_uuid=True), unique=True)
+    public_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
     operation_type: Mapped[str] = mapped_column(String(20))
     source_tariff_version_id: Mapped[int | None] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
