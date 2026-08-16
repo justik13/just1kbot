@@ -151,6 +151,12 @@ async def grant_referral_bonus_for_topup(
             purchaser_welcome_bonus=Decimal("0"),
         )
 
+    if purchaser.id == referrer.id:
+        return ReferralBonusGrantResult(
+            referrer_bonus=Decimal("0"),
+            purchaser_welcome_bonus=Decimal("0"),
+        )
+
     # 1. Grant 10% bonus to referrer for every top-up
     referrer_bonus_granted = Decimal("0")
     idempotency_key = f"referral-bonus:topup:{payment_id}:{referrer.id}"
@@ -248,6 +254,7 @@ async def grant_referral_bonus_for_topup(
                 target_id=purchaser.id,
                 details={
                     "amount": int(bonus),
+                    "referrer_telegram_id": purchaser.referred_by,
                     "payment_id": payment_id,
                 },
             )
@@ -284,102 +291,98 @@ async def reverse_referral_bonus_for_topup(
     if payment is None or payment.user_id is None:
         return Decimal("0")
 
-    # Refund processing can race with another refund finalizer or with a top-up
-    # bonus grant. Use the same purchaser -> referrer lock order as the grant
-    # path so the matching credit and its reversal are observed atomically.
     purchaser = await session.scalar(
         select(User)
         .where(User.id == payment.user_id)
         .with_for_update()
     )
-    if purchaser is None or not purchaser.referred_by:
+    if purchaser is None:
         return Decimal("0")
 
-    referrer = await session.scalar(
-        select(User)
-        .where(User.telegram_id == purchaser.referred_by)
-        .with_for_update()
-    )
-    if referrer is None:
-        return Decimal("0")
+    referrer = None
+    if purchaser.referred_by and purchaser.referred_by != purchaser.telegram_id:
+        referrer = await session.scalar(
+            select(User)
+            .where(User.telegram_id == purchaser.referred_by)
+            .with_for_update()
+        )
 
     total_reversed = Decimal("0")
 
-    # 1. Reverse referrer bonus for this top-up if present. The purchaser and
-    # referrer row locks serialize this lookup with bonus creation, preventing
-    # two refund finalizers from both attempting the same unique reversal.
-    candidate_credits = (
-        await session.scalars(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.user_id == referrer.id,
-                AccountLedgerEntry.entry_type == "admin_adjustment",
-                AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.reversal_of_id.is_(None),
-            )
-        )
-    ).all()
-    matching_credit = next(
-        (
-            c for c in candidate_credits
-            if (c.metadata_ or {}).get("topup_payment_id") == payment_id
-            and (c.metadata_ or {}).get("source_type") == REFERRAL_BONUS_SOURCE
-        ),
-        None,
-    )
-
-    if matching_credit is not None:
-        idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
-        existing = await session.scalar(
-            select(AccountLedgerEntry).where(
-                AccountLedgerEntry.idempotency_key == idempotency_key
-            )
-        )
-        if existing is None:
-            reversal_amount = -abs(Decimal(matching_credit.amount))
-            entry = AccountLedgerEntry(
-                user_id=matching_credit.user_id,
-                entry_type="admin_adjustment",
-                amount=reversal_amount,
-                currency="RUB",
-                payment_id=None,
-                quote_id=None,
-                reversal_of_id=None,
-                idempotency_key=idempotency_key,
-                metadata_={
-                    "source_type": REFERRAL_BONUS_SOURCE,
-                    "reason": "topup_refund_reversal",
-                    "topup_payment_id": payment_id,
-                    "original_credit_id": matching_credit.id,
-                },
-            )
-            session.add(entry)
-            await session.flush()
-            reversal_capacity = await _credit_capacity(session, matching_credit)
-            allocation_amount = min(abs(reversal_amount), reversal_capacity)
-            if allocation_amount > 0:
-                session.add(
-                    AccountLedgerAllocation(
-                        user_id=matching_credit.user_id,
-                        credit_entry_id=matching_credit.id,
-                        debit_entry_id=entry.id,
-                        amount=allocation_amount,
-                        idempotency_key=f"alloc:{idempotency_key}",
-                    )
+    # 1. Reverse referrer bonus for this top-up if present and referrer exists.
+    if referrer is not None:
+        candidate_credits = (
+            await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == referrer.id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.amount > 0,
+                    AccountLedgerEntry.reversal_of_id.is_(None),
                 )
-            _logger.debug(
-                "Referral bonus reversal created for referrer user_id=%s, payment_id=%s, amount=%s",
-                matching_credit.user_id, payment_id, reversal_amount,
             )
-            total_reversed += abs(reversal_amount)
+        ).all()
+        matching_credit = next(
+            (
+                c for c in candidate_credits
+                if (c.metadata_ or {}).get("topup_payment_id") == payment_id
+                and (c.metadata_ or {}).get("source_type") == REFERRAL_BONUS_SOURCE
+            ),
+            None,
+        )
+
+        if matching_credit is not None:
+            idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
+            existing = await session.scalar(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.idempotency_key == idempotency_key
+                )
+            )
+            if existing is None:
+                reversal_amount = -abs(Decimal(matching_credit.amount))
+                entry = AccountLedgerEntry(
+                    user_id=matching_credit.user_id,
+                    entry_type="admin_adjustment",
+                    amount=reversal_amount,
+                    currency="RUB",
+                    payment_id=None,
+                    quote_id=None,
+                    reversal_of_id=None,
+                    idempotency_key=idempotency_key,
+                    metadata_={
+                        "source_type": REFERRAL_BONUS_SOURCE,
+                        "reason": "topup_refund_reversal",
+                        "topup_payment_id": payment_id,
+                        "original_credit_id": matching_credit.id,
+                    },
+                )
+                session.add(entry)
+                await session.flush()
+                reversal_capacity = await _credit_capacity(session, matching_credit)
+                allocation_amount = min(abs(reversal_amount), reversal_capacity)
+                if allocation_amount > 0:
+                    session.add(
+                        AccountLedgerAllocation(
+                            user_id=matching_credit.user_id,
+                            credit_entry_id=matching_credit.id,
+                            debit_entry_id=entry.id,
+                            amount=allocation_amount,
+                            idempotency_key=f"alloc:{idempotency_key}",
+                        )
+                    )
+                _logger.debug(
+                    "Referral bonus reversal created for referrer user_id=%s, payment_id=%s, amount=%s",
+                    matching_credit.user_id, payment_id, reversal_amount,
+                )
+                total_reversed += abs(reversal_amount)
+            else:
+                _logger.debug(
+                    "Referral bonus reversal already exists for referrer, payment_id=%s", payment_id
+                )
+                total_reversed += Decimal(abs(existing.amount))
         else:
             _logger.debug(
-                "Referral bonus reversal already exists for referrer, payment_id=%s", payment_id
+                "No referral bonus credit found for referrer, payment_id=%s", payment_id
             )
-            total_reversed += Decimal(abs(existing.amount))
-    else:
-        _logger.debug(
-            "No referral bonus credit found for referrer, payment_id=%s", payment_id
-        )
 
     # 2. Reverse purchaser welcome bonus for this top-up if present
     purchaser_credits = (

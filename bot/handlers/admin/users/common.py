@@ -268,8 +268,8 @@ async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str
     if user.referred_by:
         referrer = await get_user_by_telegram_id(session, user.referred_by)
         if referrer:
-            r_name = safe(referrer.first_name) if referrer.first_name else ""
-            r_username = f" (@{safe(referrer.username)})" if referrer.username else ""
+            r_name = referrer.first_name if referrer.first_name else ""
+            r_username = f" (@{referrer.username})" if referrer.username else ""
             referrer_info = f"{r_name}{r_username} (ID: {referrer.telegram_id})"
         else:
             referrer_info = f"ID: {user.referred_by}"

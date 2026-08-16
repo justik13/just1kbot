@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from aiogram import Bot
 from cachetools import TTLCache
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from bot import texts
 from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
@@ -29,6 +29,20 @@ def _needs_attention():
         Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
         Payment.reconciliation_status.in_(("required", "mismatch", "manual_review")),
         Payment.fulfillment_status.in_(("failed", "manual_review")),
+    )
+
+
+def _needs_recovery():
+    return or_(
+        and_(
+            Payment.external_id.is_not(None),
+            Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
+        ),
+        and_(
+            Payment.provider_status == "succeeded",
+            Payment.provider_confirmed_at.is_not(None),
+            Payment.fulfillment_status.notin_(("succeeded", "reversed", "manual_review")),
+        ),
     )
 
 
@@ -85,8 +99,11 @@ async def _recover_stale_topups(bot: Bot | None = None):
         payments = (
             await session.scalars(
                 select(Payment)
-                .where(Payment.created_at < now_utc() - timedelta(minutes=5))
-                .order_by(Payment.id)
+                .where(
+                    _needs_recovery(),
+                    Payment.created_at < now_utc() - timedelta(minutes=5),
+                )
+                .order_by(Payment.id.desc())
                 .limit(100)
             )
         ).all()

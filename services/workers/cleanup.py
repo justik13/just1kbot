@@ -166,7 +166,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 from utils.datetime_helpers import is_permanent_subscription
                 if is_permanent_subscription(user.subscription_end):
                     continue
-                if user.subscription_end >= threshold:
+                if not user.financial_hold and user.subscription_end >= threshold:
                     continue
 
                 profiles_stmt = select(VPNProfile).where(

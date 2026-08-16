@@ -350,16 +350,42 @@ async def _consume_matching_reservation(
             .where(
                 AccountBalanceReservation.payment_id == payment_id,
                 AccountBalanceReservation.reservation_type == "refund",
-                AccountBalanceReservation.amount == amount,
                 AccountBalanceReservation.status == "active",
             )
-            .order_by(AccountBalanceReservation.id)
+            .order_by(
+                (AccountBalanceReservation.amount == amount).desc(),
+                AccountBalanceReservation.id.asc(),
+            )
             .with_for_update()
         )
     if reservation is not None and reservation.status == "active":
-        await resolve_reservation(
-            session, reservation_id=reservation.id, outcome="consumed"
-        )
+        if reservation.amount > amount:
+            remaining = reservation.amount - amount
+            await resolve_reservation(
+                session, reservation_id=reservation.id, outcome="consumed"
+            )
+            new_res_key = f"refund-split-res:{payment_id}:{reservation.id}:{amount}:{now_utc().timestamp()}"
+            new_reservation = AccountBalanceReservation(
+                user_id=reservation.user_id,
+                payment_id=payment_id,
+                reservation_type="refund",
+                amount=remaining,
+                currency="RUB",
+                status="active",
+                idempotency_key=new_res_key,
+                metadata_={
+                    "split_from_reservation_id": reservation.id,
+                    "original_amount": str(reservation.amount),
+                    "consumed_amount": str(amount),
+                    "remaining_amount": str(remaining),
+                },
+            )
+            session.add(new_reservation)
+            await session.flush()
+        else:
+            await resolve_reservation(
+                session, reservation_id=reservation.id, outcome="consumed"
+            )
     return reservation
 
 

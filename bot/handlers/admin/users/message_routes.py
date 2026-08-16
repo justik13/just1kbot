@@ -139,30 +139,54 @@ async def process_send_user_message(
     try:
         if message.photo:
             photo_id = message.photo[-1].file_id
-            await message.bot.send_photo(
-                target_telegram_id,
-                photo=photo_id,
-                caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
-                reply_markup=reply_markup,
-                parse_mode="HTML",
-            )
+            try:
+                await message.bot.send_photo(
+                    target_telegram_id,
+                    photo=photo_id,
+                    caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                )
+            except TelegramBadRequest:
+                await message.bot.send_photo(
+                    target_telegram_id,
+                    photo=photo_id,
+                    caption=f"📨 Сообщение от администрации:\n\n{text_to_send or ''}",
+                    reply_markup=reply_markup,
+                )
         elif message.document:
             doc_id = message.document.file_id
-            await message.bot.send_document(
-                target_telegram_id,
-                document=doc_id,
-                caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
-                reply_markup=reply_markup,
-                parse_mode="HTML",
-            )
+            try:
+                await message.bot.send_document(
+                    target_telegram_id,
+                    document=doc_id,
+                    caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                )
+            except TelegramBadRequest:
+                await message.bot.send_document(
+                    target_telegram_id,
+                    document=doc_id,
+                    caption=f"📨 Сообщение от администрации:\n\n{text_to_send or ''}",
+                    reply_markup=reply_markup,
+                )
         else:
-            header = "📨 <b>Сообщение от администрации:</b>\n\n"
-            await message.bot.send_message(
-                target_telegram_id,
-                f"{header}{text_to_send}",
-                reply_markup=reply_markup,
-                parse_mode="HTML",
-            )
+            try:
+                header = "📨 <b>Сообщение от администрации:</b>\n\n"
+                await message.bot.send_message(
+                    target_telegram_id,
+                    f"{header}{text_to_send}",
+                    reply_markup=reply_markup,
+                    parse_mode="HTML",
+                )
+            except TelegramBadRequest:
+                header = "📨 Сообщение от администрации:\n\n"
+                await message.bot.send_message(
+                    target_telegram_id,
+                    f"{header}{text_to_send}",
+                    reply_markup=reply_markup,
+                )
         msg_sent = True
     except TelegramForbiddenError:
         error_reason = "Пользователь заблокировал бота"

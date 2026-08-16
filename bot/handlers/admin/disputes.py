@@ -162,10 +162,23 @@ async def start_dispute_entry(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.set_state(DisputeEntry.details)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="❌ Отмена", callback_data="admin_dispute_cancel")
     await callback.message.answer(
         texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L175_1,
+        reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_dispute_cancel")
+async def cancel_dispute_entry(callback: CallbackQuery, state: FSMContext):
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    await state.clear()
+    await callback.message.edit_text("❌ Ввод спора отменён.")
     await callback.answer()
 
 

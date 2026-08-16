@@ -46,10 +46,15 @@ LOCKED_ACTION_PREFIXES = (
     "balance_cancel:",
     "balance_purchase_confirm:",
     "balance_change_confirm:",
+    "balance_resume_purchase:",
     "bal_short_exact:",
     "bal_chg_short_exact:",
-    # Админские платежи.
-    "admin_payment_refund_apply:",
+    "aq:x:",
+    # Админские платежи и споры.
+    "admin_payment_refund_confirm:",
+    "admin_dispute_apply:",
+    "confirm_admin_balance_apply",
+    "confirm_mass_bonus_apply",
     # Админские действия с подпиской.
     "admin_sub_apply_tariff:",
     "admin_sub_apply_extend:",
@@ -81,7 +86,10 @@ STALE_ACTION_PREFIXES = (
     "admin_sub_grant_apply:",
     "admin_ban_apply:",
     "admin_unban_apply:",
-    "admin_payment_refund_apply:",
+    "admin_payment_refund_confirm:",
+    "admin_dispute_apply:",
+    "confirm_admin_balance_apply",
+    "confirm_mass_bonus_apply",
     "admin_manual_grant_apply:",
     "confirm_server_delete:",
     "admin_server_toggle_apply:",
@@ -89,6 +97,8 @@ STALE_ACTION_PREFIXES = (
     "admin_maintenance_toggle_apply",
     "broadcast_send_all",
     "broadcast_send_active",
+    "balance_resume_purchase:",
+    "aq:x:",
 )
 
 STALE_MAX_AGE_SECONDS = 600
