@@ -345,6 +345,25 @@ async def _consume_matching_reservation(
             .with_for_update()
         )
     if reservation is None:
+        # First try to find a reservation that covers the requested amount (>= amount),
+        # prioritizing exact match, then the smallest sufficient reservation.
+        reservation = await session.scalar(
+            select(AccountBalanceReservation)
+            .where(
+                AccountBalanceReservation.payment_id == payment_id,
+                AccountBalanceReservation.reservation_type == "refund",
+                AccountBalanceReservation.status == "active",
+                AccountBalanceReservation.amount >= amount,
+            )
+            .order_by(
+                (AccountBalanceReservation.amount == amount).desc(),
+                AccountBalanceReservation.amount.asc(),
+                AccountBalanceReservation.id.asc(),
+            )
+            .with_for_update()
+        )
+    if reservation is None:
+        # Fallback: if no single reservation >= amount exists, pick the largest active one
         reservation = await session.scalar(
             select(AccountBalanceReservation)
             .where(
@@ -353,7 +372,7 @@ async def _consume_matching_reservation(
                 AccountBalanceReservation.status == "active",
             )
             .order_by(
-                (AccountBalanceReservation.amount == amount).desc(),
+                AccountBalanceReservation.amount.desc(),
                 AccountBalanceReservation.id.asc(),
             )
             .with_for_update()

@@ -1,10 +1,11 @@
-"""Tests for full audit defects remediation using standard unittest framework."""
-
 import unittest
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp import web
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from bot.handlers.webhook import _get_real_ip
 from bot.middlewares.action_lock import LOCKED_ACTION_PREFIXES, STALE_ACTION_PREFIXES
@@ -12,13 +13,14 @@ from database.models import (
     PAYMENT_FULFILLMENT_STATUSES,
     PAYMENT_PROVIDER_STATUSES,
     AccountBalanceReservation,
+    Payment,
     Server,
 )
 from database.repositories.servers_repo import update_server_health_snapshot
 from services.provider_refunds import _consume_matching_reservation
 from services.referral_bonus import reverse_referral_bonus_for_topup
 from services.workers.node_monitor import AUTO_DISABLED_CHECK_INTERVAL
-from services.workers.payments import _needs_recovery
+from services.workers.payments import _needs_recovery, _recover_stale_topups
 from services.workers.webhook_inbox import auto_resolve_untracked_canceled_webhooks
 
 
@@ -38,6 +40,12 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
                 "manual_review",
             ),
         )
+
+    def test_migration_0005_exists_and_revises_0004(self):
+        scripts = ScriptDirectory.from_config(Config("alembic.ini"))
+        rev_0005 = scripts.get_revision("0005_payment_statuses_sync")
+        self.assertIsNotNone(rev_0005)
+        self.assertEqual(rev_0005.down_revision, "0004_referral_entitlements")
 
     def test_action_lock_prefixes_updated(self):
         self.assertIn("admin_payment_refund_confirm:", LOCKED_ACTION_PREFIXES)
@@ -89,6 +97,58 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
 
 
 class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
+    async def test_recover_stale_topups_fifo_starvation_prevention(self):
+        # Verify oldest payments (FIFO) are processed first
+        processed_payment_ids = []
+
+        fake_payments = [
+            Payment(
+                id=1,
+                user_id=10,
+                external_id="ext-1",
+                provider_status="pending",
+                fulfillment_status="not_ready",
+            ),
+            Payment(
+                id=2,
+                user_id=11,
+                external_id="ext-2",
+                provider_status="pending",
+                fulfillment_status="not_ready",
+            ),
+        ]
+
+        query_count = 0
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            nonlocal query_count
+            mock_session = AsyncMock()
+            mock_scalars = MagicMock()
+            if query_count == 0:
+                mock_scalars.all.return_value = fake_payments
+            else:
+                mock_scalars.all.return_value = []
+            query_count += 1
+            mock_session.scalars.return_value = mock_scalars
+            yield mock_session
+
+        async def fake_reconcile(session, payment, reason=""):
+            processed_payment_ids.append(payment.id)
+
+        with (
+            patch(
+                "services.workers.payments.session_scope", fake_session_scope
+            ),
+            patch(
+                "services.workers.payments.ensure_reconcile_payment_operation",
+                fake_reconcile,
+            ),
+        ):
+            await _recover_stale_topups(bot=None)
+
+        self.assertEqual(processed_payment_ids, [1, 2])
+
     async def test_untracked_refund_not_auto_resolved(self):
         session = AsyncMock()
         mock_scalars = MagicMock()
@@ -182,6 +242,43 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(split_res.metadata_["split_from_reservation_id"], 77)
         self.assertEqual(split_res.metadata_["consumed_amount"], "200")
         self.assertEqual(split_res.metadata_["remaining_amount"], "300")
+
+    async def test_partial_refund_selection_picks_sufficient_reservation(self):
+        session = AsyncMock()
+
+        # Reservation 700 covers 500 refund
+        res_700 = AccountBalanceReservation(
+            id=2,
+            user_id=10,
+            payment_id=42,
+            reservation_type="refund",
+            amount=Decimal("700"),
+            currency="RUB",
+            status="active",
+        )
+
+        added_items = []
+
+        def fake_add(item):
+            added_items.append(item)
+
+        # scalar returns res_700 because it is >= 500
+        session.scalar = AsyncMock(return_value=res_700)
+        session.add = fake_add
+        session.flush = AsyncMock()
+
+        result = await _consume_matching_reservation(
+            session,
+            payment_id=42,
+            amount=Decimal("500"),
+            reservation_id=None,
+        )
+
+        self.assertIs(result, res_700)
+        self.assertEqual(res_700.status, "consumed")
+        self.assertEqual(len(added_items), 1)
+        self.assertEqual(added_items[0].amount, Decimal("200"))
+        self.assertEqual(added_items[0].status, "active")
 
     async def test_update_server_health_snapshot_auto_disabled_allowed(self):
         session = AsyncMock()
