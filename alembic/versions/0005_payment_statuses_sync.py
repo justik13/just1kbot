@@ -22,9 +22,19 @@ def upgrade() -> None:
         "SET fulfillment_status = 'processing' "
         "WHERE fulfillment_status = 'pending'"
     )
+    # Safely backfill reversal_pending: only set to 'reversed' if total confirmed refunds >= payment amount,
+    # otherwise set to 'processing' so it remains eligible for recovery and reconciliation.
     op.execute(
         "UPDATE public.payments "
-        "SET fulfillment_status = 'reversed' "
+        "SET fulfillment_status = CASE "
+        "    WHEN ( "
+        "        SELECT COALESCE(SUM(amount), 0) "
+        "        FROM public.payment_refunds "
+        "        WHERE payment_refunds.payment_id = payments.id "
+        "          AND payment_refunds.provider_status = 'succeeded' "
+        "    ) >= payments.amount THEN 'reversed' "
+        "    ELSE 'processing' "
+        "END "
         "WHERE fulfillment_status = 'reversal_pending'"
     )
 

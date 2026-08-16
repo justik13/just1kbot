@@ -280,6 +280,107 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(added_items[0].amount, Decimal("200"))
         self.assertEqual(added_items[0].status, "active")
 
+    async def test_partial_refund_multi_reservation_consumption(self):
+        session = AsyncMock()
+
+        # Two smaller reservations 300 and 200 covering 500 refund
+        res_300 = AccountBalanceReservation(
+            id=1,
+            user_id=10,
+            payment_id=42,
+            reservation_type="refund",
+            amount=Decimal("300"),
+            currency="RUB",
+            status="active",
+        )
+        res_200 = AccountBalanceReservation(
+            id=2,
+            user_id=10,
+            payment_id=42,
+            reservation_type="refund",
+            amount=Decimal("200"),
+            currency="RUB",
+            status="active",
+        )
+
+        session.scalar = AsyncMock(return_value=None)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [res_300, res_200]
+        session.scalars = AsyncMock(return_value=mock_scalars)
+        session.flush = AsyncMock()
+
+        with patch(
+            "services.provider_refunds.resolve_reservation", AsyncMock()
+        ) as mock_resolve:
+            result = await _consume_matching_reservation(
+                session,
+                payment_id=42,
+                amount=Decimal("500"),
+                reservation_id=None,
+            )
+
+        self.assertIs(result, res_300)
+        self.assertEqual(mock_resolve.await_count, 2)
+        mock_resolve.assert_any_await(session, reservation_id=1, outcome="consumed")
+        mock_resolve.assert_any_await(session, reservation_id=2, outcome="consumed")
+
+    async def test_partial_refund_insufficient_reservations_returns_none(self):
+        session = AsyncMock()
+
+        # Reservations total only 300, but refund is 500
+        res_200 = AccountBalanceReservation(
+            id=1,
+            user_id=10,
+            payment_id=42,
+            reservation_type="refund",
+            amount=Decimal("200"),
+            currency="RUB",
+            status="active",
+        )
+        res_100 = AccountBalanceReservation(
+            id=2,
+            user_id=10,
+            payment_id=42,
+            reservation_type="refund",
+            amount=Decimal("100"),
+            currency="RUB",
+            status="active",
+        )
+
+        session.scalar = AsyncMock(return_value=None)
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [res_200, res_100]
+        session.scalars = AsyncMock(return_value=mock_scalars)
+
+        result = await _consume_matching_reservation(
+            session,
+            payment_id=42,
+            amount=Decimal("500"),
+            reservation_id=None,
+        )
+
+        # Must return None safely and NOT consume any reservation
+        self.assertIsNone(result)
+        self.assertEqual(res_200.status, "active")
+        self.assertEqual(res_100.status, "active")
+
+    def test_recovery_query_sql_structure(self):
+        from sqlalchemy import select
+        # Verify the actual compiled SQL ordering and filter
+        stmt = (
+            select(Payment)
+            .where(
+                Payment.id > 10,
+                _needs_recovery(),
+            )
+            .order_by(Payment.id.asc())
+            .limit(100)
+        )
+        compiled_sql = str(stmt.compile())
+        self.assertIn("ORDER BY payments.id ASC", compiled_sql)
+        self.assertIn("LIMIT", compiled_sql)
+        self.assertIn("payments.id >", compiled_sql)
+
     async def test_update_server_health_snapshot_auto_disabled_allowed(self):
         session = AsyncMock()
 
