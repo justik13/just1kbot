@@ -12,15 +12,12 @@ from database.models import (
     PAYMENT_FULFILLMENT_STATUSES,
     PAYMENT_PROVIDER_STATUSES,
     AccountBalanceReservation,
-    Payment,
     Server,
-    TariffQuote,
-    User,
 )
 from database.repositories.servers_repo import update_server_health_snapshot
 from services.provider_refunds import _consume_matching_reservation
 from services.referral_bonus import reverse_referral_bonus_for_topup
-from services.workers.node_monitor import AUTO_DISABLED_CHECK_INTERVAL, ServerHealthState
+from services.workers.node_monitor import AUTO_DISABLED_CHECK_INTERVAL
 from services.workers.payments import _needs_recovery
 from services.workers.webhook_inbox import auto_resolve_untracked_canceled_webhooks
 
