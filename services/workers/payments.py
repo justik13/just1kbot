@@ -35,6 +35,7 @@ def _needs_attention():
 def _needs_recovery():
     from database.models import AccountLedgerEntry, User
     from sqlalchemy import func
+    from sqlalchemy.orm import aliased
 
     bonus_subquery = (
         select(1)
@@ -46,13 +47,21 @@ def _needs_recovery():
         )
     )
 
+    purchaser = aliased(User)
+    referrer = aliased(User)
+
     user_subquery = (
         select(1)
-        .select_from(User)
+        .select_from(purchaser)
+        .join(referrer, referrer.telegram_id == purchaser.referred_by)
         .where(
-            User.id == Payment.user_id,
-            User.referred_by.is_not(None),
-            User.is_deleted.is_(False),
+            purchaser.id == Payment.user_id,
+            purchaser.is_deleted.is_(False),
+            purchaser.referred_by.is_not(None),
+            purchaser.referred_by != purchaser.telegram_id,
+            referrer.is_deleted.is_(False),
+            referrer.is_banned.is_(False),
+            referrer.id != purchaser.id,
         )
     )
 
@@ -60,7 +69,6 @@ def _needs_recovery():
         Payment.provider_status == "succeeded",
         Payment.provider_confirmed_at.is_not(None),
         Payment.fulfillment_status == "succeeded",
-        Payment.created_at > now_utc() - timedelta(hours=24),
         user_subquery.exists(),
         ~bonus_subquery.exists(),
     )

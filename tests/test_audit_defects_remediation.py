@@ -459,6 +459,11 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ORDER BY payments.id ASC", compiled_sql)
         self.assertIn("LIMIT", compiled_sql)
         self.assertIn("payments.id >", compiled_sql)
+        # Verify referral bonus retry subquery joins referrer and filters banned
+        self.assertIn("is_banned", compiled_sql)
+        self.assertIn("account_ledger_entries.idempotency_key", compiled_sql)
+        # Verify no 24h cutoff
+        self.assertNotIn("hours=24", compiled_sql)
 
     async def test_update_server_health_snapshot_auto_disabled_allowed(self):
         session = AsyncMock()
