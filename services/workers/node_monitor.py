@@ -304,7 +304,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
             elif st.health_state == ServerHealthState.AUTO_DISABLED:
                 st.consecutive_successes += 1
-                # Запланировать следующую проверку в режиме AUTO_DISABLED через 1 час
+                # Запланировать следующую проверку в режиме AUTO_DISABLED через 15 минут
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
@@ -370,7 +370,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                             f"Причина: API недоступен / соединение нестабильно.\n"
                             f"Сервер исключён из работы.\n\n"
                             f"🔕 Повторных уведомлений не будет.\n"
-                            f"Доступность будет проверяться автоматически каждый 1 час."
+                            f"Доступность будет проверяться автоматически каждые 15 минут."
                         ),
                         "reply_markup": kb,
                         "target_alert_state": ServerHealthState.AUTO_DISABLED,

@@ -209,6 +209,56 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(bonus_called_with, [(15, 99, Decimal("1000"))])
 
+    async def test_welcome_bonus_recovered_when_referrer_bonus_exists(self):
+        # Even if referrer bonus is already recorded, missing welcome bonus on first topup triggers retry
+        bonus_called_with = []
+
+        fake_payment = Payment(
+            id=101,
+            user_id=22,
+            external_id="ext-101",
+            amount=Decimal("500"),
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="succeeded",
+        )
+
+        query_count = 0
+
+        @asynccontextmanager
+        async def fake_nested():
+            yield
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            nonlocal query_count
+            mock_session = AsyncMock()
+            mock_session.begin_nested = fake_nested
+            mock_scalars = MagicMock()
+            if query_count == 0:
+                mock_scalars.all.return_value = [fake_payment]
+            else:
+                mock_scalars.all.return_value = []
+            query_count += 1
+            mock_session.scalars.return_value = mock_scalars
+            yield mock_session
+
+        async def fake_grant(session, purchaser_user_id, payment_id, topup_amount):
+            bonus_called_with.append((purchaser_user_id, payment_id, topup_amount))
+
+        with (
+            patch(
+                "services.workers.payments.session_scope", fake_session_scope
+            ),
+            patch(
+                "services.workers.payments.grant_referral_bonus_for_topup",
+                fake_grant,
+            ),
+        ):
+            await _recover_stale_topups(bot=None)
+
+        self.assertEqual(bonus_called_with, [(22, 101, Decimal("500"))])
+
     async def test_slots_cache_raises_server_unavailable_on_failure(self):
         from services.device_service import ServerUnavailable
         from services.slots_cache import capture_server_peer_snapshot
@@ -455,13 +505,14 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             .order_by(Payment.id.asc())
             .limit(100)
         )
-        compiled_sql = str(stmt.compile())
+        compiled_sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("ORDER BY payments.id ASC", compiled_sql)
-        self.assertIn("LIMIT", compiled_sql)
-        self.assertIn("payments.id >", compiled_sql)
+        self.assertIn("LIMIT 100", compiled_sql)
+        self.assertIn("payments.id > 10", compiled_sql)
         # Verify referral bonus retry subquery joins referrer and filters banned
         self.assertIn("is_banned", compiled_sql)
         self.assertIn("account_ledger_entries.idempotency_key", compiled_sql)
+        self.assertIn("referral-bonus:first-topup-welcome:", compiled_sql)
         # Verify no 24h cutoff
         self.assertNotIn("hours=24", compiled_sql)
 

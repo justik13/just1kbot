@@ -37,13 +37,33 @@ def _needs_recovery():
     from sqlalchemy import func
     from sqlalchemy.orm import aliased
 
-    bonus_subquery = (
+    referrer_bonus_subquery = (
         select(1)
         .select_from(AccountLedgerEntry)
         .where(
             AccountLedgerEntry.idempotency_key.like(
                 func.concat("referral-bonus:topup:", Payment.id, ":%")
             )
+        )
+    )
+
+    welcome_bonus_subquery = (
+        select(1)
+        .select_from(AccountLedgerEntry)
+        .where(
+            AccountLedgerEntry.idempotency_key == func.concat("referral-bonus:first-topup-welcome:", Payment.user_id)
+        )
+    )
+
+    prior_payment = aliased(Payment)
+    prior_payment_subquery = (
+        select(1)
+        .select_from(prior_payment)
+        .where(
+            prior_payment.user_id == Payment.user_id,
+            prior_payment.credited_at.is_not(None),
+            prior_payment.fulfillment_status == "succeeded",
+            prior_payment.id < Payment.id,
         )
     )
 
@@ -65,12 +85,18 @@ def _needs_recovery():
         )
     )
 
+    needs_referrer_bonus = ~referrer_bonus_subquery.exists()
+    needs_welcome_bonus = and_(
+        ~prior_payment_subquery.exists(),
+        ~welcome_bonus_subquery.exists(),
+    )
+
     needs_bonus_retry = and_(
         Payment.provider_status == "succeeded",
         Payment.provider_confirmed_at.is_not(None),
         Payment.fulfillment_status == "succeeded",
         user_subquery.exists(),
-        ~bonus_subquery.exists(),
+        or_(needs_referrer_bonus, needs_welcome_bonus),
     )
 
     return or_(
