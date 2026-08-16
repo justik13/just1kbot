@@ -22,6 +22,7 @@ from services.referral_bonus import reverse_referral_bonus_for_topup
 from services.workers.node_monitor import AUTO_DISABLED_CHECK_INTERVAL
 from services.workers.payments import _needs_recovery, _recover_stale_topups
 from services.workers.webhook_inbox import auto_resolve_untracked_canceled_webhooks
+from utils.datetime_helpers import now_utc
 
 
 class TestAuditDefectsRemediationSync(unittest.TestCase):
@@ -157,6 +158,75 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             await _recover_stale_topups(bot=None)
 
         self.assertEqual(processed_payment_ids, [1, 2])
+
+    async def test_referral_bonus_retried_for_succeeded_payment(self):
+        # Succeeded payment whose referral bonus failed in the past is retried
+        bonus_called_with = []
+
+        fake_payment = Payment(
+            id=99,
+            user_id=15,
+            external_id="ext-99",
+            amount=Decimal("1000"),
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="succeeded",
+        )
+
+        query_count = 0
+
+        @asynccontextmanager
+        async def fake_nested():
+            yield
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            nonlocal query_count
+            mock_session = AsyncMock()
+            mock_session.begin_nested = fake_nested
+            mock_scalars = MagicMock()
+            if query_count == 0:
+                mock_scalars.all.return_value = [fake_payment]
+            else:
+                mock_scalars.all.return_value = []
+            query_count += 1
+            mock_session.scalars.return_value = mock_scalars
+            yield mock_session
+
+        async def fake_grant(session, purchaser_user_id, payment_id, topup_amount):
+            bonus_called_with.append((purchaser_user_id, payment_id, topup_amount))
+
+        with (
+            patch(
+                "services.workers.payments.session_scope", fake_session_scope
+            ),
+            patch(
+                "services.workers.payments.grant_referral_bonus_for_topup",
+                fake_grant,
+            ),
+        ):
+            await _recover_stale_topups(bot=None)
+
+        self.assertEqual(bonus_called_with, [(15, 99, Decimal("1000"))])
+
+    async def test_slots_cache_raises_server_unavailable_on_failure(self):
+        from services.device_service import ServerUnavailable
+        from services.slots_cache import capture_server_peer_snapshot
+
+        server = Server(id=4, name="Down Node", api_url="http://down.node", api_key="k")
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            mock_session = AsyncMock()
+            mock_session.get.return_value = server
+            yield mock_session
+
+        with (
+            patch("database.connection.session_scope", fake_session_scope),
+            patch("services.slots_cache.AmneziaClient.get_all_clients", AsyncMock(return_value=None)),
+        ):
+            with self.assertRaises(ServerUnavailable):
+                await capture_server_peer_snapshot(4)
 
     async def test_untracked_refund_not_auto_resolved(self):
         session = AsyncMock()

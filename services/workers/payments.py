@@ -33,6 +33,38 @@ def _needs_attention():
 
 
 def _needs_recovery():
+    from database.models import AccountLedgerEntry, User
+    from sqlalchemy import func
+
+    bonus_subquery = (
+        select(1)
+        .select_from(AccountLedgerEntry)
+        .where(
+            AccountLedgerEntry.idempotency_key.like(
+                func.concat("referral-bonus:topup:", Payment.id, ":%")
+            )
+        )
+    )
+
+    user_subquery = (
+        select(1)
+        .select_from(User)
+        .where(
+            User.id == Payment.user_id,
+            User.referred_by.is_not(None),
+            User.is_deleted.is_(False),
+        )
+    )
+
+    needs_bonus_retry = and_(
+        Payment.provider_status == "succeeded",
+        Payment.provider_confirmed_at.is_not(None),
+        Payment.fulfillment_status == "succeeded",
+        Payment.created_at > now_utc() - timedelta(hours=24),
+        user_subquery.exists(),
+        ~bonus_subquery.exists(),
+    )
+
     return or_(
         and_(
             Payment.external_id.is_not(None),
@@ -43,6 +75,7 @@ def _needs_recovery():
             Payment.provider_confirmed_at.is_not(None),
             Payment.fulfillment_status.notin_(("succeeded", "reversed", "manual_review")),
         ),
+        needs_bonus_retry,
     )
 
 
