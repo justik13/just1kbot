@@ -10,6 +10,7 @@ from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.models import VPNProfile
+from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
@@ -793,6 +794,7 @@ async def process_edit_server_max_clients(
     profiles_count = await session.scalar(
         select(func.count(VPNProfile.id)).where(
             VPNProfile.server_id == server_id,
+            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES),
         )
     ) or 0
 

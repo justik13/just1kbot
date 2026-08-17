@@ -10,7 +10,10 @@ from sqlalchemy.orm import selectinload
 from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from database.models import Tariff, User
-from database.repositories.profiles_repo import get_user_profiles
+from database.repositories.profiles_repo import (
+    NON_VISIBLE_PROFILE_STATUSES,
+    get_user_profiles,
+)
 from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
@@ -205,7 +208,11 @@ async def _build_users_list_text_and_kb(
                 f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
             )
             days = format_days_left(user.subscription_end)
-            profiles_count = len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in ("deleting", "create_cleanup_pending")]) if user.profiles else 0
+            profiles_count = (
+                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in NON_VISIBLE_PROFILE_STATUSES])
+                if user.profiles
+                else 0
+            )
 
             button_text = truncate_button_text(
                 f"{status}{ban} {username} | {days} | {profiles_count} устр."
