@@ -29,11 +29,12 @@ class SubscriptionTokenService:
         if not user or not user.id:
             raise ValueError("Valid persisted user required for token operations")
 
-        # Fast check: if session already has token loaded, lock and confirm current DB value
+        # Row lock with populate_existing ensures that concurrent commits refresh the identity map
         stmt = (
             select(User)
             .where(User.id == user.id, User.is_deleted.is_(False))
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         res = await session.execute(stmt)
         locked_user = res.scalar_one_or_none()
@@ -79,6 +80,7 @@ class SubscriptionTokenService:
             select(User)
             .where(User.id == user.id, User.is_deleted.is_(False))
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         res = await session.execute(stmt)
         locked_user = res.scalar_one_or_none()

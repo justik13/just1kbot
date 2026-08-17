@@ -130,7 +130,14 @@ class SubscriptionTokenServicePostgresConcurrencyTests(unittest.IsolatedAsyncioT
 
         async with self.sessions.begin() as session:
             await session.execute(
-                text("TRUNCATE users RESTART IDENTITY CASCADE")
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, vpn_profiles, "
+                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings, payment_disputes "
+                    "RESTART IDENTITY CASCADE"
+                )
             )
             created_user = await users_repo.create_user(session, telegram_id=999888777)
             self.user_id = created_user.id
