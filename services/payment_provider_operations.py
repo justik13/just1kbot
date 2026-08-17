@@ -283,8 +283,11 @@ async def _push_payment_url(bot, session, payment) -> None:
     except TelegramForbiddenError:
         logger.info("User %s blocked the bot, skipping payment URL push", payment.user_id)
         if user and user.telegram_id:
-            from database.repositories.users_repo import mark_user_bot_blocked
-            await mark_user_bot_blocked(session, user.telegram_id)
+            try:
+                from database.repositories.users_repo import mark_user_bot_blocked
+                await mark_user_bot_blocked(session, user.telegram_id)
+            except Exception as mark_exc:
+                logger.warning("Failed to mark user %s as bot blocked: %s", user.telegram_id, mark_exc)
         payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
     except Exception as exc:
         logger.warning("Failed to push payment URL to user %s: %s", payment.user_id, exc)
