@@ -285,7 +285,7 @@ async def settle_succeeded_topup(
 
     if (
         payment.fulfillment_status in ("manual_review", "reversed")
-        or payment.reconciliation_status == "manual_review"
+        or payment.reconciliation_status in ("manual_review", "mismatch")
     ):
         session.add(
             PaymentEvent(

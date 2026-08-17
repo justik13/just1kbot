@@ -27,6 +27,7 @@ from database.repositories.account_ledger_repo import (
     AccountLedgerConflictError,
     credit_succeeded_topup,
 )
+from utils.datetime_helpers import now_utc
 from services.account_topup import (
     settle_succeeded_topup,
 )
@@ -39,10 +40,11 @@ from services.payment_provider_state import (
 class MockSession:
     """Lightweight session mock for state machine and ledger testing."""
 
-    def __init__(self, db_user=None, db_payment=None):
+    def __init__(self, db_user=None, db_payment=None, db_row=None):
         self.added = []
         self._user = db_user
         self._payment = db_payment
+        self._row = db_row
         self.flushed = False
 
     def add(self, obj):
@@ -61,7 +63,14 @@ class MockSession:
         return result
 
     async def scalar(self, stmt):
-        return self._user or self._payment
+        sql = str(stmt).lower()
+        if "payments" in sql:
+            return self._payment
+        if "webhook_inbox" in sql:
+            return self._row
+        if "payment_provider_operations" in sql:
+            return self._row
+        return self._user or self._payment or self._row
 
     async def get(self, model, ident):
         if model is User and self._user and self._user.id == ident:
@@ -278,7 +287,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(transition.outcome, "applied")
         self.assertEqual(payment.provider_status, "succeeded")
-        self.assertEqual(payment.reconciliation_status, "mismatch")
+        self.assertEqual(payment.reconciliation_status, "ok")
         self.assertEqual(payment.fulfillment_status, "not_ready")
 
         with patch("services.account_topup.lock_checkout_user", new_callable=AsyncMock) as mock_lock_user, \
@@ -525,6 +534,200 @@ class TopupContextDefensiveParsingTests(unittest.TestCase):
 
             self.assertIsNone(ref_id)
             self.assertEqual(ref_bonus, 0)
+
+
+class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
+    """Verifies that payments locked in manual_review or mismatch never get credited across all 4 entry channels."""
+
+    async def test_channel_1_provider_operations_finalize_fails_closed(self):
+        """Channel 1: services.payment_provider_operations.finalize must not credit money when manual_review locked."""
+        from database.models import PaymentProviderOperation
+        from services.payment_provider_operations import ProviderOperationClaim, finalize
+        from services.yookassa_service import YooKassaResult
+
+        captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+        payment = Payment(
+            id=201,
+            user_id=1,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=captured,
+            fulfillment_status="manual_review",
+            reconciliation_status="manual_review",
+            manual_review_reason="captured_at_changed",
+        )
+        operation = PaymentProviderOperation(
+            id=1,
+            payment_id=201,
+            operation_type="reconcile_payment",
+            status="processing",
+            locked_by="worker_1",
+            attempts=1,
+        )
+        session = MockSession(db_payment=payment, db_row=operation)
+        claim = ProviderOperationClaim(
+            operation_id=1,
+            payment_id=201,
+            operation_type="reconcile_payment",
+            payload={},
+            idempotency_key="idemp_201",
+            worker_id="worker_1",
+            attempt_number=1,
+            external_id="yoo_201",
+            created_at=now_utc(),
+        )
+        result = YooKassaResult(
+            ok=True,
+            value={
+                "id": "yoo_201",
+                "status": "succeeded",
+                "captured_at": "2026-08-17T12:00:00+00:00",
+                "amount": {"value": "500.00", "currency": "RUB"},
+                "metadata": {"order_id": "pay_201", "local_payment_id": "201"},
+            },
+            status_code=200,
+        )
+
+        with patch("services.account_topup.settle_succeeded_topup", new_callable=AsyncMock) as mock_settle:
+            await finalize(session, claim, result)
+            mock_settle.assert_not_called()
+
+        self.assertIsNone(payment.credited_at)
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+
+    async def test_channel_2_webhook_inbox_finalize_fails_closed(self):
+        """Channel 2: services.workers.webhook_inbox.finalize must not credit money when manual_review locked."""
+        from database.models import WebhookInbox
+        from services.workers.webhook_inbox import InboxClaim, finalize
+        from services.yookassa_service import YooKassaResult
+
+        captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+        payment = Payment(
+            id=202,
+            user_id=1,
+            external_id="yoo_202",
+            public_order_id="pay_202",
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=captured,
+            fulfillment_status="manual_review",
+            reconciliation_status="manual_review",
+            manual_review_reason="captured_at_changed",
+        )
+        row = WebhookInbox(
+            id=1,
+            provider="yookassa",
+            event_key="evt_key_202",
+            event_type="payment.succeeded",
+            provider_object_id="yoo_202",
+            payment_external_id="yoo_202",
+            public_order_id="pay_202",
+            payload={},
+            status="processing",
+            locked_by="worker_1",
+            attempts=1,
+        )
+        session = MockSession(db_payment=payment, db_row=row)
+        claim = InboxClaim(
+            inbox_id=1,
+            worker_id="worker_1",
+            attempt_number=1,
+            event_type="payment.succeeded",
+            payment_external_id="yoo_202",
+            public_order_id="pay_202",
+            payload={
+                "object": {
+                    "id": "yoo_202",
+                    "status": "succeeded",
+                    "captured_at": "2026-08-17T12:00:00+00:00",
+                    "amount": {"value": "500.00", "currency": "RUB"},
+                    "metadata": {"order_id": "pay_202", "local_payment_id": "202"},
+                }
+            },
+            event_key="evt_key_202",
+        )
+        result = YooKassaResult(
+            ok=True,
+            value={
+                "id": "yoo_202",
+                "status": "succeeded",
+                "captured_at": "2026-08-17T12:00:00+00:00",
+                "amount": {"value": "500.00", "currency": "RUB"},
+                "metadata": {"order_id": "pay_202", "local_payment_id": "202"},
+            },
+            status_code=200,
+        )
+
+        with patch("services.account_topup.settle_succeeded_topup", new_callable=AsyncMock) as mock_settle:
+            await finalize(session, claim, result=result)
+            mock_settle.assert_not_called()
+
+        self.assertIsNone(payment.credited_at)
+        self.assertEqual(payment.fulfillment_status, "manual_review")
+
+    async def test_channel_3_stale_refresh_fails_closed(self):
+        """Channel 3: services.account_topup_refresh.request_topup_status_refresh must not credit money when manual_review locked."""
+        from services.account_topup_refresh import request_topup_status_refresh
+
+        captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+        payment = Payment(
+            id=203,
+            user_id=1,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=captured,
+            fulfillment_status="manual_review",
+            reconciliation_status="manual_review",
+            manual_review_reason="captured_at_changed",
+        )
+        session = MockSession(db_payment=payment)
+
+        with patch("services.account_topup_refresh.lock_checkout_user", new_callable=AsyncMock) as mock_lock, \
+             patch("services.account_topup_refresh.settle_succeeded_topup", new_callable=AsyncMock) as mock_settle:
+            mock_lock.return_value = User(id=1, telegram_id=12345, topup_blocked=False, financial_hold=False)
+            res_payment = await request_topup_status_refresh(session, payment_id=203)
+            mock_settle.assert_not_called()
+
+        self.assertIsNone(res_payment.credited_at)
+        self.assertEqual(res_payment.fulfillment_status, "manual_review")
+
+    async def test_channel_4_direct_settlement_and_ledger_fail_closed(self):
+        """Channel 4: direct settle_succeeded_topup and credit_succeeded_topup must strictly fail closed on mismatch/manual_review."""
+        user = User(id=1, telegram_id=12345, is_deleted=False)
+        captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+
+        for status_tuple in [("manual_review", "manual_review"), ("not_ready", "mismatch"), ("reversed", "ok")]:
+            f_status, r_status = status_tuple
+            with self.subTest(f_status=f_status, r_status=r_status):
+                payment = Payment(
+                    id=204,
+                    user_id=1,
+                    amount=Decimal("500"),
+                    currency="RUB",
+                    provider_status="succeeded",
+                    provider_confirmed_at=captured,
+                    fulfillment_status=f_status,
+                    reconciliation_status=r_status,
+                )
+                session = MockSession(db_user=user, db_payment=payment)
+
+                with patch("services.account_topup.get_account_balance", new_callable=AsyncMock) as mock_balance:
+                    mock_balance.return_value = AccountBalanceSnapshot(
+                        accounting_position=Decimal("0"),
+                        available=Decimal("0"),
+                        reserved=Decimal("0"),
+                        debt=Decimal("0"),
+                    )
+                    credited, _ = await settle_succeeded_topup(session, payment=payment, source="test")
+                    self.assertFalse(credited)
+
+                with patch("database.repositories.account_ledger_repo.lock_account_user", new_callable=AsyncMock) as mock_lock:
+                    mock_lock.return_value = user
+                    with self.assertRaises(AccountLedgerConflictError):
+                        await credit_succeeded_topup(session, locked_payment=payment)
 
 
 if __name__ == "__main__":
