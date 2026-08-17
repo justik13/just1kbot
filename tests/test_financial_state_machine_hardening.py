@@ -846,6 +846,43 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p3.fulfillment_status, "manual_review")
         self.assertFalse(any(isinstance(x, AccountLedgerEntry) for x in s3.added))
 
+    async def test_settle_succeeded_topup_by_id_passes_bot_and_settings(self):
+        """settle_succeeded_topup_by_id must accept bot and settings and forward them to settle_succeeded_topup."""
+        from services.account_topup import settle_succeeded_topup_by_id
+
+        user = User(id=1, telegram_id=12345, is_deleted=False, topup_blocked=False, financial_hold=False)
+        p = Payment(
+            id=401,
+            user_id=1,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+        )
+        session = MockSession(db_user=user, db_payment=p)
+        mock_bot = MagicMock()
+        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB="50000")
+
+        with patch("services.account_topup.settle_succeeded_topup", new_callable=AsyncMock) as mock_settle:
+            mock_settle.return_value = (True, MagicMock())
+            credited, snapshot = await settle_succeeded_topup_by_id(
+                session,
+                payment_id=401,
+                source="test_by_id",
+                settings=mock_settings,
+                bot=mock_bot,
+            )
+            mock_settle.assert_called_once_with(
+                session,
+                payment=p,
+                source="test_by_id",
+                settings=mock_settings,
+                bot=mock_bot,
+            )
+            self.assertTrue(credited)
+
 
 if __name__ == "__main__":
     unittest.main()

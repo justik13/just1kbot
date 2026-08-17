@@ -555,6 +555,7 @@ async def settle_succeeded_topup_by_id(
     payment_id: int,
     source: str,
     settings=None,
+    bot=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
@@ -562,5 +563,5 @@ async def settle_succeeded_topup_by_id(
     if payment is None:
         raise AccountTopupError("topup_not_found")
     return await settle_succeeded_topup(
-        session, payment=payment, source=source, settings=settings
+        session, payment=payment, source=source, settings=settings, bot=bot
     )
