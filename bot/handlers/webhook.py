@@ -188,7 +188,10 @@ async def _close_healthcheck_redis(app: web.Application) -> None:
 
 
 def setup_webhook_routes(app: web.Application):
-    from bot.handlers.subscription_feed import subscription_feed_handler
+    from bot.handlers.subscription_feed import (
+        subscription_feed_handler,
+        subscription_open_handler,
+    )
 
     app.router.add_post(
         "/webhook/yookassa",
@@ -199,9 +202,12 @@ def setup_webhook_routes(app: web.Application):
         yookassa_webhook_handler,
     )
     app.router.add_get("/health", healthcheck_handler)
+    app.router.add_get("/sub/open/{token}", subscription_open_handler)
+    app.router.add_get("/subscription/open/{token}", subscription_open_handler)
     app.router.add_get("/sub/{token}", subscription_feed_handler)
     app.router.add_get("/subscription/{token}", subscription_feed_handler)
     app.on_cleanup.append(_close_healthcheck_redis)
     logger.info("YooKassa webhook route registered: POST /webhook/yookassa & POST /yookassa/webhook")
     logger.info("Healthcheck endpoint registered: GET /health")
     logger.info("Subscription feed endpoint registered: GET /sub/{token} & GET /subscription/{token}")
+    logger.info("Subscription open endpoint registered: GET /sub/open/{token} & GET /subscription/open/{token}")
