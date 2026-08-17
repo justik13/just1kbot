@@ -41,6 +41,12 @@ class SubscriptionService:
         await SubscriptionService._sync_access_state(session, user)
 
     @staticmethod
+    def check_vpn_access(user: Optional[User]) -> bool:
+        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
+            return False
+        return not is_vpn_access_expired(user.subscription_end, grace_hours=4)
+
+    @staticmethod
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
         user = await get_user_by_telegram_id(session, telegram_id)
 
