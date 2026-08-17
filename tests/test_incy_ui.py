@@ -109,6 +109,15 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("https://", text_arg)
         self.assertIn("sub/token_abc_123", text_arg)
+        self.assertIn("Как настроить", text_arg)
+
+        btn_urls = [
+            btn.url
+            for row in keyboard_arg.inline_keyboard
+            for btn in row
+            if btn.url
+        ]
+        self.assertTrue(any("sub/open/token_abc_123" in u for u in btn_urls))
 
         btn_copy = [
             btn.copy_text.text
@@ -118,6 +127,17 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertTrue(any("token_abc_123" in t for t in btn_copy))
         self.assertTrue(any("sub/token_abc_123" in t for t in btn_copy))
+
+        btn_callbacks = [
+            btn.callback_data
+            for row in keyboard_arg.inline_keyboard
+            for btn in row
+            if btn.callback_data
+        ]
+        self.assertIn("back_to_connections", btn_callbacks)
+
+        all_buttons = [btn for row in keyboard_arg.inline_keyboard for btn in row]
+        self.assertEqual(len(all_buttons), 3)
 
 
 if __name__ == "__main__":

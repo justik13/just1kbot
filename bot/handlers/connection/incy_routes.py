@@ -34,15 +34,26 @@ async def show_incy_subscription(
     token = await SubscriptionTokenService.get_or_create_token(session, db_user)
 
     sub_url = f"https://{settings.DOMAIN}/sub/{token}"
+    open_url = f"https://{settings.DOMAIN}/sub/open/{token}"
 
     text = (
-        "🔗 <b>Подписка для INCY</b>\n\n"
-        "Все ваши устройства в одной ссылке. Нажмите на неё, чтобы скопировать:\n"
+        "🔗 <b>Подключение через приложение INCY</b>\n\n"
+        "Все ваши серверы и устройства в одной самообновляемой подписке.\n\n"
+        "<b>📖 Как настроить:</b>\n"
+        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
+        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
+        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
+        "4. Включите VPN в приложении.\n\n"
+        "<b>Ваша персональная ссылка:</b>\n"
         f"<code>{sub_url}</code>\n\n"
-        "<i>При добавлении или удалении устройств в боте список в приложении обновится автоматически.</i>"
+        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
     )
 
     builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📱 Открыть в INCY",
+        url=open_url,
+    )
     builder.button(
         text="📋 Скопировать ссылку",
         copy_text=CopyTextButton(text=sub_url),
