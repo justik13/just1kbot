@@ -232,7 +232,7 @@ class ProviderCapturedAtTests(unittest.TestCase):
                 parse_provider_captured_at(value)
 
 class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
-    async def test_late_succeeded_webhook_applies_with_mismatch(self):
+    async def test_late_succeeded_webhook_conflicts_with_manual_review(self):
         from services.payment_provider_state import apply_provider_transition
         from database.models import Payment
         from decimal import Decimal
@@ -269,7 +269,8 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
             source="webhook"
         )
         
-        self.assertEqual(transition.outcome, "applied")
+        self.assertEqual(transition.outcome, "conflict")
+        self.assertEqual(transition.reason, "canceled_to_succeeded")
         self.assertEqual(payment.provider_status, "succeeded")
         self.assertEqual(payment.reconciliation_status, "mismatch")
         self.assertEqual(payment.fulfillment_status, "manual_review")

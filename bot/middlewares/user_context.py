@@ -19,7 +19,7 @@ from database.repositories.users_repo import (
 
 logger = logging.getLogger(__name__)
 
-_user_cache: TTLCache[int, User | None] = TTLCache(
+_user_cache: TTLCache[int, int | None] = TTLCache(
     maxsize=USER_CONTEXT_CACHE_MAX_SIZE,
     ttl=USER_CONTEXT_CACHE_TTL,
 )
@@ -59,46 +59,70 @@ class UserContextMiddleware(BaseMiddleware):
             data["db_user"] = None
             return await handler(event, data)
 
-        stmt = select(User).where(
-            User.telegram_id == telegram_id,
-            User.is_deleted.is_(False),
-        )
-        result = await session.execute(stmt)
-        user = result.scalar_one_or_none()
+        user: User | None = None
+        cached_user_id = _user_cache.get(telegram_id, _SENTINEL)
 
-        if user is None:
-            existing_any = await get_user_by_telegram_id_any(
-                session,
-                telegram_id,
+        if cached_user_id is not _SENTINEL:
+            if cached_user_id is None:
+                data["db_user"] = None
+                return await handler(event, data)
+            stmt = select(User).where(
+                User.id == cached_user_id,
+                User.is_deleted.is_(False),
             )
-            if existing_any is not None and existing_any.is_deleted:
-                user = None
-            elif existing_any is not None and not existing_any.is_deleted:
-                user = existing_any
-            else:
-                try:
-                    async with session.begin_nested():
-                        user = await create_user(
-                            session,
-                            telegram_id=telegram_id,
-                            username=event.from_user.username,
-                            first_name=event.from_user.first_name,
-                            referred_by=None,
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+            if user is None:
+                _user_cache.pop(telegram_id, None)
+
+        if user is None and cached_user_id is _SENTINEL:
+            stmt = select(User).where(
+                User.telegram_id == telegram_id,
+                User.is_deleted.is_(False),
+            )
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+
+            if user is None:
+                existing_any = await get_user_by_telegram_id_any(
+                    session,
+                    telegram_id,
+                )
+                if existing_any is not None and existing_any.is_deleted:
+                    user = None
+                    _user_cache[telegram_id] = None
+                elif existing_any is not None and not existing_any.is_deleted:
+                    user = existing_any
+                    _user_cache[telegram_id] = user.id
+                else:
+                    try:
+                        async with session.begin_nested():
+                            user = await create_user(
+                                session,
+                                telegram_id=telegram_id,
+                                username=event.from_user.username,
+                                first_name=event.from_user.first_name,
+                                referred_by=None,
+                            )
+                        _user_cache[telegram_id] = user.id
+                        logger.info(
+                            "Auto-registered user %s on %s",
+                            telegram_id,
+                            type(event).__name__,
                         )
-                    logger.info(
-                        "Auto-registered user %s on %s",
-                        telegram_id,
-                        type(event).__name__,
-                    )
-                except IntegrityError:
-                    existing_any = await get_user_by_telegram_id_any(
-                        session,
-                        telegram_id,
-                    )
-                    if existing_any is not None and not existing_any.is_deleted:
-                        user = existing_any
-                    else:
-                        user = None
+                    except IntegrityError:
+                        existing_any = await get_user_by_telegram_id_any(
+                            session,
+                            telegram_id,
+                        )
+                        if existing_any is not None and not existing_any.is_deleted:
+                            user = existing_any
+                            _user_cache[telegram_id] = user.id
+                        else:
+                            user = None
+                            _user_cache[telegram_id] = None
+            else:
+                _user_cache[telegram_id] = user.id
 
         data["db_user"] = user
         return await handler(event, data)

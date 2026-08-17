@@ -235,8 +235,8 @@ def _retry_delay(attempts: int) -> timedelta:
 
 async def _push_payment_url(bot, session, payment) -> None:
     """Send or update the Telegram message with the payment URL immediately after it is received."""
-    import logging
-    _log = logging.getLogger(__name__)
+    from aiogram.exceptions import TelegramForbiddenError
+    user = None
     try:
         from database.models import User
         from sqlalchemy import select as _select
@@ -279,9 +279,14 @@ async def _push_payment_url(bot, session, payment) -> None:
                 "auto_show": False,
             }
         payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
+    except TelegramForbiddenError:
+        logger.info("User %s blocked the bot, skipping payment URL push", payment.user_id)
+        if user and user.telegram_id:
+            from database.repositories.users_repo import mark_user_bot_blocked
+            await mark_user_bot_blocked(session, user.telegram_id)
+        payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
     except Exception as exc:
-        import logging
-        logging.getLogger(__name__).warning("Failed to push payment URL to user %s: %s", payment.user_id, exc)
+        logger.warning("Failed to push payment URL to user %s: %s", payment.user_id, exc)
 
 
 async def finalize(session, claim, result, bot=None):

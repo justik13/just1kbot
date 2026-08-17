@@ -214,23 +214,44 @@ async def process_balance_notifications(bot: Bot) -> int:
                 continue
 
             # Durable retry for pending referrer bonus notification
-            ref_id = (payment.topup_context or {}).get("referrer_telegram_id")
-            ref_bonus = (payment.topup_context or {}).get("referrer_bonus", 0)
-            if ref_id and ref_bonus > 0 and (payment.topup_context or {}).get("referrer_notified_at") is None:
+            ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
+            ref_id_raw = ctx.get("referrer_telegram_id")
+            ref_bonus_raw = ctx.get("referrer_bonus", 0)
+
+            ref_id: int | None = None
+            ref_bonus: int = 0
+            try:
+                if ref_id_raw is not None:
+                    parsed_id = int(ref_id_raw)
+                    if parsed_id > 0:
+                        ref_id = parsed_id
+                if ref_bonus_raw is not None:
+                    parsed_bonus = int(ref_bonus_raw)
+                    if parsed_bonus > 0:
+                        ref_bonus = parsed_bonus
+            except (ValueError, TypeError):
+                logger.warning(
+                    "Malformed referrer info in topup_context for payment %s",
+                    payment.id,
+                )
+                ref_id = None
+                ref_bonus = 0
+
+            if ref_id and ref_bonus > 0 and ctx.get("referrer_notified_at") is None:
                 try:
                     await global_send_limiter.acquire()
                     from aiogram.utils.keyboard import InlineKeyboardBuilder
                     b_builder = InlineKeyboardBuilder()
                     b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(ref_bonus)} ₽</b> бонусов на баланс."
-                    await render_hub(bot, int(ref_id), ref_text, b_builder.as_markup())
+                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
+                    await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
                     payment.topup_context = {
-                        **payment.topup_context,
+                        **ctx,
                         "referrer_notified_at": now_utc().isoformat(),
                     }
                 except TelegramForbiddenError:
                     payment.topup_context = {
-                        **payment.topup_context,
+                        **ctx,
                         "referrer_notified_at": now_utc().isoformat(),
                         "referrer_bot_blocked": True,
                     }
