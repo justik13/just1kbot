@@ -14,6 +14,8 @@ from utils.vpn_parser import encode_json_to_vpn_uri
 
 def _make_dummy_awg2_uri(device_num: int) -> str:
     config_obj = {
+        "dns1": "1.1.1.1",
+        "dns2": "1.0.0.1",
         "containers": [
             {
                 "container": "amnezia-awg2",
@@ -83,7 +85,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         cls.env_patcher.stop()
 
     @patch("services.subscription_feed_service.get_user_profiles")
-    async def test_get_exportable_profiles_filters_properly(self, mock_get_profiles):
+    async def test_get_exportable_configs_filters_properly(self, mock_get_profiles):
         server_awg2 = Server(id=1, name="Poland #1", country_flag="🇵🇱", protocol="amneziawg2", is_active=True)
         server_awg3 = Server(id=2, name="Germany #1", country_flag="🇩🇪", protocol="amneziawg3", is_active=True)
         server_inactive = Server(id=3, name="Estonia #1", country_flag="🇪🇪", protocol="amneziawg2", is_active=False)
@@ -121,13 +123,16 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         session = AsyncMock()
-        exportable = await SubscriptionFeedService.get_exportable_profiles(session, 10)
+        configs = await SubscriptionFeedService.get_exportable_configs(session, 10)
 
         # Only p1_valid must be exported
-        self.assertEqual(len(exportable), 1)
-        self.assertEqual(exportable[0].id, 1)
+        self.assertEqual(len(configs), 1)
+        profile, conf_text = configs[0]
+        self.assertEqual(profile.id, 1)
+        self.assertIn("[Interface]", conf_text)
+        self.assertIn("PrivateKey = privkey_1", conf_text)
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_profiles")
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
     @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_active_user_with_profiles(
         self, mock_get_traffic, mock_get_exportable
@@ -139,7 +144,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(1),
             provisioning_status="active", server=server
         )
-        mock_get_exportable.return_value = [profile]
+        mock_get_exportable.return_value = [(profile, "[Interface]\nPrivateKey = privkey_1\n")]
 
         now = datetime.now(timezone.utc)
         sub_end = now + timedelta(days=10)
@@ -166,7 +171,43 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(decoded_feed.startswith("amneziawg://"))
         self.assertIn("#🇵🇱 Warsaw — iPhone", decoded_feed)
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_profiles")
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    async def test_build_feed_grace_period_extends_expire_header(
+        self, mock_get_traffic, mock_get_exportable
+    ):
+        mock_get_traffic.return_value = (100, 200)
+        server = Server(id=1, name="Warsaw", country_flag="🇵🇱", protocol="amneziawg2", is_active=True)
+        profile = VPNProfile(
+            id=1, user_id=100, server_id=1, device_name="iPhone",
+            is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(1),
+            provisioning_status="active", server=server
+        )
+        mock_get_exportable.return_value = [(profile, "[Interface]\nPrivateKey = privkey_1\n")]
+
+        # subscription_end is 1 hour ago (within 4 hours grace period)
+        now = datetime.now(timezone.utc)
+        sub_end = now - timedelta(hours=1)
+        expected_grace_expire = sub_end + timedelta(hours=4)
+
+        user = User(
+            id=100, telegram_id=1001, subscription_end=sub_end,
+            is_banned=False, financial_hold=False, is_deleted=False
+        )
+
+        session = AsyncMock()
+        status, headers, body = await SubscriptionFeedService.build_feed(session, user)
+
+        self.assertEqual(status, 200)
+        # Should return configs because grace period is active
+        self.assertNotEqual(body, "")
+        # expire in header must be future-aligned to the grace period (+4h)
+        self.assertIn(
+            f"expire={int(expected_grace_expire.timestamp())}",
+            headers["subscription-userinfo"],
+        )
+
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
     @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_active_user_zero_devices(
         self, mock_get_traffic, mock_get_exportable

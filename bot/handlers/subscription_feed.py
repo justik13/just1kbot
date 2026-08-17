@@ -3,14 +3,17 @@ from aiohttp import web
 
 from database.connection import session_scope
 from services.subscription_feed_service import SubscriptionFeedService
-from services.subscription_token_service import SubscriptionTokenService
+from services.subscription_token_service import (
+    MAX_SUBSCRIPTION_TOKEN_LENGTH,
+    SubscriptionTokenService,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def subscription_feed_handler(request: web.Request) -> web.Response:
     token = request.match_info.get("token", "").strip()
-    if not token or len(token) > 128:
+    if not token or len(token) > MAX_SUBSCRIPTION_TOKEN_LENGTH:
         return web.Response(status=404, text="Not Found")
 
     async with session_scope() as session:

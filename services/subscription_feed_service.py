@@ -1,4 +1,5 @@
 import base64
+from datetime import timedelta
 import logging
 from typing import Tuple
 
@@ -9,6 +10,7 @@ from config.settings import get_settings
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
 from services.subscription import SubscriptionService
+from utils.datetime_helpers import now_utc
 from utils.vpn_parser import build_conf_file
 
 logger = logging.getLogger(__name__)
@@ -18,9 +20,9 @@ SUPPORTED_SUBSCRIPTION_PROTOCOLS = {"amneziawg2"}
 
 class SubscriptionFeedService:
     @staticmethod
-    async def get_exportable_profiles(
+    async def get_exportable_configs(
         session: AsyncSession, user_id: int
-    ) -> list[VPNProfile]:
+    ) -> list[Tuple[VPNProfile, str]]:
         profiles = await get_user_profiles(session, user_id, include_deleting=False)
         exportable = []
 
@@ -46,9 +48,16 @@ class SubscriptionFeedService:
                 )
                 continue
 
-            exportable.append(p)
+            exportable.append((p, conf))
 
         return exportable
+
+    @classmethod
+    async def get_exportable_profiles(
+        cls, session: AsyncSession, user_id: int
+    ) -> list[VPNProfile]:
+        configs = await cls.get_exportable_configs(session, user_id)
+        return [p for p, _ in configs]
 
     @staticmethod
     async def get_user_traffic(
@@ -70,11 +79,21 @@ class SubscriptionFeedService:
         access_granted = SubscriptionService.check_vpn_access(user)
         upload_sum, download_sum = await cls.get_user_traffic(session, user.id)
 
-        expire_unix = (
-            int(user.subscription_end.timestamp())
-            if user.subscription_end
-            else 0
-        )
+        now = now_utc()
+        if access_granted and user.subscription_end:
+            if user.subscription_end > now:
+                expire_unix = int(user.subscription_end.timestamp())
+            else:
+                # User is in VPN grace period (+4 hours)
+                expire_unix = int(
+                    (user.subscription_end + timedelta(hours=4)).timestamp()
+                )
+        else:
+            expire_unix = (
+                int(user.subscription_end.timestamp())
+                if user.subscription_end
+                else 0
+            )
 
         support_username = (settings.SUPPORT_USERNAME or "support").lstrip("@")
         desc_text = f"Личные устройства | @{support_username}"
@@ -97,17 +116,13 @@ class SubscriptionFeedService:
         if not access_granted:
             return 200, headers, ""
 
-        profiles = await cls.get_exportable_profiles(session, user.id)
-        if not profiles:
+        configs = await cls.get_exportable_configs(session, user.id)
+        if not configs:
             return 200, headers, ""
 
         lines = []
-        for p in profiles:
+        for p, conf in configs:
             try:
-                conf = build_conf_file(p.raw_config)
-                if not conf or not conf.strip():
-                    continue
-
                 b64_conf = base64.urlsafe_b64encode(
                     conf.encode("utf-8")
                 ).decode("ascii")

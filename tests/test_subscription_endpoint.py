@@ -58,6 +58,10 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         resp_empty = await subscription_feed_handler(req_empty)
         self.assertEqual(resp_empty.status, 404)
 
+        req_65 = make_mocked_request("GET", "/sub/" + "a" * 65, match_info={"token": "a" * 65})
+        resp_65 = await subscription_feed_handler(req_65)
+        self.assertEqual(resp_65.status, 404)
+
         req_huge = make_mocked_request("GET", "/sub/" + "a" * 200, match_info={"token": "a" * 200})
         resp_huge = await subscription_feed_handler(req_huge)
         self.assertEqual(resp_huge.status, 404)

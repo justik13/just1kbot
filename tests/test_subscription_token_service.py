@@ -1,8 +1,23 @@
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy.exc import IntegrityError
 
 from database.models import User
-from services.subscription_token_service import SubscriptionTokenService
+from services.subscription_token_service import (
+    MAX_SUBSCRIPTION_TOKEN_LENGTH,
+    SubscriptionTokenService,
+)
+
+
+def _make_mock_session():
+    session = AsyncMock()
+    session.begin_nested = MagicMock()
+    nested = AsyncMock()
+    nested.__aenter__.return_value = nested
+    nested.__aexit__.return_value = None
+    session.begin_nested.return_value = nested
+    return session, nested
 
 
 class SubscriptionTokenServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -10,10 +25,11 @@ class SubscriptionTokenServiceTests(unittest.IsolatedAsyncioTestCase):
         token = SubscriptionTokenService.generate_token()
         self.assertIsInstance(token, str)
         self.assertGreaterEqual(len(token), 32)
+        self.assertLessEqual(len(token), MAX_SUBSCRIPTION_TOKEN_LENGTH)
 
     async def test_get_or_create_token_when_none(self):
         user = User(id=1, telegram_id=12345, subscription_token=None)
-        session = AsyncMock()
+        session, _nested = _make_mock_session()
 
         token = await SubscriptionTokenService.get_or_create_token(session, user)
         self.assertIsNotNone(token)
@@ -22,15 +38,31 @@ class SubscriptionTokenServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_or_create_token_idempotent(self):
         user = User(id=1, telegram_id=12345, subscription_token="existing_token_xyz")
-        session = AsyncMock()
+        session, _ = _make_mock_session()
 
         token = await SubscriptionTokenService.get_or_create_token(session, user)
         self.assertEqual(token, "existing_token_xyz")
         session.flush.assert_not_awaited()
 
+    async def test_get_or_create_token_concurrency_race_reloads_from_db(self):
+        user = User(id=10, telegram_id=12345, subscription_token=None)
+        session, _ = _make_mock_session()
+
+        # Simulate IntegrityError on flush inside nested transaction
+        session.flush.side_effect = IntegrityError("duplicate key", params=None, orig=Exception())
+
+        # Mock DB query returning the token saved by another worker
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = "token_from_concurrent_worker"
+        session.execute.return_value = mock_result
+
+        token = await SubscriptionTokenService.get_or_create_token(session, user)
+        self.assertEqual(token, "token_from_concurrent_worker")
+        self.assertEqual(user.subscription_token, "token_from_concurrent_worker")
+
     async def test_rotate_token(self):
         user = User(id=1, telegram_id=12345, subscription_token="old_token_123")
-        session = AsyncMock()
+        session, _ = _make_mock_session()
 
         new_token = await SubscriptionTokenService.rotate_token(session, user)
         self.assertNotEqual(new_token, "old_token_123")
@@ -38,18 +70,20 @@ class SubscriptionTokenServiceTests(unittest.IsolatedAsyncioTestCase):
         session.flush.assert_awaited_once()
 
     async def test_get_user_by_token_validation(self):
-        session = AsyncMock()
+        session, _ = _make_mock_session()
         res_empty = await SubscriptionTokenService.get_user_by_token(session, "")
         self.assertIsNone(res_empty)
 
-        res_huge = await SubscriptionTokenService.get_user_by_token(session, "a" * 200)
+        res_huge = await SubscriptionTokenService.get_user_by_token(
+            session, "a" * (MAX_SUBSCRIPTION_TOKEN_LENGTH + 1)
+        )
         self.assertIsNone(res_huge)
 
     @patch("services.subscription_token_service.get_user_by_subscription_token")
     async def test_get_user_by_token_delegates(self, mock_get_repo):
         user = User(id=42, telegram_id=999, subscription_token="valid_token")
         mock_get_repo.return_value = user
-        session = AsyncMock()
+        session, _ = _make_mock_session()
 
         found = await SubscriptionTokenService.get_user_by_token(session, "valid_token")
         self.assertEqual(found, user)
