@@ -729,6 +729,123 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
                     with self.assertRaises(AccountLedgerConflictError):
                         await credit_succeeded_topup(session, locked_payment=payment)
 
+    async def test_all_channels_unmocked_pipeline_guarantees_no_credit_on_conflict(self):
+        """Cross-component test: full unmocked transition pipeline on conflict creates zero ledger credits."""
+        from database.models import AccountLedgerEntry, PaymentProviderOperation, WebhookInbox
+        from services.payment_provider_operations import ProviderOperationClaim, finalize as finalize_provider
+        from services.workers.webhook_inbox import InboxClaim, finalize as finalize_webhook
+        from services.account_topup_refresh import request_topup_status_refresh
+        from services.yookassa_service import YooKassaResult
+
+        user = User(id=1, telegram_id=12345, is_deleted=False, topup_blocked=False, financial_hold=False)
+
+        # 1. Provider Operations Channel (canceled -> succeeded conflict)
+        p1 = Payment(
+            id=301,
+            user_id=1,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="canceled",
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+        )
+        op1 = PaymentProviderOperation(
+            id=10,
+            payment_id=301,
+            operation_type="reconcile_payment",
+            status="processing",
+            locked_by="w1",
+            attempts=1,
+        )
+        s1 = MockSession(db_user=user, db_payment=p1, db_row=op1)
+        claim1 = ProviderOperationClaim(
+            operation_id=10,
+            payment_id=301,
+            operation_type="reconcile_payment",
+            payload={},
+            idempotency_key="k1",
+            worker_id="w1",
+            attempt_number=1,
+            external_id="yoo_301",
+            created_at=now_utc(),
+        )
+        res1 = YooKassaResult(
+            ok=True,
+            value={"id": "yoo_301", "status": "succeeded", "captured_at": "2026-08-17T12:00:00+00:00", "amount": {"value": "500.00", "currency": "RUB"}},
+            status_code=200,
+        )
+        await finalize_provider(s1, claim1, res1)
+        self.assertIsNone(p1.credited_at)
+        self.assertEqual(p1.fulfillment_status, "manual_review")
+        self.assertFalse(any(isinstance(x, AccountLedgerEntry) for x in s1.added))
+
+        # 2. Webhook Inbox Channel (mismatch amount conflict)
+        p2 = Payment(
+            id=302,
+            user_id=1,
+            external_id="yoo_302",
+            public_order_id="pay_302",
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="pending",
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+        )
+        row2 = WebhookInbox(
+            id=20,
+            provider="yookassa",
+            event_key="k2",
+            event_type="payment.succeeded",
+            provider_object_id="yoo_302",
+            payment_external_id="yoo_302",
+            public_order_id="pay_302",
+            payload={},
+            status="processing",
+            locked_by="w2",
+            attempts=1,
+            max_attempts=30,
+        )
+        s2 = MockSession(db_user=user, db_payment=p2, db_row=row2)
+        claim2 = InboxClaim(
+            inbox_id=20,
+            worker_id="w2",
+            attempt_number=1,
+            event_type="payment.succeeded",
+            payment_external_id="yoo_302",
+            public_order_id="pay_302",
+            payload={"object": {"id": "yoo_302", "status": "succeeded", "captured_at": "2026-08-17T12:00:00+00:00", "amount": {"value": "9999.00", "currency": "RUB"}}},
+            event_key="k2",
+        )
+        res2 = YooKassaResult(
+            ok=True,
+            value={"id": "yoo_302", "status": "succeeded", "captured_at": "2026-08-17T12:00:00+00:00", "amount": {"value": "9999.00", "currency": "RUB"}},
+            status_code=200,
+        )
+        await finalize_webhook(s2, claim2, result=res2)
+        self.assertIsNone(p2.credited_at)
+        self.assertEqual(p2.fulfillment_status, "manual_review")
+        self.assertFalse(any(isinstance(x, AccountLedgerEntry) for x in s2.added))
+
+        # 3. Stale Recovery Channel (financially blocked user)
+        blocked_user = User(id=1, telegram_id=12345, topup_blocked=True, financial_hold=True)
+        p3 = Payment(
+            id=303,
+            user_id=1,
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+        )
+        s3 = MockSession(db_user=blocked_user, db_payment=p3)
+        with patch("services.account_topup_refresh.lock_checkout_user", new_callable=AsyncMock) as mock_lock:
+            mock_lock.return_value = blocked_user
+            await request_topup_status_refresh(s3, payment_id=303)
+        self.assertIsNone(p3.credited_at)
+        self.assertEqual(p3.fulfillment_status, "manual_review")
+        self.assertFalse(any(isinstance(x, AccountLedgerEntry) for x in s3.added))
+
 
 if __name__ == "__main__":
     unittest.main()

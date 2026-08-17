@@ -286,9 +286,11 @@ async def _push_payment_url(bot, session, payment) -> None:
             try:
                 from database.repositories.users_repo import mark_user_bot_blocked
                 await mark_user_bot_blocked(session, user.telegram_id)
+                payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
             except Exception as mark_exc:
                 logger.warning("Failed to mark user %s as bot blocked: %s", user.telegram_id, mark_exc)
-        payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
+        else:
+            payment.payment_url_notified_at = payment.payment_url_notified_at or now_utc()
     except Exception as exc:
         logger.warning("Failed to push payment URL to user %s: %s", payment.user_id, exc)
 
