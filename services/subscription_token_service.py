@@ -19,43 +19,50 @@ MAX_SUBSCRIPTION_TOKEN_LENGTH = 64
 class SubscriptionTokenService:
     @staticmethod
     def generate_token() -> str:
-        # secrets.token_urlsafe(32) produces a 43-character string, which fits in VARCHAR(64)
+        # secrets.token_urlsafe(32) produces a 43-character string, safely fitting in VARCHAR(64)
         return secrets.token_urlsafe(32)
 
     @classmethod
     async def get_or_create_token(
         cls, session: AsyncSession, user: User
     ) -> str:
-        if user.subscription_token:
-            return user.subscription_token
+        if not user or not user.id:
+            raise ValueError("Valid persisted user required for token operations")
+
+        # Fast check: if session already has token loaded, lock and confirm current DB value
+        stmt = (
+            select(User)
+            .where(User.id == user.id, User.is_deleted.is_(False))
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        locked_user = res.scalar_one_or_none()
+        if not locked_user:
+            raise RuntimeError(f"User {user.id} not found or deleted")
+
+        if locked_user.subscription_token:
+            user.subscription_token = locked_user.subscription_token
+            return locked_user.subscription_token
 
         for _attempt in range(5):
             new_token = cls.generate_token()
             try:
                 async with session.begin_nested():
-                    user.subscription_token = new_token
+                    locked_user.subscription_token = new_token
                     await session.flush()
+                user.subscription_token = new_token
                 return new_token
             except IntegrityError:
                 logger.warning(
-                    "Unique constraint collision or race on subscription_token for user %s, checking DB...",
+                    "Unique token collision during subscription_token generation for user %s, retrying...",
                     user.id,
                 )
-                # Savepoint rollback is automatically performed by begin_nested()
-                # Re-query user from DB to obtain token written by concurrent worker
-                stmt = select(User.subscription_token).where(User.id == user.id)
-                res = await session.execute(stmt)
-                existing = res.scalar_one_or_none()
-                if existing:
-                    user.subscription_token = existing
-                    return existing
+                continue
 
-        stmt = select(User.subscription_token).where(User.id == user.id)
-        res = await session.execute(stmt)
-        existing = res.scalar_one_or_none()
-        if existing:
-            user.subscription_token = existing
-            return existing
+        # If retries exhausted, re-check DB state under lock
+        if locked_user.subscription_token:
+            user.subscription_token = locked_user.subscription_token
+            return locked_user.subscription_token
 
         raise RuntimeError(
             f"Failed to generate persistent subscription token for user {user.id}"
@@ -65,16 +72,30 @@ class SubscriptionTokenService:
     async def rotate_token(
         cls, session: AsyncSession, user: User
     ) -> str:
+        if not user or not user.id:
+            raise ValueError("Valid persisted user required for token operations")
+
+        stmt = (
+            select(User)
+            .where(User.id == user.id, User.is_deleted.is_(False))
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        locked_user = res.scalar_one_or_none()
+        if not locked_user:
+            raise RuntimeError(f"User {user.id} not found or deleted")
+
         for _attempt in range(5):
             new_token = cls.generate_token()
             try:
                 async with session.begin_nested():
-                    user.subscription_token = new_token
+                    locked_user.subscription_token = new_token
                     await session.flush()
+                user.subscription_token = new_token
                 return new_token
             except IntegrityError:
                 logger.warning(
-                    "Collision during token rotation for user %s, retrying...",
+                    "Unique token collision during token rotation for user %s, retrying...",
                     user.id,
                 )
                 continue
