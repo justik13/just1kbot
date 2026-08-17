@@ -283,6 +283,23 @@ async def settle_succeeded_topup(
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
 
+    if (
+        payment.fulfillment_status in ("manual_review", "reversed")
+        or payment.reconciliation_status in ("manual_review", "mismatch")
+    ):
+        session.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="topup_settlement_blocked_manual_review",
+                provider_status=payment.provider_status,
+                reason=payment.manual_review_reason or "manual_review_active",
+                source=source,
+            )
+        )
+        await session.flush()
+        snapshot = await get_account_balance(session, user_id=payment.user_id)
+        return False, snapshot
+
     user = await lock_checkout_user(session, payment.user_id)
     if user is not None:
         hard_block = user.topup_blocked
@@ -538,6 +555,7 @@ async def settle_succeeded_topup_by_id(
     payment_id: int,
     source: str,
     settings=None,
+    bot=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
@@ -545,5 +563,5 @@ async def settle_succeeded_topup_by_id(
     if payment is None:
         raise AccountTopupError("topup_not_found")
     return await settle_succeeded_topup(
-        session, payment=payment, source=source, settings=settings
+        session, payment=payment, source=source, settings=settings, bot=bot
     )

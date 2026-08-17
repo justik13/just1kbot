@@ -182,14 +182,14 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         supervisor = asyncio.create_task(workers._supervise_workers(
             self.bot, check_interval=0, clock=lambda: 1
         ))
-        await self.wait_until(lambda: workers._worker_health["optional"].state == "failed")
+        await self.wait_until(lambda: workers._worker_health["optional"].state == "cooldown")
         count = workers._worker_health["optional"].consecutive_failures
         for _ in range(10):
             await asyncio.sleep(0)
         self.assertEqual(count, workers._worker_health["optional"].consecutive_failures)
-        self.assertNotIn("optional", workers._worker_tasks)
+        self.assertIn("optional", workers._worker_tasks)
         self.assertEqual(
-            "failed",
+            "cooldown",
             workers.get_worker_health_snapshot()["workers"]["optional"]["state"],
         )
         self.assertFalse(workers.shutdown_event.is_set())
@@ -283,9 +283,9 @@ class WorkerSupervisorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(workers.shutdown_event.is_set())
         cancel_restarted.set()
         await self.wait_until(
-            lambda: workers._worker_health["optional_cancel"].state == "failed"
+            lambda: workers._worker_health["optional_cancel"].state == "cooldown"
         )
-        self.assertNotIn("optional_cancel", workers._worker_tasks)
+        self.assertIn("optional_cancel", workers._worker_tasks)
         self.assertFalse(workers.shutdown_event.is_set())
         supervisor.cancel()
         await asyncio.gather(supervisor, return_exceptions=True)

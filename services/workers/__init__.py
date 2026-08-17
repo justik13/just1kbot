@@ -73,6 +73,7 @@ class WorkerHealth:
     consecutive_failures: int
     last_error_type: str | None
     critical: bool
+    cooldown_until: float | None = None
 
 
 _worker_tasks: dict[str, asyncio.Task] = {}
@@ -218,11 +219,21 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
             definition = _WORKERS_BY_NAME[name]
             health = _worker_health[name]
             now = clock()
+            if health.state == "cooldown":
+                if health.cooldown_until is not None and now < health.cooldown_until:
+                    continue
+                # Cooldown expired -> attempt restart
+                health.state = "backoff"
+                _spawn(definition, bot, clock())
+                continue
+
             if not task.done():
                 if (health.consecutive_failures and health.last_started_at is not None
                         and now - health.last_started_at >= definition.stability_window):
                     health.consecutive_failures = 0
                     health.last_error_type = None
+                    health.cooldown_until = None
+                    health.state = "running"
                     _alert_keys.discard(f"crash:{name}")
                 continue
             if task.cancelled():
@@ -246,12 +257,13 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
             _schedule_alert(bot, f"crash:{name}", texts.RUNTIME_SERVICES_WORKERS_INIT_L233_1, name, count, error_type)
 
             if count > definition.max_consecutive_failures:
-                health.state = "failed"
                 if definition.critical:
+                    health.state = "failed"
                     _fatal(bot, name, count, error_type)
                     break
-                logger.critical("Non-critical worker %s exhausted restart budget", name)
-                _worker_tasks.pop(name, None)
+                logger.critical("Non-critical worker %s exhausted restart budget, entering cooldown", name)
+                health.state = "cooldown"
+                health.cooldown_until = now + 900.0
                 continue
 
             backoff = (backoff_delay(count) if backoff_delay is not None else min(30.0, 2.0 ** count))
