@@ -1,8 +1,7 @@
-"""Fenced PostgreSQL queue for YooKassa top-up provider commands."""
-
+import logging
+import uuid
 from dataclasses import dataclass
 from datetime import timedelta
-import uuid
 
 from sqlalchemy import select
 
@@ -11,6 +10,8 @@ from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult, YooKassaService
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 class PaymentProviderOperationOwnershipError(RuntimeError):

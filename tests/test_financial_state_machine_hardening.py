@@ -10,16 +10,14 @@ Validates:
 7. Worker supervisor cooldown and stability window.
 """
 
-import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import CallbackQuery, Message, User as TgUser
+from aiogram.types import Message, User as TgUser
 
 from database.models import (
-    AccountLedgerEntry,
     Payment,
     PaymentEvent,
     User,
@@ -30,15 +28,12 @@ from database.repositories.account_ledger_repo import (
     credit_succeeded_topup,
 )
 from services.account_topup import (
-    AccountTopupError,
     settle_succeeded_topup,
 )
 from services.api_operations_executor import _is_usable_created_config
 from services.payment_provider_state import (
     apply_provider_transition,
-    parse_provider_captured_at,
 )
-from utils.datetime_helpers import now_utc
 
 
 class MockSession:
