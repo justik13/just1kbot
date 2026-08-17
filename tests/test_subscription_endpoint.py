@@ -1,3 +1,4 @@
+from datetime import timedelta
 import os
 import unittest
 from unittest.mock import AsyncMock, patch
@@ -8,6 +9,7 @@ from bot.handlers.subscription_feed import (
     subscription_open_handler,
 )
 from database.models import User
+from utils.datetime_helpers import now_utc
 
 
 class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -107,7 +109,12 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
-        user = User(id=77, telegram_id=888, subscription_token="valid_token_xyz")
+        user = User(
+            id=77,
+            telegram_id=888,
+            subscription_token="valid_token_xyz",
+            subscription_end=now_utc() + timedelta(days=30),
+        )
         mock_get_user.return_value = user
 
         req = make_mocked_request("GET", "/sub/open/valid_token_xyz", match_info={"token": "valid_token_xyz"})
@@ -144,6 +151,53 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         req_65 = make_mocked_request("GET", "/sub/open/" + "a" * 65, match_info={"token": "a" * 65})
         resp_65 = await subscription_open_handler(req_65)
         self.assertEqual(resp_65.status, 404)
+
+    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
+    @patch("bot.handlers.subscription_feed.session_scope")
+    async def test_open_endpoint_security_headers(
+        self, mock_session_scope, mock_get_user
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+
+        user = User(
+            id=77,
+            telegram_id=888,
+            subscription_token="valid_token_xyz",
+            subscription_end=now_utc() + timedelta(days=30),
+        )
+        mock_get_user.return_value = user
+
+        req = make_mocked_request("GET", "/sub/open/valid_token_xyz", match_info={"token": "valid_token_xyz"})
+        response = await subscription_open_handler(req)
+
+        self.assertEqual(response.headers["Cache-Control"], "no-store, no-cache, must-revalidate, max-age=0")
+        self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+        self.assertEqual(response.headers["X-Robots-Tag"], "noindex, nofollow, noarchive")
+        self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
+
+    @patch("bot.handlers.subscription_feed.SubscriptionService.check_vpn_access")
+    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
+    @patch("bot.handlers.subscription_feed.session_scope")
+    async def test_open_endpoint_inactive_subscription(
+        self, mock_session_scope, mock_get_user, mock_check_access
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+
+        user = User(id=77, telegram_id=888, subscription_token="valid_token_xyz")
+        mock_get_user.return_value = user
+        mock_check_access.return_value = False
+
+        req = make_mocked_request("GET", "/sub/open/valid_token_xyz", match_info={"token": "valid_token_xyz"})
+        response = await subscription_open_handler(req)
+
+        self.assertEqual(response.status, 200)
+        self.assertIn("Подписка не активна", response.text)
+        self.assertIn("Продлить в Telegram-боте", response.text)
+        self.assertNotIn("incy://import/", response.text)
 
 
 if __name__ == "__main__":
