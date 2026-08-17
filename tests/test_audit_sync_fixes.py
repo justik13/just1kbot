@@ -14,11 +14,11 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0005_payment_statuses_sync(self):
+    def test_alembic_head_is_0006_add_user_subscription_token(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0005_payment_statuses_sync"])
-        rev_0005 = scripts.get_revision("0005_payment_statuses_sync")
-        self.assertEqual(rev_0005.down_revision, "0004_referral_entitlements")
+        self.assertEqual(scripts.get_heads(), ["0006_add_user_subscription_token"])
+        rev_0006 = scripts.get_revision("0006_add_user_subscription_token")
+        self.assertEqual(rev_0006.down_revision, "0005_payment_statuses_sync")
 
     def test_users_repo_allowed_fields_no_referral_days(self):
         self.assertNotIn("referral_days", ALLOWED_USER_UPDATE_FIELDS)

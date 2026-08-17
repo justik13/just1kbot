@@ -3,12 +3,11 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from database.models import Server, User, VPNProfile
 from services.subscription_feed_service import (
     SubscriptionFeedService,
-    SUPPORTED_SUBSCRIPTION_PROTOCOLS,
 )
 from utils.vpn_parser import encode_json_to_vpn_uri
 

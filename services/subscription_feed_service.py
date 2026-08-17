@@ -1,6 +1,6 @@
 import base64
 import logging
-from typing import Optional, Tuple
+from typing import Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 from aiohttp.test_utils import make_mocked_request
 
 from bot.handlers.subscription_feed import subscription_feed_handler

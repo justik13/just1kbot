@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import User
 from database.repositories.users_repo import (
     get_user_by_subscription_token,
-    update_user_subscription_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ class SubscriptionTokenService:
         if user.subscription_token:
             return user.subscription_token
 
-        for attempt in range(5):
+        for _attempt in range(5):
             new_token = cls.generate_token()
             try:
                 user.subscription_token = new_token
