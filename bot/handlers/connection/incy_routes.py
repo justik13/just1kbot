@@ -2,7 +2,7 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, CopyTextButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +34,6 @@ async def show_incy_subscription(
     token = await SubscriptionTokenService.get_or_create_token(session, db_user)
 
     sub_url = f"https://{settings.DOMAIN}/sub/{token}"
-    deep_link = f"incy://import/{sub_url}"
 
     text = (
         "🔗 <b>Подписка для INCY</b>\n\n"
@@ -45,8 +44,8 @@ async def show_incy_subscription(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📱 Открыть в INCY",
-        url=deep_link,
+        text="📋 Скопировать ссылку",
+        copy_text=CopyTextButton(text=sub_url),
     )
     builder.button(
         text="⬅️ Назад к устройствам",
