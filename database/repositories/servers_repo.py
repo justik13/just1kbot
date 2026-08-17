@@ -5,7 +5,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Server, VPNProfile
-from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
 from services.slots_cache import get_cached_peer_count
 
 
@@ -59,9 +58,7 @@ async def get_active_servers(session: AsyncSession) -> List[Server]:
 
 async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
-        .group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     )
     return {row[0]: row[1] for row in result.all()}
 
@@ -72,9 +69,7 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
         return []
 
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
-        .group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
 
@@ -205,9 +200,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
         return 0
 
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
-        .group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
 
