@@ -110,13 +110,14 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://", text_arg)
         self.assertIn("sub/token_abc_123", text_arg)
 
-        btn_urls = [
-            btn.url
+        btn_copy = [
+            btn.copy_text.text
             for row in keyboard_arg.inline_keyboard
             for btn in row
-            if btn.url
+            if getattr(btn, "copy_text", None)
         ]
-        self.assertTrue(any("incy://import/https://" in u and "token_abc_123" in u for u in btn_urls))
+        self.assertTrue(any("token_abc_123" in t for t in btn_copy))
+        self.assertTrue(any("sub/token_abc_123" in t for t in btn_copy))
 
 
 if __name__ == "__main__":
