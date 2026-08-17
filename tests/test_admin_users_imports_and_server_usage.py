@@ -153,6 +153,48 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         self.assertIn("admin_users_filter:tariff:5:1", callback_datas)
         self.assertIn("admin_users_filter:tariff:10:1", callback_datas)
 
+    async def test_users_keyboard_profile_count_excludes_all_non_visible_statuses(self):
+        from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+
+        profiles = [
+            SimpleNamespace(id=1, provisioning_status="active"),
+            SimpleNamespace(id=2, provisioning_status="pending_create"),
+            SimpleNamespace(id=3, provisioning_status="deleting"),
+            SimpleNamespace(id=4, provisioning_status="create_cleanup_pending"),
+            SimpleNamespace(id=5, provisioning_status="create_failed"),
+            SimpleNamespace(id=6, provisioning_status="delete_failed"),
+        ]
+
+        user = SimpleNamespace(
+            telegram_id=700,
+            username="tester",
+            subscription_end=None,
+            is_banned=False,
+            is_bot_blocked=False,
+            profiles=profiles,
+        )
+
+        with patch(
+            "bot.handlers.admin.users.common.format_days_left",
+            return_value="—",
+        ):
+            _, builder = await _build_users_list_text_and_kb(
+                [user],
+                page=1,
+                total_pages=1,
+                total=1,
+            )
+
+        buttons = [
+            button
+            for row in builder.as_markup().inline_keyboard
+            for button in row
+        ]
+        user_button = next(b for b in buttons if b.callback_data == "admin_user_card:700")
+        # 2 active/pending profiles, 4 non-visible statuses excluded
+        self.assertIn("2 устр.", user_button.text)
+        self.assertNotIn("6 устр.", user_button.text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database.models import Server, Tariff, User, VPNProfile
+from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
 from utils.datetime_helpers import now_utc
 
 ALLOWED_USER_UPDATE_FIELDS = {
@@ -313,7 +314,7 @@ def _apply_user_filters(stmt, filter_type: str, filter_param=None):
         stmt = stmt.where(
             User.profiles.any(
                 (VPNProfile.server_id == int(filter_param))
-                & (VPNProfile.provisioning_status.notin_(("deleting", "create_cleanup_pending")))
+                & (VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
             )
         )
     elif filter_type == "country" and filter_param:
