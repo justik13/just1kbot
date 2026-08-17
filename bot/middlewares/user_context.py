@@ -75,7 +75,7 @@ class UserContextMiddleware(BaseMiddleware):
             if user is None:
                 _user_cache.pop(telegram_id, None)
 
-        if user is None and cached_user_id is _SENTINEL:
+        if user is None:
             stmt = select(User).where(
                 User.telegram_id == telegram_id,
                 User.is_deleted.is_(False),

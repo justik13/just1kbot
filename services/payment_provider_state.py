@@ -98,8 +98,8 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             )
             return ProviderTransition("conflict", observed, "succeeded_after_refund")
         if (
-            payment.reconciliation_status in ("manual_review", "mismatch")
-            or payment.fulfillment_status == "manual_review"
+            payment.reconciliation_status == "manual_review"
+            or payment.fulfillment_status in ("manual_review", "reversed")
         ):
             payment.provider_status = "succeeded"
             return ProviderTransition("conflict", observed, "manual_review_locked")

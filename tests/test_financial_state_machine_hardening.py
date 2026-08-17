@@ -51,6 +51,9 @@ class MockSession:
     async def flush(self):
         self.flushed = True
 
+    async def refresh(self, obj):
+        pass
+
     async def execute(self, stmt):
         result = MagicMock()
         result.scalar_one_or_none = MagicMock(return_value=self._user)
@@ -239,6 +242,67 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
                 await credit_succeeded_topup(session, locked_payment=payment)
             self.assertIn("manual_review", str(ctx.exception))
 
+    async def test_abandoned_checkout_late_success_is_applied_and_settled(self):
+        """Late success for abandoned UI checkout must be applied and credited successfully."""
+        user = User(id=1, telegram_id=12345, is_deleted=False, topup_blocked=False, financial_hold=False)
+        captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
+        payment = Payment(
+            id=106,
+            user_id=1,
+            external_id="yoo_106",
+            public_order_id="pay_106",
+            amount=Decimal("500"),
+            currency="RUB",
+            provider_status="pending",
+            provider_confirmed_at=captured,
+            checkout_status="abandoned",
+            fulfillment_status="not_ready",
+            reconciliation_status="ok",
+        )
+        session = MockSession(db_user=user, db_payment=payment)
+
+        data = {
+            "id": "yoo_106",
+            "status": "succeeded",
+            "captured_at": "2026-08-17T12:00:00+00:00",
+            "amount": {"value": "500.00", "currency": "RUB"},
+            "metadata": {"order_id": "pay_106", "local_payment_id": "106"},
+        }
+
+        transition = await apply_provider_transition(
+            session,
+            payment=payment,
+            data=data,
+            source="webhook",
+        )
+
+        self.assertEqual(transition.outcome, "applied")
+        self.assertEqual(payment.provider_status, "succeeded")
+        self.assertEqual(payment.reconciliation_status, "mismatch")
+        self.assertEqual(payment.fulfillment_status, "not_ready")
+
+        with patch("services.account_topup.lock_checkout_user", new_callable=AsyncMock) as mock_lock_user, \
+             patch("services.account_topup.credit_succeeded_topup", new_callable=AsyncMock) as mock_credit, \
+             patch("services.account_topup.get_account_balance", new_callable=AsyncMock) as mock_balance, \
+             patch("services.account_topup.refresh_user_dispute_hold", new_callable=AsyncMock):
+            mock_lock_user.return_value = user
+            mock_credit.return_value = (MagicMock(), True)
+            mock_balance.return_value = AccountBalanceSnapshot(
+                accounting_position=Decimal("500"),
+                available=Decimal("500"),
+                reserved=Decimal("0"),
+                debt=Decimal("0"),
+            )
+            credited, snapshot = await settle_succeeded_topup(
+                session,
+                payment=payment,
+                source="test",
+                settings=MagicMock(BALANCE_MAX_AVAILABLE_RUB="50000"),
+            )
+
+        self.assertTrue(credited)
+        self.assertEqual(payment.fulfillment_status, "succeeded")
+
 
 class AmneziaWGValidationTests(unittest.TestCase):
     """Verifies strict AmneziaWG configuration validation in executor."""
@@ -354,6 +418,58 @@ class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):
         # Invalidate cache
         invalidate_user_cache(99999)
         self.assertNotIn(99999, _user_cache)
+
+    async def test_stale_cache_miss_falls_back_to_telegram_id_in_same_request(self):
+        """When cached user.id misses in DB, middleware must fall back to telegram_id in same request."""
+        from bot.middlewares.user_context import (
+            UserContextMiddleware,
+            _user_cache,
+            clear_user_cache,
+        )
+
+        clear_user_cache()
+
+        # Seed cache with stale user_id = 999
+        _user_cache[88888] = 999
+
+        real_user = User(
+            id=77,
+            telegram_id=88888,
+            username="fallback_user",
+            is_deleted=False,
+            is_banned=False,
+        )
+
+        class StaleSession(MockSession):
+            async def execute(self, stmt):
+                sql = str(stmt)
+                result = MagicMock()
+                if "users.id =" in sql or "users_1.id =" in sql or "WHERE users.id" in sql:
+                    result.scalar_one_or_none = MagicMock(return_value=None)
+                else:
+                    result.scalar_one_or_none = MagicMock(return_value=real_user)
+                return result
+
+        session = StaleSession(db_user=real_user)
+        middleware = UserContextMiddleware()
+
+        message = MagicMock(spec=Message)
+        from_user = MagicMock(spec=TgUser)
+        from_user.id = 88888
+        from_user.username = "fallback_user"
+        from_user.first_name = "Fallback"
+        message.from_user = from_user
+
+        data = {"session": session}
+
+        async def handler(event, data):
+            return data.get("db_user")
+
+        result = await middleware(handler, message, data)
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.id, 77)
+        self.assertEqual(_user_cache.get(88888), 77)
 
 
 class TopupContextDefensiveParsingTests(unittest.TestCase):

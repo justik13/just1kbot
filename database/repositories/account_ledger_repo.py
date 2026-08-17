@@ -260,7 +260,7 @@ async def credit_succeeded_topup(
         raise AccountLedgerConflictError("topup_owner_changed")
     if (
         payment.fulfillment_status in ("manual_review", "reversed")
-        or payment.reconciliation_status in ("manual_review", "mismatch")
+        or payment.reconciliation_status == "manual_review"
     ):
         raise AccountLedgerConflictError("topup_in_manual_review_cannot_be_credited")
     if payment.provider_status != "succeeded":
