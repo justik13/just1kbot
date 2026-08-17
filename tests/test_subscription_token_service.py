@@ -1,6 +1,7 @@
 import asyncio
 import os
 import unittest
+import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import text
@@ -8,13 +9,18 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import User
-from database.repositories import users_repo
 from services.subscription_token_service import (
     MAX_SUBSCRIPTION_TOKEN_LENGTH,
     SubscriptionTokenService,
 )
 
 DB = os.getenv("TEST_DATABASE_URL")
+TRUNCATE_SQL = (
+    "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
+    "account_balance_reservations, "
+    "account_ledger_allocations, account_ledger_entries, "
+    "payment_events, audit_logs, payments, users, system_settings, payment_disputes RESTART IDENTITY CASCADE"
+)
 
 
 def _make_mock_session(user_in_db: User):
@@ -103,55 +109,23 @@ class SubscriptionTokenServiceUnitTests(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class SubscriptionTokenServicePostgresConcurrencyTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.env_patcher = patch.dict(
-            os.environ,
-            {
-                "BOT_TOKEN": "123:test",
-                "REDIS_URL": "redis://localhost:6379/1",
-                "REDIS_PASSWORD": "test",
-                "ADMIN_IDS": "[123456789]",
-                "SUPPORT_USERNAME": "test_support",
-                "DOMAIN": "test.domain",
-                "SSL_EMAIL": "test@domain.com",
-                "YOOKASSA_SHOP_ID": "123456",
-                "YOOKASSA_SECRET_KEY": "test_secret",
-                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
-                "YOOKASSA_WEBHOOK_PORT": "8080",
-                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-                "DATABASE_URL": DB,
-            },
-        )
-        self.env_patcher.start()
-        from config.settings import get_settings
-        get_settings.cache_clear()
-
-        self.engine = create_async_engine(DB)
+        self.engine = create_async_engine(DB, pool_size=10, max_overflow=20)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, vpn_profiles, "
-                    "maintenance_mode, audit_logs, hub_messages, users, tariffs, servers, system_settings, payment_disputes "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
-            created_user = await users_repo.create_user(session, telegram_id=999888777)
-            self.user_id = created_user.id
+            await session.execute(text(TRUNCATE_SQL))
+            self.user = User(telegram_id=int(uuid.uuid4().int % 1000000000))
+            session.add(self.user)
+            await session.flush()
+            self.user_id = self.user.id
 
     async def asyncTearDown(self):
-        from config.settings import get_settings
-        get_settings.cache_clear()
-        self.env_patcher.stop()
         await self.engine.dispose()
 
     async def test_concurrent_get_or_create_token_returns_identical_token(self):
         async def worker_get_token():
             async with self.sessions.begin() as session:
-                user = await users_repo.get_user_by_id(session, self.user_id)
+                user = await session.get(User, self.user_id)
                 return await SubscriptionTokenService.get_or_create_token(session, user)
 
         # Run 2 concurrent requests with independent sessions
@@ -167,13 +141,13 @@ class SubscriptionTokenServicePostgresConcurrencyTests(unittest.IsolatedAsyncioT
 
         # Verify token stored in DB matches
         async with self.sessions.begin() as session:
-            db_user = await users_repo.get_user_by_id(session, self.user_id)
+            db_user = await session.get(User, self.user_id)
             self.assertEqual(db_user.subscription_token, token_a)
 
     async def test_concurrent_rotate_token_consistency(self):
         async def worker_rotate():
             async with self.sessions.begin() as session:
-                user = await users_repo.get_user_by_id(session, self.user_id)
+                user = await session.get(User, self.user_id)
                 return await SubscriptionTokenService.rotate_token(session, user)
 
         token_1, token_2 = await asyncio.gather(
@@ -186,7 +160,7 @@ class SubscriptionTokenServicePostgresConcurrencyTests(unittest.IsolatedAsyncioT
 
         # Verify DB contains the winner token
         async with self.sessions.begin() as session:
-            db_user = await users_repo.get_user_by_id(session, self.user_id)
+            db_user = await session.get(User, self.user_id)
             self.assertIn(db_user.subscription_token, [token_1, token_2])
 
 
