@@ -181,6 +181,11 @@ async def _build_connections_screen(
         )
 
     builder.button(
+        text="🔗 Добавить в INCY",
+        callback_data="menu_incy_subscription",
+    )
+
+    builder.button(
         text="🌐 Статус серверов",
         url="https://stats.uptimerobot.com/de5q3DNc95",
     )
