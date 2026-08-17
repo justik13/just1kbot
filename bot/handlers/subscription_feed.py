@@ -36,9 +36,11 @@ SECURITY_HEADERS = {
 }
 
 
-def _render_inactive_html(sub_url: str, bot_username: str) -> str:
-    escaped_bot_url = (
-        html.escape(f"https://t.me/{bot_username}") if bot_username else "#"
+def _render_inactive_html(sub_url: str, support_username: str) -> str:
+    escaped_support_url = (
+        html.escape(f"https://t.me/{support_username}")
+        if support_username
+        else "#"
     )
     js_sub_url = json.dumps(sub_url)
 
@@ -135,9 +137,9 @@ def _render_inactive_html(sub_url: str, bot_username: str) -> str:
   <div class="card">
     <div class="icon">⚠️</div>
     <h1>Подписка не активна</h1>
-    <p>Срок действия вашей подписки истёк или она приостановлена. Для возобновления доступа продлите тариф в Telegram-боте.</p>
+    <p>Срок действия вашей подписки истёк или она приостановлена. Для продления тарифа вернитесь в бот или свяжитесь с поддержкой.</p>
     
-    <a class="btn btn-primary" href="{escaped_bot_url}">🤖 Продлить в Telegram-боте</a>
+    <a class="btn btn-primary" href="{escaped_support_url}">💬 Связаться с поддержкой</a>
     <button class="btn btn-secondary" onclick="copyLink()">📋 Скопировать ссылку на подписку</button>
     <div id="toast" class="toast">✓ Ссылка скопирована в буфер обмена</div>
   </div>
@@ -183,7 +185,6 @@ def _render_open_html(sub_url: str, deep_link: str) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>Подключение к INCY</title>
-  <meta http-equiv="refresh" content="0;url={escaped_deep_link}">
   <style>
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body {{
@@ -291,11 +292,11 @@ def _render_open_html(sub_url: str, deep_link: str) -> str:
 <body>
   <div class="card">
     <div class="icon">🚀</div>
-    <h1>Открытие приложения INCY...</h1>
-    <p>Если приложение не открылось автоматически, нажмите кнопку ниже:</p>
+    <h1>Подключение к INCY</h1>
+    <p>Нажмите кнопку ниже, чтобы открыть и импортировать подписку в приложении INCY:</p>
     
     <a class="btn btn-primary" href="{escaped_deep_link}">📱 Открыть в приложении INCY</a>
-    <button class="btn btn-secondary" onclick="copyLink()">📋 Скопировать ссылку</button>
+    <button class="btn btn-secondary" onclick="copyLink()">📋 Скопировать ссылку на подписку</button>
     <div id="toast" class="toast">✓ Ссылка скопирована в буфер обмена</div>
 
     <div class="divider"></div>
@@ -397,8 +398,8 @@ async def subscription_open_handler(request: web.Request) -> web.Response:
 
         has_access = SubscriptionService.check_vpn_access(user)
         if not has_access:
-            bot_username = getattr(settings, "SUPPORT_USERNAME", "")
-            html_content = _render_inactive_html(sub_url, bot_username)
+            support_username = getattr(settings, "SUPPORT_USERNAME", "")
+            html_content = _render_inactive_html(sub_url, support_username)
         else:
             html_content = _render_open_html(sub_url, deep_link)
 

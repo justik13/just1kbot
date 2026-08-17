@@ -124,7 +124,7 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("text/html", response.headers["Content-Type"])
         self.assertIn("incy://import/https://", response.text)
         self.assertIn("valid_token_xyz", response.text)
-        self.assertIn("Открытие приложения INCY", response.text)
+        self.assertIn("Подключение к INCY", response.text)
         mock_get_user.assert_awaited_once_with(mock_session, "valid_token_xyz")
 
     @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
@@ -196,7 +196,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status, 200)
         self.assertIn("Подписка не активна", response.text)
-        self.assertIn("Продлить в Telegram-боте", response.text)
+        self.assertIn("Связаться с поддержкой", response.text)
+        self.assertIn("https://t.me/test_support", response.text)
         self.assertNotIn("incy://import/", response.text)
 
 
