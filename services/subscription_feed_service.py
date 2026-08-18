@@ -44,7 +44,7 @@ class SubscriptionFeedService:
                 logger.warning(
                     "Profile %s has invalid raw_config, skipping export: %s",
                     p.id,
-                    e,
+                    type(e).__name__,
                 )
                 continue
 
@@ -97,6 +97,7 @@ class SubscriptionFeedService:
 
         headers = {
             "Content-Type": "text/plain; charset=utf-8",
+            "X-Content-Type-Options": "nosniff",
             "Cache-Control": "no-store",
             "profile-title": "JUST1K VPN",
             "profile-description": f"base64:{desc_b64}",
@@ -131,7 +132,7 @@ class SubscriptionFeedService:
                 logger.warning(
                     "Error formatting amneziawg line for profile %s: %s",
                     p.id,
-                    e,
+                    type(e).__name__,
                 )
                 continue
 

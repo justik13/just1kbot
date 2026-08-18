@@ -7,10 +7,10 @@
 }
 
 {$DOMAIN} {
-    @amnezia_bridge path /amnezia/open/*
-    handle @amnezia_bridge {
+    @rate_limited_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/*
+    handle @rate_limited_paths {
         rate_limit {
-            zone amnezia_bridge_zone {
+            zone public_api_zone {
                 key {remote_host}
                 events 30
                 window 1m

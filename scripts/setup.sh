@@ -320,6 +320,9 @@ generate_secrets() {
     # Гарантируем URL-safe Base64 для Fernet через Python
     DB_ENCRYPTION_KEY=$(python3 -c "import secrets, base64; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())" 2>/dev/null || openssl rand -base64 32 | tr '+/' '-_')
 
+    log "Генерация 32-байтного HMAC секрета для 1-Click Amnezia Bridge (AMNEZIA_BRIDGE_HMAC_SECRET)..."
+    AMNEZIA_BRIDGE_HMAC_SECRET=$(python3 -c "import secrets; print(secrets.token_hex(32))" 2>/dev/null || openssl rand -hex 32)
+
     log "Генерация паролей для PostgreSQL и Redis..."
     POSTGRES_PASSWORD=$(openssl rand -hex 16)
     REDIS_PASSWORD=$(openssl rand -hex 16)
@@ -393,6 +396,12 @@ POSTGRES_DB='${POSTGRES_DB}'
 # Шифрование чувствительных данных в БД (URL-safe Fernet)
 # ------------------------------------------------------------
 DB_ENCRYPTION_KEY='${DB_ENCRYPTION_KEY}'
+
+# ------------------------------------------------------------
+# 1-Click Amnezia Bridge & Proxies
+# ------------------------------------------------------------
+AMNEZIA_BRIDGE_HMAC_SECRET='${AMNEZIA_BRIDGE_HMAC_SECRET}'
+TRUSTED_PROXIES='127.0.0.1,::1,172.16.0.0/12'
 
 # ------------------------------------------------------------
 # Redis

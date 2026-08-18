@@ -26,6 +26,8 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
     if len(data) < 4:
         raise VPNConfigParseError("Payload too short")
     expected_length = struct.unpack(">I", data[:4])[0]
+    if expected_length > 1024 * 1024:
+        raise VPNConfigParseError(f"Decompressed length exceeds limit: {expected_length}")
     compressed = data[4:]
     try:
         decompressed = zlib.decompress(compressed)
