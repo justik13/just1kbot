@@ -399,14 +399,3 @@ async def get_user_by_subscription_token(
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
-
-async def update_user_subscription_token(
-    session: AsyncSession, user_id: int, token: str
-) -> None:
-    stmt = (
-        update(User)
-        .where(User.id == user_id, User.is_deleted.is_(False))
-        .values(subscription_token=token)
-    )
-    await session.execute(stmt)
-
