@@ -48,13 +48,18 @@ class RuntimeConfigContractTests(unittest.TestCase):
             "YOOKASSA_WEBHOOK_PORT",
             "DOMAIN",
             "SSL_EMAIL",
-            "AMNEZIA_BRIDGE_HMAC_SECRET",
         ):
             with self.subTest(key=key):
                 data = dict(BASE)
                 data.pop(key)
                 with self.assertRaises(ValidationError):
                     self.build(data)
+
+    def test_amnezia_bridge_secret_is_optional_for_safe_upgrade(self):
+        data = dict(BASE)
+        data.pop("AMNEZIA_BRIDGE_HMAC_SECRET")
+        settings = self.build(data)
+        self.assertIsNone(settings.AMNEZIA_BRIDGE_HMAC_SECRET)
 
     def test_empty_payment_contract_fails(self):
         for key in (

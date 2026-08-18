@@ -95,6 +95,7 @@ async def render_device_screen(
             and server
             and getattr(server, "is_active", True)
             and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
+            and AmneziaBridgeTokenService.is_enabled()
         ):
             settings = get_settings()
             amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
@@ -201,10 +202,11 @@ async def device_help(
     )
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="📥 Скачать клиент Amnezia", callback_data="help_download")
-    builder.button(text="🍏 Инструкция iOS (для РФ)", callback_data="help_ios")
-    builder.button(text="💻 Инструкции Windows", callback_data="help_windows")
-    builder.button(text="🔀 Раздельное Туннелирование", callback_data="help_split")
+    suffix = f":device_{profile_id}"
+    builder.button(text="📥 Скачать клиент Amnezia", callback_data=f"help_download{suffix}")
+    builder.button(text="🍏 Инструкция iOS (для РФ)", callback_data=f"help_ios{suffix}")
+    builder.button(text="💻 Инструкции Windows", callback_data=f"help_windows{suffix}")
+    builder.button(text="🔀 Раздельное Туннелирование", callback_data=f"help_split{suffix}")
     builder.button(text="📚 Документация Amnezia", url=_AMNEZIA_DOCS)
     builder.button(text="← К устройству", callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)

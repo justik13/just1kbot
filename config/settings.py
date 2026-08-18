@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     SSL_EMAIL: str
 
     # ── Amnezia Bridge ──
-    AMNEZIA_BRIDGE_HMAC_SECRET: str = Field(repr=False)
+    AMNEZIA_BRIDGE_HMAC_SECRET: str | None = Field(default=None, repr=False)
 
     # Removed greenfield settings are declared only so stale .env files fail.
     AMNEZIA_API_URL: str | None = None
@@ -221,9 +221,13 @@ class Settings(BaseSettings):
 
     @field_validator("AMNEZIA_BRIDGE_HMAC_SECRET", mode="before")
     @classmethod
-    def validate_amnezia_bridge_hmac_secret(cls, value: Any) -> str:
+    def validate_amnezia_bridge_hmac_secret(cls, value: Any) -> str | None:
+        if value is None:
+            return None
         if not isinstance(value, str):
             raise ValueError("AMNEZIA_BRIDGE_HMAC_SECRET must be a string")
+        if not value:
+            return None
         if value != value.strip():
             raise ValueError(
                 "AMNEZIA_BRIDGE_HMAC_SECRET must not contain leading or trailing whitespace"

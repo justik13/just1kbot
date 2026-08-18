@@ -75,6 +75,11 @@ class HttpRateLimiter:
 
 
 amnezia_bridge_rate_limiter = HttpRateLimiter()
+subscription_feed_rate_limiter = HttpRateLimiter(
+    rate_per_minute=30,
+    burst=30,
+    max_entries=10000,
+)
 
 
 def _is_trusted_proxy_peer(

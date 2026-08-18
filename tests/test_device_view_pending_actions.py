@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot.handlers.connection.device_view_routes import manage_device
+from bot.handlers.connection.device_view_routes import device_help, manage_device
 
 
 class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
@@ -88,6 +88,36 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         }
         self.assertIn("show_config:1", callback_data)
         self.assertIn("download_conf:1", callback_data)
+
+    async def test_device_help_topic_buttons_keep_device_context(self):
+        callback = MagicMock()
+        callback.data = "device_help:42"
+        callback.message.chat.id = 700
+        callback.message.message_id = 99
+        callback.answer = AsyncMock()
+
+        captured = {}
+
+        async def capture_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
+            captured["keyboard"] = keyboard
+
+        with patch(
+            "bot.handlers.connection.device_view_routes.render_hub",
+            new=AsyncMock(side_effect=capture_render_hub),
+        ):
+            await device_help(callback, AsyncMock(), AsyncMock())
+
+        callback_data = {
+            button.callback_data
+            for row in captured["keyboard"].inline_keyboard
+            for button in row
+            if button.callback_data
+        }
+        self.assertIn("help_download:device_42", callback_data)
+        self.assertIn("help_ios:device_42", callback_data)
+        self.assertIn("help_windows:device_42", callback_data)
+        self.assertIn("help_split:device_42", callback_data)
+        self.assertIn("manage_device:42", callback_data)
 
 
 if __name__ == "__main__":

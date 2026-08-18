@@ -40,6 +40,10 @@ async def amnezia_bridge_handler(request: web.Request) -> web.Response:
     Zero-logging of credentials, keys, full query strings, or tracebacks.
     """
     try:
+        if not AmneziaBridgeTokenService.is_enabled():
+            logger.info("Amnezia bridge requested while feature is disabled")
+            return web.Response(status=404, text="Not Found")
+
         # Step 1: Request size and ASCII byte length check
         raw_path = request.raw_path or ""
         if len(raw_path.encode("utf-8")) > MAX_BRIDGE_REQUEST_TARGET_BYTES:

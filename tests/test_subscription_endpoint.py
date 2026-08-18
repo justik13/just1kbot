@@ -10,6 +10,7 @@ from bot.handlers.subscription_feed import (
 )
 from database.models import User
 from utils.datetime_helpers import now_utc
+from utils.http_rate_limiter import subscription_feed_rate_limiter
 
 
 class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
@@ -43,6 +44,10 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         from config.settings import get_settings
         get_settings.cache_clear()
         cls.env_patcher.stop()
+
+    def setUp(self):
+        subscription_feed_rate_limiter.reset()
+
     @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
     @patch("bot.handlers.subscription_feed.SubscriptionFeedService.build_feed")
     @patch("bot.handlers.subscription_feed.session_scope")
@@ -152,6 +157,22 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         req_65 = make_mocked_request("GET", "/sub/open/" + "a" * 65, match_info={"token": "a" * 65})
         resp_65 = await subscription_open_handler(req_65)
         self.assertEqual(resp_65.status, 404)
+
+    @patch("bot.handlers.subscription_feed.subscription_feed_rate_limiter.check")
+    async def test_open_endpoint_rate_limit_uses_correct_429_page(self, mock_check):
+        mock_check.return_value = (False, 12)
+
+        req = make_mocked_request(
+            "GET",
+            "/sub/open/valid_token_xyz",
+            match_info={"token": "valid_token_xyz"},
+        )
+        response = await subscription_open_handler(req)
+
+        self.assertEqual(response.status, 429)
+        self.assertEqual(response.headers["Retry-After"], "12")
+        self.assertIn("Слишком много запросов", response.text)
+        self.assertNotIn("Подписка не активна", response.text)
 
     @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
     @patch("bot.handlers.subscription_feed.session_scope")
