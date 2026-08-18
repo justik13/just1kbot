@@ -17,13 +17,35 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_webhook_inbox_retention",
-        "webhook_inbox",
-        ["received_at", "id"],
-        postgresql_where=sa.text("status IN ('succeeded', 'dead')"),
-    )
+    bind = op.get_bind()
+    if bind and bind.dialect.name == "postgresql":
+        with op.get_context().autocommit_block():
+            op.create_index(
+                "ix_webhook_inbox_retention",
+                "webhook_inbox",
+                ["received_at", "id"],
+                postgresql_where=sa.text("status IN ('succeeded', 'dead')"),
+                postgresql_concurrently=True,
+                if_not_exists=True,
+            )
+    else:
+        op.create_index(
+            "ix_webhook_inbox_retention",
+            "webhook_inbox",
+            ["received_at", "id"],
+            if_not_exists=True,
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_webhook_inbox_retention", table_name="webhook_inbox")
+    bind = op.get_bind()
+    if bind and bind.dialect.name == "postgresql":
+        with op.get_context().autocommit_block():
+            op.drop_index(
+                "ix_webhook_inbox_retention",
+                table_name="webhook_inbox",
+                postgresql_concurrently=True,
+                if_exists=True,
+            )
+    else:
+        op.drop_index("ix_webhook_inbox_retention", table_name="webhook_inbox", if_exists=True)

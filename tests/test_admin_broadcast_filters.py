@@ -264,4 +264,84 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
         asyncio.run(_test())
 
+    def test_broadcast_concurrent_workers_single_owner_protection(self):
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            _send_broadcast_to_users_with_resume,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress
+
+        async def _test():
+            mock_bot = AsyncMock()
+            admin_id = 999
+            progress_id = 42
+
+            initial_progress = BroadcastProgress(
+                id=progress_id,
+                admin_id=admin_id,
+                target_audience="all",
+                broadcast_text="Concurrent test",
+                media_id=None,
+                content_type="text",
+                status="in_progress",
+                last_processed_id=100,
+                success_count=0,
+                fail_count=0,
+            )
+
+            class FakeSession:
+                def __init__(self):
+                    self.progress = initial_progress
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                async def get(self, model, ident):
+                    if model == BroadcastProgress:
+                        return self.progress
+                    return None
+
+                async def commit(self):
+                    pass
+
+            fake_sess = FakeSession()
+
+            dispatch_count = 0
+            async def fake_dispatch(*args, **kwargs):
+                nonlocal dispatch_count
+                dispatch_count += 1
+                await asyncio.sleep(0.05)
+
+            batches = [[(101, 1001), (102, 1002)], []]
+            batch_iter = iter(batches)
+
+            # Ensure clean state
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            with patch("bot.handlers.admin.broadcast.session_scope", return_value=fake_sess), \
+                 patch("bot.handlers.admin.broadcast._get_next_batch", side_effect=lambda *a, **kw: next(batch_iter, [])), \
+                 patch("bot.handlers.admin.broadcast._dispatch_message", side_effect=fake_dispatch):
+
+                # Launch Worker 1 and Worker 2 concurrently
+                task1 = asyncio.create_task(_send_broadcast_to_users_with_resume(mock_bot, progress_id, admin_id))
+                await asyncio.sleep(0.01) # ensure task1 starts first
+                task2 = asyncio.create_task(_send_broadcast_to_users_with_resume(mock_bot, progress_id, admin_id))
+
+                await asyncio.gather(task1, task2)
+
+                # Worker 2 was rejected/skipped, so exactly 2 messages dispatched (not 4)
+                self.assertEqual(dispatch_count, 2)
+                self.assertEqual(fake_sess.progress.success_count, 2)
+                self.assertEqual(len(_active_broadcast_progress_ids), 0)
+                self.assertEqual(len(_broadcast_in_progress), 0)
+
+        asyncio.run(_test())
+
+
 

@@ -112,6 +112,81 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Ошибок: <b>1</b>", report_text)
             self.assertIn("Заблокировали бота: <b>1</b>", report_text)
 
+    async def test_mass_bonus_crash_retry_idempotency_recovery(self):
+        """Verify that if a mass bonus background task crashes mid-way, running it again
+        with the same batch_id safely skips already credited users and credits remaining users
+        without duplicate ledger entries."""
+        mock_bot = AsyncMock()
+        admin_id = 999999
+        amount = 50
+        reason = "Crash recovery test"
+        batch_id = 1700005555
+
+        users = [(i, 2000 + i) for i in range(1, 11)]
+
+        # Global ledger store simulating database unique constraint on idempotency_key
+        ledger_entries_by_key = {}
+        sent_messages = []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def execute(self, stmt, *args, **kwargs):
+                mock_res = MagicMock()
+                mock_res.all.return_value = users
+                return mock_res
+
+            async def get(self, model, ident):
+                return None
+
+        async def fake_create_admin_adjustment(session, user_id, signed_amount, idempotency_key, metadata):
+            if idempotency_key in ledger_entries_by_key:
+                # Simulates database unique constraint error / idempotent skip
+                raise RuntimeError(f"Duplicate key violation: {idempotency_key}")
+            ledger_entries_by_key[idempotency_key] = {
+                "user_id": user_id,
+                "amount": signed_amount,
+            }
+
+        async def fake_send_message(chat_id, text, parse_mode="HTML"):
+            sent_messages.append((chat_id, text))
+
+        mock_bot.send_message.side_effect = fake_send_message
+
+        # Run 1: process 10 users, but crash on user 6 (e.g. simulate crash during notifications)
+        # Manually populate ledger for users 1..5 as if Run 1 completed batch 1
+        for u in range(1, 6):
+            key = f"mass_bonus_{batch_id}_{u}_{amount}"
+            ledger_entries_by_key[key] = {"user_id": u, "amount": amount}
+
+        self.assertEqual(len(ledger_entries_by_key), 5)
+
+        # Run 2: full rerun of the same batch_id
+        with patch("database.connection.session_scope", side_effect=FakeSession), \
+             patch("bot.handlers.admin.users.mass_bonus.create_admin_adjustment", side_effect=fake_create_admin_adjustment), \
+             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock), \
+             patch("utils.rate_limiter.global_send_limiter.acquire", new_callable=AsyncMock), \
+             patch("bot.handlers.admin.users.mass_bonus.render_hub", new_callable=AsyncMock):
+
+            await _run_mass_bonus_background(
+                bot=mock_bot,
+                admin_id=admin_id,
+                target_aud="all",
+                amount=amount,
+                reason=reason,
+                batch_id=batch_id,
+            )
+
+        # Total entries in database must be exactly 10 (5 prior + 5 newly credited)
+        self.assertEqual(len(ledger_entries_by_key), 10)
+        for u in range(1, 11):
+            key = f"mass_bonus_{batch_id}_{u}_{amount}"
+            self.assertIn(key, ledger_entries_by_key)
+
 
 if __name__ == "__main__":
     unittest.main()

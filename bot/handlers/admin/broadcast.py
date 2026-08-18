@@ -39,6 +39,7 @@ TELEGRAM_CAPTION_LIMIT = 1024
 
 _broadcast_stop_events: dict[int, asyncio.Event] = {}
 _broadcast_in_progress: set[int] = set()
+_active_broadcast_progress_ids: set[int] = set()
 _background_tasks: set[asyncio.Task] = set()
 
 
@@ -372,6 +373,17 @@ async def _send_broadcast_to_users_with_resume(
     should_finalize = False
     blocked_user_ids = []
 
+    if progress_id in _active_broadcast_progress_ids or admin_id in _broadcast_in_progress:
+        logger.warning(
+            "Broadcast %s (admin=%s) is already actively running. Skipping concurrent duplicate worker.",
+            progress_id,
+            admin_id,
+        )
+        return
+
+    _active_broadcast_progress_ids.add(progress_id)
+    _broadcast_in_progress.add(admin_id)
+
     try:
         async with session_scope() as session:
             progress = await session.get(
@@ -545,6 +557,7 @@ async def _send_broadcast_to_users_with_resume(
     finally:
         if stop_event:
             stop_event.clear()
+        _active_broadcast_progress_ids.discard(progress_id)
         _broadcast_in_progress.discard(admin_id)
         _cleanup_stop_event(admin_id)
 
