@@ -408,37 +408,69 @@ MAX_BATCH_DELETE_ROUNDS = 100
 
 
 async def _batch_delete_matching(
-    session: AsyncSession,
     model,
     *where_clauses,
+    session: AsyncSession | None = None,
     batch_size: int = BATCH_DELETE_CHUNK_SIZE,
     max_rounds: int = MAX_BATCH_DELETE_ROUNDS,
 ) -> int:
-    """Delete rows matching where_clauses in bounded primary-key batches with skip_locked to avoid long table locks."""
+    """Delete rows matching where_clauses in bounded primary-key batches with skip_locked.
+    
+    When session is None, each batch executes and commits in its own short-lived session_scope() transaction,
+    immediately releasing row-level locks in PostgreSQL.
+    """
+    if session is not None:
+        if not hasattr(model, "id"):
+            stmt = delete(model).where(*where_clauses)
+            res = await session.execute(stmt)
+            await session.flush()
+            return int(res.rowcount or 0)
+
+        total_deleted = 0
+        for _ in range(max_rounds):
+            id_stmt = (
+                select(model.id)
+                .where(*where_clauses)
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+            res = await session.execute(id_stmt)
+            ids = list(res.scalars().all())
+            if not ids:
+                break
+            del_stmt = delete(model).where(model.id.in_(ids))
+            del_res = await session.execute(del_stmt)
+            await session.flush()
+            total_deleted += int(del_res.rowcount or 0)
+            if len(ids) < batch_size:
+                break
+            await asyncio.sleep(0.01)
+        return total_deleted
+
     if not hasattr(model, "id"):
-        stmt = delete(model).where(*where_clauses)
-        res = await session.execute(stmt)
-        await session.flush()
-        return int(res.rowcount or 0)
+        async with session_scope() as sess:
+            stmt = delete(model).where(*where_clauses)
+            res = await sess.execute(stmt)
+            return int(res.rowcount or 0)
 
     total_deleted = 0
     for _ in range(max_rounds):
-        id_stmt = (
-            select(model.id)
-            .where(*where_clauses)
-            .limit(batch_size)
-            .with_for_update(skip_locked=True)
-        )
-        res = await session.execute(id_stmt)
-        ids = list(res.scalars().all())
-        if not ids:
-            break
-        del_stmt = delete(model).where(model.id.in_(ids))
-        del_res = await session.execute(del_stmt)
-        await session.flush()
-        total_deleted += int(del_res.rowcount or 0)
-        if len(ids) < batch_size:
-            break
+        async with session_scope() as sess:
+            id_stmt = (
+                select(model.id)
+                .where(*where_clauses)
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
+            )
+            res = await sess.execute(id_stmt)
+            ids = list(res.scalars().all())
+            if not ids:
+                break
+            del_stmt = delete(model).where(model.id.in_(ids))
+            del_res = await sess.execute(del_stmt)
+            total_deleted += int(del_res.rowcount or 0)
+            if len(ids) < batch_size:
+                break
         await asyncio.sleep(0.01)
     return total_deleted
 
@@ -446,11 +478,11 @@ async def _batch_delete_matching(
 
 
 async def _cleanup_old_records():
-    async with session_scope() as session:
-        current_time = now_utc()
+    current_time = now_utc()
 
-        # Mark stuck in_progress broadcasts as stopped
-        threshold_stuck = current_time - timedelta(hours=2)
+    # Mark stuck in_progress broadcasts as stopped (short atomic transaction)
+    threshold_stuck = current_time - timedelta(hours=2)
+    async with session_scope() as session:
         stmt_stuck = (
             update(BroadcastProgress)
             .where(BroadcastProgress.status == "in_progress")
@@ -459,28 +491,26 @@ async def _cleanup_old_records():
         )
         await session.execute(stmt_stuck)
 
-        threshold_broadcasts = current_time - timedelta(days=7)
-        broadcasts_deleted = await _batch_delete_matching(
-            session,
-            BroadcastProgress,
-            BroadcastProgress.status.in_(["completed", "stopped"]),
-            BroadcastProgress.updated_at < threshold_broadcasts,
-        )
+    threshold_broadcasts = current_time - timedelta(days=7)
+    broadcasts_deleted = await _batch_delete_matching(
+        BroadcastProgress,
+        BroadcastProgress.status.in_(["completed", "stopped"]),
+        BroadcastProgress.updated_at < threshold_broadcasts,
+    )
 
-        deleted_logs = await clear_audit_logs(
-            session,
-            older_than_days=AUDIT_LOG_RETENTION_DAYS,
-        )
+    deleted_logs = await clear_audit_logs(
+        older_than_days=AUDIT_LOG_RETENTION_DAYS,
+    )
 
-        threshold_hub = current_time - timedelta(days=1)
-        hub_deleted = await _batch_delete_matching(
-            session,
-            HubMessage,
-            HubMessage.created_at < threshold_hub,
-        )
+    threshold_hub = current_time - timedelta(days=1)
+    hub_deleted = await _batch_delete_matching(
+        HubMessage,
+        HubMessage.created_at < threshold_hub,
+    )
 
-        # Auto-expire abandoned pending payments older than 48 hours
-        threshold_payments = current_time - timedelta(hours=48)
+    # Auto-expire abandoned pending payments older than 48 hours (short atomic transaction)
+    threshold_payments = current_time - timedelta(hours=48)
+    async with session_scope() as session:
         stmt_payments = (
             update(Payment)
             .where(
@@ -497,31 +527,30 @@ async def _cleanup_old_records():
         result_payments = await session.execute(stmt_payments)
         payments_expired = result_payments.rowcount
 
-        # Prune old succeeded/dead webhook inbox records
-        threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
-        webhooks_deleted = await _batch_delete_matching(
-            session,
-            WebhookInbox,
-            WebhookInbox.status.in_(["succeeded", "dead"]),
-            WebhookInbox.received_at < threshold_webhooks,
-        )
+    # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
+    threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
+    webhooks_deleted = await _batch_delete_matching(
+        WebhookInbox,
+        WebhookInbox.status.in_(["succeeded", "dead"]),
+        WebhookInbox.received_at < threshold_webhooks,
+    )
 
-        if (
-            broadcasts_deleted > 0
-            or deleted_logs > 0
-            or hub_deleted > 0
-            or payments_expired > 0
-            or webhooks_deleted > 0
-        ):
-            logger.info(
-                "Cleanup: %s old broadcasts, %s old audit logs, "
-                "%s old hub_messages deleted, %s abandoned pending payments expired, "
-                "%s old webhooks deleted",
-                broadcasts_deleted,
-                deleted_logs,
-                hub_deleted,
-                payments_expired,
-                webhooks_deleted,
-            )
+    if (
+        broadcasts_deleted > 0
+        or deleted_logs > 0
+        or hub_deleted > 0
+        or payments_expired > 0
+        or webhooks_deleted > 0
+    ):
+        logger.info(
+            "Cleanup: %s old broadcasts, %s old audit logs, "
+            "%s old hub_messages deleted, %s abandoned pending payments expired, "
+            "%s old webhooks deleted",
+            broadcasts_deleted,
+            deleted_logs,
+            hub_deleted,
+            payments_expired,
+            webhooks_deleted,
+        )
 
 

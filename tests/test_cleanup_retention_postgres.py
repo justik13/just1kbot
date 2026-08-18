@@ -31,6 +31,9 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        import database.connection as connection
+        self.old_sessionmaker = connection._sessionmaker
+        connection._sessionmaker = self.sessions
         async with self.sessions.begin() as session:
             await session.execute(
                 text(
@@ -70,6 +73,8 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
                     )
                 )
         finally:
+            import database.connection as connection
+            connection._sessionmaker = self.old_sessionmaker
             await self.engine.dispose()
 
     async def test_live_postgres_retention_cleanup_predicates(self):
@@ -174,15 +179,7 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
             }
 
         # Run retention cleanup worker function with test session
-        from contextlib import asynccontextmanager
-
-        @asynccontextmanager
-        async def test_session_scope():
-            async with self.sessions.begin() as s:
-                yield s
-
-        with patch("services.workers.cleanup.session_scope", side_effect=test_session_scope):
-            await _cleanup_old_records()
+        await _cleanup_old_records()
 
         # Query remaining records from live PostgreSQL
         async with self.sessions.begin() as session:

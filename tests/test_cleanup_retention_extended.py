@@ -63,9 +63,9 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         ]
 
         total = await _batch_delete_matching(
-            mock_session,
             WebhookInbox,
             WebhookInbox.status == "succeeded",
+            session=mock_session,
             batch_size=500,
             max_rounds=20,
         )
@@ -83,9 +83,9 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         mock_session.execute.return_value = empty_res
 
         total = await _batch_delete_matching(
-            mock_session,
             WebhookInbox,
             WebhookInbox.status == "dead",
+            session=mock_session,
         )
 
         self.assertEqual(0, total)
@@ -114,7 +114,6 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             await _cleanup_old_records()
 
             mock_clear_audit.assert_called_once_with(
-                mock_session,
                 older_than_days=AUDIT_LOG_RETENTION_DAYS,
             )
 
@@ -126,18 +125,15 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
             # 1. BroadcastProgress call
             bp_call = mock_batch_del.call_args_list[0]
-            self.assertIs(bp_call[0][0], mock_session)
-            self.assertIs(bp_call[0][1], BroadcastProgress)
+            self.assertIs(bp_call[0][0], BroadcastProgress)
 
             # 2. HubMessage call
             hub_call = mock_batch_del.call_args_list[1]
-            self.assertIs(hub_call[0][0], mock_session)
-            self.assertIs(hub_call[0][1], HubMessage)
+            self.assertIs(hub_call[0][0], HubMessage)
 
             # 3. WebhookInbox call: verify status IN ('succeeded', 'dead')
             wh_call = mock_batch_del.call_args_list[2]
-            self.assertIs(wh_call[0][0], mock_session)
-            self.assertIs(wh_call[0][1], WebhookInbox)
+            self.assertIs(wh_call[0][0], WebhookInbox)
 
             # Verify info log
             mock_logger.info.assert_called_once()
