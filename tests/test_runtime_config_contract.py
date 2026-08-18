@@ -24,6 +24,7 @@ BASE = {
     "YOOKASSA_WEBHOOK_PORT": 8080,
     "DOMAIN": "vpn.example.test",
     "SSL_EMAIL": "owner@example.test",
+    "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 }
 
 
@@ -47,6 +48,7 @@ class RuntimeConfigContractTests(unittest.TestCase):
             "YOOKASSA_WEBHOOK_PORT",
             "DOMAIN",
             "SSL_EMAIL",
+            "AMNEZIA_BRIDGE_HMAC_SECRET",
         ):
             with self.subTest(key=key):
                 data = dict(BASE)

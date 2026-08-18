@@ -28,6 +28,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
                 "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
                 "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/db",
             },
         )
@@ -70,7 +71,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             if btn.callback_data
         ]
 
-        self.assertIn("🔗 Добавить в INCY", buttons)
+        self.assertTrue(any("Добавить в INCY" in btn and "Экспериментально" in btn for btn in buttons))
         self.assertIn("menu_incy_subscription", callbacks)
 
         # Check order: add_device -> menu_incy_subscription -> status

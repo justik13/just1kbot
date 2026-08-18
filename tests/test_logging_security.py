@@ -386,6 +386,7 @@ class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
         "REDIS_URL",
         "DB_ENCRYPTION_KEY",
         "YOOKASSA_SECRET_KEY",
+        "AMNEZIA_BRIDGE_HMAC_SECRET",
     }
     LOG_METHODS = {
         "debug",

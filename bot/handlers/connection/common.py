@@ -181,7 +181,7 @@ async def _build_connections_screen(
         )
 
     builder.button(
-        text="🔗 Добавить в INCY",
+        text="🔗 Добавить в INCY [🧪 Экспериментально]",
         callback_data="menu_incy_subscription",
     )
 
