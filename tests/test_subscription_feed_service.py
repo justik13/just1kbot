@@ -171,6 +171,11 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         decoded_feed = base64.b64decode(body).decode("utf-8")
         self.assertTrue(decoded_feed.startswith("amneziawg://"))
         self.assertIn("#🇵🇱 Warsaw — iPhone", decoded_feed)
+        inner_b64 = decoded_feed.split("#")[0].replace("amneziawg://", "")
+        self.assertEqual(
+            base64.urlsafe_b64decode(inner_b64.encode("ascii")).decode("utf-8"),
+            "[Interface]\nPrivateKey = privkey_1\n",
+        )
 
     @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
     @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
