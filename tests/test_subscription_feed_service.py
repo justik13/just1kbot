@@ -1,8 +1,8 @@
 import base64
-from datetime import datetime, timedelta, timezone
 import json
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 from database.models import Server, User, VPNProfile
@@ -264,9 +264,71 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             id=101, telegram_id=1002, subscription_end=datetime.now(timezone.utc) + timedelta(days=5),
             is_banned=True, financial_hold=False, is_deleted=False
         )
-        status_banned, headers_banned, body_banned = await SubscriptionFeedService.build_feed(session, user_banned)
+        status_banned, _headers_banned, body_banned = await SubscriptionFeedService.build_feed(session, user_banned)
         self.assertEqual(status_banned, 200)
         self.assertEqual(body_banned, "")
+
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    async def test_build_feed_multiple_devices_multi_server(
+        self, mock_get_traffic, mock_get_exportable
+    ):
+        mock_get_traffic.return_value = (5000, 15000)
+
+        server_pl = Server(id=1, name="Warsaw", country_flag="🇵🇱", protocol="amneziawg2", is_active=True)
+        server_de = Server(id=2, name="Frankfurt", country_flag="🇩🇪", protocol="amneziawg2", is_active=True)
+        server_nl = Server(id=3, name="Amsterdam", country_flag="🇳🇱", protocol="amneziawg2", is_active=True)
+
+        p1 = VPNProfile(id=1, user_id=100, server_id=1, device_name="iPhone", is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(1), provisioning_status="active", server=server_pl)
+        p2 = VPNProfile(id=2, user_id=100, server_id=2, device_name="MacBook", is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(2), provisioning_status="active", server=server_de)
+        p3 = VPNProfile(id=3, user_id=100, server_id=3, device_name="PC", is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(3), provisioning_status="active", server=server_nl)
+
+        conf1 = "[Interface]\nPrivateKey = >>>>????\n"
+        conf2 = "[Interface]\nPrivateKey = ????>>>>\n"
+        conf3 = "[Interface]\nPrivateKey = privkey_normal\n"
+
+        mock_get_exportable.return_value = [
+            (p1, conf1),
+            (p2, conf2),
+            (p3, conf3),
+        ]
+
+        sub_end = datetime.now(timezone.utc) + timedelta(days=20)
+        user = User(
+            id=100, telegram_id=1001, subscription_end=sub_end,
+            is_banned=False, financial_hold=False, is_deleted=False
+        )
+
+        session = AsyncMock()
+        status, headers, body = await SubscriptionFeedService.build_feed(session, user)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "text/plain; charset=utf-8")
+
+        # Decode multi-line subscription body
+        decoded_feed = base64.b64decode(body).decode("utf-8")
+        lines = decoded_feed.strip().split("\n")
+        self.assertEqual(len(lines), 3)
+
+        expected_fragments = [
+            "🇵🇱 Warsaw — iPhone",
+            "🇩🇪 Frankfurt — MacBook",
+            "🇳🇱 Amsterdam — PC",
+        ]
+        expected_confs = [conf1, conf2, conf3]
+
+        for i, line in enumerate(lines):
+            self.assertTrue(line.startswith("amneziawg://"))
+            self.assertIn(f"#{expected_fragments[i]}", line)
+
+            inner_b64 = line.split("#")[0].replace("amneziawg://", "")
+            # Ensure URL-safe encoding (no '+' or '/')
+            self.assertNotIn("+", inner_b64)
+            self.assertNotIn("/", inner_b64)
+
+            # Ensure payload decodes to exact original configuration
+            decoded_conf = base64.urlsafe_b64decode(inner_b64.encode("ascii")).decode("utf-8")
+            self.assertEqual(decoded_conf, expected_confs[i])
 
 
 if __name__ == "__main__":
