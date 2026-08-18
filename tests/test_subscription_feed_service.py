@@ -145,7 +145,8 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             is_active=True, desired_is_active=True, raw_config=_make_dummy_awg2_uri(1),
             provisioning_status="active", server=server
         )
-        mock_get_exportable.return_value = [(profile, "[Interface]\nPrivateKey = privkey_1\n")]
+        sample_config = "[Interface]\nPrivateKey = >>>>????\n"
+        mock_get_exportable.return_value = [(profile, sample_config)]
 
         now = datetime.now(timezone.utc)
         sub_end = now + timedelta(days=10)
@@ -172,9 +173,16 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(decoded_feed.startswith("amneziawg://"))
         self.assertIn("#🇵🇱 Warsaw — iPhone", decoded_feed)
         inner_b64 = decoded_feed.split("#")[0].replace("amneziawg://", "")
+
+        # Strict URL-safe base64 proof: standard base64 would produce '+' and '/',
+        # while urlsafe base64 produces '-' and '_' and must not contain '+' or '/'
+        self.assertIn("-", inner_b64)
+        self.assertIn("_", inner_b64)
+        self.assertNotIn("+", inner_b64)
+        self.assertNotIn("/", inner_b64)
         self.assertEqual(
             base64.urlsafe_b64decode(inner_b64.encode("ascii")).decode("utf-8"),
-            "[Interface]\nPrivateKey = privkey_1\n",
+            sample_config,
         )
 
     @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
