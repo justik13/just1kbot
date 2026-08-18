@@ -113,7 +113,10 @@ services:
         condition: service_healthy
 
   caddy:
-    image: caddy:2.11.4-alpine@sha256:844f60b64e4724a5aa8245e019dace0d3f199f7433ce6c57676cb30a920dbad9
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
+    image: just1kbot_caddy:latest
     container_name: just1kbot_caddy
     restart: unless-stopped
     logging: *default-logging

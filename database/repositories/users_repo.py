@@ -55,6 +55,15 @@ async def get_user_by_telegram_id_any(
     return result.scalar_one_or_none()
 
 
+async def get_user_by_id(
+    session: AsyncSession, user_id: int
+) -> User | None:
+    """Retrieve user by database primary key ID."""
+    stmt = select(User).where(User.id == user_id)
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
 async def create_user(
     session: AsyncSession,
     telegram_id: int,

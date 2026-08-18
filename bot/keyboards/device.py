@@ -3,11 +3,21 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
-def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> InlineKeyboardMarkup:
+def get_device_keyboard(
+    profile_id: int,
+    *,
+    config_ready: bool = True,
+    amnezia_bridge_url: str | None = None,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     if config_ready:
         builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L14_1, callback_data=f"show_config:{profile_id}")
+        if amnezia_bridge_url:
+            builder.button(
+                text="🚀 Открыть в Amnezia [🧪 Экспериментально]",
+                url=amnezia_bridge_url,
+            )
         builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_L15_1, callback_data=f"download_conf:{profile_id}")
 
     builder.button(
@@ -33,7 +43,10 @@ def get_device_keyboard(profile_id: int, *, config_ready: bool = True) -> Inline
     )
 
     if config_ready:
-        builder.adjust(1, 1, 1, 1, 1, 2)
+        if amnezia_bridge_url:
+            builder.adjust(1, 1, 1, 1, 1, 1, 2)
+        else:
+            builder.adjust(1, 1, 1, 1, 1, 2)
     else:
         builder.adjust(1, 1, 1, 2)
 

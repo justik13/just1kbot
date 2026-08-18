@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     DOMAIN: str
     SSL_EMAIL: str
 
+    # ── Amnezia Bridge ──
+    AMNEZIA_BRIDGE_HMAC_SECRET: str = Field(repr=False)
+
     # Removed greenfield settings are declared only so stale .env files fail.
     AMNEZIA_API_URL: str | None = None
     AMNEZIA_API_KEY: str | None = None
@@ -83,6 +86,7 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
 
     @model_validator(mode="after")
     def reject_removed_settings(self):
@@ -214,6 +218,25 @@ class Settings(BaseSettings):
         ):
             raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
+
+    @field_validator("AMNEZIA_BRIDGE_HMAC_SECRET", mode="before")
+    @classmethod
+    def validate_amnezia_bridge_hmac_secret(cls, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("AMNEZIA_BRIDGE_HMAC_SECRET must be a string")
+        if value != value.strip():
+            raise ValueError(
+                "AMNEZIA_BRIDGE_HMAC_SECRET must not contain leading or trailing whitespace"
+            )
+        if re.fullmatch(r"^[0-9a-fA-F]{64}$", value) is None:
+            raise ValueError(
+                "AMNEZIA_BRIDGE_HMAC_SECRET must be exactly 64 hexadecimal characters"
+            )
+        if value.lower() in {"0" * 64, "a" * 64, "f" * 64, "1" * 64}:
+            raise ValueError(
+                "AMNEZIA_BRIDGE_HMAC_SECRET cannot be a trivial repeating placeholder"
+            )
+        return value
 
 
 @lru_cache()

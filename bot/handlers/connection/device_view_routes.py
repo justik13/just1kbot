@@ -10,12 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 from bot import texts
-from bot.constants import TELEGRAM_MESSAGE_LIMIT
+from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
+from config.settings import get_settings
 from database.models import User
 from .common import _render_connections
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.servers_repo import get_server_by_id
+from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic
@@ -84,7 +86,28 @@ async def render_device_screen(
     has_access = await SubscriptionService.check_access(session, user.telegram_id)
 
     if has_access:
-        keyboard = get_device_keyboard(profile.id, config_ready=True)
+        amnezia_bridge_url = None
+        if (
+            getattr(profile, "is_active", True)
+            and getattr(profile, "provisioning_status", "") == "active"
+            and getattr(profile, "peer_id", None)
+            and (getattr(profile, "raw_config", "") or "").startswith("vpn://")
+            and server
+            and getattr(server, "is_active", True)
+            and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
+        ):
+            settings = get_settings()
+            amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
+                domain=settings.DOMAIN,
+                profile_id=profile.id,
+                user_id=user.id,
+            )
+
+        keyboard = get_device_keyboard(
+            profile.id,
+            config_ready=True,
+            amnezia_bridge_url=amnezia_bridge_url,
+        )
     else:
         rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
 

@@ -96,6 +96,7 @@ jobs:
       YOOKASSA_WEBHOOK_PORT: "8080"
       DOMAIN: "vpn.example.test"
       SSL_EMAIL: "ci@example.test"
+      AMNEZIA_BRIDGE_HMAC_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       CI_TEST_MODE: "true"
     steps:
       - uses: actions/checkout@v4
@@ -120,10 +121,6 @@ jobs:
           --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
           --ignore PLW0603,PLW0108
           --output-format full
-      - name: Install Ubuntu 24.04 installer tools
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          age postgresql-client shellcheck redis-tools nginx certbot iproute2
       - name: Verify fixed platform
         run: |
           . /etc/os-release

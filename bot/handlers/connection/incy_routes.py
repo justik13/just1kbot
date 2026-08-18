@@ -37,7 +37,7 @@ async def show_incy_subscription(
     open_url = f"https://{settings.DOMAIN}/sub/open/{token}"
 
     text = (
-        "🔗 <b>Подключение через приложение INCY</b>\n\n"
+        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
         "Все ваши серверы и устройства в одной самообновляемой подписке.\n\n"
         "<b>📖 Как настроить:</b>\n"
         "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
