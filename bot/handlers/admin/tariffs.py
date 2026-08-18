@@ -14,6 +14,9 @@ from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
 )
 from bot.states import AdminStates
+from database.repositories.payments_repo import (
+    get_pending_payments_count_for_tariff as _get_pending_payments_count_for_tariff,
+)
 from database.repositories.tariffs_repo import (
     get_tariff_by_id,
     get_tariff_count,
@@ -115,25 +118,6 @@ async def _show_tariffs_list(
         logger.debug(
             f"_show_tariffs_list edit_text failed: {e}"
         )
-
-
-async def _get_pending_payments_count_for_tariff(
-    session: AsyncSession,
-    tariff_id: int,
-) -> int:
-    from database.models import TariffQuote, TariffVersion
-    from sqlalchemy import func, select
-    return int(
-        await session.scalar(
-            select(func.count(TariffQuote.id))
-            .join(TariffVersion, TariffQuote.target_tariff_version_id == TariffVersion.id)
-            .where(
-                TariffVersion.tariff_id == tariff_id,
-                TariffQuote.status == "active",
-            )
-        )
-        or 0
-    )
 
 
 

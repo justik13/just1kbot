@@ -1,6 +1,6 @@
 """Add webhook_inbox retention index.
 
-Revision ID: 0007_webhook_inbox_retention_index
+Revision ID: 0007_webhook_retention
 Revises: 0006_add_user_subscription_token
 Create Date: 2026-08-18 14:40:00.000000
 """

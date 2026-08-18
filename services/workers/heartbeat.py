@@ -50,9 +50,11 @@ async def heartbeat_loop(
             break
         except Exception as e:
             logger.error(f"Heartbeat worker error: {e}", exc_info=True)
-            if shutdown_event.is_set():
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=heartbeat_interval)
                 break
-            await asyncio.sleep(heartbeat_interval)
+            except asyncio.TimeoutError:
+                pass
 
     if health_check():
         _write_heartbeat(final=True)

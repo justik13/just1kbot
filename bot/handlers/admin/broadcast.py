@@ -413,11 +413,6 @@ async def _send_broadcast_to_users_with_resume(
                 progress = await session.get(BroadcastProgress, progress_id)
                 if not progress or progress.status != "in_progress":
                     break
-
-            if stop_event and stop_event.is_set():
-                break
-
-            async with session_scope() as session:
                 batch = await _get_next_batch(
                     session,
                     target_audience,
@@ -426,9 +421,24 @@ async def _send_broadcast_to_users_with_resume(
                 if not batch:
                     break
 
-                for internal_id, uid in batch:
-                    if stop_event and stop_event.is_set():
-                        break
+            if stop_event and stop_event.is_set():
+                break
+
+            for internal_id, uid in batch:
+                if stop_event and stop_event.is_set():
+                    break
+                try:
+                    await broadcast_send_limiter.acquire()
+                    await _dispatch_message(
+                        bot,
+                        uid,
+                        broadcast_text,
+                        media_id,
+                        content_type,
+                    )
+                    local_success += 1
+                except TelegramRetryAfter as e:
+                    await asyncio.sleep(e.retry_after + 1)
                     try:
                         await broadcast_send_limiter.acquire()
                         await _dispatch_message(
@@ -439,33 +449,22 @@ async def _send_broadcast_to_users_with_resume(
                             content_type,
                         )
                         local_success += 1
-                    except TelegramRetryAfter as e:
-                        await asyncio.sleep(e.retry_after + 1)
-                        try:
-                            await broadcast_send_limiter.acquire()
-                            await _dispatch_message(
-                                bot,
-                                uid,
-                                broadcast_text,
-                                media_id,
-                                content_type,
-                            )
-                            local_success += 1
-                        except Exception:
-                            local_fail += 1
-                    except TelegramForbiddenError:
-                        blocked_user_ids.append(uid)
+                    except Exception:
                         local_fail += 1
-                    except Exception as e:
-                        logger.error(
-                            "Broadcast error for user %s: %s",
-                            uid,
-                            e,
-                        )
-                        local_fail += 1
+                except TelegramForbiddenError:
+                    blocked_user_ids.append(uid)
+                    local_fail += 1
+                except Exception as e:
+                    logger.error(
+                        "Broadcast error for user %s: %s",
+                        uid,
+                        e,
+                    )
+                    local_fail += 1
 
-                    last_id = internal_id
+                last_id = internal_id
 
+            async with session_scope() as session:
                 progress = await session.get(
                     BroadcastProgress,
                     progress_id,
@@ -476,8 +475,8 @@ async def _send_broadcast_to_users_with_resume(
                     progress.fail_count += local_fail
                     await session.commit()
 
-                local_success = 0
-                local_fail = 0
+            local_success = 0
+            local_fail = 0
 
         if should_finalize:
             async with session_scope() as session:

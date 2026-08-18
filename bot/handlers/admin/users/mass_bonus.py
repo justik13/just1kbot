@@ -283,6 +283,7 @@ async def _run_mass_bonus_background(
     CHUNK_SIZE = 50
     for i in range(0, len(users), CHUNK_SIZE):
         chunk = users[i : i + CHUNK_SIZE]
+        credited_uids = []
         async with session_scope() as session:
             for uid, tg_id in chunk:
                 try:
@@ -295,27 +296,35 @@ async def _run_mass_bonus_background(
                         metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
                     )
                     success_count += 1
+                    credited_uids.append((uid, tg_id))
                 except Exception as exc:
                     fail_count += 1
                     logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
                     continue
 
-                if tg_id and tg_id != admin_id:
-                    try:
-                        await global_send_limiter.acquire()
-                        await bot.send_message(
-                            tg_id,
-                            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-                            f"Причина: <i>{safe(reason)}</i>",
-                            parse_mode="HTML",
-                        )
-                    except TelegramForbiddenError:
-                        blocked_count += 1
-                        db_user = await session.get(User, uid)
-                        if db_user:
-                            db_user.is_bot_blocked = True
-                    except Exception as e:
-                        logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
+        blocked_chunk_uids = []
+        for uid, tg_id in credited_uids:
+            if tg_id and tg_id != admin_id:
+                try:
+                    await global_send_limiter.acquire()
+                    await bot.send_message(
+                        tg_id,
+                        f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
+                        f"Причина: <i>{safe(reason)}</i>",
+                        parse_mode="HTML",
+                    )
+                except TelegramForbiddenError:
+                    blocked_count += 1
+                    blocked_chunk_uids.append(uid)
+                except Exception as e:
+                    logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
+
+        if blocked_chunk_uids:
+            async with session_scope() as session:
+                for uid in blocked_chunk_uids:
+                    db_user = await session.get(User, uid)
+                    if db_user:
+                        db_user.is_bot_blocked = True
 
     async with session_scope() as session:
         await AuditService.log_action(
