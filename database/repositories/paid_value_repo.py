@@ -30,15 +30,26 @@ def _verify(entry: PaidValueLedgerEntry, values: dict) -> PaidValueLedgerEntry:
     return entry
 
 
+_INDEX_WHERE_MAP = {
+    "account_purchase": text("entry_type='account_purchase'"),
+    "tariff_conversion": text("entry_type='tariff_conversion'"),
+    "manual_adjustment": text("entry_type='manual_adjustment'"),
+}
+
+
 async def _insert_or_get(
     session: AsyncSession, values: dict, conflict_column
 ) -> PaidValueLedgerEntry:
+    entry_type = values.get("entry_type")
+    index_where_clause = _INDEX_WHERE_MAP.get(entry_type)
+    if index_where_clause is None:
+        raise ValueError(f"Invalid entry_type: {entry_type}")
     entry_id = await session.scalar(
         insert(PaidValueLedgerEntry)
         .values(**values)
         .on_conflict_do_nothing(
             index_elements=[conflict_column],
-            index_where=text(f"entry_type='{values['entry_type']}'"),
+            index_where=index_where_clause,
         )
         .returning(PaidValueLedgerEntry.id)
     )

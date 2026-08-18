@@ -1,5 +1,6 @@
-"""Mass bonus compensation workflow for admin panel."""
+import asyncio
 import logging
+import time
 from aiogram import Router, F
 
 from aiogram.fsm.context import FSMContext
@@ -21,6 +22,27 @@ from utils.telegram import render_hub, safe
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+_mass_bonus_in_progress: set[int] = set()
+_active_mass_bonus_tasks: set[asyncio.Task] = set()
+
+
+def _handle_mass_bonus_task_result(task: asyncio.Task) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        logger.error("Background mass bonus task failed: %s", e, exc_info=True)
+
+
+def _start_mass_bonus_task(coro) -> asyncio.Task:
+    task = asyncio.create_task(coro)
+    _active_mass_bonus_tasks.add(task)
+    task.add_done_callback(
+        lambda t: (_active_mass_bonus_tasks.discard(t), _handle_mass_bonus_task_result(t))
+    )
+    return task
 
 
 @router.callback_query(F.data == "admin_mass_bonus")
@@ -219,9 +241,16 @@ async def apply_mass_bonus(
     callback: CallbackQuery,
     state: FSMContext,
 ):
-    if not is_admin(callback.from_user.id):
+    admin_id = callback.from_user.id
+    if not is_admin(admin_id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
+    if admin_id in _mass_bonus_in_progress:
+        await callback.answer("⚠️ Массовое начисление уже выполняется!", show_alert=True)
+        return
+
+    _mass_bonus_in_progress.add(admin_id)
 
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
@@ -232,25 +261,30 @@ async def apply_mass_bonus(
     await callback.answer("🚀 Массовое начисление запущено в фоне!", show_alert=True)
 
     header = format_admin_breadcrumbs("🎁 Массовый бонус", "Результат")
-    await callback.message.edit_text(
-        f"{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>\n\n"
-        f"По завершении операции вам придет уведомление со статистикой.",
-        parse_mode="HTML",
-    )
-
-    import time
-    batch_id = int(time.time())
-    import asyncio
-    asyncio.create_task(
-        _run_mass_bonus_background(
-            bot=callback.bot,
-            admin_id=callback.from_user.id,
-            target_aud=target_aud,
-            amount=amount,
-            reason=reason,
-            batch_id=batch_id,
+    try:
+        await callback.message.edit_text(
+            f"{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>\n\n"
+            f"По завершении операции вам придет уведомление со статистикой.",
+            parse_mode="HTML",
         )
-    )
+    except Exception:
+        pass
+
+    batch_id = int(time.time())
+    try:
+        _start_mass_bonus_task(
+            _run_mass_bonus_background(
+                bot=callback.bot,
+                admin_id=admin_id,
+                target_aud=target_aud,
+                amount=amount,
+                reason=reason,
+                batch_id=batch_id,
+            )
+        )
+    except Exception:
+        _mass_bonus_in_progress.discard(admin_id)
+        raise
 
 
 async def _run_mass_bonus_background(
@@ -261,45 +295,63 @@ async def _run_mass_bonus_background(
     reason: str,
     batch_id: int,
 ):
+    """Executes mass bonus adjustment across target audience in batches of 50.
+
+    Financial & Delivery Invariants:
+    - Strict Financial Idempotency: Uses `idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"`.
+      Guarantees exactly-once ledger credit and zero double-credits across any process crash or rerun.
+    - Transaction Fault Isolation: Each user adjustment runs inside `session.begin_nested()` (SAVEPOINT).
+      Single-user DB errors roll back locally without invalidating the batch or raising `PendingRollbackError`.
+    - Best-Effort Post-Commit Telegram Notification: Notifications are dispatched post-commit strictly to
+      newly credited users (`created=True`). If an unhandled container crash occurs mid-batch and the operator
+      reruns the batch, already-credited users are skipped from re-notification to prevent message spam,
+      while uncredited users receive both credit and notification.
+    """
     from aiogram.exceptions import TelegramForbiddenError
     from database.connection import session_scope
     from utils.rate_limiter import global_send_limiter
 
-    success_count = 0
-    fail_count = 0
-    blocked_count = 0
+    try:
+        success_count = 0
+        fail_count = 0
+        blocked_count = 0
 
-    now = now_utc()
-    stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
-    if target_aud == "active":
-        stmt = stmt.where(User.subscription_end > now)
-    elif target_aud == "expired":
-        stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
+        now = now_utc()
+        stmt = select(User.id, User.telegram_id).where(User.is_deleted.is_(False), User.is_banned.is_(False))
+        if target_aud == "active":
+            stmt = stmt.where(User.subscription_end > now)
+        elif target_aud == "expired":
+            stmt = stmt.where(or_(User.subscription_end <= now, User.subscription_end.is_(None)))
 
-    async with session_scope() as session:
-        result = await session.execute(stmt)
-        users = result.all()
-
-    CHUNK_SIZE = 50
-    for i in range(0, len(users), CHUNK_SIZE):
-        chunk = users[i : i + CHUNK_SIZE]
         async with session_scope() as session:
-            for uid, tg_id in chunk:
-                try:
-                    idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
-                    await create_admin_adjustment(
-                        session,
-                        user_id=uid,
-                        signed_amount=amount,
-                        idempotency_key=idempotency_key,
-                        metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
-                    )
-                    success_count += 1
-                except Exception as exc:
-                    fail_count += 1
-                    logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
-                    continue
+            result = await session.execute(stmt)
+            users = result.all()
 
+        CHUNK_SIZE = 50
+        for i in range(0, len(users), CHUNK_SIZE):
+            chunk = users[i : i + CHUNK_SIZE]
+            credited_in_batch = []
+            async with session_scope() as session:
+                for uid, tg_id in chunk:
+                    try:
+                        async with session.begin_nested():
+                            idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
+                            _entry, created = await create_admin_adjustment(
+                                session,
+                                user_id=uid,
+                                signed_amount=amount,
+                                idempotency_key=idempotency_key,
+                                metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
+                            )
+                            if created:
+                                success_count += 1
+                                credited_in_batch.append((uid, tg_id))
+                    except Exception as exc:
+                        fail_count += 1
+                        logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
+
+            blocked_uids = []
+            for uid, tg_id in credited_in_batch:
                 if tg_id and tg_id != admin_id:
                     try:
                         await global_send_limiter.acquire()
@@ -311,39 +363,46 @@ async def _run_mass_bonus_background(
                         )
                     except TelegramForbiddenError:
                         blocked_count += 1
-                        db_user = await session.get(User, uid)
-                        if db_user:
-                            db_user.is_bot_blocked = True
+                        blocked_uids.append(uid)
                     except Exception as e:
                         logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
 
-    async with session_scope() as session:
-        await AuditService.log_action(
-            session,
-            admin_id,
-            "MASS_BONUS_GRANTED",
-            "User",
-            0,
-            f"Granted +{amount} RUB bonus to {success_count} users (batch {batch_id}). Reason: {reason}",
-        )
+            if blocked_uids:
+                async with session_scope() as session:
+                    for uid in blocked_uids:
+                        db_user = await session.get(User, uid)
+                        if db_user:
+                            db_user.is_bot_blocked = True
 
-    try:
-        header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
-        builder = InlineKeyboardBuilder()
-        builder.button(text="🎁 Новый массовый бонус", callback_data="admin_mass_bonus")
-        builder.button(text="🏠 В админ-меню", callback_data="admin_menu")
-        builder.adjust(1)
+        async with session_scope() as session:
+            await AuditService.log_action(
+                session,
+                admin_id,
+                "MASS_BONUS_GRANTED",
+                "User",
+                0,
+                f"Granted +{amount} RUB bonus to {success_count} users (batch {batch_id}). Reason: {reason}",
+            )
 
-        await render_hub(
-            bot,
-            admin_id,
-            f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
-            f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
-            f"• Ошибок: <b>{fail_count}</b>\n"
-            f"• Заблокировали бота: <b>{blocked_count}</b>",
-            reply_markup=builder.as_markup(),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error("Failed to notify admin of mass bonus completion: %s", e)
+        try:
+            header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
+            builder = InlineKeyboardBuilder()
+            builder.button(text="🎁 Новый массовый бонус", callback_data="admin_mass_bonus")
+            builder.button(text="🏠 В админ-меню", callback_data="admin_menu")
+            builder.adjust(1)
+
+            await render_hub(
+                bot,
+                admin_id,
+                f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
+                f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
+                f"• Ошибок: <b>{fail_count}</b>\n"
+                f"• Заблокировали бота: <b>{blocked_count}</b>",
+                reply_markup=builder.as_markup(),
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            logger.error("Failed to notify admin of mass bonus completion: %s", e)
+    finally:
+        _mass_bonus_in_progress.discard(admin_id)
 

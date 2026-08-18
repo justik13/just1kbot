@@ -51,10 +51,11 @@ async def _show_purchases_list(
             dt_str = format_datetime(entry.created_at)
             amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else "0 ₽ (Бонус)"
             rendered += (
-                f"<b>{idx}. {entry.user_label}</b> | {entry.operation_title}\n"
-                f"   💎 {entry.tariff_name} ({entry.duration_days} дн., {entry.device_limit} устр.) — <b>{amount_str}</b>\n"
+                f"<b>{idx}. {safe(entry.user_label)}</b> | {safe(entry.operation_title)}\n"
+                f"   💎 {safe(entry.tariff_name)} ({entry.duration_days} дн., {entry.device_limit} устр.) — <b>{amount_str}</b>\n"
                 f"   🕒 {dt_str}\n\n"
             )
+
 
             button_text = truncate_button_text(
                 f"🛒 #{entry.numeric_id} | {entry.user_label} | {amount_str}"
@@ -161,13 +162,14 @@ async def show_purchase_card(
     rendered = (
         f"{header}"
         f"🛒 <b>Детали покупки / транзакции #{entry.numeric_id}</b>\n\n"
-        f"👤 <b>Пользователь:</b> {entry.user_label} (Telegram ID: <code>{entry.telegram_id}</code>)\n"
+        f"👤 <b>Пользователь:</b> {safe(entry.user_label)} (Telegram ID: <code>{entry.telegram_id}</code>)\n"
         f"💎 <b>Тариф:</b> {safe(entry.tariff_name)}\n"
         f"📱 <b>Лимит устройств:</b> {entry.device_limit} шт.\n"
         f"⏳ <b>Длительность:</b> {entry.duration_days} дней\n"
         f"💳 <b>Сумма:</b> <b>{amount_str}</b>\n"
-        f"⚙️ <b>Тип операции:</b> {entry.operation_title}\n"
+        f"⚙️ <b>Тип операции:</b> {safe(entry.operation_title)}\n"
         f"🕒 <b>Дата и время:</b> {dt_str}\n"
+
     )
 
     builder = InlineKeyboardBuilder()

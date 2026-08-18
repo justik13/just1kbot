@@ -85,7 +85,11 @@ async def traffic_sync_loop(
             )
             if event.is_set():
                 break
-            await asyncio.sleep(backoff)
+            try:
+                await asyncio.wait_for(event.wait(), timeout=backoff)
+                break
+            except asyncio.TimeoutError:
+                pass
             continue
 
         try:

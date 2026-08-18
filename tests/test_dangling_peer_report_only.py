@@ -202,9 +202,11 @@ class DanglingPeerReportOnlyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_old_records_executes_without_compile_error(self):
         mock_session = AsyncMock()
-        mock_session.execute.return_value = MagicMock(rowcount=0)
+        mock_res = MagicMock(rowcount=0)
+        mock_res.scalars.return_value.all.return_value = []
+        mock_session.execute.return_value = mock_res
         with patch("services.workers.cleanup.session_scope") as mock_scope, \
-             patch("services.workers.cleanup.clear_audit_logs", return_value=0):
+             patch("services.workers.cleanup.clear_audit_logs", new_callable=AsyncMock, return_value=0):
             mock_scope.return_value.__aenter__.return_value = mock_session
             await cleanup._cleanup_old_records()
             self.assertGreaterEqual(mock_session.execute.call_count, 3)

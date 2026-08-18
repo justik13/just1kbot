@@ -801,6 +801,7 @@ class WebhookInbox(Base):
         CheckConstraint("status IN ('pending','processing','retry','succeeded','dead')", name="ck_webhook_inbox_status"),
         Index("ix_webhook_inbox_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_webhook_inbox_lease", "locked_at", postgresql_where=text("status = 'processing'")),
+        Index("ix_webhook_inbox_retention", "received_at", "id", postgresql_where=text("status IN ('succeeded', 'dead')")),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     provider: Mapped[str] = mapped_column(String(30))

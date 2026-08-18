@@ -6,6 +6,7 @@ from .broadcast import router as broadcast_router
 from .payments import router as payments_router
 from .payment_queues import router as payment_queues_router
 from .purchases import router as purchases_router
+from .disputes import router as disputes_router
 
 __all__ = [
     "dashboard_router",
@@ -16,4 +17,6 @@ __all__ = [
     "payments_router",
     "payment_queues_router",
     "purchases_router",
+    "disputes_router",
 ]
+
