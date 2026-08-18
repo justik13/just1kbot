@@ -17,6 +17,10 @@ class CallbackValidationTests(unittest.TestCase):
     def test_normal_callback_remains_valid(self):
         self.assertTrue(_validate_callback_params("select_server:123"))
 
+    def test_rotate_incy_token_is_locked_action(self):
+        from bot.middlewares.action_lock import _is_locked_action
+        self.assertTrue(_is_locked_action("rotate_incy_token"))
+
 
 if __name__ == "__main__":
     unittest.main()

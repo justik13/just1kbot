@@ -178,6 +178,32 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
         self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
 
+    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
+    @patch("bot.handlers.connection.incy_routes.render_hub")
+    async def test_rotate_incy_subscription_handler_on_error(
+        self, mock_render_hub, mock_rotate_token
+    ):
+        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+
+        mock_rotate_token.side_effect = RuntimeError("DB error")
+
+        bot = AsyncMock()
+        message = MagicMock(spec=Message)
+        message.chat = MagicMock(id=999)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.bot = bot
+        callback.message = message
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=999, subscription_token="old_token")
+
+        await rotate_incy_subscription(callback, state, session, db_user=db_user)
+
+        callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        mock_render_hub.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()
