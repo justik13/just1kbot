@@ -22,15 +22,22 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
         raise VPNConfigParseError(f"Base64 decode failed: {e}") from e
 
 
+MAX_DECOMPRESSED_CONFIG_BYTES = 1024 * 1024  # 1 MiB
+
+
 def _decompress_amnezia_format(data: bytes) -> Optional[str]:
     if len(data) < 4:
         raise VPNConfigParseError("Payload too short")
     expected_length = struct.unpack(">I", data[:4])[0]
-    if expected_length > 1024 * 1024:
+    if expected_length > MAX_DECOMPRESSED_CONFIG_BYTES:
         raise VPNConfigParseError(f"Decompressed length exceeds limit: {expected_length}")
     compressed = data[4:]
     try:
-        decompressed = zlib.decompress(compressed)
+        decompressor = zlib.decompressobj()
+        decompressed = decompressor.decompress(compressed, MAX_DECOMPRESSED_CONFIG_BYTES)
+        if decompressor.unconsumed_tail or not decompressor.eof:
+            logger.error("_decompress_amnezia_format: payload exceeds maximum decompressed size")
+            raise VPNConfigParseError("Decompressed payload exceeds maximum size limit")
         if len(decompressed) != expected_length:
             logger.error(
                 "_decompress_amnezia_format length mismatch: expected %s, got %s",
@@ -39,6 +46,8 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
             )
             raise VPNConfigParseError("Length mismatch")
         return decompressed.decode("utf-8")
+    except VPNConfigParseError:
+        raise
     except Exception as e:
         logger.warning(f"_decompress_amnezia_format zlib failed: {e}")
         raise VPNConfigParseError(f"Decompress failed: {e}") from e

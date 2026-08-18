@@ -93,7 +93,7 @@ async def rotate_incy_subscription(
         new_token = await SubscriptionTokenService.rotate_token(session, db_user)
         await session.commit()
     except Exception as e:
-        logger.error("Failed to rotate subscription token for user %s: %s", db_user.id, e, exc_info=True)
+        logger.error("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__, exc_info=True)
         await callback.answer("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         return
 
