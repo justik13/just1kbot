@@ -313,6 +313,81 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
         mock_audit.assert_called_once()
         mock_render.assert_called_once()
 
+    async def test_apply_mass_bonus_concurrent_click_protection(self):
+        """Verify that multiple concurrent calls to apply_mass_bonus by the same admin
+        are debounced so only 1 background task is spawned and the duplicate receives an alert."""
+        from bot.handlers.admin.users.mass_bonus import _mass_bonus_in_progress, apply_mass_bonus
+
+        _mass_bonus_in_progress.clear()
+        admin_id = 888888
+
+        callback1 = MagicMock()
+        callback1.from_user.id = admin_id
+        callback1.bot = AsyncMock()
+        callback1.answer = AsyncMock()
+        callback1.message.edit_text = AsyncMock()
+
+        callback2 = MagicMock()
+        callback2.from_user.id = admin_id
+        callback2.bot = AsyncMock()
+        callback2.answer = AsyncMock()
+        callback2.message.edit_text = AsyncMock()
+
+        state1 = AsyncMock()
+        state1.get_data.return_value = {"target_aud": "all", "amount": 100, "reason": "Test"}
+        state2 = AsyncMock()
+        state2.get_data.return_value = {"target_aud": "all", "amount": 100, "reason": "Test"}
+
+        def fake_start_task(coro):
+            coro.close()
+            return MagicMock()
+
+        with patch("bot.handlers.admin.users.mass_bonus.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.mass_bonus._start_mass_bonus_task", side_effect=fake_start_task) as mock_start_task:
+
+            # First click succeeds and acquires lock
+            await apply_mass_bonus(callback1, state1)
+            self.assertIn(admin_id, _mass_bonus_in_progress)
+            mock_start_task.assert_called_once()
+            callback1.answer.assert_called_with("🚀 Массовое начисление запущено в фоне!", show_alert=True)
+
+            # Second concurrent click is rejected with warning
+            await apply_mass_bonus(callback2, state2)
+            self.assertEqual(mock_start_task.call_count, 1)
+            callback2.answer.assert_called_with("⚠️ Массовое начисление уже выполняется!", show_alert=True)
+
+        _mass_bonus_in_progress.clear()
+
+    async def test_apply_mass_bonus_task_start_failure_cleans_up(self):
+        """Verify that if starting the mass bonus background task raises an exception,
+        _mass_bonus_in_progress is cleanly unlocked."""
+        from bot.handlers.admin.users.mass_bonus import _mass_bonus_in_progress, apply_mass_bonus
+
+        _mass_bonus_in_progress.clear()
+        admin_id = 777777
+
+        callback = MagicMock()
+        callback.from_user.id = admin_id
+        callback.bot = AsyncMock()
+        callback.answer = AsyncMock()
+        callback.message.edit_text = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data.return_value = {"target_aud": "all", "amount": 50, "reason": "Failure test"}
+
+        def failing_start_task(coro):
+            coro.close()
+            raise RuntimeError("Task loop broken")
+
+        with patch("bot.handlers.admin.users.mass_bonus.is_admin", return_value=True), \
+             patch("bot.handlers.admin.users.mass_bonus._start_mass_bonus_task", side_effect=failing_start_task):
+
+            with self.assertRaises(RuntimeError):
+                await apply_mass_bonus(callback, state)
+
+            # Confirm lock was cleaned up
+            self.assertNotIn(admin_id, _mass_bonus_in_progress)
+
 
 if __name__ == "__main__":
     unittest.main()
