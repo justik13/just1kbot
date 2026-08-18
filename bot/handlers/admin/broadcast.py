@@ -369,11 +369,12 @@ async def _send_broadcast_to_users_with_resume(
 
     Delivery & Checkpoint Semantics:
     - Guaranteed Single-Worker Ownership: Protected by `_active_broadcast_progress_ids`.
-    - At-Most-Once per Dispatch Phase: Each recipient in the batch is attempted once
+    - Best-Effort Dispatch & Rate Limiting: Each recipient in the batch is attempted once
       (with an immediate single backoff-retry on `TelegramRetryAfter`).
     - Durable Progress Checkpoint: After each dispatch attempt, `progress.last_processed_id`
-      is immediately committed in PostgreSQL. On bot restart, resumption continues strictly
-      with `user.id > last_processed_id`, guaranteeing zero duplicate messages to already-processed users.
+      is immediately committed in PostgreSQL. Resumption continues strictly with
+      `user.id > last_processed_id` (previously checkpointed recipients are never replayed;
+      an uncheckpointed crash during an in-flight send may at most replay the single interrupted recipient).
     - Transient Failures: If a network/transient error fails both attempt and retry, the user is
       counted in `fail_count` and progress advances to prevent halting the entire broadcast pipeline.
     """

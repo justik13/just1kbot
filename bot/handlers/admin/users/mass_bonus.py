@@ -287,17 +287,18 @@ async def _run_mass_bonus_background(
         async with session_scope() as session:
             for uid, tg_id in chunk:
                 try:
-                    idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
-                    _entry, created = await create_admin_adjustment(
-                        session,
-                        user_id=uid,
-                        signed_amount=amount,
-                        idempotency_key=idempotency_key,
-                        metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
-                    )
-                    if created:
-                        success_count += 1
-                        credited_in_batch.append((uid, tg_id))
+                    async with session.begin_nested():
+                        idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
+                        _entry, created = await create_admin_adjustment(
+                            session,
+                            user_id=uid,
+                            signed_amount=amount,
+                            idempotency_key=idempotency_key,
+                            metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
+                        )
+                        if created:
+                            success_count += 1
+                            credited_in_batch.append((uid, tg_id))
                 except Exception as exc:
                     fail_count += 1
                     logger.error("Failed mass bonus credit for user %s: %s", uid, exc)

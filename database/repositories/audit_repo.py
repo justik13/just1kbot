@@ -54,6 +54,13 @@ async def clear_audit_logs(
     batch_size: int = 500,
     max_rounds: int = 100,
 ) -> int:
+    """Purges audit log entries older than older_than_days in bounded chunked rounds.
+
+    Transaction Boundaries:
+    - session=None (Default / Production Cleanup Worker): Opens an independent `session_scope()`
+      per batch of `batch_size` rows, immediately committing and releasing PostgreSQL row locks.
+    - session=<AsyncSession>: Operates within the caller's transaction context using `session.flush()`.
+    """
     import asyncio
     from datetime import timedelta
     from sqlalchemy import delete, select

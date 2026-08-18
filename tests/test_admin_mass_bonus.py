@@ -35,6 +35,14 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
                 if exc_type is None:
                     session_commits.append(len(created_adjustments))
 
+            def begin_nested(self):
+                class FakeSavepoint:
+                    async def __aenter__(self):
+                        return self
+                    async def __aexit__(self, exc_type, exc_val, exc_tb):
+                        pass
+                return FakeSavepoint()
+
             async def execute(self, stmt, *args, **kwargs):
                 mock_res = MagicMock()
                 mock_res.all.return_value = users
@@ -136,6 +144,14 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *args):
                 pass
 
+            def begin_nested(self):
+                class FakeSavepoint:
+                    async def __aenter__(self):
+                        return self
+                    async def __aexit__(self, exc_type, exc_val, exc_tb):
+                        pass
+                return FakeSavepoint()
+
             async def execute(self, stmt, *args, **kwargs):
                 mock_res = MagicMock()
                 mock_res.all.return_value = users
@@ -192,7 +208,7 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
     async def test_mass_bonus_true_crash_and_restart_recovery(self):
         """Simulates an actual process crash / exception thrown mid-run during Telegram
         notification dispatch after committing batch 1, then triggers a full restart with the
-        same batch_id, proving zero duplicate ledger entries and full delivery."""
+        same batch_id, proving zero duplicate ledger entries and notification deduplication."""
         mock_bot = AsyncMock()
         admin_id = 999999
         amount = 50
@@ -212,6 +228,14 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
 
             async def __aexit__(self, *args):
                 pass
+
+            def begin_nested(self):
+                class FakeSavepoint:
+                    async def __aenter__(self):
+                        return self
+                    async def __aexit__(self, exc_type, exc_val, exc_tb):
+                        pass
+                return FakeSavepoint()
 
             async def execute(self, stmt, *args, **kwargs):
                 mock_res = MagicMock()
