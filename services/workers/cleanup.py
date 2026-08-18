@@ -8,6 +8,7 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.connection import session_scope
 from database.models import (
@@ -404,17 +405,50 @@ async def _cleanup_dangling_peers():
         )
 
 
+BATCH_DELETE_CHUNK_SIZE = 500
+MAX_BATCH_DELETE_ROUNDS = 20
+
+
+async def _batch_delete_matching(
+    session: AsyncSession,
+    model,
+    *where_clauses,
+    batch_size: int = BATCH_DELETE_CHUNK_SIZE,
+    max_rounds: int = MAX_BATCH_DELETE_ROUNDS,
+) -> int:
+    """Delete rows matching where_clauses in bounded primary-key batches with skip_locked to avoid long table locks."""
+    if not hasattr(model, "id"):
+        stmt = delete(model).where(*where_clauses)
+        res = await session.execute(stmt)
+        await session.flush()
+        return int(res.rowcount or 0)
+
+    total_deleted = 0
+    for _ in range(max_rounds):
+        id_stmt = (
+            select(model.id)
+            .where(*where_clauses)
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+        res = await session.execute(id_stmt)
+        ids = list(res.scalars().all())
+        if not ids:
+            break
+        del_stmt = delete(model).where(model.id.in_(ids))
+        del_res = await session.execute(del_stmt)
+        await session.flush()
+        total_deleted += int(del_res.rowcount or 0)
+        if len(ids) < batch_size:
+            break
+    return total_deleted
+
+
+
 async def _cleanup_old_records():
     async with session_scope() as session:
         current_time = now_utc()
 
-        threshold_broadcasts = current_time - timedelta(days=7)
-        stmt_broadcasts = (
-            delete(BroadcastProgress)
-            .where(BroadcastProgress.status.in_(["completed", "stopped"]))
-            .where(BroadcastProgress.updated_at < threshold_broadcasts)
-        )
-        
         # Mark stuck in_progress broadcasts as stopped
         threshold_stuck = current_time - timedelta(hours=2)
         stmt_stuck = (
@@ -424,8 +458,14 @@ async def _cleanup_old_records():
             .values(status="stopped")
         )
         await session.execute(stmt_stuck)
-        result_broadcasts = await session.execute(stmt_broadcasts)
-        broadcasts_deleted = result_broadcasts.rowcount
+
+        threshold_broadcasts = current_time - timedelta(days=7)
+        broadcasts_deleted = await _batch_delete_matching(
+            session,
+            BroadcastProgress,
+            BroadcastProgress.status.in_(["completed", "stopped"]),
+            BroadcastProgress.updated_at < threshold_broadcasts,
+        )
 
         deleted_logs = await clear_audit_logs(
             session,
@@ -433,9 +473,11 @@ async def _cleanup_old_records():
         )
 
         threshold_hub = current_time - timedelta(days=1)
-        stmt_hub = delete(HubMessage).where(HubMessage.created_at < threshold_hub)
-        result_hub = await session.execute(stmt_hub)
-        hub_deleted = result_hub.rowcount
+        hub_deleted = await _batch_delete_matching(
+            session,
+            HubMessage,
+            HubMessage.created_at < threshold_hub,
+        )
 
         # Auto-expire abandoned pending payments older than 48 hours
         threshold_payments = current_time - timedelta(hours=48)
@@ -457,29 +499,23 @@ async def _cleanup_old_records():
 
         # Prune old succeeded/dead webhook inbox records
         threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
-        stmt_webhooks = (
-            delete(WebhookInbox)
-            .where(
-                WebhookInbox.status.in_(["succeeded", "dead"]),
-                WebhookInbox.received_at < threshold_webhooks,
-            )
+        webhooks_deleted = await _batch_delete_matching(
+            session,
+            WebhookInbox,
+            WebhookInbox.status.in_(["succeeded", "dead"]),
+            WebhookInbox.received_at < threshold_webhooks,
         )
-        result_webhooks = await session.execute(stmt_webhooks)
-        webhooks_deleted = result_webhooks.rowcount
-
 
         # Prune stale unconsumed checkout quotes (expired/cancelled)
         threshold_quotes = current_time - timedelta(days=STALE_QUOTES_RETENTION_DAYS)
-        stmt_quotes = (
-            delete(TariffQuote)
-            .where(
-                TariffQuote.status.in_(["expired", "cancelled"]),
-                TariffQuote.consumed_at.is_(None),
-                TariffQuote.created_at < threshold_quotes,
-            )
+        quotes_deleted = await _batch_delete_matching(
+            session,
+            TariffQuote,
+            TariffQuote.status.in_(["expired", "cancelled"]),
+            TariffQuote.consumed_at.is_(None),
+            TariffQuote.created_at < threshold_quotes,
         )
-        result_quotes = await session.execute(stmt_quotes)
-        quotes_deleted = result_quotes.rowcount
+
 
         if (
             broadcasts_deleted > 0
