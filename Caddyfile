@@ -1,5 +1,8 @@
 {
     email {$SSL_EMAIL}
+    servers {
+        max_header_size 8KB
+    }
 }
 
 {$DOMAIN} {
@@ -10,14 +13,12 @@
         }
         reverse_proxy bot:8080 {
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
         }
     }
 
     handle {
         reverse_proxy bot:8080 {
             header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
         }
     }
 }
