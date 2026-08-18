@@ -5,7 +5,6 @@ import unittest
 import uuid
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import patch
 
 
 from sqlalchemy import select, text
