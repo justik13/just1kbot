@@ -79,7 +79,7 @@ class HttpRateLimiter:
 
 amnezia_bridge_rate_limiter = HttpRateLimiter()
 subscription_feed_rate_limiter = HttpRateLimiter(
-    rate_per_minute=30,
+    rate_per_minute=30.0,
     burst=10,
     max_entries=10000,
 )

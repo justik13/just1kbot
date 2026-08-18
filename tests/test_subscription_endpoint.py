@@ -250,7 +250,7 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
             resp = await subscription_feed_handler(req)
             self.assertEqual(resp.status, 200)
 
-        # Send 4 requests to open endpoint (total 10)
+        # Send 4 requests to open endpoint (total 10 requests consuming the entire burst)
         for _ in range(4):
             req = make_mocked_request(
                 "GET",
@@ -292,6 +292,48 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         req_other._transport_peername = ("198.51.100.20", 12345)
         resp_other = await subscription_feed_handler(req_other)
         self.assertEqual(resp_other.status, 200)
+
+    def test_subscription_rate_limit_time_progression_and_refill(self):
+        # Direct temporal verification of subscription_feed_rate_limiter token dynamics
+        ip = "198.51.100.99"
+        t0 = 1000.0
+
+        # Burst capacity is 10
+        for _ in range(10):
+            allowed, retry = subscription_feed_rate_limiter.check(ip, now=t0)
+            self.assertTrue(allowed)
+            self.assertEqual(retry, 0)
+
+        # 11th request at t0 is denied; retry_after indicates 2 seconds needed for 1 full token (30 req/min = 0.5 tok/s)
+        allowed, retry = subscription_feed_rate_limiter.check(ip, now=t0)
+        self.assertFalse(allowed)
+        self.assertEqual(retry, 2)
+
+        # After 1.0s, only 0.5 token refilled (< 1.0), still denied
+        allowed, retry = subscription_feed_rate_limiter.check(ip, now=t0 + 1.0)
+        self.assertFalse(allowed)
+        self.assertEqual(retry, 1)
+
+        # After 2.0s, 1 full token refilled -> allowed
+        allowed, retry = subscription_feed_rate_limiter.check(ip, now=t0 + 2.0)
+        self.assertTrue(allowed)
+        self.assertEqual(retry, 0)
+
+        # Immediate follow-up is denied again
+        allowed, retry = subscription_feed_rate_limiter.check(ip, now=t0 + 2.0)
+        self.assertFalse(allowed)
+        self.assertEqual(retry, 2)
+
+        # After 60.0s of idle time, bucket refills up to burst ceiling (10)
+        allowed, _ = subscription_feed_rate_limiter.check(ip, now=t0 + 62.0)
+        self.assertTrue(allowed)
+        # 9 more allowed immediately
+        for _ in range(9):
+            allowed, _ = subscription_feed_rate_limiter.check(ip, now=t0 + 62.0)
+            self.assertTrue(allowed)
+        # 11th is denied
+        allowed, _ = subscription_feed_rate_limiter.check(ip, now=t0 + 62.0)
+        self.assertFalse(allowed)
 
 
 if __name__ == "__main__":
