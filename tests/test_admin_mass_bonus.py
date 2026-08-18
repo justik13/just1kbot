@@ -1,0 +1,117 @@
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from aiogram.exceptions import TelegramForbiddenError
+from bot.handlers.admin.users.mass_bonus import _run_mass_bonus_background
+from database.models import User
+
+
+class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_mass_bonus_background_batches_and_post_commit_dispatch(self):
+        """Verify that mass bonus processes in batches of 50, commits ledger adjustments,
+        and only dispatches Telegram messages after transaction commits."""
+        mock_bot = AsyncMock()
+        admin_id = 999999
+        amount = 100
+        reason = "Test bonus compensation <alert>"
+        batch_id = 1700000000
+
+        users = [(i, 1000 + i) for i in range(1, 121)]
+        users[9] = (10, admin_id)
+
+        session_commits = []
+        created_adjustments = []
+        sent_messages = []
+        blocked_users_marked = []
+
+        class FakeSession:
+            def __init__(self):
+                self._in_transaction = True
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                if exc_type is None:
+                    session_commits.append(len(created_adjustments))
+
+            async def execute(self, stmt, *args, **kwargs):
+                mock_res = MagicMock()
+                mock_res.all.return_value = users
+                return mock_res
+
+            async def get(self, model, ident):
+                if model == User:
+                    user_obj = MagicMock(spec=User)
+                    user_obj.id = ident
+                    user_obj.is_bot_blocked = False
+                    blocked_users_marked.append(user_obj)
+                    return user_obj
+                return None
+
+        async def fake_create_admin_adjustment(session, user_id, signed_amount, idempotency_key, metadata):
+            if user_id == 20:
+                raise RuntimeError("Simulated ledger error")
+            created_adjustments.append({
+                "user_id": user_id,
+                "signed_amount": signed_amount,
+                "idempotency_key": idempotency_key,
+                "metadata": metadata,
+            })
+
+        async def fake_send_message(chat_id, text, parse_mode="HTML"):
+            current_committed = session_commits[-1] if session_commits else 0
+            if chat_id == 1030:
+                sent_messages.append((chat_id, text, current_committed))
+                raise TelegramForbiddenError(method=MagicMock(), message="Forbidden: bot was blocked by the user")
+            sent_messages.append((chat_id, text, current_committed))
+
+        mock_bot.send_message.side_effect = fake_send_message
+
+        with patch("database.connection.session_scope", side_effect=FakeSession), \
+             patch("bot.handlers.admin.users.mass_bonus.create_admin_adjustment", side_effect=fake_create_admin_adjustment), \
+             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock) as mock_audit, \
+             patch("utils.rate_limiter.global_send_limiter.acquire", new_callable=AsyncMock), \
+             patch("bot.handlers.admin.users.mass_bonus.render_hub", new_callable=AsyncMock) as mock_render:
+
+            await _run_mass_bonus_background(
+                bot=mock_bot,
+                admin_id=admin_id,
+                target_aud="all",
+                amount=amount,
+                reason=reason,
+                batch_id=batch_id,
+            )
+
+            self.assertEqual(len(created_adjustments), 119)
+            self.assertGreaterEqual(len(session_commits), 4)
+
+            self.assertEqual(
+                created_adjustments[0]["idempotency_key"],
+                f"mass_bonus_{batch_id}_1_{amount}",
+            )
+
+            admin_msgs = [m for m in sent_messages if m[0] == admin_id]
+            self.assertEqual(len(admin_msgs), 0)
+            self.assertEqual(len(sent_messages), 118)
+
+            for _chat_id, text, committed_count in sent_messages:
+                self.assertGreater(committed_count, 0)
+                self.assertIn("Вам начислен бонусный баланс: +100 ₽!", text)
+                self.assertIn("&lt;alert&gt;", text)
+
+            self.assertEqual(len(blocked_users_marked), 1)
+            self.assertTrue(blocked_users_marked[0].is_bot_blocked)
+
+            mock_audit.assert_called_once()
+            self.assertIn("Granted +100 RUB bonus to 119 users", mock_audit.call_args[0][5])
+
+            mock_render.assert_called_once()
+            report_text = mock_render.call_args[0][2]
+            self.assertIn("Зачислено: <b>119 чел.</b>", report_text)
+            self.assertIn("Ошибок: <b>1</b>", report_text)
+            self.assertIn("Заблокировали бота: <b>1</b>", report_text)
+
+
+if __name__ == "__main__":
+    unittest.main()
