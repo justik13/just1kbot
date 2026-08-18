@@ -27,6 +27,7 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
                 "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "TRUSTED_PROXIES": "127.0.0.1,::1,172.16.0.0/12",
                 "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/db",
             },
         )
@@ -116,6 +117,16 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
         ip = get_trusted_client_ip(req_untrusted)
         # Header spoof MUST be ignored; uses direct remote
         self.assertEqual(ip, "93.184.216.34")
+
+        # Scenario 4: Request from unconfigured private network (10.200.0.1) when not in TRUSTED_PROXIES
+        req_unconfigured = make_mocked_request(
+            "GET",
+            "/amnezia/open/1",
+            headers={"X-Real-IP": "1.1.1.1"},
+        )
+        req_unconfigured._transport_peername = ("10.200.0.1", 12345)
+        ip = get_trusted_client_ip(req_unconfigured)
+        self.assertEqual(ip, "10.200.0.1")
 
     @patch("bot.handlers.amnezia_bridge.amnezia_bridge_rate_limiter.check", return_value=(False, 15))
     async def test_endpoint_returns_429_with_retry_after(self, mock_check):

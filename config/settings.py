@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
 
     @model_validator(mode="after")
     def reject_removed_settings(self):

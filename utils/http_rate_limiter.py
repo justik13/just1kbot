@@ -77,16 +77,39 @@ class HttpRateLimiter:
 amnezia_bridge_rate_limiter = HttpRateLimiter()
 
 
-def _is_trusted_proxy_peer(peer_ip: str, trusted_proxies: set | None = None) -> bool:
-    """Determine whether peer IP is an internal reverse proxy or local container."""
-    if trusted_proxies and peer_ip in trusted_proxies:
-        return True
+def _is_trusted_proxy_peer(
+    peer_ip: str,
+    trusted_proxies: str | set | list | None = None,
+) -> bool:
+    """Determine whether peer IP matches explicitly configured trusted proxy subnets or addresses."""
+    if trusted_proxies is None:
+        try:
+            from config.settings import get_settings
+            trusted_proxies = get_settings().TRUSTED_PROXIES
+        except (AttributeError, KeyError, TypeError, ValueError):
+            trusted_proxies = "127.0.0.1,::1,172.16.0.0/12"
+
+    if isinstance(trusted_proxies, str):
+        trusted_items = [p.strip() for p in trusted_proxies.split(",") if p.strip()]
+    else:
+        trusted_items = list(trusted_proxies)
 
     try:
         ip = ipaddress.ip_address(peer_ip)
-        return bool(ip.is_private or ip.is_loopback or ip.is_link_local)
+        for item in trusted_items:
+            try:
+                if "/" in item:
+                    if ip in ipaddress.ip_network(item, strict=False):
+                        return True
+                else:
+                    if ip == ipaddress.ip_address(item):
+                        return True
+            except ValueError:
+                continue
     except ValueError:
         return False
+
+    return False
 
 
 def get_trusted_client_ip(request: web.Request) -> str:
@@ -97,7 +120,14 @@ def get_trusted_client_ip(request: web.Request) -> str:
     Direct connections from arbitrary external peers use request.remote directly.
     """
     peer_ip = request.remote or "127.0.0.1"
-    trusted_proxies = request.app.get("trusted_proxies") if hasattr(request, "app") and request.app else None
+    trusted_proxies = None
+    if hasattr(request, "app") and request.app is not None:
+        try:
+            raw_proxies = request.app.get("trusted_proxies")
+            if isinstance(raw_proxies, (str, list, set, tuple)):
+                trusted_proxies = raw_proxies
+        except (AttributeError, KeyError, TypeError):
+            trusted_proxies = None
 
     if _is_trusted_proxy_peer(peer_ip, trusted_proxies):
         # 1. Prefer X-Real-IP set by Caddy
