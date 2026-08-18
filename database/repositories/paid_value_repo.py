@@ -30,15 +30,21 @@ def _verify(entry: PaidValueLedgerEntry, values: dict) -> PaidValueLedgerEntry:
     return entry
 
 
+_VALID_ENTRY_TYPES = frozenset({"account_purchase", "tariff_conversion", "manual_adjustment"})
+
+
 async def _insert_or_get(
     session: AsyncSession, values: dict, conflict_column
 ) -> PaidValueLedgerEntry:
+    entry_type = values.get("entry_type")
+    if entry_type not in _VALID_ENTRY_TYPES:
+        raise ValueError(f"Invalid entry_type: {entry_type}")
     entry_id = await session.scalar(
         insert(PaidValueLedgerEntry)
         .values(**values)
         .on_conflict_do_nothing(
             index_elements=[conflict_column],
-            index_where=text(f"entry_type='{values['entry_type']}'"),
+            index_where=text(f"entry_type='{entry_type}'"),
         )
         .returning(PaidValueLedgerEntry.id)
     )
