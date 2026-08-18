@@ -405,9 +405,6 @@ async def _send_broadcast_to_users_with_resume(
             last_id,
         )
 
-        local_success = 0
-        local_fail = 0
-
         while True:
             async with session_scope() as session:
                 progress = await session.get(BroadcastProgress, progress_id)
@@ -427,6 +424,8 @@ async def _send_broadcast_to_users_with_resume(
             for internal_id, uid in batch:
                 if stop_event and stop_event.is_set():
                     break
+                is_success = False
+                is_forbidden = False
                 try:
                     await broadcast_send_limiter.acquire()
                     await _dispatch_message(
@@ -436,7 +435,7 @@ async def _send_broadcast_to_users_with_resume(
                         media_id,
                         content_type,
                     )
-                    local_success += 1
+                    is_success = True
                 except TelegramRetryAfter as e:
                     await asyncio.sleep(e.retry_after + 1)
                     try:
@@ -448,35 +447,40 @@ async def _send_broadcast_to_users_with_resume(
                             media_id,
                             content_type,
                         )
-                        local_success += 1
+                        is_success = True
+                    except TelegramForbiddenError:
+                        is_forbidden = True
                     except Exception:
-                        local_fail += 1
+                        pass
                 except TelegramForbiddenError:
-                    blocked_user_ids.append(uid)
-                    local_fail += 1
+                    is_forbidden = True
                 except Exception as e:
                     logger.error(
                         "Broadcast error for user %s: %s",
                         uid,
                         e,
                     )
-                    local_fail += 1
 
                 last_id = internal_id
 
-            async with session_scope() as session:
-                progress = await session.get(
-                    BroadcastProgress,
-                    progress_id,
-                )
-                if progress:
-                    progress.last_processed_id = last_id
-                    progress.success_count += local_success
-                    progress.fail_count += local_fail
-                    await session.commit()
-
-            local_success = 0
-            local_fail = 0
+                # Durable per-user checkpoint: immediately commit progress and block status
+                async with session_scope() as session:
+                    progress = await session.get(
+                        BroadcastProgress,
+                        progress_id,
+                    )
+                    if progress:
+                        progress.last_processed_id = internal_id
+                        if is_success:
+                            progress.success_count += 1
+                        else:
+                            progress.fail_count += 1
+                        await session.commit()
+                    if is_forbidden:
+                        db_user = await session.get(User, uid)
+                        if db_user:
+                            db_user.is_bot_blocked = True
+                            await session.commit()
 
         if should_finalize:
             async with session_scope() as session:

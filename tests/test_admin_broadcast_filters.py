@@ -59,3 +59,67 @@ class TestAdminBroadcastFilters(unittest.TestCase):
             self.assertNotIn("users.telegram_id =", compiled)
 
         asyncio.run(_test())
+
+    def test_broadcast_resume_durable_checkpoint(self):
+        from bot.handlers.admin.broadcast import _send_broadcast_to_users_with_resume
+        from database.models import BroadcastProgress
+        from unittest.mock import patch
+
+        async def _test():
+            mock_bot = AsyncMock()
+            admin_id = 999
+            progress_id = 42
+
+            initial_progress = BroadcastProgress(
+                id=progress_id,
+                admin_id=admin_id,
+                target_audience="all",
+                broadcast_text="Hello",
+                media_id=None,
+                content_type="text",
+                status="in_progress",
+                last_processed_id=100,
+                success_count=5,
+                fail_count=0,
+            )
+
+            # Simulated users batch: (101, 1001), (102, 1002)
+            batches = [[(101, 1001), (102, 1002)], []]
+            batch_iter = iter(batches)
+
+            class FakeSession:
+                def __init__(self):
+                    self.progress = initial_progress
+
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                async def get(self, model, ident):
+                    if model == BroadcastProgress:
+                        return self.progress
+                    return None
+
+                async def commit(self):
+                    pass
+
+            fake_sess = FakeSession()
+
+            async def fake_get_next_batch(session, target_aud, last_id, limit=50):
+                return next(batch_iter, [])
+
+            with patch("bot.handlers.admin.broadcast.session_scope", return_value=fake_sess), \
+                 patch("bot.handlers.admin.broadcast._get_next_batch", side_effect=fake_get_next_batch), \
+                 patch("bot.handlers.admin.broadcast._dispatch_message", new_callable=AsyncMock) as mock_dispatch:
+
+                await _send_broadcast_to_users_with_resume(mock_bot, admin_id, progress_id)
+
+                self.assertEqual(mock_dispatch.call_count, 2)
+                self.assertEqual(fake_sess.progress.last_processed_id, 102)
+                self.assertEqual(fake_sess.progress.success_count, 7)
+                self.assertEqual(fake_sess.progress.status, "completed")
+
+        asyncio.run(_test())
+
