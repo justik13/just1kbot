@@ -72,7 +72,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1200, total)
         self.assertEqual(6, mock_session.execute.call_count)
-        self.assertEqual(3, mock_session.commit.call_count)
+        self.assertEqual(3, mock_session.flush.call_count)
 
     async def test_batch_delete_matching_empty_returns_zero(self):
         mock_session = AsyncMock()
