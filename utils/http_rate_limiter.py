@@ -87,7 +87,7 @@ def _is_trusted_proxy_peer(
             from config.settings import get_settings
             trusted_proxies = get_settings().TRUSTED_PROXIES
         except (AttributeError, KeyError, TypeError, ValueError):
-            trusted_proxies = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+            trusted_proxies = "127.0.0.1,::1,172.16.0.0/12"
 
     if isinstance(trusted_proxies, str):
         trusted_items = [p.strip() for p in trusted_proxies.split(",") if p.strip()]
