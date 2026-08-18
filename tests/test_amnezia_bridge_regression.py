@@ -101,7 +101,46 @@ class AmneziaBridgeRegressionTests(unittest.TestCase):
         }
         return encode_json_to_vpn_uri(data)
 
-    def test_builder_parity_with_frozen_legacy_algorithm(self):
+    def test_byte_for_byte_parity_across_diverse_fixtures(self):
+        raw_config = self._generate_awg2_fixture()
+
+        scenarios = [
+            ("Frankfurt", "iPhone #1", "Frankfurt"),
+            ("Amsterdam", "MacBook Pro #12", "Amsterdam"),
+            ("  Germany  ", "PC #3", "  Germany  "),
+            ("🇩🇪 Berlin Server", "Телефон #1", "🇩🇪 Berlin Server"),
+            (None, "Device #5", "server"),
+            ("France", "Work-Laptop", "France"),
+        ]
+
+        for s_name, dev_name, expected_server in scenarios:
+            with self.subTest(server=s_name, device=dev_name):
+                server = Server(id=1, name=s_name, protocol="amneziawg2", is_active=True)
+                profile = VPNProfile(
+                    id=10,
+                    user_id=20,
+                    server_id=1,
+                    server=server,
+                    device_name=dev_name,
+                    raw_config=raw_config,
+                )
+
+                legacy_output = legacy_show_config_algorithm(
+                    raw_config=raw_config,
+                    server_name=expected_server,
+                    device_name=dev_name,
+                )
+
+                builder_output = build_display_vpn_uri(profile)
+
+                # Strict byte-for-byte equality of the generated vpn:// keys
+                self.assertEqual(
+                    legacy_output,
+                    builder_output,
+                    f"Byte-for-byte mismatch for scenario ({s_name}, {dev_name})",
+                )
+
+    def test_preservation_of_all_awg2_parameters(self):
         raw_config = self._generate_awg2_fixture()
         server = Server(id=1, name="Frankfurt", protocol="amneziawg2", is_active=True)
         profile = VPNProfile(
@@ -113,35 +152,17 @@ class AmneziaBridgeRegressionTests(unittest.TestCase):
             raw_config=raw_config,
         )
 
-        legacy_output = legacy_show_config_algorithm(
-            raw_config=raw_config,
-            server_name="Frankfurt",
-            device_name="iPhone #2",
-        )
-
         builder_output = build_display_vpn_uri(profile)
-
-        # Decode both and assert semantic and structural parity
-        legacy_data = decode_vpn_uri_to_json(legacy_output)
         builder_data = decode_vpn_uri_to_json(builder_output)
 
-        self.assertEqual(legacy_data["description"], builder_data["description"])
         self.assertEqual(builder_data["description"], "Frankfurt #2")
-        self.assertEqual(legacy_data["dns1"], "8.8.8.8")
-        self.assertEqual(legacy_data["dns2"], "8.8.4.4")
         self.assertEqual(builder_data["dns1"], "8.8.8.8")
         self.assertEqual(builder_data["dns2"], "8.8.4.4")
 
-        legacy_awg = legacy_data["containers"][0]["awg"]
         builder_awg = builder_data["containers"][0]["awg"]
-
-        self.assertEqual(legacy_awg["protocol_version"], builder_awg["protocol_version"])
         self.assertEqual(builder_awg["protocol_version"], "2")
 
-        legacy_last = json.loads(legacy_awg["last_config"])
         builder_last = json.loads(builder_awg["last_config"])
-
-        # Check preservation of all AWG2 parameters
         for key in (
             "client_priv_key",
             "server_pub_key",
@@ -165,11 +186,7 @@ class AmneziaBridgeRegressionTests(unittest.TestCase):
             "I4",
             "I5",
         ):
-            self.assertEqual(
-                legacy_last[key],
-                builder_last[key],
-                f"Mismatch in AWG2 parameter: {key}",
-            )
+            self.assertIn(key, builder_last)
 
 
 if __name__ == "__main__":

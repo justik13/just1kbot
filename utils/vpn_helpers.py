@@ -7,7 +7,6 @@ from services.amnezia_bridge_constants import MAX_RAW_CONFIG_BYTES
 from utils.vpn_parser import (
     customize_vpn_uri,
     decode_vpn_uri_to_json,
-    is_valid_vpn_uri,
 )
 
 
@@ -59,8 +58,9 @@ def _get_effective_mtu(awg: dict) -> str | None:
 def build_display_vpn_uri(profile: VPNProfile) -> str:
     """Build and customize a display vpn:// URI for an AmneziaWG 2.0 profile.
 
-    Authoritative builder ensuring protocol consistency and post-customization
-    integrity checks without altering legacy parser fallbacks.
+    Authoritative single-pass builder ensuring protocol consistency and
+    post-customization integrity checks without altering legacy parser fallbacks.
+    Preserves exact legacy naming semantics without stripping server names.
     """
     if not profile or not profile.server:
         raise InvalidAmneziaProfileError("Profile server must be eagerly loaded")
@@ -76,10 +76,7 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     if len(raw_config.encode("utf-8")) > MAX_RAW_CONFIG_BYTES:
         raise InvalidAmneziaConfigError("raw_config exceeds maximum allowed size (64 KiB)")
 
-    # Read-only structural validation using public parser API
-    if not is_valid_vpn_uri(raw_config):
-        raise InvalidAmneziaConfigError("raw_config failed is_valid_vpn_uri structural validation")
-
+    # Single-pass structural JSON and AWG2 decoding
     data = decode_vpn_uri_to_json(raw_config)
     if not data or not isinstance(data, dict):
         raise InvalidAmneziaConfigError("raw_config failed JSON decode")
@@ -88,7 +85,8 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     if not awg or str(awg.get("protocol_version")) != "2":
         raise InvalidAmneziaConfigError("raw_config is not an AWG2 container (protocol_version != 2)")
 
-    server_name = (profile.server.name or "").strip() if profile.server.name else "server"
+    # Preserve exact legacy naming semantics (no .strip() on server.name)
+    server_name = profile.server.name if profile.server.name else "server"
     m = re.search(r'#(\d+)$', profile.device_name or "")
     slot_suffix = f" #{m.group(1)}" if m else ""
     client_description = f"{server_name}{slot_suffix}"
@@ -104,9 +102,7 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     if not display_key or not display_key.startswith("vpn://"):
         raise InvalidAmneziaConfigError("customize_vpn_uri did not produce a vpn:// URI")
 
-    if not is_valid_vpn_uri(display_key):
-        raise InvalidAmneziaConfigError("customized display_key failed is_valid_vpn_uri validation")
-
+    # Single-pass post-customization integrity validation
     customized_data = decode_vpn_uri_to_json(display_key)
     if not customized_data or not isinstance(customized_data, dict):
         raise InvalidAmneziaConfigError("customized display_key failed JSON decode")
@@ -115,7 +111,6 @@ def build_display_vpn_uri(profile: VPNProfile) -> str:
     if not customized_awg or str(customized_awg.get("protocol_version")) != "2":
         raise InvalidAmneziaConfigError("customized display_key is not valid AWG2")
 
-    # Post-customization semantic validation
     if customized_data.get("description") != client_description:
         raise InvalidAmneziaConfigError("customized display_key description mismatch")
     if customized_data.get("dns1") != "8.8.8.8" or customized_data.get("dns2") != "8.8.4.4":

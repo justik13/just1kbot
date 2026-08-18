@@ -376,5 +376,136 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(TEST_SECRET, resp.text)
 
 
+    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
+    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
+    @patch("bot.handlers.amnezia_bridge.session_scope")
+    async def test_endpoint_acl_user_flags_return_403(
+        self,
+        mock_session_scope,
+        mock_get_profile,
+        mock_get_user,
+        mock_check_access,
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+
+        server = Server(id=10, name="Server", protocol="amneziawg2", is_active=True)
+        raw_uri = make_valid_awg2_vpn_uri()
+        profile = VPNProfile(
+            id=77,
+            user_id=88,
+            server=server,
+            raw_config=raw_uri,
+            peer_id="peer_1",
+            is_active=True,
+            provisioning_status="active",
+        )
+        mock_get_profile.return_value = profile
+
+        for flag_name in ("is_deleted", "is_banned", "financial_hold"):
+            with self.subTest(flag=flag_name):
+                user_kwargs = {
+                    "id": 88,
+                    "is_deleted": False,
+                    "is_banned": False,
+                    "financial_hold": False,
+                }
+                user_kwargs[flag_name] = True
+                user = User(**user_kwargs)
+                mock_get_user.return_value = user
+
+                exp = int(now_utc().timestamp()) + 300
+                sig = AmneziaBridgeTokenService.sign(77, 88, exp, secret=TEST_SECRET)
+                req = self._create_request("77", {"uid": "88", "exp": str(exp), "sig": sig})
+
+                resp = await amnezia_bridge_handler(req)
+                self.assertEqual(resp.status, 403)
+
+    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=False)
+    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
+    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
+    @patch("bot.handlers.amnezia_bridge.session_scope")
+    async def test_endpoint_acl_subscription_access_denied_returns_403(
+        self,
+        mock_session_scope,
+        mock_get_profile,
+        mock_get_user,
+        mock_check_access,
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+
+        server = Server(id=10, name="Server", protocol="amneziawg2", is_active=True)
+        profile = VPNProfile(
+            id=77,
+            user_id=88,
+            server=server,
+            raw_config=make_valid_awg2_vpn_uri(),
+            peer_id="peer_1",
+            is_active=True,
+            provisioning_status="active",
+        )
+        user = User(id=88, is_deleted=False, is_banned=False, financial_hold=False)
+        mock_get_profile.return_value = profile
+        mock_get_user.return_value = user
+
+        exp = int(now_utc().timestamp()) + 300
+        sig = AmneziaBridgeTokenService.sign(77, 88, exp, secret=TEST_SECRET)
+        req = self._create_request("77", {"uid": "88", "exp": str(exp), "sig": sig})
+
+        resp = await amnezia_bridge_handler(req)
+        self.assertEqual(resp.status, 403)
+
+    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
+    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
+    @patch("bot.handlers.amnezia_bridge.session_scope")
+    async def test_endpoint_acl_profile_and_server_states_return_403(
+        self,
+        mock_session_scope,
+        mock_get_profile,
+        mock_get_user,
+        mock_check_access,
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+        user = User(id=88, is_deleted=False, is_banned=False, financial_hold=False)
+        mock_get_user.return_value = user
+        raw_uri = make_valid_awg2_vpn_uri()
+
+        invalid_combinations = [
+            ("server_none", None, True, "active", "peer_1", raw_uri),
+            ("server_inactive", Server(id=10, protocol="amneziawg2", is_active=False), True, "active", "peer_1", raw_uri),
+            ("server_wireguard", Server(id=10, protocol="wireguard", is_active=True), True, "active", "peer_1", raw_uri),
+            ("server_awg3", Server(id=10, protocol="amneziawg3", is_active=True), True, "active", "peer_1", raw_uri),
+            ("profile_inactive", Server(id=10, protocol="amneziawg2", is_active=True), False, "active", "peer_1", raw_uri),
+            ("provisioning_pending", Server(id=10, protocol="amneziawg2", is_active=True), True, "pending_create", "peer_1", raw_uri),
+            ("peer_id_missing", Server(id=10, protocol="amneziawg2", is_active=True), True, "active", None, raw_uri),
+            ("raw_config_empty", Server(id=10, protocol="amneziawg2", is_active=True), True, "active", "peer_1", ""),
+            ("raw_config_not_vpn", Server(id=10, protocol="amneziawg2", is_active=True), True, "active", "peer_1", "https://not.vpn"),
+        ]
+
+        for desc, server, p_active, prov_stat, peer, config in invalid_combinations:
+            with self.subTest(case=desc):
+                profile = VPNProfile(
+                    id=77,
+                    user_id=88,
+                    server=server,
+                    is_active=p_active,
+                    provisioning_status=prov_stat,
+                    peer_id=peer,
+                    raw_config=config,
+                )
+                mock_get_profile.return_value = profile
+
+                exp = int(now_utc().timestamp()) + 300
+                sig = AmneziaBridgeTokenService.sign(77, 88, exp, secret=TEST_SECRET)
+                req = self._create_request("77", {"uid": "88", "exp": str(exp), "sig": sig})
+
+                resp = await amnezia_bridge_handler(req)
+                self.assertEqual(resp.status, 403)
+
+
 if __name__ == "__main__":
     unittest.main()

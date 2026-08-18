@@ -3,7 +3,21 @@
 }
 
 {$DOMAIN} {
-    reverse_proxy bot:8080 {
-        header_up X-Real-IP {remote_host}
+    @amnezia_bridge path /amnezia/open/*
+    handle @amnezia_bridge {
+        request_body {
+            max_size 2KB
+        }
+        reverse_proxy bot:8080 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
+    }
+
+    handle {
+        reverse_proxy bot:8080 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+        }
     }
 }
