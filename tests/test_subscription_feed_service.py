@@ -172,7 +172,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         decoded_feed = base64.b64decode(body).decode("utf-8")
         self.assertTrue(decoded_feed.startswith("amneziawg://"))
         self.assertIn("#🇵🇱 Warsaw — iPhone", decoded_feed)
-        inner_b64 = decoded_feed.split("#")[0].replace("amneziawg://", "")
+        inner_b64 = decoded_feed.removeprefix("amneziawg://").split("#", 1)[0]
 
         # Strict URL-safe base64 proof: standard base64 would produce '+' and '/',
         # while urlsafe base64 produces '-' and '_' and must not contain '+' or '/'
@@ -321,7 +321,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(line.startswith("amneziawg://"))
             self.assertIn(f"#{expected_fragments[i]}", line)
 
-            inner_b64 = line.split("#")[0].replace("amneziawg://", "")
+            inner_b64 = line.removeprefix("amneziawg://").split("#", 1)[0]
             # Ensure URL-safe encoding (no '+' or '/')
             self.assertNotIn("+", inner_b64)
             self.assertNotIn("/", inner_b64)
