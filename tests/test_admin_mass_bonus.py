@@ -58,6 +58,7 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
                 "idempotency_key": idempotency_key,
                 "metadata": metadata,
             })
+            return MagicMock(), True
 
         async def fake_send_message(chat_id, text, parse_mode="HTML"):
             current_committed = session_commits[-1] if session_commits else 0
@@ -145,12 +146,13 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_create_admin_adjustment(session, user_id, signed_amount, idempotency_key, metadata):
             if idempotency_key in ledger_entries_by_key:
-                # Simulates database unique constraint error / idempotent skip
-                raise RuntimeError(f"Duplicate key violation: {idempotency_key}")
+                # Simulates account_ledger_repo._insert_or_get_entry returning (existing_entry, False)
+                return MagicMock(), False
             ledger_entries_by_key[idempotency_key] = {
                 "user_id": user_id,
                 "amount": signed_amount,
             }
+            return MagicMock(), True
 
         async def fake_send_message(chat_id, text, parse_mode="HTML"):
             sent_messages.append((chat_id, text))
@@ -221,9 +223,10 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
 
         async def persistent_create_admin_adjustment(session, user_id, signed_amount, idempotency_key, metadata):
             if idempotency_key in ledger_table:
-                # Simulates database UniqueConstraint(idempotency_key) raising IntegrityError
-                raise RuntimeError(f"IntegrityError: Duplicate key {idempotency_key}")
+                # Simulates database returning (existing_entry, False)
+                return MagicMock(), False
             ledger_table[idempotency_key] = {"user_id": user_id, "amount": signed_amount}
+            return MagicMock(), True
 
         should_crash = True
 
