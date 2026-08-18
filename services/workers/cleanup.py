@@ -15,8 +15,10 @@ from database.models import (
     HubMessage,
     Payment,
     Server,
+    TariffQuote,
     User,
     VPNProfile,
+    WebhookInbox,
 )
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
@@ -40,8 +42,11 @@ CLEANUP_LOOP_INTERVAL = 900.0
 OLD_RECORDS_INTERVAL = 86400.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
+WEBHOOK_INBOX_RETENTION_DAYS = 30
+STALE_QUOTES_RETENTION_DAYS = 14
 
 _last_old_cleanup: float = 0.0
+
 
 
 EXECUTABLE_DELETE_REASONS = frozenset(
@@ -450,12 +455,49 @@ async def _cleanup_old_records():
         result_payments = await session.execute(stmt_payments)
         payments_expired = result_payments.rowcount
 
-        if broadcasts_deleted > 0 or deleted_logs > 0 or hub_deleted > 0 or payments_expired > 0:
+        # Prune old succeeded/dead webhook inbox records
+        threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
+        stmt_webhooks = (
+            delete(WebhookInbox)
+            .where(
+                WebhookInbox.status.in_(["succeeded", "dead"]),
+                WebhookInbox.received_at < threshold_webhooks,
+            )
+        )
+        result_webhooks = await session.execute(stmt_webhooks)
+        webhooks_deleted = result_webhooks.rowcount
+
+
+        # Prune stale unconsumed checkout quotes (expired/cancelled)
+        threshold_quotes = current_time - timedelta(days=STALE_QUOTES_RETENTION_DAYS)
+        stmt_quotes = (
+            delete(TariffQuote)
+            .where(
+                TariffQuote.status.in_(["expired", "cancelled"]),
+                TariffQuote.consumed_at.is_(None),
+                TariffQuote.created_at < threshold_quotes,
+            )
+        )
+        result_quotes = await session.execute(stmt_quotes)
+        quotes_deleted = result_quotes.rowcount
+
+        if (
+            broadcasts_deleted > 0
+            or deleted_logs > 0
+            or hub_deleted > 0
+            or payments_expired > 0
+            or webhooks_deleted > 0
+            or quotes_deleted > 0
+        ):
             logger.info(
                 "Cleanup: %s old broadcasts, %s old audit logs, "
-                "%s old hub_messages deleted, %s abandoned pending payments expired",
+                "%s old hub_messages deleted, %s abandoned pending payments expired, "
+                "%s old webhooks deleted, %s stale quotes deleted",
                 broadcasts_deleted,
                 deleted_logs,
                 hub_deleted,
                 payments_expired,
+                webhooks_deleted,
+                quotes_deleted,
             )
+

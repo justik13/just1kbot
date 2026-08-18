@@ -209,7 +209,8 @@ async def process_send_user_message(
         )
         notice = f"✅ <b>Сообщение пользователю ID {target_telegram_id} успешно отправлено!</b>"
     else:
-        notice = f"❌ <b>Не удалось отправить сообщение:</b> {error_reason}"
+        notice = f"❌ <b>Не удалось отправить сообщение:</b> {safe(error_reason)}"
 
     await _show_user_card_edit(message, user, session, notice=notice)
+
 

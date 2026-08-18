@@ -237,6 +237,9 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     from bot.handlers.admin.purchases import (
         router as admin_purchases_router,
     )
+    from bot.handlers.admin.disputes import (
+        router as admin_disputes_router,
+    )
     from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
@@ -258,6 +261,7 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         admin_payments_router,
         admin_purchases_router,
         admin_payment_queues_router,
+        admin_disputes_router,
         fallback_router,
     ]:
         # Reset parent so module-level router singletons can be included in a

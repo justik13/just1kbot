@@ -40,6 +40,39 @@ class TestAdminDirectMessages(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("dismiss_notification", inline_keyboard[0][0].callback_data)
             self.assertEqual("✅ Прочитано", inline_keyboard[0][0].text)
 
+    async def test_admin_direct_message_error_html_escaped(self):
+        message = AsyncMock()
+        message.from_user.id = 100
+        message.text = "Тестовое сообщение"
+        message.photo = None
+        message.document = None
+        message.chat.id = 100
+        message.message_id = 50
+        message.bot.send_message.side_effect = RuntimeError("Bad Request: <can't parse entities & text>")
+
+        state = AsyncMock()
+        state.get_data.return_value = {"target_telegram_id": 777, "target_user_db_id": 10}
+
+        user = MagicMock()
+        user.id = 10
+        user.telegram_id = 777
+
+        session = AsyncMock()
+
+        mock_show_card = AsyncMock()
+        with (
+            patch("bot.handlers.admin.users.message_routes.is_admin", return_value=True),
+            patch("bot.handlers.admin.users.message_routes.get_user_by_telegram_id", return_value=user),
+            patch("bot.handlers.admin.users.message_routes._show_user_card_edit", mock_show_card),
+        ):
+            await process_send_user_message(message, state, session)
+
+            mock_show_card.assert_called_once()
+            notice = mock_show_card.call_args[1].get("notice", "")
+            self.assertIn("&lt;can&#x27;t parse entities &amp; text&gt;", notice)
+            self.assertNotIn("<can't", notice)
+
 
 if __name__ == "__main__":
     unittest.main()
+
