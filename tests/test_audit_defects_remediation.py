@@ -72,7 +72,7 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("admin_dismiss_alert:5", callbacks)
         self.assertIn("admin_server_toggle_apply:5", callbacks)
         self.assertIn("admin_server_card:5", callbacks)
-        self.assertIn("admin_servers_list", callbacks)
+        self.assertIn("admin_servers", callbacks)
 
     def test_get_real_ip_forwarded_for(self):
         # Loopback remote -> reads X-Forwarded-For first element

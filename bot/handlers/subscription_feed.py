@@ -4,6 +4,7 @@ from aiohttp import web
 from bot.handlers.incy_web_templates import (
     NOT_FOUND_HTML,
     SECURITY_HEADERS,
+    TOO_MANY_REQUESTS_HTML,
     render_inactive_html,
     render_open_html,
 )
@@ -15,11 +16,28 @@ from services.subscription_token_service import (
     MAX_SUBSCRIPTION_TOKEN_LENGTH,
     SubscriptionTokenService,
 )
+from utils.http_rate_limiter import (
+    get_trusted_client_ip,
+    subscription_feed_rate_limiter,
+)
 
 logger = logging.getLogger(__name__)
 
 
 async def subscription_feed_handler(request: web.Request) -> web.Response:
+    client_ip = get_trusted_client_ip(request)
+    is_allowed, retry_after = subscription_feed_rate_limiter.check(client_ip)
+    if not is_allowed:
+        return web.Response(
+            status=429,
+            text="Too Many Requests",
+            headers={
+                "Retry-After": str(retry_after),
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     token = request.match_info.get("token", "").strip()
     if not token or len(token) > MAX_SUBSCRIPTION_TOKEN_LENGTH:
         return web.Response(status=404, text="Not Found")
@@ -41,6 +59,18 @@ async def subscription_feed_handler(request: web.Request) -> web.Response:
 
 
 async def subscription_open_handler(request: web.Request) -> web.Response:
+    client_ip = get_trusted_client_ip(request)
+    is_allowed, retry_after = subscription_feed_rate_limiter.check(client_ip)
+    if not is_allowed:
+        return web.Response(
+            status=429,
+            text=TOO_MANY_REQUESTS_HTML,
+            headers={
+                **SECURITY_HEADERS,
+                "Retry-After": str(retry_after),
+            },
+        )
+
     token = request.match_info.get("token", "").strip()
     if not token or len(token) > MAX_SUBSCRIPTION_TOKEN_LENGTH:
         return web.Response(

@@ -22,7 +22,14 @@ class AmneziaBridgeTokenService:
 
     @classmethod
     def get_secret(cls) -> str:
-        return get_settings().AMNEZIA_BRIDGE_HMAC_SECRET
+        secret = get_settings().AMNEZIA_BRIDGE_HMAC_SECRET
+        if not secret:
+            raise RuntimeError("AMNEZIA_BRIDGE_HMAC_SECRET is not configured")
+        return secret
+
+    @classmethod
+    def is_enabled(cls) -> bool:
+        return bool(get_settings().AMNEZIA_BRIDGE_HMAC_SECRET)
 
     @classmethod
     def sign(

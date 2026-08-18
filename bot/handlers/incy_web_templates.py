@@ -31,6 +31,16 @@ NOT_FOUND_HTML = (
     "</body></html>"
 )
 
+TOO_MANY_REQUESTS_HTML = (
+    "<!DOCTYPE html>"
+    "<html lang='ru'>"
+    "<head><meta charset='utf-8'><title>Слишком много запросов</title></head>"
+    "<body style='background:#0f1117;color:#fff;text-align:center;padding:50px;font-family:sans-serif'>"
+    "<h2>Слишком много запросов</h2>"
+    "<p style='color:#8b949e'>Пожалуйста, подождите немного и повторите попытку.</p>"
+    "</body></html>"
+)
+
 
 def render_inactive_html(sub_url: str, support_username: str) -> str:
     escaped_support_url = (

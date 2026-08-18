@@ -1,14 +1,13 @@
 import ast
 import glob
-import os
-import re
+import importlib
 import sys
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, '.')
+texts_mod = importlib.import_module("bot.texts")
 
 bot_files = glob.glob('bot/**/*.py', recursive=True) + glob.glob('services/**/*.py', recursive=True)
-import bot.texts as texts_mod
 
 print("=== 1. CHECKING MISSING TEXTS ATTRIBUTES ===")
 missing_texts = []
@@ -68,7 +67,7 @@ for fpath in bot_files:
         try:
             tree = ast.parse(f.read(), filename=fpath)
             CallbackEmitterVisitor(fpath).visit(tree)
-        except Exception as e:
+        except Exception:
             pass
 
 # AST Visitor for handlers to catch all F.data filters reliably!
@@ -130,7 +129,7 @@ for fpath in bot_files:
         try:
             tree = ast.parse(f.read(), filename=fpath)
             HandlerVisitor(fpath).visit(tree)
-        except Exception as e:
+        except Exception:
             pass
 
 print(f"Total emitted callbacks found: {len(emitted_callbacks)}")
@@ -160,7 +159,7 @@ for fpath, line, cb in emitted_callbacks:
 
 if unhandled:
     print("\n[UNHANDLED CALLBACKS EMITTED]:")
-    for f, l, cb in unhandled:
-        print(f"  {f}:{l} -> '{cb}'")
+    for f, line_no, cb in unhandled:
+        print(f"  {f}:{line_no} -> '{cb}'")
 else:
     print("\n[OK] Every emitted callback_data has a matching registered handler!")

@@ -15,3 +15,16 @@ def test_public_compose_ports_are_limited_to_caddy():
     )
     assert '"80:80"' in compose
     assert '"443:443"' in compose
+
+
+def test_caddy_config_does_not_require_custom_plugins():
+    root = Path(__file__).parents[1]
+    caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+    caddyfile_ci = (root / "Caddyfile.ci").read_text(encoding="utf-8")
+    dockerfile = (root / "Dockerfile.caddy").read_text(encoding="utf-8")
+
+    assert "order rate_limit" not in caddyfile
+    assert "rate_limit {" not in caddyfile
+    assert "order rate_limit" not in caddyfile_ci
+    assert "rate_limit {" not in caddyfile_ci
+    assert "xcaddy" not in dockerfile

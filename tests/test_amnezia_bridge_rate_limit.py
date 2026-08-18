@@ -65,6 +65,53 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
         allowed, retry_after = limiter.check("client_1", now=now)
         self.assertTrue(allowed)
 
+    def test_token_bucket_temporal_simulation_and_burst_invariants(self):
+        """Verify token-bucket rate limiter replenishment, burst constraints, and steady-state."""
+        limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+        t = 1000.0
+
+        # 1. Burst exhaustion: 10 instant requests allowed, 11th rejected
+        for _ in range(10):
+            allowed, _ = limiter.check("attacker_ip", now=t)
+            self.assertTrue(allowed)
+        allowed, retry_after = limiter.check("attacker_ip", now=t)
+        self.assertFalse(allowed)
+        self.assertGreaterEqual(retry_after, 2)
+
+        # 2. At t + 1.0s: only 0.5 token refilled (insufficient), rejected
+        allowed, retry_after = limiter.check("attacker_ip", now=t + 1.0)
+        self.assertFalse(allowed)
+        self.assertEqual(retry_after, 1)
+
+        # 3. At t + 2.0s: 1.0 token refilled, exactly 1 request allowed
+        allowed, retry_after = limiter.check("attacker_ip", now=t + 2.0)
+        self.assertTrue(allowed)
+        self.assertEqual(retry_after, 0)
+
+        # 4. Immediate second request at t + 2.0s rejected
+        allowed, retry_after = limiter.check("attacker_ip", now=t + 2.0)
+        self.assertFalse(allowed)
+
+        # 5. Sustained load over 60 seconds (rate of 30 req/min = 1 req every 2s)
+        # Starting from empty bucket at t + 2.0s:
+        t_start = t + 2.0
+        passed_in_minute = 0
+        for step in range(1, 31):  # 30 steps of 2 seconds = 60 seconds
+            curr_t = t_start + step * 2.0
+            allowed, _ = limiter.check("attacker_ip", now=curr_t)
+            if allowed:
+                passed_in_minute += 1
+        self.assertEqual(passed_in_minute, 30)
+
+        # 6. Idle bucket caps at burst capacity (10 tokens) after 20s (20s * 0.5 tokens/s = 10)
+        idle_t = t_start + 100.0
+        allowed_count = 0
+        for _ in range(15):
+            allowed, _ = limiter.check("attacker_ip", now=idle_t)
+            if allowed:
+                allowed_count += 1
+        self.assertEqual(allowed_count, 10)
+
     def test_rate_limiter_bounded_lru_and_cleanup(self):
         limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10, max_entries=3)
         now = 100.0
@@ -84,6 +131,23 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
         now += 130.0
         limiter._cleanup(now)
         self.assertEqual(len(limiter.buckets), 0)
+
+    def test_rate_limiter_o1_eviction_under_capacity_flood(self):
+        limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10, max_entries=50)
+        now = 1000.0
+
+        # Rapidly flood 500 distinct client IPs within 5 seconds
+        for i in range(500):
+            now += 0.01
+            allowed, _ = limiter.check(f"flood_ip_{i}", now=now)
+            self.assertTrue(allowed)
+            # Capacity MUST stay strictly bounded to max_entries without runaway memory
+            self.assertLessEqual(len(limiter.buckets), 50)
+
+        # Most recent IP (flood_ip_499) must be retained
+        self.assertIn("flood_ip_499", limiter.buckets)
+        # Oldest IP (flood_ip_0) must have been evicted
+        self.assertNotIn("flood_ip_0", limiter.buckets)
 
     def test_trusted_client_ip_extraction_from_caddy_and_docker(self):
         # Scenario 1: Request from Caddy via Docker private network (172.18.0.3) matching TRUSTED_PROXIES

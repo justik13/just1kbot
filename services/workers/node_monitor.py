@@ -133,7 +133,7 @@ def _build_alert_keyboard(server_id: int, include_enable_button: bool = False) -
     )
     kb.button(
         text="📋 Список серверов",
-        callback_data="admin_servers_list",
+        callback_data="admin_servers",
     )
     kb.button(
         text="🗑 Прочитано",
