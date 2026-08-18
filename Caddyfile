@@ -32,13 +32,19 @@
 
     handle_errors {
         header {
-            Cache-Control "no-store"
+            Content-Type "text/html; charset=utf-8"
+            Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+            Pragma "no-cache"
             Referrer-Policy "no-referrer"
             X-Content-Type-Options "nosniff"
             X-Frame-Options "DENY"
             X-Robots-Tag "noindex, nofollow, noarchive"
+            X-Permitted-Cross-Domain-Policies "none"
+            Permissions-Policy "geolocation=(), camera=(), microphone=()"
+            Cross-Origin-Opener-Policy "same-origin"
+            Cross-Origin-Resource-Policy "same-origin"
             Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none';"
         }
-        respond "{err.status_code} {err.status_text}" {err.status_code}
+        respond `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Слишком много запросов</title><style>:root{--bg:#0f172a;--card-bg:#1e293b;--text-primary:#f8fafc;--text-secondary:#94a3b8;--border:#334155;--error:#ef4444;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg);color:var(--text-primary);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}.card{background-color:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px 24px;max-width:440px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);}h1{font-size:22px;font-weight:700;margin-bottom:12px;color:var(--error);}p{color:var(--text-secondary);font-size:15px;line-height:1.5;}</style></head><body><div class="card"><h1>Слишком много запросов</h1><p>Превышен лимит запросов. Пожалуйста, подождите и повторите попытку позже.</p></div></body></html>` {err.status_code}
     }
 }
