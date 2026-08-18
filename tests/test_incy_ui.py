@@ -136,9 +136,73 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             if btn.callback_data
         ]
         self.assertIn("back_to_connections", btn_callbacks)
+        self.assertIn("rotate_incy_token", btn_callbacks)
 
         all_buttons = [btn for row in keyboard_arg.inline_keyboard for btn in row]
-        self.assertEqual(len(all_buttons), 3)
+        self.assertEqual(len(all_buttons), 4)
+
+    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
+    @patch("bot.handlers.connection.incy_routes.render_hub")
+    async def test_rotate_incy_subscription_handler(
+        self, mock_render_hub, mock_rotate_token
+    ):
+        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+
+        mock_rotate_token.return_value = "new_rotated_token_456"
+
+        bot = AsyncMock()
+        message = MagicMock(spec=Message)
+        message.chat = MagicMock(id=999)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.bot = bot
+        callback.message = message
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        db_user = User(id=1, telegram_id=999, subscription_token="old_token")
+
+        await rotate_incy_subscription(callback, state, session, db_user=db_user)
+
+        callback.answer.assert_any_await("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
+        mock_rotate_token.assert_awaited_once_with(session, db_user)
+        session.commit.assert_awaited_once()
+        mock_render_hub.assert_awaited_once()
+
+        args = mock_render_hub.call_args[0]
+        text_arg = args[2]
+        keyboard_arg = args[3]
+
+        self.assertIn("sub/new_rotated_token_456", text_arg)
+        btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
+        self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
+
+    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
+    @patch("bot.handlers.connection.incy_routes.render_hub")
+    async def test_rotate_incy_subscription_handler_on_error(
+        self, mock_render_hub, mock_rotate_token
+    ):
+        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+
+        mock_rotate_token.side_effect = RuntimeError("DB error")
+
+        bot = AsyncMock()
+        message = MagicMock(spec=Message)
+        message.chat = MagicMock(id=999)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.bot = bot
+        callback.message = message
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=999, subscription_token="old_token")
+
+        await rotate_incy_subscription(callback, state, session, db_user=db_user)
+
+        callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        mock_render_hub.assert_not_awaited()
 
 
 if __name__ == "__main__":

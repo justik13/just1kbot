@@ -32,6 +32,20 @@ class VPNParserTests(unittest.TestCase):
         with self.assertRaises(VPNConfigParseError):
             _decompress_amnezia_format(b"123")
 
+    def test_rejects_declared_length_exceeding_limit(self):
+        content = b"{}"
+        with self.assertRaises(VPNConfigParseError) as ctx:
+            _decompress_amnezia_format(_payload(content, declared_length=2 * 1024 * 1024))
+        self.assertIn("exceeds limit", str(ctx.exception))
+
+    def test_rejects_decompression_bomb_with_small_declared_length(self):
+        # 2 MB of zeroes compresses into ~2 KB, but declared length is forged to 50 bytes
+        bomb_data = b"0" * (2 * 1024 * 1024)
+        forged_payload = struct.pack(">I", 50) + zlib.compress(bomb_data)
+        with self.assertRaises(VPNConfigParseError) as ctx:
+            _decompress_amnezia_format(forged_payload)
+        self.assertIn("exceeds maximum size limit", str(ctx.exception))
+
     def test_full_vpn_uri_roundtrip(self):
         config = {
             "containers": [

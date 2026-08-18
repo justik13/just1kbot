@@ -35,6 +35,8 @@ LOCKED_ACTION_PREFIXES = (
     "add_device",
     "select_server:",
     "confirm_delete_device:",
+    # Ротация подписки INCY.
+    "rotate_incy_token",
     # Админское удаление устройства.
     "admin_delete_device_apply:",
     # Генерация конфигураций.
