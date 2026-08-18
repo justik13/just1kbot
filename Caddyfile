@@ -3,9 +3,6 @@
 }
 
 {$DOMAIN} {
-    @amnezia_too_long path_regexp ^/amnezia/open/.{2048,}
-    respond @amnezia_too_long "URI Too Long" 414
-
     @amnezia_bridge path /amnezia/open/*
     handle @amnezia_bridge {
         request_body {
