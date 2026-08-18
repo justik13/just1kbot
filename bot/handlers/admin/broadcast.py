@@ -373,11 +373,10 @@ async def _send_broadcast_to_users_with_resume(
     should_finalize = False
     blocked_user_ids = []
 
-    if progress_id in _active_broadcast_progress_ids or admin_id in _broadcast_in_progress:
+    if progress_id in _active_broadcast_progress_ids:
         logger.warning(
-            "Broadcast %s (admin=%s) is already actively running. Skipping concurrent duplicate worker.",
+            "Broadcast worker for progress_id=%s is already actively running. Skipping concurrent duplicate worker.",
             progress_id,
-            admin_id,
         )
         return
 
@@ -488,9 +487,9 @@ async def _send_broadcast_to_users_with_resume(
                     if progress:
                         progress.last_processed_id = internal_id
                         if is_success:
-                            progress.success_count += 1
+                            progress.success_count = (progress.success_count or 0) + 1
                         else:
-                            progress.fail_count += 1
+                            progress.fail_count = (progress.fail_count or 0) + 1
                         await session.commit()
                     if is_forbidden:
                         db_user = await session.get(User, uid)
@@ -790,6 +789,9 @@ async def _start_broadcast_process(
             content_type=content_type,
             label=label,
             status="in_progress",
+            last_processed_id=0,
+            success_count=0,
+            fail_count=0,
         )
         sess.add(progress)
         await sess.commit()

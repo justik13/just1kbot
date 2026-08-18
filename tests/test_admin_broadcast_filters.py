@@ -343,5 +343,164 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
         asyncio.run(_test())
 
+    def test_broadcast_ui_launch_executes_successfully(self):
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            _start_broadcast_process,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress, User
+
+        async def _test():
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            callback = AsyncMock()
+            callback.from_user.id = 12345
+            callback.bot = AsyncMock()
+            callback.message.edit_text = AsyncMock()
+
+            state = AsyncMock()
+            state.get_data.return_value = {
+                "broadcast_text": "UI launch test",
+                "media_id": None,
+                "content_type": "text",
+            }
+
+            progress_record = None
+
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                async def scalar(self, stmt):
+                    return 0
+
+                async def execute(self, stmt):
+                    res = MagicMock()
+                    res.scalar_one.return_value = 1
+                    res.all.return_value = [(1, 1001)]
+                    return res
+
+                def add(self, obj):
+                    nonlocal progress_record
+                    obj.id = 77
+                    progress_record = obj
+
+                async def commit(self):
+                    pass
+
+                async def flush(self):
+                    pass
+
+                async def refresh(self, obj):
+                    pass
+
+                async def get(self, model, ident):
+                    if model == BroadcastProgress:
+                        return progress_record
+                    if model == User:
+                        return User(id=1, telegram_id=1001, is_bot_blocked=False)
+                    return None
+
+            dispatch_called = []
+
+            async def fake_dispatch(*args, **kwargs):
+                dispatch_called.append(1)
+
+            with patch("bot.handlers.admin.broadcast.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.broadcast._get_next_batch", side_effect=[[(1, 1001)], []]), \
+                 patch("bot.handlers.admin.broadcast._dispatch_message", side_effect=fake_dispatch):
+
+                await _start_broadcast_process(callback, state, FakeSession(), "all")
+                await asyncio.sleep(0.05)
+
+            self.assertEqual(len(dispatch_called), 1)
+            self.assertEqual(len(_active_broadcast_progress_ids), 0)
+            self.assertEqual(len(_broadcast_in_progress), 0)
+
+        asyncio.run(_test())
+
+    def test_broadcast_resume_pending_executes_successfully(self):
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            resume_pending_broadcasts,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress
+
+        async def _test():
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            mock_bot = AsyncMock()
+
+            progress = BroadcastProgress(
+                id=10,
+                admin_id=12345,
+                target_audience="all",
+                broadcast_text="Resume test",
+                media_id=None,
+                content_type="text",
+                status="in_progress",
+                last_processed_id=0,
+                success_count=0,
+                fail_count=0,
+            )
+
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                def add(self, obj):
+                    pass
+
+                async def flush(self):
+                    pass
+
+                async def refresh(self, obj):
+                    pass
+
+                async def execute(self, stmt):
+                    res = MagicMock()
+                    scalars = MagicMock()
+                    scalars.all.return_value = [progress]
+                    res.scalars.return_value = scalars
+                    return res
+
+                async def get(self, model, ident):
+                    if model == BroadcastProgress:
+                        return progress
+                    return None
+
+                async def commit(self):
+                    pass
+
+            dispatch_called = []
+
+            async def fake_dispatch(*args, **kwargs):
+                dispatch_called.append(1)
+
+            with patch("bot.handlers.admin.broadcast.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.broadcast._get_next_batch", side_effect=[[(1, 1001)], []]), \
+                 patch("bot.handlers.admin.broadcast._dispatch_message", side_effect=fake_dispatch):
+
+                await resume_pending_broadcasts(mock_bot)
+                await asyncio.sleep(0.05)
+
+            self.assertEqual(len(dispatch_called), 1)
+            self.assertEqual(len(_active_broadcast_progress_ids), 0)
+            self.assertEqual(len(_broadcast_in_progress), 0)
+
+        asyncio.run(_test())
+
 
 
