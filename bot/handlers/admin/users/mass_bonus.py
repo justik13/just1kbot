@@ -280,41 +280,50 @@ async def _run_mass_bonus_background(
         result = await session.execute(stmt)
         users = result.all()
 
-    for uid, tg_id in users:
-        idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
-        credited = False
+    CHUNK_SIZE = 50
+    for i in range(0, len(users), CHUNK_SIZE):
+        chunk = users[i : i + CHUNK_SIZE]
+        credited_in_batch = []
         async with session_scope() as session:
-            try:
-                await create_admin_adjustment(
-                    session,
-                    user_id=uid,
-                    signed_amount=amount,
-                    idempotency_key=idempotency_key,
-                    metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
-                )
-                success_count += 1
-                credited = True
-            except Exception as exc:
-                fail_count += 1
-                logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
+            for uid, tg_id in chunk:
+                try:
+                    idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"
+                    await create_admin_adjustment(
+                        session,
+                        user_id=uid,
+                        signed_amount=amount,
+                        idempotency_key=idempotency_key,
+                        metadata={"admin_id": admin_id, "reason": reason, "batch_id": batch_id},
+                    )
+                    success_count += 1
+                    credited_in_batch.append((uid, tg_id))
+                except Exception as exc:
+                    fail_count += 1
+                    logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
 
-        if credited and tg_id and tg_id != admin_id:
-            try:
-                await global_send_limiter.acquire()
-                await bot.send_message(
-                    tg_id,
-                    f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-                    f"Причина: <i>{safe(reason)}</i>",
-                    parse_mode="HTML",
-                )
-            except TelegramForbiddenError:
-                blocked_count += 1
-                async with session_scope() as session:
+        blocked_uids = []
+        for uid, tg_id in credited_in_batch:
+            if tg_id and tg_id != admin_id:
+                try:
+                    await global_send_limiter.acquire()
+                    await bot.send_message(
+                        tg_id,
+                        f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
+                        f"Причина: <i>{safe(reason)}</i>",
+                        parse_mode="HTML",
+                    )
+                except TelegramForbiddenError:
+                    blocked_count += 1
+                    blocked_uids.append(uid)
+                except Exception as e:
+                    logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
+
+        if blocked_uids:
+            async with session_scope() as session:
+                for uid in blocked_uids:
                     db_user = await session.get(User, uid)
                     if db_user:
                         db_user.is_bot_blocked = True
-            except Exception as e:
-                logger.warning("Failed to notify user %s for mass bonus: %s", uid, e)
 
     async with session_scope() as session:
         await AuditService.log_action(

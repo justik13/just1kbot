@@ -450,8 +450,12 @@ async def _send_broadcast_to_users_with_resume(
                         is_success = True
                     except TelegramForbiddenError:
                         is_forbidden = True
-                    except Exception:
-                        pass
+                    except Exception as retry_err:
+                        logger.error(
+                            "Broadcast retry error for user %s: %s",
+                            uid,
+                            retry_err,
+                        )
                 except TelegramForbiddenError:
                     is_forbidden = True
                 except Exception as e:
