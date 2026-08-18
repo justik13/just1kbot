@@ -52,8 +52,10 @@ async def clear_audit_logs(
     session: AsyncSession,
     older_than_days: int = 30,
     batch_size: int = 500,
-    max_rounds: int = 20,
+    max_rounds: int = 100,
+    commit_per_batch: bool = True,
 ) -> int:
+    import asyncio
     from datetime import timedelta
     from sqlalchemy import delete, select
     threshold = now_utc() - timedelta(days=older_than_days)
@@ -72,10 +74,14 @@ async def clear_audit_logs(
             break
         del_stmt = delete(AuditLog).where(AuditLog.id.in_(ids))
         del_res = await session.execute(del_stmt)
-        await session.flush()
+        if commit_per_batch:
+            await session.commit()
+        else:
+            await session.flush()
         total_deleted += int(del_res.rowcount or 0)
         if len(ids) < batch_size:
             break
+        await asyncio.sleep(0.01)
     return total_deleted
 
 

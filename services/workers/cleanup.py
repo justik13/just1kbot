@@ -404,7 +404,7 @@ async def _cleanup_dangling_peers():
 
 
 BATCH_DELETE_CHUNK_SIZE = 500
-MAX_BATCH_DELETE_ROUNDS = 20
+MAX_BATCH_DELETE_ROUNDS = 100
 
 
 async def _batch_delete_matching(
@@ -413,12 +413,16 @@ async def _batch_delete_matching(
     *where_clauses,
     batch_size: int = BATCH_DELETE_CHUNK_SIZE,
     max_rounds: int = MAX_BATCH_DELETE_ROUNDS,
+    commit_per_batch: bool = True,
 ) -> int:
-    """Delete rows matching where_clauses in bounded primary-key batches with skip_locked to avoid long table locks."""
+    """Delete rows matching where_clauses in bounded primary-key batches with skip_locked, committing per batch to release locks immediately."""
     if not hasattr(model, "id"):
         stmt = delete(model).where(*where_clauses)
         res = await session.execute(stmt)
-        await session.flush()
+        if commit_per_batch:
+            await session.commit()
+        else:
+            await session.flush()
         return int(res.rowcount or 0)
 
     total_deleted = 0
@@ -435,11 +439,16 @@ async def _batch_delete_matching(
             break
         del_stmt = delete(model).where(model.id.in_(ids))
         del_res = await session.execute(del_stmt)
-        await session.flush()
+        if commit_per_batch:
+            await session.commit()
+        else:
+            await session.flush()
         total_deleted += int(del_res.rowcount or 0)
         if len(ids) < batch_size:
             break
+        await asyncio.sleep(0.01)
     return total_deleted
+
 
 
 

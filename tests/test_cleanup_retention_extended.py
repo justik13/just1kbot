@@ -25,7 +25,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(30, WEBHOOK_INBOX_RETENTION_DAYS)
         self.assertEqual(180, AUDIT_LOG_RETENTION_DAYS)
         self.assertEqual(500, BATCH_DELETE_CHUNK_SIZE)
-        self.assertEqual(20, MAX_BATCH_DELETE_ROUNDS)
+        self.assertEqual(100, MAX_BATCH_DELETE_ROUNDS)
 
     async def test_batch_delete_matching_chunks_multi_round(self):
         mock_session = AsyncMock()
@@ -72,7 +72,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(1200, total)
         self.assertEqual(6, mock_session.execute.call_count)
-        self.assertEqual(3, mock_session.flush.call_count)
+        self.assertEqual(3, mock_session.commit.call_count)
 
     async def test_batch_delete_matching_empty_returns_zero(self):
         mock_session = AsyncMock()
