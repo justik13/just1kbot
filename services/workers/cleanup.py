@@ -16,7 +16,6 @@ from database.models import (
     HubMessage,
     Payment,
     Server,
-    TariffQuote,
     User,
     VPNProfile,
     WebhookInbox,
@@ -44,7 +43,6 @@ OLD_RECORDS_INTERVAL = 86400.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
-STALE_QUOTES_RETENTION_DAYS = 14
 
 _last_old_cleanup: float = 0.0
 
@@ -506,34 +504,22 @@ async def _cleanup_old_records():
             WebhookInbox.received_at < threshold_webhooks,
         )
 
-        # Prune stale unconsumed checkout quotes (expired/cancelled)
-        threshold_quotes = current_time - timedelta(days=STALE_QUOTES_RETENTION_DAYS)
-        quotes_deleted = await _batch_delete_matching(
-            session,
-            TariffQuote,
-            TariffQuote.status.in_(["expired", "cancelled"]),
-            TariffQuote.consumed_at.is_(None),
-            TariffQuote.created_at < threshold_quotes,
-        )
-
-
         if (
             broadcasts_deleted > 0
             or deleted_logs > 0
             or hub_deleted > 0
             or payments_expired > 0
             or webhooks_deleted > 0
-            or quotes_deleted > 0
         ):
             logger.info(
                 "Cleanup: %s old broadcasts, %s old audit logs, "
                 "%s old hub_messages deleted, %s abandoned pending payments expired, "
-                "%s old webhooks deleted, %s stale quotes deleted",
+                "%s old webhooks deleted",
                 broadcasts_deleted,
                 deleted_logs,
                 hub_deleted,
                 payments_expired,
                 webhooks_deleted,
-                quotes_deleted,
             )
+
 

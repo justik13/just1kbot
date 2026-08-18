@@ -7,24 +7,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from database.models import (
     BroadcastProgress,
     HubMessage,
-    TariffQuote,
     WebhookInbox,
 )
 from services.workers.cleanup import (
     AUDIT_LOG_RETENTION_DAYS,
     BATCH_DELETE_CHUNK_SIZE,
     MAX_BATCH_DELETE_ROUNDS,
-    STALE_QUOTES_RETENTION_DAYS,
     WEBHOOK_INBOX_RETENTION_DAYS,
     _batch_delete_matching,
     _cleanup_old_records,
 )
 
 
+
 class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
     def test_retention_constants(self):
         self.assertEqual(30, WEBHOOK_INBOX_RETENTION_DAYS)
-        self.assertEqual(14, STALE_QUOTES_RETENTION_DAYS)
         self.assertEqual(180, AUDIT_LOG_RETENTION_DAYS)
         self.assertEqual(500, BATCH_DELETE_CHUNK_SIZE)
         self.assertEqual(20, MAX_BATCH_DELETE_ROUNDS)
@@ -111,7 +109,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         ):
             mock_scope.return_value.__aenter__.return_value = mock_session
             mock_clear_audit.return_value = 15
-            mock_batch_del.side_effect = [3, 2, 8, 4]  # broadcasts, hub, webhooks, quotes
+            mock_batch_del.side_effect = [3, 2, 8]  # broadcasts, hub, webhooks
 
             await _cleanup_old_records()
 
@@ -124,8 +122,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             # 1. BroadcastProgress
             # 2. HubMessage
             # 3. WebhookInbox
-            # 4. TariffQuote
-            self.assertEqual(4, mock_batch_del.call_count)
+            self.assertEqual(3, mock_batch_del.call_count)
 
             # 1. BroadcastProgress call
             bp_call = mock_batch_del.call_args_list[0]
@@ -142,32 +139,20 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             self.assertIs(wh_call[0][0], mock_session)
             self.assertIs(wh_call[0][1], WebhookInbox)
 
-            # 4. TariffQuote call: verify status IN ('expired', 'cancelled')
-            tq_call = mock_batch_del.call_args_list[3]
-            self.assertIs(tq_call[0][0], mock_session)
-            self.assertIs(tq_call[0][1], TariffQuote)
-
             # Verify info log
             mock_logger.info.assert_called_once()
             log_args = mock_logger.info.call_args[0]
             self.assertIn("old webhooks deleted", log_args[0])
-            self.assertIn("stale quotes deleted", log_args[0])
 
-    def test_webhook_and_quote_retention_predicates_logic(self):
+    def test_webhook_retention_predicates_logic(self):
         """Pure-logic verification of the retention predicates against sample entity states."""
         now = datetime(2026, 8, 18, 12, 0, 0, tzinfo=timezone.utc)
         threshold_webhooks = now - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)
-        threshold_quotes = now - timedelta(days=STALE_QUOTES_RETENTION_DAYS)
 
         # Predicate for WebhookInbox:
         # status IN ('succeeded', 'dead') AND received_at < threshold_webhooks
         def matches_webhook_retention(status: str, received_at: datetime) -> bool:
             return status in ("succeeded", "dead") and received_at < threshold_webhooks
-
-        # Predicate for TariffQuote:
-        # status IN ('expired', 'cancelled') AND consumed_at IS NULL AND created_at < threshold_quotes
-        def matches_quote_retention(status: str, consumed_at: datetime | None, created_at: datetime) -> bool:
-            return status in ("expired", "cancelled") and consumed_at is None and created_at < threshold_quotes
 
         old_dt = now - timedelta(days=40)
         recent_dt = now - timedelta(days=2)
@@ -181,11 +166,4 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(matches_webhook_retention("succeeded", recent_dt), "Recent succeeded webhook must NOT be deleted")
         self.assertFalse(matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted")
 
-        # Quote matching assertions
-        self.assertTrue(matches_quote_retention("expired", None, old_dt))
-        self.assertTrue(matches_quote_retention("cancelled", None, old_dt))
-        self.assertFalse(matches_quote_retention("consumed", old_dt, old_dt), "Consumed quote must NEVER be deleted")
-        self.assertFalse(matches_quote_retention("active", None, old_dt), "Active quote must NEVER be deleted")
-        self.assertFalse(matches_quote_retention("expired", None, recent_dt), "Recent expired quote must NOT be deleted")
-        self.assertFalse(matches_quote_retention("cancelled", None, recent_dt), "Recent cancelled quote must NOT be deleted")
 
