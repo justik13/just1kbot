@@ -38,7 +38,9 @@ logger = logging.getLogger(__name__)
 TELEGRAM_CAPTION_LIMIT = 1024
 
 _broadcast_stop_events: dict[int, asyncio.Event] = {}
+# Tracks which admin_id is actively running a broadcast to prevent concurrent UI launches by the same admin
 _broadcast_in_progress: set[int] = set()
+# Tracks which broadcast progress record (id) is actively being processed by a worker task to prevent duplicate concurrent runs
 _active_broadcast_progress_ids: set[int] = set()
 _background_tasks: set[asyncio.Task] = set()
 
@@ -363,6 +365,18 @@ async def _send_broadcast_to_users_with_resume(
     progress_id: int,
     admin_id: int,
 ):
+    """Executes or resumes broadcast message dispatch to target audience.
+
+    Delivery & Checkpoint Semantics:
+    - Guaranteed Single-Worker Ownership: Protected by `_active_broadcast_progress_ids`.
+    - At-Most-Once per Dispatch Phase: Each recipient in the batch is attempted once
+      (with an immediate single backoff-retry on `TelegramRetryAfter`).
+    - Durable Progress Checkpoint: After each dispatch attempt, `progress.last_processed_id`
+      is immediately committed in PostgreSQL. On bot restart, resumption continues strictly
+      with `user.id > last_processed_id`, guaranteeing zero duplicate messages to already-processed users.
+    - Transient Failures: If a network/transient error fails both attempt and retry, the user is
+      counted in `fail_count` and progress advances to prevent halting the entire broadcast pipeline.
+    """
     stop_event = None
     broadcast_text = None
     media_id = None

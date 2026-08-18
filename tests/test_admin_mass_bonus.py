@@ -187,6 +187,105 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             key = f"mass_bonus_{batch_id}_{u}_{amount}"
             self.assertIn(key, ledger_entries_by_key)
 
+    async def test_mass_bonus_true_crash_and_restart_recovery(self):
+        """Simulates an actual process crash / exception thrown mid-run during Telegram
+        notification dispatch after committing batch 1, then triggers a full restart with the
+        same batch_id, proving zero duplicate ledger entries and full delivery."""
+        mock_bot = AsyncMock()
+        admin_id = 999999
+        amount = 50
+        reason = "Real crash restart test"
+        batch_id = 1700008888
+
+        # 120 users (3 batches of 50: batch1=1..50, batch2=51..100, batch3=101..120)
+        users = [(i, 3000 + i) for i in range(1, 121)]
+
+        # Simulated persistent database ledger table with unique constraint on idempotency_key
+        ledger_table = {}
+        sent_messages = []
+
+        class FakeSession:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+            async def execute(self, stmt, *args, **kwargs):
+                mock_res = MagicMock()
+                mock_res.all.return_value = users
+                return mock_res
+
+            async def get(self, model, ident):
+                return None
+
+        async def persistent_create_admin_adjustment(session, user_id, signed_amount, idempotency_key, metadata):
+            if idempotency_key in ledger_table:
+                # Simulates database UniqueConstraint(idempotency_key) raising IntegrityError
+                raise RuntimeError(f"IntegrityError: Duplicate key {idempotency_key}")
+            ledger_table[idempotency_key] = {"user_id": user_id, "amount": signed_amount}
+
+        should_crash = True
+
+        async def crashable_send_message(chat_id, text, parse_mode="HTML"):
+            nonlocal should_crash
+            sent_messages.append((chat_id, text))
+            if should_crash and chat_id == 3025:  # crash on user 25 during batch 1 notification
+                raise KeyboardInterrupt("Simulated server crash / process SIGKILL")
+
+        mock_bot.send_message.side_effect = crashable_send_message
+
+        # RUN 1: Starts processing batch 1 (users 1..50 committed to DB), but crashes at user 25 in Telegram dispatch
+        with self.assertRaises(KeyboardInterrupt):
+            with patch("database.connection.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.users.mass_bonus.create_admin_adjustment", side_effect=persistent_create_admin_adjustment), \
+                 patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock), \
+                 patch("utils.rate_limiter.global_send_limiter.acquire", new_callable=AsyncMock), \
+                 patch("bot.handlers.admin.users.mass_bonus.render_hub", new_callable=AsyncMock):
+
+                await _run_mass_bonus_background(
+                    bot=mock_bot,
+                    admin_id=admin_id,
+                    target_aud="all",
+                    amount=amount,
+                    reason=reason,
+                    batch_id=batch_id,
+                )
+
+        # Confirm that Batch 1 (50 users) was committed to the DB before the crash
+        self.assertEqual(len(ledger_table), 50)
+        self.assertEqual(len(sent_messages), 25)
+
+        # RUN 2: Server restarts, operator triggers rerun of the same batch_id
+        should_crash = False
+        sent_messages.clear()
+
+        with patch("database.connection.session_scope", side_effect=FakeSession), \
+             patch("bot.handlers.admin.users.mass_bonus.create_admin_adjustment", side_effect=persistent_create_admin_adjustment), \
+             patch("services.audit_service.AuditService.log_action", new_callable=AsyncMock) as mock_audit, \
+             patch("utils.rate_limiter.global_send_limiter.acquire", new_callable=AsyncMock), \
+             patch("bot.handlers.admin.users.mass_bonus.render_hub", new_callable=AsyncMock) as mock_render:
+
+            await _run_mass_bonus_background(
+                bot=mock_bot,
+                admin_id=admin_id,
+                target_aud="all",
+                amount=amount,
+                reason=reason,
+                batch_id=batch_id,
+            )
+
+        # Verify that all 120 users are in the ledger and exactly 0 duplicate adjustments were created
+        self.assertEqual(len(ledger_table), 120)
+        for u in range(1, 121):
+            key = f"mass_bonus_{batch_id}_{u}_{amount}"
+            self.assertIn(key, ledger_table)
+
+        # Batch 2 and 3 (70 users) were credited and notified
+        self.assertEqual(len(sent_messages), 70)
+        mock_audit.assert_called_once()
+        mock_render.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
