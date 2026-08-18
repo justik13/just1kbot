@@ -708,132 +708,140 @@ async def _start_broadcast_process(
         )
         return
 
-    try:
-        async with session_scope() as check_session:
-            active_count = await check_session.scalar(
-                select(func.count(BroadcastProgress.id)).where(
-                    BroadcastProgress.admin_id == admin_id,
-                    BroadcastProgress.status == "in_progress",
-                )
-            )
-            if active_count and active_count > 0:
-                await callback.answer(
-                    texts.BROADCAST_ALREADY_RUNNING,
-                    show_alert=True,
-                )
-                return
-    except Exception as e:
-        logger.warning(
-            "Failed to check DB for active broadcasts: %s",
-            e,
-        )
-
-    data = await state.get_data()
-    broadcast_text = data.get("broadcast_text")
-    if not broadcast_text:
-        await callback.answer(
-            texts.ERROR_TEXT_EMPTY,
-            show_alert=True,
-        )
-        await state.clear()
-        return
-
-    media_id = data.get("media_id")
-    content_type = data.get("content_type")
-
-    count_stmt = select(func.count(User.id)).where(
-        User.is_deleted.is_(False),
-        User.is_bot_blocked.is_(False),
-        User.is_banned.is_(False),
-    )
-    current_time = now_utc()
-    if audience == "active":
-        count_stmt = count_stmt.where(
-            User.subscription_end > current_time,
-        )
-    elif audience == "expiring_3d":
-        from datetime import timedelta
-        count_stmt = count_stmt.where(
-            User.subscription_end > current_time,
-            User.subscription_end <= current_time + timedelta(days=3),
-        )
-    elif audience == "expired":
-        count_stmt = count_stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end <= current_time,
-        )
-    elif audience == "never":
-        count_stmt = count_stmt.where(
-            User.subscription_end.is_(None),
-        )
-    elif audience.startswith("test_"):
-        try:
-            admin_tg_id = int(audience.split("_", 1)[1])
-            count_stmt = count_stmt.where(User.telegram_id == admin_tg_id)
-        except (IndexError, ValueError):
-            pass
-
-    result = await session.execute(count_stmt)
-    total_count = result.scalar_one()
-
-    if not total_count:
-        await callback.answer(
-            texts.BROADCAST_NO_RECIPIENTS,
-            show_alert=True,
-        )
-        await state.clear()
-        return
-
-    label_map = {
-        "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
-        "active": texts.BROADCAST_ACTIVE_LABEL,
-        "expiring_3d": "⏳ Истекают < 3 дней",
-        "expired": "🔴 Истекшие подписки",
-        "never": "🆕 Без подписок",
-    }
-    label = label_map.get(audience, "🧪 Тест мне (Админу)" if audience.startswith("test_") else audience)
-
-    async with session_scope() as sess:
-        progress = BroadcastProgress(
-            admin_id=admin_id,
-            total_count=total_count,
-            target_audience=audience,
-            broadcast_text=broadcast_text,
-            media_id=media_id,
-            content_type=content_type,
-            label=label,
-            status="in_progress",
-            last_processed_id=0,
-            success_count=0,
-            fail_count=0,
-        )
-        sess.add(progress)
-        await sess.commit()
-        await sess.refresh(progress)
-        progress_id = progress.id
-
+    # Immediately claim admin broadcast lock before any async yields/awaits to prevent race conditions
     _broadcast_in_progress.add(admin_id)
-    _start_background_task(
-        _send_broadcast_to_users_with_resume(
-            callback.bot,
-            progress_id,
-            admin_id,
-        )
-    )
+    launched = False
 
     try:
-        await callback.message.edit_text(
-            texts.BROADCAST_STARTED.format(total_count=total_count),
-            reply_markup=get_back_button("admin_menu"),
-            parse_mode="HTML",
-        )
-    except TelegramBadRequest as e:
-        logger.debug(
-            "edit_text failed in _start_broadcast_process: %s",
-            e,
-        )
+        try:
+            async with session_scope() as check_session:
+                active_count = await check_session.scalar(
+                    select(func.count(BroadcastProgress.id)).where(
+                        BroadcastProgress.admin_id == admin_id,
+                        BroadcastProgress.status == "in_progress",
+                    )
+                )
+                if active_count and active_count > 0:
+                    await callback.answer(
+                        texts.BROADCAST_ALREADY_RUNNING,
+                        show_alert=True,
+                    )
+                    return
+        except Exception as e:
+            logger.warning(
+                "Failed to check DB for active broadcasts: %s",
+                e,
+            )
 
-    await state.clear()
+        data = await state.get_data()
+        broadcast_text = data.get("broadcast_text")
+        if not broadcast_text:
+            await callback.answer(
+                texts.ERROR_TEXT_EMPTY,
+                show_alert=True,
+            )
+            await state.clear()
+            return
+
+        media_id = data.get("media_id")
+        content_type = data.get("content_type")
+
+        count_stmt = select(func.count(User.id)).where(
+            User.is_deleted.is_(False),
+            User.is_bot_blocked.is_(False),
+            User.is_banned.is_(False),
+        )
+        current_time = now_utc()
+        if audience == "active":
+            count_stmt = count_stmt.where(
+                User.subscription_end > current_time,
+            )
+        elif audience == "expiring_3d":
+            from datetime import timedelta
+            count_stmt = count_stmt.where(
+                User.subscription_end > current_time,
+                User.subscription_end <= current_time + timedelta(days=3),
+            )
+        elif audience == "expired":
+            count_stmt = count_stmt.where(
+                User.subscription_end.is_not(None),
+                User.subscription_end <= current_time,
+            )
+        elif audience == "never":
+            count_stmt = count_stmt.where(
+                User.subscription_end.is_(None),
+            )
+        elif audience.startswith("test_"):
+            try:
+                admin_tg_id = int(audience.split("_", 1)[1])
+                count_stmt = count_stmt.where(User.telegram_id == admin_tg_id)
+            except (IndexError, ValueError):
+                pass
+
+        result = await session.execute(count_stmt)
+        total_count = result.scalar_one()
+
+        if not total_count:
+            await callback.answer(
+                texts.BROADCAST_NO_RECIPIENTS,
+                show_alert=True,
+            )
+            await state.clear()
+            return
+
+        label_map = {
+            "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
+            "active": texts.BROADCAST_ACTIVE_LABEL,
+            "expiring_3d": "⏳ Истекают < 3 дней",
+            "expired": "🔴 Истекшие подписки",
+            "never": "🆕 Без подписок",
+        }
+        label = label_map.get(audience, "🧪 Тест мне (Админу)" if audience.startswith("test_") else audience)
+
+        async with session_scope() as sess:
+            progress = BroadcastProgress(
+                admin_id=admin_id,
+                total_count=total_count,
+                target_audience=audience,
+                broadcast_text=broadcast_text,
+                media_id=media_id,
+                content_type=content_type,
+                label=label,
+                status="in_progress",
+                last_processed_id=0,
+                success_count=0,
+                fail_count=0,
+            )
+            sess.add(progress)
+            await sess.commit()
+            await sess.refresh(progress)
+            progress_id = progress.id
+
+        _start_background_task(
+            _send_broadcast_to_users_with_resume(
+                callback.bot,
+                progress_id,
+                admin_id,
+            )
+        )
+        launched = True
+
+        try:
+            await callback.message.edit_text(
+                texts.BROADCAST_STARTED.format(total_count=total_count),
+                reply_markup=get_back_button("admin_menu"),
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest as e:
+            logger.debug(
+                "edit_text failed in _start_broadcast_process: %s",
+                e,
+            )
+
+        await state.clear()
+    finally:
+        if not launched:
+            _broadcast_in_progress.discard(admin_id)
 
 
 @router.callback_query(

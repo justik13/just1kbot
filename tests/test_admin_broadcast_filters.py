@@ -502,5 +502,103 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
         asyncio.run(_test())
 
+    def test_start_broadcast_process_concurrent_race_protection(self):
+        """Verify that concurrent calls to _start_broadcast_process for the same admin
+        are serialized/locked before the first await, creating exactly 1 progress record
+        and returning BROADCAST_ALREADY_RUNNING to the duplicate invocation."""
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            _start_broadcast_process,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress
+        from bot import texts
+
+        async def _test():
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            admin_id = 777888
+            callback1 = AsyncMock()
+            callback1.from_user.id = admin_id
+            callback1.bot = AsyncMock()
+            callback1.message.edit_text = AsyncMock()
+
+            callback2 = AsyncMock()
+            callback2.from_user.id = admin_id
+            callback2.bot = AsyncMock()
+            callback2.message.edit_text = AsyncMock()
+
+            state = AsyncMock()
+            state.get_data.return_value = {
+                "broadcast_text": "Concurrent UI test",
+                "media_id": None,
+                "content_type": "text",
+            }
+
+            created_records = []
+
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                def add(self, obj):
+                    if isinstance(obj, BroadcastProgress):
+                        obj.id = 999
+                        created_records.append(obj)
+
+                async def flush(self):
+                    pass
+
+                async def refresh(self, obj):
+                    pass
+
+                async def commit(self):
+                    pass
+
+                async def scalar(self, stmt):
+                    # Simulate DB check with small async delay to test pre-await lock
+                    await asyncio.sleep(0.01)
+                    return 0
+
+                async def execute(self, stmt):
+                    mock_res = MagicMock()
+                    mock_res.scalar_one.return_value = 10
+                    return mock_res
+
+            def fake_start_task(coro):
+                coro.close()
+                return MagicMock()
+
+            with patch("bot.handlers.admin.broadcast.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.broadcast._start_background_task", side_effect=fake_start_task) as mock_start_task:
+
+                # Launch two concurrent _start_broadcast_process calls
+                await asyncio.gather(
+                    _start_broadcast_process(callback1, state, FakeSession(), "all"),
+                    _start_broadcast_process(callback2, state, FakeSession(), "all"),
+                )
+
+            # Exactly one progress record should be created
+            self.assertEqual(len(created_records), 1)
+            # Exactly one background worker task should be launched
+            self.assertEqual(mock_start_task.call_count, 1)
+
+            # One callback was answered with BROADCAST_ALREADY_RUNNING
+            answers1 = [call.args[0] for call in callback1.answer.call_args_list if call.args]
+            answers2 = [call.args[0] for call in callback2.answer.call_args_list if call.args]
+            all_answers = answers1 + answers2
+            self.assertIn(texts.BROADCAST_ALREADY_RUNNING, all_answers)
+
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+        asyncio.run(_test())
+
+
 
 
