@@ -401,7 +401,7 @@ DB_ENCRYPTION_KEY='${DB_ENCRYPTION_KEY}'
 # 1-Click Amnezia Bridge & Proxies
 # ------------------------------------------------------------
 AMNEZIA_BRIDGE_HMAC_SECRET='${AMNEZIA_BRIDGE_HMAC_SECRET}'
-TRUSTED_PROXIES='127.0.0.1,::1,172.16.0.0/12'
+TRUSTED_PROXIES='127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'
 
 # ------------------------------------------------------------
 # Redis
