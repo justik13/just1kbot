@@ -254,8 +254,11 @@ async def amnezia_bridge_handler(request: web.Request) -> web.Response:
             status=400,
             headers=AMNEZIA_SECURITY_HEADERS,
         )
-    except Exception:
-        logger.exception("Unexpected error in Amnezia bridge handler")
+    except Exception as exc:
+        logger.error(
+            "Unexpected error in Amnezia bridge handler: %s",
+            type(exc).__name__,
+        )
         return web.Response(
             text=render_500_html(),
             status=500,

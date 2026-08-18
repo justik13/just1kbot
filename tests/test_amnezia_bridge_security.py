@@ -506,6 +506,22 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
                 resp = await amnezia_bridge_handler(req)
                 self.assertEqual(resp.status, 403)
 
+    @patch("bot.handlers.amnezia_bridge.session_scope")
+    async def test_unexpected_exception_logs_only_exception_type_without_traceback(self, mock_session_scope):
+        mock_session_scope.side_effect = RuntimeError("Sensitive internal secret error details")
+        exp = int(now_utc().timestamp()) + 300
+        sig = AmneziaBridgeTokenService.sign(1, 1, exp, secret=TEST_SECRET)
+        req = self._create_request("1", {"uid": "1", "exp": str(exp), "sig": sig})
+
+        with self.assertLogs("bot.handlers.amnezia_bridge", level="ERROR") as cm:
+            resp = await amnezia_bridge_handler(req)
+
+        self.assertEqual(resp.status, 500)
+        self.assertEqual(len(cm.output), 1)
+        self.assertIn("Unexpected error in Amnezia bridge handler: RuntimeError", cm.output[0])
+        self.assertNotIn("Sensitive internal secret error details", cm.output[0])
+        self.assertNotIn("Traceback", cm.output[0])
+
 
 if __name__ == "__main__":
     unittest.main()
