@@ -29,6 +29,7 @@ class HttpRateLimiter:
         self.burst = float(burst)
         self.max_entries = max_entries
         self.buckets: collections.OrderedDict[str, tuple[float, float]] = collections.OrderedDict()
+        self._last_cleanup: float = 0.0
 
     def check(self, key: str, now: float | None = None) -> tuple[bool, int]:
         """Check if request is allowed.
@@ -38,11 +39,13 @@ class HttpRateLimiter:
         if now is None:
             now = time.monotonic()
 
-        # Evict old / least recently used entries if capacity is reached
+        # O(1) LRU eviction when capacity is reached + throttled background cleanup
         if key not in self.buckets and len(self.buckets) >= self.max_entries:
-            self._cleanup(now)
+            if now - self._last_cleanup >= 30.0:
+                self._last_cleanup = now
+                self._cleanup(now)
             if len(self.buckets) >= self.max_entries:
-                self.buckets.popitem(last=False)  # pop least recently used
+                self.buckets.popitem(last=False)  # pop least recently used in O(1)
 
         tokens, last_refill = self.buckets.get(key, (self.burst, now))
         elapsed = max(0.0, now - last_refill)

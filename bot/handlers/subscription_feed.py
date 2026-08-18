@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 async def subscription_feed_handler(request: web.Request) -> web.Response:
     client_ip = get_trusted_client_ip(request)
-    is_allowed, retry_after = subscription_feed_rate_limiter.check(f"feed:{client_ip}")
+    is_allowed, retry_after = subscription_feed_rate_limiter.check(client_ip)
     if not is_allowed:
         return web.Response(
             status=429,
@@ -60,7 +60,7 @@ async def subscription_feed_handler(request: web.Request) -> web.Response:
 
 async def subscription_open_handler(request: web.Request) -> web.Response:
     client_ip = get_trusted_client_ip(request)
-    is_allowed, retry_after = subscription_feed_rate_limiter.check(f"open:{client_ip}")
+    is_allowed, retry_after = subscription_feed_rate_limiter.check(client_ip)
     if not is_allowed:
         return web.Response(
             status=429,

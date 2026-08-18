@@ -222,6 +222,77 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://t.me/test_support", response.text)
         self.assertNotIn("incy://import/", response.text)
 
+    @patch("bot.handlers.subscription_feed.SubscriptionFeedService.build_feed")
+    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
+    @patch("bot.handlers.subscription_feed.session_scope")
+    async def test_feed_and_open_endpoints_share_rate_limit_budget(
+        self, mock_session_scope, mock_get_user, mock_build_feed
+    ):
+        mock_session = AsyncMock()
+        mock_session_scope.return_value.__aenter__.return_value = mock_session
+        user = User(
+            id=77,
+            telegram_id=888,
+            subscription_token="valid_token_xyz",
+            subscription_end=now_utc() + timedelta(days=30),
+        )
+        mock_get_user.return_value = user
+        mock_build_feed.return_value = (200, {"Content-Type": "text/plain"}, "test-feed")
+
+        # Burst is 30. Send 20 requests to feed endpoint
+        for _ in range(20):
+            req = make_mocked_request(
+                "GET",
+                "/sub/valid_token_xyz",
+                match_info={"token": "valid_token_xyz"},
+            )
+            req._transport_peername = ("198.51.100.10", 12345)
+            resp = await subscription_feed_handler(req)
+            self.assertEqual(resp.status, 200)
+
+        # Send 10 requests to open endpoint (total 30)
+        for _ in range(10):
+            req = make_mocked_request(
+                "GET",
+                "/sub/open/valid_token_xyz",
+                match_info={"token": "valid_token_xyz"},
+            )
+            req._transport_peername = ("198.51.100.10", 12345)
+            resp = await subscription_open_handler(req)
+            self.assertEqual(resp.status, 200)
+
+        # 31st request to feed endpoint MUST be throttled (429)
+        req_31 = make_mocked_request(
+            "GET",
+            "/sub/valid_token_xyz",
+            match_info={"token": "valid_token_xyz"},
+        )
+        req_31._transport_peername = ("198.51.100.10", 12345)
+        resp_31 = await subscription_feed_handler(req_31)
+        self.assertEqual(resp_31.status, 429)
+        self.assertEqual(resp_31.text, "Too Many Requests")
+
+        # 32nd request to open endpoint MUST also be throttled (429 with HTML)
+        req_32 = make_mocked_request(
+            "GET",
+            "/sub/open/valid_token_xyz",
+            match_info={"token": "valid_token_xyz"},
+        )
+        req_32._transport_peername = ("198.51.100.10", 12345)
+        resp_32 = await subscription_open_handler(req_32)
+        self.assertEqual(resp_32.status, 429)
+        self.assertIn("Слишком много запросов", resp_32.text)
+
+        # A different IP address still has its full independent budget
+        req_other = make_mocked_request(
+            "GET",
+            "/sub/valid_token_xyz",
+            match_info={"token": "valid_token_xyz"},
+        )
+        req_other._transport_peername = ("198.51.100.20", 12345)
+        resp_other = await subscription_feed_handler(req_other)
+        self.assertEqual(resp_other.status, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

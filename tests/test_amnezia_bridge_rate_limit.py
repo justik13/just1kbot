@@ -85,6 +85,23 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
         limiter._cleanup(now)
         self.assertEqual(len(limiter.buckets), 0)
 
+    def test_rate_limiter_o1_eviction_under_capacity_flood(self):
+        limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10, max_entries=50)
+        now = 1000.0
+
+        # Rapidly flood 500 distinct client IPs within 5 seconds
+        for i in range(500):
+            now += 0.01
+            allowed, _ = limiter.check(f"flood_ip_{i}", now=now)
+            self.assertTrue(allowed)
+            # Capacity MUST stay strictly bounded to max_entries without runaway memory
+            self.assertLessEqual(len(limiter.buckets), 50)
+
+        # Most recent IP (flood_ip_499) must be retained
+        self.assertIn("flood_ip_499", limiter.buckets)
+        # Oldest IP (flood_ip_0) must have been evicted
+        self.assertNotIn("flood_ip_0", limiter.buckets)
+
     def test_trusted_client_ip_extraction_from_caddy_and_docker(self):
         # Scenario 1: Request from Caddy via Docker private network (172.18.0.3) matching TRUSTED_PROXIES
         req_caddy = make_mocked_request(
