@@ -599,6 +599,158 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
         asyncio.run(_test())
 
+    def test_start_broadcast_process_task_failure_cleans_up_state(self):
+        """Verify that if _start_background_task fails during launch,
+        BroadcastProgress is updated to status='stopped' and admin_id is discarded from memory."""
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            _start_broadcast_process,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress
+
+        async def _test():
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            admin_id = 999111
+            callback = AsyncMock()
+            callback.from_user.id = admin_id
+            callback.bot = AsyncMock()
+
+            state = AsyncMock()
+            state.get_data.return_value = {
+                "broadcast_text": "Launch failure test",
+                "media_id": None,
+                "content_type": "text",
+            }
+
+            stopped_ids = []
+
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                def add(self, obj):
+                    if isinstance(obj, BroadcastProgress):
+                        obj.id = 888
+
+                async def refresh(self, obj):
+                    pass
+
+                async def commit(self):
+                    pass
+
+                async def scalar(self, stmt):
+                    return 0
+
+                async def execute(self, stmt):
+                    mock_res = MagicMock()
+                    mock_res.scalar_one.return_value = 5
+                    # Check for update status='stopped'
+                    if "UPDATE" in str(stmt).upper() or "broadcast_progress" in str(stmt).lower():
+                        stopped_ids.append(888)
+                    return mock_res
+
+            def failing_start_task(coro):
+                coro.close()
+                raise RuntimeError("Simulated background task executor failure")
+
+            with patch("bot.handlers.admin.broadcast.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.broadcast._start_background_task", side_effect=failing_start_task):
+
+                with self.assertRaises(RuntimeError):
+                    await _start_broadcast_process(callback, state, FakeSession(), "all")
+
+            # Must mark progress record as stopped in database
+            self.assertIn(888, stopped_ids)
+            # Must remove admin_id from in-progress set
+            self.assertNotIn(admin_id, _broadcast_in_progress)
+
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+        asyncio.run(_test())
+
+    def test_resume_pending_broadcasts_task_failure_cleans_up_state(self):
+        """Verify that if _start_background_task fails during resume,
+        BroadcastProgress is updated to status='stopped' and admin_id is discarded from memory."""
+        from unittest.mock import patch
+        from bot.handlers.admin.broadcast import (
+            resume_pending_broadcasts,
+            _active_broadcast_progress_ids,
+            _broadcast_in_progress,
+        )
+        from database.models import BroadcastProgress
+
+        async def _test():
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+            admin_id = 999222
+            mock_bot = AsyncMock()
+
+            progress = BroadcastProgress(
+                id=777,
+                admin_id=admin_id,
+                target_audience="all",
+                broadcast_text="Resume failure test",
+                media_id=None,
+                content_type="text",
+                status="in_progress",
+                last_processed_id=0,
+                success_count=0,
+                fail_count=0,
+            )
+
+            stopped_ids = []
+
+            class FakeSession:
+                async def __aenter__(self):
+                    return self
+
+                async def __aexit__(self, *args):
+                    pass
+
+                def add(self, obj):
+                    pass
+
+                async def commit(self):
+                    pass
+
+                async def execute(self, stmt):
+                    res = MagicMock()
+                    scalars = MagicMock()
+                    scalars.all.return_value = [progress]
+                    res.scalars.return_value = scalars
+                    if "UPDATE" in str(stmt).upper() or "broadcast_progress" in str(stmt).lower():
+                        stopped_ids.append(777)
+                    return res
+
+            def failing_start_task(coro):
+                coro.close()
+                raise RuntimeError("Simulated resume executor failure")
+
+            with patch("bot.handlers.admin.broadcast.session_scope", side_effect=FakeSession), \
+                 patch("bot.handlers.admin.broadcast._start_background_task", side_effect=failing_start_task):
+
+                await resume_pending_broadcasts(mock_bot)
+
+            # Must mark progress record as stopped in database
+            self.assertIn(777, stopped_ids)
+            # Must remove admin_id from in-progress set
+            self.assertNotIn(admin_id, _broadcast_in_progress)
+
+            _active_broadcast_progress_ids.clear()
+            _broadcast_in_progress.clear()
+
+        asyncio.run(_test())
+
+
 
 
 

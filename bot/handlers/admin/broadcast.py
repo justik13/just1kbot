@@ -682,13 +682,30 @@ async def resume_pending_broadcasts(bot):
                 admin_id,
             )
             _broadcast_in_progress.add(admin_id)
-            _start_background_task(
-                _send_broadcast_to_users_with_resume(
-                    bot,
-                    progress_id,
-                    admin_id,
+            try:
+                _start_background_task(
+                    _send_broadcast_to_users_with_resume(
+                        bot,
+                        progress_id,
+                        admin_id,
+                    )
                 )
-            )
+            except Exception as e:
+                _broadcast_in_progress.discard(admin_id)
+                logger.exception(
+                    "Failed to launch background task for resumed broadcast ID %s: %s",
+                    progress_id,
+                    e,
+                )
+                try:
+                    async with session_scope() as fail_sess:
+                        await fail_sess.execute(
+                            update(BroadcastProgress)
+                            .where(BroadcastProgress.id == progress_id)
+                            .values(status="stopped")
+                        )
+                except Exception as db_err:
+                    logger.error("Failed to mark resumed broadcast ID %s as stopped: %s", progress_id, db_err)
     except Exception as e:
         logger.exception("Failed to resume broadcasts: %s", e)
         raise
@@ -818,14 +835,31 @@ async def _start_broadcast_process(
             await sess.refresh(progress)
             progress_id = progress.id
 
-        _start_background_task(
-            _send_broadcast_to_users_with_resume(
-                callback.bot,
-                progress_id,
-                admin_id,
+        try:
+            _start_background_task(
+                _send_broadcast_to_users_with_resume(
+                    callback.bot,
+                    progress_id,
+                    admin_id,
+                )
             )
-        )
-        launched = True
+            launched = True
+        except Exception as e:
+            logger.exception(
+                "Failed to launch background task for broadcast progress %s: %s",
+                progress_id,
+                e,
+            )
+            try:
+                async with session_scope() as fail_sess:
+                    await fail_sess.execute(
+                        update(BroadcastProgress)
+                        .where(BroadcastProgress.id == progress_id)
+                        .values(status="stopped")
+                    )
+            except Exception as db_err:
+                logger.error("Failed to mark progress %s as stopped: %s", progress_id, db_err)
+            raise
 
         try:
             await callback.message.edit_text(
