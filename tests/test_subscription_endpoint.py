@@ -239,8 +239,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         mock_get_user.return_value = user
         mock_build_feed.return_value = (200, {"Content-Type": "text/plain"}, "test-feed")
 
-        # Burst is 30. Send 20 requests to feed endpoint
-        for _ in range(20):
+        # Burst is 10. Send 6 requests to feed endpoint
+        for _ in range(6):
             req = make_mocked_request(
                 "GET",
                 "/sub/valid_token_xyz",
@@ -250,8 +250,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
             resp = await subscription_feed_handler(req)
             self.assertEqual(resp.status, 200)
 
-        # Send 10 requests to open endpoint (total 30)
-        for _ in range(10):
+        # Send 4 requests to open endpoint (total 10)
+        for _ in range(4):
             req = make_mocked_request(
                 "GET",
                 "/sub/open/valid_token_xyz",
@@ -261,27 +261,27 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
             resp = await subscription_open_handler(req)
             self.assertEqual(resp.status, 200)
 
-        # 31st request to feed endpoint MUST be throttled (429)
-        req_31 = make_mocked_request(
+        # 11th request to feed endpoint MUST be throttled (429)
+        req_11 = make_mocked_request(
             "GET",
             "/sub/valid_token_xyz",
             match_info={"token": "valid_token_xyz"},
         )
-        req_31._transport_peername = ("198.51.100.10", 12345)
-        resp_31 = await subscription_feed_handler(req_31)
-        self.assertEqual(resp_31.status, 429)
-        self.assertEqual(resp_31.text, "Too Many Requests")
+        req_11._transport_peername = ("198.51.100.10", 12345)
+        resp_11 = await subscription_feed_handler(req_11)
+        self.assertEqual(resp_11.status, 429)
+        self.assertEqual(resp_11.text, "Too Many Requests")
 
-        # 32nd request to open endpoint MUST also be throttled (429 with HTML)
-        req_32 = make_mocked_request(
+        # 12th request to open endpoint MUST also be throttled (429 with HTML)
+        req_12 = make_mocked_request(
             "GET",
             "/sub/open/valid_token_xyz",
             match_info={"token": "valid_token_xyz"},
         )
-        req_32._transport_peername = ("198.51.100.10", 12345)
-        resp_32 = await subscription_open_handler(req_32)
-        self.assertEqual(resp_32.status, 429)
-        self.assertIn("Слишком много запросов", resp_32.text)
+        req_12._transport_peername = ("198.51.100.10", 12345)
+        resp_12 = await subscription_open_handler(req_12)
+        self.assertEqual(resp_12.status, 429)
+        self.assertIn("Слишком много запросов", resp_12.text)
 
         # A different IP address still has its full independent budget
         req_other = make_mocked_request(
