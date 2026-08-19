@@ -113,26 +113,65 @@ class TestAdminRouterTreeArchitecture(unittest.TestCase):
                 )
 
 
+class TestSetupBotLifecycleIdempotency(unittest.IsolatedAsyncioTestCase):
+    """Verifies setup_bot() can be called repeatedly without router/parent conflicts."""
+
+    async def test_repeated_setup_bot_lifecycle_clean(self):
+        from bot.main import setup_bot
+        from bot.handlers.admin import dashboard_router, disputes_router
+
+        fake_settings = MagicMock()
+        fake_settings.BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+        fake_settings.REDIS_URL = "redis://localhost:6379/0"
+        fake_settings.REDIS_PASSWORD = None
+        fake_settings.ADMIN_IDS = [12345]
+
+        for _ in range(3):
+            storage = MemoryStorage()
+            bot = MagicMock()
+            bot.session = AsyncMock()
+
+            with (
+                patch("bot.main.get_settings", return_value=fake_settings),
+                patch("bot.main.RedisStorage.from_url", return_value=storage),
+                patch("bot.main.setup_bot_commands", new_callable=AsyncMock),
+            ):
+                bot_instance, dp = await setup_bot(bot=bot, storage=storage)
+                try:
+                    self.assertIn(admin_router, dp.sub_routers)
+                    self.assertIn(dashboard_router, admin_router.sub_routers)
+                    self.assertIn(disputes_router, dashboard_router.sub_routers)
+                finally:
+                    await storage.close()
+                    for r in dp.sub_routers[:]:
+                        r._parent_router = None
+
+
 class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
-    """End-to-end Dispatcher integration tests proving non-admin updates are blocked."""
+    """End-to-end Dispatcher integration tests proving non-admin updates NEVER execute admin handlers."""
 
     async def asyncSetUp(self):
         from bot.main import setup_bot
 
-        self.bot = MagicMock()
+        self.bot = AsyncMock()
         self.bot.id = 100
         self.bot.session = AsyncMock()
         self.storage = MemoryStorage()
 
+        self.admin_id = 12345
+        self.non_admin_id = 99999
+
+        self.fake_settings = MagicMock()
+        self.fake_settings.ADMIN_IDS = [self.admin_id]
+        self.fake_settings.BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+        self.fake_settings.REDIS_URL = "redis://localhost:6379/0"
+        self.fake_settings.REDIS_PASSWORD = None
+
         with (
-            patch("bot.main.get_settings") as mock_settings,
+            patch("bot.main.get_settings", return_value=self.fake_settings),
             patch("bot.main.RedisStorage.from_url", return_value=self.storage),
             patch("bot.main.setup_bot_commands", new_callable=AsyncMock),
         ):
-            mock_settings.return_value.BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-            mock_settings.return_value.REDIS_URL = "redis://localhost:6379/0"
-            mock_settings.return_value.REDIS_PASSWORD = None
-            mock_settings.return_value.ADMIN_IDS = [12345]
             self.bot_instance, self.dp = await setup_bot(bot=self.bot, storage=self.storage)
 
     async def asyncTearDown(self):
@@ -159,28 +198,10 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         )
         return Update(update_id=1, callback_query=cb)
 
-    async def test_non_admin_callbacks_do_not_reach_admin_handlers(self):
-        """Non-admin callbacks targeting deep nested admin routes are blocked by AdminFilter."""
-        non_admin_id = 99999
-        admin_probes = [
-            "admin_menu",
-            "admin_users",
-            "admin_user_card:1",
-            "admin_sub_extend:1",
-            "admin_sub_reduce:1",
-            "admin_sub_grant:1",
-            "admin_balance_menu:1",
-            "admin_mass_bonus",
-            "admin_servers",
-            "admin_tariffs",
-            "admin_broadcast",
-            "admin_disputes",
-            "admin_payments",
-            "admin_payment_queues",
-        ]
-
+    async def test_non_admin_callbacks_never_execute_admin_handlers(self):
+        """Security Proof: Non-admin updates targeting admin endpoints NEVER invoke the admin handlers."""
         mock_user = MagicMock()
-        mock_user.id = non_admin_id
+        mock_user.id = self.non_admin_id
         mock_user.is_banned = False
         mock_user.is_deleted = False
 
@@ -194,22 +215,67 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        fake_settings = MagicMock()
-        fake_settings.ADMIN_IDS = [12345]
-        fake_settings.BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+        # Probe points across key admin subsystems with their core action functions
+        probe_targets = [
+            ("admin_menu", "bot.handlers.admin.dashboard._show_admin_dashboard"),
+            ("admin_users", "bot.handlers.admin.users.list_routes._build_users_list_text_and_kb"),
+            ("admin_servers", "bot.handlers.admin.servers.list_routes._show_servers_list"),
+            ("admin_tariffs", "bot.handlers.admin.tariffs._build_tariffs_list_text_and_kb"),
+            ("admin_disputes", "bot.handlers.admin.disputes._list_keyboard"),
+            ("admin_payments", "bot.handlers.admin.payments._show_payments_list"),
+            ("admin_purchases", "bot.handlers.admin.purchases._show_purchases_list"),
+            ("aq:home", "bot.handlers.admin.payment_queues._show_home"),
+        ]
 
         with (
-            patch("utils.admin.get_settings", return_value=fake_settings),
-            patch("config.settings.get_settings", return_value=fake_settings),
-            patch("bot.middlewares.ban_check.get_settings", return_value=fake_settings),
-            patch("bot.main.get_settings", return_value=fake_settings),
+            patch("utils.admin.get_settings", return_value=self.fake_settings),
+            patch("config.settings.get_settings", return_value=self.fake_settings),
+            patch("bot.middlewares.ban_check.get_settings", return_value=self.fake_settings),
+            patch("bot.main.get_settings", return_value=self.fake_settings),
             patch("bot.middlewares.db_session.session_scope", side_effect=fake_session_scope),
             patch("bot.middlewares.user_context.get_user_by_telegram_id_any", new_callable=AsyncMock, return_value=mock_user),
             patch("database.repositories.users_repo.get_user_by_telegram_id", new_callable=AsyncMock, return_value=mock_user),
         ):
-            for probe_data in admin_probes:
-                with self.subTest(callback_data=probe_data):
-                    update = self._make_callback_update(non_admin_id, probe_data)
-                    # Feed update through the full dispatcher pipeline
-                    # When blocked by AdminFilter on admin_router, it does not enter admin handlers
-                    await self.dp.feed_update(self.bot, update)
+            for callback_data, handler_action_path in probe_targets:
+                with self.subTest(callback=callback_data, action=handler_action_path):
+                    with patch(handler_action_path, new_callable=AsyncMock if "list_keyboard" not in handler_action_path else MagicMock) as mock_action:
+                        non_admin_update = self._make_callback_update(self.non_admin_id, callback_data)
+                        await self.dp.feed_update(self.bot, non_admin_update)
+
+                        # PROOF: Admin action was NOT executed for non-admin update!
+                        if isinstance(mock_action, AsyncMock):
+                            mock_action.assert_not_awaited()
+                        mock_action.assert_not_called()
+
+    async def test_admin_callbacks_successfully_execute_admin_handlers(self):
+        """Positive Proof: Admin updates targeting admin endpoints successfully reach and execute the admin handler."""
+        mock_admin = MagicMock()
+        mock_admin.id = self.admin_id
+        mock_admin.is_banned = False
+        mock_admin.is_deleted = False
+
+        exec_result = MagicMock()
+        exec_result.scalar_one_or_none.return_value = mock_admin
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=exec_result)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with (
+            patch("utils.admin.get_settings", return_value=self.fake_settings),
+            patch("config.settings.get_settings", return_value=self.fake_settings),
+            patch("bot.middlewares.ban_check.get_settings", return_value=self.fake_settings),
+            patch("bot.main.get_settings", return_value=self.fake_settings),
+            patch("bot.middlewares.db_session.session_scope", side_effect=fake_session_scope),
+            patch("bot.middlewares.user_context.get_user_by_telegram_id_any", new_callable=AsyncMock, return_value=mock_admin),
+            patch("database.repositories.users_repo.get_user_by_telegram_id", new_callable=AsyncMock, return_value=mock_admin),
+            patch("bot.handlers.admin.dashboard._show_admin_dashboard", new_callable=AsyncMock) as mock_show_dashboard,
+        ):
+            admin_update = self._make_callback_update(self.admin_id, "admin_menu")
+            await self.dp.feed_update(self.bot, admin_update)
+
+            # PROOF: Admin action MUST be executed for authorized admin
+            mock_show_dashboard.assert_awaited_once()

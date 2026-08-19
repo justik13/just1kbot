@@ -20,8 +20,9 @@ admin_router = Router(name="admin_root")
 admin_router.message.filter(AdminFilter())
 admin_router.callback_query.filter(AdminFilter())
 
-# Include top-level admin branch routers idempotently
-for _child in (
+# Register all top-level admin branch routers into admin_router using the public API.
+# Note: disputes_router is already included by dashboard_router.
+admin_router.include_routers(
     dashboard_router,
     users_router,
     servers_router,
@@ -30,11 +31,7 @@ for _child in (
     payments_router,
     payment_queues_router,
     purchases_router,
-    # Note: disputes_router is already included by dashboard_router
-):
-    if _child not in admin_router.sub_routers:
-        _child._parent_router = None
-        admin_router.include_router(_child)
+)
 
 __all__ = [
     "admin_router",
