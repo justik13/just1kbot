@@ -14,14 +14,22 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
-# These lifecycle states represent profiles that are being removed or are
-# waiting for cleanup and therefore must not count as active user devices.
-NON_VISIBLE_PROFILE_STATUSES = (
+# Lifecycle states hidden from the user's UI connection list.
+# Only in-flight deletions are hidden; recoverable and failure states remain visible.
+PROFILE_LIST_HIDDEN_STATUSES = (
+    "deleting",
+)
+
+# Lifecycle states excluded from active quota / capacity count calculations.
+PROFILE_QUOTA_EXCLUDED_STATUSES = (
     "deleting",
     "create_cleanup_pending",
     "delete_failed",
     "create_failed",
 )
+
+# Retained for backward compatibility with quota-checking queries
+NON_VISIBLE_PROFILE_STATUSES = PROFILE_QUOTA_EXCLUDED_STATUSES
 
 
 def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
@@ -41,7 +49,7 @@ async def get_user_profiles(
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
+            VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES)
         )
     stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)

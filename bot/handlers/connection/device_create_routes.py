@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import re
 import time
@@ -401,25 +400,6 @@ async def _process_server_selection(
             )
             await state.clear()
             return
-        except DeviceCreationError:
-            try:
-                await session.rollback()
-            except Exception:
-                pass
-            logger.exception(
-                "Device creation failed for user=%s server=%s",
-                telegram_user_id,
-                server_id,
-            )
-            await render_hub(
-                callback.bot,
-                callback.message.chat.id,
-                texts.ERROR_TECHNICAL_MESSAGE,
-                get_back_button("back_to_connections"),
-                parse_mode="HTML",
-            )
-            await state.clear()
-            return
         except ServerUnavailable as e:
             try:
                 await session.rollback()
@@ -443,6 +423,25 @@ async def _process_server_selection(
             )
             await state.clear()
             return
+        except DeviceCreationError:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+            logger.exception(
+                "Device creation failed for user=%s server=%s",
+                telegram_user_id,
+                server_id,
+            )
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.ERROR_TECHNICAL_MESSAGE,
+                get_back_button("back_to_connections"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
         except Exception:
             try:
                 await session.rollback()
@@ -462,30 +461,22 @@ async def _process_server_selection(
 
         await state.clear()
         if new_profile:
-            ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=4.0)
+            try:
+                ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=4.0)
+            except Exception:
+                logger.exception("Error during _await_profile_ready for profile_id=%s", new_profile.id)
+                ready_profile = None
+
             if ready_profile and ready_profile.provisioning_status == "active":
                 from .device_view_routes import render_device_screen
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
-                await render_hub(
-                    callback.bot,
-                    callback.message.chat.id,
-                    texts.ERROR_API_CREATE_FAILED,
-                    get_back_button("back_to_connections"),
-                )
+                from .device_view_routes import render_device_screen
+                await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:
-                # Timeout reached or cleanup pending -> render connections list showing current status
-                # using fresh DB state to avoid stale ORM objects from expire_on_commit=False
-                if hasattr(session, "expire_all"):
-                    res = session.expire_all()
-                    if inspect.isawaitable(res):
-                        await res
+                # Timeout reached or creation still pending -> render connections list showing current status
                 await _render_connections(callback.message, user, session)
         else:
-            if hasattr(session, "expire_all"):
-                res = session.expire_all()
-                if inspect.isawaitable(res):
-                    await res
             await _render_connections(callback.message, user, session)
 
     finally:

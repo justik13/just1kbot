@@ -172,7 +172,7 @@ async def _build_connections_screen(
             if profile.provisioning_status in labels:
                 rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
 
-        rendered += "\n\n<i>Нажмите на устройство ниже для управления и получения ключа:</i>"
+        rendered += "\n\n<i>Нажмите на устройство ниже для просмотра статуса и управления:</i>"
 
     if not read_only and profiles_count < device_limit:
         builder.button(

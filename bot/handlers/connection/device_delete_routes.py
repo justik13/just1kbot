@@ -125,11 +125,28 @@ async def confirm_delete_device(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
+    from .device_view_routes import can_show_delete_action, render_device_screen
+
+    if not can_show_delete_action(profile):
+        status = getattr(profile, "provisioning_status", "")
+        if status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif status == "create_cleanup_pending":
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        elif status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+        await callback.answer(msg, show_alert=True)
+        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        return
+
     if profile_id in _deleting_devices:
         await callback.answer(texts.DEVICE_DELETE_IN_PROGRESS, show_alert=True)
         return
 
     _deleting_devices[profile_id] = True
+    answered = False
 
     try:
         await state.clear()
@@ -144,6 +161,7 @@ async def confirm_delete_device(
             )
         except DeviceStillCreating:
             await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            answered = True
             return
 
         if not success:
@@ -151,9 +169,11 @@ async def confirm_delete_device(
                 texts.ERROR_SERVER_UNAVAILABLE_GENERIC,
                 show_alert=True,
             )
+            answered = True
             return
 
         await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
+        answered = True
 
         user = db_user or await get_user_by_telegram_id(
             session,
@@ -164,6 +184,10 @@ async def confirm_delete_device(
             await _render_connections(callback.message, user, session)
     except Exception:
         logger.exception("Unexpected error in confirm_delete_device for profile_id=%s", profile_id)
-        await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+        if not answered:
+            try:
+                await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+            except Exception:
+                pass
     finally:
         _deleting_devices.pop(profile_id, None)

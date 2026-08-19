@@ -433,8 +433,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res, valid_profile)
             self.assertEqual(mock_session.close.call_count, 3)
 
-    async def test_12_await_profile_ready_cleanup_pending_returns_profile_and_renders_error_banner(self):
-        """Profiles with create_cleanup_pending return immediately and trigger explicit error banner."""
+    async def test_12_await_profile_ready_cleanup_pending_returns_profile_and_renders_device_screen(self):
+        """Profiles with create_cleanup_pending return immediately and trigger render_device_screen with recovery banner."""
         cleanup_profile = SimpleNamespace(
             id=42,
             provisioning_status="create_cleanup_pending",
@@ -458,11 +458,11 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.connection.device_create_routes._await_profile_ready", new=AsyncMock(return_value=cleanup_profile)),
             patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
             patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
-            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()) as mock_render_hub,
+            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render_device,
             patch("bot.handlers.connection.device_create_routes._render_connections", new=AsyncMock()) as mock_render_connections,
         ):
             await _process_server_selection(callback, state, session, server_id=10, user=db_user)
-            self.assertTrue(mock_render_hub.called)
+            self.assertTrue(mock_render_device.called)
             self.assertFalse(mock_render_connections.called)
 
     async def test_13_session_commit_failure_cleans_up_creating_lock(self):
@@ -905,16 +905,128 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
             self.assertNotIn(42, _deleting_devices)
 
-    def test_27_non_visible_profile_statuses_matches_quota_exclusion_policy(self):
-        """NON_VISIBLE_PROFILE_STATUSES excludes in-flight deleting and non-active cleanup/failure states from active quota."""
-        from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
+    def test_27_ui_visibility_separated_from_quota_exclusion_policy(self):
+        """UI list hides only deleting, while quota excludes all non-active/failed states."""
+        from database.repositories.profiles_repo import (
+            NON_VISIBLE_PROFILE_STATUSES,
+            PROFILE_LIST_HIDDEN_STATUSES,
+            PROFILE_QUOTA_EXCLUDED_STATUSES,
+        )
 
-        self.assertIn("deleting", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertIn("create_cleanup_pending", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertIn("create_failed", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertIn("delete_failed", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertNotIn("pending_create", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertNotIn("active", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertEqual(PROFILE_LIST_HIDDEN_STATUSES, ("deleting",))
+        self.assertEqual(NON_VISIBLE_PROFILE_STATUSES, PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertIn("create_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertNotIn("pending_create", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertNotIn("active", PROFILE_QUOTA_EXCLUDED_STATUSES)
+
+    async def test_28_confirm_delete_device_stale_callback_fail_closed_rejection(self):
+        """If device transitioned to create_cleanup_pending, confirm_delete rejects it fail-closed."""
+        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        cleanup_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="create_cleanup_pending",
+            peer_id="p1",
+            raw_config=None,
+            is_active=True,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "confirm_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=cleanup_profile)),
+            patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock()) as mock_delete,
+            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render,
+        ):
+            await confirm_delete_device(callback, state, session, db_user)
+
+            callback.answer.assert_called_once_with("⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже.", show_alert=True)
+            mock_delete.assert_not_called()
+            mock_render.assert_called_once()
+            self.assertNotIn(42, _deleting_devices)
+
+    async def test_29_confirm_delete_device_render_connections_failure_does_not_double_answer(self):
+        """If _render_connections throws after successful delete answer, callback.answer is not invoked a second time."""
+        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config=_make_valid_vpn_uri(),
+            is_active=True,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "confirm_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
+            patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.connection.device_delete_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
+            patch("bot.handlers.connection.device_delete_routes._render_connections", new=AsyncMock(side_effect=RuntimeError("Network error during render"))),
+        ):
+            await confirm_delete_device(callback, state, session, db_user)
+
+            # Exactly one answer with DELETING_PROGRESS, no secondary ERROR_TECHNICAL_MESSAGE
+            callback.answer.assert_called_once_with(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
+            self.assertNotIn(42, _deleting_devices)
+
+    async def test_30_server_unavailable_caught_and_classified_properly(self):
+        """ServerUnavailable is caught before DeviceCreationError and displays classified server error text."""
+        from bot.handlers.connection.device_create_routes import _process_server_selection
+        from services.device_service import ServerUnavailable
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("bot.handlers.connection.device_create_routes._get_effective_device_limit", new=AsyncMock(return_value=5)),
+            patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock(side_effect=ServerUnavailable("Server is full"))),
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()) as mock_render_hub,
+        ):
+            await _process_server_selection(callback, state, session, server_id=10, user=db_user)
+
+            self.assertTrue(mock_render_hub.called)
+            error_text = mock_render_hub.call_args.args[2]
+            self.assertEqual(error_text, texts.ERROR_SERVER_FULL)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
