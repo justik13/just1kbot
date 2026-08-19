@@ -43,7 +43,7 @@ class CommandSurfaceTests(unittest.TestCase):
         fallback = (ROOT / "bot" / "handlers" / "fallback.py").read_text(
             encoding="utf-8"
         )
-        self.assertLess(main.index("admin_payment_queues_router,"), main.index("fallback_router,"))
+        self.assertLess(main.index("admin_router,"), main.index("fallback_router,"))
         self.assertIn("message.delete()", fallback)
         self.assertIn("@router.message()", fallback)
 

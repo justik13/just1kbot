@@ -1,15 +1,27 @@
+from aiogram import Router
+
 from bot.filters import AdminFilter
+from .broadcast import router as broadcast_router
 from .dashboard import router as dashboard_router
-from .users import router as users_router
+from .disputes import router as disputes_router
+from .payment_queues import router as payment_queues_router
+from .payments import router as payments_router
+from .purchases import router as purchases_router
 from .servers import router as servers_router
 from .tariffs import router as tariffs_router
-from .broadcast import router as broadcast_router
-from .payments import router as payments_router
-from .payment_queues import router as payment_queues_router
-from .purchases import router as purchases_router
-from .disputes import router as disputes_router
+from .users import router as users_router
 
-ADMIN_ROUTERS = (
+# ── Root Admin Gate ─────────────────────────────────────────
+# A single root router that guards the ENTIRE admin tree.
+# AdminFilter is attached to admin_router.message and admin_router.callback_query.
+# Because aiogram checks root router filters before descending into sub_routers,
+# ANY handler in ANY nested admin subrouter is automatically protected.
+admin_router = Router(name="admin_root")
+admin_router.message.filter(AdminFilter())
+admin_router.callback_query.filter(AdminFilter())
+
+# Include top-level admin branch routers idempotently
+for _child in (
     dashboard_router,
     users_router,
     servers_router,
@@ -18,19 +30,14 @@ ADMIN_ROUTERS = (
     payments_router,
     payment_queues_router,
     purchases_router,
-    disputes_router,
-)
-
-# ── Centralised admin gate ──────────────────────────────────
-# Every admin router is protected with AdminFilter, so *any* new
-# handler registered under any admin router is automatically rejected
-# for non-admin users without requiring a manual is_admin() call.
-for _r in ADMIN_ROUTERS:
-    _r.message.filter(AdminFilter())
-    _r.callback_query.filter(AdminFilter())
+    # Note: disputes_router is already included by dashboard_router
+):
+    if _child not in admin_router.sub_routers:
+        _child._parent_router = None
+        admin_router.include_router(_child)
 
 __all__ = [
-    "ADMIN_ROUTERS",
+    "admin_router",
     "dashboard_router",
     "users_router",
     "servers_router",
