@@ -92,8 +92,15 @@ INCY регистрирует схему `incy://` для управления �
 
 ---
 
-## 🔗 6. ИСТОЧНИКИ
+## 🔗 6. ИСТОЧНИКИ И ССЫЛКИ НА ПРИЛОЖЕНИЯ
 
+### Официальные приложения INCY:
+* [Официальный сайт INCY](https://incy.cc/)
+* [INCY в App Store (iOS / iPadOS / macOS / Apple TV)](https://apps.apple.com/app/incy/id6756943388)
+* [INCY в Google Play (Android / Android TV)](https://play.google.com/store/apps/details?id=llc.itdev.incy)
+* [Релизы и сборки платформ (GitHub)](https://github.com/INCY-DEV/incy-platforms)
+
+### Документация для разработчиков:
 * [INCY Developer Documentation](https://docs.incy.cc/)
 * [INCY Subscription Format](https://docs.incy.cc/subscription-format/)
 * [INCY Deep Links](https://docs.incy.cc/deep-links/)

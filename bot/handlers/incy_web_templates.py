@@ -310,9 +310,11 @@ def render_open_html(sub_url: str, deep_link: str) -> str:
     <div class="download-section">
       <span>Приложение ещё не установлено?</span>
       <div class="download-links">
-        <a href="https://apps.apple.com/app/incy-vpn/id6475727187" target="_blank" rel="noopener">iOS (App Store)</a>
+        <a href="https://apps.apple.com/app/incy/id6756943388" target="_blank" rel="noopener">iOS (App Store)</a>
         <span>•</span>
-        <a href="https://play.google.com/store/apps/details?id=cc.incy.app" target="_blank" rel="noopener">Android (Google Play)</a>
+        <a href="https://play.google.com/store/apps/details?id=llc.itdev.incy" target="_blank" rel="noopener">Android (Google Play)</a>
+        <span>•</span>
+        <a href="https://github.com/INCY-DEV/incy-platforms" target="_blank" rel="noopener">GitHub</a>
         <span>•</span>
         <a href="https://incy.cc/" target="_blank" rel="noopener">Сайт INCY</a>
       </div>

@@ -236,5 +236,33 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         mock_render_hub.assert_not_awaited()
 
 
+class IncyWebTemplatesTests(unittest.TestCase):
+    def test_render_open_html_contains_valid_store_and_platform_links(self):
+        from bot.handlers.incy_web_templates import render_open_html
+
+        html_out = render_open_html(
+            sub_url="https://vpn.example.com/sub/token_123",
+            deep_link="incy://import/https%3A%2F%2Fvpn.example.com%2Fsub%2Ftoken_123",
+        )
+
+        self.assertIn("https://apps.apple.com/app/incy/id6756943388", html_out)
+        self.assertIn("https://play.google.com/store/apps/details?id=llc.itdev.incy", html_out)
+        self.assertIn("https://github.com/INCY-DEV/incy-platforms", html_out)
+        self.assertIn("https://incy.cc/", html_out)
+        self.assertIn("AmneziaVPN", html_out)
+        self.assertIn("Windows / macOS", html_out)
+
+    def test_render_inactive_html_contains_support_link(self):
+        from bot.handlers.incy_web_templates import render_inactive_html
+
+        html_out = render_inactive_html(
+            sub_url="https://vpn.example.com/sub/token_123",
+            support_username="test_support_admin",
+        )
+
+        self.assertIn("https://t.me/test_support_admin", html_out)
+        self.assertIn("Подписка не активна", html_out)
+
+
 if __name__ == "__main__":
     unittest.main()
