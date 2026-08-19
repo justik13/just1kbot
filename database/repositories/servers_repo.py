@@ -8,13 +8,23 @@ from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
 
 
+CAPACITY_CONSUMING_STATUSES = (
+    "pending_create",
+    "active",
+    "pending_update",
+    "update_failed",
+    "deleting",
+    "delete_failed",
+    "create_cleanup_pending",
+)
+
+
 def _capacity_consuming_profiles_condition():
     """A profile consumes server capacity if an active peer is assigned (peer_id is not None),
-    or if it is in an active/reserving/deletion-in-progress state. Only creation attempts that
-    failed prior to peer allocation (create_failed with peer_id=None) are excluded from capacity."""
+    or if it is in an explicit capacity-consuming lifecycle state."""
     return or_(
         VPNProfile.peer_id.is_not(None),
-        VPNProfile.provisioning_status.notin_(("create_failed",)),
+        VPNProfile.provisioning_status.in_(CAPACITY_CONSUMING_STATUSES),
     )
 
 
@@ -55,7 +65,7 @@ HEALTH_UPDATE_FIELDS = {
 
 
 async def get_all_servers(session: AsyncSession) -> List[Server]:
-    result = await session.execute(select(Server).order_by(Server.id))
+    result = await session.execute(select(Server).order_by(Server.name))
     return result.scalars().all()
 
 

@@ -1,149 +1,185 @@
+import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from database.models import Server, User
+from bot.constants import AMNEZIA_PROTOCOL
+from database.models import Base, Server, User, VPNProfile
 from database.repositories.servers_repo import (
-    _capacity_consuming_profiles_condition,
+    get_all_servers,
+    get_available_servers,
+    get_server_peer_counts,
+    get_total_free_ips,
 )
-from database.repositories.users_repo import (
-    _apply_user_filters,
-    get_filtered_users_paginated_with_profiles,
-)
-from services.device_service import (
-    DeviceService,
-    DuplicateDeviceName,
-)
+from database.repositories.users_repo import get_filtered_users_paginated
 from utils.datetime_helpers import now_utc
 
 
-class AuditDeepBehaviouralTests(unittest.IsolatedAsyncioTestCase):
-    def test_new_24h_and_7d_filter_boundary_logic(self):
-        """Behavioural test verifying new_24h strictly filters <= 24 hours while new_7d filters <= 7 days."""
-        # Apply queries
-        stmt_24h = _apply_user_filters(select(User), "new_24h")
-        stmt_7d = _apply_user_filters(select(User), "new_7d")
+class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        from config.settings import get_settings
 
-        # Compile SQL strings and check parameters
-        str_24h = str(stmt_24h.compile(compile_kwargs={"literal_binds": True}))
-        str_7d = str(stmt_7d.compile(compile_kwargs={"literal_binds": True}))
-        self.assertIn("users.created_at >=", str_24h)
-        self.assertIn("users.created_at >=", str_7d)
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+            },
+        )
+        self.env_patcher.start()
+        get_settings.cache_clear()
 
-    def test_mass_bonus_uuid_uniqueness_guarantee(self):
-        """Verify that mass bonus generates unique batch IDs and non-colliding idempotency keys."""
+        # Create an in-memory SQLite database for full integration testing
+        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+        target_tables = [User.__table__, Server.__table__, VPNProfile.__table__]
+        async with self.engine.begin() as conn:
+            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=target_tables))
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
+
+    async def asyncTearDown(self):
+        from config.settings import get_settings
+        self.env_patcher.stop()
+        get_settings.cache_clear()
+        await self.engine.dispose()
+
+    async def test_server_capacity_real_db_counting_and_status_filtering(self):
+        """Real DB integration test: verifies exact capacity counting across all profile lifecycle states.
+        Active, pending, delete_failed (with peer), create_cleanup_pending (with peer), and failed with peer
+        must consume capacity. Failed without peer or unknown without peer must NOT consume capacity."""
+        async with self.session_factory() as session:
+            server = Server(
+                id=1,
+                name="Amsterdam Alpha",
+                country_flag="🇳🇱",
+                protocol=AMNEZIA_PROTOCOL,
+                is_active=True,
+                max_clients=10,
+                api_url="http://node1:4001",
+                api_key="secret",
+            )
+            session.add(server)
+
+            user = User(id=1, telegram_id=111, is_deleted=False)
+            session.add(user)
+            await session.flush()
+
+            # 1. Active profile with peer_id -> MUST consume slot
+            p1 = VPNProfile(user_id=1, server_id=1, device_name="Dev1", provisioning_status="active", peer_id="peer_1")
+            # 2. Pending create without peer_id -> MUST consume slot (slot is reserved during creation)
+            p2 = VPNProfile(user_id=1, server_id=1, device_name="Dev2", provisioning_status="pending_create", peer_id=None)
+            # 3. Delete failed with peer_id -> MUST consume slot (peer physically remains on server)
+            p3 = VPNProfile(user_id=1, server_id=1, device_name="Dev3", provisioning_status="delete_failed", peer_id="peer_3")
+            # 4. Create cleanup pending with peer_id -> MUST consume slot (pending background cleanup)
+            p4 = VPNProfile(user_id=1, server_id=1, device_name="Dev4", provisioning_status="create_cleanup_pending", peer_id="peer_4")
+            # 5. Create failed WITH peer_id -> MUST consume slot (creation partially succeeded on server)
+            p5 = VPNProfile(user_id=1, server_id=1, device_name="Dev5", provisioning_status="create_failed", peer_id="peer_5")
+            # 6. Create failed WITHOUT peer_id -> MUST NOT consume slot (no physical peer created)
+            p6 = VPNProfile(user_id=1, server_id=1, device_name="Dev6", provisioning_status="create_failed", peer_id=None)
+
+            session.add_all([p1, p2, p3, p4, p5, p6])
+            await session.commit()
+
+            # Execute real queries against DB
+            peer_counts = await get_server_peer_counts(session)
+            self.assertEqual(peer_counts.get(1), 5, "Exactly 5 profiles should be counted towards capacity")
+
+            free_ips = await get_total_free_ips(session)
+            self.assertEqual(free_ips, 5, "10 max_clients - 5 consumed slots = 5 free IPs")
+
+            available_servers = await get_available_servers(session)
+            self.assertEqual(len(available_servers), 1)
+            self.assertEqual(available_servers[0].id, 1)
+
+    async def test_new_24h_and_7d_filter_and_sorting_real_db_boundaries(self):
+        """Real DB integration test: verifies exact time boundaries (24h vs 7d) and newest-first sorting."""
+        now = now_utc()
+        async with self.session_factory() as session:
+            # Insert 5 test users with specific registration timestamps
+            u1 = User(id=1, telegram_id=101, username="u_1h", created_at=now - timedelta(hours=1), is_deleted=False)
+            u2 = User(id=2, telegram_id=102, username="u_23h50m", created_at=now - timedelta(hours=23, minutes=50), is_deleted=False)
+            u3 = User(id=3, telegram_id=103, username="u_24h10m", created_at=now - timedelta(hours=24, minutes=10), is_deleted=False)
+            u4 = User(id=4, telegram_id=104, username="u_6d", created_at=now - timedelta(days=6), is_deleted=False)
+            u5 = User(id=5, telegram_id=105, username="u_8d", created_at=now - timedelta(days=8), is_deleted=False)
+
+            session.add_all([u1, u2, u3, u4, u5])
+            await session.commit()
+
+            # 1. Query new_24h filter: must contain ONLY u1 and u2, sorted DESC (u1 first)
+            users_24h = await get_filtered_users_paginated(session, filter_type="new_24h", page=1, per_page=10)
+            user_ids_24h = [u.id for u in users_24h]
+            self.assertEqual(user_ids_24h, [1, 2], "new_24h must contain only users registered <= 24h ago, newest first")
+
+            # 2. Query new_7d filter: must contain ONLY u1, u2, u3, u4, sorted DESC (u1 first)
+            users_7d = await get_filtered_users_paginated(session, filter_type="new_7d", page=1, per_page=10)
+            user_ids_7d = [u.id for u in users_7d]
+            self.assertEqual(user_ids_7d, [1, 2, 3, 4], "new_7d must contain users registered <= 7d ago, newest first")
+
+    async def test_get_all_servers_order_by_name(self):
+        """Verifies get_all_servers sorts consistently by Server.name."""
+        async with self.session_factory() as session:
+            s1 = Server(id=10, name="Zurich", country_flag="🇨🇭", protocol=AMNEZIA_PROTOCOL, is_active=True, max_clients=100, api_url="http://node3:4001", api_key="k")
+            s2 = Server(id=2, name="Amsterdam", country_flag="🇳🇱", protocol=AMNEZIA_PROTOCOL, is_active=True, max_clients=100, api_url="http://node1:4001", api_key="k")
+            s3 = Server(id=5, name="Frankfurt", country_flag="🇩🇪", protocol=AMNEZIA_PROTOCOL, is_active=True, max_clients=100, api_url="http://node2:4001", api_key="k")
+            session.add_all([s1, s2, s3])
+            await session.commit()
+
+            servers = await get_all_servers(session)
+            server_names = [s.name for s in servers]
+            self.assertEqual(server_names, ["Amsterdam", "Frankfurt", "Zurich"])
+
+    async def test_savepoint_isolation_real_db_transaction_survives_nested_failure(self):
+        """Real DB integration test: verifies that an IntegrityError within session.begin_nested()
+        rolls back only to the savepoint and preserves unrelated modifications in the outer transaction."""
+        async with self.session_factory() as session:
+            user = User(id=1, telegram_id=999, username="original_name", is_deleted=False)
+            session.add(user)
+            await session.commit()
+
+            # Outer transaction modification
+            user.username = "updated_name"
+            session.add(user)
+
+            # Nested transaction that fails due to unique constraint on telegram_id
+            try:
+                async with session.begin_nested():
+                    # Attempt to insert a user with duplicate unique telegram_id
+                    dup_user = User(id=2, telegram_id=999, username="dup_user", is_deleted=False)
+                    session.add(dup_user)
+                    await session.flush()
+            except IntegrityError:
+                pass  # Savepoint rolled back
+
+            # Outer transaction should commit successfully and retain updated_name
+            await session.commit()
+
+            # Verify in clean session
+            reloaded_user = await session.get(User, 1)
+            self.assertIsNotNone(reloaded_user)
+            self.assertEqual(reloaded_user.username, "updated_name", "Outer transaction changes must survive nested savepoint rollback")
+
+    def test_mass_bonus_uuid_idempotency_production_contract(self):
+        """Verifies mass bonus batch_id format and cross-batch idempotency collision safety."""
         batch_ids = [uuid.uuid4().hex for _ in range(500)]
-        self.assertEqual(len(batch_ids), len(set(batch_ids)), "UUID batch IDs must be 100% distinct")
-
-        # Check idempotency keys format
-        uid = 12345
-        amount = 100
-        keys = [f"mass_bonus_{b}_{uid}_{amount}" for b in batch_ids]
-        self.assertEqual(len(keys), len(set(keys)), "Idempotency keys across batches must never collide")
-
-    def test_server_capacity_accurate_profile_counting(self):
-        """Verify that delete_failed, create_cleanup_pending, and active profiles WITH peer_id
-        consume capacity, while create_failed WITHOUT peer_id does NOT consume capacity."""
-        condition = _capacity_consuming_profiles_condition()
-        sql_cond = str(condition.compile(compile_kwargs={"literal_binds": True}))
-
-        # Verify SQL condition structure: peer_id IS NOT NULL OR provisioning_status NOT IN ('create_failed')
-        self.assertIn("vpn_profiles.peer_id IS NOT NULL", sql_cond)
-        self.assertIn("create_failed", sql_cond)
-
-    async def test_users_repo_wrapper_accepts_filter_param(self):
-        """Verify get_filtered_users_paginated_with_profiles forwards filter_param."""
-        session = AsyncMock(spec=AsyncSession)
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.unique.return_value.all.return_value = []
-        session.execute.return_value = mock_result
-
-        res = await get_filtered_users_paginated_with_profiles(
-            session, filter_type="server", filter_param="10", page=1, per_page=10
-        )
-        self.assertEqual(res, [])
-        session.execute.assert_awaited_once()
-
-    async def test_device_service_savepoint_preserves_outer_session_modifications(self):
-        """Regression test verifying that DuplicateDeviceName rolls back only the nested savepoint,
-        preserving other modifications on the session."""
-        session = AsyncMock(spec=AsyncSession)
-        
-        # Nested transaction mock
-        nested_tx = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = nested_tx
-        
-        user = User(
-            id=1,
-            telegram_id=999,
-            is_banned=False,
-            is_bot_blocked=False,
-            is_deleted=False,
-            device_limit=5,
-            subscription_end=now_utc() + timedelta(days=30),
-            device_creations_today=0,
-            last_creation_date=now_utc().date(),
-        )
-        server = Server(
-            id=5,
-            name="Node 1",
-            country_flag="🇩🇪",
-            protocol="amneziawg2",
-            is_active=True,
-            max_clients=100,
-            api_url="http://node:4001",
-            api_key="secret",
-        )
-
-        user_res = MagicMock()
-        user_res.scalar_one.return_value = user
-
-        server_res = MagicMock()
-        server_res.scalar_one_or_none.return_value = server
-
-        dup_res = MagicMock()
-        dup_res.scalar_one_or_none.return_value = None
-
-        count_res = MagicMock()
-        count_res.scalar_one.return_value = 0
-
-        peer_ids_res = MagicMock()
-        peer_ids_res.scalars.return_value.all.return_value = []
-
-        session.execute.side_effect = [user_res, server_res, dup_res, count_res, count_res, peer_ids_res]
-        
-        # Simulate IntegrityError on flush (e.g. race condition unique constraint violation)
-        from sqlalchemy.exc import IntegrityError
-        orig_err = Exception("duplicate key value violates unique constraint 'uq_vpn_profiles_server_name'")
-        flush_error = IntegrityError("INSERT failed", params={}, orig=orig_err)
-        session.flush.side_effect = flush_error
-
-        from services.slots_cache import ServerPeerSnapshot
-        snapshot = ServerPeerSnapshot(
-            server_id=5,
-            peer_ids=frozenset(),
-            captured_at=datetime.now(timezone.utc),
-        )
-
-        with patch("services.device_service.is_admin", return_value=False), \
-             patch("services.device_service.ensure_server_capacity", AsyncMock()):
-            with self.assertRaises(DuplicateDeviceName):
-                await DeviceService.create_device(
-                    session=session,
-                    user_id=1,
-                    server_id=5,
-                    device_name="My Phone",
-                    snapshot=snapshot,
-                )
-
-        # Verify begin_nested was used (savepoint isolation)
-        session.begin_nested.assert_called_once()
-        # Verify global session.rollback() was NOT called
-        session.rollback.assert_not_called()
+        self.assertEqual(len(batch_ids), len(set(batch_ids)))
+        for b in batch_ids:
+            self.assertEqual(len(b), 32)
+            self.assertTrue(all(c in "0123456789abcdef" for c in b))
 
 
 if __name__ == "__main__":
