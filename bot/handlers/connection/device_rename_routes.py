@@ -1,5 +1,6 @@
 import re
-from aiogram import Router, F
+
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from database.repositories.profiles_repo import (
     get_user_profiles,
     update_profile,
 )
+from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
@@ -175,13 +177,35 @@ async def rename_device_process(
         },
     )
 
+    server = await get_server_by_id(session, profile.server_id)
+    from config.settings import get_settings
+    from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
+
+    from .device_view_routes import can_show_amnezia_bridge, can_show_config_actions
+
+    config_ready = can_show_config_actions(profile)
+    show_delete = profile.provisioning_status not in ("pending_create", "create_cleanup_pending", "deleting")
+    amnezia_bridge_url = None
+    if can_show_amnezia_bridge(profile, server):
+        settings = get_settings()
+        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
+            domain=settings.DOMAIN,
+            profile_id=profile.id,
+            user_id=db_user.id,
+        )
+
     await render_hub(
         message.bot,
         message.chat.id,
         texts.DEVICE_RENAMED_SUCCESS.format(
             device_name=safe(new_name),
         ),
-        get_device_keyboard(profile.id),
+        get_device_keyboard(
+            profile.id,
+            config_ready=config_ready,
+            show_delete=show_delete,
+            amnezia_bridge_url=amnezia_bridge_url,
+        ),
     )
 
     await state.clear()

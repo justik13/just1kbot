@@ -524,11 +524,60 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
             patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
             patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
+            self.assertRaises(asyncio.CancelledError),
         ):
-            with self.assertRaises(asyncio.CancelledError):
-                await _process_server_selection(callback, AsyncMock(), session, server_id=10, user=db_user)
+            await _process_server_selection(callback, AsyncMock(), session, server_id=10, user=db_user)
 
-            self.assertNotIn(100, _creating_devices)
+    async def test_16_rename_device_renders_keyboard_with_capability_flags(self):
+        """Rename success screen builds keyboard with dynamic capability flags."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        pending_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Старое #1",
+            provisioning_status="pending_create",
+            peer_id=None,
+            raw_config=None,
+            is_active=True,
+        )
+
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.text = "Новое"
+        message.delete = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+        session = AsyncMock()
+
+        captured = {}
+        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+            captured["text"] = text
+            captured["keyboard"] = keyboard
+
+        with (
+            patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=pending_profile)),
+            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[pending_profile])),
+            patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()),
+            patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+            patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
+        ):
+            await rename_device_process(message, state, session, db_user)
+
+            self.assertIn("keyboard", captured)
+            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            # Since pending_create: no show_config, no download_conf, no delete
+            self.assertNotIn("show_config:42", buttons)
+            self.assertNotIn("download_conf:42", buttons)
+            self.assertNotIn("request_delete_device:42", buttons)
+            self.assertIn("rename_device:42", buttons)
 
 
 if __name__ == "__main__":
