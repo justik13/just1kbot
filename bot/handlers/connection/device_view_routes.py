@@ -12,7 +12,10 @@ from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
 from config.settings import get_settings
 from database.models import User
-from database.repositories.profiles_repo import get_profile_by_id
+from database.repositories.profiles_repo import (
+    ALLOWED_DELETE_STATES,
+    get_profile_by_id,
+)
 from database.repositories.servers_repo import get_server_by_id
 from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from services.subscription import SubscriptionService
@@ -88,15 +91,6 @@ def can_show_amnezia_bridge(profile, server) -> bool:
         and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
         and AmneziaBridgeTokenService.is_enabled()
     )
-
-
-ALLOWED_DELETE_STATES = frozenset({
-    "active",
-    "pending_update",
-    "update_failed",
-    "create_failed",
-    "delete_failed",
-})
 
 
 def can_show_delete_action(profile) -> bool:

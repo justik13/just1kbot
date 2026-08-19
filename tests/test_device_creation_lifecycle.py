@@ -1129,7 +1129,12 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))))
+        # First query: stuck_profiles returns [stuck_profile]
+        # Inside loop: active_op returns None (operation dead/absent)
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
         mock_session.get = AsyncMock(return_value=mock_server)
 
         mock_scope = MagicMock()
@@ -1160,12 +1165,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             peer_id=None,
         )
 
+        active_op = SimpleNamespace(id=101, operation_type="create_peer", status="processing")
+
         mock_session = AsyncMock()
-        # First query: active_op_profile_ids returns {42}
-        # Second query: stuck_profiles returns [stuck_profile]
+        # First query: stuck_profiles returns [stuck_profile]
+        # Inside loop: active_op returns active_op
         mock_session.execute = AsyncMock(side_effect=[
-            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[42])))),
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=active_op)),
         ])
 
         mock_scope = MagicMock()
@@ -1177,6 +1184,74 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             # Profile must remain pending_create since operation is still active in queue
             self.assertEqual(stuck_profile.provisioning_status, "pending_create")
+
+    async def test_36_cleanup_worker_ensure_delete_error_keeps_cleanup_pending(self):
+        """If ensure_delete_operation fails, profile stays in create_cleanup_pending so peer is not orphaned."""
+        from database.models import Server, VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            client_name="tg_100_p42",
+            provisioning_status="create_cleanup_pending",
+            peer_id="peer_abc",
+        )
+
+        mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+        mock_session.get = AsyncMock(return_value=mock_server)
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock(side_effect=RuntimeError("DB lock error"))),
+        ):
+            await _cleanup_stuck_profiles()
+
+            # Must remain create_cleanup_pending for next cycle retry
+            self.assertEqual(stuck_profile.provisioning_status, "create_cleanup_pending")
+
+    async def test_37_slot_allocation_respects_all_profiles_including_failed(self):
+        """Slot allocator uses include_deleting=True to prevent name collisions across all profile statuses."""
+        from bot.handlers.connection.device_create_routes import _process_server_selection
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.from_user.id = 100
+        state = AsyncMock()
+        session = AsyncMock()
+
+        failed_p1 = SimpleNamespace(id=1, user_id=1, server_id=10, device_name="Устройство #1", provisioning_status="create_failed")
+        deleting_p2 = SimpleNamespace(id=2, user_id=1, server_id=10, device_name="Устройство #2", provisioning_status="deleting")
+
+        with (
+            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[failed_p1, deleting_p2])) as mock_get_profiles,
+            patch("bot.handlers.connection.device_create_routes._get_effective_device_limit", new=AsyncMock(return_value=5)),
+            patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock()) as mock_create_device,
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes._await_profile_ready", new=AsyncMock(return_value=None)),
+            patch("bot.handlers.connection.device_create_routes._render_connections", new=AsyncMock()),
+        ):
+            await _process_server_selection(callback, state, session, server_id=10, user=db_user)
+
+            # Verified that include_deleting=True was requested
+            mock_get_profiles.assert_called_with(session, 1, include_deleting=True)
+            # Verified that slot #3 was chosen (since #1 and #2 exist in DB)
+            mock_create_device.assert_called_once()
+            self.assertEqual(mock_create_device.call_args.kwargs["device_name"], "Устройство #3")
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
@@ -1265,6 +1340,43 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(op.status, "pending")
             self.assertEqual(op.profile_id, created_profile_id)
             self.assertEqual(op.operation_type, "create_peer")
+
+    async def test_cleanup_worker_concurrency_with_active_operation_in_postgres(self):
+        """Verify that cleanup worker skips profiles with active APIOperation in real PostgreSQL."""
+        from database.models import VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        async with self.sessions.begin() as s:
+            old_time = datetime.now(timezone.utc) - timedelta(hours=2)
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Stuck Dev",
+                client_name="tg_987654_stuck",
+                provisioning_status="pending_create",
+                created_at=old_time,
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            # Active operation in processing state
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+            )
+            s.add(op)
+
+        with patch("services.workers.cleanup.session_scope", side_effect=self.sessions):
+            await _cleanup_stuck_profiles()
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            # Profile must NOT have been converted to create_failed because APIOperation was in 'processing'
+            self.assertEqual(p.provisioning_status, "pending_create")
 
 
 if __name__ == "__main__":

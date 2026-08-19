@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -474,14 +475,21 @@ async def _process_server_selection(
                 from .device_view_routes import render_device_screen
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:
-                # Timeout reached or creation still pending -> render connections list showing current status
+                # Timeout reached or creation still pending -> expire identity map and render connections
                 try:
-                    if new_profile:
-                        await session.refresh(new_profile)
+                    res = session.expire_all()
+                    if inspect.isawaitable(res):
+                        await res
                 except Exception:
                     pass
                 await _render_connections(callback.message, user, session)
         else:
+            try:
+                res = session.expire_all()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
             await _render_connections(callback.message, user, session)
 
     finally:

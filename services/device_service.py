@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import Server, User, VPNProfile
+from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
@@ -246,13 +247,7 @@ class DeviceService:
                 raise DeviceCreationError("Cleanup in progress")
             if profile.provisioning_status == "deleting":
                 return True
-            if profile.provisioning_status not in {
-                "active",
-                "pending_update",
-                "update_failed",
-                "create_failed",
-                "delete_failed",
-            }:
+            if profile.provisioning_status not in ALLOWED_DELETE_STATES:
                 raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
 
         # Capture server and device info for audit before deletion

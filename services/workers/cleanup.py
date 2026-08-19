@@ -269,15 +269,6 @@ async def _cleanup_stuck_profiles():
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
 
-        active_op_profile_ids_res = await session.execute(
-            select(APIOperation.profile_id).where(
-                APIOperation.profile_id.isnot(None),
-                APIOperation.operation_type == "create_peer",
-                APIOperation.status.in_(["pending", "processing", "retry"]),
-            )
-        )
-        active_op_profile_ids = set(active_op_profile_ids_res.scalars().all())
-
         stuck_profiles = (
             await session.execute(
                 select(VPNProfile)
@@ -290,7 +281,14 @@ async def _cleanup_stuck_profiles():
         ).scalars().all()
 
         for profile in stuck_profiles:
-            if profile.id in active_op_profile_ids:
+            active_op_res = await session.execute(
+                select(APIOperation.id).where(
+                    APIOperation.profile_id == profile.id,
+                    APIOperation.operation_type == "create_peer",
+                    APIOperation.status.in_(["pending", "processing", "retry"]),
+                ).limit(1)
+            )
+            if active_op_res.scalar_one_or_none() is not None:
                 logger.debug("Skipping profile %s cleanup: create_peer operation is still active", profile.id)
                 continue
 
@@ -313,7 +311,7 @@ async def _cleanup_stuck_profiles():
                     profile.provisioning_status = "deleting"
                 except Exception as exc:
                     logger.warning("Failed to queue delete_peer operation during stuck profile cleanup: %s", exc)
-                    profile.provisioning_status = "create_failed"
+                    profile.provisioning_status = "create_cleanup_pending"
             else:
                 profile.provisioning_status = "create_failed"
             profile.last_sync_error = "Creation timed out by cleanup worker"

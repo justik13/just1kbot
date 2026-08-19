@@ -28,6 +28,15 @@ PROFILE_QUOTA_EXCLUDED_STATUSES = (
     "create_failed",
 )
 
+# Provisioning states in which a profile can be deleted by a user or service (Fail-Closed).
+ALLOWED_DELETE_STATES = frozenset({
+    "active",
+    "pending_update",
+    "update_failed",
+    "create_failed",
+    "delete_failed",
+})
+
 # Retained for backward compatibility with quota-checking queries
 NON_VISIBLE_PROFILE_STATUSES = PROFILE_QUOTA_EXCLUDED_STATUSES
 
