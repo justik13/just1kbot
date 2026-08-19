@@ -1145,6 +1145,39 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stuck_profile.provisioning_status, "deleting")
             mock_ensure_delete.assert_called_once()
 
+    async def test_35_cleanup_worker_skips_profiles_with_active_api_operation(self):
+        """Cleanup worker skips profiles whose create_peer operation is still active in retry/processing."""
+        from database.models import VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            client_name="tg_100_p42",
+            provisioning_status="pending_create",
+            peer_id=None,
+        )
+
+        mock_session = AsyncMock()
+        # First query: active_op_profile_ids returns {42}
+        # Second query: stuck_profiles returns [stuck_profile]
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[42])))),
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+        ])
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with patch("services.workers.cleanup.session_scope", return_value=mock_scope):
+            await _cleanup_stuck_profiles()
+
+            # Profile must remain pending_create since operation is still active in queue
+            self.assertEqual(stuck_profile.provisioning_status, "pending_create")
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):

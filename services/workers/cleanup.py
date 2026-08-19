@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.connection import session_scope
 from database.models import (
+    APIOperation,
     BroadcastProgress,
     HubMessage,
     Payment,
@@ -264,20 +265,35 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 async def _cleanup_stuck_profiles():
     # P1-2: Cleanup dangling pending_create and create_cleanup_pending profiles
+    # Only clean up profiles that do NOT have an active APIOperation in flight.
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
+
+        active_op_profile_ids_res = await session.execute(
+            select(APIOperation.profile_id).where(
+                APIOperation.profile_id.isnot(None),
+                APIOperation.operation_type == "create_peer",
+                APIOperation.status.in_(["pending", "processing", "retry"]),
+            )
+        )
+        active_op_profile_ids = set(active_op_profile_ids_res.scalars().all())
+
         stuck_profiles = (
             await session.execute(
                 select(VPNProfile)
                 .where(
                     VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending"]),
-                    VPNProfile.created_at < cutoff_time
+                    VPNProfile.created_at < cutoff_time,
                 )
                 .with_for_update(skip_locked=True)
             )
         ).scalars().all()
 
         for profile in stuck_profiles:
+            if profile.id in active_op_profile_ids:
+                logger.debug("Skipping profile %s cleanup: create_peer operation is still active", profile.id)
+                continue
+
             if profile.peer_id:
                 server = await session.get(Server, profile.server_id)
                 try:

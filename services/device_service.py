@@ -239,10 +239,21 @@ class DeviceService:
         ).scalar_one_or_none()
         if not profile:
             return True
-        if profile.provisioning_status == "pending_create" and not force:
-            raise DeviceStillCreating("Device still creating")
-        if profile.provisioning_status == "create_cleanup_pending" and not force:
-            raise DeviceCreationError("Cleanup in progress")
+        if not force:
+            if profile.provisioning_status == "pending_create":
+                raise DeviceStillCreating("Device still creating")
+            if profile.provisioning_status == "create_cleanup_pending":
+                raise DeviceCreationError("Cleanup in progress")
+            if profile.provisioning_status == "deleting":
+                return True
+            if profile.provisioning_status not in {
+                "active",
+                "pending_update",
+                "update_failed",
+                "create_failed",
+                "delete_failed",
+            }:
+                raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
 
         # Capture server and device info for audit before deletion
         server = await session.get(Server, profile.server_id)
