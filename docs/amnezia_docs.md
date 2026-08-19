@@ -45,10 +45,16 @@
 * **Импорт:** Ключ `vpn://...` из буфера обмена, файл `.vpn`, файл `.conf`.
 * **Назначение:** Рекомендуемый основной клиент для современных настольных и мобильных ОС.
 
-### 2. AmneziaWG (легковесный клиент)
+### 2. DefaultVPN (альтернативный клиент для iOS)
+* **Платформы:** iOS 17+.
+* **Репозиторий:** [`amnezia-vpn/DefaultVPN`](https://github.com/amnezia-vpn/DefaultVPN) / [App Store](https://apps.apple.com/app/defaultvpn/id6744725017)
+* **Импорт:** Ключ `vpn://...` или файл конфигурации `.conf`.
+* **Назначение:** Легковесное нативное iOS-приложение от команды Amnezia с поддержкой AmneziaWG и XRay Reality.
+
+### 3. AmneziaWG (легковесный клиент)
 * **Платформы:** Windows (включая Windows 7/8, 32-bit, ARM64), macOS, iOS, Android.
 * **Импорт:** **Только `.conf` файлы** (или QR-код с содержимым `.conf`).
-* **Назначение:** Альтернативный быстрый клиент для устройств, где не поддерживается или избыточен полный AmneziaVPN.
+* **Назначение:** Альтернативный быстрый клиент для устройств, где не поддерживается или избыточен полный AmneziaVPN (включая роутеры OpenWrt/Keenetic).
 
 ### Рекомендация интерфейса бота
 1. **Быстрый доступ:** Кнопка **«🔑 Показать ключ»** — выводит `vpn://` URI для AmneziaVPN.
@@ -177,11 +183,13 @@ def encode_vpn_uri(config_dict: dict) -> str:
 ## 🔗 6. ИСТОЧНИКИ И СПРАВОЧНЫЕ МАТЕРИАЛЫ
 
 ### Официальные ресурсы Amnezia:
-* [Amnezia Developer Portal](https://docs.amnezia.org)
-* [Amnezia — Alternative Apps & Native Configs](https://docs.amnezia.org/documentation/alternative-clients/)
-* [Amnezia — Supported Configuration Formats](https://docs.amnezia.org/documentation/supported-configuration-formats/)
-* [Amnezia — How to Share VPN Access](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/)
+* [Amnezia Documentation Portal (RU)](https://docs.amnezia.org/ru/documentation)
+* [Amnezia — Инструкции по настройке](https://docs.amnezia.org/ru/documentation/instructions/)
+* [Amnezia — Альтернативные приложения](https://docs.amnezia.org/ru/documentation/alternative-clients)
+* [Amnezia — Поддерживаемые форматы конфигураций](https://docs.amnezia.org/ru/documentation/supported-configuration-formats)
+* [Amnezia — Как поделиться VPN-доступом](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/)
 * [Amnezia Client (Desktop/Mobile)](https://github.com/amnezia-vpn/amnezia-client)
+* [DefaultVPN (iOS 17+ client)](https://github.com/amnezia-vpn/DefaultVPN)
 * [AmneziaWG Go Engine](https://github.com/amnezia-vpn/amneziawg-go)
 * [AmneziaWG Windows Client](https://github.com/amnezia-vpn/amneziawg-windows-client)
 * [AmneziaWG Android](https://github.com/amnezia-vpn/amneziawg-android)
