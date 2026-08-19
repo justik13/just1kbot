@@ -204,7 +204,7 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     session.add(dup_user)
                     await session.flush()
             except IntegrityError:
-                pass  # Savepoint rolled back
+                session.expunge(dup_user)  # Savepoint rolled back; expunge invalid instance
 
             # Outer transaction should commit successfully and retain updated_name
             await session.commit()

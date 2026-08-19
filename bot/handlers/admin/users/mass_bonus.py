@@ -298,14 +298,12 @@ async def _run_mass_bonus_background(
     """Executes mass bonus adjustment across target audience in batches of 50.
 
     Financial & Delivery Invariants:
-    - Strict Financial Idempotency: Uses `idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"`.
-      Guarantees exactly-once ledger credit and zero double-credits across any process crash or rerun.
+    - Financial Idempotency: Uses unique `batch_id` with `idempotency_key = f"mass_bonus_{batch_id}_{uid}_{amount}"`.
+      Guarantees collision-free ledger credits and zero duplicate records within the execution batch.
     - Transaction Fault Isolation: Each user adjustment runs inside `session.begin_nested()` (SAVEPOINT).
       Single-user DB errors roll back locally without invalidating the batch or raising `PendingRollbackError`.
     - Best-Effort Post-Commit Telegram Notification: Notifications are dispatched post-commit strictly to
-      newly credited users (`created=True`). If an unhandled container crash occurs mid-batch and the operator
-      reruns the batch, already-credited users are skipped from re-notification to prevent message spam,
-      while uncredited users receive both credit and notification.
+      newly credited users (`created=True`) in each chunk.
     """
     from aiogram.exceptions import TelegramForbiddenError
     from database.connection import session_scope
