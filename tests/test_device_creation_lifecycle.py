@@ -760,8 +760,45 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await request_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            callback.answer.assert_called_with("🗑 Устройство уже удаляется с сервера.", show_alert=True)
             self.assertTrue(mock_render_screen.called)
+
+    async def test_22_await_profile_ready_polling_sequence_pending_to_active(self):
+        """Sequential polling progression: pending -> pending -> active resolves successfully."""
+        pending_1 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None)
+        pending_2 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None)
+        ready_3 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config="vpn://test")
+
+        responses = [pending_1, pending_2, ready_3]
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(side_effect=responses)
+        mock_session.close = AsyncMock()
+
+        with patch("bot.handlers.connection.device_create_routes.get_session", new=AsyncMock(return_value=mock_session)):
+            res = await _await_profile_ready(42, timeout_seconds=2.0, poll_interval=0.01)
+
+            self.assertEqual(res, ready_3)
+            self.assertEqual(mock_session.get.call_count, 3)
+            self.assertEqual(mock_session.close.call_count, 3)
+
+    def test_23_can_show_delete_action_fail_closed_on_unknown_or_null_state(self):
+        """can_show_delete_action follows strict fail-closed whitelist policy."""
+        from bot.handlers.connection.device_view_routes import can_show_delete_action
+
+        self.assertFalse(can_show_delete_action(None))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status=None)))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="")))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="unknown_custom_state")))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="pending_create")))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="deleting")))
+
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="active")))
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="pending_update")))
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="update_failed")))
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_failed")))
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="delete_failed")))
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

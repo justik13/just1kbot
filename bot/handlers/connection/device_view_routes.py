@@ -83,15 +83,20 @@ def can_show_amnezia_bridge(profile, server) -> bool:
     )
 
 
+ALLOWED_DELETE_STATES = frozenset({
+    "active",
+    "pending_update",
+    "update_failed",
+    "create_failed",
+    "delete_failed",
+})
+
+
 def can_show_delete_action(profile) -> bool:
-    """Check if device deletion is permissible in the current state."""
+    """Check if device deletion is permissible in the current state (Fail-Closed)."""
     if not profile:
         return False
-    return getattr(profile, "provisioning_status", "") not in {
-        "pending_create",
-        "create_cleanup_pending",
-        "deleting",
-    }
+    return getattr(profile, "provisioning_status", "") in ALLOWED_DELETE_STATES
 
 
 async def render_device_screen(
