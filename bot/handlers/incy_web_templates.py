@@ -310,12 +310,15 @@ def render_open_html(sub_url: str, deep_link: str) -> str:
     <div class="download-section">
       <span>Приложение ещё не установлено?</span>
       <div class="download-links">
-        <a href="https://apps.apple.com/app/incy-vpn/id6475727187" target="_blank" rel="noopener">App Store</a>
+        <a href="https://apps.apple.com/app/incy-vpn/id6475727187" target="_blank" rel="noopener">iOS (App Store)</a>
         <span>•</span>
-        <a href="https://play.google.com/store/apps/details?id=cc.incy.app" target="_blank" rel="noopener">Google Play</a>
+        <a href="https://play.google.com/store/apps/details?id=cc.incy.app" target="_blank" rel="noopener">Android (Google Play)</a>
         <span>•</span>
-        <a href="https://incy.cc/" target="_blank" rel="noopener">Официальный сайт</a>
+        <a href="https://incy.cc/" target="_blank" rel="noopener">Сайт INCY</a>
       </div>
+      <p style="font-size: 12px; color: #8b949e; margin-top: 14px; line-height: 1.4;">
+        💻 <b>Пользователям на ПК (Windows / macOS):</b> для подключения по протоколу AmneziaWG используйте официальное приложение <b>AmneziaVPN</b> (скопируйте ключ или скачайте конфигурацию в Telegram-боте).
+      </p>
     </div>
   </div>
 

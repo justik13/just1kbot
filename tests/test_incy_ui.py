@@ -71,7 +71,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             if btn.callback_data
         ]
 
-        self.assertTrue(any("Добавить в INCY" in btn and "Экспериментально" in btn for btn in buttons))
+        self.assertTrue(any("Добавить в INCY" in btn and "🧪" in btn for btn in buttons))
         self.assertIn("menu_incy_subscription", callbacks)
 
         # Check order: add_device -> menu_incy_subscription -> status
