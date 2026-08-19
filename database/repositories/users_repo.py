@@ -358,9 +358,9 @@ async def get_filtered_users_count(
 async def get_filtered_users_paginated(
     session: AsyncSession,
     filter_type: str = "all",
-    filter_param=None,
     page: int = 1,
     per_page: int = 10,
+    filter_param=None,
 ) -> list[User]:
     offset = (page - 1) * per_page
     stmt = select(User).where(User.is_deleted.is_(False))
@@ -384,12 +384,12 @@ async def get_filtered_users_paginated(
 async def get_filtered_users_paginated_with_profiles(
     session: AsyncSession,
     filter_type: str = "all",
-    filter_param=None,
     page: int = 1,
     per_page: int = 10,
+    filter_param=None,
 ) -> list[User]:
     return await get_filtered_users_paginated(
-        session, filter_type=filter_type, filter_param=filter_param, page=page, per_page=per_page
+        session, filter_type=filter_type, page=page, per_page=per_page, filter_param=filter_param
     )
 
 
