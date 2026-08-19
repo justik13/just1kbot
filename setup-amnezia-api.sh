@@ -80,6 +80,7 @@ fi
 DOMAIN=""
 EMAIL=""
 PUBLIC_PORT="$DEFAULT_PUBLIC_PORT"
+ALLOW_IP=""
 UNINSTALL=false
 
 print_help() {
@@ -87,15 +88,16 @@ print_help() {
 Использование: sudo $0 [OPTIONS]
 
 Опции:
-  --domain DOMAIN    Домен для SSL (обязательно)
-  --email EMAIL      Email для Let's Encrypt (обязательно)
-  --port PORT        Публичный HTTPS порт (по умолчанию: $DEFAULT_PUBLIC_PORT)
-  --uninstall        Удалить конфигурацию Nginx и сертификат
-  -h, --help         Показать справку
+  --domain DOMAIN        Домен для SSL (обязательно)
+  --email EMAIL          Email для Let's Encrypt (обязательно)
+  --port PORT            Публичный HTTPS порт (по умолчанию: $DEFAULT_PUBLIC_PORT)
+  --allow-ip IP_OR_CIDR  Ограничить доступ к порту в UFW только для IP бота (рекомендуется)
+  --uninstall            Удалить конфигурацию Nginx и сертификат
+  -h, --help             Показать справку
 
 Пример:
   sudo $0 --domain api.myvpn.com --email admin@myvpn.com
-  sudo $0 --domain api.myvpn.com --email admin@myvpn.com --port 9443
+  sudo $0 --domain api.myvpn.com --email admin@myvpn.com --port 9443 --allow-ip 198.51.100.10
 EOF
 }
 
@@ -115,6 +117,11 @@ parse_args() {
             --port)
                 [[ $# -ge 2 ]] || error "Для --port требуется значение"
                 PUBLIC_PORT="$2"
+                shift 2
+                ;;
+            --allow-ip|--allow-from-ip)
+                [[ $# -ge 2 ]] || error "Для --allow-ip требуется значение IP или CIDR"
+                ALLOW_IP="$2"
                 shift 2
                 ;;
             --uninstall)
@@ -255,9 +262,15 @@ check_prerequisites() {
     # Проверка UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         if ! ufw status 2>/dev/null | grep -q "$PUBLIC_PORT"; then
-            warn "UFW активен, но порт $PUBLIC_PORT не открыт. Открываю..."
-            ufw allow "$PUBLIC_PORT/tcp" > /dev/null 2>&1
-            log "UFW: порт $PUBLIC_PORT открыт"
+            if [[ -n "$ALLOW_IP" ]]; then
+                warn "UFW активен. Ограничиваю доступ к порту $PUBLIC_PORT только с $ALLOW_IP..."
+                ufw allow from "$ALLOW_IP" to any port "$PUBLIC_PORT" proto tcp > /dev/null 2>&1
+                log "UFW: порт $PUBLIC_PORT открыт исключительно для $ALLOW_IP"
+            else
+                warn "UFW активен, но порт $PUBLIC_PORT не открыт. Открываю для всех..."
+                ufw allow "$PUBLIC_PORT/tcp" > /dev/null 2>&1
+                log "UFW: порт $PUBLIC_PORT открыт"
+            fi
         fi
         if ! ufw status 2>/dev/null | grep -q "80"; then
             ufw allow 80/tcp > /dev/null 2>&1

@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # ── Database ──
     DATABASE_URL: str
     DB_ENCRYPTION_KEY: str = Field(repr=False)
+    DB_ENCRYPTION_KEYS: str = Field(default="", repr=False)
 
     # ── Redis ──
     REDIS_URL: str
@@ -86,7 +87,7 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
-    TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
     @model_validator(mode="after")
     def reject_removed_settings(self):
