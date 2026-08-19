@@ -4,21 +4,57 @@ from datetime import timedelta
 import unittest
 from unittest.mock import patch
 
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.constants import AMNEZIA_PROTOCOL
-from database.models import Base, Server, User, VPNProfile
+from database.models import Server, User, VPNProfile
 from database.repositories.servers_repo import (
+    CAPACITY_CONSUMING_STATUSES,
+    _capacity_consuming_profiles_condition,
     get_all_servers,
     get_available_servers,
     get_server_peer_counts,
     get_total_free_ips,
 )
-from database.repositories.users_repo import get_filtered_users_paginated
+from database.repositories.users_repo import (
+    _apply_user_filters,
+    get_filtered_users_paginated,
+)
 from utils.datetime_helpers import now_utc
 
+DB = os.getenv("TEST_DATABASE_URL")
 
+
+class AuditDeepBehaviouralUnitTests(unittest.TestCase):
+    def test_capacity_consuming_statuses_explicit_whitelist(self):
+        """Verifies that capacity condition uses an explicit whitelist of statuses and checks peer_id."""
+        condition = _capacity_consuming_profiles_condition()
+        sql_cond = str(condition.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("vpn_profiles.peer_id IS NOT NULL", sql_cond)
+        for st in CAPACITY_CONSUMING_STATUSES:
+            self.assertIn(st, sql_cond)
+
+    def test_new_24h_and_7d_filter_sql_generation(self):
+        """Verifies _apply_user_filters produces correct created_at boundary clauses."""
+        stmt_24h = _apply_user_filters(select(User), "new_24h")
+        stmt_7d = _apply_user_filters(select(User), "new_7d")
+        str_24h = str(stmt_24h.compile(compile_kwargs={"literal_binds": True}))
+        str_7d = str(stmt_7d.compile(compile_kwargs={"literal_binds": True}))
+        self.assertIn("users.created_at >=", str_24h)
+        self.assertIn("users.created_at >=", str_7d)
+
+    def test_mass_bonus_uuid_idempotency_production_contract(self):
+        """Verifies mass bonus batch_id format and cross-batch idempotency collision safety."""
+        batch_ids = [uuid.uuid4().hex for _ in range(500)]
+        self.assertEqual(len(batch_ids), len(set(batch_ids)))
+        for b in batch_ids:
+            self.assertEqual(len(b), 32)
+            self.assertTrue(all(c in "0123456789abcdef" for c in b))
+
+
+@unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from config.settings import get_settings
@@ -39,18 +75,23 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
                 "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-                "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+                "DATABASE_URL": DB,
             },
         )
         self.env_patcher.start()
         get_settings.cache_clear()
 
-        # Create an in-memory SQLite database for full integration testing
-        self.engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        target_tables = [User.__table__, Server.__table__, VPNProfile.__table__]
-        async with self.engine.begin() as conn:
-            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=target_tables))
+        self.engine = create_async_engine(DB)
         self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
+
+        async with self.session_factory() as session:
+            await session.execute(
+                text(
+                    "TRUNCATE vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+            await session.commit()
 
     async def asyncTearDown(self):
         from config.settings import get_settings
@@ -172,14 +213,6 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
             reloaded_user = await session.get(User, 1)
             self.assertIsNotNone(reloaded_user)
             self.assertEqual(reloaded_user.username, "updated_name", "Outer transaction changes must survive nested savepoint rollback")
-
-    def test_mass_bonus_uuid_idempotency_production_contract(self):
-        """Verifies mass bonus batch_id format and cross-batch idempotency collision safety."""
-        batch_ids = [uuid.uuid4().hex for _ in range(500)]
-        self.assertEqual(len(batch_ids), len(set(batch_ids)))
-        for b in batch_ids:
-            self.assertEqual(len(b), 32)
-            self.assertTrue(all(c in "0123456789abcdef" for c in b))
 
 
 if __name__ == "__main__":
