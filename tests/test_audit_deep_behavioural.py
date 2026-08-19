@@ -58,6 +58,9 @@ class AuditDeepBehaviouralUnitTests(unittest.TestCase):
 class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         from config.settings import get_settings
+        from services.slots_cache import clear_slots_cache
+
+        clear_slots_cache()
 
         self.env_patcher = patch.dict(
             os.environ,
@@ -95,6 +98,8 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         from config.settings import get_settings
+        from services.slots_cache import clear_slots_cache
+        clear_slots_cache()
         self.env_patcher.stop()
         get_settings.cache_clear()
         await self.engine.dispose()
@@ -103,6 +108,8 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
         """Real DB integration test: verifies exact capacity counting across all profile lifecycle states.
         Active, pending, delete_failed (with peer), create_cleanup_pending (with peer), and failed with peer
         must consume capacity. Failed without peer or unknown without peer must NOT consume capacity."""
+        from services.slots_cache import clear_slots_cache, update_cached_peer_count
+
         async with self.session_factory() as session:
             server = Server(
                 id=1,
@@ -136,9 +143,9 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
             session.add_all([p1, p2, p3, p4, p5, p6])
             await session.commit()
 
-            # Execute real queries against DB
+            # Execute real queries against DB without cache
             peer_counts = await get_server_peer_counts(session)
-            self.assertEqual(peer_counts.get(1), 5, "Exactly 5 profiles should be counted towards capacity")
+            self.assertEqual(peer_counts.get(1), 5, "Exactly 5 profiles should be counted towards capacity (p6 excluded)")
 
             free_ips = await get_total_free_ips(session)
             self.assertEqual(free_ips, 5, "10 max_clients - 5 consumed slots = 5 free IPs")
@@ -146,6 +153,21 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
             available_servers = await get_available_servers(session)
             self.assertEqual(len(available_servers), 1)
             self.assertEqual(available_servers[0].id, 1)
+
+            # Test cache unification: if live physical peers = 4, but DB reservations = 5 -> max(4, 5) = 5
+            update_cached_peer_count(1, 4)
+            free_ips_with_cache = await get_total_free_ips(session)
+            self.assertEqual(free_ips_with_cache, 5, "Effective count must be max(4 cached, 5 db) = 5 -> 5 free IPs")
+
+            # If live physical peers = 10 (node full of external peers) -> effective count = max(10, 5) = 10 -> 0 free IPs
+            update_cached_peer_count(1, 10)
+            free_ips_full = await get_total_free_ips(session)
+            self.assertEqual(free_ips_full, 0, "Effective count max(10, 5) = 10 -> 0 free IPs")
+            available_servers_full = await get_available_servers(session)
+            self.assertEqual(len(available_servers_full), 0, "Server must not be available when live peers reach max_clients")
+
+            # Clean cache after capacity test
+            clear_slots_cache()
 
     async def test_new_24h_and_7d_filter_and_sorting_real_db_boundaries(self):
         """Real DB integration test: verifies exact time boundaries (24h vs 7d) and newest-first sorting."""

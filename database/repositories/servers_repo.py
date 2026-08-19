@@ -96,13 +96,12 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
         .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
-
     available: List[Server] = []
     for server in servers:
-        real_count = get_cached_peer_count(server.id)
-        if real_count is None:
-            real_count = db_counts.get(server.id, 0)
-        if real_count < server.max_clients:
+        cached_count = get_cached_peer_count(server.id)
+        db_count = db_counts.get(server.id, 0)
+        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
+        if effective_count < server.max_clients:
             available.append(server)
     return available
 
@@ -232,10 +231,10 @@ async def get_total_free_ips(session: AsyncSession) -> int:
 
     total_free = 0
     for server in active_servers:
-        real_count = get_cached_peer_count(server.id)
-        if real_count is None:
-            real_count = db_counts.get(server.id, 0)
-        total_free += max(0, server.max_clients - real_count)
+        cached_count = get_cached_peer_count(server.id)
+        db_count = db_counts.get(server.id, 0)
+        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
+        total_free += max(0, server.max_clients - effective_count)
     return total_free
 
 
