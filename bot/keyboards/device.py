@@ -1,12 +1,14 @@
-from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from bot import texts
 
 
 def get_device_keyboard(
     profile_id: int,
     *,
     config_ready: bool = True,
+    show_delete: bool = True,
     amnezia_bridge_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
@@ -28,10 +30,11 @@ def get_device_keyboard(
         text="📖 Инструкция и помощь",
         callback_data=f"support_help:device_{profile_id}",
     )
-    builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
-        callback_data=f"request_delete_device:{profile_id}",
-    )
+    if show_delete:
+        builder.button(
+            text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
+            callback_data=f"request_delete_device:{profile_id}",
+        )
 
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_DEVICE_L23_1,
@@ -42,13 +45,15 @@ def get_device_keyboard(
         callback_data="back_to_main_menu",
     )
 
+    single_buttons_count = 0
     if config_ready:
-        if amnezia_bridge_url:
-            builder.adjust(1, 1, 1, 1, 1, 1, 2)
-        else:
-            builder.adjust(1, 1, 1, 1, 1, 2)
-    else:
-        builder.adjust(1, 1, 1, 2)
+        single_buttons_count += 3 if amnezia_bridge_url else 2
+    single_buttons_count += 2  # rename + help
+    if show_delete:
+        single_buttons_count += 1
+
+    adjustments = [1] * single_buttons_count + [2]
+    builder.adjust(*adjustments)
 
     return builder.as_markup()
 

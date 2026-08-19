@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import re
+import time
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -12,16 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import DeviceCreationStates
-from database.models import User
+from database.connection import get_session
+from database.models import User, VPNProfile
+from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.servers_repo import (
     get_available_servers,
     get_server_by_id,
 )
-from database.repositories.profiles_repo import get_user_profiles
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.device_service import (
-    DeviceCreationError,
     DailyLimitExceeded,
+    DeviceCreationError,
     DeviceLimitExceeded,
     DeviceService,
     DuplicateDeviceName,
@@ -30,15 +33,15 @@ from services.device_service import (
     ServerUnavailable,
 )
 from services.maintenance_service import MaintenanceService
-from services.subscription import SubscriptionService
 from services.slots_cache import capture_server_peer_snapshot
+from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub
 
 from .common import (
     _get_effective_device_limit,
-    _render_maintenance,
     _render_connections,
+    _render_maintenance,
 )
 
 router = Router()
@@ -48,6 +51,34 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
     maxsize=5000,
     ttl=300,
 )
+
+
+async def _await_profile_ready(
+    profile_id: int,
+    timeout_seconds: float = 4.0,
+    poll_interval: float = 0.25,
+) -> VPNProfile | None:
+    """Poll for profile to become active or fail within a monotonic UI wait window.
+
+    Uses short-lived independent read sessions to prevent identity-map staleness
+    and avoid holding DB connections from the pool during sleeps.
+    """
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        session = await get_session()
+        try:
+            profile = await session.get(VPNProfile, profile_id)
+            if profile and profile.provisioning_status == "active" and bool(profile.raw_config) and bool(profile.peer_id):
+                return profile
+            if profile and profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
+                return profile
+        finally:
+            await session.close()
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        await asyncio.sleep(min(poll_interval, remaining))
 
 
 def _get_no_subscription_keyboard():
@@ -299,6 +330,9 @@ async def _process_server_selection(
                 device_name=device_name,
                 snapshot=snapshot,
             )
+            # Commit the creation transaction immediately so that background workers
+            # claiming api_operations can see the durable create_peer task in PostgreSQL.
+            await session.commit()
         except NoActiveSubscription:
             await render_hub(
                 callback.bot,
@@ -345,13 +379,11 @@ async def _process_server_selection(
             )
             await state.clear()
             return
-        except DeviceCreationError as e:
-            logger.error(
-                "Device creation failed for user=%s server=%s: %s",
+        except DeviceCreationError:
+            logger.exception(
+                "Device creation failed for user=%s server=%s",
                 telegram_user_id,
                 server_id,
-                e,
-                exc_info=True,
             )
             await render_hub(
                 callback.bot,
@@ -381,8 +413,8 @@ async def _process_server_selection(
             )
             await state.clear()
             return
-        except Exception as e:
-            logger.error(f"Unexpected error in _process_server_selection: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Unexpected error in _process_server_selection")
 
             await render_hub(
                 callback.bot,
@@ -396,8 +428,20 @@ async def _process_server_selection(
 
         await state.clear()
         if new_profile:
-            from .device_view_routes import render_device_screen
-            await render_device_screen(callback.bot, callback.message.chat.id, new_profile, user, session)
+            ready_profile = await _await_profile_ready(new_profile.id, timeout_seconds=4.0)
+            if ready_profile and ready_profile.provisioning_status == "active":
+                from .device_view_routes import render_device_screen
+                await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
+            elif ready_profile and ready_profile.provisioning_status == "create_failed":
+                await render_hub(
+                    callback.bot,
+                    callback.message.chat.id,
+                    texts.ERROR_API_CREATE_FAILED,
+                    get_back_button("back_to_connections"),
+                )
+            else:
+                # Timeout reached or cleanup pending -> render connections list showing current status
+                await _render_connections(callback.message, user, session)
         else:
             await _render_connections(callback.message, user, session)
 

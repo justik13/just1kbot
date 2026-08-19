@@ -1,14 +1,11 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_device_delete_confirm_keyboard,
-    get_device_keyboard,
-)
+from bot.keyboards import get_device_delete_confirm_keyboard
 from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
@@ -79,11 +76,13 @@ async def cancel_delete_device(
 
     await callback.answer(texts.DEVICE_DELETE_CANCELLED, show_alert=False)
 
-    await render_hub(
+    from .device_view_routes import render_device_screen
+    await render_device_screen(
         callback.bot,
         callback.message.chat.id,
-        texts.DEVICE_MANAGE_TITLE,
-        get_device_keyboard(profile_id),
+        profile,
+        db_user,
+        session,
     )
 
 
