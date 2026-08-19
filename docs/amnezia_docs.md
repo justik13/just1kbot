@@ -1,7 +1,7 @@
-# 📚 AMNEZIA WG 2.0 — ПОЛНАЯ ТЕХНИЧЕСКАЯ СПРАВКА
+# 📚 AMNEZIA WG 2.0 — ТЕХНИЧЕСКИЙ СПРАВОЧНИК
 
 > **ОБЛАСТЬ ДЕЙСТВИЯ:** В проекте используется **ТОЛЬКО AmneziaWG** (чистый стандартный WireGuard не поддерживается из-за DPI-блокировок).
-> На текущий момент в продакшене активен **ТОЛЬКО протокол AmneziaWG 2.0** (`amneziawg2`), управляемый через `kyoresuas/amnezia-api`.
+> На текущий момент в продакшене активен **ТОЛЬКО протокол AmneziaWG 2.0** (`amneziawg2`), управляемый через серверный API `kyoresuas/amnezia-api`.
 > **Планы развития (Roadmap):**
 > 1. Поддержка **AmneziaWG 3.0** (`amneziawg3`) при появлении стабильного self-hosted серверного решения.
 > 2. Интеграция протоколов стека **Xray** (VLESS-Reality, Trojan, Shadowsocks, Hysteria 2).
@@ -23,61 +23,44 @@
 
 ---
 
-## 📦 1. ТРИ ФОРМАТА КОНФИГУРАЦИИ
+## 📦 1. ФОРМАТЫ КОНФИГУРАЦИИ И СОВМЕСТИМОСТЬ С КЛИЕНТАМИ
 
-| Формат | Расширение | Для какого приложения | Содержимое |
+| Формат | Расширение | Совместимость с приложениями | Содержимое |
 |---|---|---|---|
-| **AmneziaVPN native** | `.vpn` | **AmneziaVPN** (универсальный клиент) | Полный JSON с `containers`, `awg`, `last_config` |
-| **AmneziaWG native** | `.conf` | **AmneziaWG** (отдельное приложение) | WireGuard INI + AWG 2.0 параметры |
-| **vpn:// URI** | — (строка) | Оба приложения (импорт через QR/буфер) | `base64url(4-byte BE length + zlib(JSON))` |
+| **AmneziaVPN native** | `.vpn` | **AmneziaVPN** (официальный универсальный клиент) | Полный JSON с `containers`, `awg`, `last_config` |
+| **AmneziaWG / WireGuard conf** | `.conf` | **AmneziaWG** (нативное приложение), **AmneziaVPN** (импорт файла), **INCY** (мобильные) | Текстовый WireGuard INI + AWG 2.0 параметры |
+| **vpn:// URI** | — (строка) | **Только AmneziaVPN** (вставка ключа из буфера/QR) | `base64url(4-byte BE length + zlib(JSON))` |
 
-### ⚠️ Критическое правило соответствия
-
-- `.conf` файл **ДОЛЖЕН** содержать WireGuard INI (не JSON)
-- `.vpn` файл **ДОЛЖЕН** содержать полный JSON (не INI)
-- Если перепутать — **ни одно приложение не откроет файл**
-
----
-
-## 📱 2. КЛИЕНТЫ И ИХ ФОРМАТЫ
-
-### AmneziaVPN (универсальный клиент)
-
-| Платформа | Репозиторий | Импорт |
-|---|---|---|
-| Windows / macOS / Linux | `amnezia-vpn/amnezia-client` | `.vpn` (JSON) или `vpn://` URI |
-| Android | `amnezia-vpn/amnezia-client` | `.vpn` или `vpn://` |
-| iOS | `amnezia-vpn/amnezia-client` | `.vpn` или `vpn://` |
-
-**Это основной клиент.** Поддерживает OpenVPN, WG, AWG 1.0/1.5/2.0, Xray.
-
-### AmneziaWG (отдельное легковесное приложение)
-
-| Платформа | Репозиторий | Импорт |
-|---|---|---|
-| Windows | `amnezia-vpn/amneziawg-windows-client` | `.conf` (AWG INI) |
-| macOS / iOS | `amnezia-vpn/amneziawg-apple` | `.conf` (AWG INI) |
-| Android | `amnezia-vpn/amneziawg-android` | `.conf` (AWG INI) |
-
-**Это отдельный клиент.** Поддерживает **только AmneziaWG 2.0** (и старые AWG). Быстрее, легче, меньше памяти.
-
-### Рекомендация для бота
-
-В интерфейсе бота используется двухуровневая модель предоставления доступа:
-1. **Основной способ (быстрый):** Кнопка **«🔑 Показать ключ»** — выводит `vpn://` URI в моноширинном блоке для копирования в один клик.
-2. **Резервный способ (файлы):** Кнопка **«📥 Скачать файлом»** — генерирует и отправляет два файла:
-   - `device.vpn` — для AmneziaVPN (полный JSON с `containers`, `awg`, `last_config`);
-   - `device.conf` — для AmneziaWG / DefaultVPN (WireGuard INI + AWG 2.0 параметры).
-
-Плюс подробная контекстная справка по настройке клиентов.
+### ⚠️ Важные правила совместимости:
+1. **`vpn://` URI работает ТОЛЬКО в AmneziaVPN** — отдельное легковесное приложение AmneziaWG не поддерживает key-based импорт `vpn://` (официальная документация [Amnezia Sharing](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/)).
+2. **Файл `.conf` универсален для AWG** — его открывает как легковесный клиент AmneziaWG, так и универсальный клиент AmneziaVPN через меню «Подключиться по файлу конфигурации».
+3. **Файл `.vpn` строго для AmneziaVPN** — содержит полный JSON-контейнер настроек сервера.
 
 ---
 
-## 📄 3. ФОРМАТ `.vpn` (AmneziaVPN) — Полный JSON
+## 📱 2. КЛИЕНТСКИЕ ПРИЛОЖЕНИЯ
 
-Это то, что возвращает `kyoresuas/amnezia-api` в поле `client.config` как `vpn://...`.
+### 1. AmneziaVPN (универсальный клиент)
+* **Платформы:** Windows 10/11 x64, macOS 14+, Linux, Android, iOS.
+* **Импорт:** Ключ `vpn://...` из буфера обмена, файл `.vpn`, файл `.conf`.
+* **Назначение:** Рекомендуемый основной клиент для современных настольных и мобильных ОС.
 
-### Эталонный пример
+### 2. AmneziaWG (легковесный клиент)
+* **Платформы:** Windows (включая Windows 7/8, 32-bit, ARM64), macOS, iOS, Android.
+* **Импорт:** **Только `.conf` файлы** (или QR-код с содержимым `.conf`).
+* **Назначение:** Альтернативный быстрый клиент для устройств, где не поддерживается или избыточен полный AmneziaVPN.
+
+### Рекомендация интерфейса бота
+1. **Быстрый доступ:** Кнопка **«🔑 Показать ключ»** — выводит `vpn://` URI для AmneziaVPN.
+2. **Резервный доступ:** Кнопка **«📥 Скачать файлом»** — отправляет:
+   - `device.vpn` — для AmneziaVPN;
+   - `device.conf` — для AmneziaWG / роутеров / сторонних клиентов.
+
+---
+
+## 📄 3. СТРУКТУРА ФОРМАТА `.vpn` (JSON)
+
+Это декодированное представление того, что возвращает `kyoresuas/amnezia-api` в поле `client.config` (`vpn://...`):
 
 ```json
 {
@@ -104,62 +87,29 @@
         "I3": "",
         "I4": "",
         "I5": "",
-        "last_config": "{...JSON-СТРОКА (см. ниже)...}"
+        "last_config": "{...JSON-СТРОКА...}"
       }
     }
   ],
   "defaultContainer": "amnesia-awg2",
   "description": "Germany",
-  "dns1": "1.1.1.1",
-  "dns2": "1.0.0.1",
-  "hostName": "just1kbot.1337.cx"
+  "dns1": "8.8.8.8",
+  "dns2": "8.8.4.4",
+  "hostName": "vpn.example.com"
 }
 ```
-
-### Ключевой момент: `last_config`
-
-Поле `awg.last_config` — это **JSON-СТРОКА** (не объект!), внутри которой есть готовый WireGuard INI-файл.
-
-Декодированный `last_config` имеет такую структуру:
-
-```json
-{
-  "H1": "169154911-1234371153",
-  "H2": "2057051984-2121122945",
-  "H3": "2132872968-2133668229",
-  "H4": "2136455412-2141801388",
-  "I1": "<r 2><b 0x8580...>",
-  "I2": "", "I3": "", "I4": "", "I5": "",
-  "Jc": "4", "Jmin": "10", "Jmax": "50",
-  "S1": "79", "S2": "115", "S3": "5", "S4": "1",
-  "allowed_ips": ["0.0.0.0/0", "::/0"],
-  "clientId": "dwvGfuluZKlNwickCgPb6DLiUE36icqZPiQWX/BHwBk=",
-  "client_ip": "10.8.1.34",
-  "client_priv_key": "uC6xUgdQDF4+fAOiw37ZQCG7XljilDsnBCl7VH7bAl8=",
-  "client_pub_key": "dwvGfuluZKlNwickCgPb6DLiUE36icqZPiQWX/BHwBk=",
-  "config": "[Interface]\nAddress = 10.8.1.34/32\nDNS = 1.1.1.1, 1.0.0.1\n...",
-  "hostName": "just1kbot.1337.cx",
-  "mtu": "1376",
-  "persistent_keep_alive": "25",
-  "port": 1234,
-  "psk_key": "PGh2rNsBmWVJC7qpa3fZ1dwB6tLjBUVKsxSZK6pMQRY=",
-  "server_pub_key": "bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o="
-}
-```
-
-**Поле `config`** внутри `last_config` — это **уже готовый WireGuard INI-файл как строка**. Его можно взять как есть для `.conf`.
 
 ---
 
-## 📄 4. ФОРМАТ `.conf` (AmneziaWG) — WireGuard INI + AWG 2.0
-
-### Эталонный пример (ТОЧНЫЙ формат, который импортирует AmneziaWG)
+## ⚙️ 4. СТРУКТУРА ФАЙЛА `.conf` И ПАРАМЕТРЫ ОБФУСКАЦИИ
 
 ```ini
 [Interface]
 Address = 10.8.1.34/32
-DNS = 1.1.1.1, 1.0.0.1
+DNS = 8.8.8.8, 8.8.4.4
+MTU = 1280
 PrivateKey = uC6xUgdQDF4+fAOiw37ZQCG7XljilDsnBCl7VH7bAl8=
+
 Jc = 4
 Jmin = 10
 Jmax = 50
@@ -172,382 +122,71 @@ H2 = 2057051984-2121122945
 H3 = 2132872968-2133668229
 H4 = 2136455412-2141801388
 
-h1 = <r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>
-h2 = 
-h3 = 
-h4 = 
-h5 = 
+I1 = <r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>
 
 [Peer]
 PublicKey = bRqF9LY7lnONibMDWH3u0QbeC7QbrLYPufdO4QMm53o=
 PresharedKey = PGh2rNsBmWVJC7qpa3fZ1dwB6tLjBUVKsxSZK6pMQRY=
 AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = just1kbot.1337.cx:1234
+Endpoint = vpn.example.com:1234
 PersistentKeepalive = 25
 ```
 
-### 🔑 КЛЮЧЕВЫЕ ОТЛИЧИЯ AWG 2.0 ОТ ОБЫЧНОГО WIREGUARD
-
-| Параметр | AWG 2.0 | Как записывается в `.conf` |
-|---|---|---|
-| **Jc / Jmin / Jmax** | Обязательны (вместо J1/J2/J3) | `Jc = 4`, `Jmin = 10`, `Jmax = 50` |
-| **S1, S2, S3, S4** | Все четыре обязательны | `S1 = 79`, `S2 = 115`, `S3 = 5`, `S4 = 1` |
-| **H1-H4** | **ДИАПАЗОНЫ через дефис** (строки!) | `H1 = 169154911-1234371153` |
-| **I1-I5 (CPS)** | В JSON: `I1`-`I5` (uppercase) | В `.conf`: **`h1`-`h5` (lowercase!)** |
-| **MTU** | Рекомендовано 1376 | Обычно берётся из `last_config.mtu` |
-
-### ⚠️ Регистр критичен!
-
-- В JSON (`awg` секции): `I1`, `I2`, `I3`, `I4`, `I5` — **UPPERCASE**
-- В `.conf` файле: `h1`, `h2`, `h3`, `h4`, `h5` — **lowercase**
-- Это **пакеты инициализации (CPS)** — разные регистры для разных форматов
-
-### ⚠️ H1-H4 — это СТРОКИ, не числа
-
-В AWG 2.0 это **обязательно диапазоны** вида `"min-max"`. Нельзя конвертировать в `int`.
-
-```
-✅ H1 = 169154911-1234371153
-❌ H1 = 169154911   (это AWG 1.0, не работает в 2.0)
-```
+### Спецификация параметров AWG 2.0:
+1. **`Jc`, `Jmin`, `Jmax` (Junk packets):** Количество и диапазон размеров мусорных пакетов перед хэндшейком.
+2. **`S1`, `S2`, `S3`, `S4` (Packet sizes):** Размеры пакетов инициализации, ответа, cookie и префикса данных.
+3. **`H1`, `H2`, `H3`, `H4` (Headers):** Заголовки пакетов. В протоколе `amneziawg-go` допускаются как одиночные значения (`H1 = 1234567890`), так и диапазоны (`H1 = 169154911-1234371153`). Серверный API `kyoresuas/amnezia-api` генерирует диапазоны. В коде всегда сохраняются строками без приведения к `int`.
+4. **`I1`..`I5` (Custom Packet Sequences / CPS):** Пакеты инициализации протокола.
+   - В коде проекта и официальных клиентах записываются как `I1`, `I2`, `I3`, `I4`, `I5`.
+   - Парсеры официальных клиентов (`amneziawg-windows-client`, `amneziawg-android`, `amneziawg-go`) регистронезависимы.
+   - *Known compatibility caveat:* В Android AmneziaWG пустые строки `I2 = `, `I3 = ` могут вызывать ошибки импорта QR (upstream issue #56). Если CPS-пакеты не используются сервером, их можно безопасно опускать.
 
 ---
 
-## 🔐 5. ФОРМАТ `vpn://` URI
-
-### Кодирование
-
-```
-vpn:// + base64url( 4-byte big-endian original_length + zlib_compressed_JSON )
-```
-
-### Декодирование (Python)
+## 🔐 5. ДЕКОДИРОВАНИЕ И КОДИРОВАНИЕ `vpn://` URI
 
 ```python
-import base64, zlib, struct, json
+import base64
+import json
+import struct
+import zlib
 
 def decode_vpn_uri(uri: str) -> dict:
     payload = uri[6:]  # убрать vpn://
-    # base64url → standard base64
     b64 = payload.replace("-", "+").replace("_", "/")
     b64 += "=" * ((4 - len(b64) % 4) % 4)
     data = base64.b64decode(b64)
-    # Первые 4 байта — длина оригинального JSON (big-endian)
-    original_len = struct.unpack(">I", data[:4])[0]
-    # Остальное — zlib-сжатый JSON
+    
+    orig_len = struct.unpack(">I", data[:4])[0]
     json_bytes = zlib.decompress(data[4:])
-    assert len(json_bytes) == original_len
+    if len(json_bytes) != orig_len:
+        raise ValueError(f"Length mismatch: {len(json_bytes)} != {orig_len}")
     return json.loads(json_bytes.decode("utf-8"))
-```
 
-### Обратное кодирование
-
-```python
-def encode_vpn_uri(data: dict) -> str:
-    json_bytes = json.dumps(data, separators=(",", ":")).encode("utf-8")
+def encode_vpn_uri(config_dict: dict) -> str:
+    json_bytes = json.dumps(config_dict, ensure_ascii=False).encode("utf-8")
     header = struct.pack(">I", len(json_bytes))
-    compressed = zlib.compress(json_bytes)
-    payload = base64.urlsafe_b64encode(header + compressed).decode("ascii").rstrip("=")
-    return "vpn://" + payload
+    compressed = zlib.compress(json_bytes, level=9)
+    payload = header + compressed
+    b64 = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    return f"vpn://{b64}"
 ```
 
 ---
 
-## 🎛️ 6. ПАРАМЕТРЫ AWG 2.0 (полный список)
+## 🔗 6. ИСТОЧНИКИ И СПРАВОЧНЫЕ МАТЕРИАЛЫ
 
-### WireGuard-базовые (стандартные)
+### Официальные ресурсы Amnezia:
+* [Amnezia Developer Portal](https://docs.amnezia.org)
+* [Amnezia — Alternative Apps & Native Configs](https://docs.amnezia.org/documentation/alternative-clients/)
+* [Amnezia — Supported Configuration Formats](https://docs.amnezia.org/documentation/supported-configuration-formats/)
+* [Amnezia — How to Share VPN Access](https://docs.amnezia.org/documentation/instructions/amnezia-hosting-sharing/)
+* [Amnezia Client (Desktop/Mobile)](https://github.com/amnezia-vpn/amnezia-client)
+* [AmneziaWG Go Engine](https://github.com/amnezia-vpn/amneziawg-go)
+* [AmneziaWG Windows Client](https://github.com/amnezia-vpn/amneziawg-windows-client)
+* [AmneziaWG Android](https://github.com/amnezia-vpn/amneziawg-android)
+* [AmneziaWG Apple (iOS / macOS)](https://github.com/amnezia-vpn/amneziawg-apple)
 
-| Параметр | Где находится | Описание |
-|---|---|---|
-| `Address` | `[Interface]` | IP клиента (например `10.8.1.34/32`) |
-| `DNS` | `[Interface]` | DNS серверы (обычно `1.1.1.1, 1.0.0.1`) |
-| `PrivateKey` | `[Interface]` | Приватный ключ клиента (base64) |
-| `PublicKey` | `[Peer]` | Публичный ключ сервера (base64) |
-| `PresharedKey` | `[Peer]` | PSK (опционально, base64) |
-| `AllowedIPs` | `[Peer]` | Обычно `0.0.0.0/0, ::/0` |
-| `Endpoint` | `[Peer]` | `host:port` сервера |
-| `PersistentKeepalive` | `[Peer]` | Обычно `25` секунд |
-
-### AWG 2.0 обфускационные (J/S/H/I)
-
-| Параметр | Тип | Описание |
-|---|---|---|
-| `Jc` | int | Количество junk-пакетов перед handshake |
-| `Jmin` | int | Минимальный размер junk-пакета (байты) |
-| `Jmax` | int | Максимальный размер junk-пакета (байты) |
-| `S1` | int | Размер Initial packet |
-| `S2` | int | Размер Response packet |
-| `S3` | int | Размер Cookie-response (≤ 64) |
-| `S4` | int | Размер Data-prefix (≤ 32) |
-| `H1` | string `"min-max"` | Диапазон заголовка 1 |
-| `H2` | string `"min-max"` | Диапазон заголовка 2 |
-| `H3` | string `"min-max"` | Диапазон заголовка 3 |
-| `H4` | string `"min-max"` | Диапазон заголовка 4 |
-| `I1` / `h1` | string | CPS пакет инициализации 1 |
-| `I2` / `h2` | string | CPS пакет 2 |
-| `I3` / `h3` | string | CPS пакет 3 |
-| `I4` / `h4` | string | CPS пакет 4 |
-| `I5` / `h5` | string | CPS пакет 5 |
-
-### Метаданные JSON
-
-| Поле | Где | Описание |
-|---|---|---|
-| `containers` | верхний уровень | Массив контейнеров протоколов |
-| `defaultContainer` | верхний уровень | `"amnesia-awg2"` |
-| `description` | верхний уровень | Название сервера (отображается в клиенте) |
-| `dns1`, `dns2` | верхний уровень | DNS серверы |
-| `hostName` | верхний уровень | Hostname/IP сервера |
-| `protocol_version` | внутри `awg` | `"2"` для AWG 2.0 |
-| `port` | внутри `awg` | UDP порт сервера |
-| `transport_proto` | внутри `awg` | `"udp"` |
-| `last_config` | внутри `awg` | **JSON-строка** с готовым конфигом |
-| `client_ip` | внутри `last_config` | IP клиента |
-| `client_priv_key` | внутри `last_config` | Приватный ключ |
-| `client_pub_key` | внутри `last_config` | Публичный ключ клиента |
-| `server_pub_key` | внутри `last_config` | Публичный ключ сервера |
-| `psk_key` | внутри `last_config` | Preshared key |
-| `mtu` | внутри `last_config` | MTU (обычно `"1376"`) |
-| `persistent_keep_alive` | внутри `last_config` | Keepalive в секундах |
-| `allowed_ips` | внутри `last_config` | Массив `["0.0.0.0/0", "::/0"]` |
-
----
-
-## 🚧 7. ОГРАНИЧЕНИЯ ПАРАМЕТРОВ (из AmneziaWG-Architect)
-
-**Нарушение = конфиг не работает!**
-
-| Правило | Ограничение | Причина |
-|---|---|---|
-| `S4` | `≤ 32` | Data prefix не более 32 байт |
-| `S3` | `≤ 64` | Cookie-ответ не более 64 байт |
-| `S1 + 56` | `≠ S2` | Init и Response не совпадают по длине |
-| `S2 + 92` | `≠ S3` | Response и Cookie не совпадают |
-| `H1, H2, H3, H4` | **Диапазоны не пересекаются** | Каждый заголовок уникален |
-| `Jc` | `≥ 4` | Минимум 4 junk-пакета |
-| `Jmax` | `> 81` | Минимальный размер junk |
-
-**Важно:** Эти ограничения **соблюдает сам Amnezia API** при создании клиента. Боту нужно просто отдавать то, что пришло из API, **не изменяя параметры**.
-
----
-
-## 🌐 8. AMNEZIA API (`kyoresuas/amnezia-api`) — ENDPOINTS
-
-### Аутентификация
-
-Все endpoints (кроме `/healthz`, `/metrics`, `/docs`) требуют заголовок:
-```
-x-api-key: <FASTIFY_API_KEY>
-```
-
-### Используемые endpoints (только `amneziawg2`)
-
-| Метод | Маршрут | Назначение |
-|---|---|---|
-| `POST` | `/clients` | Создать клиента → получить `vpn://` URI |
-| `GET` | `/clients?skip=0&limit=100` | Список клиентов с трафиком и статусами |
-| `PATCH` | `/clients` | Обновить статус (`disabled`/`active`) и `expiresAt` |
-| `DELETE` | `/clients` | Удалить клиента |
-| `POST` | `/clients/qr` | Сгенерировать серию QR-кодов |
-| `GET` | `/server` | Информация о сервере |
-| `GET` | `/server/load` | Метрики нагрузки (CPU/RAM/диск/сеть) |
-| `GET` | `/healthz` | Healthcheck |
-
-### Создание клиента (AWG 2.0)
-
-**Запрос:**
-```bash
-curl -X POST http://<server>/clients \
--H "x-api-key: <KEY>" \
--H "Content-Type: application/json" \
--d '{
-  "clientName": "tg_123456_iPhone_a1b2",
-  "protocol": "amneziawg2",
-  "expiresAt": null
-}'
-```
-
-**Ответ:**
-```json
-{
-  "message": "Client created",
-  "client": {
-    "id": "PF77ZXRl1yAkFzhBq/zQNlDPD73XXTq+Zs2PgtjLKVA=",
-    "config": "vpn://AAAJBXjatVZbT-M4...",
-    "protocol": "amneziawg2"
-  }
-}
-```
-
-- `id` → сохраняется в БД как `peer_id` (используется для PATCH/DELETE)
-- `config` → сохраняется в БД как `raw_config` (это `vpn://` URI или сырая строка конфигурации)
-
-> ⚠️ **КРИТИЧЕСКОЕ ПРАВИЛО ВАЛИДАЦИИ ДЛЯ БОТА (`services/api_operations_executor.py`):**
-> При ответе `201 Created` от API **НЕЛЬЗЯ отбраковывать или удалять созданное устройство**, если `build_conf_file(created.config)` возвращает `None`.
-> Для некоторых протоколов или клиентов `.conf` не требуется или `raw_config` передаётся в текстовом виде. Всякая непустая конфигурация с заполненным `id` считается успешной.
-
-### Пауза доступа (без удаления ключа)
-
-`status: disabled` **отключает доступ, не удаляя ключ**. Конфиг у пользователя остаётся прежним.
-
-```bash
-curl -X PATCH http://<server>/clients \
--H "x-api-key: <KEY>" \
--d '{
-  "clientId": "PF77ZXRl1y...",
-  "protocol": "amneziawg2",
-  "status": "disabled"
-}'
-```
-
-Для возобновления: `"status": "active"`.
-
-### Срок действия
-
-`expiresAt` — **Unix timestamp в секундах** (UTC) или `null` для бессрочного доступа.
-Фоновая задача API автоматически отключает истёкших клиентов по cron.
-
-### QR-коды
-
-```bash
-curl -X POST http://<server>/clients/qr \
--d '{"config": "vpn://..."}'
-```
-
-**Ответ:**
-```json
-{
-  "total": 1,
-  "items": ["data:image/png;base64,iVBORw0KGgo..."]
-}
-```
-
-Большие конфиги разбиваются на несколько QR — Amnezia-клиент сканирует их по очереди.
-
----
-
-## 🤖 9. ЛОГИКА ГЕНЕРАЦИИ ФАЙЛОВ В БОТЕ
-
-### Файл 1: `device.vpn` (для AmneziaVPN)
-
-```python
-def build_vpn_file(vpn_uri: str) -> str:
-    data = decode_vpn_uri(vpn_uri)  # весь JSON как dict
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-```
-
-Отдавать как `{device_name}.vpn` с MIME `application/json` или `application/octet-stream`.
-
-### Файл 2: `device.conf` (для AmneziaWG)
-
-**ПРИОРИТЕТ №1:** Взять готовый INI из `last_config.config`:
-
-```python
-def build_conf_file(vpn_uri: str) -> str:
-    data = decode_vpn_uri(vpn_uri)
-    last_config_str = data["containers"][0]["awg"]["last_config"]
-    last_config = json.loads(last_config_str)
-    return last_config["config"]  # Уже готовый INI!
-```
-
-**ПРИОРИТЕТ №2 (fallback):** Собрать вручную, соблюдая формат:
-1. `[Interface]`: Address, DNS, MTU (если есть), PrivateKey
-2. `Jc`, `Jmin`, `Jmax`
-3. `S1`, `S2`, `S3`, `S4`
-4. `H1`, `H2`, `H3`, `H4` **как строки** (без приведения к int!)
-5. Пустая строка
-6. **`h1`, `h2`, `h3`, `h4`, `h5` (lowercase!)** — из `I1`-`I5` в JSON
-7. Пустая строка
-8. `[Peer]`: PublicKey, PresharedKey, AllowedIPs, Endpoint, PersistentKeepalive
-
-### Отправка в Telegram
-
-```python
-# Пользователь нажимает "📥 Скачать файлом":
-# 1. Прикрепить .vpn файл к хабу сообщений
-await append_hub_document(
-    bot, chat_id, document=vpn_file,
-    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
-    parse_mode="HTML",
-)
-# 2. Прикрепить .conf файл к хабу сообщений
-await append_hub_document(
-    bot, chat_id, document=conf_file,
-    caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
-    parse_mode="HTML",
-)
-# 3. Отправить текстовый хаб с инструкцией и клавиатурой возврата к устройству
-await append_hub_message(
-    bot, chat_id,
-    text=texts.DEVICE_CONFIG_INSTRUCTION,
-    reply_markup=_get_device_config_keyboard(profile.id),
-    parse_mode="HTML",
-)
-# 4. Удалить предыдущие сообщения хаба для сохранения чистоты экрана
-await delete_hub_ids(bot, chat_id, old_hub_ids)
-```
-
----
-
-## ⚠️ 10. ЖЁСТКИЕ ПРАВИЛА ДЛЯ БОТА
-
-1. **Никогда не отдавать `.conf` с JSON-содержимым** — AmneziaWG не откроет
-2. **Никогда не отдавать `.vpn` с INI-содержимым** — AmneziaVPN не откроет
-3. **H1-H4 в AWG 2.0 — это строки-диапазоны** (`"min-max"`), не `int`
-4. **В `.conf` файле CPS = `h1`-`h5` (lowercase!)**, хотя в JSON это `I1`-`I5`
-5. **Оптимизация MTU и DNS:** Для стабильной работы на мобильных сетях РФ бот через `customize_vpn_config_dict` принудительно выставляет `MTU = 1280` (устранение фрагментации/дропов пакетов) и Google DNS `8.8.8.8, 8.8.4.4` (обход замедления Cloudflare 1.1.1.1)
-6. **Всегда сохранять `vpn://` URI в БД** (поле `raw_config`) — это единственный источник истины
-7. **При пересоздании устройства** — новый `vpn://`, новые ключи, новый `last_config`
-8. **Не менять параметры AWG 2.0 (Jc, S1-S4, H1-H4, CPS)** — они генерируются API, ручные изменения сломают handshake
-9. **Для `protocol` всегда использовать `"amneziawg2"`** — никаких `"amneziawg"` (это AWG 1.0)
-10. **Имя клиента в API** — формат `tg_{telegram_id}_{device_name}_{4-char-hash}` для трассируемости
-
----
-
-## 🔗 11. ССЫЛКИ
-
-### Официальные репозитории Amnezia
-
-- **AmneziaVPN (основной клиент):** https://github.com/amnezia-vpn/amnezia-client
-- **AmneziaWG Windows:** https://github.com/amnezia-vpn/amneziawg-windows-client
-- **AmneziaWG Apple (macOS/iOS):** https://github.com/amnezia-vpn/amneziawg-apple
-- **AmneziaWG Android:** https://github.com/amnezia-vpn/amneziawg-android
-- **Все репозитории:** https://github.com/orgs/amnezia-vpn/repositories
-
-### API
-
-- **Amnezia API (наш API):** https://github.com/kyoresuas/amnezia-api
-- **English README:** https://raw.githubusercontent.com/kyoresuas/amnezia-api/refs/heads/main/README_EN.md
-- **Документация API:** `http://<server>/docs` (Swagger UI)
-
-### Генераторы и валидаторы
-
-- **AmneziaWG Architect (онлайн):** https://architect.vai-rice.space/
-- **AmneziaWG Architect (исходники):** https://github.com/Vadim-Khristenko/AmneziaWG-Architect
-- **Пул доменов CPS:** ~540 хостов (QUIC Initial, TLS ClientHello, DTLS, SIP)
-
-### Документация
-
-- **Amnezia Docs:** https://docs.amnezia.org
-- **Amnezia Website:** https://amnezia.org
-
----
-
-## 📋 12. БЫСТРАЯ ПРОВЕРКА (чеклист)
-
-При генерации конфигов для нового устройства:
-
-- [ ] API-запрос: `protocol = "amneziawg2"` (не `"amneziawg"`)
-- [ ] Получен `vpn://...` URI от API
-- [ ] URI декодирован через `base64url + zlib` (4-byte header)
-- [ ] В JSON есть `containers[0].awg.last_config` (строка)
-- [ ] `last_config` распарсен как JSON
-- [ ] Для `.vpn`: `json.dumps(весь_json, indent=2, ensure_ascii=False)`
-- [ ] Для `.conf`: взять `last_config["config"]` как есть
-- [ ] В `.conf` параметры `h1-h5` записаны **lowercase** (не `I1-I5`)
-- [ ] В `.conf` `H1-H4` записаны как **строки** (`"169154911-1234371153"`)
-- [ ] Оба файла отправлены пользователю + инструкция
-- [ ] `vpn://` URI сохранён в БД в поле `raw_config`
-- [ ] `id` из API сохранён в БД в поле `peer_id`
-
----
+### Сторонние и сопутствующие ресурсы:
+* [kyoresuas/amnezia-api (Fastify REST API для управления AmneziaWG)](https://github.com/kyoresuas/amnezia-api) — стороннее серверное API, используемое ботом.
+* [AmneziaWG-Architect (Community Validator)](https://github.com/Vadim-Khristenko/AmneziaWG-Architect) — генератор и валидатор параметров AWG.

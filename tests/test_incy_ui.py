@@ -71,7 +71,9 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             if btn.callback_data
         ]
 
-        self.assertTrue(any("Добавить в INCY" in btn and "🧪" in btn for btn in buttons))
+        self.assertTrue(
+            any("Добавить в INCY (iOS / Android)" in btn and "🧪" in btn for btn in buttons)
+        )
         self.assertIn("menu_incy_subscription", callbacks)
 
         # Check order: add_device -> menu_incy_subscription -> status
@@ -111,6 +113,8 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://", text_arg)
         self.assertIn("sub/token_abc_123", text_arg)
         self.assertIn("Как настроить", text_arg)
+        self.assertIn("Windows / macOS", text_arg)
+        self.assertIn("AmneziaVPN", text_arg)
 
         btn_urls = [
             btn.url
