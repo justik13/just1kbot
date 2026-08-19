@@ -182,7 +182,6 @@ class DeviceService:
                 session.add(profile)
                 await session.flush()
         except IntegrityError as e:
-            session.expunge(profile)
             error_str = str(e.orig).lower() if e.orig else ""
             if (
                 "duplicate" in error_str
