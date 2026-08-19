@@ -1,12 +1,21 @@
 from datetime import datetime
 from typing import List, Optional, TypedDict
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Server, VPNProfile
-from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
 from services.slots_cache import get_cached_peer_count
+
+
+def _capacity_consuming_profiles_condition():
+    """A profile consumes server capacity if an active peer is assigned (peer_id is not None),
+    or if it is in an active/reserving/deletion-in-progress state. Only creation attempts that
+    failed prior to peer allocation (create_failed with peer_id=None) are excluded from capacity."""
+    return or_(
+        VPNProfile.peer_id.is_not(None),
+        VPNProfile.provisioning_status.notin_(("create_failed",)),
+    )
 
 
 class ServerUpdateFields(TypedDict, total=False):
@@ -46,7 +55,7 @@ HEALTH_UPDATE_FIELDS = {
 
 
 async def get_all_servers(session: AsyncSession) -> List[Server]:
-    result = await session.execute(select(Server).order_by(Server.name))
+    result = await session.execute(select(Server).order_by(Server.id))
     return result.scalars().all()
 
 
@@ -60,7 +69,7 @@ async def get_active_servers(session: AsyncSession) -> List[Server]:
 async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     result = await session.execute(
         select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
+        .where(_capacity_consuming_profiles_condition())
         .group_by(VPNProfile.server_id)
     )
     return {row[0]: row[1] for row in result.all()}
@@ -73,7 +82,7 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
 
     result = await session.execute(
         select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
+        .where(_capacity_consuming_profiles_condition())
         .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
@@ -206,7 +215,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
 
     result = await session.execute(
         select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES))
+        .where(_capacity_consuming_profiles_condition())
         .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
