@@ -179,9 +179,9 @@ class DeviceService:
         session.add(profile)
 
         try:
-            await session.flush()
+            async with session.begin_nested():
+                await session.flush()
         except IntegrityError as e:
-            await session.rollback()
             error_str = str(e.orig).lower() if e.orig else ""
             if (
                 "duplicate" in error_str

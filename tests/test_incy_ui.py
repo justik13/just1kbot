@@ -167,7 +167,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         callback.answer.assert_any_await("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
         mock_rotate_token.assert_awaited_once_with(session, db_user)
-        session.commit.assert_awaited_once()
         mock_render_hub.assert_awaited_once()
 
         args = mock_render_hub.call_args[0]

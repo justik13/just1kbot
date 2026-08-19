@@ -299,7 +299,9 @@ async def search_user_flexible(session: AsyncSession, query: str) -> Optional[Us
 
 def _apply_user_filters(stmt, filter_type: str, filter_param=None):
     now = now_utc()
-    if filter_type in ("new_7d", "new", "new_24h"):
+    if filter_type == "new_24h":
+        stmt = stmt.where(User.created_at >= now - timedelta(hours=24))
+    elif filter_type in ("new_7d", "new"):
         stmt = stmt.where(User.created_at >= now - timedelta(days=7))
     elif filter_type == "expiring_3d":
         stmt = stmt.where(
@@ -364,9 +366,7 @@ async def get_filtered_users_paginated(
     stmt = select(User).where(User.is_deleted.is_(False))
     stmt = _apply_user_filters(stmt, filter_type, filter_param)
 
-    if filter_type in ("new_7d", "new", "new_24h"):
-        order_clause = User.created_at.asc()
-    elif filter_type == "expiring_3d":
+    if filter_type == "expiring_3d":
         order_clause = User.subscription_end.asc()
     else:
         order_clause = User.created_at.desc()
@@ -382,9 +382,15 @@ async def get_filtered_users_paginated(
 
 
 async def get_filtered_users_paginated_with_profiles(
-    session: AsyncSession, filter_type: str = "all", page: int = 1, per_page: int = 10
+    session: AsyncSession,
+    filter_type: str = "all",
+    filter_param=None,
+    page: int = 1,
+    per_page: int = 10,
 ) -> list[User]:
-    return await get_filtered_users_paginated(session, filter_type=filter_type, page=page, per_page=per_page)
+    return await get_filtered_users_paginated(
+        session, filter_type=filter_type, filter_param=filter_param, page=page, per_page=per_page
+    )
 
 
 async def get_user_by_subscription_token(

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-import time
+import uuid
 from aiogram import Router, F
 
 from aiogram.fsm.context import FSMContext
@@ -270,7 +270,7 @@ async def apply_mass_bonus(
     except Exception:
         pass
 
-    batch_id = int(time.time())
+    batch_id = uuid.uuid4().hex
     try:
         _start_mass_bonus_task(
             _run_mass_bonus_background(
@@ -293,7 +293,7 @@ async def _run_mass_bonus_background(
     target_aud: str,
     amount: int,
     reason: str,
-    batch_id: int,
+    batch_id: str | int,
 ):
     """Executes mass bonus adjustment across target audience in batches of 50.
 

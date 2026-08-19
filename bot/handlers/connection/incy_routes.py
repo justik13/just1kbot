@@ -91,7 +91,6 @@ async def rotate_incy_subscription(
 
     try:
         new_token = await SubscriptionTokenService.rotate_token(session, db_user)
-        await session.commit()
 
         settings = get_settings()
         sub_url = f"https://{settings.DOMAIN}/sub/{new_token}"

@@ -64,6 +64,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
 
         stmt_all = _apply_user_filters(select(User), "all")
         stmt_new = _apply_user_filters(select(User), "new_7d")
+        stmt_new_24h = _apply_user_filters(select(User), "new_24h")
         stmt_expiring = _apply_user_filters(select(User), "expiring_3d")
         stmt_active = _apply_user_filters(select(User), "active")
         stmt_expired = _apply_user_filters(select(User), "expired")
@@ -73,6 +74,7 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("select users.id", str(stmt_all).lower())
         self.assertIn("created_at >=", str(stmt_new))
+        self.assertIn("created_at >=", str(stmt_new_24h))
         self.assertIn("subscription_end >", str(stmt_expiring))
         self.assertIn("subscription_end <=", str(stmt_expiring))
         self.assertIn("subscription_end >", str(stmt_active))
