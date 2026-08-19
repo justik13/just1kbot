@@ -767,17 +767,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.settings_patcher = patch(
-            "config.settings.get_settings",
-            return_value=SimpleNamespace(
-                DB_ENCRYPTION_KEY=os.getenv(
-                    "DB_ENCRYPTION_KEY", "CpVTtwjMHfR3GI2GQqg4P7JZnBHkQCINIQrb4N77hsg="
-                ),
-                ADMIN_IDS=[12345],
-            ),
-        )
-        self.settings_patcher.start()
-
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
@@ -790,6 +779,25 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "RESTART IDENTITY CASCADE"
                 )
             )
+            u = User(
+                telegram_id=987654,
+                username="testuser",
+                device_limit=10,
+                subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+            )
+            v = Server(
+                name="Germany Live",
+                country_flag="🇩🇪",
+                api_url="http://127.0.0.1:8080",
+                api_key="secret",
+                protocol="amneziawg2",
+                is_active=True,
+                max_clients=100,
+            )
+            s.add_all([u, v])
+            await s.flush()
+            self.uid = u.id
+            self.sid = v.id
 
     async def asyncTearDown(self):
         async with self.sessions.begin() as s:
@@ -803,39 +811,16 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
         await self.engine.dispose()
-        self.settings_patcher.stop()
 
     async def test_create_device_commit_makes_operation_visible_to_second_session(self):
         """Verify that create_device followed by session.commit makes create_peer visible to independent session."""
         from services.device_service import DeviceService
         from services.slots_cache import ServerPeerSnapshot
 
-        # 1. Setup seed user and server in DB
-        async with self.sessions() as s:
-            user = User(
-                telegram_id=987654,
-                username="testuser",
-                subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
-                device_limit=5,
-            )
-            server = Server(
-                name="Germany Live",
-                country_flag="🇩🇪",
-                api_url="http://127.0.0.1:8080",
-                api_key="secret",
-                protocol="amneziawg2",
-                is_active=True,
-                max_clients=100,
-            )
-            s.add_all([user, server])
-            await s.commit()
-            user_id = user.id
-            server_id = server.id
-
         snapshot = ServerPeerSnapshot(
-            server_id=server_id,
-            captured_at=datetime.now(timezone.utc),
-            raw_peers=frozenset(),
+            self.sid,
+            frozenset(),
+            datetime.now(timezone.utc),
         )
 
         # 2. Session A: create_device and commit
@@ -843,8 +828,8 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             async with self.sessions() as session_a:
                 profile = await DeviceService.create_device(
                     session_a,
-                    user_id=user_id,
-                    server_id=server_id,
+                    user_id=self.uid,
+                    server_id=self.sid,
                     device_name="Integration Dev #1",
                     snapshot=snapshot,
                 )
