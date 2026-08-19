@@ -466,7 +466,7 @@ async def _process_server_selection(
             if ready_profile and ready_profile.provisioning_status == "active":
                 from .device_view_routes import render_device_screen
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
-            elif ready_profile and ready_profile.provisioning_status == "create_failed":
+            elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
                 await render_hub(
                     callback.bot,
                     callback.message.chat.id,

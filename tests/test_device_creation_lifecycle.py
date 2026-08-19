@@ -433,8 +433,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res, valid_profile)
             self.assertEqual(mock_session.close.call_count, 3)
 
-    async def test_12_await_profile_ready_cleanup_pending_returns_profile_and_renders_connections(self):
-        """Profiles with create_cleanup_pending return immediately and trigger connections list render."""
+    async def test_12_await_profile_ready_cleanup_pending_returns_profile_and_renders_error_banner(self):
+        """Profiles with create_cleanup_pending return immediately and trigger explicit error banner."""
         cleanup_profile = SimpleNamespace(
             id=42,
             provisioning_status="create_cleanup_pending",
@@ -458,11 +458,12 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.connection.device_create_routes._await_profile_ready", new=AsyncMock(return_value=cleanup_profile)),
             patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
             patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
-            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()) as mock_render_hub,
             patch("bot.handlers.connection.device_create_routes._render_connections", new=AsyncMock()) as mock_render_connections,
         ):
             await _process_server_selection(callback, state, session, server_id=10, user=db_user)
-            self.assertTrue(mock_render_connections.called)
+            self.assertTrue(mock_render_hub.called)
+            self.assertFalse(mock_render_connections.called)
 
     async def test_13_session_commit_failure_cleans_up_creating_lock(self):
         """If session.commit fails during creation, user lock is properly cleared and error is rendered."""
@@ -904,14 +905,16 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
             self.assertNotIn(42, _deleting_devices)
 
-    def test_27_non_visible_profile_statuses_only_excludes_in_flight_deleting(self):
-        """NON_VISIBLE_PROFILE_STATUSES only excludes deleting; all recoverable/failure states remain visible in user lists."""
+    def test_27_non_visible_profile_statuses_matches_quota_exclusion_policy(self):
+        """NON_VISIBLE_PROFILE_STATUSES excludes in-flight deleting and non-active cleanup/failure states from active quota."""
         from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
 
-        self.assertEqual(NON_VISIBLE_PROFILE_STATUSES, ("deleting",))
-        self.assertNotIn("create_cleanup_pending", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertNotIn("create_failed", NON_VISIBLE_PROFILE_STATUSES)
-        self.assertNotIn("delete_failed", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertIn("deleting", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertIn("create_cleanup_pending", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertIn("create_failed", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertIn("delete_failed", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertNotIn("pending_create", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertNotIn("active", NON_VISIBLE_PROFILE_STATUSES)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
