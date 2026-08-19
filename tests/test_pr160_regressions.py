@@ -108,7 +108,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
                     if button.callback_data is not None
                 ]
                 self.assertNotIn("menu_admin", user_callbacks)
-                self.assertEqual(user_callbacks[-1], "white_internet")
+                self.assertNotIn("white_internet", user_callbacks)
                 self.assertEqual(
                     len(user_callbacks),
                     len(set(user_callbacks)),

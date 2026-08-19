@@ -137,15 +137,25 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
         btn_back = common_kb.get_back_button("main_menu")
         self.assertIsNotNone(btn_back)
 
-        hub = common_kb.get_hub_keyboard()
-        callbacks = [
+        hub_user = common_kb.get_hub_keyboard(is_admin=False)
+        user_callbacks = [
             button.callback_data
-            for row in hub.inline_keyboard
+            for row in hub_user.inline_keyboard
             for button in row
             if button.callback_data
         ]
-        self.assertIn("white_internet", callbacks)
-        self.assertEqual(len(callbacks), len(set(callbacks)))
+        self.assertNotIn("white_internet", user_callbacks)
+        self.assertEqual(len(user_callbacks), len(set(user_callbacks)))
+
+        hub_admin = common_kb.get_hub_keyboard(is_admin=True)
+        admin_callbacks = [
+            button.callback_data
+            for row in hub_admin.inline_keyboard
+            for button in row
+            if button.callback_data
+        ]
+        self.assertIn("white_internet", admin_callbacks)
+        self.assertEqual(len(admin_callbacks), len(set(admin_callbacks)))
 
     def test_admin_keyboards(self):
         kb_admin_menu = admin_dashboard_kb.get_admin_menu()

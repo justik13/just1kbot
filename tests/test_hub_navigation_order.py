@@ -20,8 +20,9 @@ class HubNavigationOrderTests(unittest.TestCase):
         callbacks = [button.callback_data for button in buttons]
         self.assertEqual(callbacks[-2:], ["white_internet", "menu_admin"])
 
-    def test_white_internet_is_last_for_non_admin(self):
+    def test_white_internet_is_omitted_for_non_admin(self):
         buttons = callback_buttons(
             get_hub_keyboard(is_admin=False, is_active=True)
         )
-        self.assertEqual(buttons[-1].callback_data, "white_internet")
+        callbacks = [button.callback_data for button in buttons]
+        self.assertNotIn("white_internet", callbacks)

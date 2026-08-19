@@ -6,12 +6,22 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+networks:
+  frontend_net:
+    driver: bridge
+  backend_net:
+    driver: bridge
+
 services:
   db:
     image: postgres:16.14-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     container_name: just1kbot_db
     restart: unless-stopped
+    stop_grace_period: 30s
+    shm_size: "256m"
     logging: *default-logging
+    networks:
+      - backend_net
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-just1kbot}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -24,7 +34,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-just1kbot} -d ${POSTGRES_DB:-just1kbot_bot}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-just1kbot} -d $${POSTGRES_DB:-just1kbot_bot} && PGPASSWORD=$${POSTGRES_PASSWORD} psql -h 127.0.0.1 -U $${POSTGRES_USER:-just1kbot} -d $${POSTGRES_DB:-just1kbot_bot} -tAc 'SELECT 1'"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -34,7 +44,9 @@ services:
     container_name: just1kbot_redis
     restart: unless-stopped
     logging: *default-logging
-    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf'
+    networks:
+      - backend_net
+    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf --maxmemory 384mb --maxmemory-policy noeviction'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     deploy:
@@ -57,6 +69,8 @@ services:
     container_name: just1kbot_migrate
     restart: "no"
     logging: *default-logging
+    networks:
+      - backend_net
     env_file:
       - .env
     environment:
@@ -72,8 +86,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
 
   bot:
     build:
@@ -81,7 +93,11 @@ services:
       dockerfile: Dockerfile
     container_name: just1kbot_app
     restart: unless-stopped
+    stop_grace_period: 30s
     logging: *default-logging
+    networks:
+      - frontend_net
+      - backend_net
     env_file:
       - .env
     environment:
@@ -120,9 +136,12 @@ services:
     container_name: just1kbot_caddy
     restart: unless-stopped
     logging: *default-logging
+    networks:
+      - frontend_net
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:?DOMAIN is required}
       SSL_EMAIL: ${SSL_EMAIL:?SSL_EMAIL is required}
@@ -131,7 +150,8 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - bot
+      bot:
+        condition: service_healthy
 
   backup:
     build:
@@ -140,6 +160,15 @@ services:
     container_name: just1kbot_backup
     profiles: ["tools"]
     logging: *default-logging
+    networks:
+      - backend_net
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
     volumes:
       - ./backups:/backups
     environment:
