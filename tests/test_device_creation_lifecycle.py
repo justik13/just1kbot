@@ -1,5 +1,6 @@
 import os
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -785,7 +786,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, audit_logs, system_settings, payment_disputes "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -797,7 +798,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     "TRUNCATE account_balance_reservations, "
                     "account_ledger_allocations, account_ledger_entries, "
                     "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers, audit_logs, system_settings, payment_disputes "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -806,8 +807,6 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_device_commit_makes_operation_visible_to_second_session(self):
         """Verify that create_device followed by session.commit makes create_peer visible to independent session."""
-        from datetime import datetime, timezone
-
         from services.device_service import DeviceService
         from services.slots_cache import ServerPeerSnapshot
 
@@ -816,7 +815,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             user = User(
                 telegram_id=987654,
                 username="testuser",
-                subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc),
+                subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
                 device_limit=5,
             )
             server = Server(
