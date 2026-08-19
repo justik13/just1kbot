@@ -319,7 +319,7 @@ def render_open_html(sub_url: str, deep_link: str) -> str:
         <a href="https://incy.cc/" target="_blank" rel="noopener">Сайт INCY</a>
       </div>
       <p style="font-size: 12px; color: #8b949e; margin-top: 14px; line-height: 1.4;">
-        💻 <b>Пользователям на ПК (Windows / macOS):</b> для подключения по протоколу AmneziaWG используйте официальное приложение <b>AmneziaVPN</b> (скопируйте ключ или скачайте конфигурацию в Telegram-боте).
+        💻 <b>Пользователям на ПК:</b> для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом конфигурации <code>.conf</code> (в Telegram-боте).
       </p>
     </div>
   </div>

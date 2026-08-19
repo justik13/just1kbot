@@ -113,8 +113,10 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://", text_arg)
         self.assertIn("sub/token_abc_123", text_arg)
         self.assertIn("Как настроить", text_arg)
-        self.assertIn("Windows / macOS", text_arg)
+        self.assertIn("iOS / Android", text_arg)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", text_arg)
         self.assertIn("AmneziaVPN", text_arg)
+        self.assertIn("AmneziaWG", text_arg)
 
         btn_urls = [
             btn.url
@@ -178,6 +180,10 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         keyboard_arg = args[3]
 
         self.assertIn("sub/new_rotated_token_456", text_arg)
+        self.assertIn("iOS / Android", text_arg)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", text_arg)
+        self.assertIn("AmneziaVPN", text_arg)
+        self.assertIn("AmneziaWG", text_arg)
         btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
         self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
 
@@ -250,7 +256,8 @@ class IncyWebTemplatesTests(unittest.TestCase):
         self.assertIn("https://github.com/INCY-DEV/incy-platforms", html_out)
         self.assertIn("https://incy.cc/", html_out)
         self.assertIn("AmneziaVPN", html_out)
-        self.assertIn("Windows / macOS", html_out)
+        self.assertIn("AmneziaWG", html_out)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", html_out)
 
     def test_render_inactive_html_contains_support_link(self):
         from bot.handlers.incy_web_templates import render_inactive_html

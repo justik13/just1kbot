@@ -15,8 +15,7 @@ from utils.vpn_parser import build_conf_file
 
 logger = logging.getLogger(__name__)
 
-# Проект работает ТОЛЬКО с AmneziaWG (обычный WireGuard исключён из-за блокировок DPI).
-# В текущей реализации активен исключительно протокол AWG 2.0 ("amneziawg2").
+# В текущей реализации проекта поддерживается только AmneziaWG 2.0 ("amneziawg2"); стандартный WireGuard не используется.
 # Планы развития (Roadmap): поддержка AWG 3.0 ("amneziawg3") и стека Xray (VLESS-Reality и др.).
 SUPPORTED_SUBSCRIPTION_PROTOCOLS = {"amneziawg2"}
 
