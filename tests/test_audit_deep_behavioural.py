@@ -234,7 +234,6 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         # Hold a lock on User 1 in a separate connection/transaction
         holding_session = self.session_factory()
-        await holding_session.begin()
         locked_u1 = await holding_session.scalar(select(User).where(User.id == 1).with_for_update())
         self.assertIsNotNone(locked_u1)
 
