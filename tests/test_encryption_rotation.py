@@ -210,42 +210,59 @@ class AmneziaClientCacheTests(unittest.TestCase):
 
 class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
     async def test_reencryption_script_processes_batches(self):
-        with patch("scripts.reencrypt_database.session_scope") as mock_session_scope:
-            mock_session = AsyncMock()
-            mock_session_scope.return_value.__aenter__.return_value = mock_session
+        primary_key = Fernet.generate_key().decode("utf-8")
+        valid_ct = Fernet(primary_key.encode("utf-8")).encrypt(b"secret").decode("utf-8")
 
-            server1 = MagicMock(id=1, api_key="secret_key_1")
-            profile1 = MagicMock(id=1, raw_config="raw_vpn_config_1")
+        env = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": primary_key, "DB_ENCRYPTION_KEYS": ""}
+        with patch.dict("os.environ", env, clear=True):
+            from config.settings import get_settings
+            get_settings.cache_clear()
+            _get_fernet_engine.cache_clear()
 
-            # First query returns items, second returns empty list to stop loop
-            mock_session.scalars.side_effect = [
-                MagicMock(all=MagicMock(return_value=[server1])),
-                MagicMock(all=MagicMock(return_value=[])),
-                MagicMock(all=MagicMock(return_value=[profile1])),
-                MagicMock(all=MagicMock(return_value=[])),
-                MagicMock(all=MagicMock(return_value=[server1])),  # verification pass
-                MagicMock(all=MagicMock(return_value=[profile1])), # verification pass
-            ]
+            with patch("scripts.reencrypt_database.session_scope") as mock_session_scope:
+                mock_session = AsyncMock()
+                mock_session_scope.return_value.__aenter__.return_value = mock_session
 
-            await reencrypt_all()
+                server1 = MagicMock(id=1, api_key="secret_key_1")
+                profile1 = MagicMock(id=1, raw_config="raw_vpn_config_1")
+
+                # First query returns items, second returns empty list to stop loop
+                mock_session.scalars.side_effect = [
+                    MagicMock(all=MagicMock(return_value=[server1])),
+                    MagicMock(all=MagicMock(return_value=[])),
+                    MagicMock(all=MagicMock(return_value=[profile1])),
+                    MagicMock(all=MagicMock(return_value=[])),
+                ]
+
+                # Verification pass executes text queries
+                mock_session.execute.side_effect = [
+                    MagicMock(all=MagicMock(return_value=[(1, valid_ct)])),
+                    MagicMock(all=MagicMock(return_value=[(1, valid_ct)])),
+                ]
+
+                await reencrypt_all()
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
+    TEST_SERVER_ID = 999901
+    TEST_API_URL = "https://vpn-rotation-test.example.com:8443"
+
     async def asyncSetUp(self):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        async with self.sessions.begin() as s:
-            await s.execute(
-                text("TRUNCATE vpn_profiles, servers RESTART IDENTITY CASCADE")
-            )
+        await self._cleanup_test_records()
 
     async def asyncTearDown(self):
+        await self._cleanup_test_records()
+        await self.engine.dispose()
+
+    async def _cleanup_test_records(self):
         async with self.sessions.begin() as s:
             await s.execute(
-                text("TRUNCATE vpn_profiles, servers RESTART IDENTITY CASCADE")
+                text("DELETE FROM servers WHERE id = :id OR api_url = :url"),
+                {"id": self.TEST_SERVER_ID, "url": self.TEST_API_URL},
             )
-        await self.engine.dispose()
 
     async def test_reencryption_real_db_ciphertext_rotation(self):
         old_key = Fernet.generate_key().decode("utf-8")
@@ -260,9 +277,9 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             async with self.sessions() as session:
                 server = Server(
-                    id=1,
-                    name="Test Server",
-                    api_url="https://vpn.example.com:8443",
+                    id=self.TEST_SERVER_ID,
+                    name="Test Rotation Server",
+                    api_url=self.TEST_API_URL,
                     api_key="server_secret_api_key_123",
                     country_flag="🇳🇱",
                     is_active=True,
@@ -272,7 +289,10 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # 2. Read raw SQL ciphertext to verify it was encrypted with OLD_KEY
         async with self.engine.connect() as conn:
-            result = await conn.execute(text("SELECT api_key FROM servers WHERE id=1"))
+            result = await conn.execute(
+                text("SELECT api_key FROM servers WHERE id = :id"),
+                {"id": self.TEST_SERVER_ID},
+            )
             raw_ciphertext_old = result.scalar_one()
 
         f_old = Fernet(old_key.encode("utf-8"))
@@ -300,7 +320,10 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # 4. Read raw SQL ciphertext to verify it is NOW encrypted with NEW_KEY!
         async with self.engine.connect() as conn:
-            result = await conn.execute(text("SELECT api_key FROM servers WHERE id=1"))
+            result = await conn.execute(
+                text("SELECT api_key FROM servers WHERE id = :id"),
+                {"id": self.TEST_SERVER_ID},
+            )
             raw_ciphertext_new = result.scalar_one()
 
         # Raw ciphertext MUST have changed in PostgreSQL

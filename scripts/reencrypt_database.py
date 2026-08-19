@@ -14,9 +14,11 @@ import asyncio
 import logging
 import sys
 
-from sqlalchemy import select
+from cryptography.fernet import Fernet
+from sqlalchemy import select, text
 from sqlalchemy.orm.attributes import flag_modified
 
+from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server, VPNProfile
 
@@ -88,25 +90,38 @@ async def reencrypt_all() -> None:
             # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of VPN profiles up to ID %d (total: %d)", last_profile_id, total_profiles)
 
-    # 3. Verification phase: ensure every record decrypts cleanly
-    logger.info("Verifying all records decrypt cleanly...")
-    async with session_scope() as session:
-        verified_servers = (await session.scalars(select(Server))).all()
-        for s in verified_servers:
-            if s.api_key:
-                _ = len(s.api_key)
+    # 3. Verification phase: ensure raw database ciphertext is encrypted strictly with the primary key
+    logger.info("Verifying all records in database are encrypted strictly with the NEW primary key...")
+    settings = get_settings()
+    primary_fernet = Fernet(settings.DB_ENCRYPTION_KEY.encode("utf-8"))
 
-        verified_profiles = (
-            await session.scalars(
-                select(VPNProfile).where(VPNProfile.raw_config.is_not(None))
+    async with session_scope() as session:
+        server_rows = (await session.execute(text("SELECT id, api_key FROM servers"))).all()
+        for s_id, raw_api_key in server_rows:
+            if raw_api_key:
+                try:
+                    primary_fernet.decrypt(raw_api_key.encode("utf-8"))
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Server ID {s_id} is not encrypted with the new primary key: {exc}"
+                    ) from exc
+
+        profile_rows = (
+            await session.execute(
+                text("SELECT id, raw_config FROM vpn_profiles WHERE raw_config IS NOT NULL")
             )
         ).all()
-        for p in verified_profiles:
-            if p.raw_config:
-                _ = len(p.raw_config)
+        for p_id, raw_config in profile_rows:
+            if raw_config:
+                try:
+                    primary_fernet.decrypt(raw_config.encode("utf-8"))
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"VPNProfile ID {p_id} is not encrypted with the new primary key: {exc}"
+                    ) from exc
 
     logger.info(
-        "Successfully finished database re-encryption & verification: %d servers, %d VPN profiles.",
+        "Successfully finished database re-encryption & primary key verification: %d servers, %d VPN profiles.",
         total_servers,
         total_profiles,
     )

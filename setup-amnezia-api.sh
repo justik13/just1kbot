@@ -285,7 +285,13 @@ check_prerequisites() {
             if ! ufw allow from "$ALLOW_IP" to any port "$PUBLIC_PORT" proto tcp >/dev/null 2>&1; then
                 error "Не удалось применить правило UFW для $ALLOW_IP на порту $PUBLIC_PORT"
             fi
-            log "UFW: порт $PUBLIC_PORT открыт исключительно для $ALLOW_IP"
+            # Проверяем, что не осталось широких правил для порта
+            if ufw status 2>/dev/null | grep -E "${PUBLIC_PORT}(/tcp)?\s+ALLOW\s+(Anywhere|0.0.0.0/0|::/0)" >/dev/null 2>&1; then
+                warn "Обнаружены дополнительные широкие правила для $PUBLIC_PORT в UFW, удаляю..."
+                ufw delete allow "$PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
+                ufw delete allow "$PUBLIC_PORT" >/dev/null 2>&1 || true
+            fi
+            log "UFW: порт $PUBLIC_PORT настроен для $ALLOW_IP"
         else
             warn "UFW активен. Открываю порт $PUBLIC_PORT для всех..."
             if ! ufw allow "$PUBLIC_PORT/tcp" >/dev/null 2>&1; then
