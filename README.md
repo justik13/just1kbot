@@ -46,7 +46,7 @@ Telegram-бот для продажи VPN-доступа на базе **Amnezia
 | FSM / Cache | Redis 7.4 |
 | HTTP / Proxy | aiohttp + Caddy 2.11.4 |
 | Платежи | YooKassa (платежи, возвраты, диспуты) |
-| VPN | Amnezia API, `amneziawg2` (MTU 1280, Google DNS) |
+| VPN | Amnezia API: строго AmneziaWG 2.0 (`amneziawg2`). Без чистого WG. В планах: AWG 3.0 (`amneziawg3`), Xray |
 | Миграции | Alembic 1.19 |
 | Backup | `pg_dump` + `gzip` + `age` (+ опционально HTTPS/S3) |
 
