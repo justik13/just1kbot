@@ -107,6 +107,27 @@
 }
 ```
 
+### 3.1 Архитектурная роль и структура `last_config`
+
+Поле `awg.last_config` в спецификации Amnezia — это **экранированная JSON-строка** (`string`), а не вложенный JSON-объект.
+
+При десериализации (`json.loads(last_config)`) получается словарь со следующими ключевыми полями:
+* `config` (`str`) — готовый текстовый файл WireGuard/AmneziaWG INI (`[Interface]` + `[Peer]`).
+* `client_ip` (`str`) — локальный IP адрес клиента в VPN-сети (например, `10.8.1.34`).
+* `client_priv_key` (`str`) — приватный ключ клиента.
+* `client_pub_key` (`str`) — публичный ключ клиента.
+* `server_pub_key` (`str`) — публичный ключ сервера.
+* `psk_key` (`str`) — preshared key (PSK).
+* `hostName` (`str`) и `port` (`int`) — адрес и UDP-порт сервера.
+* `mtu` (`str`) — размер MTU (в боте кастомизируется до `1280`).
+* `allowed_ips` (`list[str]`) — маршруты (`["0.0.0.0/0", "::/0"]`).
+* `H1-H4`, `I1-I5`, `Jc`, `Jmin`, `Jmax`, `S1-S4` — параметры обфускации AWG 2.0.
+
+**Как `last_config` используется в боте (`utils/vpn_parser.py`):**
+1. **Для `.conf`:** Бот извлекает `last_config["config"]`, кастомизирует `DNS` и `MTU`, и отдает пользователю как готовый `.conf` файл.
+2. **Fallback:** Если строка `config` отсутствует, бот собирает INI-конфигурацию заново из отдельных полей `last_config` через `_build_conf_fallback`.
+3. **Для `vpn://`:** Бот модифицирует `last_config`, упаковывает его обратно в JSON-строку (`json.dumps(last_config, ensure_ascii=False)`), сжимает весь контейнер через `zlib` и кодирует в `vpn://`.
+
 > **⚠️ КРИТИЧЕСКОЕ РАЗЛИЧИЕ ФОРМАТОВ:**
 > * **`.vpn`** — ВСЕГДА **JSON** (`json.dumps(dict, indent=2)`). Если положить туда текст WireGuard INI (`[Interface]`), приложение AmneziaVPN вернёт ошибку парсинга.
 > * **`.conf`** — ВСЕГДА **WireGuard INI** (`[Interface]` + `[Peer]`). Если положить туда JSON, нативный клиент AmneziaWG и роутеры вернут ошибку.
