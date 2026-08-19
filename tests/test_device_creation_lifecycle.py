@@ -1,6 +1,10 @@
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot import texts
 from bot.handlers.connection.device_create_routes import (
@@ -13,6 +17,7 @@ from bot.handlers.connection.device_view_routes import (
     manage_device,
     render_device_screen,
 )
+from database.models import APIOperation, Server, User
 from utils.vpn_parser import encode_json_to_vpn_uri
 
 
@@ -758,14 +763,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_render_screen.called)
 
 
-import os
-
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
-from database.models import APIOperation, Server, User
-
-
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -812,6 +809,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         from datetime import datetime, timezone
 
         from services.device_service import DeviceService
+        from services.slots_cache import ServerPeerSnapshot
 
         # 1. Setup seed user and server in DB
         async with self.sessions() as s:
@@ -819,21 +817,27 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 telegram_id=987654,
                 username="testuser",
                 subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc),
+                device_limit=5,
             )
             server = Server(
                 name="Germany Live",
                 country_flag="🇩🇪",
-                ip_address="127.0.0.1",
                 api_url="http://127.0.0.1:8080",
                 api_key="secret",
                 protocol="amneziawg2",
                 is_active=True,
-                max_devices=100,
+                max_clients=100,
             )
             s.add_all([user, server])
             await s.commit()
             user_id = user.id
             server_id = server.id
+
+        snapshot = ServerPeerSnapshot(
+            server_id=server_id,
+            captured_at=datetime.now(timezone.utc),
+            raw_peers=frozenset(),
+        )
 
         # 2. Session A: create_device and commit
         async with self.sessions() as session_a:
@@ -842,7 +846,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 user_id=user_id,
                 server_id=server_id,
                 device_name="Integration Dev #1",
-                snapshot=[],
+                snapshot=snapshot,
             )
             await session_a.commit()
             created_profile_id = profile.id
