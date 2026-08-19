@@ -15,8 +15,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y age
+          curl -fsSL https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz | tar -xz -C /tmp
+          sudo mv /tmp/age/age /tmp/age/age-keygen /usr/local/bin/
           age-keygen -o ci-key.txt
           PUBKEY="$(sed -n 's/^# public key: //p' ci-key.txt)"
           test -n "$PUBKEY"
