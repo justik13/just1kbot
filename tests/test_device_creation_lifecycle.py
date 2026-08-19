@@ -397,6 +397,140 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res.provisioning_status, "active")
             self.assertTrue(mock_session.close.called)
 
+    async def test_10_await_profile_ready_closes_session_on_exception(self):
+        """If session.get raises an exception, session.close is still called in finally block."""
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(side_effect=RuntimeError("Database query failed"))
+        mock_session.close = AsyncMock()
+
+        with patch("bot.handlers.connection.device_create_routes.get_session", new=AsyncMock(return_value=mock_session)):
+            with self.assertRaises(RuntimeError):
+                await _await_profile_ready(42, timeout_seconds=1.0, poll_interval=0.05)
+            self.assertTrue(mock_session.close.called)
+
+    async def test_11_await_profile_ready_waits_for_both_raw_config_and_peer_id(self):
+        """Does not return active if raw_config or peer_id is missing/empty."""
+        partial_profile_1 = SimpleNamespace(id=42, provisioning_status="active", peer_id=None, raw_config="vpn://test")
+        partial_profile_2 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config=None)
+        valid_profile = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config="vpn://test")
+
+        responses = [partial_profile_1, partial_profile_2, valid_profile]
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(side_effect=responses)
+        mock_session.close = AsyncMock()
+
+        with patch("bot.handlers.connection.device_create_routes.get_session", new=AsyncMock(return_value=mock_session)):
+            res = await _await_profile_ready(42, timeout_seconds=2.0, poll_interval=0.01)
+            self.assertEqual(res, valid_profile)
+            self.assertEqual(mock_session.close.call_count, 3)
+
+    async def test_12_await_profile_ready_cleanup_pending_returns_profile_and_renders_connections(self):
+        """Profiles with create_cleanup_pending return immediately and trigger connections list render."""
+        cleanup_profile = SimpleNamespace(
+            id=42,
+            provisioning_status="create_cleanup_pending",
+            peer_id=None,
+            raw_config=None,
+        )
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock(return_value=cleanup_profile)),
+            patch("bot.handlers.connection.device_create_routes._await_profile_ready", new=AsyncMock(return_value=cleanup_profile)),
+            patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
+            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes._render_connections", new=AsyncMock()) as mock_render_connections,
+        ):
+            await _process_server_selection(callback, state, session, server_id=10, user=db_user)
+            self.assertTrue(mock_render_connections.called)
+
+    async def test_13_session_commit_failure_cleans_up_creating_lock(self):
+        """If session.commit fails during creation, user lock is properly cleared and error is rendered."""
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        session = AsyncMock()
+        # Fail on the second commit (the one after create_device)
+        session.commit = AsyncMock(side_effect=[None, RuntimeError("DB commit failed")])
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        created_profile = SimpleNamespace(id=42, provisioning_status="pending_create")
+
+        with (
+            patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock(return_value=created_profile)),
+            patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
+            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()) as mock_render_hub,
+        ):
+            await _process_server_selection(callback, AsyncMock(), session, server_id=10, user=db_user)
+
+            self.assertNotIn(100, _creating_devices)
+            self.assertTrue(mock_render_hub.called)
+            self.assertEqual(mock_render_hub.call_args[0][2], texts.ERROR_TECHNICAL_MESSAGE)
+
+    async def test_14_await_profile_ready_zero_or_negative_timeout_no_infinite_loop(self):
+        """Zero or negative timeout evaluates once and returns None without hanging."""
+        pending_profile = SimpleNamespace(
+            id=42,
+            provisioning_status="pending_create",
+            peer_id=None,
+            raw_config=None,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=pending_profile)
+        mock_session.close = AsyncMock()
+
+        with patch("bot.handlers.connection.device_create_routes.get_session", new=AsyncMock(return_value=mock_session)):
+            res = await _await_profile_ready(42, timeout_seconds=0.0)
+            self.assertIsNone(res)
+            self.assertEqual(mock_session.get.call_count, 1)
+            self.assertEqual(mock_session.close.call_count, 1)
+
+    async def test_15_cancelled_error_in_process_selection_cleans_up_creating_lock(self):
+        """If task is cancelled during _await_profile_ready, finally block releases lock."""
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        created_profile = SimpleNamespace(id=42, provisioning_status="pending_create")
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        session = AsyncMock()
+
+        import asyncio
+        with (
+            patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
+            patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock(return_value=created_profile)),
+            patch("bot.handlers.connection.device_create_routes._await_profile_ready", new=AsyncMock(side_effect=asyncio.CancelledError())),
+            patch("bot.handlers.connection.device_create_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
+            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
+            patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await _process_server_selection(callback, AsyncMock(), session, server_id=10, user=db_user)
+
+            self.assertNotIn(100, _creating_devices)
+
 
 if __name__ == "__main__":
     unittest.main()
+
