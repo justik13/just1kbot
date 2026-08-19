@@ -1,30 +1,61 @@
+import re
+import unittest
 from pathlib import Path
 
 
-def test_database_and_redis_are_not_published_on_host():
-    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
-        encoding="utf-8"
-    )
-    assert '"5432:5432"' not in compose
-    assert '"6379:6379"' not in compose
+class DockerComposeSecurityTests(unittest.TestCase):
+    def test_database_and_redis_are_not_published_on_host(self):
+        compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn('"5432:5432"', compose)
+        self.assertNotIn('"6379:6379"', compose)
 
+    def test_public_compose_ports_are_limited_to_caddy(self):
+        compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"80:80"', compose)
+        self.assertIn('"443:443"', compose)
 
-def test_public_compose_ports_are_limited_to_caddy():
-    compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
-        encoding="utf-8"
-    )
-    assert '"80:80"' in compose
-    assert '"443:443"' in compose
+    def test_caddy_config_does_not_require_custom_plugins(self):
+        root = Path(__file__).parents[1]
+        caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
+        caddyfile_ci = (root / "Caddyfile.ci").read_text(encoding="utf-8")
+        dockerfile = (root / "Dockerfile.caddy").read_text(encoding="utf-8")
 
+        self.assertNotIn("order rate_limit", caddyfile)
+        self.assertNotIn("rate_limit {", caddyfile)
+        self.assertNotIn("order rate_limit", caddyfile_ci)
+        self.assertNotIn("rate_limit {", caddyfile_ci)
+        self.assertNotIn("xcaddy", dockerfile)
 
-def test_caddy_config_does_not_require_custom_plugins():
-    root = Path(__file__).parents[1]
-    caddyfile = (root / "Caddyfile").read_text(encoding="utf-8")
-    caddyfile_ci = (root / "Caddyfile.ci").read_text(encoding="utf-8")
-    dockerfile = (root / "Dockerfile.caddy").read_text(encoding="utf-8")
+    def test_compose_network_segmentation_and_resource_bounds(self):
+        compose = (Path(__file__).parents[1] / "docker-compose.yml").read_text(
+            encoding="utf-8"
+        )
 
-    assert "order rate_limit" not in caddyfile
-    assert "rate_limit {" not in caddyfile
-    assert "order rate_limit" not in caddyfile_ci
-    assert "rate_limit {" not in caddyfile_ci
-    assert "xcaddy" not in dockerfile
+        # 1. Networks defined
+        self.assertIn("frontend_net:", compose)
+        self.assertIn("backend_net:", compose)
+
+        # 2. Service network assignments
+        self.assertTrue(re.search(r"db:.*?networks:\s*-\s*backend_net", compose, re.DOTALL))
+        self.assertTrue(re.search(r"redis:.*?networks:\s*-\s*backend_net", compose, re.DOTALL))
+        self.assertTrue(re.search(r"migrate:.*?networks:\s*-\s*backend_net", compose, re.DOTALL))
+        self.assertTrue(re.search(r"backup:.*?networks:\s*-\s*backend_net", compose, re.DOTALL))
+        self.assertTrue(re.search(r"caddy:.*?networks:\s*-\s*frontend_net", compose, re.DOTALL))
+        self.assertTrue(re.search(r"bot:.*?networks:\s*-\s*frontend_net\s*-\s*backend_net", compose, re.DOTALL))
+
+        # 3. Redis bounds
+        self.assertIn("--maxmemory 384mb", compose)
+        self.assertIn("--maxmemory-policy noeviction", compose)
+
+        # 4. Caddy ports
+        self.assertIn('"80:80"', compose)
+        self.assertIn('"443:443"', compose)
+        self.assertIn('"443:443/udp"', compose)
+
+        # 5. Postgres and Bot graceful shutdown
+        self.assertIn("stop_grace_period: 30s", compose)
+        self.assertIn('shm_size: "256m"', compose)

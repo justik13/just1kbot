@@ -1,15 +1,41 @@
 import logging
 from functools import lru_cache
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from sqlalchemy.types import Text, TypeDecorator
 
 logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=10)
-def _get_fernet(key: str) -> Fernet:
-    return Fernet(key.encode("utf-8"))
+def _get_fernet_engine(keys_str: str) -> MultiFernet:
+    keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+    if not keys:
+        raise ValueError("No encryption keys provided")
+    fernets = [Fernet(k.encode("utf-8")) for k in keys]
+    return MultiFernet(fernets)
+
+
+def _get_active_keys() -> str:
+    from config.settings import get_settings
+
+    settings = get_settings()
+    primary = getattr(settings, "DB_ENCRYPTION_KEY", None)
+    primary_str = primary.strip() if isinstance(primary, str) else ""
+
+    additional = getattr(settings, "DB_ENCRYPTION_KEYS", None)
+    additional_list: list[str] = []
+    if isinstance(additional, str) and additional.strip():
+        additional_list = [k.strip() for k in additional.split(",") if k.strip()]
+
+    keys: list[str] = []
+    if primary_str:
+        keys.append(primary_str)
+    for k in additional_list:
+        if k not in keys:
+            keys.append(k)
+
+    return ",".join(keys)
 
 
 class EncryptedString(TypeDecorator):
@@ -23,18 +49,16 @@ class EncryptedString(TypeDecorator):
     def process_bind_param(self, value, dialect):
         if value is None:
             return None
-        from config.settings import get_settings
 
-        settings = get_settings()
-        key = settings.DB_ENCRYPTION_KEY
-        if not key:
+        keys_str = _get_active_keys()
+        if not keys_str:
             raise RuntimeError(
                 "CRITICAL: DB_ENCRYPTION_KEY is empty! "
                 "Cannot write sensitive data in plaintext. "
                 "Fix .env immediately."
             )
         try:
-            f = _get_fernet(key)
+            f = _get_fernet_engine(keys_str)
             encrypted = f.encrypt(value.encode("utf-8"))
             return encrypted.decode("utf-8")
         except Exception as e:
@@ -44,13 +68,10 @@ class EncryptedString(TypeDecorator):
     def process_result_value(self, value, dialect):
         if value is None:
             return None
-        from config.settings import get_settings
 
-        settings = get_settings()
-        key = settings.DB_ENCRYPTION_KEY
-        if not key:
+        keys_str = _get_active_keys()
+        if not keys_str:
             if self.critical:
-                # ── ИСПРАВЛЕНО: raise вместо return None ──
                 raise RuntimeError(
                     "CRITICAL: DB_ENCRYPTION_KEY is empty during "
                     "decryption of a critical field. "
@@ -62,12 +83,11 @@ class EncryptedString(TypeDecorator):
                 )
             return None
         try:
-            f = _get_fernet(key)
+            f = _get_fernet_engine(keys_str)
             decrypted = f.decrypt(value.encode("utf-8"))
             return decrypted.decode("utf-8")
         except InvalidToken:
             if self.critical:
-                # ── ИСПРАВЛЕНО: raise вместо return None ──
                 logger.critical(
                     "Critical encrypted field decryption failed: "
                     "invalid token. Possible causes: "

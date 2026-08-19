@@ -6,7 +6,7 @@
 }
 
 {$DOMAIN} {
-    @rate_limited_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/*
+    @rate_limited_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/* /health
     handle @rate_limited_paths {
         request_body {
             max_size 2KB

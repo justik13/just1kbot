@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import logging
 import time
 from dataclasses import dataclass
@@ -132,17 +133,23 @@ class CircuitBreaker:
         return self.state == "OPEN"
 
 
-_circuit_breakers: dict[str, CircuitBreaker] = {}
+_MAX_CLIENT_CACHE_ENTRIES = 500
+_circuit_breakers: collections.OrderedDict[str, CircuitBreaker] = collections.OrderedDict()
 
 
 def _get_circuit_breaker(api_url: str) -> CircuitBreaker:
     api_url = (api_url or "").rstrip("/")  # Normalize trailing slash for consistent keys
-    if api_url not in _circuit_breakers:
-        _circuit_breakers[api_url] = CircuitBreaker(
-            failure_threshold=5,
-            recovery_timeout=60.0,
-        )
-    return _circuit_breakers[api_url]
+    if api_url in _circuit_breakers:
+        _circuit_breakers.move_to_end(api_url)
+        return _circuit_breakers[api_url]
+    if len(_circuit_breakers) >= _MAX_CLIENT_CACHE_ENTRIES:
+        _circuit_breakers.popitem(last=False)
+    cb = CircuitBreaker(
+        failure_threshold=5,
+        recovery_timeout=60.0,
+    )
+    _circuit_breakers[api_url] = cb
+    return cb
 
 
 def cleanup_server_circuit_breakers(api_url: str) -> None:
@@ -191,17 +198,22 @@ class TokenBucketRateLimiter:
             )
 
 
-_rate_limiters: dict[str, TokenBucketRateLimiter] = {}
+_rate_limiters: collections.OrderedDict[str, TokenBucketRateLimiter] = collections.OrderedDict()
 
 
 def _get_rate_limiter(api_url: str) -> TokenBucketRateLimiter:
     api_url = (api_url or "").rstrip("/")  # Normalize trailing slash for consistent keys
-    if api_url not in _rate_limiters:
-        _rate_limiters[api_url] = TokenBucketRateLimiter(
-            rate=3.0,
-            burst=5,
-        )
-    return _rate_limiters[api_url]
+    if api_url in _rate_limiters:
+        _rate_limiters.move_to_end(api_url)
+        return _rate_limiters[api_url]
+    if len(_rate_limiters) >= _MAX_CLIENT_CACHE_ENTRIES:
+        _rate_limiters.popitem(last=False)
+    rl = TokenBucketRateLimiter(
+        rate=3.0,
+        burst=5,
+    )
+    _rate_limiters[api_url] = rl
+    return rl
 
 
 class AmneziaClientCreateResponse(BaseModel):

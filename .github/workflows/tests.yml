@@ -117,7 +117,7 @@ jobs:
       - name: Audit Python syntax, imports and common human errors
         run: >-
           ruff check
-          bot config database services utils alembic tests
+          bot config database services utils alembic scripts tests
           --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
           --ignore PLW0603,PLW0108
           --output-format full
@@ -137,7 +137,6 @@ jobs:
           python -m unittest discover -s tests -v 2>&1 | tee /tmp/unittest.log || {
             echo "=================== FAILED TEST LOG ==================="
             cat /tmp/unittest.log | grep -E '^(FAIL|ERROR|AssertionError|Traceback|  File)' -A 5 -B 2 || cat /tmp/unittest.log
-            curl -d "@/tmp/unittest.log" https://ntfy.sh/justik13_diff_1234567890 || true
             exit 1
           }
         env:
@@ -153,9 +152,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-
-
-
       - run: alembic downgrade base
       - name: Verify downgrade leaves no application tables
         run: |
@@ -169,7 +165,7 @@ jobs:
           fi
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
-        run: python -m compileall -q bot config database services utils alembic tests
+        run: python -m compileall -q bot config database services utils alembic scripts tests
       - run: git diff --check
 
 

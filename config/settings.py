@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # ── Database ──
     DATABASE_URL: str
     DB_ENCRYPTION_KEY: str = Field(repr=False)
+    DB_ENCRYPTION_KEYS: str = Field(default="", repr=False)
 
     # ── Redis ──
     REDIS_URL: str
@@ -86,7 +87,7 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
-    TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 
     @model_validator(mode="after")
     def reject_removed_settings(self):
@@ -138,7 +139,6 @@ class Settings(BaseSettings):
 
     @field_validator(
         "DATABASE_URL",
-        "DB_ENCRYPTION_KEY",
         "REDIS_URL",
         "REDIS_PASSWORD",
         "YOOKASSA_SHOP_ID",
@@ -154,6 +154,40 @@ class Settings(BaseSettings):
             raise ValueError(
                 "required production setting is empty or placeholder"
             )
+        return normalized
+
+    @field_validator("DB_ENCRYPTION_KEY", mode="before")
+    @classmethod
+    def validate_db_encryption_key(cls, value: str) -> str:
+        if isinstance(value, str):
+            value = value.strip().strip("'").strip('"')
+        normalized = value.strip()
+        if not normalized or "change_me" in normalized.lower():
+            raise ValueError(
+                "DB_ENCRYPTION_KEY is required and must not be empty or placeholder"
+            )
+        from cryptography.fernet import Fernet
+        try:
+            Fernet(normalized.encode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"DB_ENCRYPTION_KEY must be a valid 32-byte base64 Fernet key: {exc}") from exc
+        return normalized
+
+    @field_validator("DB_ENCRYPTION_KEYS", mode="before")
+    @classmethod
+    def validate_db_encryption_keys(cls, value: Any) -> str:
+        if not value or not isinstance(value, str):
+            return ""
+        normalized = value.strip().strip("'").strip('"')
+        if not normalized:
+            return ""
+        from cryptography.fernet import Fernet
+        keys = [k.strip() for k in normalized.split(",") if k.strip()]
+        for k in keys:
+            try:
+                Fernet(k.encode("utf-8"))
+            except Exception as exc:
+                raise ValueError(f"Invalid Fernet key in DB_ENCRYPTION_KEYS: {exc}") from exc
         return normalized
 
     @field_validator("DOMAIN", mode="before")
