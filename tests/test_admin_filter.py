@@ -269,6 +269,7 @@ class TestRootAdminFilterPureSecurityProof(unittest.IsolatedAsyncioTestCase):
         finally:
             if probe_router in dashboard_router.sub_routers:
                 dashboard_router.sub_routers.remove(probe_router)
+            probe_router._parent_router = None
 
     async def test_root_admin_filter_blocks_unguarded_nested_message_handler(self):
         """Proof 2: An unguarded message handler deep in admin tree NEVER executes for non-admin."""
@@ -321,6 +322,7 @@ class TestRootAdminFilterPureSecurityProof(unittest.IsolatedAsyncioTestCase):
         finally:
             if probe_router in dashboard_router.sub_routers:
                 dashboard_router.sub_routers.remove(probe_router)
+            probe_router._parent_router = None
 
     async def test_counterproof_without_admin_filter_unguarded_handler_executes(self):
         """Counter-proof: Demonstrates that without root AdminFilter, the unguarded handler
@@ -344,10 +346,15 @@ class TestRootAdminFilterPureSecurityProof(unittest.IsolatedAsyncioTestCase):
         mock_bot = AsyncMock()
         non_admin_update = self._make_callback_update(self.non_admin_id, "probe_counterproof_action")
 
-        await test_dp.feed_update(mock_bot, non_admin_update)
-
-        # PROOF: In absence of AdminFilter, handler executes for non-admin!
-        unguarded_executed.assert_awaited_once_with(self.non_admin_id)
+        try:
+            await test_dp.feed_update(mock_bot, non_admin_update)
+            # PROOF: In absence of AdminFilter, handler executes for non-admin!
+            unguarded_executed.assert_awaited_once_with(self.non_admin_id)
+        finally:
+            for r in test_dp.sub_routers[:]:
+                r._parent_router = None
+            child._parent_router = None
+            unprotected_root._parent_router = None
 
 
 class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
