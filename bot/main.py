@@ -215,32 +215,7 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 
     dp.message.middleware(ChatActionMiddleware())
 
-
-    from bot.handlers.admin.broadcast import (
-        router as admin_broadcast_router,
-    )
-    from bot.handlers.admin.dashboard import (
-        router as admin_dashboard_router,
-    )
-    from bot.handlers.admin.servers import (
-        router as admin_servers_router,
-    )
-    from bot.handlers.admin.tariffs import (
-        router as admin_tariffs_router,
-    )
-    from bot.handlers.admin.users import router as admin_users_router
-    from bot.handlers.admin.payments import (
-        router as admin_payments_router,
-    )
-    from bot.handlers.admin.payment_queues import (
-        router as admin_payment_queues_router,
-    )
-    from bot.handlers.admin.purchases import (
-        router as admin_purchases_router,
-    )
-    from bot.handlers.admin.disputes import (
-        router as admin_disputes_router,
-    )
+    from bot.handlers.admin import admin_router
     from bot.handlers.connection import router as connection_router
     from bot.handlers.fallback import router as fallback_router
     from bot.handlers.payment import router as payment_router
@@ -254,15 +229,7 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         connection_router,
         support_router,
         payment_router,
-        admin_dashboard_router,
-        admin_users_router,
-        admin_servers_router,
-        admin_tariffs_router,
-        admin_broadcast_router,
-        admin_payments_router,
-        admin_purchases_router,
-        admin_payment_queues_router,
-        admin_disputes_router,
+        admin_router,
         fallback_router,
     ]:
         # Reset parent so module-level router singletons can be included in a

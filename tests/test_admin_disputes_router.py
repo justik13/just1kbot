@@ -46,7 +46,10 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
             bot, dp = await setup_bot()
             try:
                 self.assertIsInstance(dp, Dispatcher)
-                self.assertIn(disputes_router, dp.sub_routers)
+                from bot.handlers.admin import admin_router, dashboard_router
+                self.assertIn(admin_router, dp.sub_routers)
+                self.assertIn(dashboard_router, admin_router.sub_routers)
+                self.assertIn(disputes_router, dashboard_router.sub_routers)
             finally:
                 await bot.session.close()
 
