@@ -1053,7 +1053,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         with (
             patch("bot.handlers.connection.common.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
             patch("bot.handlers.connection.common.get_user_profiles", new=AsyncMock(return_value=[failed_profile])),
-            patch("bot.handlers.connection.common.get_user_profiles_count", new=AsyncMock(return_value=0)),
             patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
             patch("bot.handlers.connection.common._get_grace_deletion_time", return_value=None),
             patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub,
