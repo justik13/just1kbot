@@ -262,14 +262,26 @@ check_prerequisites() {
     # Проверка и настройка UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         if [[ -n "$ALLOW_IP" ]]; then
-            ip_regex='^[0-9a-fA-F.:]+(/[0-9]{1,3})?$'
-            if [[ ! $ALLOW_IP =~ $ip_regex ]]; then
+            is_valid_ip=false
+            if command -v python3 &>/dev/null; then
+                if python3 -c "import ipaddress, sys; ipaddress.ip_network(sys.argv[1], strict=False)" "$ALLOW_IP" 2>/dev/null; then
+                    is_valid_ip=true
+                fi
+            else
+                ip_regex='^[0-9a-fA-F.:]+(/[0-9]{1,3})?$'
+                if [[ $ALLOW_IP =~ $ip_regex ]]; then
+                    is_valid_ip=true
+                fi
+            fi
+
+            if [[ "$is_valid_ip" != "true" ]]; then
                 error "Невалидный IP-адрес или CIDR подсеть для --allow-ip: $ALLOW_IP"
             fi
             warn "UFW активен. Ограничиваю доступ к порту $PUBLIC_PORT только с $ALLOW_IP..."
-            # Удаляем открытые широкие правила для этого порта, если они были настроены ранее
+            # Удаляем открытые широкие правила для этого порта (IPv4 и IPv6)
             ufw delete allow "$PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
             ufw delete allow "$PUBLIC_PORT" >/dev/null 2>&1 || true
+            ufw delete allow proto tcp from any to any port "$PUBLIC_PORT" >/dev/null 2>&1 || true
             if ! ufw allow from "$ALLOW_IP" to any port "$PUBLIC_PORT" proto tcp >/dev/null 2>&1; then
                 error "Не удалось применить правило UFW для $ALLOW_IP на порту $PUBLIC_PORT"
             fi

@@ -57,7 +57,7 @@ async def reencrypt_all() -> None:
                 last_server_id = server.id
                 total_servers += 1
 
-            await session.commit()
+            # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of servers up to ID %d (total: %d)", last_server_id, total_servers)
 
     # 2. Re-encrypt VPN profiles in batches
@@ -85,11 +85,28 @@ async def reencrypt_all() -> None:
                 last_profile_id = profile.id
                 total_profiles += 1
 
-            await session.commit()
+            # session_scope() automatically commits on block exit
             logger.info("Re-encrypted batch of VPN profiles up to ID %d (total: %d)", last_profile_id, total_profiles)
 
+    # 3. Verification phase: ensure every record decrypts cleanly
+    logger.info("Verifying all records decrypt cleanly...")
+    async with session_scope() as session:
+        verified_servers = (await session.scalars(select(Server))).all()
+        for s in verified_servers:
+            if s.api_key:
+                _ = len(s.api_key)
+
+        verified_profiles = (
+            await session.scalars(
+                select(VPNProfile).where(VPNProfile.raw_config.is_not(None))
+            )
+        ).all()
+        for p in verified_profiles:
+            if p.raw_config:
+                _ = len(p.raw_config)
+
     logger.info(
-        "Successfully finished database re-encryption: %d servers, %d VPN profiles.",
+        "Successfully finished database re-encryption & verification: %d servers, %d VPN profiles.",
         total_servers,
         total_profiles,
     )
