@@ -207,6 +207,7 @@ def _get_healthcheck_redis():
         _healthcheck_redis = aioredis.from_url(
             settings.REDIS_URL,
             socket_timeout=2.0,
+            socket_connect_timeout=2.0,
         )
     return _healthcheck_redis
 

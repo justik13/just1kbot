@@ -6,6 +6,16 @@
 }
 
 {$DOMAIN} {
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        X-Robots-Tag "noindex, nofollow, noarchive"
+        X-Permitted-Cross-Domain-Policies "none"
+        Permissions-Policy "geolocation=(), camera=(), microphone=()"
+        Cross-Origin-Opener-Policy "same-origin"
+        -Server
+    }
     @rate_limited_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/* /health
     handle @rate_limited_paths {
         request_body {
