@@ -214,6 +214,48 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(reloaded_user)
             self.assertEqual(reloaded_user.username, "updated_name", "Outer transaction changes must survive nested savepoint rollback")
 
+    async def test_notification_worker_per_user_atomic_transaction_and_skip_locked(self):
+        """Real DB integration test: verifies notification worker operates atomically per user.
+        If a user is locked by another transaction, skip_locked cleanly skips them (no Telegram message sent).
+        Unlocked users are processed and updated atomically."""
+        from unittest.mock import AsyncMock
+        from services.workers import notifications
+
+        now = now_utc()
+        async with self.session_factory() as session:
+            # User 1: will be locked by an active external transaction
+            u1 = User(id=1, telegram_id=1001, subscription_end=now + timedelta(hours=1), notified_2h=False, is_deleted=False)
+            # User 2: available for notifications
+            u2 = User(id=2, telegram_id=1002, subscription_end=now + timedelta(hours=1), notified_2h=False, is_deleted=False)
+            session.add_all([u1, u2])
+            await session.commit()
+
+        bot = AsyncMock()
+
+        # Hold a lock on User 1 in a separate connection/transaction
+        holding_session = self.session_factory()
+        await holding_session.begin()
+        locked_u1 = await holding_session.scalar(select(User).where(User.id == 1).with_for_update())
+        self.assertIsNotNone(locked_u1)
+
+        try:
+            # Run pre-expiry notification loop
+            await notifications._send_pre_expiry_notifications(bot, now)
+        finally:
+            await holding_session.rollback()
+            await holding_session.close()
+
+        # Verify state in a clean session
+        async with self.session_factory() as session:
+            check_u1 = await session.get(User, 1)
+            check_u2 = await session.get(User, 2)
+            self.assertFalse(check_u1.notified_2h, "Locked User 1 must be skipped and NOT marked as notified")
+            self.assertTrue(check_u2.notified_2h, "Unlocked User 2 must be notified and marked atomically")
+
+        # Telegram message must have been sent ONLY to User 2 (exactly 1 send, no double send)
+        self.assertEqual(bot.send_message.call_count, 1)
+        self.assertEqual(bot.send_message.call_args[0][0], 1002)
+
 
 if __name__ == "__main__":
     unittest.main()
