@@ -255,6 +255,30 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self._cleanup_test_records()
+        # Restore any other DB records back to baseline CI key if they were rotated
+        if hasattr(self, "_new_key") and hasattr(self, "_old_key"):
+            env_restore = {
+                **BASE_MOCK_ENV,
+                "DB_ENCRYPTION_KEY": BASE_MOCK_ENV["DB_ENCRYPTION_KEY"],
+                "DB_ENCRYPTION_KEYS": f"{self._new_key},{self._old_key}",
+            }
+            with patch.dict("os.environ", env_restore, clear=True):
+                from config.settings import get_settings
+                get_settings.cache_clear()
+                _get_fernet_engine.cache_clear()
+
+                from contextlib import asynccontextmanager
+                @asynccontextmanager
+                async def test_session_scope():
+                    async with self.sessions() as session:
+                        yield session
+                        await session.commit()
+
+                with patch("scripts.reencrypt_database.session_scope", side_effect=test_session_scope):
+                    try:
+                        await reencrypt_all()
+                    except Exception:
+                        pass
         await self.engine.dispose()
 
     async def _cleanup_test_records(self):
@@ -265,11 +289,15 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_reencryption_real_db_ciphertext_rotation(self):
-        old_key = Fernet.generate_key().decode("utf-8")
-        new_key = Fernet.generate_key().decode("utf-8")
+        self._old_key = Fernet.generate_key().decode("utf-8")
+        self._new_key = Fernet.generate_key().decode("utf-8")
 
         # 1. Insert records using OLD_KEY
-        env_old = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": old_key, "DB_ENCRYPTION_KEYS": ""}
+        env_old = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": self._old_key,
+            "DB_ENCRYPTION_KEYS": BASE_MOCK_ENV["DB_ENCRYPTION_KEY"],
+        }
         with patch.dict("os.environ", env_old, clear=True):
             from config.settings import get_settings
             get_settings.cache_clear()
@@ -295,15 +323,19 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             raw_ciphertext_old = result.scalar_one()
 
-        f_old = Fernet(old_key.encode("utf-8"))
-        f_new = Fernet(new_key.encode("utf-8"))
+        f_old = Fernet(self._old_key.encode("utf-8"))
+        f_new = Fernet(self._new_key.encode("utf-8"))
 
         self.assertEqual(f_old.decrypt(raw_ciphertext_old.encode("utf-8")).decode("utf-8"), "server_secret_api_key_123")
         with self.assertRaises(InvalidToken):
             f_new.decrypt(raw_ciphertext_old.encode("utf-8"))
 
         # 3. Run reencrypt_all() with NEW_KEY as primary and OLD_KEY in DB_ENCRYPTION_KEYS
-        env_new = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": new_key, "DB_ENCRYPTION_KEYS": old_key}
+        env_new = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": self._new_key,
+            "DB_ENCRYPTION_KEYS": f"{self._old_key},{BASE_MOCK_ENV['DB_ENCRYPTION_KEY']}",
+        }
         with patch.dict("os.environ", env_new, clear=True):
             get_settings.cache_clear()
             _get_fernet_engine.cache_clear()
