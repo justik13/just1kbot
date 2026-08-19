@@ -391,6 +391,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             provisioning_status="active",
             peer_id="peer-42",
             raw_config=valid_uri,
+            is_active=True,
         )
 
         mock_session = AsyncMock()
@@ -416,9 +417,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_11_await_profile_ready_waits_for_both_raw_config_and_peer_id(self):
         """Does not return active if raw_config or peer_id is missing/empty."""
-        partial_profile_1 = SimpleNamespace(id=42, provisioning_status="active", peer_id=None, raw_config="vpn://test")
-        partial_profile_2 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config=None)
-        valid_profile = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config="vpn://test")
+        valid_uri = _make_valid_vpn_uri()
+        partial_profile_1 = SimpleNamespace(id=42, provisioning_status="active", peer_id=None, raw_config=valid_uri, is_active=True)
+        partial_profile_2 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config=None, is_active=True)
+        valid_profile = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config=valid_uri, is_active=True)
 
         responses = [partial_profile_1, partial_profile_2, valid_profile]
 
@@ -721,7 +723,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await request_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            callback.answer.assert_called_once_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
             self.assertTrue(mock_render_screen.called)
 
     async def test_21_stale_request_delete_on_deleting_rejected_with_alert(self):
@@ -760,14 +762,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await request_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_with("🗑 Устройство уже удаляется с сервера.", show_alert=True)
+            callback.answer.assert_called_once_with("🗑 Устройство уже удаляется с сервера.", show_alert=True)
             self.assertTrue(mock_render_screen.called)
 
     async def test_22_await_profile_ready_polling_sequence_pending_to_active(self):
         """Sequential polling progression: pending -> pending -> active resolves successfully."""
-        pending_1 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None)
-        pending_2 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None)
-        ready_3 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config="vpn://test")
+        pending_1 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None, is_active=True)
+        pending_2 = SimpleNamespace(id=42, provisioning_status="pending_create", peer_id=None, raw_config=None, is_active=True)
+        ready_3 = SimpleNamespace(id=42, provisioning_status="active", peer_id="p1", raw_config=_make_valid_vpn_uri(), is_active=True)
 
         responses = [pending_1, pending_2, ready_3]
 
@@ -799,6 +801,72 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="update_failed")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_failed")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="delete_failed")))
+
+    async def test_24_await_profile_ready_rejects_corrupted_raw_config_until_valid(self):
+        """Profile with active status and peer_id but invalid raw_config is not treated as ready."""
+        corrupted_profile = SimpleNamespace(
+            id=42,
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config="corrupted_not_vpn_uri",
+            is_active=True,
+        )
+        valid_profile = SimpleNamespace(
+            id=42,
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config=_make_valid_vpn_uri(),
+            is_active=True,
+        )
+
+        responses = [corrupted_profile, valid_profile]
+
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(side_effect=responses)
+        mock_session.close = AsyncMock()
+
+        with patch("bot.handlers.connection.device_create_routes.get_session", new=AsyncMock(return_value=mock_session)):
+            res = await _await_profile_ready(42, timeout_seconds=2.0, poll_interval=0.01)
+
+            self.assertEqual(res, valid_profile)
+    async def test_25_request_delete_device_on_active_profile_answers_once_without_alert(self):
+        """Valid delete request on active profile answers callback once without alert and renders confirm dialog."""
+        from bot.handlers.connection.device_delete_routes import request_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config=_make_valid_vpn_uri(),
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "request_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
+            patch("bot.handlers.connection.device_delete_routes.render_hub", new=AsyncMock()) as mock_render_hub,
+        ):
+            await request_delete_device(callback, state, session, db_user)
+
+            callback.answer.assert_called_once_with(show_alert=False)
+            self.assertTrue(mock_render_hub.called)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

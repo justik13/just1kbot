@@ -68,7 +68,8 @@ async def _await_profile_ready(
         session = await get_session()
         try:
             profile = await session.get(VPNProfile, profile_id)
-            if profile and profile.provisioning_status == "active" and bool(profile.raw_config) and bool(profile.peer_id):
+            from .device_view_routes import is_profile_ready_for_user
+            if is_profile_ready_for_user(profile):
                 return profile
             if profile and profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
                 return profile
@@ -334,6 +335,10 @@ async def _process_server_selection(
             # claiming api_operations can see the durable create_peer task in PostgreSQL.
             await session.commit()
         except NoActiveSubscription:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -343,6 +348,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except DailyLimitExceeded:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -353,6 +362,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except DeviceLimitExceeded:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -362,6 +375,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except DuplicateDeviceName:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -371,6 +388,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except InvalidConfig:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
@@ -380,6 +401,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except DeviceCreationError:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             logger.exception(
                 "Device creation failed for user=%s server=%s",
                 telegram_user_id,
@@ -395,6 +420,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except ServerUnavailable as e:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             error_msg = str(e)
             error_type = _classify_server_error(error_msg)
             error_text = _get_server_error_text(error_type)
@@ -414,6 +443,10 @@ async def _process_server_selection(
             await state.clear()
             return
         except Exception:
+            try:
+                await session.rollback()
+            except Exception:
+                pass
             logger.exception("Unexpected error in _process_server_selection")
 
             await render_hub(

@@ -65,6 +65,13 @@ def has_usable_vpn_uri(profile) -> bool:
     return is_valid_vpn_uri(raw)
 
 
+def is_profile_ready_for_user(profile) -> bool:
+    """Check if profile is fully provisioned with active status and valid vpn:// URI."""
+    if not profile or getattr(profile, "provisioning_status", "") != "active":
+        return False
+    return has_usable_vpn_uri(profile)
+
+
 def can_show_config_actions(profile) -> bool:
     """Check if Show Key and Download Conf buttons should be displayed."""
     if not has_usable_vpn_uri(profile):

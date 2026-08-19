@@ -30,7 +30,6 @@ async def request_delete_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -60,6 +59,8 @@ async def request_delete_device(
         await callback.answer(msg, show_alert=True)
         await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
         return
+
+    await callback.answer(show_alert=False)
 
     await render_hub(
         callback.bot,
@@ -128,7 +129,6 @@ async def confirm_delete_device(
     _deleting_devices[profile_id] = True
 
     try:
-        await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
         await state.clear()
 
         from services.device_service import DeviceStillCreating
@@ -149,6 +149,8 @@ async def confirm_delete_device(
                 show_alert=True,
             )
             return
+
+        await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
 
         user = db_user or await get_user_by_telegram_id(
             session,
