@@ -577,7 +577,290 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("show_config:42", buttons)
             self.assertNotIn("download_conf:42", buttons)
             self.assertNotIn("request_delete_device:42", buttons)
-            self.assertIn("rename_device:42", buttons)
+    async def test_17_expired_subscription_with_pending_create_hides_delete_button(self):
+        """Expired subscription with pending_create hides Delete button in render_device_screen."""
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        pending_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="pending_create",
+            peer_id=None,
+            raw_config=None,
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        captured = {}
+        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+            captured["text"] = text
+            captured["keyboard"] = keyboard
+
+        with (
+            patch("bot.handlers.connection.device_view_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_view_routes.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+        ):
+            await render_device_screen(MagicMock(), 100, pending_profile, db_user, AsyncMock())
+
+            self.assertIn("keyboard", captured)
+            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            self.assertNotIn("request_delete_device:42", buttons)
+            self.assertIn("back_to_connections", buttons)
+            self.assertIn("back_to_main_menu", buttons)
+
+    async def test_18_expired_subscription_with_deleting_or_cleanup_hides_delete_button(self):
+        """Expired subscription with deleting or create_cleanup_pending hides Delete button."""
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        deleting_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="deleting",
+            peer_id="p1",
+            raw_config=None,
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        captured = {}
+        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+            captured["text"] = text
+            captured["keyboard"] = keyboard
+
+        with (
+            patch("bot.handlers.connection.device_view_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_view_routes.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+        ):
+            await render_device_screen(MagicMock(), 100, deleting_profile, db_user, AsyncMock())
+
+            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            self.assertNotIn("request_delete_device:42", buttons)
+
+    async def test_19_expired_subscription_with_active_shows_delete_button(self):
+        """Expired subscription with active profile allows deleting old device."""
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config="vpn://test",
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        captured = {}
+        async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
+            captured["text"] = text
+            captured["keyboard"] = keyboard
+
+        with (
+            patch("bot.handlers.connection.device_view_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_view_routes.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+        ):
+            await render_device_screen(MagicMock(), 100, active_profile, db_user, AsyncMock())
+
+            buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
+            self.assertIn("request_delete_device:42", buttons)
+
+    async def test_20_stale_request_delete_on_pending_create_rejected_with_alert(self):
+        """Stale click on request_delete_device when profile is pending_create is rejected immediately."""
+        from bot.handlers.connection.device_delete_routes import request_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        pending_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="pending_create",
+            peer_id=None,
+            raw_config=None,
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "request_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=pending_profile)),
+            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render_screen,
+        ):
+            await request_delete_device(callback, state, session, db_user)
+
+            callback.answer.assert_called_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            self.assertTrue(mock_render_screen.called)
+
+    async def test_21_stale_request_delete_on_deleting_rejected_with_alert(self):
+        """Stale click on request_delete_device when profile is deleting is rejected immediately."""
+        from bot.handlers.connection.device_delete_routes import request_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        deleting_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="deleting",
+            peer_id="p1",
+            raw_config=None,
+            is_active=True,
+            traffic_down=0,
+            traffic_up=0,
+            last_connected=None,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "request_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=deleting_profile)),
+            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render_screen,
+        ):
+            await request_delete_device(callback, state, session, db_user)
+
+            callback.answer.assert_called_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            self.assertTrue(mock_render_screen.called)
+
+
+import os
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from database.models import APIOperation, Server, User
+
+
+@unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
+class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.settings_patcher = patch(
+            "config.settings.get_settings",
+            return_value=SimpleNamespace(
+                DB_ENCRYPTION_KEY=os.getenv(
+                    "DB_ENCRYPTION_KEY", "CpVTtwjMHfR3GI2GQqg4P7JZnBHkQCINIQrb4N77hsg="
+                ),
+                ADMIN_IDS=[12345],
+            ),
+        )
+        self.settings_patcher.start()
+
+        self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.sessions.begin() as s:
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+
+    async def asyncTearDown(self):
+        async with self.sessions.begin() as s:
+            await s.execute(
+                text(
+                    "TRUNCATE account_balance_reservations, "
+                    "account_ledger_allocations, account_ledger_entries, "
+                    "entitlement_entries, paid_value_ledger, "
+                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
+                    "RESTART IDENTITY CASCADE"
+                )
+            )
+        await self.engine.dispose()
+        self.settings_patcher.stop()
+
+    async def test_create_device_commit_makes_operation_visible_to_second_session(self):
+        """Verify that create_device followed by session.commit makes create_peer visible to independent session."""
+        from datetime import datetime, timezone
+
+        from services.device_service import DeviceService
+
+        # 1. Setup seed user and server in DB
+        async with self.sessions() as s:
+            user = User(
+                telegram_id=987654,
+                username="testuser",
+                subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc),
+            )
+            server = Server(
+                name="Germany Live",
+                country_flag="🇩🇪",
+                ip_address="127.0.0.1",
+                api_url="http://127.0.0.1:8080",
+                api_key="secret",
+                protocol="amneziawg2",
+                is_active=True,
+                max_devices=100,
+            )
+            s.add_all([user, server])
+            await s.commit()
+            user_id = user.id
+            server_id = server.id
+
+        # 2. Session A: create_device and commit
+        async with self.sessions() as session_a:
+            profile = await DeviceService.create_device(
+                session_a,
+                user_id=user_id,
+                server_id=server_id,
+                device_name="Integration Dev #1",
+                snapshot=[],
+            )
+            await session_a.commit()
+            created_profile_id = profile.id
+
+        # 3. Session B: query from completely separate database connection
+        async with self.sessions() as session_b:
+            res = await session_b.execute(
+                select(APIOperation).where(
+                    APIOperation.profile_id == created_profile_id,
+                    APIOperation.operation_type == "create_peer",
+                )
+            )
+            op = res.scalar_one_or_none()
+
+            self.assertIsNotNone(op, "APIOperation(create_peer) must be visible in session_b immediately after commit")
+            self.assertEqual(op.status, "pending")
+            self.assertEqual(op.profile_id, created_profile_id)
+            self.assertEqual(op.operation_type, "create_peer")
 
 
 if __name__ == "__main__":

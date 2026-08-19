@@ -83,6 +83,17 @@ def can_show_amnezia_bridge(profile, server) -> bool:
     )
 
 
+def can_show_delete_action(profile) -> bool:
+    """Check if device deletion is permissible in the current state."""
+    if not profile:
+        return False
+    return getattr(profile, "provisioning_status", "") not in {
+        "pending_create",
+        "create_cleanup_pending",
+        "deleting",
+    }
+
+
 async def render_device_screen(
     bot,
     chat_id: int,
@@ -126,10 +137,10 @@ async def render_device_screen(
         rendered += "\n\n⚠️ <b>Не удалось удалить устройство на сервере. Попробуйте повторить.</b>"
 
     has_access = await SubscriptionService.check_access(session, user.telegram_id)
+    show_delete = can_show_delete_action(profile)
 
     if has_access:
         config_ready = can_show_config_actions(profile)
-        show_delete = status not in ("pending_create", "create_cleanup_pending", "deleting")
         amnezia_bridge_url = None
         if can_show_amnezia_bridge(profile, server):
             settings = get_settings()
@@ -149,7 +160,8 @@ async def render_device_screen(
         rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
 
         builder = InlineKeyboardBuilder()
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
+        if show_delete:
+            builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
         builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
         builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
         builder.adjust(1)

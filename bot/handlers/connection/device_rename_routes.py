@@ -181,10 +181,14 @@ async def rename_device_process(
     from config.settings import get_settings
     from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 
-    from .device_view_routes import can_show_amnezia_bridge, can_show_config_actions
+    from .device_view_routes import (
+        can_show_amnezia_bridge,
+        can_show_config_actions,
+        can_show_delete_action,
+    )
 
     config_ready = can_show_config_actions(profile)
-    show_delete = profile.provisioning_status not in ("pending_create", "create_cleanup_pending", "deleting")
+    show_delete = can_show_delete_action(profile)
     amnezia_bridge_url = None
     if can_show_amnezia_bridge(profile, server):
         settings = get_settings()
