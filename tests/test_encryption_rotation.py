@@ -1,6 +1,7 @@
 import asyncio
+import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 from cryptography.fernet import Fernet, InvalidToken
 from aiohttp.test_utils import make_mocked_request
@@ -18,7 +19,7 @@ from services.amnezia_client import (
     cleanup_server_circuit_breakers,
 )
 from scripts.reencrypt_database import reencrypt_all
-from database.models import Server, VPNProfile
+from database.models import Server
 
 
 BASE_MOCK_ENV = {
@@ -207,27 +208,57 @@ class AmneziaClientCacheTests(unittest.TestCase):
         cleanup_server_circuit_breakers("https://server-550.vpn.internal")
 
 
-class DatabaseReencryptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
+class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reencryption_script_processes_batches(self):
+        with patch("scripts.reencrypt_database.session_scope") as mock_session_scope:
+            mock_session = AsyncMock()
+            mock_session_scope.return_value.__aenter__.return_value = mock_session
+
+            server1 = MagicMock(id=1, api_key="secret_key_1")
+            profile1 = MagicMock(id=1, raw_config="raw_vpn_config_1")
+
+            # First query returns items, second returns empty list to stop loop
+            mock_session.scalars.side_effect = [
+                MagicMock(all=MagicMock(return_value=[server1])),
+                MagicMock(all=MagicMock(return_value=[])),
+                MagicMock(all=MagicMock(return_value=[profile1])),
+                MagicMock(all=MagicMock(return_value=[])),
+                MagicMock(all=MagicMock(return_value=[server1])),  # verification pass
+                MagicMock(all=MagicMock(return_value=[profile1])), # verification pass
+            ]
+
+            await reencrypt_all()
+
+
+@unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
+class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
+        self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        async with self.sessions.begin() as s:
+            await s.execute(
+                text("TRUNCATE vpn_profiles, servers RESTART IDENTITY CASCADE")
+            )
+
+    async def asyncTearDown(self):
+        async with self.sessions.begin() as s:
+            await s.execute(
+                text("TRUNCATE vpn_profiles, servers RESTART IDENTITY CASCADE")
+            )
+        await self.engine.dispose()
+
     async def test_reencryption_real_db_ciphertext_rotation(self):
         old_key = Fernet.generate_key().decode("utf-8")
         new_key = Fernet.generate_key().decode("utf-8")
 
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-        async_session = async_sessionmaker(engine, expire_on_commit=False)
-
-        # 1. Setup in-memory tables (Server and VPNProfile)
-        async with engine.begin() as conn:
-            await conn.run_sync(Server.__table__.create)
-            await conn.run_sync(VPNProfile.__table__.create)
-
-        # 2. Insert records using OLD_KEY
+        # 1. Insert records using OLD_KEY
         env_old = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": old_key, "DB_ENCRYPTION_KEYS": ""}
         with patch.dict("os.environ", env_old, clear=True):
             from config.settings import get_settings
             get_settings.cache_clear()
             _get_fernet_engine.cache_clear()
 
-            async with async_session() as session:
+            async with self.sessions() as session:
                 server = Server(
                     id=1,
                     name="Test Server",
@@ -239,8 +270,8 @@ class DatabaseReencryptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 session.add(server)
                 await session.commit()
 
-        # 3. Read raw SQL ciphertext to verify it was encrypted with OLD_KEY
-        async with engine.connect() as conn:
+        # 2. Read raw SQL ciphertext to verify it was encrypted with OLD_KEY
+        async with self.engine.connect() as conn:
             result = await conn.execute(text("SELECT api_key FROM servers WHERE id=1"))
             raw_ciphertext_old = result.scalar_one()
 
@@ -251,29 +282,28 @@ class DatabaseReencryptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(InvalidToken):
             f_new.decrypt(raw_ciphertext_old.encode("utf-8"))
 
-        # 4. Run reencrypt_all() with NEW_KEY as primary and OLD_KEY in DB_ENCRYPTION_KEYS
+        # 3. Run reencrypt_all() with NEW_KEY as primary and OLD_KEY in DB_ENCRYPTION_KEYS
         env_new = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": new_key, "DB_ENCRYPTION_KEYS": old_key}
         with patch.dict("os.environ", env_new, clear=True):
             get_settings.cache_clear()
             _get_fernet_engine.cache_clear()
 
-            # Point database.connection.session_scope to our test in-memory sessionmaker
             from contextlib import asynccontextmanager
             @asynccontextmanager
             async def test_session_scope():
-                async with async_session() as session:
+                async with self.sessions() as session:
                     yield session
                     await session.commit()
 
             with patch("scripts.reencrypt_database.session_scope", side_effect=test_session_scope):
                 await reencrypt_all()
 
-        # 5. Read raw SQL ciphertext to verify it is NOW encrypted with NEW_KEY!
-        async with engine.connect() as conn:
+        # 4. Read raw SQL ciphertext to verify it is NOW encrypted with NEW_KEY!
+        async with self.engine.connect() as conn:
             result = await conn.execute(text("SELECT api_key FROM servers WHERE id=1"))
             raw_ciphertext_new = result.scalar_one()
 
-        # Raw ciphertext MUST have changed
+        # Raw ciphertext MUST have changed in PostgreSQL
         self.assertNotEqual(raw_ciphertext_new, raw_ciphertext_old)
 
         # NEW_KEY CAN decrypt the new ciphertext
@@ -282,5 +312,3 @@ class DatabaseReencryptionIntegrationTests(unittest.IsolatedAsyncioTestCase):
         # OLD_KEY CANNOT decrypt the new ciphertext anymore
         with self.assertRaises(InvalidToken):
             f_old.decrypt(raw_ciphertext_new.encode("utf-8"))
-
-        await engine.dispose()

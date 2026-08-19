@@ -262,13 +262,13 @@ check_prerequisites() {
     # Проверка и настройка UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         if [[ -n "$ALLOW_IP" ]]; then
-            is_valid_ip=false
+            local is_valid_ip=false
             if command -v python3 &>/dev/null; then
                 if python3 -c "import ipaddress, sys; ipaddress.ip_network(sys.argv[1], strict=False)" "$ALLOW_IP" 2>/dev/null; then
                     is_valid_ip=true
                 fi
             else
-                ip_regex='^[0-9a-fA-F.:]+(/[0-9]{1,3})?$'
+                local ip_regex='^[0-9a-fA-F.:]+(/[0-9]{1,3})?$'
                 if [[ $ALLOW_IP =~ $ip_regex ]]; then
                     is_valid_ip=true
                 fi
