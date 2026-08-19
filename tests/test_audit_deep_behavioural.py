@@ -218,6 +218,7 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
         """Real DB integration test: verifies notification worker operates atomically per user.
         If a user is locked by another transaction, skip_locked cleanly skips them (no Telegram message sent).
         Unlocked users are processed and updated atomically."""
+        from contextlib import asynccontextmanager
         from unittest.mock import AsyncMock
         from services.workers import notifications
 
@@ -237,12 +238,19 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
         locked_u1 = await holding_session.scalar(select(User).where(User.id == 1).with_for_update())
         self.assertIsNotNone(locked_u1)
 
-        try:
-            # Run pre-expiry notification loop
-            await notifications._send_pre_expiry_notifications(bot, now)
-        finally:
-            await holding_session.rollback()
-            await holding_session.close()
+        @asynccontextmanager
+        async def mock_session_scope():
+            async with self.session_factory() as s:
+                yield s
+                await s.commit()
+
+        with patch("services.workers.notifications.session_scope", side_effect=mock_session_scope):
+            try:
+                # Run pre-expiry notification loop
+                await notifications._send_pre_expiry_notifications(bot, now)
+            finally:
+                await holding_session.rollback()
+                await holding_session.close()
 
         # Verify state in a clean session
         async with self.session_factory() as session:
