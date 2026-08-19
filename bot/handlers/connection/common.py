@@ -10,8 +10,8 @@ from bot import texts
 from bot.keyboards import get_back_button
 from database.models import User
 from database.repositories.profiles_repo import (
+    PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
-    get_user_profiles_count,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
@@ -115,7 +115,12 @@ async def _build_connections_screen(
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
     profiles = await get_user_profiles(session, user.id)
-    profiles_count = len(profiles)
+    visible_profiles_count = len(profiles)
+
+    quota_profiles_count = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
 
     device_limit = await _get_effective_device_limit(
         user,
@@ -123,7 +128,7 @@ async def _build_connections_screen(
     )
 
     rendered = texts.CONNECTION_LIST_HEADER.format(
-        count=profiles_count,
+        count=quota_profiles_count,
         limit=device_limit,
     )
 
@@ -140,7 +145,7 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
-    if profiles_count == 0:
+    if visible_profiles_count == 0:
         rendered += texts.CONNECTION_EMPTY
     else:
         for profile in profiles:
@@ -174,7 +179,7 @@ async def _build_connections_screen(
 
         rendered += "\n\n<i>Нажмите на устройство ниже для просмотра статуса и управления:</i>"
 
-    if not read_only and profiles_count < device_limit:
+    if not read_only and quota_profiles_count < device_limit:
         builder.button(
             text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
             callback_data="add_device",
@@ -218,13 +223,14 @@ async def _render_connections(
         user.telegram_id,
     )
 
-    profiles_count = await get_user_profiles_count(
+    visible_profiles = await get_user_profiles(
         session,
         user.id,
     )
+    visible_profiles_count = len(visible_profiles)
 
     if not has_access:
-        if profiles_count > 0:
+        if visible_profiles_count > 0:
             rendered, builder = await _build_connections_screen(
                 user,
                 session,

@@ -31,8 +31,6 @@ async def rename_device_start(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
-
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
@@ -48,6 +46,11 @@ async def rename_device_start(
         )
         return
 
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending"):
+        msg = "🗑 Устройство уже удаляется с сервера." if profile.provisioning_status == "deleting" else "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        await callback.answer(msg, show_alert=True)
+        return
+
     has_access = await SubscriptionService.check_access(
         session,
         db_user.telegram_id,
@@ -60,6 +63,7 @@ async def rename_device_start(
         )
         return
 
+    await callback.answer(show_alert=False)
     await state.update_data(profile_id=profile_id)
     await state.set_state(DeviceManagementStates.rename_device)
 
@@ -91,15 +95,24 @@ async def rename_device_process(
     profile_id = data.get("profile_id")
 
     profile = await get_profile_by_id(session, profile_id)
-
     if not profile or not db_user or profile.user_id != db_user.id:
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_ACCESS_DENIED,
             get_back_button("back_to_connections"),
+        )
+        return
+
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending"):
+        await state.clear()
+        msg = "🗑 Устройство уже удаляется с сервера." if profile.provisioning_status == "deleting" else "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            msg,
+            get_back_button(f"manage_device:{profile.id}"),
         )
         return
 

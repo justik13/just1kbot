@@ -240,7 +240,9 @@ class DeviceService:
         if not profile:
             return True
         if profile.provisioning_status == "pending_create" and not force:
-            raise DeviceStillCreating("Устройство ещё создаётся")
+            raise DeviceStillCreating("Device still creating")
+        if profile.provisioning_status == "create_cleanup_pending" and not force:
+            raise DeviceCreationError("Cleanup in progress")
 
         # Capture server and device info for audit before deletion
         server = await session.get(Server, profile.server_id)

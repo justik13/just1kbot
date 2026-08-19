@@ -1028,6 +1028,124 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             error_text = mock_render_hub.call_args.args[2]
             self.assertEqual(error_text, texts.ERROR_SERVER_FULL)
 
+    async def test_31_expired_subscription_with_create_failed_renders_readonly_connections_screen(self):
+        """Expired subscription user with create_failed device sees read-only screen with recoverable device."""
+        from bot.handlers.connection.common import _render_connections
+
+        user = SimpleNamespace(id=1, telegram_id=100, subscription_end=None)
+        target = MagicMock()
+        target.bot = MagicMock()
+        target.chat.id = 100
+        session = AsyncMock()
+
+        failed_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="create_failed",
+            server=SimpleNamespace(country_flag="🇩🇪", name="Germany"),
+            last_connected=None,
+            traffic_down=0,
+            traffic_up=0,
+        )
+
+        with (
+            patch("bot.handlers.connection.common.SubscriptionService.check_access", new=AsyncMock(return_value=False)),
+            patch("bot.handlers.connection.common.get_user_profiles", new=AsyncMock(return_value=[failed_profile])),
+            patch("bot.handlers.connection.common.get_user_profiles_count", new=AsyncMock(return_value=0)),
+            patch("bot.handlers.connection.common._get_effective_device_limit", new=AsyncMock(return_value=5)),
+            patch("bot.handlers.connection.common._get_grace_deletion_time", return_value=None),
+            patch("bot.handlers.connection.common.render_hub", new=AsyncMock()) as mock_render_hub,
+        ):
+            await _render_connections(target, user, session)
+
+            self.assertTrue(mock_render_hub.called)
+            rendered_text = mock_render_hub.call_args.args[2]
+            self.assertIn("Устройство #1", rendered_text)
+            self.assertIn("(0/5)", rendered_text)
+
+    async def test_32_rename_device_start_rejects_deleting_and_cleanup_states(self):
+        """rename_device_start rejects deleting and create_cleanup_pending states with exactly-once alert answer."""
+        from bot.handlers.connection.device_rename_routes import rename_device_start
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        deleting_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="deleting",
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "rename_device:42"
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=deleting_profile)):
+            await rename_device_start(callback, state, session, db_user)
+
+            callback.answer.assert_called_once_with("🗑 Устройство уже удаляется с сервера.", show_alert=True)
+            self.assertFalse(state.set_state.called)
+
+    async def test_33_device_service_delete_device_rejects_create_cleanup_pending(self):
+        """DeviceService.delete_device raises DeviceCreationError for create_cleanup_pending on service boundary."""
+        from database.models import VPNProfile
+        from services.device_service import DeviceCreationError, DeviceService
+
+        cleanup_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="create_cleanup_pending",
+            peer_id="peer1",
+        )
+
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=cleanup_profile)))
+
+        with self.assertRaises(DeviceCreationError):
+            await DeviceService.delete_device(session, cleanup_profile, force=False)
+
+    async def test_34_cleanup_worker_stuck_profile_with_peer_id_queues_delete_operation(self):
+        """Cleanup worker ensures delete_peer operation is queued if stuck profile has peer_id."""
+        from database.models import Server, VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            client_name="tg_100_p42",
+            provisioning_status="create_cleanup_pending",
+            peer_id="peer_abc",
+        )
+
+        mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))))
+        mock_session.get = AsyncMock(return_value=mock_server)
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock()) as mock_ensure_delete,
+        ):
+            await _cleanup_stuck_profiles()
+
+            self.assertEqual(stuck_profile.provisioning_status, "deleting")
+            mock_ensure_delete.assert_called_once()
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):

@@ -292,11 +292,11 @@ async def _process_server_selection(
     _creating_devices[telegram_user_id] = True
 
     try:
-        profiles = await get_user_profiles(session, user.id)
+        all_profiles = await get_user_profiles(session, user.id, include_deleting=True)
         limit = await _get_effective_device_limit(user, session)
         
         used = set()
-        for p in profiles:
+        for p in all_profiles:
             m = re.search(r'#(\d+)$', p.device_name)
             if m:
                 used.add(int(m.group(1)))
@@ -475,6 +475,11 @@ async def _process_server_selection(
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:
                 # Timeout reached or creation still pending -> render connections list showing current status
+                try:
+                    if new_profile:
+                        await session.refresh(new_profile)
+                except Exception:
+                    pass
                 await _render_connections(callback.message, user, session)
         else:
             await _render_connections(callback.message, user, session)

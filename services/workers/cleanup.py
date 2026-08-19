@@ -263,7 +263,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_stuck_profiles():
-    # P1-2: Cleanup dangling pending_create profiles
+    # P1-2: Cleanup dangling pending_create and create_cleanup_pending profiles
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
         stuck_profiles = (
@@ -278,9 +278,30 @@ async def _cleanup_stuck_profiles():
         ).scalars().all()
 
         for profile in stuck_profiles:
-            profile.provisioning_status = "create_failed"
+            if profile.peer_id:
+                server = await session.get(Server, profile.server_id)
+                try:
+                    from services.api_operations_queue import ensure_delete_operation
+                    await ensure_delete_operation(
+                        session,
+                        idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                        server_id=server.id if server else None,
+                        profile_id=profile.id,
+                        server_name_snapshot=server.name if server else None,
+                        api_url_snapshot=server.api_url if server else None,
+                        api_key_snapshot=server.api_key if server else None,
+                        peer_id=profile.peer_id,
+                        client_name=profile.client_name,
+                        audit_reason="stuck_cleanup_worker",
+                    )
+                    profile.provisioning_status = "deleting"
+                except Exception as exc:
+                    logger.warning("Failed to queue delete_peer operation during stuck profile cleanup: %s", exc)
+                    profile.provisioning_status = "create_failed"
+            else:
+                profile.provisioning_status = "create_failed"
             profile.last_sync_error = "Creation timed out by cleanup worker"
-            logger.info("Marked stuck pending_create profile %s as create_failed", profile.id)
+            logger.info("Cleaned up stuck profile %s (peer_id=%s, status=%s)", profile.id, profile.peer_id, profile.provisioning_status)
 
 async def _cleanup_dangling_peers():
     servers_data = []
