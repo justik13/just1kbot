@@ -840,16 +840,17 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
 
         # 2. Session A: create_device and commit
-        async with self.sessions() as session_a:
-            profile = await DeviceService.create_device(
-                session_a,
-                user_id=user_id,
-                server_id=server_id,
-                device_name="Integration Dev #1",
-                snapshot=snapshot,
-            )
-            await session_a.commit()
-            created_profile_id = profile.id
+        with patch("services.device_service.ensure_server_capacity", new=AsyncMock()):
+            async with self.sessions() as session_a:
+                profile = await DeviceService.create_device(
+                    session_a,
+                    user_id=user_id,
+                    server_id=server_id,
+                    device_name="Integration Dev #1",
+                    snapshot=snapshot,
+                )
+                await session_a.commit()
+                created_profile_id = profile.id
 
         # 3. Session B: query from completely separate database connection
         async with self.sessions() as session_b:
