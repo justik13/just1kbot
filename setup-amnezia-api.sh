@@ -262,7 +262,8 @@ check_prerequisites() {
     # Проверка и настройка UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
         if [[ -n "$ALLOW_IP" ]]; then
-            if [[ ! "$ALLOW_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]] && [[ ! "$ALLOW_IP" =~ ^[0-9a-fA-F:]+(/[0-9]{1,3})?$ ]]; then
+            ip_regex='^[0-9a-fA-F.:]+(/[0-9]{1,3})?$'
+            if [[ ! $ALLOW_IP =~ $ip_regex ]]; then
                 error "Невалидный IP-адрес или CIDR подсеть для --allow-ip: $ALLOW_IP"
             fi
             warn "UFW активен. Ограничиваю доступ к порту $PUBLIC_PORT только с $ALLOW_IP..."
