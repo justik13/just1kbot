@@ -74,3 +74,21 @@ def test_active_user_facing_claims_are_neutralized():
     assert "24 часа" not in texts.SUPPORT_TEXT
     assert "максимальной скорости" not in texts.PAYMENT_SHOWCASE_HEADER
     assert "Мы постараемся помочь как можно скорее." in texts.SUPPORT_TEXT
+
+
+def test_payment_and_receipt_descriptions_contain_no_vpn_wording():
+    from services.account_topup import get_topup_description
+
+    contexts = [
+        {},
+        {"auto_fulfill_action": "purchase", "operation": "renew"},
+        {"auto_fulfill_action": "tariff_change"},
+        {"auto_fulfill_action": "purchase", "operation": "new"},
+    ]
+    for ctx in contexts:
+        desc = get_topup_description(ctx)
+        assert re.search(r"(?<![A-Za-zА-Яа-я])VPN(?![A-Za-zА-Яа-я])", desc, re.IGNORECASE) is None
+        assert "ВПН" not in desc.upper()
+        assert "прокси" not in desc.lower()
+        assert "обход" not in desc.lower()
+
