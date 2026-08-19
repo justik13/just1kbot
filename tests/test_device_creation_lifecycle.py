@@ -868,6 +868,51 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_called_once_with(show_alert=False)
             self.assertTrue(mock_render_hub.called)
 
+    async def test_26_confirm_delete_device_unexpected_exception_answers_error_alert_once(self):
+        """Unexpected exception in confirm_delete_device answers technical error alert once and clears lock."""
+        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Мой телефон",
+            provisioning_status="active",
+            peer_id="p1",
+            raw_config=_make_valid_vpn_uri(),
+            is_active=True,
+        )
+
+        callback = MagicMock()
+        callback.bot = MagicMock()
+        callback.data = "confirm_delete_device:42"
+        callback.message.chat.id = 100
+        callback.message.message_id = 10
+        callback.from_user.id = 100
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
+            patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock(side_effect=RuntimeError("Database failure"))),
+        ):
+            await confirm_delete_device(callback, state, session, db_user)
+
+            callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+            self.assertNotIn(42, _deleting_devices)
+
+    def test_27_non_visible_profile_statuses_only_excludes_in_flight_deleting(self):
+        """NON_VISIBLE_PROFILE_STATUSES only excludes deleting; all recoverable/failure states remain visible in user lists."""
+        from database.repositories.profiles_repo import NON_VISIBLE_PROFILE_STATUSES
+
+        self.assertEqual(NON_VISIBLE_PROFILE_STATUSES, ("deleting",))
+        self.assertNotIn("create_cleanup_pending", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertNotIn("create_failed", NON_VISIBLE_PROFILE_STATUSES)
+        self.assertNotIn("delete_failed", NON_VISIBLE_PROFILE_STATUSES)
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):

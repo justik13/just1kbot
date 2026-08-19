@@ -14,13 +14,10 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
-# These lifecycle states represent profiles that are being removed or are
-# waiting for cleanup and therefore must not count as active user devices.
+# These lifecycle states represent profiles that are actively in flight being
+# removed by backend workers and therefore must not appear in user device lists.
 NON_VISIBLE_PROFILE_STATUSES = (
     "deleting",
-    "create_cleanup_pending",
-    "delete_failed",
-    "create_failed",
 )
 
 

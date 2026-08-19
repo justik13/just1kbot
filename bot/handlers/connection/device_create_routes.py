@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 import re
 import time
@@ -474,8 +475,17 @@ async def _process_server_selection(
                 )
             else:
                 # Timeout reached or cleanup pending -> render connections list showing current status
+                # using fresh DB state to avoid stale ORM objects from expire_on_commit=False
+                if hasattr(session, "expire_all"):
+                    res = session.expire_all()
+                    if inspect.isawaitable(res):
+                        await res
                 await _render_connections(callback.message, user, session)
         else:
+            if hasattr(session, "expire_all"):
+                res = session.expire_all()
+                if inspect.isawaitable(res):
+                    await res
             await _render_connections(callback.message, user, session)
 
     finally:
