@@ -1,11 +1,31 @@
 from datetime import datetime
 from typing import List, Optional, TypedDict
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
+
+
+CAPACITY_CONSUMING_STATUSES = (
+    "pending_create",
+    "active",
+    "pending_update",
+    "update_failed",
+    "deleting",
+    "delete_failed",
+    "create_cleanup_pending",
+)
+
+
+def _capacity_consuming_profiles_condition():
+    """A profile consumes server capacity if an active peer is assigned (peer_id is not None),
+    or if it is in an explicit capacity-consuming lifecycle state."""
+    return or_(
+        VPNProfile.peer_id.is_not(None),
+        VPNProfile.provisioning_status.in_(CAPACITY_CONSUMING_STATUSES),
+    )
 
 
 class ServerUpdateFields(TypedDict, total=False):
@@ -58,7 +78,9 @@ async def get_active_servers(session: AsyncSession) -> List[Server]:
 
 async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id))
+        .where(_capacity_consuming_profiles_condition())
+        .group_by(VPNProfile.server_id)
     )
     return {row[0]: row[1] for row in result.all()}
 
@@ -69,16 +91,17 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
         return []
 
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id))
+        .where(_capacity_consuming_profiles_condition())
+        .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
-
     available: List[Server] = []
     for server in servers:
-        real_count = get_cached_peer_count(server.id)
-        if real_count is None:
-            real_count = db_counts.get(server.id, 0)
-        if real_count < server.max_clients:
+        cached_count = get_cached_peer_count(server.id)
+        db_count = db_counts.get(server.id, 0)
+        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
+        if effective_count < server.max_clients:
             available.append(server)
     return available
 
@@ -200,16 +223,18 @@ async def get_total_free_ips(session: AsyncSession) -> int:
         return 0
 
     result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id)).group_by(VPNProfile.server_id)
+        select(VPNProfile.server_id, func.count(VPNProfile.id))
+        .where(_capacity_consuming_profiles_condition())
+        .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
 
     total_free = 0
     for server in active_servers:
-        real_count = get_cached_peer_count(server.id)
-        if real_count is None:
-            real_count = db_counts.get(server.id, 0)
-        total_free += max(0, server.max_clients - real_count)
+        cached_count = get_cached_peer_count(server.id)
+        db_count = db_counts.get(server.id, 0)
+        effective_count = max(cached_count, db_count) if cached_count is not None else db_count
+        total_free += max(0, server.max_clients - effective_count)
     return total_free
 
 

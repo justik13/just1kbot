@@ -175,14 +175,14 @@ async def _send_pre_expiry_notifications(
     for i in range(0, len(user_ids), NOTIFICATION_BATCH_SIZE):
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
-        async with session_scope() as session:
-            users_result = await session.execute(
-                select(User).where(User.id.in_(batch_ids)).with_for_update(skip_locked=True)
-            )
+        for uid in batch_ids:
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                if user is None:
+                    continue
 
-            batch_users = list(users_result.scalars().all())
-
-            for user in batch_users:
                 if user.is_banned or user.is_bot_blocked or user.is_deleted:
                     continue
 
@@ -205,7 +205,6 @@ async def _send_pre_expiry_notifications(
                         "Max retries reached for user %s, will retry in next global cycle",
                         user.telegram_id,
                     )
-
                     continue
 
                 if retry_count > 0 and user.last_notification_attempt:
@@ -335,14 +334,14 @@ async def _send_post_expiry_notifications(
     for i in range(0, len(user_ids), NOTIFICATION_BATCH_SIZE):
         batch_ids = user_ids[i : i + NOTIFICATION_BATCH_SIZE]
 
-        async with session_scope() as session:
-            users_result = await session.execute(
-                select(User).where(User.id.in_(batch_ids)).with_for_update(skip_locked=True)
-            )
+        for uid in batch_ids:
+            async with session_scope() as session:
+                user = await session.scalar(
+                    select(User).where(User.id == uid).with_for_update(skip_locked=True)
+                )
+                if user is None:
+                    continue
 
-            batch_users = list(users_result.scalars().all())
-
-            for user in batch_users:
                 if not user.subscription_end or user.subscription_end >= current_time:
                     continue
 
@@ -369,7 +368,6 @@ async def _send_post_expiry_notifications(
                         "Max retries reached for user %s, will retry in next global cycle",
                         user.telegram_id,
                     )
-
                     continue
 
                 if retry_count > 0 and user.last_notification_attempt:

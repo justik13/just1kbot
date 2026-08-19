@@ -167,7 +167,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         callback.answer.assert_any_await("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
         mock_rotate_token.assert_awaited_once_with(session, db_user)
-        session.commit.assert_awaited_once()
         mock_render_hub.assert_awaited_once()
 
         args = mock_render_hub.call_args[0]
@@ -201,6 +200,34 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         await rotate_incy_subscription(callback, state, session, db_user=db_user)
 
+        callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        mock_render_hub.assert_not_awaited()
+
+    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
+    @patch("bot.handlers.connection.incy_routes.render_hub")
+    async def test_rotate_incy_subscription_handler_on_commit_failure(
+        self, mock_render_hub, mock_rotate_token
+    ):
+        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+
+        mock_rotate_token.return_value = "uncommitted_token_999"
+
+        bot = AsyncMock()
+        message = MagicMock(spec=Message)
+        message.chat = MagicMock(id=999)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.bot = bot
+        callback.message = message
+        callback.answer = AsyncMock()
+
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        session.commit.side_effect = RuntimeError("DB connection dropped on commit")
+        db_user = User(id=1, telegram_id=999, subscription_token="old_token")
+
+        await rotate_incy_subscription(callback, state, session, db_user=db_user)
+
+        # If commit fails, render_hub must NOT be called with the uncommitted token
         callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         mock_render_hub.assert_not_awaited()
 

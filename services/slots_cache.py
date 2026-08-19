@@ -53,6 +53,11 @@ def update_cached_peer_count(server_id: int, count: int) -> None:
     _slots_cache[server_id] = count
 
 
+def clear_slots_cache() -> None:
+    """Clear all cached peer counts."""
+    _slots_cache.clear()
+
+
 async def get_real_peer_count(server: Server, force_refresh: bool = False) -> int:
     global _last_cleanup_time
     now = time.monotonic()
