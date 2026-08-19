@@ -1,19 +1,13 @@
 # 📚 INCY APPLICATION & SUBSCRIPTION FORMAT — ТЕХНИЧЕСКИЙ СПРАВОЧНИК
 
-> **ПОЛИТИКА ПРОЕКТА ПО ПРОТОКОЛАМ:**
-> 1. В текущей реализации проекта поддерживается только **AmneziaWG 2.0 (`amneziawg2`)**; стандартный WireGuard не используется.
-> 2. В планах развития (**Roadmap**): поддержка **AmneziaWG 3.0 (`amneziawg3`)** и стека **Xray** (VLESS-Reality / Hysteria 2).
-
----
-
 ## 🧭 1. ОБЩИЙ ОБЗОР И ПОДДЕРЖКА ПЛАТФОРМ
 
-| Платформа | AmneziaWG 2.0 (`amneziawg://`, `awg://`) | Чистый WireGuard (стандартный) | Xray (VLESS, VMess, Trojan, Hy2) |
+| Платформа | AmneziaWG 2.0 (`amneziawg://`, `awg://`) | Стандартный WireGuard | Xray (VLESS, VMess, Trojan, Hy2) |
 |---|:---:|:---:|:---:|
 | **Статус в боте** | ✅ **Active Production** (`amneziawg2`) | ❌ **Не используется** | ⏳ **Roadmap** (в планах) |
 | **iOS** (App Store) | ✅ Полная поддержка | ✅ Поддерживается клиентом | ✅ Полная поддержка |
 | **Android** (Google Play) | ✅ Полная поддержка | ✅ Поддерживается клиентом | ✅ Полная поддержка |
-| **Desktop** (Win/macOS/Linux) | ❌ **В desktop INCY схемы amneziawg:///awg:// не поддерживаются в подписках** | ✅ Только локальный `.conf` | ✅ Полная поддержка |
+| **Desktop** (Win/macOS/Linux) | ❌ **Схемы amneziawg:///awg:// не поддерживаются в подписках** | ✅ Только локальный `.conf` | ✅ Полная поддержка |
 
 ### ⚠️ Ограничение десктопного клиента INCY
 По спецификации разработчиков INCY:

@@ -16,6 +16,44 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _build_incy_text(sub_url: str) -> str:
+    return (
+        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
+        "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
+        "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
+        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
+        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
+        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
+        "4. Включите подключение в приложении.\n\n"
+        "<b>Ваша персональная ссылка:</b>\n"
+        f"<code>{sub_url}</code>\n\n"
+        "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
+        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
+    )
+
+
+def _build_incy_keyboard(sub_url: str, open_url: str):
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="📱 Открыть в INCY",
+        url=open_url,
+    )
+    builder.button(
+        text="📋 Скопировать ссылку",
+        copy_text=CopyTextButton(text=sub_url),
+    )
+    builder.button(
+        text="🔄 Сбросить ссылку",
+        callback_data="rotate_incy_token",
+    )
+    builder.button(
+        text="⬅️ Назад к устройствам",
+        callback_data="back_to_connections",
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 @router.callback_query(F.data == "menu_incy_subscription")
 async def show_incy_subscription(
     callback: CallbackQuery,
@@ -36,44 +74,11 @@ async def show_incy_subscription(
     sub_url = f"https://{settings.DOMAIN}/sub/{token}"
     open_url = f"https://{settings.DOMAIN}/sub/open/{token}"
 
-    text = (
-        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
-        "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
-        "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
-        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
-        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
-        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
-        "4. Включите подключение в приложении.\n\n"
-        "<b>Ваша персональная ссылка:</b>\n"
-        f"<code>{sub_url}</code>\n\n"
-        "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
-        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
-    )
-
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text="📱 Открыть в INCY",
-        url=open_url,
-    )
-    builder.button(
-        text="📋 Скопировать ссылку",
-        copy_text=CopyTextButton(text=sub_url),
-    )
-    builder.button(
-        text="🔄 Сбросить ссылку",
-        callback_data="rotate_incy_token",
-    )
-    builder.button(
-        text="⬅️ Назад к устройствам",
-        callback_data="back_to_connections",
-    )
-    builder.adjust(1)
-
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        text,
-        builder.as_markup(),
+        _build_incy_text(sub_url),
+        _build_incy_keyboard(sub_url, open_url),
     )
 
 
@@ -98,44 +103,11 @@ async def rotate_incy_subscription(
         sub_url = f"https://{settings.DOMAIN}/sub/{new_token}"
         open_url = f"https://{settings.DOMAIN}/sub/open/{new_token}"
 
-        text = (
-            "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
-            "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
-            "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
-            "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
-            "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
-            "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
-            "4. Включите подключение в приложении.\n\n"
-            "<b>Ваша персональная ссылка:</b>\n"
-            f"<code>{sub_url}</code>\n\n"
-            "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
-            "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
-        )
-
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text="📱 Открыть в INCY",
-            url=open_url,
-        )
-        builder.button(
-            text="📋 Скопировать ссылку",
-            copy_text=CopyTextButton(text=sub_url),
-        )
-        builder.button(
-            text="🔄 Сбросить ссылку",
-            callback_data="rotate_incy_token",
-        )
-        builder.button(
-            text="⬅️ Назад к устройствам",
-            callback_data="back_to_connections",
-        )
-        builder.adjust(1)
-
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            text,
-            builder.as_markup(),
+            _build_incy_text(sub_url),
+            _build_incy_keyboard(sub_url, open_url),
         )
         await callback.answer("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
     except Exception as e:
