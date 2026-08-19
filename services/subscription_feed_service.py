@@ -117,7 +117,7 @@ class SubscriptionFeedService:
         lines = []
         for p, conf in configs:
             try:
-                b64_conf = base64.b64encode(
+                b64_conf = base64.urlsafe_b64encode(
                     conf.encode("utf-8")
                 ).decode("ascii")
 
