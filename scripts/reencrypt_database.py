@@ -4,9 +4,10 @@ Usage:
     python -m scripts.reencrypt_database
 
 Requirements:
-    DB_ENCRYPTION_KEYS in .env must be set with the new primary key first,
-    followed by the old key(s):
-    DB_ENCRYPTION_KEYS='<NEW_KEY>,<OLD_KEY>'
+    DB_ENCRYPTION_KEY in .env must be set to the NEW primary encryption key.
+    DB_ENCRYPTION_KEYS (optional) should list old key(s) to allow decrypting existing data:
+    DB_ENCRYPTION_KEY='<NEW_PRIMARY_KEY>'
+    DB_ENCRYPTION_KEYS='<OLD_KEY_1>,<OLD_KEY_2>'
 """
 
 import asyncio
@@ -14,6 +15,7 @@ import logging
 import sys
 
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from database.connection import session_scope
 from database.models import Server, VPNProfile
@@ -24,38 +26,73 @@ logging.basicConfig(
 )
 logger = logging.getLogger("reencrypt")
 
+BATCH_SIZE = 100
+
 
 async def reencrypt_all() -> None:
     logger.info("Starting database re-encryption with primary key...")
 
-    async with session_scope() as session:
-        # 1. Re-encrypt servers
-        servers = (await session.scalars(select(Server))).all()
-        logger.info("Found %d servers to re-encrypt", len(servers))
-        for server in servers:
-            # Accessing and re-assigning triggers process_result_value + process_bind_param
-            if server.api_key:
-                server.api_key = str(server.api_key)
-            if server.country_flag:
-                server.country_flag = str(server.country_flag)
+    total_servers = 0
+    total_profiles = 0
 
-        # 2. Re-encrypt VPN profiles
-        profiles = (
-            await session.scalars(
-                select(VPNProfile).where(VPNProfile.raw_config.is_not(None))
-            )
-        ).all()
-        logger.info("Found %d VPN profiles with configs to re-encrypt", len(profiles))
-        for profile in profiles:
-            if profile.raw_config:
-                profile.raw_config = str(profile.raw_config)
+    # 1. Re-encrypt servers in batches
+    last_server_id = 0
+    while True:
+        async with session_scope() as session:
+            servers = (
+                await session.scalars(
+                    select(Server)
+                    .where(Server.id > last_server_id)
+                    .order_by(Server.id)
+                    .limit(BATCH_SIZE)
+                )
+            ).all()
+            if not servers:
+                break
 
-        await session.flush()
-        logger.info(
-            "Successfully re-encrypted %d servers and %d profiles.",
-            len(servers),
-            len(profiles),
-        )
+            for server in servers:
+                if server.api_key:
+                    server.api_key = str(server.api_key)
+                    flag_modified(server, "api_key")
+                last_server_id = server.id
+                total_servers += 1
+
+            await session.commit()
+            logger.info("Re-encrypted batch of servers up to ID %d (total: %d)", last_server_id, total_servers)
+
+    # 2. Re-encrypt VPN profiles in batches
+    last_profile_id = 0
+    while True:
+        async with session_scope() as session:
+            profiles = (
+                await session.scalars(
+                    select(VPNProfile)
+                    .where(
+                        VPNProfile.id > last_profile_id,
+                        VPNProfile.raw_config.is_not(None),
+                    )
+                    .order_by(VPNProfile.id)
+                    .limit(BATCH_SIZE)
+                )
+            ).all()
+            if not profiles:
+                break
+
+            for profile in profiles:
+                if profile.raw_config:
+                    profile.raw_config = str(profile.raw_config)
+                    flag_modified(profile, "raw_config")
+                last_profile_id = profile.id
+                total_profiles += 1
+
+            await session.commit()
+            logger.info("Re-encrypted batch of VPN profiles up to ID %d (total: %d)", last_profile_id, total_profiles)
+
+    logger.info(
+        "Successfully finished database re-encryption: %d servers, %d VPN profiles.",
+        total_servers,
+        total_profiles,
+    )
 
 
 def main():

@@ -259,21 +259,29 @@ check_prerequisites() {
         fi
     fi
 
-    # Проверка UFW
+    # Проверка и настройка UFW
     if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-        if ! ufw status 2>/dev/null | grep -q "$PUBLIC_PORT"; then
-            if [[ -n "$ALLOW_IP" ]]; then
-                warn "UFW активен. Ограничиваю доступ к порту $PUBLIC_PORT только с $ALLOW_IP..."
-                ufw allow from "$ALLOW_IP" to any port "$PUBLIC_PORT" proto tcp > /dev/null 2>&1
-                log "UFW: порт $PUBLIC_PORT открыт исключительно для $ALLOW_IP"
-            else
-                warn "UFW активен, но порт $PUBLIC_PORT не открыт. Открываю для всех..."
-                ufw allow "$PUBLIC_PORT/tcp" > /dev/null 2>&1
-                log "UFW: порт $PUBLIC_PORT открыт"
+        if [[ -n "$ALLOW_IP" ]]; then
+            if [[ ! "$ALLOW_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?$ ]] && [[ ! "$ALLOW_IP" =~ ^[0-9a-fA-F:]+(/[0-9]{1,3})?$ ]]; then
+                error "Невалидный IP-адрес или CIDR подсеть для --allow-ip: $ALLOW_IP"
             fi
+            warn "UFW активен. Ограничиваю доступ к порту $PUBLIC_PORT только с $ALLOW_IP..."
+            # Удаляем открытые широкие правила для этого порта, если они были настроены ранее
+            ufw delete allow "$PUBLIC_PORT/tcp" >/dev/null 2>&1 || true
+            ufw delete allow "$PUBLIC_PORT" >/dev/null 2>&1 || true
+            if ! ufw allow from "$ALLOW_IP" to any port "$PUBLIC_PORT" proto tcp >/dev/null 2>&1; then
+                error "Не удалось применить правило UFW для $ALLOW_IP на порту $PUBLIC_PORT"
+            fi
+            log "UFW: порт $PUBLIC_PORT открыт исключительно для $ALLOW_IP"
+        else
+            warn "UFW активен. Открываю порт $PUBLIC_PORT для всех..."
+            if ! ufw allow "$PUBLIC_PORT/tcp" >/dev/null 2>&1; then
+                error "Не удалось открыть порт $PUBLIC_PORT в UFW"
+            fi
+            log "UFW: порт $PUBLIC_PORT открыт"
         fi
         if ! ufw status 2>/dev/null | grep -q "80"; then
-            ufw allow 80/tcp > /dev/null 2>&1
+            ufw allow 80/tcp > /dev/null 2>&1 || true
             log "UFW: порт 80 открыт (для certbot)"
         fi
     fi

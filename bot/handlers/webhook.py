@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import ipaddress
 import json
@@ -147,10 +148,18 @@ async def yookassa_webhook_handler(request: web.Request) -> web.Response:
 
 _healthcheck_cache: tuple[float, int, str] | None = None
 _HEALTHCHECK_CACHE_TTL = 5.0  # seconds
+_healthcheck_lock: asyncio.Lock | None = None
+
+
+def _get_healthcheck_lock() -> asyncio.Lock:
+    global _healthcheck_lock
+    if _healthcheck_lock is None:
+        _healthcheck_lock = asyncio.Lock()
+    return _healthcheck_lock
 
 
 # ──────────────────────────────────────────────────────────────
-# Healthcheck with 5-second in-memory TTL cache
+# Healthcheck with 5-second in-memory TTL cache & single-flight lock
 # ──────────────────────────────────────────────────────────────
 async def healthcheck_handler(
     request: web.Request,
@@ -162,26 +171,33 @@ async def healthcheck_handler(
         if now - cached_time < _HEALTHCHECK_CACHE_TTL:
             return web.Response(status=status_code, text=body)
 
-    # Проверка DB
-    try:
-        async with session_scope() as session:
-            await session.execute(text("SELECT 1"))
-    except Exception as e:
-        logger.warning("Healthcheck DB failed: %s", e)
-        _healthcheck_cache = (now, 503, "DB unavailable")
-        return web.Response(status=503, text="DB unavailable")
+    async with _get_healthcheck_lock():
+        now = time.monotonic()
+        if _healthcheck_cache is not None:
+            cached_time, status_code, body = _healthcheck_cache
+            if now - cached_time < _HEALTHCHECK_CACHE_TTL:
+                return web.Response(status=status_code, text=body)
 
-    # Проверка Redis
-    try:
-        r = _get_healthcheck_redis()
-        await r.ping()
-    except Exception as e:
-        logger.warning("Healthcheck Redis failed: %s", e)
-        _healthcheck_cache = (now, 503, "Redis unavailable")
-        return web.Response(status=503, text="Redis unavailable")
+        # Проверка DB
+        try:
+            async with session_scope() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception as e:
+            logger.warning("Healthcheck DB failed: %s", e)
+            _healthcheck_cache = (now, 503, "DB unavailable")
+            return web.Response(status=503, text="DB unavailable")
 
-    _healthcheck_cache = (now, 200, "OK")
-    return web.Response(status=200, text="OK")
+        # Проверка Redis
+        try:
+            r = _get_healthcheck_redis()
+            await r.ping()
+        except Exception as e:
+            logger.warning("Healthcheck Redis failed: %s", e)
+            _healthcheck_cache = (now, 503, "Redis unavailable")
+            return web.Response(status=503, text="Redis unavailable")
+
+        _healthcheck_cache = (now, 200, "OK")
+        return web.Response(status=200, text="OK")
 
 
 def _get_healthcheck_redis():

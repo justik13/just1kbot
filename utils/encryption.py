@@ -20,13 +20,22 @@ def _get_active_keys() -> str:
     from config.settings import get_settings
 
     settings = get_settings()
-    raw_keys = getattr(settings, "DB_ENCRYPTION_KEYS", None)
-    if isinstance(raw_keys, str) and raw_keys.strip():
-        return raw_keys.strip()
-    raw_key = getattr(settings, "DB_ENCRYPTION_KEY", None)
-    if isinstance(raw_key, str) and raw_key.strip():
-        return raw_key.strip()
-    return ""
+    primary = getattr(settings, "DB_ENCRYPTION_KEY", None)
+    primary_str = primary.strip() if isinstance(primary, str) else ""
+
+    additional = getattr(settings, "DB_ENCRYPTION_KEYS", None)
+    additional_list: list[str] = []
+    if isinstance(additional, str) and additional.strip():
+        additional_list = [k.strip() for k in additional.split(",") if k.strip()]
+
+    keys: list[str] = []
+    if primary_str:
+        keys.append(primary_str)
+    for k in additional_list:
+        if k not in keys:
+            keys.append(k)
+
+    return ",".join(keys)
 
 
 class EncryptedString(TypeDecorator):
