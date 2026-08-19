@@ -71,7 +71,9 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             if btn.callback_data
         ]
 
-        self.assertTrue(any("Добавить в INCY" in btn and "Экспериментально" in btn for btn in buttons))
+        self.assertTrue(
+            any("Добавить в INCY (iOS / Android)" in btn and "🧪" in btn for btn in buttons)
+        )
         self.assertIn("menu_incy_subscription", callbacks)
 
         # Check order: add_device -> menu_incy_subscription -> status
@@ -111,6 +113,10 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://", text_arg)
         self.assertIn("sub/token_abc_123", text_arg)
         self.assertIn("Как настроить", text_arg)
+        self.assertIn("iOS / Android", text_arg)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", text_arg)
+        self.assertIn("AmneziaVPN", text_arg)
+        self.assertIn("AmneziaWG", text_arg)
 
         btn_urls = [
             btn.url
@@ -174,6 +180,10 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         keyboard_arg = args[3]
 
         self.assertIn("sub/new_rotated_token_456", text_arg)
+        self.assertIn("iOS / Android", text_arg)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", text_arg)
+        self.assertIn("AmneziaVPN", text_arg)
+        self.assertIn("AmneziaWG", text_arg)
         btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
         self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
 
@@ -230,6 +240,35 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         # If commit fails, render_hub must NOT be called with the uncommitted token
         callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         mock_render_hub.assert_not_awaited()
+
+
+class IncyWebTemplatesTests(unittest.TestCase):
+    def test_render_open_html_contains_valid_store_and_platform_links(self):
+        from bot.handlers.incy_web_templates import render_open_html
+
+        html_out = render_open_html(
+            sub_url="https://vpn.example.com/sub/token_123",
+            deep_link="incy://import/https%3A%2F%2Fvpn.example.com%2Fsub%2Ftoken_123",
+        )
+
+        self.assertIn("https://apps.apple.com/app/incy/id6756943388", html_out)
+        self.assertIn("https://play.google.com/store/apps/details?id=llc.itdev.incy", html_out)
+        self.assertIn("https://github.com/INCY-DEV/incy-platforms", html_out)
+        self.assertIn("https://incy.cc/", html_out)
+        self.assertIn("AmneziaVPN", html_out)
+        self.assertIn("AmneziaWG", html_out)
+        self.assertIn("Windows 10/11 (x64) и macOS 14+", html_out)
+
+    def test_render_inactive_html_contains_support_link(self):
+        from bot.handlers.incy_web_templates import render_inactive_html
+
+        html_out = render_inactive_html(
+            sub_url="https://vpn.example.com/sub/token_123",
+            support_username="test_support_admin",
+        )
+
+        self.assertIn("https://t.me/test_support_admin", html_out)
+        self.assertIn("Подписка не активна", html_out)
 
 
 if __name__ == "__main__":
