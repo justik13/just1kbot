@@ -373,7 +373,7 @@ async def process_edit_server_url(
     data = await state.get_data()
     server_id = data["server_id"]
 
-    server = await get_server_by_id(session, server_id, for_update=True)
+    server = await get_server_by_id(session, server_id)
 
     if not server:
         await render_hub(
@@ -483,6 +483,17 @@ async def process_edit_server_url(
         return
 
     if server.api_url != new_url:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if not server:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_NOT_FOUND,
+                get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
+
         profiles_count = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
@@ -629,7 +640,7 @@ async def process_edit_server_key(
     data = await state.get_data()
     server_id = data["server_id"]
 
-    server = await get_server_by_id(session, server_id, for_update=True)
+    server = await get_server_by_id(session, server_id)
 
     if not server:
         await render_hub(
@@ -710,6 +721,16 @@ async def process_edit_server_key(
         return
 
     if server.api_key != new_key:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if not server:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_NOT_FOUND,
+                get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
         profiles_count = (
             await session.execute(
                 select(func.count(VPNProfile.id)).where(
