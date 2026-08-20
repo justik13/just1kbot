@@ -1402,7 +1402,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_op_active.scalar_one_or_none.return_value = None
 
         mock_op_peer = MagicMock()
-        mock_op_peer.scalar_one_or_none.return_value = "peer_recovered_123"
+        mock_op_peer.scalar_one_or_none.return_value = SimpleNamespace(id=99, peer_id="peer_recovered_123")
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_op_active, mock_op_peer])
@@ -1748,6 +1748,50 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
                 snapshot=snapshot,
             )
             self.assertEqual(profile.device_name, "Устройство #3")
+
+    async def test_57_lock_operation_and_profile_propagates_db_error(self):
+        """_lock_operation_and_profile propagates genuine database exceptions without swallowing."""
+        from services.api_operations_finalizer import _lock_operation_and_profile
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=RuntimeError("PostgreSQL connection failure"))
+
+        with self.assertRaises(RuntimeError) as ctx:
+            await _lock_operation_and_profile(
+                mock_session,
+                operation_id=1,
+                worker_id="worker-1",
+                attempt=1,
+            )
+        self.assertIn("PostgreSQL connection failure", str(ctx.exception))
+
+    async def test_58_delete_device_when_server_is_none_deletes_profile_directly(self):
+        """DeviceService.delete_device directly deletes local profile row when server record is missing."""
+        from database.models import VPNProfile
+        from services.device_service import DeviceService
+
+        profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=999,  # Server no longer exists in DB
+            device_name="Old Device",
+            peer_id="peer-xyz",
+            provisioning_status="active",
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
+        mock_session.get = AsyncMock(return_value=None)  # Server is None!
+
+        with (
+            patch("services.device_service.AuditService.log_action", new=AsyncMock()),
+            patch("services.device_service.ensure_delete_operation", new=AsyncMock()) as mock_ensure_del,
+            patch("services.device_service.is_admin", return_value=True),
+        ):
+            res = await DeviceService.delete_device(mock_session, profile, actor_id=1)
+            self.assertTrue(res)
+            mock_session.delete.assert_called_once_with(profile)
+            mock_ensure_del.assert_not_called()
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

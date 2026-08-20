@@ -284,9 +284,7 @@ async def _cleanup_stuck_profiles():
                     ).order_by(APIOperation.id.desc()).limit(1)
                 )
                 create_op = create_op_res.scalar_one_or_none()
-                if isinstance(create_op, str):
-                    peer_id = create_op
-                elif create_op is not None:
+                if create_op is not None:
                     peer_id = getattr(create_op, "peer_id", None)
 
             if peer_id:

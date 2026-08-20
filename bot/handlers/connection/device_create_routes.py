@@ -461,11 +461,7 @@ async def _process_server_selection(
                 logger.exception("Error during _await_profile_ready for profile_id=%s", new_profile.id)
                 ready_profile = None
 
-            if ready_profile and ready_profile.provisioning_status == "active":
-                from .device_view_routes import render_device_screen
-                await session.refresh(user)
-                await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
-            elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
+            if ready_profile and ready_profile.provisioning_status in ("active", "create_failed", "create_cleanup_pending"):
                 from .device_view_routes import render_device_screen
                 await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)

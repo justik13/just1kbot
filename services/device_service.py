@@ -277,17 +277,17 @@ class DeviceService:
         profile_id = profile.id
         user_id = profile.user_id
 
-        if not profile.peer_id or force:
-            if profile.peer_id:
+        if not server or not profile.peer_id or force:
+            if server and profile.peer_id:
                 try:
                     await ensure_delete_operation(
                         session,
                         idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-                        server_id=server.id if server else None,
+                        server_id=server.id,
                         profile_id=profile.id,
-                        server_name_snapshot=server.name if server else None,
-                        api_url_snapshot=server.api_url if server else None,
-                        api_key_snapshot=server.api_key if server else None,
+                        server_name_snapshot=server.name,
+                        api_url_snapshot=server.api_url,
+                        api_key_snapshot=server.api_key,
                         peer_id=profile.peer_id,
                         client_name=profile.client_name,
                         audit_reason="device_delete_force" if force else "device_delete",
@@ -316,7 +316,7 @@ class DeviceService:
         await ensure_delete_operation(
             session,
             idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-            server_id=server.id if server else None,
+            server_id=server.id,
             profile_id=profile.id,
             server_name_snapshot=server.name if server else None,
             api_url_snapshot=server.api_url if server else None,

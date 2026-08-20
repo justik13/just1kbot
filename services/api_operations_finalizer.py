@@ -44,33 +44,27 @@ async def _lock_operation_and_profile(session, operation_id, worker_id, attempt)
     This strictly prevents PostgreSQL deadlocks between background workers (finalizer)
     and foreground services (ProfileDeletionService, server deletion, user ban).
     """
+    op_profile_res = await session.execute(
+        select(APIOperation.profile_id).where(APIOperation.id == operation_id)
+    )
+    profile_id = op_profile_res.scalar_one_or_none()
     profile = None
-    try:
-        op_profile_res = await session.execute(
-            select(APIOperation.profile_id).where(APIOperation.id == operation_id)
+    if profile_id is not None:
+        profile_res = await session.execute(
+            select(VPNProfile)
+            .where(VPNProfile.id == profile_id)
+            .with_for_update()
         )
-        profile_id = op_profile_res.scalar_one_or_none()
-        if profile_id is not None:
-            profile_res = await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == profile_id)
-                .with_for_update()
-            )
-            profile = profile_res.scalar_one_or_none()
-    except Exception:
-        profile = None
+        profile = profile_res.scalar_one_or_none()
 
     operation = await _locked(session, operation_id, worker_id, attempt)
     if profile is None and operation and getattr(operation, "profile_id", None):
-        try:
-            profile_res = await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-            profile = profile_res.scalar_one_or_none()
-        except Exception:
-            profile = None
+        profile_res = await session.execute(
+            select(VPNProfile)
+            .where(VPNProfile.id == operation.profile_id)
+            .with_for_update()
+        )
+        profile = profile_res.scalar_one_or_none()
 
     return operation, profile
 
