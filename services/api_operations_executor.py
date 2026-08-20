@@ -85,25 +85,17 @@ async def _client(op):
     url = op.api_url_snapshot
     key = op.api_key_snapshot
 
-    # Fallback to current Server row if operation was created without snapshot (e.g. legacy row)
-    if (not url or not key) and op.server_id:
-        async with session_scope() as session:
-            server = await session.get(Server, op.server_id)
-            if server is not None:
-                url = server.api_url
-                key = server.api_key
-
     if not url or not key:
         return None
 
     # The durable operation always executes against its immutable snapshot.
     # The current Server row is used only to detect identity changes when snapshot exists.
-    if op.server_id and op.api_url_snapshot and op.api_key_snapshot:
+    if op.server_id:
         async with session_scope() as session:
             server = await session.get(Server, op.server_id)
             if server is not None and (
-                server.api_url != op.api_url_snapshot
-                or server.api_key != op.api_key_snapshot
+                server.api_url != url
+                or server.api_key != key
             ):
                 raise _ServerEndpointChanged
 

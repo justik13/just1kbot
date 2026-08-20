@@ -2629,7 +2629,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(del_op.api_key_snapshot, "legacy-secret-key-99")
 
     async def test_64_postgres_claim_vs_finalize_create_success_concurrent(self):
-        """Prove that claim_api_operations and finalize_create_success execute concurrently without deadlock or corruption."""
+        """Prove that competing workers claiming and finalizing operations synchronize cleanly with SKIP LOCKED."""
         from services.api_operations_finalizer import finalize_create_success
         from services.api_operations_queue import claim_api_operations
         import asyncio
@@ -2648,52 +2648,62 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
             op = APIOperation(
                 operation_type="create_peer",
-                status="processing",
+                status="pending",
                 idempotency_key=f"create-concurrent-test:{prof_id}",
                 server_id=self.sid,
                 profile_id=prof_id,
-                locked_by="worker-1",
-                attempts=1,
+                server_name_snapshot="Test Node",
+                api_url_snapshot="http://10.0.0.1:8080",
+                api_key_snapshot="secret-key",
+                attempts=0,
                 max_attempts=10,
             )
             s.add(op)
             await s.flush()
             op_id = op.id
 
-        async def run_finalizer():
-            try:
-                await finalize_create_success(
-                    op_id,
-                    worker_id="worker-1",
-                    expected_attempt_number=1,
-                    peer_id="peer-created-123",
-                    raw_config="vpn://test-config-concurrent",
-                    sent_desired_version=1,
-                    sent_is_active=True,
-                    sent_expires_at=None,
-                    session_factory=self.sessions,
-                )
-                return "finalized"
-            except Exception as e:
-                return f"finalizer_err: {type(e).__name__}"
+        barrier = asyncio.Event()
 
-        async def run_claim():
-            try:
-                claimed = await claim_api_operations(
-                    worker_id="worker-2",
-                    limit=10,
-                    session_factory=self.sessions,
-                )
-                return f"claimed_{len(claimed)}"
-            except Exception as e:
-                return f"claim_err: {type(e).__name__}"
+        async def worker_1():
+            # Worker 1 claims the pending operation
+            claimed = await claim_api_operations(
+                worker_id="worker-1",
+                limit=10,
+                session_factory=self.sessions,
+            )
+            self.assertEqual(len(claimed), 1)
+            self.assertEqual(claimed[0].id, op_id)
+            barrier.set()
 
-        res1, res2 = await asyncio.gather(run_finalizer(), run_claim())
+            # Worker 1 finalizes create success
+            await finalize_create_success(
+                op_id,
+                worker_id="worker-1",
+                expected_attempt_number=1,
+                peer_id="peer-created-123",
+                raw_config="vpn://test-config-concurrent",
+                sent_desired_version=1,
+                sent_is_active=True,
+                sent_expires_at=None,
+                session_factory=self.sessions,
+            )
+            return "worker_1_done"
 
-        self.assertNotIn("Deadlock", res1)
-        self.assertNotIn("deadlock", res1)
-        self.assertNotIn("Deadlock", res2)
-        self.assertNotIn("deadlock", res2)
+        async def worker_2():
+            # Worker 2 attempts to claim concurrently
+            await barrier.wait()
+            claimed = await claim_api_operations(
+                worker_id="worker-2",
+                limit=10,
+                session_factory=self.sessions,
+            )
+            # Worker 2 must get 0 claimed because Worker 1 already claimed it
+            self.assertEqual(len(claimed), 0)
+            return "worker_2_done"
+
+        res1, res2 = await asyncio.gather(worker_1(), worker_2())
+        self.assertEqual(res1, "worker_1_done")
+        self.assertEqual(res2, "worker_2_done")
 
         async with self.sessions() as s:
             final_prof = await s.get(VPNProfile, prof_id)
@@ -2701,9 +2711,9 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(final_prof.provisioning_status, "active")
 
     async def test_65_postgres_recover_stale_vs_finalizer_concurrent(self):
-        """Prove that recover_stale_api_operations and finalize_operation_failure execute concurrently without deadlock."""
+        """Prove that recover_stale_api_operations and finalize_operation_failure coordinate cleanly under concurrency."""
         from services.api_operations_finalizer import finalize_operation_failure
-        from services.api_operations_queue import recover_stale_api_operations
+        from services.api_operations_queue import recover_stale_api_operations, APIOperationOwnershipError
         from datetime import timedelta
         import asyncio
 
@@ -2725,6 +2735,9 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 idempotency_key=f"create-stale-test:{prof_id}",
                 server_id=self.sid,
                 profile_id=prof_id,
+                server_name_snapshot="Test Node",
+                api_url_snapshot="http://10.0.0.1:8080",
+                api_key_snapshot="secret-key",
                 locked_by="worker-stale-1",
                 attempts=1,
                 max_attempts=10,
@@ -2733,7 +2746,21 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             op_id = op.id
 
-        async def run_finalizer():
+        barrier = asyncio.Event()
+
+        async def worker_recover():
+            # Supervisor recovers the stale operation (lease expired)
+            retried, dead = await recover_stale_api_operations(
+                lease_timeout=timedelta(microseconds=1),
+                session_factory=self.sessions,
+            )
+            self.assertEqual(retried, 1)
+            barrier.set()
+            return "recovered"
+
+        async def worker_finalize():
+            await barrier.wait()
+            # Stale worker tries to finalize attempt 1 after supervisor already recovered it
             try:
                 await finalize_operation_failure(
                     op_id,
@@ -2745,29 +2772,16 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     session_factory=self.sessions,
                 )
                 return "finalized"
-            except Exception as e:
-                return f"finalizer_err: {type(e).__name__}"
+            except APIOperationOwnershipError:
+                return "fenced"
 
-        async def run_recover():
-            try:
-                retried, dead = await recover_stale_api_operations(
-                    lease_timeout=timedelta(seconds=0),
-                    session_factory=self.sessions,
-                )
-                return f"recovered_{retried}_{dead}"
-            except Exception as e:
-                return f"recover_err: {type(e).__name__}"
-
-        res1, res2 = await asyncio.gather(run_finalizer(), run_recover())
-
-        self.assertNotIn("Deadlock", res1)
-        self.assertNotIn("deadlock", res1)
-        self.assertNotIn("Deadlock", res2)
-        self.assertNotIn("deadlock", res2)
+        res_rec, res_fin = await asyncio.gather(worker_recover(), worker_finalize())
+        self.assertEqual(res_rec, "recovered")
+        self.assertEqual(res_fin, "fenced")
 
     async def test_66_postgres_profile_deletion_vs_create_finalizer_concurrent(self):
         """Prove that ProfileDeletionService and finalize_create_success coordinate cleanly under concurrency."""
-        from services.api_operations_finalizer import finalize_create_success
+        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
         from services.profile_deletion_service import ProfileDeletionService
         import asyncio
 
@@ -2789,6 +2803,9 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 idempotency_key=f"create-del-fin-test:{prof_id}",
                 server_id=self.sid,
                 profile_id=prof_id,
+                server_name_snapshot="Test Node",
+                api_url_snapshot="http://10.0.0.1:8080",
+                api_key_snapshot="secret-key",
                 locked_by="worker-fin-1",
                 attempts=1,
                 max_attempts=10,
@@ -2797,19 +2814,20 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             op_id = op.id
 
-        async def run_delete():
-            try:
-                async with self.sessions.begin() as s:
-                    current_prof = await s.get(VPNProfile, prof_id)
-                    if current_prof:
-                        await ProfileDeletionService._delete_profiles(
-                            s, [current_prof], reason="user_unsubscribed", background=True
-                        )
-                return "deleted"
-            except Exception as e:
-                return f"del_err: {type(e).__name__}"
+        barrier = asyncio.Event()
 
-        async def run_finalizer():
+        async def worker_delete():
+            async with self.sessions.begin() as s:
+                current_prof = await s.get(VPNProfile, prof_id)
+                self.assertIsNotNone(current_prof)
+                await ProfileDeletionService._delete_profiles(
+                    s, [current_prof], reason="user_unsubscribed", background=True
+                )
+            barrier.set()
+            return "deleted"
+
+        async def worker_finalize():
+            await barrier.wait()
             try:
                 await finalize_create_success(
                     op_id,
@@ -2823,21 +2841,18 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                     session_factory=self.sessions,
                 )
                 return "finalized"
-            except Exception as e:
-                return f"fin_err: {type(e).__name__}"
+            except CreateCompensationRequired:
+                return "compensated"
 
-        res1, res2 = await asyncio.gather(run_delete(), run_finalizer())
-
-        self.assertNotIn("Deadlock", res1)
-        self.assertNotIn("deadlock", res1)
-        self.assertNotIn("Deadlock", res2)
-        self.assertNotIn("deadlock", res2)
+        res_del, res_fin = await asyncio.gather(worker_delete(), worker_finalize())
+        self.assertEqual(res_del, "deleted")
+        self.assertEqual(res_fin, "compensated")
 
         async with self.sessions() as s:
             final_prof = await s.get(VPNProfile, prof_id)
-            if final_prof:
-                self.assertIn(final_prof.provisioning_status, {"deleting", "create_cleanup_pending"})
-                self.assertEqual(final_prof.peer_id, "peer-fin-999")
+            self.assertIsNotNone(final_prof)
+            self.assertIn(final_prof.provisioning_status, {"deleting", "create_cleanup_pending"})
+            self.assertEqual(final_prof.peer_id, "peer-fin-999")
 
 
 if __name__ == "__main__":
