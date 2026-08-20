@@ -78,7 +78,7 @@ class DeviceService:
         *,
         user_id: int,
         server_id: int,
-        device_name: str,
+        device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
@@ -103,6 +103,26 @@ class DeviceService:
             or is_expired(user.subscription_end)
         ):
             raise NoActiveSubscription("No active subscription")
+        if not device_name:
+            user_profiles = (
+                await session.execute(
+                    select(VPNProfile).where(VPNProfile.user_id == user.id)
+                )
+            ).scalars().all()
+            used = set()
+            for p in user_profiles:
+                m = re.search(r"#(\d+)$", p.device_name)
+                if m:
+                    used.add(int(m.group(1)))
+            limit = user.device_limit or 5
+            slot_index = 1
+            for i in range(1, limit + 1):
+                if i not in used:
+                    slot_index = i
+                    break
+            else:
+                slot_index = max(used) + 1 if used else 1
+            device_name = f"Устройство #{slot_index}"
         duplicate = (
             await session.execute(
                 select(VPNProfile.id).where(

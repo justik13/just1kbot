@@ -198,6 +198,7 @@ async def rename_device_process(
     for p in existing_profiles:
         if (
             p.id != profile.id
+            and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
             await render_hub(

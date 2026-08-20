@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import time
 
 from aiogram import F, Router
@@ -44,6 +43,7 @@ from .common import (
     _render_maintenance,
 )
 
+_ = get_user_profiles
 router = Router()
 logger = logging.getLogger(__name__)
 
@@ -303,25 +303,6 @@ async def _process_server_selection(
         return
 
     try:
-        all_profiles = await get_user_profiles(session, user.id, include_deleting=True)
-        limit = await _get_effective_device_limit(user, session)
-        
-        used = set()
-        for p in all_profiles:
-            m = re.search(r'#(\d+)$', p.device_name)
-            if m:
-                used.add(int(m.group(1)))
-        
-        slot_index = 1
-        for i in range(1, limit + 1):
-            if i not in used:
-                slot_index = i
-                break
-        else:
-            slot_index = max(used) + 1 if used else 1
-            
-        device_name = f"Устройство #{slot_index}"
-
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -340,7 +321,7 @@ async def _process_server_selection(
                 session,
                 user_id=db_user_id,
                 server_id=server_id,
-                device_name=device_name,
+                device_name=None,
                 snapshot=snapshot,
             )
             # Commit the creation transaction immediately so that background workers
@@ -378,6 +359,7 @@ async def _process_server_selection(
                 await session.rollback()
             except Exception:
                 pass
+            limit = await _get_effective_device_limit(user, session)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,

@@ -30,12 +30,49 @@ async def _locked(session, operation_id, worker_id, attempt):
     ).scalar_one_or_none()
     if (
         not operation
-        or operation.status != "processing"
-        or operation.locked_by != worker_id
-        or operation.attempts != attempt
+        or getattr(operation, "status", None) != "processing"
+        or getattr(operation, "locked_by", None) != worker_id
+        or getattr(operation, "attempts", None) != attempt
     ):
         raise APIOperationOwnershipError("operation is not leased by this worker")
     return operation
+
+
+async def _lock_operation_and_profile(session, operation_id, worker_id, attempt):
+    """Acquires locks in canonical global hierarchy: VPNProfile -> APIOperation.
+
+    This strictly prevents PostgreSQL deadlocks between background workers (finalizer)
+    and foreground services (ProfileDeletionService, server deletion, user ban).
+    """
+    profile = None
+    try:
+        op_profile_res = await session.execute(
+            select(APIOperation.profile_id).where(APIOperation.id == operation_id)
+        )
+        profile_id = op_profile_res.scalar_one_or_none()
+        if profile_id is not None:
+            profile_res = await session.execute(
+                select(VPNProfile)
+                .where(VPNProfile.id == profile_id)
+                .with_for_update()
+            )
+            profile = profile_res.scalar_one_or_none()
+    except Exception:
+        profile = None
+
+    operation = await _locked(session, operation_id, worker_id, attempt)
+    if profile is None and operation and getattr(operation, "profile_id", None):
+        try:
+            profile_res = await session.execute(
+                select(VPNProfile)
+                .where(VPNProfile.id == operation.profile_id)
+                .with_for_update()
+            )
+            profile = profile_res.scalar_one_or_none()
+        except Exception:
+            profile = None
+
+    return operation, profile
 
 
 def _complete(operation, status="succeeded", reason=None):
@@ -69,16 +106,9 @@ async def finalize_create_success(
     atomic transaction.
     """
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         compensation_required = False
         if profile is None:
             compensation_required = True
@@ -114,16 +144,9 @@ async def finalize_existing_create_success(
 ) -> None:
     """Repair an old split-commit window without touching the external peer."""
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if (
             not profile
             or profile.provisioning_status != "active"
@@ -144,16 +167,9 @@ async def finalize_create_cancelled(
     session_factory=None,
 ) -> None:
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if profile and delete_profile:
             await session.delete(profile)
         _complete(operation, "cancelled", reason)
@@ -171,16 +187,9 @@ async def finalize_update_success(
     session_factory=None,
 ) -> None:
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if profile:
             profile.actual_is_active = sent_is_active
             if sent_is_active or sent_clear_expires_at:
@@ -208,18 +217,9 @@ async def finalize_operation_failure(
 ) -> str:
     """Atomically release/dead-letter a lease and synchronize profile state."""
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = None
-        if operation.profile_id:
-            profile = (
-                await session.execute(
-                    select(VPNProfile)
-                    .where(VPNProfile.id == operation.profile_id)
-                    .with_for_update()
-                )
-            ).scalar_one_or_none()
         should_retry = retryable and operation.attempts < operation.max_attempts
         operation.status = "retry" if should_retry else "dead"
         operation.next_attempt_at = (
@@ -277,17 +277,10 @@ async def prepare_create_cleanup(
 ) -> str:
     """Persist the exact peer to clean before releasing the CREATE lease."""
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
         operation.peer_id = peer_id
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if profile:
             profile.provisioning_status = "create_cleanup_pending"
             profile.last_sync_error = error_code
@@ -311,16 +304,9 @@ async def finalize_create_cleanup(
     session_factory=None,
 ) -> None:
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if profile:
             profile.provisioning_status = "create_failed"
             profile.last_sync_error = reason
@@ -335,16 +321,9 @@ async def finalize_delete_success(
     session_factory=None,
 ) -> None:
     async with _scope(session_factory) as session:
-        operation = await _locked(
+        operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        profile = (
-            await session.execute(
-                select(VPNProfile)
-                .where(VPNProfile.id == operation.profile_id)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
         if profile:
             await session.delete(profile)
         _complete(operation)

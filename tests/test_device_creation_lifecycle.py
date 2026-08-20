@@ -1336,12 +1336,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         state = AsyncMock()
         session = AsyncMock()
 
-        failed_p1 = SimpleNamespace(id=1, user_id=1, server_id=10, device_name="Устройство #1", provisioning_status="create_failed")
-        deleting_p2 = SimpleNamespace(id=2, user_id=1, server_id=10, device_name="Устройство #2", provisioning_status="deleting")
-
         with (
-            patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[failed_p1, deleting_p2])) as mock_get_profiles,
-            patch("bot.handlers.connection.device_create_routes._get_effective_device_limit", new=AsyncMock(return_value=5)),
             patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
             patch("bot.handlers.connection.device_create_routes.DeviceService.create_device", new=AsyncMock()) as mock_create_device,
             patch("bot.handlers.connection.device_create_routes.render_hub", new=AsyncMock()),
@@ -1350,11 +1345,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await _process_server_selection(callback, state, session, server_id=10, user=db_user)
 
-            # Verified that include_deleting=True was requested
-            mock_get_profiles.assert_called_with(session, 1, include_deleting=True)
-            # Verified that slot #3 was chosen (since #1 and #2 exist in DB)
             mock_create_device.assert_called_once()
-            self.assertEqual(mock_create_device.call_args.kwargs["device_name"], "Устройство #3")
+            self.assertIsNone(mock_create_device.call_args.kwargs["device_name"])
 
     async def test_40_rename_device_process_with_for_update_rejects_deleting(self):
         """rename_device_process rejects deleting profile and clears state."""
@@ -1578,6 +1570,184 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
                     "create_cleanup_pending",
                     f"Code {code} must transition to create_cleanup_pending",
                 )
+
+    async def test_53_rename_device_allows_same_name_on_different_servers(self):
+        """Rename allows the same device name on different servers for the same user (server-scoped uniqueness)."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.from_user.id = 100
+        message.text = "Phone #1"
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+
+        # Target profile is on server 20
+        target_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=20,
+            device_name="Laptop #1",
+            provisioning_status="active",
+        )
+        # Existing profile with "Phone #1" is on server 10 (different server!)
+        other_server_profile = SimpleNamespace(
+            id=10,
+            user_id=1,
+            server_id=10,
+            device_name="Phone #1",
+            provisioning_status="active",
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=target_profile)))
+
+        with (
+            patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[target_profile, other_server_profile])),
+            patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()) as mock_update,
+            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()),
+            patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
+        ):
+            await rename_device_process(message, state, mock_session, db_user)
+
+            # Successfully updated because server_id differs
+            mock_update.assert_called_once_with(mock_session, target_profile, device_name="Phone #1")
+            state.clear.assert_called_once()
+
+    async def test_54_cleanup_stuck_profiles_requeues_cleanup_pending_without_peer_id(self):
+        """Cleanup worker requeues create_peer for reconciliation when profile is create_cleanup_pending without peer_id."""
+        from database.models import VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Test Phone",
+            client_name="tg_100_p42",
+            provisioning_status="create_cleanup_pending",
+            peer_id=None,
+        )
+
+        dead_create_op = SimpleNamespace(
+            id=99,
+            profile_id=42,
+            operation_type="create_peer",
+            status="dead",
+            peer_id=None,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. Stuck profiles query
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            # 2. Active op query -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            # 3. Last create_op query -> dead_create_op
+            MagicMock(scalar_one_or_none=MagicMock(return_value=dead_create_op)),
+            # 4. update execute
+            MagicMock(),
+        ])
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with patch("services.workers.cleanup.session_scope", return_value=mock_scope):
+            await _cleanup_stuck_profiles()
+
+            # The profile MUST NOT be blindly set to create_failed!
+            self.assertEqual(stuck_profile.provisioning_status, "create_cleanup_pending")
+
+    async def test_55_cleanup_stuck_profiles_handles_stuck_deleting_profiles(self):
+        """Cleanup worker picks up stuck deleting profiles and ensures delete operation if peer_id is known."""
+        from database.models import Server, VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = VPNProfile(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Test Phone",
+            client_name="tg_100_p42",
+            provisioning_status="deleting",
+            peer_id="peer_abc",
+        )
+
+        mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+        mock_session.get = AsyncMock(return_value=mock_server)
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock()) as mock_ensure_delete,
+        ):
+            await _cleanup_stuck_profiles()
+
+            self.assertEqual(stuck_profile.provisioning_status, "deleting")
+            mock_ensure_delete.assert_called_once()
+
+    async def test_56_device_service_atomic_slot_allocation_under_user_lock(self):
+        """DeviceService.create_device allocates next slot #3 under user lock when #1 and #2 are used."""
+        from services.device_service import DeviceService
+        from database.models import Server, User, VPNProfile
+        from services.slots_cache import ServerPeerSnapshot
+        from datetime import datetime, timezone
+
+        user = User(id=1, telegram_id=100, device_limit=5, subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc), is_banned=False)
+        server = Server(id=10, name="DE", api_url="https://de.vpn", api_key="k", protocol="amneziawg2", is_active=True, max_clients=100)
+        p1 = VPNProfile(id=1, user_id=1, server_id=10, device_name="Устройство #1", provisioning_status="active")
+        p2 = VPNProfile(id=2, user_id=1, server_id=10, device_name="Устройство #2", provisioning_status="deleting")
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[
+            # 1. select User FOR UPDATE
+            MagicMock(scalar_one=MagicMock(return_value=user)),
+            # 2. select Server FOR UPDATE
+            MagicMock(scalar_one_or_none=MagicMock(return_value=server)),
+            # 3. select all user profiles for slot allocation
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[p1, p2])))),
+            # 4. select duplicate -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+            # 5. user_count -> 1
+            MagicMock(scalar_one=MagicMock(return_value=1)),
+            # 6. server_count -> 1
+            MagicMock(scalar_one=MagicMock(return_value=1)),
+            # 7. bot_peer_ids -> []
+            MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),
+            # 8. duplicate client_name -> None
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
+        ])
+
+        mock_nested = MagicMock()
+        mock_nested.__aenter__ = AsyncMock()
+        mock_nested.__aexit__ = AsyncMock()
+        mock_session.begin_nested = MagicMock(return_value=mock_nested)
+
+        snapshot = ServerPeerSnapshot(server_id=10, peer_ids=frozenset(), captured_at=datetime.now(timezone.utc))
+
+        with (
+            patch("services.device_service.enqueue_api_operation", new=AsyncMock()),
+            patch("services.device_service.is_admin", return_value=True),
+        ):
+            profile = await DeviceService.create_device(
+                mock_session,
+                user_id=1,
+                server_id=10,
+                device_name=None,
+                snapshot=snapshot,
+            )
+            self.assertEqual(profile.device_name, "Устройство #3")
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")

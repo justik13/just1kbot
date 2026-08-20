@@ -246,8 +246,9 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 
 
 async def _cleanup_stuck_profiles():
-    # P1-2: Cleanup dangling pending_create and create_cleanup_pending profiles
+    # Cleanup dangling pending_create, create_cleanup_pending, and deleting profiles.
     # Only clean up profiles that do NOT have an active APIOperation in flight.
+    from sqlalchemy import func, update as sa_update
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
 
@@ -255,7 +256,7 @@ async def _cleanup_stuck_profiles():
             await session.execute(
                 select(VPNProfile)
                 .where(
-                    VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending"]),
+                    VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending", "deleting"]),
                     VPNProfile.created_at < cutoff_time,
                 )
                 .with_for_update(skip_locked=True)
@@ -266,23 +267,27 @@ async def _cleanup_stuck_profiles():
             active_op_res = await session.execute(
                 select(APIOperation.id).where(
                     APIOperation.profile_id == profile.id,
-                    APIOperation.operation_type == "create_peer",
                     APIOperation.status.in_(["pending", "processing", "retry"]),
                 ).limit(1)
             )
             if active_op_res.scalar_one_or_none() is not None:
-                logger.debug("Skipping profile %s cleanup: create_peer operation is still active", profile.id)
+                logger.debug("Skipping profile %s cleanup: APIOperation is still active", profile.id)
                 continue
 
             peer_id = profile.peer_id
-            if not peer_id and profile.provisioning_status == "create_cleanup_pending":
-                op_res = await session.execute(
-                    select(APIOperation.peer_id).where(
+            create_op = None
+            if not peer_id:
+                create_op_res = await session.execute(
+                    select(APIOperation).where(
                         APIOperation.profile_id == profile.id,
-                        APIOperation.operation_type == "create_peer"
+                        APIOperation.operation_type == "create_peer",
                     ).order_by(APIOperation.id.desc()).limit(1)
                 )
-                peer_id = op_res.scalar_one_or_none()
+                create_op = create_op_res.scalar_one_or_none()
+                if isinstance(create_op, str):
+                    peer_id = create_op
+                elif create_op is not None:
+                    peer_id = getattr(create_op, "peer_id", None)
 
             if peer_id:
                 profile.peer_id = peer_id
@@ -305,10 +310,34 @@ async def _cleanup_stuck_profiles():
                 except Exception as exc:
                     logger.warning("Failed to queue delete_peer operation during stuck profile cleanup: %s", exc)
                     profile.provisioning_status = "create_cleanup_pending"
+            elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
+                # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
+                if create_op and create_op.status in {"dead", "cancelled"}:
+                    await session.execute(
+                        sa_update(APIOperation)
+                        .where(APIOperation.id == create_op.id)
+                        .values(
+                            status="retry",
+                            attempts=0,
+                            next_attempt_at=func.now(),
+                            completed_at=None,
+                            locked_at=None,
+                            locked_by=None,
+                            updated_at=func.now(),
+                            last_error_code="stuck_cleanup_requeued",
+                            last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
+                        )
+                    )
+                    logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
+                elif not create_op and profile.provisioning_status == "deleting":
+                    # No operation ever existed and no peer_id; safe to delete local tombstone
+                    await session.delete(profile)
+                    logger.info("Deleted orphaned tombstone profile %s without operations", profile.id)
             else:
+                # pending_create where attempts == 0: safe to fail closed without side effects
                 profile.provisioning_status = "create_failed"
-            profile.last_sync_error = "Creation timed out by cleanup worker"
-            logger.info("Cleaned up stuck profile %s (peer_id=%s, status=%s)", profile.id, profile.peer_id, profile.provisioning_status)
+                profile.last_sync_error = "Creation timed out by cleanup worker"
+                logger.info("Marked unattempted pending_create profile %s as create_failed", profile.id)
 
 async def _cleanup_dangling_peers():
     servers_data = []
