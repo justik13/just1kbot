@@ -208,7 +208,7 @@ async def amnezia_bridge_handler(request: web.Request) -> web.Response:
                     headers=AMNEZIA_SECURITY_HEADERS,
                 )
 
-            if profile.provisioning_status != "active":
+            if profile.provisioning_status not in ("active", "pending_update", "update_failed"):
                 return web.Response(
                     text=render_error_html("Устройство настраивается", "Пожалуйста, подождите завершения настройки устройства."),
                     status=403,

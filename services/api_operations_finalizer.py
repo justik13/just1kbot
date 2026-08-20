@@ -79,25 +79,32 @@ async def finalize_create_success(
                 .with_for_update()
             )
         ).scalar_one_or_none()
+        compensation_required = False
         if profile is None:
-            raise CreateCompensationRequired()
-        if profile.provisioning_status == "deleting":
-            raise RuntimeError("create_cancel_requested")
-        if profile.provisioning_status not in {"pending_create", "active"}:
+            compensation_required = True
+        elif profile.provisioning_status in {"create_failed", "deleting"}:
+            profile.peer_id = peer_id
+            if profile.provisioning_status != "deleting":
+                profile.provisioning_status = "create_cleanup_pending"
+            compensation_required = True
+        elif profile.provisioning_status not in {"pending_create", "active"}:
             raise RuntimeError("profile_not_create_finalizable")
-
-        profile.peer_id = peer_id
-        profile.raw_config = raw_config
-        profile.actual_is_active = sent_is_active
-        profile.actual_expires_at = sent_expires_at
-        profile.last_synced_at = datetime.now(timezone.utc)
-        profile.last_sync_error = None
-        if profile.desired_version == sent_desired_version:
-            profile.provisioning_status = "active"
         else:
-            profile.provisioning_status = "pending_update"
-            await _ensure_current_update(session, profile)
-        _complete(operation)
+            profile.peer_id = peer_id
+            profile.raw_config = raw_config
+            profile.actual_is_active = sent_is_active
+            profile.actual_expires_at = sent_expires_at
+            profile.last_synced_at = datetime.now(timezone.utc)
+            profile.last_sync_error = None
+            if profile.desired_version == sent_desired_version:
+                profile.provisioning_status = "active"
+            else:
+                profile.provisioning_status = "pending_update"
+                await _ensure_current_update(session, profile)
+            _complete(operation)
+
+    if compensation_required:
+        raise CreateCompensationRequired()
 
 
 async def finalize_existing_create_success(
@@ -245,17 +252,8 @@ async def finalize_operation_failure(
             profile.last_sync_error = human_readable[:2000]
             if not should_retry:
                 if operation.operation_type == "create_peer":
-                    cleanup = bool(operation.peer_id) or error_code in {
-                        "create_ambiguous_reconcile",
-                        "invalid_created_config_cleanup",
-                        "duplicate_exact_client_name",
-                        "create_compensation_required",
-                        "executor_exception",
-                        "stale_create_lease",
-                        "stale_lease_max_attempts",
-                        "unknown_error",
-                        "cleanup_peer_identity_mismatch",
-                    }
+                    from services.api_operations_queue import CREATE_SIDE_EFFECT_ERROR_CODES
+                    cleanup = bool(operation.peer_id) or error_code in CREATE_SIDE_EFFECT_ERROR_CODES
                     profile.provisioning_status = (
                         "create_cleanup_pending" if cleanup else "create_failed"
                     )

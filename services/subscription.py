@@ -422,6 +422,7 @@ class SubscriptionService:
                 "deleting",
                 "create_failed",
                 "delete_failed",
+                "create_cleanup_pending",
             }:
                 continue
             was_pending_create = profile.provisioning_status == "pending_create"

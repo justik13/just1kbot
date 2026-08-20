@@ -188,7 +188,6 @@ async def manage_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -210,6 +209,7 @@ async def manage_device(
         db_user,
         session,
     )
+    await callback.answer(show_alert=False)
 
 
 def _get_device_config_keyboard(profile_id: int):
@@ -238,8 +238,6 @@ async def device_help(
     user returns to their device card, not to the generic support menu.
     DO NOT replace the back button with menu_support — that breaks the device flow.
     """
-    await callback.answer(show_alert=False)
-
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
@@ -272,6 +270,7 @@ async def device_help(
         builder.as_markup(),
         trigger_message_id=callback.message.message_id,
     )
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("show_config:"))
@@ -281,7 +280,6 @@ async def show_config(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -336,6 +334,7 @@ async def show_config(
             reply_markup=_get_device_config_keyboard(profile.id),
             parse_mode="HTML",
         )
+        await callback.answer(show_alert=False)
         return
 
     await render_hub(
@@ -348,6 +347,7 @@ async def show_config(
         _get_device_config_keyboard(profile.id),
         trigger_message_id=callback.message.message_id,
     )
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("download_conf:"))

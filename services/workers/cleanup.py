@@ -275,19 +275,29 @@ async def _cleanup_stuck_profiles():
                 logger.debug("Skipping profile %s cleanup: create_peer operation is still active", profile.id)
                 continue
 
-            if profile.peer_id:
+            peer_id = profile.peer_id
+            if not peer_id and profile.provisioning_status == "create_cleanup_pending":
+                op_res = await session.execute(
+                    select(APIOperation.peer_id).where(
+                        APIOperation.profile_id == profile.id,
+                        APIOperation.operation_type == "create_peer"
+                    ).order_by(APIOperation.id.desc()).limit(1)
+                )
+                peer_id = op_res.scalar_one_or_none()
+
+            if peer_id:
                 try:
                     server = await session.get(Server, profile.server_id)
                     from services.api_operations_queue import ensure_delete_operation
                     await ensure_delete_operation(
                         session,
-                        idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                        idempotency_key=f"delete-peer:{profile.id}:{peer_id}",
                         server_id=server.id if server else None,
                         profile_id=profile.id,
                         server_name_snapshot=server.name if server else None,
                         api_url_snapshot=server.api_url if server else None,
                         api_key_snapshot=server.api_key if server else None,
-                        peer_id=profile.peer_id,
+                        peer_id=peer_id,
                         client_name=profile.client_name,
                         audit_reason="stuck_cleanup_worker",
                     )

@@ -795,8 +795,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="unknown_custom_state")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="pending_create")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="deleting")))
+        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
 
-        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="active")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="pending_update")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="update_failed")))
@@ -949,13 +949,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=cleanup_profile)),
             patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock(return_value=True)) as mock_delete,
-            patch("bot.handlers.connection.device_delete_routes._render_connections", new=AsyncMock()),
             patch("bot.handlers.connection.device_delete_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
+            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render,
         ):
             await confirm_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_once_with(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
-            mock_delete.assert_called_once()
+            callback.answer.assert_called_once_with("⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже.", show_alert=True)
+            mock_delete.assert_not_called()
+            mock_render.assert_called_once()
 
     async def test_29_confirm_delete_device_render_connections_failure_does_not_double_answer(self):
         """If _render_connections throws after successful delete answer, callback.answer is not invoked a second time."""
@@ -1108,8 +1109,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         session.get = AsyncMock(return_value=MagicMock(name="Server"))
 
         with patch("services.device_service.ensure_delete_operation", new=AsyncMock()):
-            result = await DeviceService.delete_device(session, cleanup_profile, force=False)
-            self.assertTrue(result)
+            from services.device_service import DeviceCreationError
+            with self.assertRaises(DeviceCreationError):
+                await DeviceService.delete_device(session, cleanup_profile, force=False)
 
     async def test_34_cleanup_worker_stuck_profile_with_peer_id_queues_delete_operation(self):
         """Cleanup worker ensures delete_peer operation is queued if stuck profile has peer_id."""
@@ -1449,6 +1451,60 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             o = await s.get(APIOperation, op_id)
             self.assertEqual(o.status, "processing")
             self.assertEqual(o.locked_by, "test-worker")
+
+    async def test_39_finalize_create_success_race_condition(self):
+        """finalize_create_success catches create_failed mid-flight and queues compensation."""
+        from database.models import VPNProfile, APIOperation
+        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Race Dev",
+                client_name="tg_race",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-1",
+                attempts=1,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        # Simulating external factor modifying profile to create_failed during HTTP request
+        async with self.sessions.begin() as s:
+            p = await s.get(VPNProfile, prof_id)
+            p.provisioning_status = "create_failed"
+            await s.flush()
+
+        with self.assertRaises(CreateCompensationRequired):
+            await finalize_create_success(
+                op_id,
+                worker_id="worker-1",
+                expected_attempt_number=1,
+                peer_id="peer-123",
+                raw_config="vpn://test",
+                sent_desired_version=1,
+                sent_is_active=True,
+                sent_expires_at=None,
+                session_factory=self.sessions,
+            )
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            self.assertEqual(p.provisioning_status, "create_cleanup_pending")
+            self.assertEqual(p.peer_id, "peer-123")
 
 if __name__ == "__main__":
     unittest.main()

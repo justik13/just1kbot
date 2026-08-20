@@ -131,6 +131,8 @@ async def confirm_delete_device(
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
             msg = "🗑 Устройство уже удаляется с сервера."
+        elif status == "create_cleanup_pending":
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
