@@ -7,7 +7,7 @@ import zlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.amnezia_client import (
