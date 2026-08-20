@@ -6,7 +6,7 @@ import time
 from typing import Optional, List
 
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import InlineKeyboardMarkup, InputFile
+from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 
 from bot.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
@@ -226,9 +226,12 @@ async def render_hub(
     parse_mode: str = "HTML",
     force_new: bool = False,
     trigger_message_id: Optional[int] = None,
+    disable_web_page_preview: bool = True,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
+
+    link_preview_opts = LinkPreviewOptions(is_disabled=True) if disable_web_page_preview else None
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
@@ -260,6 +263,7 @@ async def render_hub(
                     text=text_parts[0],
                     reply_markup=reply_markup,
                     parse_mode=parse_mode,
+                    link_preview_options=link_preview_opts,
                 )
                 edited = True
             except TelegramBadRequest as exc:
@@ -305,6 +309,7 @@ async def render_hub(
                     text=part,
                     reply_markup=markup,
                     parse_mode=parse_mode,
+                    link_preview_options=link_preview_opts,
                 )
             except TelegramBadRequest as exc:
                 error = str(exc).lower()
@@ -319,6 +324,7 @@ async def render_hub(
                     chat_id=chat_id,
                     text=plain,
                     reply_markup=markup,
+                    link_preview_options=link_preview_opts,
                 )
             sent_ids.append(message.message_id)
 
