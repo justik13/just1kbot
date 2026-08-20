@@ -42,6 +42,14 @@ CREATE_SIDE_EFFECT_ERROR_CODES = frozenset({
     "create_ambiguous_reconcile", "executor_exception", "stale_lease_max_attempts",
     "network_error", "timeout", "server_error", "invalid_response", "unknown_error",
 })
+CREATE_CLEANUP_REQUIRED_CODES = frozenset(
+    CREATE_CLEANUP_ERROR_CODES
+    | CREATE_SIDE_EFFECT_ERROR_CODES
+    | {
+        "duplicate_exact_client_name",
+        "stale_create_lease",
+    }
+)
 
 
 def classify_create_side_effect_risk(operation: APIOperation) -> str:

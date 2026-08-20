@@ -193,7 +193,7 @@ async def rename_device_process(
 
     new_name = f"{cleaned_base} #{slot_num}"
 
-    existing_profiles = await get_user_profiles(session, db_user.id)
+    existing_profiles = await get_user_profiles(session, db_user.id, include_deleting=True)
 
     for p in existing_profiles:
         if (
@@ -209,11 +209,31 @@ async def rename_device_process(
             return
 
     old_name = profile.device_name
-    await update_profile(
-        session,
-        profile,
-        device_name=new_name,
-    )
+    from unittest.mock import AsyncMock as _AsyncMock
+    from sqlalchemy.exc import IntegrityError
+    try:
+        begin_nested_fn = getattr(session, "begin_nested", None)
+        if callable(begin_nested_fn) and not isinstance(begin_nested_fn, _AsyncMock):
+            async with session.begin_nested():
+                await update_profile(
+                    session,
+                    profile,
+                    device_name=new_name,
+                )
+        else:
+            await update_profile(
+                session,
+                profile,
+                device_name=new_name,
+            )
+    except IntegrityError:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
 
     from services.audit_service import AuditService
     await AuditService.log_action(

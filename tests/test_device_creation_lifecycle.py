@@ -1505,7 +1505,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock()
         session = AsyncMock()
-
         with patch("bot.handlers.connection.incy_routes.render_hub", new=AsyncMock()) as mock_render:
             await show_incy_subscription(callback, state, session, db_user=None)
 
@@ -1513,6 +1512,72 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_render.assert_called_once()
             self.assertEqual(mock_render.call_args.args[2], texts.ERROR_USER_NOT_FOUND)
 
+    async def test_51_admin_server_filter_includes_create_failed_and_excludes_deleting(self):
+        """_apply_user_filters for server uses PROFILE_LIST_HIDDEN_STATUSES."""
+        from database.models import User
+        from database.repositories.users_repo import _apply_user_filters
+        from sqlalchemy import select
+
+        stmt = select(User)
+        filtered = _apply_user_filters(stmt, filter_type="server", filter_param=5)
+        sql_str = str(filtered.compile())
+        # Must filter using PROFILE_LIST_HIDDEN_STATUSES ('deleting')
+        self.assertIn("vpn_profiles.server_id =", sql_str)
+        self.assertIn("vpn_profiles.provisioning_status NOT IN", sql_str)
+
+    async def test_52_finalize_operation_failure_canonical_cleanup_required_codes(self):
+        """All error codes in CREATE_CLEANUP_REQUIRED_CODES trigger create_cleanup_pending."""
+        from services.api_operations_queue import CREATE_CLEANUP_REQUIRED_CODES
+        from services.api_operations_finalizer import finalize_operation_failure
+
+        mock_op = MagicMock()
+        mock_op.status = "dead"
+        mock_op.operation_type = "create_peer"
+        mock_op.peer_id = None
+        mock_op.locked_by = "worker-1"
+        mock_op.attempts = 10
+        mock_op.max_attempts = 10
+
+        mock_prof = MagicMock()
+        mock_prof.provisioning_status = "pending_create"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_prof
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = mock_result
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        critical_codes = [
+            "duplicate_exact_client_name",
+            "cleanup_peer_identity_mismatch",
+            "invalid_created_config_cleanup",
+            "create_compensation_required",
+            "create_ambiguous_reconcile",
+            "stale_create_lease",
+            "executor_exception",
+            "network_error",
+            "timeout",
+        ]
+        for code in critical_codes:
+            self.assertIn(code, CREATE_CLEANUP_REQUIRED_CODES)
+            with patch("services.api_operations_finalizer._scope", return_value=mock_scope), \
+                 patch("services.api_operations_finalizer._locked", return_value=mock_op):
+                await finalize_operation_failure(
+                    1,
+                    worker_id="worker-1",
+                    expected_attempt_number=10,
+                    error_code=code,
+                    error_message="Test failure",
+                    retryable=False,
+                )
+                self.assertEqual(
+                    mock_prof.provisioning_status,
+                    "create_cleanup_pending",
+                    f"Code {code} must transition to create_cleanup_pending",
+                )
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
@@ -1840,7 +1905,192 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             deleted_prof = await s.get(VPNProfile, prof_id)
             self.assertIsNone(deleted_prof)
 
+    async def test_47_finalize_operation_failure_duplicate_exact_client_name_sets_create_cleanup_pending(self):
+        """duplicate_exact_client_name must mark profile as create_cleanup_pending, not create_failed."""
+        from database.models import VPNProfile, APIOperation
+        from services.api_operations_finalizer import finalize_operation_failure
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Dup Exact Test",
+                client_name="tg_dup_exact",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}:dup",
+                server_id=self.sid,
+                profile_id=prof_id,
+                attempts=1,
+                locked_by="worker-1",
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        await finalize_operation_failure(
+            op_id,
+            worker_id="worker-1",
+            expected_attempt_number=1,
+            error_code="duplicate_exact_client_name",
+            error_message="Multiple exact client names found on server",
+            should_retry=False,
+            next_attempt_at=None,
+            session_factory=self.sessions,
+        )
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            self.assertEqual(p.provisioning_status, "create_cleanup_pending")
+
+    async def test_48_finalize_operation_failure_cleanup_peer_identity_mismatch_sets_create_cleanup_pending(self):
+        """cleanup_peer_identity_mismatch must mark profile as create_cleanup_pending."""
+        from database.models import VPNProfile, APIOperation
+        from services.api_operations_finalizer import finalize_operation_failure
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Mismatch Test",
+                client_name="tg_mismatch",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}:mismatch",
+                server_id=self.sid,
+                profile_id=prof_id,
+                attempts=1,
+                locked_by="worker-1",
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        await finalize_operation_failure(
+            op_id,
+            worker_id="worker-1",
+            expected_attempt_number=1,
+            error_code="cleanup_peer_identity_mismatch",
+            error_message="Peer identity mismatch during reconciliation",
+            should_retry=False,
+            next_attempt_at=None,
+            session_factory=self.sessions,
+        )
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            self.assertEqual(p.provisioning_status, "create_cleanup_pending")
+
+    async def test_49_profile_deletion_does_not_overwrite_active_worker_processing_lease(self):
+        """ProfileDeletionService._delete_profiles does not overwrite status or locked_by of processing APIOperation."""
+        from database.models import VPNProfile, APIOperation
+        from services.profile_deletion_service import ProfileDeletionService
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Processing Guard Test",
+                client_name="tg_proc_guard",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}:proc",
+                server_id=self.sid,
+                profile_id=prof_id,
+                attempts=2,
+                locked_by="worker-active-42",
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        async with self.sessions.begin() as session:
+            count = await ProfileDeletionService.delete_profiles_for_user(
+                session, self.uid, reason="user_banned"
+            )
+            self.assertEqual(count, 1)
+
+        async with self.sessions() as s:
+            op_after = await s.get(APIOperation, op_id)
+            # Must remain 'processing' with its original worker lease intact
+            self.assertEqual(op_after.status, "processing")
+            self.assertEqual(op_after.locked_by, "worker-active-42")
+            self.assertEqual(op_after.attempts, 2)
+            prof_after = await s.get(VPNProfile, prof_id)
+            self.assertEqual(prof_after.provisioning_status, "deleting")
+
+    async def test_50_rename_device_process_rejects_duplicate_with_deleting_profile(self):
+        """rename_device_process rejects rename when a deleting profile holds the same target name."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+        from database.models import VPNProfile
+
+        async with self.sessions.begin() as s:
+            # Existing deleting profile
+            prof_deleting = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Phone #1",
+                client_name="tg_del_1",
+                provisioning_status="deleting",
+            )
+            # Profile to rename
+            prof_active = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Laptop #1",
+                client_name="tg_act_1",
+                provisioning_status="active",
+            )
+            s.add_all([prof_deleting, prof_active])
+            await s.flush()
+            active_id = prof_active.id
+
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 987654
+        message.from_user.id = 987654
+        message.text = "Phone"
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": active_id})
+        db_user = SimpleNamespace(id=self.uid, telegram_id=987654)
+
+        async with self.sessions.begin() as session:
+            with (
+                patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
+                patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()) as mock_hub,
+            ):
+                await rename_device_process(message, state, session, db_user=db_user)
+                self.assertTrue(mock_hub.called)
+                text_arg = mock_hub.call_args.args[2]
+                self.assertIn("уже существует", text_arg)
+
+        async with self.sessions() as s:
+            unchanged = await s.get(VPNProfile, active_id)
+            self.assertEqual(unchanged.device_name, "Laptop #1")
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

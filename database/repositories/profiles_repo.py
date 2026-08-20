@@ -108,6 +108,10 @@ async def delete_profile(session: AsyncSession, profile: VPNProfile) -> None:
 async def get_user_profiles_count(
     session: AsyncSession, user_id: int, include_deleting: bool = False
 ) -> int:
+    """Return count of active/reserving profiles for quota checks.
+
+    Excludes PROFILE_QUOTA_EXCLUDED_STATUSES ('deleting', 'create_failed') by default.
+    """
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
@@ -115,3 +119,6 @@ async def get_user_profiles_count(
         )
     result = await session.execute(stmt)
     return result.scalar_one()
+
+
+get_user_quota_profiles_count = get_user_profiles_count
