@@ -247,17 +247,12 @@ async def resolve_profile_endpoint_snapshot(
 ) -> tuple[int | None, str | None, str | None, str | None]:
     """Resolve (server_id, server_name_snapshot, api_url_snapshot, api_key_snapshot) for a profile.
 
-    If the Server row exists in the database, its current attributes are used.
-    If the Server row has been deleted from the database, the immutable encrypted
-    endpoint snapshot is recovered from previous APIOperations recorded for this profile.
+    1. First check if the profile has an immutable historical snapshot from previous operations.
+       This guarantees that even if the Server row's api_url/api_key was edited later by an admin,
+       the lifecycle operations for this specific peer will target the exact endpoint where the
+       peer was actually provisioned.
+    2. If no historical snapshot exists, fallback to the current Server row in the database.
     """
-    server = None
-    if profile.server_id is not None:
-        server = await session.get(Server, profile.server_id)
-    if server is not None:
-        return server.id, server.name, server.api_url, server.api_key
-
-    # Server row is missing/deleted: recover snapshot from earlier operations for this profile
     if profile.id is not None:
         prev_op = (
             await session.execute(
@@ -271,13 +266,19 @@ async def resolve_profile_endpoint_snapshot(
                 .limit(1)
             )
         ).scalar_one_or_none()
-        if prev_op is not None:
+        if prev_op is not None and getattr(prev_op, "api_url_snapshot", None) is not None:
             return (
-                prev_op.server_id or profile.server_id,
-                prev_op.server_name_snapshot,
-                prev_op.api_url_snapshot,
-                prev_op.api_key_snapshot,
+                getattr(prev_op, "server_id", None) or profile.server_id,
+                getattr(prev_op, "server_name_snapshot", None),
+                getattr(prev_op, "api_url_snapshot", None),
+                getattr(prev_op, "api_key_snapshot", None),
             )
+
+    server = None
+    if profile.server_id is not None:
+        server = await session.get(Server, profile.server_id)
+    if server is not None:
+        return server.id, server.name, server.api_url, server.api_key
 
     return profile.server_id, None, None, None
 

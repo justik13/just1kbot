@@ -1234,8 +1234,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         # First query: stuck_profiles returns [stuck_profile]
         # Inside loop: active_op returns None (operation dead/absent)
+        # Inside resolve_profile_endpoint_snapshot: prev_op returns None (falls back to server)
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
         ])
         mock_session.get = AsyncMock(return_value=mock_server)
@@ -1405,7 +1407,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_op_peer.scalar_one_or_none.return_value = SimpleNamespace(id=99, peer_id="peer_recovered_123")
 
         mock_session = AsyncMock()
-        mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_op_active, mock_op_peer])
+        mock_snapshot_op = MagicMock()
+        mock_snapshot_op.scalar_one_or_none.return_value = None
+        mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_op_active, mock_op_peer, mock_snapshot_op])
         mock_session.get = AsyncMock(return_value=SimpleNamespace(id=10, name="S1", api_url="http://s1", api_key="k1"))
 
         mock_scope = MagicMock()
@@ -1680,6 +1684,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
         ])
         mock_session.get = AsyncMock(return_value=mock_server)

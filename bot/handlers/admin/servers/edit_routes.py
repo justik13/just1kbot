@@ -479,10 +479,29 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
-
         await state.clear()
-
         return
+
+    if server.api_url != new_url:
+        active_peers_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.server_id == server_id,
+                    VPNProfile.peer_id.is_not(None),
+                )
+            )
+        ).scalar_one()
+        if active_peers_count > 0:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                f"❌ Нельзя изменить адрес сервера, на котором есть активные устройства ({active_peers_count} шт.).\n\n"
+                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                get_back_button(f"admin_server_card:{server_id}"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     old_url = server.api_url
 
@@ -655,7 +674,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L652_1
+                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
                 ),
             ),
             get_back_button("admin_servers"),
@@ -665,6 +684,27 @@ async def process_edit_server_key(
         await state.clear()
 
         return
+
+    if server.api_key != new_key:
+        active_peers_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.server_id == server_id,
+                    VPNProfile.peer_id.is_not(None),
+                )
+            )
+        ).scalar_one()
+        if active_peers_count > 0:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                f"❌ Нельзя изменить ключ API сервера, на котором есть активные устройства ({active_peers_count} шт.).\n\n"
+                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                get_back_button(f"admin_server_card:{server_id}"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     await update_server(session, server, api_key=new_key)
 
