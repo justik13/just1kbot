@@ -162,27 +162,27 @@ async def rename_device_process(
         )
         return
 
-    base_new_name = message.text.strip()
+    raw_text = message.text.strip()
 
-    if not base_new_name:
+    # Extract the permanent slot number assigned to this device
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_num = m.group(1) if m else str(profile.id)
+
+    # Strip any user-typed trailing #... to get the clean base name
+    cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
+    if not cleaned_base:
+        cleaned_base = "Устройство"
+
+    if len(cleaned_base) > 16:
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Имя устройства не может быть пустым.\n\nПожалуйста, введите имя устройства (от 1 до 16 символов):",
+            f"⚠️ Имя слишком длинное ({len(cleaned_base)} из 16 символов).\n\nПожалуйста, введите имя покороче (максимум 16 символов):",
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
 
-    if len(base_new_name) > 16:
-        await render_hub(
-            message.bot,
-            message.chat.id,
-            f"⚠️ Имя слишком длинное ({len(base_new_name)} из 16 символов).\n\nПожалуйста, введите имя покороче (максимум 16 символов):",
-            get_back_button(f"manage_device:{profile.id}"),
-        )
-        return
-
-    if not DEVICE_NAME_REGEX.match(base_new_name):
+    if not DEVICE_NAME_REGEX.match(cleaned_base):
         await render_hub(
             message.bot,
             message.chat.id,
@@ -191,25 +191,19 @@ async def rename_device_process(
         )
         return
 
-    if re.search(r'#\d+$', base_new_name):
-        new_name = base_new_name
-    else:
-        m = re.search(r'#(\d+)$', profile.device_name)
-        slot_suffix = f" #{m.group(1)}" if m else ""
-        new_name = f"{base_new_name}{slot_suffix}"
+    new_name = f"{cleaned_base} #{slot_num}"
 
     existing_profiles = await get_user_profiles(session, db_user.id)
 
     for p in existing_profiles:
         if (
             p.id != profile.id
-            and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует на этой локации.\n\nПожалуйста, введите другое имя:",
+                f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
                 get_back_button(f"manage_device:{profile.id}"),
             )
             return

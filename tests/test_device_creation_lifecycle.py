@@ -614,7 +614,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         message.bot = MagicMock()
         message.chat.id = 100
         message.from_user.id = 100
-        message.text = "Устройство #7"
+        message.text = "Мой Телефон"
         message.delete = AsyncMock()
 
         state = AsyncMock()
@@ -639,7 +639,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             await rename_device_process(message, state, session, db_user)
 
             mock_update.assert_called_once()
-            self.assertEqual(mock_update.call_args.kwargs.get("device_name"), "Устройство #7")
+            self.assertEqual(mock_update.call_args.kwargs.get("device_name"), "Мой Телефон #11")
             state.clear.assert_called_once()
 
     async def test_16_c_rename_device_validation_errors_preserve_state_and_show_specific_message(self):
