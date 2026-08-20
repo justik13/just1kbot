@@ -1765,8 +1765,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             )
         self.assertIn("PostgreSQL connection failure", str(ctx.exception))
 
-    async def test_58_delete_device_when_server_is_none_deletes_profile_directly(self):
-        """DeviceService.delete_device directly deletes local profile row when server record is missing."""
+    async def test_58_delete_device_when_server_is_none_recovers_snapshot_and_enqueues_delete(self):
+        """When Server row is missing from DB, delete_device recovers snapshot and enqueues delete_peer."""
         from database.models import VPNProfile
         from services.device_service import DeviceService
 
@@ -1776,6 +1776,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             server_id=999,  # Server no longer exists in DB
             device_name="Old Device",
             peer_id="peer-xyz",
+            client_name="tg_old_client",
             provisioning_status="active",
         )
 
@@ -1786,12 +1787,20 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         with (
             patch("services.device_service.AuditService.log_action", new=AsyncMock()),
             patch("services.device_service.ensure_delete_operation", new=AsyncMock()) as mock_ensure_del,
+            patch("services.device_service.resolve_profile_endpoint_snapshot", new=AsyncMock(return_value=(999, "Legacy Server", "http://1.2.3.4", "key-secret"))),
             patch("services.device_service.is_admin", return_value=True),
         ):
             res = await DeviceService.delete_device(mock_session, profile, actor_id=1)
             self.assertTrue(res)
-            mock_session.delete.assert_called_once_with(profile)
-            mock_ensure_del.assert_not_called()
+            self.assertEqual(profile.provisioning_status, "deleting")
+            mock_ensure_del.assert_called_once()
+            call_kwargs = mock_ensure_del.call_args.kwargs
+            self.assertEqual(call_kwargs["server_id"], 999)
+            self.assertEqual(call_kwargs["server_name_snapshot"], "Legacy Server")
+            self.assertEqual(call_kwargs["api_url_snapshot"], "http://1.2.3.4")
+            self.assertEqual(call_kwargs["api_key_snapshot"], "key-secret")
+            self.assertEqual(call_kwargs["peer_id"], "peer-xyz")
+            mock_session.delete.assert_not_called()
 
     async def test_59_cleanup_claim_deterministic_barrier_mock(self):
         """Unit test demonstrating deterministic cleanup skip when active operation is in flight."""
@@ -2546,6 +2555,78 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             final_op = await s.get(APIOperation, op_id)
             self.assertIn(final_prof.provisioning_status, {"create_cleanup_pending", "create_failed"})
             self.assertIn(final_op.status, {"dead", "retry"})
+
+    async def test_63_postgres_delete_device_with_missing_server_row_enqueues_delete_peer(self):
+        """When Server row is missing from DB, delete_device recovers endpoint snapshot and enqueues delete_peer."""
+        from services.device_service import DeviceService
+        from database.models import APIOperation, Server, VPNProfile
+
+        # 1. Create a profile pointing to self.sid
+        # and previous APIOperation recording the endpoint snapshot
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Orphan Server Device",
+                client_name="tg_orphan_server_client",
+                peer_id="amnezia-peer-999",
+                provisioning_status="active",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            # Previous create_peer operation holding the immutable endpoint snapshot
+            prev_op = APIOperation(
+                operation_type="create_peer",
+                status="succeeded",
+                idempotency_key=f"create-orphan-test:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                server_name_snapshot="Old Node 99",
+                api_url_snapshot="http://10.99.99.1:9999",
+                api_key_snapshot="legacy-secret-key-99",
+                peer_id="amnezia-peer-999",
+                client_name="tg_orphan_server_client",
+                attempts=1,
+                max_attempts=10,
+            )
+            s.add(prev_op)
+
+        # 2. Call DeviceService.delete_device with Server row simulated as missing/deleted
+        async with self.sessions.begin() as s:
+            prof_to_delete = await s.get(VPNProfile, prof_id)
+            orig_get = s.get
+
+            async def patched_get(entity, ident, **kwargs):
+                if entity is Server:
+                    return None
+                return await orig_get(entity, ident, **kwargs)
+
+            s.get = patched_get
+            res = await DeviceService.delete_device(s, prof_to_delete, actor_id=self.uid)
+            self.assertTrue(res)
+
+        # 3. Assert profile is in 'deleting' and durable delete_peer operation is queued with recovered snapshot!
+        async with self.sessions() as s:
+            deleted_prof = await s.get(VPNProfile, prof_id)
+            self.assertIsNotNone(deleted_prof)
+            self.assertEqual(deleted_prof.provisioning_status, "deleting")
+
+            del_op = (
+                await s.execute(
+                    select(APIOperation).where(
+                        APIOperation.profile_id == prof_id,
+                        APIOperation.operation_type == "delete_peer",
+                    )
+                )
+            ).scalar_one_or_none()
+            self.assertIsNotNone(del_op)
+            self.assertEqual(del_op.status, "pending")
+            self.assertEqual(del_op.peer_id, "amnezia-peer-999")
+            self.assertEqual(del_op.server_name_snapshot, "Old Node 99")
+            self.assertEqual(del_op.api_url_snapshot, "http://10.99.99.1:9999")
+            self.assertEqual(del_op.api_key_snapshot, "legacy-secret-key-99")
 
 
 if __name__ == "__main__":

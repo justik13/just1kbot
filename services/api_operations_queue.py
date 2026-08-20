@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import API_OPERATION_TYPES, APIOperation, VPNProfile
+from database.models import API_OPERATION_TYPES, APIOperation, Server, VPNProfile
 
 
 class APIOperationValidationError(Exception):
@@ -239,6 +239,47 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
         operation.next_attempt_at = func.now()
         operation.last_error_code = "delete_profile_discrepancy"
     return operation
+
+
+async def resolve_profile_endpoint_snapshot(
+    session: AsyncSession,
+    profile: VPNProfile,
+) -> tuple[int | None, str | None, str | None, str | None]:
+    """Resolve (server_id, server_name_snapshot, api_url_snapshot, api_key_snapshot) for a profile.
+
+    If the Server row exists in the database, its current attributes are used.
+    If the Server row has been deleted from the database, the immutable encrypted
+    endpoint snapshot is recovered from previous APIOperations recorded for this profile.
+    """
+    server = None
+    if profile.server_id is not None:
+        server = await session.get(Server, profile.server_id)
+    if server is not None:
+        return server.id, server.name, server.api_url, server.api_key
+
+    # Server row is missing/deleted: recover snapshot from earlier operations for this profile
+    if profile.id is not None:
+        prev_op = (
+            await session.execute(
+                select(APIOperation)
+                .where(
+                    APIOperation.profile_id == profile.id,
+                    APIOperation.api_url_snapshot.is_not(None),
+                    APIOperation.api_key_snapshot.is_not(None),
+                )
+                .order_by(APIOperation.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if prev_op is not None:
+            return (
+                prev_op.server_id or profile.server_id,
+                prev_op.server_name_snapshot,
+                prev_op.api_url_snapshot,
+                prev_op.api_key_snapshot,
+            )
+
+    return profile.server_id, None, None, None
 
 
 @asynccontextmanager

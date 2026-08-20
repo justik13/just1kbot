@@ -14,7 +14,11 @@ from services.amnezia_capacity import (
     ServerCapacityUnavailable,
     ensure_server_capacity,
 )
-from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
+from services.api_operations_queue import (
+    enqueue_api_operation,
+    ensure_delete_operation,
+    resolve_profile_endpoint_snapshot,
+)
 from services.audit_service import AuditService
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
@@ -271,60 +275,45 @@ class DeviceService:
                 raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
 
         # Capture server and device info for audit before deletion
-        server = await session.get(Server, profile.server_id)
-        server_name = server.name if server else ""
+        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
         device_name = profile.device_name
         profile_id = profile.id
         user_id = profile.user_id
 
-        if not server or not profile.peer_id or force:
-            if server and profile.peer_id:
+        if profile.peer_id:
+            if not force:
+                profile.provisioning_status = "deleting"
+                await ensure_delete_operation(
+                    session,
+                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    server_id=server_id,
+                    profile_id=profile.id,
+                    server_name_snapshot=server_name,
+                    api_url_snapshot=api_url,
+                    api_key_snapshot=api_key,
+                    peer_id=profile.peer_id,
+                    client_name=profile.client_name,
+                    audit_reason="device_delete",
+                )
+            else:
                 try:
                     await ensure_delete_operation(
                         session,
                         idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-                        server_id=server.id,
+                        server_id=server_id,
                         profile_id=profile.id,
-                        server_name_snapshot=server.name,
-                        api_url_snapshot=server.api_url,
-                        api_key_snapshot=server.api_key,
+                        server_name_snapshot=server_name,
+                        api_url_snapshot=api_url,
+                        api_key_snapshot=api_key,
                         peer_id=profile.peer_id,
                         client_name=profile.client_name,
-                        audit_reason="device_delete_force" if force else "device_delete",
+                        audit_reason="device_delete_force",
                     )
                 except Exception as exc:
                     logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
+                await session.delete(profile)
+        else:
             await session.delete(profile)
-            action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
-            admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
-            await AuditService.log_action(
-                session,
-                admin_id=admin_id,
-                action=action,
-                target_type="user",
-                target_id=user_id,
-                details={
-                    "device_name": device_name,
-                    "profile_id": profile_id,
-                    "server_name": server_name,
-                    "force": force,
-                },
-            )
-            return True
-
-        profile.provisioning_status = "deleting"
-        await ensure_delete_operation(
-            session,
-            idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-            server_id=server.id,
-            profile_id=profile.id,
-            server_name_snapshot=server.name if server else None,
-            api_url_snapshot=server.api_url if server else None,
-            api_key_snapshot=server.api_key if server else None,
-            peer_id=profile.peer_id,
-            client_name=profile.client_name,
-            audit_reason="device_delete",
-        )
 
         action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
@@ -337,7 +326,7 @@ class DeviceService:
             details={
                 "device_name": device_name,
                 "profile_id": profile_id,
-                "server_name": server_name,
+                "server_name": server_name or "",
                 "force": force,
             },
         )

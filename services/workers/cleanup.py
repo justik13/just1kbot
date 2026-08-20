@@ -290,16 +290,19 @@ async def _cleanup_stuck_profiles():
             if peer_id:
                 profile.peer_id = peer_id
                 try:
-                    server = await session.get(Server, profile.server_id)
-                    from services.api_operations_queue import ensure_delete_operation
+                    from services.api_operations_queue import (
+                        ensure_delete_operation,
+                        resolve_profile_endpoint_snapshot,
+                    )
+                    server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
                     await ensure_delete_operation(
                         session,
                         idempotency_key=f"delete-peer:{profile.id}:{peer_id}",
-                        server_id=server.id if server else None,
+                        server_id=server_id,
                         profile_id=profile.id,
-                        server_name_snapshot=server.name if server else None,
-                        api_url_snapshot=server.api_url if server else None,
-                        api_key_snapshot=server.api_key if server else None,
+                        server_name_snapshot=server_name,
+                        api_url_snapshot=api_url,
+                        api_key_snapshot=api_key,
                         peer_id=peer_id,
                         client_name=profile.client_name,
                         audit_reason="stuck_cleanup_worker",
