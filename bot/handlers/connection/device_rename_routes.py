@@ -46,8 +46,13 @@ async def rename_device_start(
         )
         return
 
-    if profile.provisioning_status in ("deleting", "create_cleanup_pending"):
-        msg = "🗑 Устройство уже удаляется с сервера." if profile.provisioning_status == "deleting" else "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
+        if profile.provisioning_status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif profile.provisioning_status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
         await callback.answer(msg, show_alert=True)
         return
 
@@ -105,9 +110,14 @@ async def rename_device_process(
         )
         return
 
-    if profile.provisioning_status in ("deleting", "create_cleanup_pending"):
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         await state.clear()
-        msg = "🗑 Устройство уже удаляется с сервера." if profile.provisioning_status == "deleting" else "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        if profile.provisioning_status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif profile.provisioning_status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
         await render_hub(
             message.bot,
             message.chat.id,

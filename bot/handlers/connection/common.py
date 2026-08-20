@@ -111,10 +111,10 @@ async def _render_maintenance(
 async def _build_connections_screen(
     user: User,
     session: AsyncSession,
+    profiles: list,
     *,
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
-    profiles = await get_user_profiles(session, user.id)
     visible_profiles_count = len(profiles)
 
     quota_profiles_count = len([
@@ -234,6 +234,7 @@ async def _render_connections(
             rendered, builder = await _build_connections_screen(
                 user,
                 session,
+                visible_profiles,
                 read_only=True,
             )
 
@@ -273,6 +274,7 @@ async def _render_connections(
     rendered, builder = await _build_connections_screen(
         user,
         session,
+        visible_profiles,
         read_only=False,
     )
 

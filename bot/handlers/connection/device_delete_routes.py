@@ -131,8 +131,6 @@ async def confirm_delete_device(
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
             msg = "🗑 Устройство уже удаляется с сервера."
-        elif status == "create_cleanup_pending":
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
@@ -151,7 +149,7 @@ async def confirm_delete_device(
     try:
         await state.clear()
 
-        from services.device_service import DeviceStillCreating
+        from services.device_service import DeviceCreationError, DeviceStillCreating
 
         try:
             success = await DeviceService.delete_device(
@@ -161,6 +159,10 @@ async def confirm_delete_device(
             )
         except DeviceStillCreating:
             await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            answered = True
+            return
+        except DeviceCreationError:
+            await callback.answer("⚠️ Идёт автоматическое восстановление или действие недоступно.", show_alert=True)
             answered = True
             return
 

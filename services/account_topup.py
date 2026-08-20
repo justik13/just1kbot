@@ -301,6 +301,9 @@ async def settle_succeeded_topup(
         return False, snapshot
 
     user = await lock_checkout_user(session, payment.user_id)
+    if user is None:
+        raise AccountTopupError("topup_user_missing")
+    
     if user is not None:
         hard_block = user.topup_blocked
         recovery_topup = (

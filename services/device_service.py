@@ -26,6 +26,8 @@ RESERVING_STATUSES = (
     "active",
     "pending_update",
     "update_failed",
+    "create_cleanup_pending",
+    "delete_failed",
 )
 
 
@@ -243,8 +245,6 @@ class DeviceService:
         if not force:
             if profile.provisioning_status == "pending_create":
                 raise DeviceStillCreating("Device still creating")
-            if profile.provisioning_status == "create_cleanup_pending":
-                raise DeviceCreationError("Cleanup in progress")
             if profile.provisioning_status == "deleting":
                 return True
             if profile.provisioning_status not in ALLOWED_DELETE_STATES:
@@ -305,8 +305,6 @@ class DeviceService:
             client_name=profile.client_name,
             audit_reason="device_delete",
         )
-        if not server:
-            await session.delete(profile)
 
         action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0

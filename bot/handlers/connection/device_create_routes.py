@@ -1,5 +1,4 @@
 import asyncio
-import inspect
 import logging
 import re
 import time
@@ -323,6 +322,7 @@ async def _process_server_selection(
         new_profile = None
         try:
             db_user_id = user.id
+            # Defensive commit: flush any prior pending session state before the creation transaction
             await session.commit()
             snapshot = await capture_server_peer_snapshot(server_id)
             new_profile = await DeviceService.create_device(
@@ -470,26 +470,18 @@ async def _process_server_selection(
 
             if ready_profile and ready_profile.provisioning_status == "active":
                 from .device_view_routes import render_device_screen
+                await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             elif ready_profile and ready_profile.provisioning_status in ("create_failed", "create_cleanup_pending"):
                 from .device_view_routes import render_device_screen
+                await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:
-                # Timeout reached or creation still pending -> expire identity map and render connections
-                try:
-                    res = session.expire_all()
-                    if inspect.isawaitable(res):
-                        await res
-                except Exception:
-                    pass
+                # Timeout reached or creation still pending -> render connections
+                await session.refresh(user)
                 await _render_connections(callback.message, user, session)
         else:
-            try:
-                res = session.expire_all()
-                if inspect.isawaitable(res):
-                    await res
-            except Exception:
-                pass
+            await session.refresh(user)
             await _render_connections(callback.message, user, session)
 
     finally:

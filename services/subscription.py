@@ -50,7 +50,7 @@ class SubscriptionService:
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
         user = await get_user_by_telegram_id(session, telegram_id)
 
-        if not user or user.is_banned or not user.subscription_end:
+        if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
             return False
 
         return not is_expired(user.subscription_end)

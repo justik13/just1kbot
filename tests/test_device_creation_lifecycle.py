@@ -794,9 +794,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="unknown_custom_state")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="pending_create")))
-        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="deleting")))
 
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="active")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="pending_update")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="update_failed")))
@@ -908,22 +908,20 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
     def test_27_ui_visibility_separated_from_quota_exclusion_policy(self):
         """UI list hides only deleting, while quota excludes all non-active/failed states."""
         from database.repositories.profiles_repo import (
-            NON_VISIBLE_PROFILE_STATUSES,
             PROFILE_LIST_HIDDEN_STATUSES,
             PROFILE_QUOTA_EXCLUDED_STATUSES,
         )
 
         self.assertEqual(PROFILE_LIST_HIDDEN_STATUSES, ("deleting",))
-        self.assertEqual(NON_VISIBLE_PROFILE_STATUSES, PROFILE_QUOTA_EXCLUDED_STATUSES)
-        self.assertIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertNotIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertNotIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertIn("create_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
-        self.assertIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertNotIn("pending_create", PROFILE_QUOTA_EXCLUDED_STATUSES)
         self.assertNotIn("active", PROFILE_QUOTA_EXCLUDED_STATUSES)
 
     async def test_28_confirm_delete_device_stale_callback_fail_closed_rejection(self):
         """If device transitioned to create_cleanup_pending, confirm_delete rejects it fail-closed."""
-        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+        from bot.handlers.connection.device_delete_routes import confirm_delete_device
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
         cleanup_profile = SimpleNamespace(
@@ -950,15 +948,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=cleanup_profile)),
-            patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock()) as mock_delete,
-            patch("bot.handlers.connection.device_view_routes.render_device_screen", new=AsyncMock()) as mock_render,
+            patch("bot.handlers.connection.device_delete_routes.DeviceService.delete_device", new=AsyncMock(return_value=True)) as mock_delete,
+            patch("bot.handlers.connection.device_delete_routes._render_connections", new=AsyncMock()),
+            patch("bot.handlers.connection.device_delete_routes.get_user_by_telegram_id", new=AsyncMock(return_value=db_user)),
         ):
             await confirm_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_once_with("⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже.", show_alert=True)
-            mock_delete.assert_not_called()
-            mock_render.assert_called_once()
-            self.assertNotIn(42, _deleting_devices)
+            callback.answer.assert_called_once_with(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
+            mock_delete.assert_called_once()
 
     async def test_29_confirm_delete_device_render_connections_failure_does_not_double_answer(self):
         """If _render_connections throws after successful delete answer, callback.answer is not invoked a second time."""
@@ -1095,7 +1092,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_33_device_service_delete_device_rejects_create_cleanup_pending(self):
         """DeviceService.delete_device raises DeviceCreationError for create_cleanup_pending on service boundary."""
         from database.models import VPNProfile
-        from services.device_service import DeviceCreationError, DeviceService
+        from services.device_service import DeviceService
 
         cleanup_profile = VPNProfile(
             id=42,
@@ -1108,9 +1105,11 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=cleanup_profile)))
+        session.get = AsyncMock(return_value=MagicMock(name="Server"))
 
-        with self.assertRaises(DeviceCreationError):
-            await DeviceService.delete_device(session, cleanup_profile, force=False)
+        with patch("services.device_service.ensure_delete_operation", new=AsyncMock()):
+            result = await DeviceService.delete_device(session, cleanup_profile, force=False)
+            self.assertTrue(result)
 
     async def test_34_cleanup_worker_stuck_profile_with_peer_id_queues_delete_operation(self):
         """Cleanup worker ensures delete_peer operation is queued if stuck profile has peer_id."""
@@ -1257,6 +1256,29 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
+            },
+        )
+        self.env_patcher.start()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as s:
@@ -1301,6 +1323,9 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
         await self.engine.dispose()
+        self.env_patcher.stop()
+        from config.settings import get_settings
+        get_settings.cache_clear()
 
     async def test_create_device_commit_makes_operation_visible_to_second_session(self):
         """Verify that create_device followed by session.commit makes create_peer visible to independent session."""
@@ -1378,6 +1403,52 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             # Profile must NOT have been converted to create_failed because APIOperation was in 'processing'
             self.assertEqual(p.provisioning_status, "pending_create")
 
+
+    async def test_38_postgres_cleanup_claim_concurrency_interleaving(self):
+        """Prove that cleanup skipping logic works even if claim_api_operations executes concurrently."""
+        from database.models import VPNProfile, APIOperation
+        from services.workers.cleanup import _cleanup_stuck_profiles
+        from services.api_operations_queue import claim_api_operations
+        import asyncio
+        from unittest.mock import patch
+        from datetime import datetime, timezone, timedelta
+
+        async with self.sessions.begin() as s:
+            old_time = datetime.now(timezone.utc) - timedelta(hours=2)
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Stuck Concurrent",
+                client_name="tg_conc_987",
+                provisioning_status="pending_create",
+                created_at=old_time,
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="pending",
+                idempotency_key=f"create-peer:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        with patch("services.workers.cleanup.session_scope", side_effect=self.sessions):
+            cleanup_task = asyncio.create_task(_cleanup_stuck_profiles())
+            claim_task = asyncio.create_task(claim_api_operations(worker_id="test-worker", limit=10, session_factory=self.sessions))
+            await asyncio.gather(cleanup_task, claim_task)
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            self.assertEqual(p.provisioning_status, "pending_create")
+            o = await s.get(APIOperation, op_id)
+            self.assertEqual(o.status, "processing")
+            self.assertEqual(o.locked_by, "test-worker")
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         rendered, builder = await _build_connections_screen(
             user=user,
             session=session,
+            profiles=[],
             read_only=False,
         )
         markup = builder.as_markup()

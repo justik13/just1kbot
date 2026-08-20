@@ -49,23 +49,6 @@ _last_old_cleanup: float = 0.0
 
 
 
-EXECUTABLE_DELETE_REASONS = frozenset(
-    {
-        "create_device_rollback_failed",
-        "device_delete_api_failed",
-        "ban_delete",
-        "chargeback_delete",
-        "grace_delete",
-        "server_delete",
-    }
-)
-
-
-def _is_executable_pending_deletion(reason: str | None) -> bool:
-    """Allow only deletion reasons produced by confirmed bot workflows."""
-    return reason in EXECUTABLE_DELETE_REASONS
-
-
 def _safe_log_value(value, limit=64):
     text = str(value or "unknown")
     sanitized = "".join(
@@ -293,8 +276,8 @@ async def _cleanup_stuck_profiles():
                 continue
 
             if profile.peer_id:
-                server = await session.get(Server, profile.server_id)
                 try:
+                    server = await session.get(Server, profile.server_id)
                     from services.api_operations_queue import ensure_delete_operation
                     await ensure_delete_operation(
                         session,

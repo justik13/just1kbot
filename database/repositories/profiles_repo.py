@@ -21,10 +21,10 @@ PROFILE_LIST_HIDDEN_STATUSES = (
 )
 
 # Lifecycle states excluded from active quota / capacity count calculations.
+# delete_failed and create_cleanup_pending still have active server peers,
+# so they MUST consume quota to prevent downgrade exploits.
 PROFILE_QUOTA_EXCLUDED_STATUSES = (
     "deleting",
-    "create_cleanup_pending",
-    "delete_failed",
     "create_failed",
 )
 
@@ -35,10 +35,8 @@ ALLOWED_DELETE_STATES = frozenset({
     "update_failed",
     "create_failed",
     "delete_failed",
+    "create_cleanup_pending",
 })
-
-# Retained for backward compatibility with quota-checking queries
-NON_VISIBLE_PROFILE_STATUSES = PROFILE_QUOTA_EXCLUDED_STATUSES
 
 
 def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
@@ -114,7 +112,7 @@ async def get_user_profiles_count(
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
+            VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES)
         )
     result = await session.execute(stmt)
     return result.scalar_one()
