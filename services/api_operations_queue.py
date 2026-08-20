@@ -287,21 +287,46 @@ async def claim_api_operations(
     claimed: list[ClaimedAPIOperation] = []
     async with _transaction(session_factory) as session:
         now = now_utc()
-        exhausted = (await session.execute(select(APIOperation).where(
-            APIOperation.status.in_(("pending", "retry")),
-            APIOperation.attempts >= APIOperation.max_attempts,
-        ).with_for_update(skip_locked=True))).scalars().all()
-        for operation in exhausted:
-            previous_error_code = operation.last_error_code
-            previous_status = operation.status
-            await _sync_terminal_profile(session, operation,
-                previous_error_code=previous_error_code,
-                previous_status=previous_status)
-            operation.status = "dead"
-            operation.completed_at = now
-            operation.updated_at = now
-            operation.last_error_code = "max_attempts_exhausted"
-            operation.locked_at = operation.locked_by = None
+        exhausted_candidates = (
+            await session.execute(
+                select(APIOperation.id, APIOperation.profile_id).where(
+                    APIOperation.status.in_(("pending", "retry")),
+                    APIOperation.attempts >= APIOperation.max_attempts,
+                )
+            )
+        ).all()
+        for op_id, profile_id in exhausted_candidates:
+            if profile_id is not None:
+                await session.execute(
+                    select(VPNProfile)
+                    .where(VPNProfile.id == profile_id)
+                    .with_for_update()
+                )
+            operation = (
+                await session.execute(
+                    select(APIOperation)
+                    .where(
+                        APIOperation.id == op_id,
+                        APIOperation.status.in_(("pending", "retry")),
+                        APIOperation.attempts >= APIOperation.max_attempts,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if operation:
+                previous_error_code = operation.last_error_code
+                previous_status = operation.status
+                await _sync_terminal_profile(
+                    session,
+                    operation,
+                    previous_error_code=previous_error_code,
+                    previous_status=previous_status,
+                )
+                operation.status = "dead"
+                operation.completed_at = now
+                operation.updated_at = now
+                operation.last_error_code = "max_attempts_exhausted"
+                operation.locked_at = operation.locked_by = None
         operations = (
             await session.execute(
                 select(APIOperation)
@@ -475,20 +500,40 @@ async def recover_stale_api_operations(
 
     retried = dead = 0
     async with _transaction(session_factory) as session:
-        operations = (
+        stale_candidates = (
             await session.execute(
-                select(APIOperation)
-                .where(
+                select(APIOperation.id, APIOperation.profile_id).where(
                     APIOperation.status == "processing",
                     or_(
                         APIOperation.locked_at.is_(None),
                         APIOperation.locked_at < func.now() - lease_timeout,
                     ),
                 )
-                .with_for_update(skip_locked=True)
             )
-        ).scalars().all()
-        for operation in operations:
+        ).all()
+        for op_id, profile_id in stale_candidates:
+            if profile_id is not None:
+                await session.execute(
+                    select(VPNProfile)
+                    .where(VPNProfile.id == profile_id)
+                    .with_for_update()
+                )
+            operation = (
+                await session.execute(
+                    select(APIOperation)
+                    .where(
+                        APIOperation.id == op_id,
+                        APIOperation.status == "processing",
+                        or_(
+                            APIOperation.locked_at.is_(None),
+                            APIOperation.locked_at < func.now() - lease_timeout,
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if not operation:
+                continue
             operation.locked_at = None
             operation.locked_by = None
             operation.updated_at = func.now()
@@ -501,9 +546,12 @@ async def recover_stale_api_operations(
                 retried += 1
             else:
                 previous_error_code = operation.last_error_code
-                await _sync_terminal_profile(session, operation,
+                await _sync_terminal_profile(
+                    session,
+                    operation,
                     previous_error_code=previous_error_code,
-                    previous_status="processing")
+                    previous_status="processing",
+                )
                 operation.status = "dead"
                 operation.completed_at = func.now()
                 operation.last_error_code = "stale_lease_max_attempts"

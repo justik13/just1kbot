@@ -2473,6 +2473,80 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             unchanged = await s.get(VPNProfile, active_id)
             self.assertEqual(unchanged.device_name, "Laptop #1")
 
+    async def test_62_postgres_claim_exhausted_sync_vs_finalizer_deadlock(self):
+        """Prove that claim_api_operations terminal sync and finalizer lock in same order without deadlock."""
+        from services.api_operations_finalizer import finalize_operation_failure
+        from services.api_operations_queue import claim_api_operations
+        import asyncio
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Concurrent Deadlock Probe",
+                client_name="tg_deadlock_probe",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-deadlock:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-1",
+                attempts=10,
+                max_attempts=10,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        # Concurrently execute finalize_operation_failure (which locks VPNProfile -> APIOperation)
+        # and claim_api_operations (which processes exhausted operations with VPNProfile -> APIOperation lock order)
+        async def run_finalizer():
+            try:
+                await finalize_operation_failure(
+                    op_id,
+                    worker_id="worker-1",
+                    expected_attempt_number=10,
+                    retryable=False,
+                    error_code="timeout",
+                    error_message="Network timed out",
+                    session_factory=self.sessions,
+                )
+                return "finalized"
+            except Exception as e:
+                return f"finalizer_err: {type(e).__name__}"
+
+        async def run_claim():
+            try:
+                await claim_api_operations(
+                    worker_id="worker-2",
+                    limit=10,
+                    session_factory=self.sessions,
+                )
+                return "claimed"
+            except Exception as e:
+                return f"claim_err: {type(e).__name__}"
+
+        res1, res2 = await asyncio.gather(run_finalizer(), run_claim())
+
+        # Neither result should contain a deadlock error
+        self.assertNotIn("Deadlock", res1)
+        self.assertNotIn("deadlock", res1)
+        self.assertNotIn("Deadlock", res2)
+        self.assertNotIn("deadlock", res2)
+
+        async with self.sessions() as s:
+            final_prof = await s.get(VPNProfile, prof_id)
+            final_op = await s.get(APIOperation, op_id)
+            self.assertIn(final_prof.provisioning_status, {"create_cleanup_pending", "create_failed"})
+            self.assertIn(final_op.status, {"dead", "retry"})
+
 
 if __name__ == "__main__":
     unittest.main()
