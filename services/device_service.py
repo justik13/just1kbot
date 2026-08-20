@@ -296,21 +296,20 @@ class DeviceService:
                     audit_reason="device_delete",
                 )
             else:
-                try:
-                    await ensure_delete_operation(
-                        session,
-                        idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-                        server_id=server_id,
-                        profile_id=profile.id,
-                        server_name_snapshot=server_name,
-                        api_url_snapshot=api_url,
-                        api_key_snapshot=api_key,
-                        peer_id=profile.peer_id,
-                        client_name=profile.client_name,
-                        audit_reason="device_delete_force",
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
+                # Force delete: ensure durable delete_peer is enqueued before removing local row.
+                # If enqueue fails, exception propagates to maintain fail-closed consistency.
+                await ensure_delete_operation(
+                    session,
+                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    server_id=server_id,
+                    profile_id=profile.id,
+                    server_name_snapshot=server_name,
+                    api_url_snapshot=api_url,
+                    api_key_snapshot=api_key,
+                    peer_id=profile.peer_id,
+                    client_name=profile.client_name,
+                    audit_reason="device_delete_force",
+                )
                 await session.delete(profile)
         else:
             await session.delete(profile)

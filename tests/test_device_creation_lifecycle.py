@@ -2628,6 +2628,217 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(del_op.api_url_snapshot, "http://10.99.99.1:9999")
             self.assertEqual(del_op.api_key_snapshot, "legacy-secret-key-99")
 
+    async def test_64_postgres_claim_vs_finalize_create_success_concurrent(self):
+        """Prove that claim_api_operations and finalize_create_success execute concurrently without deadlock or corruption."""
+        from services.api_operations_finalizer import finalize_create_success
+        from services.api_operations_queue import claim_api_operations
+        import asyncio
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Concurrent Create Probe",
+                client_name="tg_create_probe",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-concurrent-test:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-1",
+                attempts=1,
+                max_attempts=10,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        async def run_finalizer():
+            try:
+                await finalize_create_success(
+                    op_id,
+                    worker_id="worker-1",
+                    expected_attempt_number=1,
+                    peer_id="peer-created-123",
+                    raw_config="vpn://test-config-concurrent",
+                    sent_desired_version=1,
+                    sent_is_active=True,
+                    sent_expires_at=None,
+                    session_factory=self.sessions,
+                )
+                return "finalized"
+            except Exception as e:
+                return f"finalizer_err: {type(e).__name__}"
+
+        async def run_claim():
+            try:
+                claimed = await claim_api_operations(
+                    worker_id="worker-2",
+                    limit=10,
+                    session_factory=self.sessions,
+                )
+                return f"claimed_{len(claimed)}"
+            except Exception as e:
+                return f"claim_err: {type(e).__name__}"
+
+        res1, res2 = await asyncio.gather(run_finalizer(), run_claim())
+
+        self.assertNotIn("Deadlock", res1)
+        self.assertNotIn("deadlock", res1)
+        self.assertNotIn("Deadlock", res2)
+        self.assertNotIn("deadlock", res2)
+
+        async with self.sessions() as s:
+            final_prof = await s.get(VPNProfile, prof_id)
+            self.assertEqual(final_prof.peer_id, "peer-created-123")
+            self.assertEqual(final_prof.provisioning_status, "active")
+
+    async def test_65_postgres_recover_stale_vs_finalizer_concurrent(self):
+        """Prove that recover_stale_api_operations and finalize_operation_failure execute concurrently without deadlock."""
+        from services.api_operations_finalizer import finalize_operation_failure
+        from services.api_operations_queue import recover_stale_api_operations
+        from datetime import timedelta
+        import asyncio
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Concurrent Stale Probe",
+                client_name="tg_stale_probe",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-stale-test:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-stale-1",
+                attempts=1,
+                max_attempts=10,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        async def run_finalizer():
+            try:
+                await finalize_operation_failure(
+                    op_id,
+                    worker_id="worker-stale-1",
+                    expected_attempt_number=1,
+                    retryable=True,
+                    error_code="timeout",
+                    error_message="Gateway timeout",
+                    session_factory=self.sessions,
+                )
+                return "finalized"
+            except Exception as e:
+                return f"finalizer_err: {type(e).__name__}"
+
+        async def run_recover():
+            try:
+                retried, dead = await recover_stale_api_operations(
+                    lease_timeout=timedelta(seconds=0),
+                    session_factory=self.sessions,
+                )
+                return f"recovered_{retried}_{dead}"
+            except Exception as e:
+                return f"recover_err: {type(e).__name__}"
+
+        res1, res2 = await asyncio.gather(run_finalizer(), run_recover())
+
+        self.assertNotIn("Deadlock", res1)
+        self.assertNotIn("deadlock", res1)
+        self.assertNotIn("Deadlock", res2)
+        self.assertNotIn("deadlock", res2)
+
+    async def test_66_postgres_profile_deletion_vs_create_finalizer_concurrent(self):
+        """Prove that ProfileDeletionService and finalize_create_success coordinate cleanly under concurrency."""
+        from services.api_operations_finalizer import finalize_create_success
+        from services.profile_deletion_service import ProfileDeletionService
+        import asyncio
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Concurrent Delete-vs-Finalize",
+                client_name="tg_del_finalize_probe",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-del-fin-test:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-fin-1",
+                attempts=1,
+                max_attempts=10,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        async def run_delete():
+            try:
+                async with self.sessions.begin() as s:
+                    current_prof = await s.get(VPNProfile, prof_id)
+                    if current_prof:
+                        await ProfileDeletionService._delete_profiles(
+                            s, [current_prof], reason="user_unsubscribed", background=True
+                        )
+                return "deleted"
+            except Exception as e:
+                return f"del_err: {type(e).__name__}"
+
+        async def run_finalizer():
+            try:
+                await finalize_create_success(
+                    op_id,
+                    worker_id="worker-fin-1",
+                    expected_attempt_number=1,
+                    peer_id="peer-fin-999",
+                    raw_config="vpn://test-config-del-fin",
+                    sent_desired_version=1,
+                    sent_is_active=True,
+                    sent_expires_at=None,
+                    session_factory=self.sessions,
+                )
+                return "finalized"
+            except Exception as e:
+                return f"fin_err: {type(e).__name__}"
+
+        res1, res2 = await asyncio.gather(run_delete(), run_finalizer())
+
+        self.assertNotIn("Deadlock", res1)
+        self.assertNotIn("deadlock", res1)
+        self.assertNotIn("Deadlock", res2)
+        self.assertNotIn("deadlock", res2)
+
+        async with self.sessions() as s:
+            final_prof = await s.get(VPNProfile, prof_id)
+            if final_prof:
+                self.assertIn(final_prof.provisioning_status, {"deleting", "create_cleanup_pending"})
+                self.assertEqual(final_prof.peer_id, "peer-fin-999")
+
 
 if __name__ == "__main__":
     unittest.main()
