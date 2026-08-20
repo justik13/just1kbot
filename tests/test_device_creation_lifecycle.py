@@ -2202,7 +2202,8 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             op_id = op.id
 
-        with self.assertRaises(RuntimeError) as ctx:
+        from services.api_operations_queue import APIOperationOwnershipError
+        with self.assertRaises(APIOperationOwnershipError) as ctx:
             await finalize_create_success(
                 op_id,
                 worker_id="worker-1",  # Old worker
@@ -2214,7 +2215,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 sent_expires_at=None,
                 session_factory=self.sessions,
             )
-        self.assertIn("lease_lost", str(ctx.exception))
+        self.assertIn("not leased", str(ctx.exception))
 
     async def test_45_postgres_rename_device_process_with_for_update(self):
         """Rename device uses row-level lock and updates device_name atomically on PostgreSQL."""
