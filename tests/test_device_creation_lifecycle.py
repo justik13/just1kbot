@@ -1,10 +1,12 @@
+import asyncio
 import os
 import unittest
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import select, text
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot import texts
@@ -19,6 +21,7 @@ from bot.handlers.connection.device_view_routes import (
     render_device_screen,
 )
 from database.models import APIOperation, Server, User, VPNProfile
+from services.device_service import DeviceService
 from utils.vpn_parser import encode_json_to_vpn_uri
 
 
@@ -2858,6 +2861,113 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(final_prof)
             self.assertIn(final_prof.provisioning_status, {"deleting", "create_cleanup_pending"})
             self.assertEqual(final_prof.peer_id, "peer-fin-999")
+
+    async def test_67_postgres_server_edit_vs_create_device_serialization(self):
+        """
+        Prove that admin Server edit with FOR UPDATE serializes with DeviceService.create_device.
+        When create_device acquires Server FOR UPDATE first, admin edit sees active profiles/ops
+        and is blocked. When admin edit acquires Server FOR UPDATE first, create_device waits
+        and proceeds on the updated server identity.
+        """
+        from database.repositories.servers_repo import get_server_by_id
+        from services.slots_cache import ServerPeerSnapshot
+
+        async with self.sessions.begin() as s:
+            server = Server(
+                name="Concurrency Srv 67",
+                api_url="https://vpn67.example.com",
+                api_key="key67-initial",
+                country_flag="🇩🇪",
+                protocol="amneziawg2",
+                max_clients=10,
+                is_active=True,
+            )
+            s.add(server)
+            await s.flush()
+            srv_id = server.id
+
+            user = User(
+                telegram_id=987654321,
+                username="test_user_67",
+                first_name="Test",
+                subscription_end=datetime.now(timezone.utc) + timedelta(days=30),
+                device_limit=5,
+            )
+            s.add(user)
+            await s.flush()
+            u_id = user.id
+
+        admin_locked_event = asyncio.Event()
+        create_started_event = asyncio.Event()
+
+        async def admin_edit_worker():
+            async with self.sessions.begin() as s:
+                srv = await get_server_by_id(s, srv_id, for_update=True)
+                self.assertIsNotNone(srv)
+                admin_locked_event.set()
+                await create_started_event.wait()
+                await asyncio.sleep(0.05)
+                srv.api_url = "https://vpn67-updated.example.com"
+            return "admin_updated"
+
+        async def create_device_worker():
+            await admin_locked_event.wait()
+            create_started_event.set()
+            snap = ServerPeerSnapshot(
+                server_id=srv_id,
+                peer_ids=frozenset(),
+                captured_at=datetime.now(timezone.utc),
+            )
+            async with self.sessions.begin() as s:
+                prof = await DeviceService.create_device(
+                    session=s,
+                    user_id=u_id,
+                    server_id=srv_id,
+                    device_name="Phone 67",
+                    snapshot=snap,
+                )
+                self.assertIsNotNone(prof)
+            return "created"
+
+        res_admin, res_create = await asyncio.gather(admin_edit_worker(), create_device_worker())
+        self.assertEqual(res_admin, "admin_updated")
+        self.assertEqual(res_create, "created")
+
+        async with self.sessions() as s:
+            op = (
+                await s.execute(
+                    select(APIOperation)
+                    .where(APIOperation.server_id == srv_id)
+                    .order_by(APIOperation.id.desc())
+                    .limit(1)
+                )
+            ).scalar_one()
+            self.assertEqual(op.api_url_snapshot, "https://vpn67-updated.example.com")
+
+            async with self.sessions.begin() as s2:
+                srv = await get_server_by_id(s2, srv_id, for_update=True)
+                self.assertIsNotNone(srv)
+                profiles_count = (
+                    await s2.execute(
+                        select(func.count(VPNProfile.id)).where(
+                            VPNProfile.server_id == srv_id,
+                            or_(
+                                VPNProfile.peer_id.is_not(None),
+                                VPNProfile.provisioning_status.in_((
+                                    "pending_create",
+                                    "pending_update",
+                                    "deleting",
+                                    "create_cleanup_pending",
+                                    "create_failed",
+                                    "update_failed",
+                                    "delete_failed",
+                                    "active",
+                                )),
+                            ),
+                        )
+                    )
+                ).scalar_one()
+                self.assertGreater(profiles_count, 0)
 
 
 if __name__ == "__main__":

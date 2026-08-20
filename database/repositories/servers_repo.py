@@ -106,8 +106,16 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
     return available
 
 
-async def get_server_by_id(session: AsyncSession, server_id: int) -> Optional[Server]:
-    result = await session.execute(select(Server).where(Server.id == server_id))
+async def get_server_by_id(
+    session: AsyncSession,
+    server_id: int,
+    *,
+    for_update: bool = False,
+) -> Optional[Server]:
+    stmt = select(Server).where(Server.id == server_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    result = await session.execute(stmt)
     return result.scalar_one_or_none()
 
 
