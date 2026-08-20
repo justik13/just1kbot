@@ -209,11 +209,10 @@ async def rename_device_process(
             return
 
     old_name = profile.device_name
-    from unittest.mock import AsyncMock as _AsyncMock
     from sqlalchemy.exc import IntegrityError
     try:
         begin_nested_fn = getattr(session, "begin_nested", None)
-        if callable(begin_nested_fn) and not isinstance(begin_nested_fn, _AsyncMock):
+        if callable(begin_nested_fn) and not getattr(begin_nested_fn, "_mock_name", None) and type(begin_nested_fn).__name__ != "AsyncMock":
             async with session.begin_nested():
                 await update_profile(
                     session,
