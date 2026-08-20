@@ -100,16 +100,15 @@ async def cleanup_dangling_peers_loop(
                 e,
                 exc_info=True,
             )
-            if event.is_set():
-                break
-            try:
-                await asyncio.wait_for(
-                    event.wait(),
-                    timeout=CLEANUP_LOOP_INTERVAL,
-                )
-                break
-            except asyncio.TimeoutError:
-                continue
+
+        try:
+            await asyncio.wait_for(
+                event.wait(),
+                timeout=CLEANUP_LOOP_INTERVAL,
+            )
+            break
+        except asyncio.TimeoutError:
+            continue
 
     logger.info("Cleanup worker stopped gracefully")
 
