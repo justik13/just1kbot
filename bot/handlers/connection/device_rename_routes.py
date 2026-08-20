@@ -164,16 +164,29 @@ async def rename_device_process(
 
     base_new_name = message.text.strip()
 
-    if (
-        not base_new_name
-        or len(base_new_name) > 16
-        or not DEVICE_NAME_REGEX.match(base_new_name)
-    ):
-        await state.clear()
+    if not base_new_name:
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_INVALID_DEVICE_NAME,
+            "⚠️ Имя устройства не может быть пустым.\n\nПожалуйста, введите имя устройства (от 1 до 16 символов):",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
+
+    if len(base_new_name) > 16:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"⚠️ Имя слишком длинное ({len(base_new_name)} из 16 символов).\n\nПожалуйста, введите имя покороче (максимум 16 символов):",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
+
+    if not DEVICE_NAME_REGEX.match(base_new_name):
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "⚠️ Имя содержит недопустимые символы.\n\nРазрешены только буквы, цифры, пробелы, дефисы, подчёркивания и знак #.\n\nПопробуйте ещё раз:",
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
@@ -193,11 +206,10 @@ async def rename_device_process(
             and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
-            await state.clear()
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.DEVICE_NAME_DUPLICATE.format(device_name=safe(new_name)),
+                f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует на этой локации.\n\nПожалуйста, введите другое имя:",
                 get_back_button(f"manage_device:{profile.id}"),
             )
             return

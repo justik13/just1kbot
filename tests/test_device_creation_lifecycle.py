@@ -641,6 +641,53 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_update.assert_called_once()
             self.assertEqual(mock_update.call_args.kwargs.get("device_name"), "Устройство #7")
             state.clear.assert_called_once()
+
+    async def test_16_c_rename_device_validation_errors_preserve_state_and_show_specific_message(self):
+        """rename_device_process preserves state and renders specific error when input is invalid or duplicate."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #11",
+            provisioning_status="active",
+            peer_id="peer1",
+            raw_config="vpn://valid",
+            is_active=True,
+        )
+
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.from_user.id = 100
+        message.text = "ThisNameIsWayTooLongForADevice123"
+        message.delete = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+        
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = active_profile
+        session = AsyncMock()
+        session.execute.return_value = mock_result
+
+        captured = {}
+        async def mock_render_hub(_bot, _chat_id, text, _kb, **_kwargs):
+            captured["text"] = text
+
+        with (
+            patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
+            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+        ):
+            await rename_device_process(message, state, session, db_user)
+
+            self.assertFalse(state.clear.called)
+            self.assertIn("слишком длинное", captured.get("text", ""))
     async def test_17_expired_subscription_with_pending_create_hides_delete_button(self):
         """Expired subscription with pending_create hides Delete button in render_device_screen."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
