@@ -1941,8 +1941,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             expected_attempt_number=1,
             error_code="duplicate_exact_client_name",
             error_message="Multiple exact client names found on server",
-            should_retry=False,
-            next_attempt_at=None,
+            retryable=False,
             session_factory=self.sessions,
         )
 
@@ -1986,8 +1985,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             expected_attempt_number=1,
             error_code="cleanup_peer_identity_mismatch",
             error_message="Peer identity mismatch during reconciliation",
-            should_retry=False,
-            next_attempt_at=None,
+            retryable=False,
             session_factory=self.sessions,
         )
 
