@@ -178,9 +178,12 @@ async def rename_device_process(
         )
         return
 
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    new_name = f"{base_new_name}{slot_suffix}"
+    if re.search(r'#\d+$', base_new_name):
+        new_name = base_new_name
+    else:
+        m = re.search(r'#(\d+)$', profile.device_name)
+        slot_suffix = f" #{m.group(1)}" if m else ""
+        new_name = f"{base_new_name}{slot_suffix}"
 
     existing_profiles = await get_user_profiles(session, db_user.id)
 

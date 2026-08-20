@@ -589,6 +589,58 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertIn("show_config:42", buttons)
             self.assertIn("download_conf:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
+
+    async def test_16_b_rename_device_accepts_hash_and_custom_number(self):
+        """rename_device_process accepts names with '#' like 'Устройство #7' without double-suffixing."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        active_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #11",
+            provisioning_status="active",
+            peer_id="peer1",
+            raw_config="vpn://valid",
+            is_active=True,
+            traffic_down=100,
+            traffic_up=200,
+            last_connected=None,
+        )
+
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.from_user.id = 100
+        message.text = "Устройство #7"
+        message.delete = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+        
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = active_profile
+        session = AsyncMock()
+        session.execute.return_value = mock_result
+
+        mock_update = AsyncMock()
+
+        with (
+            patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
+            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
+            patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
+            patch("bot.handlers.connection.device_rename_routes.update_profile", new=mock_update),
+            patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
+            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()),
+            patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
+        ):
+            await rename_device_process(message, state, session, db_user)
+
+            mock_update.assert_called_once()
+            self.assertEqual(mock_update.call_args.kwargs.get("device_name"), "Устройство #7")
+            state.clear.assert_called_once()
     async def test_17_expired_subscription_with_pending_create_hides_delete_button(self):
         """Expired subscription with pending_create hides Delete button in render_device_screen."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
