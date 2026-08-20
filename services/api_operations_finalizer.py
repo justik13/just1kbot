@@ -82,13 +82,11 @@ async def finalize_create_success(
         compensation_required = False
         if profile is None:
             compensation_required = True
-        elif profile.provisioning_status in {"create_failed", "deleting"}:
+        elif profile.provisioning_status not in {"pending_create", "active"}:
             profile.peer_id = peer_id
             if profile.provisioning_status != "deleting":
                 profile.provisioning_status = "create_cleanup_pending"
             compensation_required = True
-        elif profile.provisioning_status not in {"pending_create", "active"}:
-            raise RuntimeError("profile_not_create_finalizable")
         else:
             profile.peer_id = peer_id
             profile.raw_config = raw_config

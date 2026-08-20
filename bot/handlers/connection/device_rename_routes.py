@@ -3,12 +3,13 @@ import re
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button, get_device_keyboard
 from bot.states import DeviceManagementStates
-from database.models import User
+from database.models import User, VPNProfile
 from database.repositories.profiles_repo import (
     get_profile_by_id,
     get_user_profiles,
@@ -98,9 +99,28 @@ async def rename_device_process(
 
     data = await state.get_data()
     profile_id = data.get("profile_id")
+    if not profile_id or not db_user:
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_ACCESS_DENIED,
+            get_back_button("back_to_connections"),
+        )
+        return
 
-    profile = await get_profile_by_id(session, profile_id)
-    if not profile or not db_user or profile.user_id != db_user.id:
+    profile = (
+        await session.execute(
+            select(VPNProfile)
+            .where(
+                VPNProfile.id == profile_id,
+                VPNProfile.user_id == db_user.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if not profile:
         await state.clear()
         await render_hub(
             message.bot,

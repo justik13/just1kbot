@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.keyboards import get_back_button
 from config.settings import get_settings
 from database.models import User
 from services.subscription_token_service import SubscriptionTokenService
@@ -65,7 +66,12 @@ async def show_incy_subscription(
     await state.clear()
 
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.ERROR_USER_NOT_FOUND,
+            get_back_button("back_to_connections"),
+        )
         return
 
     settings = get_settings()

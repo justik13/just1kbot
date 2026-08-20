@@ -179,8 +179,16 @@ async def start_add_device(
         return
 
     if len(servers) == 1:
-        await state.set_state(DeviceCreationStates.choose_server)
-        return await _process_server_selection(callback, state, session, servers[0].id, user)
+        if user_id in _creating_devices:
+            await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            return
+        _creating_devices[user_id] = True
+        try:
+            await callback.answer(show_alert=False)
+            await state.set_state(DeviceCreationStates.choose_server)
+            return await _process_server_selection(callback, state, session, servers[0].id, user)
+        finally:
+            _creating_devices.pop(user_id, None)
 
     builder = InlineKeyboardBuilder()
 
@@ -214,17 +222,30 @@ async def select_server(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
-    server_id = parse_callback_id(callback.data, 1)
-
-    if server_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L207_1, show_alert=True)
-        _creating_devices.pop(callback.from_user.id, None)
-        await state.clear()
+    telegram_user_id = callback.from_user.id
+    if telegram_user_id in _creating_devices:
+        await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
         return
 
-    user = db_user or await get_user_by_telegram_id(session, callback.from_user.id)
-    return await _process_server_selection(callback, state, session, server_id, user)
+    _creating_devices[telegram_user_id] = True
+    try:
+        await callback.answer(show_alert=False)
+        server_id = parse_callback_id(callback.data, 1)
+
+        if server_id is None:
+            await render_hub(
+                callback.bot,
+                callback.message.chat.id,
+                texts.ERROR_LOCATION_NOT_FOUND,
+                get_back_button("add_device"),
+            )
+            await state.clear()
+            return
+
+        user = db_user or await get_user_by_telegram_id(session, telegram_user_id)
+        return await _process_server_selection(callback, state, session, server_id, user)
+    finally:
+        _creating_devices.pop(telegram_user_id, None)
 
 
 async def _process_server_selection(
@@ -242,7 +263,6 @@ async def _process_server_selection(
         await _render_maintenance(
             callback.message, session, back_to="back_to_connections"
         )
-        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
@@ -257,15 +277,18 @@ async def _process_server_selection(
             texts.ERROR_NO_SUBSCRIPTION,
             _get_no_subscription_keyboard(),
         )
-        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
 
     server = await get_server_by_id(session, server_id)
 
     if not server:
-        await callback.answer(texts.ERROR_LOCATION_NOT_FOUND, show_alert=True)
-        _creating_devices.pop(telegram_user_id, None)
+        await render_hub(
+            callback.bot,
+            callback.message.chat.id,
+            texts.ERROR_LOCATION_NOT_FOUND,
+            get_back_button("add_device"),
+        )
         await state.clear()
         return
 
@@ -276,20 +299,8 @@ async def _process_server_selection(
             texts.ERROR_SERVER_DISABLED,
             get_back_button("add_device"),
         )
-        _creating_devices.pop(telegram_user_id, None)
         await state.clear()
         return
-        
-    if telegram_user_id in _creating_devices:
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.DEVICE_CREATE_IN_PROGRESS,
-            get_back_button("add_device"),
-        )
-        return
-
-    _creating_devices[telegram_user_id] = True
 
     try:
         all_profiles = await get_user_profiles(session, user.id, include_deleting=True)

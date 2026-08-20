@@ -18,7 +18,7 @@ from bot.handlers.connection.device_view_routes import (
     manage_device,
     render_device_screen,
 )
-from database.models import APIOperation, Server, User
+from database.models import APIOperation, Server, User, VPNProfile
 from utils.vpn_parser import encode_json_to_vpn_uri
 
 
@@ -324,16 +324,16 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_7_duplicate_create_click_blocked_by_cache(self):
         """Second click while device is being created is ignored via _creating_devices lock."""
+        from bot.handlers.connection.device_create_routes import select_server
         _creating_devices[999] = True
         callback = MagicMock()
         callback.from_user.id = 999
+        callback.data = "select_server:1"
         callback.answer = AsyncMock()
 
         try:
-            with patch("bot.handlers.connection.device_create_routes.render_hub") as mock_render_hub:
-                await _process_server_selection(callback, AsyncMock(), AsyncMock(), server_id=1, user=SimpleNamespace(id=1, telegram_id=999))
-                self.assertTrue(mock_render_hub.called)
-                self.assertEqual(mock_render_hub.call_args[0][2], texts.DEVICE_CREATE_IN_PROGRESS)
+            await select_server(callback, AsyncMock(), AsyncMock())
+            callback.answer.assert_called_once_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
         finally:
             _creating_devices.pop(999, None)
 
@@ -543,14 +543,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        pending_profile = SimpleNamespace(
+        active_profile = SimpleNamespace(
             id=42,
             user_id=1,
             server_id=10,
             device_name="Старое #1",
-            provisioning_status="pending_create",
-            peer_id=None,
-            raw_config=None,
+            provisioning_status="active",
+            peer_id="peer-123",
+            raw_config=_make_valid_vpn_uri(),
             is_active=True,
         )
 
@@ -562,7 +562,11 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
+        
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
+        session.execute.return_value = mock_result
 
         captured = {}
         async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
@@ -570,9 +574,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             captured["keyboard"] = keyboard
 
         with (
-            patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=pending_profile)),
+            patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
             patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
-            patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[pending_profile])),
+            patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
             patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
@@ -582,10 +586,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("keyboard", captured)
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            # Since pending_create: no show_config, no download_conf, no delete
-            self.assertNotIn("show_config:42", buttons)
-            self.assertNotIn("download_conf:42", buttons)
-            self.assertNotIn("request_delete_device:42", buttons)
+            self.assertIn("show_config:42", buttons)
+            self.assertIn("download_conf:42", buttons)
+            self.assertIn("request_delete_device:42", buttons)
     async def test_17_expired_subscription_with_pending_create_hides_delete_button(self):
         """Expired subscription with pending_create hides Delete button in render_device_screen."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
@@ -1254,6 +1257,164 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_create_device.assert_called_once()
             self.assertEqual(mock_create_device.call_args.kwargs["device_name"], "Устройство #3")
 
+    async def test_40_rename_device_process_with_for_update_rejects_deleting(self):
+        """rename_device_process rejects deleting profile and clears state."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.from_user.id = 100
+        message.text = "My Phone"
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+        session = AsyncMock()
+
+        deleting_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Устройство #1",
+            provisioning_status="deleting",
+        )
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = deleting_profile
+        session.execute = AsyncMock(return_value=mock_result)
+
+        with patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()) as mock_render_hub:
+            await rename_device_process(message, state, session, db_user=db_user)
+
+            state.clear.assert_called_once()
+            self.assertTrue(mock_render_hub.called)
+            self.assertIn("удаляется", mock_render_hub.call_args.args[2])
+
+    async def test_41_cleanup_stuck_profile_persists_peer_id_on_model(self):
+        """_cleanup_stuck_profiles persists peer_id recovered from APIOperation on profile model."""
+        from services.workers.cleanup import _cleanup_stuck_profiles
+
+        stuck_profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            client_name="tg_stuck",
+            peer_id=None,
+            provisioning_status="create_cleanup_pending",
+            last_sync_error=None,
+        )
+
+        mock_prof_res = MagicMock()
+        mock_prof_res.scalars.return_value.all.return_value = [stuck_profile]
+
+        mock_op_active = MagicMock()
+        mock_op_active.scalar_one_or_none.return_value = None
+
+        mock_op_peer = MagicMock()
+        mock_op_peer.scalar_one_or_none.return_value = "peer_recovered_123"
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_op_active, mock_op_peer])
+        mock_session.get = AsyncMock(return_value=SimpleNamespace(id=10, name="S1", api_url="http://s1", api_key="k1"))
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.workers.cleanup.session_scope", return_value=mock_scope),
+            patch("services.api_operations_queue.ensure_delete_operation", new=AsyncMock()) as mock_ensure_del,
+        ):
+            await _cleanup_stuck_profiles()
+
+            # Must set profile.peer_id = peer_id
+            self.assertEqual(stuck_profile.peer_id, "peer_recovered_123")
+            self.assertEqual(stuck_profile.provisioning_status, "deleting")
+            mock_ensure_del.assert_called_once()
+            self.assertEqual(mock_ensure_del.call_args.kwargs["peer_id"], "peer_recovered_123")
+
+    async def test_42_execute_create_reconciliation_cleans_orphan_for_create_failed(self):
+        """_execute_create cleans up exact orphan on Amnezia when profile is create_failed."""
+        from services.api_operations_executor import _execute_create
+
+        op = SimpleNamespace(
+            id=1,
+            client_name="tg_orphan",
+            peer_id=None,
+            attempt_number=2,
+            last_error_code="create_timeout",
+            locked_by="worker-1",
+            server_id=10,
+            profile_id=42,
+        )
+
+        mock_client = AsyncMock()
+        mock_client.get_all_clients = AsyncMock(
+            return_value=[SimpleNamespace(id="peer_orphan_99", clientName="tg_orphan")]
+        )
+        mock_client.delete_user_result = AsyncMock(return_value=SimpleNamespace(ok=True))
+
+        mock_prof = SimpleNamespace(
+            provisioning_status="create_failed",
+            desired_version=1,
+            desired_is_active=True,
+            desired_expires_at=None,
+            peer_id=None,
+            raw_config=None,
+        )
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_prof)
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.api_operations_executor.session_scope", return_value=mock_scope),
+            patch("services.api_operations_executor.finalize_create_cancelled", new=AsyncMock(return_value=True)) as mock_cancel,
+        ):
+            res = await _execute_create(op, mock_client)
+
+            mock_client.delete_user_result.assert_called_once_with("peer_orphan_99")
+            mock_cancel.assert_called_once()
+            self.assertFalse(mock_cancel.call_args.kwargs["delete_profile"])
+
+    async def test_43_select_server_concurrency_double_click_fences_immediately(self):
+        """select_server rejects with DEVICE_CREATE_IN_PROGRESS if user already in _creating_devices."""
+        from bot.handlers.connection.device_create_routes import _creating_devices, select_server
+
+        callback = MagicMock()
+        callback.from_user.id = 999
+        callback.answer = AsyncMock()
+        state = AsyncMock()
+        session = AsyncMock()
+
+        _creating_devices[999] = True
+        try:
+            await select_server(callback, state, session)
+            callback.answer.assert_called_once_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+        finally:
+            _creating_devices.pop(999, None)
+
+    async def test_44_show_incy_subscription_missing_user_renders_hub(self):
+        """show_incy_subscription renders error hub when db_user is None."""
+        from bot.handlers.connection.incy_routes import show_incy_subscription
+
+        callback = MagicMock()
+        callback.from_user.id = 100
+        callback.bot = MagicMock()
+        callback.message.chat.id = 100
+        callback.answer = AsyncMock()
+        state = AsyncMock()
+        session = AsyncMock()
+
+        with patch("bot.handlers.connection.incy_routes.render_hub", new=AsyncMock()) as mock_render:
+            await show_incy_subscription(callback, state, session, db_user=None)
+
+            callback.answer.assert_called_once_with(show_alert=False)
+            mock_render.assert_called_once()
+            self.assertEqual(mock_render.call_args.args[2], texts.ERROR_USER_NOT_FOUND)
+
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -1505,6 +1666,81 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             p = await s.get(VPNProfile, prof_id)
             self.assertEqual(p.provisioning_status, "create_cleanup_pending")
             self.assertEqual(p.peer_id, "peer-123")
+
+    async def test_45_postgres_rename_device_process_with_for_update(self):
+        """Rename device uses row-level lock and updates device_name atomically on PostgreSQL."""
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Old Device #1",
+                client_name="tg_rename_test",
+                provisioning_status="active",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 987654
+        message.from_user.id = 987654
+        message.text = "New Device Name"
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": prof_id})
+        db_user = SimpleNamespace(id=self.uid, telegram_id=987654)
+
+        async with self.sessions.begin() as session:
+            with (
+                patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
+                patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()) as mock_hub,
+            ):
+                await rename_device_process(message, state, session, db_user=db_user)
+                self.assertTrue(mock_hub.called)
+
+        async with self.sessions() as s:
+            updated = await s.get(VPNProfile, prof_id)
+            self.assertEqual(updated.device_name, "New Device Name #1")
+
+    async def test_46_profile_deletion_no_deadlock_with_finalizer(self):
+        """ProfileDeletionService._delete_profiles does not deadlock with finalizer locking on PostgreSQL."""
+        from services.profile_deletion_service import ProfileDeletionService
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Delete Deadlock Test #1",
+                client_name="tg_del_deadlock",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="pending",
+                idempotency_key=f"create-peer:{prof_id}:v1",
+                server_id=self.sid,
+                profile_id=prof_id,
+                attempts=0,
+            )
+            s.add(op)
+            await s.flush()
+
+        async with self.sessions.begin() as session:
+            count = await ProfileDeletionService.delete_profiles_for_user(
+                session, self.uid, reason="user_banned"
+            )
+            self.assertEqual(count, 1)
+
+        async with self.sessions() as s:
+            deleted_prof = await s.get(VPNProfile, prof_id)
+            self.assertIsNone(deleted_prof)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -65,7 +65,6 @@ class ProfileDeletionService:
                             APIOperation.profile_id == profile.id,
                             APIOperation.operation_type == "create_peer",
                         )
-                        .with_for_update()
                     )
                 ).scalar_one_or_none()
                 if create and create.status in {"dead", "cancelled"}:
@@ -90,7 +89,6 @@ class ProfileDeletionService:
                             APIOperation.profile_id == profile.id,
                             APIOperation.operation_type == "create_peer",
                         )
-                        .with_for_update()
                     )
                 ).scalar_one_or_none()
                 risk = (

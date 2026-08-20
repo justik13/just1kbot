@@ -286,6 +286,7 @@ async def _cleanup_stuck_profiles():
                 peer_id = op_res.scalar_one_or_none()
 
             if peer_id:
+                profile.peer_id = peer_id
                 try:
                     server = await session.get(Server, profile.server_id)
                     from services.api_operations_queue import ensure_delete_operation

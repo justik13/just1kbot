@@ -118,7 +118,7 @@ async def _execute_create(op, client):
             existing_peer_id = profile.peer_id
             has_config = bool(profile.raw_config)
     needs_reconciliation = (
-        profile_state in {"missing", "deleting", "create_cleanup_pending"}
+        profile_state in {"missing", "deleting", "create_cleanup_pending", "create_failed"}
         or op.attempt_number > 1 or bool(op.peer_id)
         or op.last_error_code in {"create_ambiguous_reconcile", "invalid_created_config_cleanup"}
     )
@@ -150,7 +150,7 @@ async def _execute_create(op, client):
         if profile_state == "active" and exact and exact[0].id == existing_peer_id and has_config:
             return await finalize_existing_create_success(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number)
-        if profile_state in {"missing", "deleting"}:
+        if profile_state in {"missing", "deleting", "create_failed"}:
             decision = _select_create_cleanup_target(clients=clients,
                 saved_peer_id=op.peer_id, expected_client_name=op.client_name,
                 allow_name_only_reconciliation=(op.attempt_number > 1 or bool(op.last_error_code)))
@@ -163,7 +163,7 @@ async def _execute_create(op, client):
                     return await _fail(op, retryable=deleted.retryable, code=_error_code(deleted))
             return await finalize_create_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number,
-                reason=f"profile_{profile_state}", delete_profile=True)
+                reason=f"profile_{profile_state}", delete_profile=(profile_state != "create_failed"))
         if profile_state != "pending_create":
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="profile_not_pending_create")
