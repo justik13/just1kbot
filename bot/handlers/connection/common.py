@@ -16,6 +16,7 @@ from database.repositories.profiles_repo import (
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
+from services.subscription_token_service import SubscriptionTokenService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
@@ -28,6 +29,13 @@ DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_-]+$")
 _PROTOCOL_DISPLAY = {
     "amneziawg2": "AmneziaWG",
 }
+
+
+def can_show_incy_subscription(read_only: bool = False) -> bool:
+    """Check if INCY subscription button should be displayed."""
+    if read_only:
+        return False
+    return SubscriptionTokenService.is_enabled()
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
@@ -185,10 +193,11 @@ async def _build_connections_screen(
             callback_data="add_device",
         )
 
-    builder.button(
-        text="🔗 Добавить в INCY (iOS / Android) [🧪]",
-        callback_data="menu_incy_subscription",
-    )
+    if can_show_incy_subscription(read_only=read_only):
+        builder.button(
+            text="🔗 Добавить в INCY (iOS / Android) [🧪]",
+            callback_data="menu_incy_subscription",
+        )
 
     builder.button(
         text="🌐 Статус серверов",

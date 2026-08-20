@@ -10,6 +10,7 @@ from bot import texts
 from bot.keyboards import get_back_button
 from config.settings import get_settings
 from database.models import User
+from services.subscription import SubscriptionService
 from services.subscription_token_service import SubscriptionTokenService
 from utils.telegram import render_hub
 
@@ -62,10 +63,10 @@ async def show_incy_subscription(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     if not db_user:
+        await callback.answer(show_alert=False)
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -73,6 +74,17 @@ async def show_incy_subscription(
             get_back_button("back_to_connections"),
         )
         return
+
+    if not SubscriptionTokenService.is_enabled():
+        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
+        return
+
+    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
+    if not has_access:
+        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
+        return
+
+    await callback.answer(show_alert=False)
 
     settings = get_settings()
     token = await SubscriptionTokenService.get_or_create_token(session, db_user)
@@ -99,6 +111,15 @@ async def rotate_incy_subscription(
 
     if not db_user:
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        return
+
+    if not SubscriptionTokenService.is_enabled():
+        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
+        return
+
+    has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
+    if not has_access:
+        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
 
     try:
