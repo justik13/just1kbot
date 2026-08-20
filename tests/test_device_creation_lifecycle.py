@@ -569,6 +569,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
         session.execute.return_value = mock_result
+        nested_ctx = MagicMock()
+        nested_ctx.__aenter__ = AsyncMock()
+        nested_ctx.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_ctx)
 
         captured = {}
         async def mock_render_hub(_bot, _chat_id, text, keyboard, **_kwargs):
@@ -626,6 +630,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
         session.execute.return_value = mock_result
+        nested_ctx = MagicMock()
+        nested_ctx.__aenter__ = AsyncMock()
+        nested_ctx.__aexit__ = AsyncMock()
+        session.begin_nested = MagicMock(return_value=nested_ctx)
 
         mock_update = AsyncMock()
 
@@ -1309,6 +1317,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
@@ -1475,6 +1484,51 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_cancel.assert_called_once()
             self.assertFalse(mock_cancel.call_args.kwargs["delete_profile"])
 
+    async def test_42_b_first_attempt_exact_peer_enters_cleanup_recovery(self):
+        """An exact peer on the first failed attempt must remain recoverable."""
+        from services.api_operations_executor import _execute_create
+
+        op = SimpleNamespace(
+            id=2,
+            client_name="tg_first_attempt_orphan",
+            peer_id=None,
+            attempt_number=1,
+            last_error_code=None,
+            locked_by="worker-1",
+            server_id=10,
+            profile_id=42,
+        )
+        mock_client = AsyncMock()
+        mock_client.get_all_clients = AsyncMock(return_value=[
+            SimpleNamespace(id="peer-first-attempt", clientName=op.client_name)
+        ])
+        mock_client.delete_user_result = AsyncMock()
+        mock_prof = SimpleNamespace(
+            provisioning_status="create_failed",
+            desired_version=1,
+            desired_is_active=True,
+            desired_expires_at=None,
+            peer_id=None,
+            raw_config=None,
+        )
+        mock_session = AsyncMock()
+        mock_session.get = AsyncMock(return_value=mock_prof)
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with (
+            patch("services.api_operations_executor.session_scope", return_value=mock_scope),
+            patch("services.api_operations_executor.finalize_create_cancelled", new=AsyncMock()) as mock_cancel,
+            patch("services.api_operations_executor.finalize_operation_failure", new=AsyncMock()) as mock_fail,
+        ):
+            await _execute_create(op, mock_client)
+
+        mock_client.delete_user_result.assert_not_awaited()
+        mock_cancel.assert_not_awaited()
+        mock_fail.assert_awaited_once()
+        self.assertEqual(mock_fail.call_args.kwargs["error_code"], "cleanup_peer_identity_mismatch")
+
     async def test_43_select_server_concurrency_double_click_fences_immediately(self):
         """select_server rejects with DEVICE_CREATE_IN_PROGRESS if user already in _creating_devices."""
         from bot.handlers.connection.device_create_routes import _creating_devices, select_server
@@ -1609,6 +1663,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=target_profile)))
+        nested_ctx = MagicMock()
+        nested_ctx.__aenter__ = AsyncMock()
+        nested_ctx.__aexit__ = AsyncMock()
+        mock_session.begin_nested = MagicMock(return_value=nested_ctx)
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[target_profile, other_server_profile])),
@@ -1646,6 +1704,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             # 1. Stuck profiles query
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
@@ -1717,6 +1776,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         p2 = VPNProfile(id=2, user_id=1, server_id=10, device_name="Устройство #2", provisioning_status="deleting")
 
         mock_session = AsyncMock()
+        mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             # 1. select User FOR UPDATE
             MagicMock(scalar_one=MagicMock(return_value=user)),

@@ -534,10 +534,13 @@ def _validate_expected_attempt_number(expected_attempt_number: int) -> None:
 async def recover_stale_api_operations(
     *,
     lease_timeout: timedelta,
+    limit: int = 100,
     session_factory: SessionFactory | None = None,
 ) -> tuple[int, int]:
     if lease_timeout <= timedelta(0):
         raise APIOperationValidationError("lease_timeout must be positive")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise APIOperationValidationError("limit must be a positive integer")
     from sqlalchemy import func
 
     retried = dead = 0
@@ -550,7 +553,7 @@ async def recover_stale_api_operations(
                         APIOperation.locked_at.is_(None),
                         APIOperation.locked_at < func.now() - lease_timeout,
                     ),
-                )
+                ).order_by(APIOperation.id).limit(limit)
             )
         ).all()
         for op_id, profile_id in stale_candidates:

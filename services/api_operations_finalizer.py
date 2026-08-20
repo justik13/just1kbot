@@ -90,6 +90,9 @@ async def finalize_create_success(
     sent_desired_version: int,
     sent_is_active: bool,
     sent_expires_at: datetime | None,
+    server_name_snapshot: str | None = None,
+    api_url_snapshot: str | None = None,
+    api_key_snapshot: str | None = None,
     session_factory=None,
 ) -> None:
     """Atomically persist a previously validated CREATE result.
@@ -122,7 +125,13 @@ async def finalize_create_success(
                 profile.provisioning_status = "active"
             else:
                 profile.provisioning_status = "pending_update"
-                await _ensure_current_update(session, profile)
+                await _ensure_current_update(
+                    session,
+                    profile,
+                    server_name_snapshot=server_name_snapshot,
+                    api_url_snapshot=api_url_snapshot,
+                    api_key_snapshot=api_key_snapshot,
+                )
             _complete(operation)
 
     if compensation_required:
@@ -326,7 +335,14 @@ async def finalize_delete_success(
         _complete(operation)
 
 
-async def _ensure_current_update(session, profile):
+async def _ensure_current_update(
+    session,
+    profile,
+    *,
+    server_name_snapshot: str | None = None,
+    api_url_snapshot: str | None = None,
+    api_key_snapshot: str | None = None,
+):
     active = profile.desired_is_active
     from utils.datetime_helpers import is_permanent_subscription
     permanent = bool(
@@ -347,9 +363,19 @@ async def _ensure_current_update(session, profile):
         server_id=profile.server_id,
         profile_id=profile.id,
         peer_id=profile.peer_id,
-        server_name_snapshot=server.name if server else None,
-        api_url_snapshot=server.api_url if server else None,
-        api_key_snapshot=server.api_key if server else None,
+        # Keep follow-up mutations on the endpoint that created the peer.
+        server_name_snapshot=(
+            server_name_snapshot if server_name_snapshot is not None
+            else server.name if server else None
+        ),
+        api_url_snapshot=(
+            api_url_snapshot if api_url_snapshot is not None
+            else server.api_url if server else None
+        ),
+        api_key_snapshot=(
+            api_key_snapshot if api_key_snapshot is not None
+            else server.api_key if server else None
+        ),
         client_name=profile.client_name,
         payload={
             "desired_version": profile.desired_version,

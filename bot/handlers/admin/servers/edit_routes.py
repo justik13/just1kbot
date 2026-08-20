@@ -387,6 +387,8 @@ async def process_edit_server_url(
 
         return
 
+    validated_api_url = server.api_url
+    validated_api_key = server.api_key
     new_url = normalize_api_url(message.text)
 
     if len(new_url) > 500:
@@ -490,6 +492,31 @@ async def process_edit_server_url(
                 message.chat.id,
                 texts.ERROR_SERVER_NOT_FOUND,
                 get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
+
+        if (
+            server.api_url != validated_api_url
+            or server.api_key != validated_api_key
+        ):
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_OPERATION_CANCELLED,
+                get_back_button(f"admin_server_card:{server_id}"),
+            )
+            await state.clear()
+            return
+
+        existing = await get_server_by_api_url(session, new_url)
+        if existing and existing.id != server_id:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_DUPLICATE_URL.format(api_url=safe(new_url)),
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
             )
             await state.clear()
             return
@@ -654,6 +681,8 @@ async def process_edit_server_key(
 
         return
 
+    validated_api_url = server.api_url
+    validated_api_key = server.api_key
     new_key = message.text.strip()
     try:
         await message.delete()
@@ -728,6 +757,18 @@ async def process_edit_server_key(
                 message.chat.id,
                 texts.ERROR_SERVER_NOT_FOUND,
                 get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
+        if (
+            server.api_url != validated_api_url
+            or server.api_key != validated_api_key
+        ):
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_OPERATION_CANCELLED,
+                get_back_button(f"admin_server_card:{server_id}"),
             )
             await state.clear()
             return

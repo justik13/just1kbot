@@ -221,7 +221,10 @@ async def _execute_create(op, client):
         await finalize_create_success(op.id, worker_id=op.locked_by,
             expected_attempt_number=op.attempt_number, peer_id=created.id,
             raw_config=created.config, sent_desired_version=sent_version,
-            sent_is_active=True, sent_expires_at=expires)
+            sent_is_active=True, sent_expires_at=expires,
+            server_name_snapshot=getattr(op, "server_name_snapshot", None),
+            api_url_snapshot=getattr(op, "api_url_snapshot", None),
+            api_key_snapshot=getattr(op, "api_key_snapshot", None))
     except (RuntimeError, CreateCompensationRequired) as error:
         compensation = isinstance(error, CreateCompensationRequired)
         if not compensation and str(error) != "create_cancel_requested":
