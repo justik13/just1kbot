@@ -164,8 +164,11 @@ async def finalize_create_cancelled(
         operation, profile = await _lock_operation_and_profile(
             session, operation_id, worker_id, expected_attempt_number
         )
-        if profile and delete_profile:
-            await session.delete(profile)
+        if profile:
+            if delete_profile:
+                await session.delete(profile)
+            else:
+                profile.peer_id = None
         _complete(operation, "cancelled", reason)
 
 

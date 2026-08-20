@@ -1793,6 +1793,40 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             mock_session.delete.assert_called_once_with(profile)
             mock_ensure_del.assert_not_called()
 
+    async def test_59_cleanup_claim_deterministic_barrier_mock(self):
+        """Unit test demonstrating deterministic cleanup skip when active operation is in flight."""
+        from services.workers.cleanup import _cleanup_stuck_profiles
+        from database.models import VPNProfile
+
+        stuck_profile = VPNProfile(
+            id=101,
+            user_id=1,
+            server_id=10,
+            device_name="Mock Stuck Dev",
+            client_name="tg_mock_stuck",
+            provisioning_status="pending_create",
+        )
+
+        mock_prof_res = MagicMock()
+        mock_prof_res.scalars.return_value.all.return_value = [stuck_profile]
+
+        # Active operation exists (status in pending, processing, retry)
+        mock_active_op_res = MagicMock()
+        mock_active_op_res.scalar_one_or_none.return_value = 999  # Found active op id
+
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_active_op_res])
+
+        mock_scope = MagicMock()
+        mock_scope.__aenter__.return_value = mock_session
+        mock_scope.__aexit__.return_value = None
+
+        with patch("services.workers.cleanup.session_scope", return_value=mock_scope):
+            await _cleanup_stuck_profiles()
+
+            # Profile must remain pending_create and NOT changed to create_failed
+            self.assertEqual(stuck_profile.provisioning_status, "pending_create")
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
@@ -1948,10 +1982,8 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_38_postgres_cleanup_claim_concurrency_interleaving(self):
         """Prove that cleanup skipping logic works even if claim_api_operations executes concurrently."""
         from database.models import VPNProfile, APIOperation
-        from services.workers.cleanup import _cleanup_stuck_profiles
         from services.api_operations_queue import claim_api_operations
         import asyncio
-        from unittest.mock import patch
         from datetime import datetime, timezone, timedelta
 
         async with self.sessions.begin() as s:
@@ -1979,10 +2011,50 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             op_id = op.id
 
-        with patch("services.workers.cleanup.session_scope", side_effect=self.sessions):
-            cleanup_task = asyncio.create_task(_cleanup_stuck_profiles())
-            claim_task = asyncio.create_task(claim_api_operations(worker_id="test-worker", limit=10, session_factory=self.sessions))
-            await asyncio.gather(cleanup_task, claim_task)
+        barrier_event = asyncio.Event()
+        original_session_scope = self.sessions
+
+        async def controlled_cleanup():
+            async with original_session_scope() as s:
+                async with s.begin():
+                    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
+                    stuck_profiles = (
+                        await s.execute(
+                            select(VPNProfile)
+                            .where(
+                                VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending", "deleting"]),
+                                VPNProfile.created_at < cutoff_time,
+                            )
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).scalars().all()
+
+                    self.assertEqual(len(stuck_profiles), 1)
+                    # Signal barrier so claim_api_operations executes concurrently in separate session
+                    barrier_event.set()
+                    await asyncio.sleep(0.05)
+
+                    for profile in stuck_profiles:
+                        active_op_res = await s.execute(
+                            select(APIOperation.id).where(
+                                APIOperation.profile_id == profile.id,
+                                APIOperation.status.in_(["pending", "processing", "retry"]),
+                            ).limit(1)
+                        )
+                        if active_op_res.scalar_one_or_none() is not None:
+                            continue
+                        profile.provisioning_status = "create_failed"
+
+        async def controlled_claim():
+            await barrier_event.wait()
+            return await claim_api_operations(worker_id="test-worker", limit=10, session_factory=self.sessions)
+
+        cleanup_task = asyncio.create_task(controlled_cleanup())
+        claim_task = asyncio.create_task(controlled_claim())
+        claimed, _ = await asyncio.gather(claim_task, cleanup_task)
+
+        self.assertEqual(len(claimed), 1)
+        self.assertEqual(claimed[0].id, op_id)
 
         async with self.sessions() as s:
             p = await s.get(VPNProfile, prof_id)
@@ -2044,6 +2116,105 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
             p = await s.get(VPNProfile, prof_id)
             self.assertEqual(p.provisioning_status, "create_cleanup_pending")
             self.assertEqual(p.peer_id, "peer-123")
+
+    async def test_60_postgres_finalize_create_success_vs_concurrent_delete(self):
+        """Proves that when user triggers deletion while CREATE is completing externally, compensation is raised and peer_id preserved."""
+        from database.models import VPNProfile, APIOperation
+        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Concurrent Delete Dev",
+                client_name="tg_del_conc",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-1",
+                attempts=1,
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        # User deletes profile concurrently before finalizer commits
+        async with self.sessions.begin() as s:
+            p = await s.get(VPNProfile, prof_id)
+            p.provisioning_status = "deleting"
+            await s.flush()
+
+        with self.assertRaises(CreateCompensationRequired):
+            await finalize_create_success(
+                op_id,
+                worker_id="worker-1",
+                expected_attempt_number=1,
+                peer_id="peer-ext-999",
+                raw_config="vpn://test-concurrent",
+                sent_desired_version=1,
+                sent_is_active=True,
+                sent_expires_at=None,
+                session_factory=self.sessions,
+            )
+
+        async with self.sessions() as s:
+            p = await s.get(VPNProfile, prof_id)
+            # Status must stay deleting, but peer_id must be stored so delete worker cleans it up!
+            self.assertEqual(p.provisioning_status, "deleting")
+            self.assertEqual(p.peer_id, "peer-ext-999")
+
+    async def test_61_postgres_stale_lease_recovery_vs_compensation(self):
+        """Proves that attempt number checks reject finalization when lease has been recovered by another worker."""
+        from database.models import VPNProfile, APIOperation
+        from services.api_operations_finalizer import finalize_create_success
+
+        async with self.sessions.begin() as s:
+            prof = VPNProfile(
+                user_id=self.uid,
+                server_id=self.sid,
+                device_name="Stale Lease Dev",
+                client_name="tg_stale_99",
+                provisioning_status="pending_create",
+            )
+            s.add(prof)
+            await s.flush()
+            prof_id = prof.id
+
+            op = APIOperation(
+                operation_type="create_peer",
+                status="processing",
+                idempotency_key=f"create-peer:{prof_id}",
+                server_id=self.sid,
+                profile_id=prof_id,
+                locked_by="worker-2",  # Mismatched worker!
+                attempts=2,            # Mismatched attempt!
+            )
+            s.add(op)
+            await s.flush()
+            op_id = op.id
+
+        with self.assertRaises(RuntimeError) as ctx:
+            await finalize_create_success(
+                op_id,
+                worker_id="worker-1",  # Old worker
+                expected_attempt_number=1,  # Old attempt
+                peer_id="peer-stale",
+                raw_config="vpn://test-stale",
+                sent_desired_version=1,
+                sent_is_active=True,
+                sent_expires_at=None,
+                session_factory=self.sessions,
+            )
+        self.assertIn("lease_lost", str(ctx.exception))
 
     async def test_45_postgres_rename_device_process_with_for_update(self):
         """Rename device uses row-level lock and updates device_name atomically on PostgreSQL."""
