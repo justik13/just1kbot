@@ -1372,7 +1372,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("services.api_operations_executor.session_scope", return_value=mock_scope),
             patch("services.api_operations_executor.finalize_create_cancelled", new=AsyncMock(return_value=True)) as mock_cancel,
         ):
-            res = await _execute_create(op, mock_client)
+            await _execute_create(op, mock_client)
 
             mock_client.delete_user_result.assert_called_once_with("peer_orphan_99")
             mock_cancel.assert_called_once()
