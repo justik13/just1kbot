@@ -337,7 +337,8 @@ async def claim_api_operations(
                 )
             )
         ).all()
-        for op_id, profile_id in exhausted_candidates:
+        exhausted_sorted = sorted(exhausted_candidates, key=lambda r: (r.profile_id or 0, r.id))
+        for op_id, profile_id in exhausted_sorted:
             if profile_id is not None:
                 await session.execute(
                     select(VPNProfile)
@@ -556,7 +557,8 @@ async def recover_stale_api_operations(
                 ).order_by(APIOperation.id).limit(limit)
             )
         ).all()
-        for op_id, profile_id in stale_candidates:
+        stale_sorted = sorted(stale_candidates, key=lambda r: (r.profile_id or 0, r.id))
+        for op_id, profile_id in stale_sorted:
             if profile_id is not None:
                 await session.execute(
                     select(VPNProfile)

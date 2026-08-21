@@ -9,6 +9,8 @@ class TestAdminBroadcastFilters(unittest.TestCase):
     def test_get_next_batch_applies_audience_predicates(self):
         async def _test():
             session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
             mock_result = MagicMock()
             mock_result.all.return_value = [(1, 1000), (2, 2000)]
             session.execute.return_value = mock_result
@@ -47,6 +49,8 @@ class TestAdminBroadcastFilters(unittest.TestCase):
     def test_invalid_test_audience_does_not_broaden_query(self):
         async def _test():
             session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
             mock_result = MagicMock()
             mock_result.all.return_value = []
             session.execute.return_value = mock_result

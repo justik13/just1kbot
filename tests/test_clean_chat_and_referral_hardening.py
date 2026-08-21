@@ -23,6 +23,8 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
 
         state = MagicMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock(spec=User)
 
         with patch("bot.handlers.payment.balance_routes.render_hub", new_callable=AsyncMock) as mock_render:
@@ -42,6 +44,8 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         state = MagicMock(spec=FSMContext)
         state.get_data = AsyncMock(return_value={"balance_minimum": 100})
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock(spec=User)
 
         with patch("bot.handlers.payment.balance_routes.render_hub", new_callable=AsyncMock) as mock_render:
@@ -62,6 +66,8 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         state.get_data = AsyncMock(return_value={"balance_minimum": 100})
         state.clear = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock(spec=User)
 
         with patch("bot.handlers.payment.balance_routes._create_and_render_topup", new_callable=AsyncMock) as mock_create:
@@ -84,6 +90,8 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         state.clear = AsyncMock()
         command = MagicMock(args=None)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         dummy_user = User(id=1, telegram_id=12345, username="testuser", first_name="Test")
 
@@ -116,6 +124,8 @@ class TestReferralIdParsing(unittest.TestCase):
 class TestLateBindingPolicy(unittest.IsolatedAsyncioTestCase):
     async def test_late_binding_allowed_if_no_successful_topups(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         existing_user = User(id=10, telegram_id=1000, referred_by=None, is_deleted=False, is_bot_blocked=False)
 
         with patch("services.subscription.get_user_by_telegram_id_any", AsyncMock(return_value=existing_user)), \
@@ -134,6 +144,8 @@ class TestLateBindingPolicy(unittest.IsolatedAsyncioTestCase):
 
     async def test_late_binding_forbidden_if_user_already_has_successful_topup(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         existing_user = User(id=10, telegram_id=1000, referred_by=None, is_deleted=False, is_bot_blocked=False)
 
         with patch("services.subscription.get_user_by_telegram_id_any", AsyncMock(return_value=existing_user)), \
@@ -154,6 +166,8 @@ class TestLateBindingPolicy(unittest.IsolatedAsyncioTestCase):
 class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):
     async def test_deep_cycle_detected_and_rejected(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Build a chain: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
         # Now 8 tries to be referred by 1 (which would create a cycle: 1 -> ... -> 8 -> 1)
@@ -179,6 +193,8 @@ class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):
 
     async def test_chain_depth_boundaries_49_50_51(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Build 52 chained users: 1 -> 2 -> 3 -> ... -> 52 -> None
         users = {
@@ -213,6 +229,8 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
         from utils.datetime_helpers import now_utc
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         payment = Payment(
             id=100,
@@ -268,6 +286,8 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
         from utils.datetime_helpers import now_utc
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         payment = Payment(
             id=101,
@@ -319,6 +339,8 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
         from database.repositories.users_repo import get_user_referrals_paginated
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         # Mock count = 21 (3 pages of 10 items)
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = [User(id=21, telegram_id=2021, username="ref21")]
@@ -357,6 +379,8 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
         state = MagicMock(spec=FSMContext)
         state.clear = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = User(id=1, telegram_id=1000, username="owner")
 
         last_page_referral = User(id=21, telegram_id=2021, username="ref21")

@@ -19,6 +19,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
         session.delete = AsyncMock()
 
@@ -40,6 +42,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         server = Server(id=2, name="US Server", api_url="https://us.vpn", api_key="secret")
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
         session.get = AsyncMock(return_value=server)
         session.delete = AsyncMock()
@@ -70,6 +74,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
@@ -110,6 +116,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             client_name=profile.client_name,
         )
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
@@ -148,6 +156,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
@@ -189,6 +199,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(
             side_effect=[
                 MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
@@ -214,6 +226,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         p_cleanup = VPNProfile(id=1, user_id=1, provisioning_status="create_cleanup_pending")
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(
             return_value=MagicMock(
                 scalars=MagicMock(
@@ -239,6 +253,8 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         mock_scalars.__iter__ = MagicMock(return_value=iter([p_no_peer]))
         mock_scalars.all = MagicMock(return_value=[p_no_peer])
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.execute = AsyncMock(return_value=MagicMock(scalars=MagicMock(return_value=mock_scalars)))
         session.delete = AsyncMock()
 

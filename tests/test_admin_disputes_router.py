@@ -59,6 +59,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with patch("bot.handlers.admin.disputes.is_admin", return_value=False):
             await show_disputes(callback, state, session)
@@ -72,6 +74,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = []
         session.scalars.return_value = mock_scalars
@@ -106,6 +110,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.data = "admin_dispute_card:42"
         callback.message = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         dispute = MagicMock(spec=PaymentDispute)
         dispute.id = 42
@@ -133,6 +139,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.data = "admin_dispute_review:42"
         callback.message = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_dispute = MagicMock(id=42, status="manual_review")
 
@@ -163,6 +171,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         dispute = MagicMock(id=42, status="open")
         session.get.return_value = dispute
@@ -185,6 +195,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         dispute = MagicMock(id=42, status="manual_review")
         session.get.return_value = dispute
@@ -205,6 +217,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_dispute = MagicMock(id=42, status="won_by_merchant")
 
@@ -235,6 +249,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         callback.message = AsyncMock()
         callback.message.edit_text = AsyncMock()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_dispute = MagicMock(id=42, status="lost_by_merchant")
 
@@ -262,6 +278,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         message.answer = AsyncMock()
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with patch("bot.handlers.admin.disputes.is_admin", return_value=True):
             # 1. Invalid parts length
@@ -287,6 +305,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         message.text = "pay_100|case_abc|500|2026-08-15|open|Chargeback reason"
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_dispute = MagicMock(id=99, status="open")
         mock_result = SimpleNamespace(dispute=mock_dispute, created=True)
@@ -321,6 +341,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         message.text = "pay_100|case_abc|500|2026-08-15|won_by_merchant|Won evidence"
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_dispute_init = MagicMock(id=99, status="open")
         mock_dispute_won = MagicMock(id=99, status="won_by_merchant")
@@ -356,6 +378,8 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
         message.text = "pay_100|case_abc|500|2026-08-15|open|reason"
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.disputes.is_admin", return_value=True),

@@ -53,6 +53,8 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         token = "secure_token_abc_123"
@@ -100,6 +102,8 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         self, mock_session_scope, mock_get_user, mock_check_access
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         token = "expired_token_xyz"
@@ -128,6 +132,8 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         mock_get_user.return_value = None
 

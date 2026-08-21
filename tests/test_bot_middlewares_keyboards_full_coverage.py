@@ -89,6 +89,8 @@ class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):
         data = {}
         with patch("bot.middlewares.db_session.session_scope") as mock_scope:
             mock_session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
             mock_scope.return_value.__aenter__.return_value = mock_session
             res = await middleware(handler, msg, data)
             self.assertEqual(res, "OK")

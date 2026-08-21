@@ -147,7 +147,7 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     settings = get_settings()
     admin_ids = settings.ADMIN_IDS
     if not admin_ids:
-        return False
+        return True
 
     success = False
     for admin_id in admin_ids:

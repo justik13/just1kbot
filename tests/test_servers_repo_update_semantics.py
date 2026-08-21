@@ -8,6 +8,8 @@ from database.repositories.servers_repo import update_server, update_server_heal
 class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
     async def test_ordinary_update_does_not_issue_row_lock_query(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         server = SimpleNamespace(id=1, name="old", max_clients=50)
 
         result = await update_server(session, server, name="new")
@@ -20,6 +22,8 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_health_update_uses_locked_current_row_and_rejects_stale_snapshot(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         current = SimpleNamespace(
             id=2,
             name="node",
@@ -49,6 +53,8 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_health_update_rejects_consecutive_fails_mismatch(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         current = SimpleNamespace(
             id=3,
             name="node-3",
@@ -78,6 +84,8 @@ class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_health_update_rejects_consecutive_successes_mismatch(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         current = SimpleNamespace(
             id=4,
             name="node-4",

@@ -72,6 +72,8 @@ class AmneziaBridgeLeakageTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         raw_config = encode_json_to_vpn_uri(

@@ -145,6 +145,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             _spec("invalid")
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         with self.assertRaises(ValueError):
             await confirm_manual_retry(
                 session,
@@ -177,6 +179,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_dispatcher_only_calls_existing_retry_primitive(self):
         row = type("Row", (), {"status": "dead", "attempts": 3, "payment_id": 9})()
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalar.return_value = row
         with (
             patch(
@@ -216,6 +220,8 @@ class PaymentQueueAdminUnitTests(unittest.IsolatedAsyncioTestCase):
             last_error_code="new_episode",
         )
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalar.return_value = row
         with (
             patch(

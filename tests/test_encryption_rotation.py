@@ -148,6 +148,8 @@ class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.webhook._get_healthcheck_redis") as mock_get_redis:
             
             mock_session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session_scope.return_value.__aenter__.return_value = mock_session
             mock_redis = AsyncMock()
             mock_get_redis.return_value = mock_redis
@@ -171,6 +173,8 @@ class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.webhook._get_healthcheck_redis") as mock_get_redis:
             
             mock_session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session_scope.return_value.__aenter__.return_value = mock_session
             mock_redis = AsyncMock()
             mock_get_redis.return_value = mock_redis
@@ -221,6 +225,8 @@ class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
 
             with patch("scripts.reencrypt_database.session_scope") as mock_session_scope:
                 mock_session = AsyncMock()
+                session.begin_nested.return_value.__aenter__.return_value = session
+                session.begin_nested.return_value.__aexit__.return_value = None
                 mock_session_scope.return_value.__aenter__.return_value = mock_session
 
                 server1 = MagicMock(id=1, api_key="secret_key_1")

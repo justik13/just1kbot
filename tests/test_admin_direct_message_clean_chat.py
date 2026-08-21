@@ -33,6 +33,8 @@ class AdminDirectMessageCleanChatTests(unittest.IsolatedAsyncioTestCase):
         target_user = DBUser(id=4, telegram_id=902161217, username="test_target")
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with patch("bot.handlers.admin.users.message_routes.is_admin", return_value=True), \
              patch("bot.handlers.admin.users.message_routes.get_user_by_telegram_id", return_value=target_user), \

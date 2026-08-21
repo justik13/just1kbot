@@ -85,6 +85,8 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("current_tariff_id in", str(stmt_tariff).lower())
     async def test_purchases_repo_mocked(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         user = User(id=10, telegram_id=3001, username="buyer_user")
         tariff = Tariff(

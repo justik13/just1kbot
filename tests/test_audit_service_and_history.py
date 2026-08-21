@@ -11,6 +11,8 @@ from utils.formatters import format_audit_details
 class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_audit_service_dict_serialization(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         with patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create:
             await AuditService.log_action(
                 session,
@@ -31,6 +33,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_audit_service_helpers(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         with patch("services.audit_service.create_audit_log", new_callable=AsyncMock) as mock_create:
             await AuditService.log_user_action(
                 session,
@@ -90,6 +94,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_user_audit_logs_query_building(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
         session.execute.return_value = mock_result
@@ -134,6 +140,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True),
@@ -167,6 +175,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         server = Server(id=1, name="NL-Node-1", api_url="https://vpn.test", api_key="secret")
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = profile
         session.execute.return_value = mock_result
@@ -216,6 +226,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         server = Server(id=1, name="DE-Node-1", api_url="https://vpn.test", api_key="secret")
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = profile
         session.execute.return_value = mock_result
@@ -268,6 +280,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.device_routes.is_admin", return_value=True),
@@ -313,6 +327,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = profile
         session.execute.return_value = mock_result
@@ -344,6 +360,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_audit_service_error_resilience(self):
         """Verify AuditService logs exception without crashing caller on DB/audit failure."""
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         with (
             patch("services.audit_service.create_audit_log", side_effect=RuntimeError("DB disconnect")),
             patch("services.audit_service.logger.error") as mock_logger_error,
@@ -363,6 +381,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.begin_nested = MagicMock()
         session.begin_nested.return_value.__aenter__ = AsyncMock()
         session.begin_nested.return_value.__aexit__ = AsyncMock()
@@ -386,6 +406,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         existing_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=False)
 
         with (
@@ -403,6 +425,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.begin_nested = MagicMock()
         session.begin_nested.return_value.__aenter__ = AsyncMock()
         session.begin_nested.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -422,6 +446,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         deleted_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", is_deleted=True)
 
         with (
@@ -443,6 +469,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.begin_nested = MagicMock()
         session.begin_nested.return_value.__aenter__ = AsyncMock()
         session.begin_nested.return_value.__aexit__ = AsyncMock(return_value=None)
@@ -466,6 +494,8 @@ class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):
         from services.subscription import SubscriptionService
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         existing_user = User(id=20, telegram_id=555, username="alice", first_name="Alice", referred_by=None, is_deleted=False)
 
         with (

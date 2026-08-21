@@ -29,14 +29,15 @@ class AuditService:
 
             normalized_target_type = target_type.lower() if target_type else None
 
-            await create_audit_log(
-                session=session,
-                admin_id=admin_id,
-                action=action,
-                target_type=normalized_target_type,
-                target_id=target_id,
-                details=formatted_details,
-            )
+            async with session.begin_nested():
+                await create_audit_log(
+                    session=session,
+                    admin_id=admin_id,
+                    action=action,
+                    target_type=normalized_target_type,
+                    target_id=target_id,
+                    details=formatted_details,
+                )
         except Exception as e:
             logger.error("Failed to write audit log action %s: %s", action, e)
 

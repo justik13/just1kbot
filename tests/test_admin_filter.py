@@ -130,6 +130,8 @@ class TestSetupBotLifecycleIdempotency(unittest.IsolatedAsyncioTestCase):
             storage = MemoryStorage()
             bot = MagicMock()
             bot.session = AsyncMock()
+            session.begin_nested.return_value.__aenter__.return_value = session
+            session.begin_nested.return_value.__aexit__.return_value = None
 
             with (
                 patch("bot.main.get_settings", return_value=fake_settings),
@@ -159,6 +161,8 @@ class TestRootAdminFilterPureSecurityProof(unittest.IsolatedAsyncioTestCase):
         self.bot = AsyncMock()
         self.bot.id = 100
         self.bot.session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         self.storage = MemoryStorage()
 
         self.admin_id = 12345
@@ -366,6 +370,8 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         self.bot = AsyncMock()
         self.bot.id = 100
         self.bot.session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         self.storage = MemoryStorage()
 
         self.admin_id = 12345
@@ -419,6 +425,8 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         exec_result.scalar_one_or_none.return_value = mock_user
 
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.execute = AsyncMock(return_value=exec_result)
 
         @asynccontextmanager
@@ -468,6 +476,8 @@ class TestAdminRouterDispatcherIntegration(unittest.IsolatedAsyncioTestCase):
         exec_result.scalar_one_or_none.return_value = mock_admin
 
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.execute = AsyncMock(return_value=exec_result)
 
         @asynccontextmanager

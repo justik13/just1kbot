@@ -9,6 +9,8 @@ from services.workers.node_monitor import check_node_resources_and_alerts, get_s
 class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
     async def test_update_server_is_pure_crud_without_kwargs_stripping(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         server = SimpleNamespace(id=10, name="Node A", is_active=True, health_state="ONLINE", disabled_reason=None)
 
         result = await update_server(
@@ -27,6 +29,8 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_server_health_snapshot_rejects_inactive_or_manually_disabled_server(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         inactive_server = SimpleNamespace(
             id=1, is_active=False, health_state="MANUAL_DISABLED", disabled_reason="MANUAL"
         )
@@ -48,6 +52,8 @@ class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_server_health_snapshot_rejects_stale_expected_health_mismatch(self):
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         db_server = SimpleNamespace(
             id=2, is_active=True, health_state="PROBLEM", consecutive_fails=2
         )

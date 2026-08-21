@@ -55,6 +55,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_build_feed, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         user = User(id=77, telegram_id=888, subscription_token="valid_token_xyz")
@@ -85,6 +87,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         mock_get_user.return_value = None
 
@@ -113,6 +117,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         user = User(
@@ -139,6 +145,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         mock_get_user.return_value = None
 
@@ -180,6 +188,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         user = User(
@@ -207,6 +217,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user, mock_check_access
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         user = User(id=77, telegram_id=888, subscription_token="valid_token_xyz")
@@ -229,6 +241,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self, mock_session_scope, mock_get_user, mock_build_feed
     ):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         user = User(
             id=77,

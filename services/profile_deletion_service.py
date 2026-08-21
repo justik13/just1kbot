@@ -22,6 +22,7 @@ class ProfileDeletionService:
                 await session.execute(
                     select(VPNProfile)
                     .where(VPNProfile.user_id == user_id)
+                    .order_by(VPNProfile.id)
                     .with_for_update()
                 )
             ).scalars()
@@ -44,6 +45,7 @@ class ProfileDeletionService:
                 await session.execute(
                     select(VPNProfile)
                     .where(VPNProfile.id.in_(profile_ids))
+                    .order_by(VPNProfile.id)
                     .with_for_update()
                 )
             )

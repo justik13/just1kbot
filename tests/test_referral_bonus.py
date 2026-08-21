@@ -68,6 +68,8 @@ class TestReferralBonusLedgerEntryShape:
                 captured_entry["obj"] = entry
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
         session.add = fake_add
         session.flush = AsyncMock()
@@ -131,6 +133,8 @@ class TestReferralBonusLedgerEntryShape:
         scalars_mock.all.return_value = [existing_bonus_credit]
 
         session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         session.get = AsyncMock(side_effect=fake_get)
         session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
         session.scalars = AsyncMock(return_value=scalars_mock)
@@ -177,6 +181,8 @@ def test_first_topup_bonus_credits_both_purchaser_and_referrer():
             added_entries.append(entry)
 
     session = AsyncMock()
+    session.begin_nested.return_value.__aenter__.return_value = session
+    session.begin_nested.return_value.__aexit__.return_value = None
     # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (0), 5. existing purchaser bonus check (None)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
     session.add = fake_add
@@ -226,6 +232,8 @@ def test_second_topup_credits_only_referrer():
             added_entries.append(entry)
 
     session = AsyncMock()
+    session.begin_nested.return_value.__aenter__.return_value = session
+    session.begin_nested.return_value.__aexit__.return_value = None
     # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (1 = previous topup exists)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 1])
     session.add = fake_add
@@ -297,6 +305,8 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     scalars_mock_purchaser.all.return_value = [purchaser_credit]
 
     session = AsyncMock()
+    session.begin_nested.return_value.__aenter__.return_value = session
+    session.begin_nested.return_value.__aexit__.return_value = None
     session.get = AsyncMock(side_effect=fake_get)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None])
     session.scalars = AsyncMock(
@@ -361,6 +371,8 @@ def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
     scalars_mock_purchaser.all.return_value = []
 
     session = AsyncMock()
+    session.begin_nested.return_value.__aenter__.return_value = session
+    session.begin_nested.return_value.__aexit__.return_value = None
     session.get = AsyncMock(return_value=payment)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
     session.scalars = AsyncMock(

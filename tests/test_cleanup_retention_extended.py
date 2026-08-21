@@ -29,6 +29,8 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_delete_matching_chunks_multi_round(self):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Simulate 3 rounds: 500 ids, 500 ids, 200 ids (total 1200)
         round1_scalars = MagicMock()
@@ -76,6 +78,8 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
     async def test_batch_delete_matching_empty_returns_zero(self):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
         empty_scalars = MagicMock()
         empty_scalars.all.return_value = []
         empty_res = MagicMock()
@@ -93,6 +97,8 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_old_records_executes_batched_pruning(self):
         mock_session = AsyncMock()
+        session.begin_nested.return_value.__aenter__.return_value = session
+        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Return empty id lists for all batched select queries
         empty_scalars = MagicMock()

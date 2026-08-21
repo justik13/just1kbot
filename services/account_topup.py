@@ -400,6 +400,7 @@ async def settle_succeeded_topup(
                 "referrer_bonus": int(referrer_bonus_amount),
                 "referrer_notified_at": None,
                 "purchaser_welcome_bonus": int(purchaser_welcome_amount),
+                "referral_bonus_processed": True,
             }
             if bot is not None:
                 try:
@@ -433,6 +434,9 @@ async def settle_succeeded_topup(
                 except Exception as exc:
                     import logging
                     logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
+        else:
+            ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
+            payment.topup_context = {**ctx, "referral_bonus_processed": True}
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
