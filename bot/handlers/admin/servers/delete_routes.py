@@ -1,6 +1,6 @@
 import logging
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -12,9 +12,6 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
 from database.models import APIOperation, Server, VPNProfile
-from services.api_operations_queue import (
-    classify_create_side_effect_risk, ensure_delete_operation,
-)
 from database.repositories.servers_repo import (
     delete_profiles_by_server_id,
     delete_server,
@@ -22,6 +19,10 @@ from database.repositories.servers_repo import (
 )
 from services.amnezia_client import cleanup_server_circuit_breakers
 from services.audit_service import AuditService
+from services.api_operations_queue import (
+    classify_create_side_effect_risk,
+    ensure_delete_operation,
+)
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
@@ -130,12 +131,15 @@ async def confirm_delete_server(
         return
 
     server_id = parse_callback_id(callback.data, 1)
+    state_data = await state.get_data()
+    expected_server_id = state_data.get("delete_server_id")
 
-    if server_id is None:
+    if server_id is None or server_id != expected_server_id:
         await callback.answer(
             texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L134_1,
             show_alert=True,
         )
+        await state.clear()
         return
 
     await callback.answer(show_alert=False)
@@ -186,7 +190,9 @@ async def confirm_delete_server(
             pass
         return
     for operation in operations:
-        if operation.operation_type in {"create_peer", "update_peer"}:
+        if operation.operation_type in {"create_peer", "update_peer"} and operation.status in {
+            "pending", "retry"
+        }:
             operation.status = "cancelled"
             operation.completed_at = now_utc()
             operation.locked_at = operation.locked_by = None

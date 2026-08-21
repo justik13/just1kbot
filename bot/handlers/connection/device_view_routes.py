@@ -242,6 +242,10 @@ async def device_help(
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
         return
+    profile = await get_profile_by_id(session, profile_id)
+    if not profile or not db_user or profile.user_id != db_user.id:
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
 
     text = (
         "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"

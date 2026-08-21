@@ -698,6 +698,56 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(state.clear.called)
             self.assertIn("слишком длинное", captured.get("text", ""))
+
+    async def test_16_d_rename_device_rejects_whitespace_only_input(self):
+        from bot.handlers.connection.device_rename_routes import rename_device_process
+
+        db_user = SimpleNamespace(id=1, telegram_id=100)
+        profile = SimpleNamespace(
+            id=42,
+            user_id=1,
+            server_id=10,
+            device_name="Phone #1",
+            provisioning_status="active",
+            peer_id="peer1",
+            raw_config="vpn://valid",
+            is_active=True,
+        )
+        message = MagicMock()
+        message.bot = MagicMock()
+        message.chat.id = 100
+        message.from_user.id = 100
+        message.text = "   "
+        message.delete = AsyncMock()
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={"profile_id": 42})
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = profile
+        session = AsyncMock()
+        session.execute = AsyncMock(return_value=result)
+        captured = {}
+
+        async def capture_render(_bot, _chat, text, _keyboard, **_kwargs):
+            captured["text"] = text
+
+        with (
+            patch(
+                "bot.handlers.connection.device_rename_routes.get_profile_by_id",
+                new=AsyncMock(return_value=profile),
+            ),
+            patch(
+                "bot.handlers.connection.device_rename_routes.SubscriptionService.check_access",
+                new=AsyncMock(return_value=True),
+            ),
+            patch(
+                "bot.handlers.connection.device_rename_routes.render_hub",
+                new=AsyncMock(side_effect=capture_render),
+            ),
+        ):
+            await rename_device_process(message, state, session, db_user)
+
+        self.assertIn("Имя не может быть пустым", captured["text"])
+        state.clear.assert_not_awaited()
     async def test_17_expired_subscription_with_pending_create_hides_delete_button(self):
         """Expired subscription with pending_create hides Delete button in render_device_screen."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
@@ -3031,5 +3081,3 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-

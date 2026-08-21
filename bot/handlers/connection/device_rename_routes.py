@@ -171,7 +171,13 @@ async def rename_device_process(
     # Strip any user-typed trailing #... to get the clean base name
     cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
     if not cleaned_base:
-        cleaned_base = "Устройство"
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "⚠️ Имя не может быть пустым. Введите корректное имя:",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
 
     if len(cleaned_base) > 16:
         await render_hub(

@@ -129,11 +129,15 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         async def capture_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
             captured["keyboard"] = keyboard
 
+        profile = MagicMock(user_id=42)
         with patch(
             "bot.handlers.connection.device_view_routes.render_hub",
             new=AsyncMock(side_effect=capture_render_hub),
+        ), patch(
+            "bot.handlers.connection.device_view_routes.get_profile_by_id",
+            new=AsyncMock(return_value=profile),
         ):
-            await device_help(callback, AsyncMock(), AsyncMock())
+            await device_help(callback, AsyncMock(), AsyncMock(), SimpleNamespace(id=42))
 
         callback_data = {
             button.callback_data
@@ -146,6 +150,28 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
         self.assertIn("help_windows:device_42", callback_data)
         self.assertIn("help_split:device_42", callback_data)
         self.assertIn("manage_device:42", callback_data)
+
+    async def test_device_help_rejects_foreign_profile(self):
+        callback = MagicMock()
+        callback.data = "device_help:42"
+        callback.answer = AsyncMock()
+
+        with patch(
+            "bot.handlers.connection.device_view_routes.get_profile_by_id",
+            new=AsyncMock(return_value=SimpleNamespace(user_id=99)),
+        ), patch(
+            "bot.handlers.connection.device_view_routes.render_hub",
+            new=AsyncMock(),
+        ) as render:
+            await device_help(
+                callback,
+                AsyncMock(),
+                AsyncMock(),
+                SimpleNamespace(id=42),
+            )
+
+        callback.answer.assert_awaited_once()
+        render.assert_not_awaited()
 
 
 if __name__ == "__main__":

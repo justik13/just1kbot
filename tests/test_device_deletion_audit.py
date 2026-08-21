@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from database.models import Server, VPNProfile
+from database.models import APIOperation, Server, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
 from services.device_service import DeviceService
 
@@ -49,6 +49,84 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertTrue(result)
             session.delete.assert_called_once_with(profile)
+
+    async def test_force_delete_uses_create_operation_peer_identity(self):
+        profile = VPNProfile(
+            id=12,
+            user_id=1,
+            server_id=2,
+            device_name="Cleanup",
+            peer_id=None,
+            client_name="tg_1_p12",
+            provisioning_status="create_cleanup_pending",
+        )
+        create_operation = APIOperation(
+            id=20,
+            operation_type="create_peer",
+            idempotency_key="create-peer:12:v1",
+            status="dead",
+            peer_id="created-peer",
+            client_name=profile.client_name,
+            attempts=1,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=create_operation)),
+            ]
+        )
+
+        with patch(
+            "services.device_service.resolve_profile_endpoint_snapshot",
+            new=AsyncMock(return_value=(2, "US", "https://us.vpn", "secret")),
+        ), patch(
+            "services.device_service.ensure_delete_operation",
+            new=AsyncMock(),
+        ) as ensure_delete:
+            await DeviceService.delete_device(session, profile, force=True)
+
+        self.assertEqual(ensure_delete.await_args.kwargs["peer_id"], "created-peer")
+        session.delete.assert_awaited_once_with(profile)
+
+    async def test_force_delete_keeps_anchor_for_attempted_create_without_peer_id(self):
+        profile = VPNProfile(
+            id=13,
+            user_id=1,
+            server_id=2,
+            device_name="Creating",
+            peer_id=None,
+            client_name="tg_1_p13",
+            provisioning_status="pending_create",
+            desired_is_active=True,
+            is_active=True,
+        )
+        create_operation = APIOperation(
+            id=21,
+            operation_type="create_peer",
+            idempotency_key="create-peer:13:v1",
+            status="processing",
+            attempts=1,
+            client_name=profile.client_name,
+        )
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                MagicMock(scalar_one_or_none=MagicMock(return_value=profile)),
+                MagicMock(scalar_one_or_none=MagicMock(return_value=create_operation)),
+            ]
+        )
+
+        with patch(
+            "services.device_service.resolve_profile_endpoint_snapshot",
+            new=AsyncMock(return_value=(2, "US", "https://us.vpn", "secret")),
+        ):
+            await DeviceService.delete_device(session, profile, force=True)
+
+        session.delete.assert_not_awaited()
+        self.assertEqual(profile.provisioning_status, "create_cleanup_pending")
+        self.assertFalse(profile.desired_is_active)
+        self.assertFalse(profile.is_active)
 
     async def test_repo_excludes_deleting_but_keeps_create_cleanup_pending_profiles(self):
         """Problem create states should remain visible instead of disappearing."""
