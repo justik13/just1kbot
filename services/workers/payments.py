@@ -33,9 +33,10 @@ def _needs_attention():
 
 
 def _needs_recovery():
-    from database.models import User
-    from sqlalchemy import and_, or_, not_
+    from sqlalchemy import or_
     from sqlalchemy.orm import aliased
+
+    from database.models import User
 
     purchaser = aliased(User)
     referrer = aliased(User)
