@@ -124,7 +124,7 @@ class TestReferralBonusLedgerEntryShape:
         referrer = MagicMock()
         referrer.id = 1
 
-        def fake_get(model, pk):
+        def fake_get(model, pk, *args, **kwargs):
             if pk == 42:
                 return payment
             if pk == 4:
@@ -301,7 +301,7 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     referrer = MagicMock()
     referrer.id = 10
 
-    def fake_get(model, pk):
+    def fake_get(model, pk, *args, **kwargs):
         if pk == 101:
             return payment
         if pk == 20:
