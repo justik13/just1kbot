@@ -183,9 +183,8 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
         """Test that the _needs_recovery query actually uses the partial index on production data sizes."""
         async with self.session_factory() as session:
             # Create user 1 first to satisfy foreign key constraints
-            await session.execute(
-                text("INSERT INTO users (id, telegram_id, created_at) VALUES (1, 1, now()) ON CONFLICT (id) DO NOTHING")
-            )
+            await session.merge(User(id=1, telegram_id=1))
+            await session.commit()
             
             # Insert 5000 irrelevant rows so the planner naturally prefers an Index Scan
             # over a full Seq Scan without artificial settings.
