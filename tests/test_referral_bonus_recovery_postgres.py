@@ -257,7 +257,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             
             op = PaymentProviderOperation(
                 payment_id=p1.id,
-                operation_type="reconcile",
+                operation_type="reconcile_payment",
                 status="processing",
                 locked_by="test-worker",
                 attempts=1,
