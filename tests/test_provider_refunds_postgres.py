@@ -28,7 +28,6 @@ from services.provider_refunds import (
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult
 from utils.datetime_helpers import now_utc
 
-
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
@@ -93,7 +92,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.user_id = user.id
             payment = Payment(
                 user_id=user.id,
-                amount=Decimal("100"),
+                amount=Decimal(100),
                 currency="RUB",
                 public_order_id="topup_" + uuid.uuid4().hex,
                 provider_idempotency_key=uuid.uuid4().hex,
@@ -171,7 +170,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reservation.status, "consumed")
             self.assertEqual(payment.provider_status, "refunded")
             self.assertEqual(payment.fulfillment_status, "reversed")
-            self.assertEqual(balance.available, Decimal("0"))
+            self.assertEqual(balance.available, Decimal(0))
             self.assertEqual(
                 await session.scalar(
                     select(func.count(AccountLedgerEntry.id)).where(

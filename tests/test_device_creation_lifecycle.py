@@ -1033,7 +1033,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_26_confirm_delete_device_unexpected_exception_answers_error_alert_once(self):
         """Unexpected exception in confirm_delete_device answers technical error alert once and clears lock."""
-        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+        from bot.handlers.connection.device_delete_routes import (
+            _deleting_devices,
+            confirm_delete_device,
+        )
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
         active_profile = SimpleNamespace(
@@ -1122,7 +1125,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_29_confirm_delete_device_render_connections_failure_does_not_double_answer(self):
         """If _render_connections throws after successful delete answer, callback.answer is not invoked a second time."""
-        from bot.handlers.connection.device_delete_routes import _deleting_devices, confirm_delete_device
+        from bot.handlers.connection.device_delete_routes import (
+            _deleting_devices,
+            confirm_delete_device,
+        )
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
         active_profile = SimpleNamespace(
@@ -1161,7 +1167,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_30_server_unavailable_caught_and_classified_properly(self):
         """ServerUnavailable is caught before DeviceCreationError and displays classified server error text."""
-        from bot.handlers.connection.device_create_routes import _process_server_selection
+        from bot.handlers.connection.device_create_routes import (
+            _process_server_selection,
+        )
         from services.device_service import ServerUnavailable
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
@@ -1391,7 +1399,9 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_37_slot_allocation_respects_all_profiles_including_failed(self):
         """Slot allocator uses include_deleting=True to prevent name collisions across all profile statuses."""
-        from bot.handlers.connection.device_create_routes import _process_server_selection
+        from bot.handlers.connection.device_create_routes import (
+            _process_server_selection,
+        )
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
         callback = MagicMock()
@@ -1583,7 +1593,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_43_select_server_concurrency_double_click_fences_immediately(self):
         """select_server rejects with DEVICE_CREATE_IN_PROGRESS if user already in _creating_devices."""
-        from bot.handlers.connection.device_create_routes import _creating_devices, select_server
+        from bot.handlers.connection.device_create_routes import (
+            _creating_devices,
+            select_server,
+        )
 
         callback = MagicMock()
         callback.from_user.id = 999
@@ -1618,9 +1631,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_51_admin_server_filter_includes_create_failed_and_excludes_deleting(self):
         """_apply_user_filters for server uses PROFILE_LIST_HIDDEN_STATUSES."""
+        from sqlalchemy import select
+
         from database.models import User
         from database.repositories.users_repo import _apply_user_filters
-        from sqlalchemy import select
 
         stmt = select(User)
         filtered = _apply_user_filters(stmt, filter_type="server", filter_param=5)
@@ -1631,8 +1645,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_52_finalize_operation_failure_canonical_cleanup_required_codes(self):
         """All error codes in CREATE_CLEANUP_REQUIRED_CODES trigger create_cleanup_pending."""
-        from services.api_operations_queue import CREATE_CLEANUP_REQUIRED_CODES
         from services.api_operations_finalizer import finalize_operation_failure
+        from services.api_operations_queue import CREATE_CLEANUP_REQUIRED_CODES
 
         mock_op = MagicMock()
         mock_op.status = "dead"
@@ -1817,10 +1831,11 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_56_device_service_atomic_slot_allocation_under_user_lock(self):
         """DeviceService.create_device allocates next slot #3 under user lock when #1 and #2 are used."""
-        from services.device_service import DeviceService
-        from database.models import Server, User, VPNProfile
-        from services.slots_cache import ServerPeerSnapshot
         from datetime import datetime, timezone
+
+        from database.models import Server, User, VPNProfile
+        from services.device_service import DeviceService
+        from services.slots_cache import ServerPeerSnapshot
 
         user = User(id=1, telegram_id=100, device_limit=5, subscription_end=datetime(2099, 1, 1, tzinfo=timezone.utc), is_banned=False)
         server = Server(id=10, name="DE", api_url="https://de.vpn", api_key="k", protocol="amneziawg2", is_active=True, max_clients=100)
@@ -1923,8 +1938,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
     async def test_59_cleanup_claim_deterministic_barrier_mock(self):
         """Unit test demonstrating deterministic cleanup skip when active operation is in flight."""
-        from services.workers.cleanup import _cleanup_stuck_profiles
         from database.models import VPNProfile
+        from services.workers.cleanup import _cleanup_stuck_profiles
 
         stuck_profile = VPNProfile(
             id=101,
@@ -2109,10 +2124,11 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_38_postgres_cleanup_claim_concurrency_interleaving(self):
         """Prove that cleanup skipping logic works even if claim_api_operations executes concurrently."""
-        from database.models import VPNProfile, APIOperation
-        from services.api_operations_queue import claim_api_operations
         import asyncio
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
+        from database.models import APIOperation, VPNProfile
+        from services.api_operations_queue import claim_api_operations
 
         async with self.sessions.begin() as s:
             old_time = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -2193,8 +2209,11 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_39_finalize_create_success_race_condition(self):
         """finalize_create_success catches create_failed mid-flight and queues compensation."""
-        from database.models import VPNProfile, APIOperation
-        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
+        from database.models import APIOperation, VPNProfile
+        from services.api_operations_finalizer import (
+            CreateCompensationRequired,
+            finalize_create_success,
+        )
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(
@@ -2247,8 +2266,11 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_60_postgres_finalize_create_success_vs_concurrent_delete(self):
         """Proves that when user triggers deletion while CREATE is completing externally, compensation is raised and peer_id preserved."""
-        from database.models import VPNProfile, APIOperation
-        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
+        from database.models import APIOperation, VPNProfile
+        from services.api_operations_finalizer import (
+            CreateCompensationRequired,
+            finalize_create_success,
+        )
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(
@@ -2302,7 +2324,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_61_postgres_stale_lease_recovery_vs_compensation(self):
         """Proves that attempt number checks reject finalization when lease has been recovered by another worker."""
-        from database.models import VPNProfile, APIOperation
+        from database.models import APIOperation, VPNProfile
         from services.api_operations_finalizer import finalize_create_success
 
         async with self.sessions.begin() as s:
@@ -2421,7 +2443,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_47_finalize_operation_failure_duplicate_exact_client_name_sets_create_cleanup_pending(self):
         """duplicate_exact_client_name must mark profile as create_cleanup_pending, not create_failed."""
-        from database.models import VPNProfile, APIOperation
+        from database.models import APIOperation, VPNProfile
         from services.api_operations_finalizer import finalize_operation_failure
 
         async with self.sessions.begin() as s:
@@ -2465,7 +2487,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_48_finalize_operation_failure_cleanup_peer_identity_mismatch_sets_create_cleanup_pending(self):
         """cleanup_peer_identity_mismatch must mark profile as create_cleanup_pending."""
-        from database.models import VPNProfile, APIOperation
+        from database.models import APIOperation, VPNProfile
         from services.api_operations_finalizer import finalize_operation_failure
 
         async with self.sessions.begin() as s:
@@ -2509,7 +2531,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_49_profile_deletion_does_not_overwrite_active_worker_processing_lease(self):
         """ProfileDeletionService._delete_profiles does not overwrite status or locked_by of processing APIOperation."""
-        from database.models import VPNProfile, APIOperation
+        from database.models import APIOperation, VPNProfile
         from services.profile_deletion_service import ProfileDeletionService
 
         async with self.sessions.begin() as s:
@@ -2603,9 +2625,10 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_62_postgres_claim_exhausted_sync_vs_finalizer_deadlock(self):
         """Prove that claim_api_operations terminal sync and finalizer lock in same order without deadlock."""
+        import asyncio
+
         from services.api_operations_finalizer import finalize_operation_failure
         from services.api_operations_queue import claim_api_operations
-        import asyncio
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(
@@ -2677,8 +2700,8 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_63_postgres_delete_device_with_missing_server_row_enqueues_delete_peer(self):
         """When Server row is missing from DB, delete_device recovers endpoint snapshot and enqueues delete_peer."""
-        from services.device_service import DeviceService
         from database.models import APIOperation, Server, VPNProfile
+        from services.device_service import DeviceService
 
         # 1. Create a profile pointing to self.sid
         # and previous APIOperation recording the endpoint snapshot
@@ -2749,9 +2772,10 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_64_postgres_claim_vs_finalize_create_success_concurrent(self):
         """Prove that competing workers claiming and finalizing operations synchronize cleanly with SKIP LOCKED."""
+        import asyncio
+
         from services.api_operations_finalizer import finalize_create_success
         from services.api_operations_queue import claim_api_operations
-        import asyncio
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(
@@ -2831,10 +2855,14 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_65_postgres_recover_stale_vs_finalizer_concurrent(self):
         """Prove that recover_stale_api_operations and finalize_operation_failure coordinate cleanly under concurrency."""
-        from services.api_operations_finalizer import finalize_operation_failure
-        from services.api_operations_queue import recover_stale_api_operations, APIOperationOwnershipError
-        from datetime import timedelta
         import asyncio
+        from datetime import timedelta
+
+        from services.api_operations_finalizer import finalize_operation_failure
+        from services.api_operations_queue import (
+            APIOperationOwnershipError,
+            recover_stale_api_operations,
+        )
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(
@@ -2900,9 +2928,13 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_66_postgres_profile_deletion_vs_create_finalizer_concurrent(self):
         """Prove that ProfileDeletionService and finalize_create_success coordinate cleanly under concurrency."""
-        from services.api_operations_finalizer import finalize_create_success, CreateCompensationRequired
-        from services.profile_deletion_service import ProfileDeletionService
         import asyncio
+
+        from services.api_operations_finalizer import (
+            CreateCompensationRequired,
+            finalize_create_success,
+        )
+        from services.profile_deletion_service import ProfileDeletionService
 
         async with self.sessions.begin() as s:
             prof = VPNProfile(

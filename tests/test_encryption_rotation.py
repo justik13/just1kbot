@@ -1,26 +1,25 @@
 import asyncio
 import os
 import unittest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from cryptography.fernet import Fernet, InvalidToken
 from aiohttp.test_utils import make_mocked_request
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from utils.encryption import EncryptedString, _get_fernet_engine, _get_active_keys
-from bot.handlers.webhook import healthcheck_handler
 import bot.handlers.webhook as webhook_module
-import services.amnezia_client as amnezia_client
+from bot.handlers.webhook import healthcheck_handler
+from database.models import Server
+from scripts.reencrypt_database import reencrypt_all
+from services import amnezia_client
 from services.amnezia_client import (
+    _MAX_CLIENT_CACHE_ENTRIES,
     _get_circuit_breaker,
     _get_rate_limiter,
-    _MAX_CLIENT_CACHE_ENTRIES,
     cleanup_server_circuit_breakers,
 )
-from scripts.reencrypt_database import reencrypt_all
-from database.models import Server
-
+from utils.encryption import EncryptedString, _get_active_keys, _get_fernet_engine
 
 BASE_MOCK_ENV = {
     "BOT_TOKEN": "123:test",

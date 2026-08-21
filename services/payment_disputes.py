@@ -28,7 +28,6 @@ from database.repositories.account_ledger_repo import (
 from services.audit_service import AuditService
 from utils.datetime_helpers import now_utc
 
-
 ACTIVE_DISPUTE_STATUSES = ("open", "manual_review")
 DISPUTE_HOLD_REASONS = {"open_payment_dispute", "chargeback_debt"}
 
@@ -64,7 +63,7 @@ async def _remaining_payment_exposure(session, payment: Payment) -> Decimal:
             or 0
         )
     )
-    return max(Decimal("0"), Decimal(payment.amount) - removed)
+    return max(Decimal(0), Decimal(payment.amount) - removed)
 
 
 async def refresh_user_dispute_hold(session, *, user_id: int) -> None:

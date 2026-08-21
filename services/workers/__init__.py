@@ -1,28 +1,26 @@
 """Lifecycle supervision and in-memory health for background workers."""
-from bot import texts
-
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
-from typing import Awaitable, Callable
 
 import aiohttp
 from aiogram import Bot
 
+from bot import texts
 from config.settings import get_settings
 
-
-from .api_operations import api_operations_loop
 from .account_balance import account_balance_notifications_loop
+from .api_operations import api_operations_loop
 from .cleanup import cleanup_dangling_peers_loop
 from .heartbeat import heartbeat_loop
+from .node_monitor import node_monitor_loop
 from .notifications import subscription_notifications_loop
 from .payment_pipeline import payment_pipeline_loop
-from .queue_health import queue_health_loop
 from .payments import stale_payments_checker_loop
+from .queue_health import queue_health_loop
 from .traffic import traffic_sync_loop
-from .node_monitor import node_monitor_loop
 
 
 class _ExpectedNodeMonitorNetworkWarningFilter(logging.Filter):

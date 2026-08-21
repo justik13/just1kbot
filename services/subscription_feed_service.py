@@ -1,7 +1,6 @@
 import base64
-from datetime import timedelta
 import logging
-from typing import Tuple
+from datetime import timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,7 +23,7 @@ class SubscriptionFeedService:
     @staticmethod
     async def get_exportable_configs(
         session: AsyncSession, user_id: int
-    ) -> list[Tuple[VPNProfile, str]]:
+    ) -> list[tuple[VPNProfile, str]]:
         profiles = await get_user_profiles(session, user_id, include_deleting=False)
         exportable = []
 
@@ -57,7 +56,7 @@ class SubscriptionFeedService:
     @staticmethod
     async def get_user_traffic(
         session: AsyncSession, user_id: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         stmt = select(
             func.coalesce(func.sum(VPNProfile.traffic_up), 0),
             func.coalesce(func.sum(VPNProfile.traffic_down), 0),
@@ -69,7 +68,7 @@ class SubscriptionFeedService:
     @classmethod
     async def build_feed(
         cls, session: AsyncSession, user: User
-    ) -> Tuple[int, dict[str, str], str]:
+    ) -> tuple[int, dict[str, str], str]:
         settings = get_settings()
         access_granted = SubscriptionService.check_vpn_access(user)
         upload_sum, download_sum = await cls.get_user_traffic(session, user.id)

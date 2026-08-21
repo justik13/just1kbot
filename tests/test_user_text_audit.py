@@ -3,7 +3,6 @@ import re
 from bot import texts
 from bot.texts_data.referral_texts import REFERRAL_TEXTS
 
-
 FORBIDDEN_USER_WORDING = (
     "Что делать, если VPN не подключается или медленно работает?",
     "Что делать, если ВПН не подключается или медленно работает?",

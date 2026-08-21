@@ -466,7 +466,7 @@ async def _consume_matching_reservation(
             )
             session.add(new_reservation)
             await session.flush()
-            remaining_to_consume = Decimal("0")
+            remaining_to_consume = Decimal(0)
 
     return first_consumed
 

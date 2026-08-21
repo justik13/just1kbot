@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-
 from bot.keyboards import (
     get_back_button,
     get_balance_purchase_confirm_keyboard,
@@ -26,14 +25,12 @@ from services.account_purchase import (
     prepare_account_purchase,
     settle_account_purchase,
 )
-
 from utils.callbacks import parse_callback_id, parse_callback_parts
+from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
-from utils.datetime_helpers import now_utc
 
 from .balance_routes import _create_and_render_topup
-
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -387,6 +384,7 @@ async def resume_purchase_after_topup(
         return
     if source == "change":
         from services.tariff_change_quote import create_tariff_change_quote
+
         from .tariff_change_routes import render_tariff_change_review
 
         quote_result = await create_tariff_change_quote(

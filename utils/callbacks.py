@@ -1,10 +1,9 @@
-from typing import Optional
 
 
 def parse_callback_id(
     callback_data: str,
     index: int = 1,
-) -> Optional[int]:
+) -> int | None:
     """
     Безопасно достаёт int из callback_data вида:
     admin_server_card:123
@@ -18,7 +17,7 @@ def parse_callback_id(
 def parse_callback_parts(
     callback_data: str,
     min_parts: int,
-) -> Optional[list[str]]:
+) -> list[str] | None:
     """
     Безопасно разбивает callback_data.
     Возвращает None, если частей меньше min_parts.
@@ -37,7 +36,7 @@ def parse_callback_parts(
 def parse_callback_int(
     parts: list[str],
     index: int,
-) -> Optional[int]:
+) -> int | None:
     """
     Безопасно достаёт int из уже разбитых частей.
     """

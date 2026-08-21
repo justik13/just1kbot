@@ -2,6 +2,7 @@ import ast
 import unittest
 from pathlib import Path
 
+
 class UnmanagedPeerSafetyTests(unittest.TestCase):
     def test_detection_worker_has_no_amnezia_write(self):
         path = Path(__file__).parents[1] / "services/workers/cleanup.py"

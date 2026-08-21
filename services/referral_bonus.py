@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,8 +23,8 @@ REFERRAL_BONUS_SOURCE = "referral_bonus"
 
 @dataclass(frozen=True)
 class ReferralBonusGrantResult:
-    referrer_bonus: Decimal = Decimal("0")
-    purchaser_welcome_bonus: Decimal = Decimal("0")
+    referrer_bonus: Decimal = Decimal(0)
+    purchaser_welcome_bonus: Decimal = Decimal(0)
 
     def __iter__(self):
         yield self.referrer_bonus
@@ -66,9 +66,9 @@ def calculate_referral_bonus(purchase_amount: object) -> Decimal:
     """Return 10% of a purchase, rounded down to whole rubles."""
     amount = Decimal(str(purchase_amount))
     if not amount.is_finite() or amount <= 0:
-        return Decimal("0")
+        return Decimal(0)
     return (amount * REFERRAL_BONUS_RATE).quantize(
-        Decimal("1"), rounding=ROUND_DOWN
+        Decimal(1), rounding=ROUND_DOWN
     )
 
 
@@ -89,8 +89,9 @@ async def is_first_topup_eligible(
     if purchaser.referred_by == purchaser.telegram_id:
         return False
 
-    from database.models import Payment
     from sqlalchemy import func
+
+    from database.models import Payment
 
     count = await session.scalar(
         select(func.count(Payment.id)).where(
@@ -113,8 +114,8 @@ async def grant_referral_bonus_for_topup(
     bonus = calculate_referral_bonus(topup_amount)
     if bonus <= 0:
         return ReferralBonusGrantResult(
-            referrer_bonus=Decimal("0"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
         )
 
     purchaser = await session.scalar(
@@ -127,14 +128,14 @@ async def grant_referral_bonus_for_topup(
     )
     if purchaser is None or purchaser.referred_by is None:
         return ReferralBonusGrantResult(
-            referrer_bonus=Decimal("0"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
         )
 
     if purchaser.referred_by == purchaser.telegram_id:
         return ReferralBonusGrantResult(
-            referrer_bonus=Decimal("0"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
         )
 
     referrer = await session.scalar(
@@ -147,18 +148,18 @@ async def grant_referral_bonus_for_topup(
     )
     if referrer is None or referrer.is_banned:
         return ReferralBonusGrantResult(
-            referrer_bonus=Decimal("0"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
         )
 
     if purchaser.id == referrer.id:
         return ReferralBonusGrantResult(
-            referrer_bonus=Decimal("0"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(0),
+            purchaser_welcome_bonus=Decimal(0),
         )
 
     # 1. Grant 10% bonus to referrer for every top-up
-    referrer_bonus_granted = Decimal("0")
+    referrer_bonus_granted = Decimal(0)
     idempotency_key = f"referral-bonus:topup:{payment_id}:{referrer.id}"
     existing = await session.scalar(
         select(AccountLedgerEntry).where(
@@ -201,12 +202,13 @@ async def grant_referral_bonus_for_topup(
             },
         )
     else:
-        referrer_bonus_granted = Decimal("0")
+        referrer_bonus_granted = Decimal(0)
 
     # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +10% bonus as well.
-    purchaser_welcome_granted = Decimal("0")
-    from database.models import Payment
+    purchaser_welcome_granted = Decimal(0)
     from sqlalchemy import func
+
+    from database.models import Payment
 
     prev_credited = await session.scalar(
         select(func.count(Payment.id)).where(
@@ -259,7 +261,7 @@ async def grant_referral_bonus_for_topup(
                 },
             )
         else:
-            purchaser_welcome_granted = Decimal("0")
+            purchaser_welcome_granted = Decimal(0)
 
     await session.flush()
     return ReferralBonusGrantResult(
@@ -276,7 +278,7 @@ async def grant_referral_bonus_for_purchase(
     purchase_amount: object,
 ) -> Decimal:
     """Legacy alias for backward compatibility."""
-    return Decimal("0")
+    return Decimal(0)
 
 
 async def reverse_referral_bonus_for_topup(
@@ -289,7 +291,7 @@ async def reverse_referral_bonus_for_topup(
 
     payment = await session.get(Payment, payment_id)
     if payment is None or payment.user_id is None:
-        return Decimal("0")
+        return Decimal(0)
 
     purchaser = await session.scalar(
         select(User)
@@ -297,7 +299,7 @@ async def reverse_referral_bonus_for_topup(
         .with_for_update()
     )
     if purchaser is None:
-        return Decimal("0")
+        return Decimal(0)
 
     referrer = None
     if purchaser.referred_by and purchaser.referred_by != purchaser.telegram_id:
@@ -307,7 +309,7 @@ async def reverse_referral_bonus_for_topup(
             .with_for_update()
         )
 
-    total_reversed = Decimal("0")
+    total_reversed = Decimal(0)
 
     # 1. Reverse referrer bonus for this top-up if present and referrer exists.
     if referrer is not None:
@@ -482,7 +484,7 @@ async def get_referral_bonus_balance(
         )
     ).all()
     if not credits:
-        return Decimal("0")
+        return Decimal(0)
 
     credit_ids = [credit.id for credit in credits]
     reversal_rows = (
@@ -535,23 +537,23 @@ async def get_referral_bonus_balance(
         if row.debit_entry_id in reversed_debits:
             continue
         used_by_credit[row.credit_entry_id] = (
-            used_by_credit.get(row.credit_entry_id, Decimal("0"))
+            used_by_credit.get(row.credit_entry_id, Decimal(0))
             + Decimal(row.amount)
         )
 
     remaining = sum(
         max(
-            Decimal("0"),
-            Decimal("0")
+            Decimal(0),
+            Decimal(0)
             if credit.id in fully_reversed_credit_ids
             else Decimal(credit.amount)
-            - used_by_credit.get(credit.id, Decimal("0")),
+            - used_by_credit.get(credit.id, Decimal(0)),
         )
         for credit in credits
     )
 
     balance = await get_account_balance(session, user_id=user_id)
     if balance.debt > 0:
-        remaining = max(Decimal("0"), remaining - balance.debt)
+        remaining = max(Decimal(0), remaining - balance.debt)
 
     return remaining

@@ -1,9 +1,8 @@
 import os
 import unittest
+
 from sqlalchemy import text
-from sqlalchemy.exc import DataError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from unittest.mock import patch
 
 from database.models import User
 from services.audit_service import AuditService

@@ -24,12 +24,13 @@ from database.repositories.account_ledger_repo import (
 )
 from services.provider_refunds import (
     claim as claim_provider_refund,
+)
+from services.provider_refunds import (
     request_balance_topup_refund,
 )
 from services.workers.webhook_inbox import InboxClaim, finalize
 from services.yookassa_service import YooKassaResult
 from utils.datetime_helpers import now_utc
-
 
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
@@ -165,7 +166,7 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             balance = await get_account_balance(session, user_id=self.user_id)
             self.assertEqual(balance.available, Decimal("0.00"))
-            self.assertEqual(balance.debt, Decimal("0"))
+            self.assertEqual(balance.debt, Decimal(0))
             self.assertEqual(payment.provider_status, "refunded")
             self.assertEqual(payment.fulfillment_status, "reversed")
             self.assertIsNotNone(payment.reversed_at)
@@ -226,7 +227,7 @@ class BalanceRefundWebhookPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             balance = await get_account_balance(session, user_id=self.user_id)
             self.assertEqual(balance.accounting_position, Decimal("-80.00"))
-            self.assertEqual(balance.available, Decimal("0"))
+            self.assertEqual(balance.available, Decimal(0))
             self.assertEqual(balance.debt, Decimal("80.00"))
             self.assertEqual(payment.fulfillment_status, "manual_review")
             self.assertEqual(payment.manual_review_reason, "chargeback_debt")

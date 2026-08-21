@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import MagicMock
 
 from aiogram import Bot
-
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 

@@ -1,19 +1,22 @@
 """Periodic non-blocking alerts for unhealthy durable payment queues."""
 from __future__ import annotations
-from bot import texts
 
 import asyncio
 import html
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from aiogram import Bot
 
+from bot import texts
 from config.settings import get_settings
 from database.connection import session_scope
-from services.payment_queue_health import QueueSnapshot, get_payment_queue_health_snapshot
+from services.payment_queue_health import (
+    QueueSnapshot,
+    get_payment_queue_health_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 60.0

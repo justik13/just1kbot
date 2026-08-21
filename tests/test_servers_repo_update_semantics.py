@@ -2,7 +2,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from database.repositories.servers_repo import update_server, update_server_health_snapshot
+from database.repositories.servers_repo import (
+    update_server,
+    update_server_health_snapshot,
+)
 
 
 class ServerRepoUpdateSemanticsTests(unittest.IsolatedAsyncioTestCase):

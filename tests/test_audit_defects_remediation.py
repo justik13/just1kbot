@@ -176,7 +176,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             id=99,
             user_id=15,
             external_id="ext-99",
-            amount=Decimal("1000"),
+            amount=Decimal(1000),
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),
             fulfillment_status="succeeded",
@@ -221,7 +221,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         ):
             await _recover_stale_topups(bot=None)
 
-        self.assertEqual(bonus_called_with, [(15, 99, Decimal("1000"))])
+        self.assertEqual(bonus_called_with, [(15, 99, Decimal(1000))])
 
     async def test_welcome_bonus_recovered_when_referrer_bonus_exists(self):
         # Even if referrer bonus is already recorded, missing welcome bonus on first topup triggers retry
@@ -231,7 +231,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             id=101,
             user_id=22,
             external_id="ext-101",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),
             fulfillment_status="succeeded",
@@ -276,7 +276,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         ):
             await _recover_stale_topups(bot=None)
 
-        self.assertEqual(bonus_called_with, [(22, 101, Decimal("500"))])
+        self.assertEqual(bonus_called_with, [(22, 101, Decimal(500))])
 
     async def test_slots_cache_raises_server_unavailable_on_failure(self):
         from services.device_service import ServerUnavailable
@@ -319,7 +319,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         welcome_credit = MagicMock()
         welcome_credit.id = 100
         welcome_credit.user_id = 10
-        welcome_credit.amount = Decimal("50")
+        welcome_credit.amount = Decimal(50)
         welcome_credit.metadata_ = {
             "topup_payment_id": 55,
             "reason": "first_topup_welcome",
@@ -340,15 +340,15 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
         with patch(
             "services.referral_bonus._credit_capacity",
-            AsyncMock(return_value=Decimal("50")),
+            AsyncMock(return_value=Decimal(50)),
         ):
             total_reversed = await reverse_referral_bonus_for_topup(
                 session, payment_id=55
             )
 
-        self.assertEqual(total_reversed, Decimal("50"))
+        self.assertEqual(total_reversed, Decimal(50))
         self.assertGreaterEqual(len(added_entries), 1)
-        self.assertEqual(added_entries[0].amount, Decimal("-50"))
+        self.assertEqual(added_entries[0].amount, Decimal(-50))
 
     async def test_partial_refund_reservation_split(self):
         session = AsyncMock()
@@ -358,7 +358,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             status="active",
         )
@@ -375,7 +375,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         result = await _consume_matching_reservation(
             session,
             payment_id=42,
-            amount=Decimal("200"),
+            amount=Decimal(200),
             reservation_id=77,
         )
 
@@ -384,7 +384,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(added_items), 1)
         split_res = added_items[0]
         self.assertIsInstance(split_res, AccountBalanceReservation)
-        self.assertEqual(split_res.amount, Decimal("300"))
+        self.assertEqual(split_res.amount, Decimal(300))
         self.assertEqual(split_res.status, "active")
         self.assertEqual(split_res.payment_id, 42)
         self.assertEqual(split_res.metadata_["split_from_reservation_id"], 77)
@@ -400,7 +400,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("700"),
+            amount=Decimal(700),
             currency="RUB",
             status="active",
         )
@@ -418,14 +418,14 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         result = await _consume_matching_reservation(
             session,
             payment_id=42,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             reservation_id=None,
         )
 
         self.assertIs(result, res_700)
         self.assertEqual(res_700.status, "consumed")
         self.assertEqual(len(added_items), 1)
-        self.assertEqual(added_items[0].amount, Decimal("200"))
+        self.assertEqual(added_items[0].amount, Decimal(200))
         self.assertEqual(added_items[0].status, "active")
 
     async def test_partial_refund_multi_reservation_consumption(self):
@@ -437,7 +437,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("300"),
+            amount=Decimal(300),
             currency="RUB",
             status="active",
         )
@@ -446,7 +446,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("200"),
+            amount=Decimal(200),
             currency="RUB",
             status="active",
         )
@@ -463,7 +463,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             result = await _consume_matching_reservation(
                 session,
                 payment_id=42,
-                amount=Decimal("500"),
+                amount=Decimal(500),
                 reservation_id=None,
             )
 
@@ -481,7 +481,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("200"),
+            amount=Decimal(200),
             currency="RUB",
             status="active",
         )
@@ -490,7 +490,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             user_id=10,
             payment_id=42,
             reservation_type="refund",
-            amount=Decimal("100"),
+            amount=Decimal(100),
             currency="RUB",
             status="active",
         )
@@ -503,7 +503,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         result = await _consume_matching_reservation(
             session,
             payment_id=42,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             reservation_id=None,
         )
 

@@ -7,19 +7,18 @@ has returned and committed its lease.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import AsyncIterator, Callable
-
-from utils.datetime_helpers import now_utc
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import API_OPERATION_TYPES, APIOperation, Server, VPNProfile
+from utils.datetime_helpers import now_utc
 
 
 class APIOperationValidationError(Exception):
@@ -291,9 +290,8 @@ async def _transaction(session_factory: SessionFactory | None) -> AsyncIterator[
         async with session_scope() as session:
             yield session
         return
-    async with session_factory() as session:
-        async with session.begin():
-            yield session
+    async with session_factory() as session, session.begin():
+        yield session
 
 
 def _dto(operation: APIOperation) -> ClaimedAPIOperation:

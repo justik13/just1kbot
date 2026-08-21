@@ -1,6 +1,5 @@
 import logging
 import secrets
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -122,7 +121,7 @@ class SubscriptionTokenService:
     @staticmethod
     async def get_user_by_token(
         session: AsyncSession, token: str
-    ) -> Optional[User]:
+    ) -> User | None:
         if not token or len(token) > MAX_SUBSCRIPTION_TOKEN_LENGTH:
             return None
         return await get_user_by_subscription_token(session, token)

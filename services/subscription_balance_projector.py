@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, localcontext
-from typing import Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class ProjectedBonusLot:
     remaining_whole_hours: int
     segment_start: datetime
     segment_end: datetime
-    paid_value_rub: Decimal = Decimal("0")
+    paid_value_rub: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)

@@ -1,9 +1,9 @@
-from logging.config import fileConfig
 import asyncio
 import os
 from logging import getLogger
-from dotenv import load_dotenv
+from logging.config import fileConfig
 
+from dotenv import load_dotenv
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -25,9 +25,9 @@ logger = getLogger("alembic.env")
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from database.models import Base  # noqa: E402
-from database import dispute_models as _dispute_models  # noqa: E402,F401
-from database import refund_models as _refund_models  # noqa: E402,F401
+from database import dispute_models as _dispute_models  # noqa: F401
+from database import refund_models as _refund_models  # noqa: F401
+from database.models import Base
 
 target_metadata = Base.metadata
 

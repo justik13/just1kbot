@@ -3,22 +3,26 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from types import SimpleNamespace
 from datetime import datetime, timezone
-
+from types import SimpleNamespace
 
 from database.connection import session_scope
 from database.models import Server, VPNProfile
 from services.amnezia_client import AmneziaClient
-from services.api_operations_queue import (
-    ClaimedAPIOperation, mark_api_operation_cancelled,
-)
 from services.api_operations_finalizer import (
     CreateCompensationRequired,
-    finalize_create_cancelled, finalize_create_success,
-    finalize_create_cleanup, finalize_operation_failure,
-    finalize_delete_success, finalize_existing_create_success,
-    finalize_update_success, prepare_create_cleanup,
+    finalize_create_cancelled,
+    finalize_create_cleanup,
+    finalize_create_success,
+    finalize_delete_success,
+    finalize_existing_create_success,
+    finalize_operation_failure,
+    finalize_update_success,
+    prepare_create_cleanup,
+)
+from services.api_operations_queue import (
+    ClaimedAPIOperation,
+    mark_api_operation_cancelled,
 )
 
 logger = logging.getLogger(__name__)

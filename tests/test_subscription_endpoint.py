@@ -1,7 +1,8 @@
-from datetime import timedelta
 import os
 import unittest
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
+
 from aiohttp.test_utils import make_mocked_request
 
 from bot.handlers.subscription_feed import (

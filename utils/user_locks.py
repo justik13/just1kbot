@@ -1,11 +1,10 @@
 import asyncio
-import time
 import logging
-from typing import Dict, Tuple
+import time
 
 logger = logging.getLogger(__name__)
 
-_user_action_locks: Dict[int, Tuple[asyncio.Lock, float]] = {}
+_user_action_locks: dict[int, tuple[asyncio.Lock, float]] = {}
 _last_cleanup_time: float = 0.0
 _CLEANUP_INTERVAL = 3600.0
 _LOCK_TTL = 3600.0

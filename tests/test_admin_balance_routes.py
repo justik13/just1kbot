@@ -1,16 +1,15 @@
-from decimal import Decimal
 import unittest
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from bot.handlers.admin.users.balance_routes import (
+    process_balance_deduct,
+    process_balance_reason,
+    process_balance_topup,
+)
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
 )
-from bot.handlers.admin.users.balance_routes import (
-    process_balance_deduct,
-    process_balance_topup,
-    process_balance_reason,
-)
-
 
 
 class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
@@ -29,11 +28,11 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         user.telegram_id = 888
 
         snapshot = AccountBalanceSnapshot(
-            accounting_position=Decimal("100"),
-            available=Decimal("100"),
-            reserved=Decimal("0"),
-            debt=Decimal("0"),
-            bonus_available=Decimal("100"),
+            accounting_position=Decimal(100),
+            available=Decimal(100),
+            reserved=Decimal(0),
+            debt=Decimal(0),
+            bonus_available=Decimal(100),
         )
 
         session = AsyncMock()

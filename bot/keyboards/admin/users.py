@@ -1,7 +1,7 @@
-from bot import texts
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot import texts
 from utils.tariff_names import get_tariff_group_name
 from utils.text_limits import truncate_button_text
 

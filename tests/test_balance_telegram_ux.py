@@ -135,7 +135,9 @@ class BalanceTelegramUXTests(unittest.TestCase):
 class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_and_render_topup_handles_callback_and_none_targets(self):
         from unittest.mock import AsyncMock, MagicMock
+
         from aiogram.types import CallbackQuery
+
         from bot.handlers.payment.balance_routes import _create_and_render_topup
 
         await _create_and_render_topup(None, MagicMock(), MagicMock(), 100)
@@ -148,6 +150,7 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dismiss_notification_renders_hub_when_message_is_hub(self):
         from unittest.mock import AsyncMock, MagicMock, patch
+
         from bot.handlers.fallback import dismiss_notification
 
         cb = MagicMock()
@@ -171,6 +174,7 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dismiss_notification_deletes_standalone_message(self):
         from unittest.mock import AsyncMock, MagicMock, patch
+
         from bot.handlers.fallback import dismiss_notification
 
         cb = MagicMock()
@@ -191,6 +195,7 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dismiss_notification_renders_hub_when_db_fails_to_load_hub_ids(self):
         from unittest.mock import AsyncMock, MagicMock, patch
+
         from bot.handlers.fallback import dismiss_notification
 
         cb = MagicMock()
@@ -213,6 +218,7 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
             mock_hub.assert_awaited_once_with(cb, state, db_user, session)
     async def test_dismiss_notification_deletes_standalone_message_when_no_hub_exists(self):
         from unittest.mock import AsyncMock, MagicMock, patch
+
         from bot.handlers.fallback import dismiss_notification
 
         cb = MagicMock()

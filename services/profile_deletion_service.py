@@ -1,6 +1,8 @@
 import logging
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.models import APIOperation, VPNProfile
 from services.api_operations_queue import (
     classify_create_side_effect_risk,

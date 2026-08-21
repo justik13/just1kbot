@@ -2,8 +2,19 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import CallbackQuery, Chat, Message, User as TelegramUser
+from aiogram.types import CallbackQuery, Chat, Message
+from aiogram.types import User as TelegramUser
 
+from bot.keyboards import common as common_kb
+from bot.keyboards import device as device_kb
+from bot.keyboards import payment as payment_kb
+from bot.keyboards import user as user_kb
+from bot.keyboards.admin import (
+    dashboard as admin_dashboard_kb,
+)
+from bot.keyboards.admin import (
+    users as admin_users_kb,
+)
 from bot.middlewares.action_lock import ActionLockMiddleware
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import CleanChatMiddleware, stop_clean_chat_worker
@@ -11,15 +22,6 @@ from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.db_session import DBSessionMiddleware
 from bot.middlewares.private_chat import PrivateChatMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
-
-from bot.keyboards import user as user_kb
-from bot.keyboards import device as device_kb
-from bot.keyboards import payment as payment_kb
-from bot.keyboards import common as common_kb
-from bot.keyboards.admin import (
-    dashboard as admin_dashboard_kb,
-    users as admin_users_kb,
-)
 
 
 class TestBotMiddlewaresFullCoverage(unittest.IsolatedAsyncioTestCase):

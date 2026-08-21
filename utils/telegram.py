@@ -3,7 +3,6 @@ import html
 import logging
 import re
 import time
-from typing import Optional, List
 
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
@@ -65,7 +64,7 @@ def _cleanup_render_locks(now: float) -> None:
 async def _safe_delete_batch(
     bot,
     chat_id: int,
-    msg_ids: List[int],
+    msg_ids: list[int],
 ) -> tuple[list[int], list[int]]:
     deleted_ids: list[int] = []
     failed_ids: list[int] = []
@@ -103,7 +102,7 @@ async def _safe_delete_batch(
     return deleted_ids, failed_ids
 
 
-def safe(value: Optional[str]) -> str:
+def safe(value: str | None) -> str:
     if value is None:
         return "—"
     return html.escape(str(value))
@@ -139,7 +138,7 @@ def _maybe_cleanup_cache() -> None:
         )
 
 
-async def _load_hub_ids_from_db(chat_id: int) -> List[int] | None:
+async def _load_hub_ids_from_db(chat_id: int) -> list[int] | None:
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         return list(cached["ids"])
@@ -169,7 +168,7 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
         _hub_cache[chat_id] = {"ids": [message_id]}
 
 
-async def _remove_hub_ids_from_db(chat_id: int, message_ids: List[int]) -> None:
+async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
     if not message_ids:
         return
 
@@ -185,11 +184,11 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: List[int]) -> None:
         cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
 
 
-async def get_hub_ids(chat_id: int) -> List[int]:
+async def get_hub_ids(chat_id: int) -> list[int]:
     return await _load_hub_ids_from_db(chat_id)
 
 
-async def _delete_hub_messages(bot, chat_id: int, msg_ids: List[int]) -> List[int]:
+async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
     if not msg_ids:
         return []
 
@@ -209,7 +208,7 @@ async def _delete_hub_messages(bot, chat_id: int, msg_ids: List[int]) -> List[in
     return failed_ids
 
 
-async def delete_hub_ids(bot, chat_id: int, msg_ids: List[int]) -> List[int]:
+async def delete_hub_ids(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
     if not msg_ids:
         return []
 
@@ -225,7 +224,7 @@ async def render_hub(
     reply_markup: InlineKeyboardMarkup,
     parse_mode: str = "HTML",
     force_new: bool = False,
-    trigger_message_id: Optional[int] = None,
+    trigger_message_id: int | None = None,
     disable_web_page_preview: bool = True,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""

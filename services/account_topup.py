@@ -158,7 +158,7 @@ async def create_balance_topup(
 
     pending = await _pending_topup_exposure(session, user.id)
     projected_position = balance.real_position + pending + rubles
-    if max(Decimal("0"), projected_position) > Decimal(
+    if max(Decimal(0), projected_position) > Decimal(
         cfg.BALANCE_MAX_AVAILABLE_RUB
     ):
         raise AccountTopupError("topup_balance_limit_exceeded")
@@ -390,7 +390,7 @@ async def settle_succeeded_topup(
             topup_amount=payment.amount,
         )
         referrer_bonus_amount = getattr(bonus_result, "referrer_bonus", bonus_result)
-        purchaser_welcome_amount = getattr(bonus_result, "purchaser_welcome_bonus", Decimal("0"))
+        purchaser_welcome_amount = getattr(bonus_result, "purchaser_welcome_bonus", Decimal(0))
 
         if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
@@ -446,11 +446,13 @@ async def settle_succeeded_topup(
                 auto_action = payment.topup_context.get("auto_fulfill_action")
                 quote_raw = payment.topup_context.get("quote_public_id")
                 if auto_action and quote_raw:
-                    import uuid
                     import logging
+                    import uuid
                     quote_uuid = uuid.UUID(str(quote_raw))
                     if auto_action == "tariff_change":
-                        from services.account_tariff_change import settle_account_tariff_change
+                        from services.account_tariff_change import (
+                            settle_account_tariff_change,
+                        )
                         await settle_account_tariff_change(
                             session,
                             user_id=payment.user_id,
@@ -532,8 +534,9 @@ async def settle_succeeded_topup(
                             if p and p.credit_notified_at is None:
                                 p.credit_notified_at = now_utc()
                             if target_quote_uuid:
-                                from database.models import TariffQuote
                                 from sqlalchemy import select
+
+                                from database.models import TariffQuote
                                 q = await notify_session.scalar(
                                     select(TariffQuote).where(TariffQuote.public_id == target_quote_uuid)
                                 )

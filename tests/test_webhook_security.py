@@ -113,6 +113,7 @@ class WebhookProviderVerificationTests(unittest.IsolatedAsyncioTestCase):
 class WebhookRouteRegistrationTests(unittest.TestCase):
     def test_both_yookassa_webhook_routes_are_registered(self):
         from aiohttp import web
+
         from bot.handlers.webhook import setup_webhook_routes
 
         app = web.Application()

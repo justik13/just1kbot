@@ -20,7 +20,6 @@ from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 from utils.telegram import render_hub
 
-
 logger = logging.getLogger("AccountBalanceNotifications")
 BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
@@ -262,6 +261,7 @@ async def process_balance_notifications(bot: Bot) -> int:
                 quote_raw = (payment.topup_context or {}).get("quote_public_id")
                 if quote_raw:
                     import uuid
+
                     from database.models import TariffQuote
                     try:
                         quote_uuid = uuid.UUID(str(quote_raw))

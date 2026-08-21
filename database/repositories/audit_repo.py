@@ -1,8 +1,9 @@
 import inspect
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.models import AuditLog
-from typing import List, Optional
 from utils.datetime_helpers import now_utc
 
 
@@ -10,9 +11,9 @@ async def create_audit_log(
     session: AsyncSession,
     admin_id: int,
     action: str,
-    target_type: Optional[str] = None,
-    target_id: Optional[int] = None,
-    details: Optional[str] = None
+    target_type: str | None = None,
+    target_id: int | None = None,
+    details: str | None = None
 ) -> AuditLog:
     log = AuditLog(
         admin_id=admin_id,
@@ -29,7 +30,7 @@ async def create_audit_log(
     return log
 
 
-async def get_recent_audit_logs(session: AsyncSession, limit: int = 10) -> List[AuditLog]:
+async def get_recent_audit_logs(session: AsyncSession, limit: int = 10) -> list[AuditLog]:
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -37,7 +38,7 @@ async def get_recent_audit_logs(session: AsyncSession, limit: int = 10) -> List[
 
 async def get_all_audit_logs_paginated(
     session: AsyncSession, offset: int = 0, limit: int = 10
-) -> List[AuditLog]:
+) -> list[AuditLog]:
     stmt = select(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
@@ -63,6 +64,7 @@ async def clear_audit_logs(
     """
     import asyncio
     from datetime import timedelta
+
     from sqlalchemy import delete, select
     threshold = now_utc() - timedelta(days=older_than_days)
 
@@ -115,10 +117,10 @@ async def clear_audit_logs(
 async def get_user_audit_logs(
     session: AsyncSession,
     user_id: int,
-    telegram_id: Optional[int] = None,
+    telegram_id: int | None = None,
     offset: int = 0,
     limit: int = 10,
-) -> List[AuditLog]:
+) -> list[AuditLog]:
     from sqlalchemy import or_
 
     conditions = [func.lower(AuditLog.target_type) == "user"]
@@ -146,7 +148,7 @@ async def get_user_audit_logs(
 async def get_user_audit_logs_count(
     session: AsyncSession,
     user_id: int,
-    telegram_id: Optional[int] = None,
+    telegram_id: int | None = None,
 ) -> int:
     from sqlalchemy import or_
 

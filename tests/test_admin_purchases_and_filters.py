@@ -2,6 +2,8 @@ import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
+from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+from bot.keyboards.device import get_device_keyboard
 from database.models import (
     AuditLog,
     Tariff,
@@ -12,8 +14,6 @@ from database.models import (
 from database.repositories.purchases_repo import (
     get_purchase_logs_paginated,
 )
-from bot.handlers.admin.users.common import _build_users_list_text_and_kb
-from bot.keyboards.device import get_device_keyboard
 from utils.datetime_helpers import now_utc
 
 
@@ -59,8 +59,9 @@ class AdminPurchasesAndFiltersTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("admin_users_filter_menu:tariff", all_callbacks)
 
     def test_apply_user_filters_logic(self):
-        from database.repositories.users_repo import _apply_user_filters
         from sqlalchemy import select
+
+        from database.repositories.users_repo import _apply_user_filters
 
         stmt_all = _apply_user_filters(select(User), "all")
         stmt_new = _apply_user_filters(select(User), "new_7d")

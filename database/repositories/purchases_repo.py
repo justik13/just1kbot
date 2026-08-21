@@ -1,9 +1,9 @@
 """Repository for querying user purchase logs (tariff purchases, renewals, changes, and admin grants)."""
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-import re
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,7 +137,7 @@ async def get_purchase_logs_paginated(
                 tariff_name=tariff_name,
                 device_limit=dev_limit,
                 duration_days=dur_days,
-                amount_rub=quote.amount_due_rub or Decimal("0"),
+                amount_rub=quote.amount_due_rub or Decimal(0),
                 created_at=created_at,
             )
         )
@@ -271,7 +271,7 @@ async def get_purchase_log_by_id(
             tariff_name=tariff_name,
             device_limit=dev_limit,
             duration_days=dur_days,
-            amount_rub=quote.amount_due_rub or Decimal("0"),
+            amount_rub=quote.amount_due_rub or Decimal(0),
             created_at=quote.consumed_at or quote.created_at,
         )
 

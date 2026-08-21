@@ -33,7 +33,7 @@ def _needs_attention():
 
 
 def _needs_recovery():
-    from sqlalchemy import or_, and_, select, func, text
+    from sqlalchemy import func, or_, select, text
     from sqlalchemy.orm import aliased
 
     from database.models import User

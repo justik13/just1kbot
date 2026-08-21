@@ -8,29 +8,29 @@ from aiogram.exceptions import TelegramBadRequest
 from utils.admin import is_admin
 from utils.callbacks import (
     parse_callback_id,
-    parse_callback_parts,
     parse_callback_int,
+    parse_callback_parts,
 )
 from utils.datetime_helpers import (
-    now_utc,
-    now_msk,
-    format_datetime_msk,
     days_left_msk,
+    format_datetime_msk,
     is_expired,
+    now_msk,
+    now_utc,
 )
 from utils.encryption import (
     EncryptedString,
 )
 from utils.formatters import (
-    format_traffic,
     format_datetime,
     format_days_left,
+    format_traffic,
 )
 from utils.logging_security import (
-    sanitize_text,
-    sanitize_short,
-    safe_url_target,
     SensitiveDataFilter,
+    safe_url_target,
+    sanitize_short,
+    sanitize_text,
 )
 from utils.rate_limiter import TokenBucketRateLimiter
 from utils.security import (
@@ -39,8 +39,8 @@ from utils.security import (
     is_safe_url,
 )
 from utils.telegram import (
-    _get_hub_render_lock,
     _cleanup_render_locks,
+    _get_hub_render_lock,
     _safe_delete_batch,
 )
 from utils.text_limits import (
@@ -49,8 +49,8 @@ from utils.text_limits import (
 )
 from utils.user_locks import get_user_action_lock
 from utils.vpn_parser import (
-    encode_json_to_vpn_uri,
     decode_vpn_uri_to_json,
+    encode_json_to_vpn_uri,
 )
 
 

@@ -212,17 +212,16 @@ class APIOperationsPostgresTests(unittest.IsolatedAsyncioTestCase):
         for error_code, error_message in ((object(), "safe"), ("safe", object())):
             with self.subTest(
                 error_code=type(error_code), error_message=type(error_message)
-            ):
-                with self.assertRaises(APIOperationValidationError):
-                    await mark_api_operation_failed(
-                        claimed.id,
-                        worker_id="owner",
-                        expected_attempt_number=claimed.attempt_number,
-                        retryable=True,
-                        error_code=error_code,
-                        error_message=error_message,
-                        session_factory=self.sessions,
-                    )
+            ), self.assertRaises(APIOperationValidationError):
+                await mark_api_operation_failed(
+                    claimed.id,
+                    worker_id="owner",
+                    expected_attempt_number=claimed.attempt_number,
+                    retryable=True,
+                    error_code=error_code,
+                    error_message=error_message,
+                    session_factory=self.sessions,
+                )
         result = await mark_api_operation_failed(
             claimed.id,
             worker_id="owner",

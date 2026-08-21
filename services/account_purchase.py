@@ -29,6 +29,7 @@ from database.repositories.paid_value_repo import (
     PaidValueLedgerConflictError,
     get_or_create_account_purchase_entry,
 )
+from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariff_quotes_repo import (
     CheckoutQuoteConflictError,
     get_active_financial_quotes_for_update,
@@ -40,7 +41,6 @@ from services.audit_service import AuditService
 from services.referral_bonus import grant_referral_bonus_for_purchase
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
-from database.repositories.profiles_repo import get_user_profiles_count
 
 
 class AccountPurchaseError(RuntimeError):

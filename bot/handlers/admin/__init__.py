@@ -1,6 +1,7 @@
 from aiogram import Router
 
 from bot.filters import AdminFilter
+
 from .broadcast import router as broadcast_router
 from .dashboard import router as dashboard_router
 from .disputes import router as disputes_router
@@ -35,13 +36,13 @@ admin_router.include_routers(
 
 __all__ = [
     "admin_router",
+    "broadcast_router",
     "dashboard_router",
-    "users_router",
+    "disputes_router",
+    "payment_queues_router",
+    "payments_router",
+    "purchases_router",
     "servers_router",
     "tariffs_router",
-    "broadcast_router",
-    "payments_router",
-    "payment_queues_router",
-    "purchases_router",
-    "disputes_router",
+    "users_router",
 ]

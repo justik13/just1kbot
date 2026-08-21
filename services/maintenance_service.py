@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -64,7 +63,7 @@ class MaintenanceService:
     async def enable(
         session: AsyncSession,
         admin_id: int,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> None:
         await set_maintenance_mode(
             session,
@@ -96,7 +95,7 @@ class MaintenanceService:
     async def toggle(
         session: AsyncSession,
         admin_id: int,
-        message: Optional[str] = None,
+        message: str | None = None,
     ) -> bool:
         """
         Переключает режим технических работ.

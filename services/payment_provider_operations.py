@@ -239,8 +239,9 @@ async def _push_payment_url(bot, session, payment) -> None:
     from aiogram.exceptions import TelegramForbiddenError
     user = None
     try:
-        from database.models import User
         from sqlalchemy import select as _select
+
+        from database.models import User
         user = await session.scalar(_select(User).where(User.id == payment.user_id))
         if user is None or not user.telegram_id:
             return

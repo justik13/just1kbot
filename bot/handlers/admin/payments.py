@@ -125,8 +125,7 @@ async def _show_payments_list(
         1,
         math.ceil(total_payments / PAYMENTS_PER_PAGE),
     )
-    if page > total_pages:
-        page = total_pages
+    page = min(page, total_pages)
     offset = (page - 1) * PAYMENTS_PER_PAGE
     stmt = (
         select(Payment)

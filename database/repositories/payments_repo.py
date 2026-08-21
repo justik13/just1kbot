@@ -1,4 +1,3 @@
-from typing import Optional, List
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +26,7 @@ async def has_successful_topup(
 
 
 
-async def get_user_payments(session: AsyncSession, user_id: int) -> List[Payment]:
+async def get_user_payments(session: AsyncSession, user_id: int) -> list[Payment]:
     stmt = (
         select(Payment)
         .where(Payment.user_id == user_id)
@@ -39,7 +38,7 @@ async def get_user_payments(session: AsyncSession, user_id: int) -> List[Payment
 
 async def get_payment_by_id(
     session: AsyncSession, payment_id: int
-) -> Optional[Payment]:
+) -> Payment | None:
     stmt = (
         select(Payment)
         .options(
@@ -53,7 +52,7 @@ async def get_payment_by_id(
 
 async def get_payment_by_id_for_update(
     session: AsyncSession, payment_id: int
-) -> Optional[Payment]:
+) -> Payment | None:
     stmt = (
         select(Payment)
         .options(
@@ -68,7 +67,7 @@ async def get_payment_by_id_for_update(
 
 async def get_payment_by_id_simple(
     session: AsyncSession, payment_id: int
-) -> Optional[Payment]:
+) -> Payment | None:
     stmt = select(Payment).where(Payment.id == payment_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
@@ -91,10 +90,10 @@ async def log_payment_event(
     payment_id: int,
     event_type: str,
     *,
-    provider_status: Optional[str] = None,
-    reason: Optional[str] = None,
-    source: Optional[str] = None,
-    details: Optional[str] = None,
+    provider_status: str | None = None,
+    reason: str | None = None,
+    source: str | None = None,
+    details: str | None = None,
 ) -> PaymentEvent:
     event = PaymentEvent(
         payment_id=payment_id,
@@ -113,8 +112,9 @@ async def get_pending_payments_count_for_tariff(
     session: AsyncSession,
     tariff_id: int,
 ) -> int:
-    from database.models import TariffQuote, TariffVersion
     from sqlalchemy import func, select
+
+    from database.models import TariffQuote, TariffVersion
     return int(
         await session.scalar(
             select(func.count(TariffQuote.id))

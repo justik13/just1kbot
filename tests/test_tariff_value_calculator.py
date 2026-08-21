@@ -2,7 +2,9 @@ import unittest
 from decimal import Decimal
 
 from services.tariff_value_calculator import (
-    TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
+    TariffCalculationError,
+    TariffVersionSnapshot,
+    calculate_tariff_value,
 )
 
 
@@ -35,8 +37,8 @@ class TariffValueCalculatorTests(unittest.TestCase):
     def test_due_rounds_up_and_hours_round_down(self):
         result = calculate_tariff_value(operation_type="change", source_paid_hours=1, source_paid_value_rub=Decimal("0.01"),
             source_tariff=snap(hours=100, price="1"), target_tariff=snap(2, 3, "2"),
-            confirmed_additional_payment_rub=Decimal("2"), bonus_hours=0)
-        self.assertEqual(result.required_payment_rub, Decimal("2"))
+            confirmed_additional_payment_rub=Decimal(2), bonus_hours=0)
+        self.assertEqual(result.required_payment_rub, Decimal(2))
         self.assertEqual(result.resulting_paid_hours, 3)
         self.assertLess(result.rounding_loss_hours, 1)
 
@@ -55,11 +57,11 @@ class TariffValueCalculatorTests(unittest.TestCase):
 
     def test_exact_frozen_due_and_operation_shapes(self):
         for operation, source, source_hours, source_value, confirmed in (
-            ("purchase", None, 0, 0, Decimal("290")),
-            ("purchase", None, 0, 0, Decimal("310")),
-            ("purchase", snap(), 1, Decimal("0.40"), Decimal("300")),
-            ("renew", snap(2), 1, Decimal("0.40"), Decimal("300")),
-            ("change", snap(), 1, Decimal("0.40"), Decimal("300")),
+            ("purchase", None, 0, 0, Decimal(290)),
+            ("purchase", None, 0, 0, Decimal(310)),
+            ("purchase", snap(), 1, Decimal("0.40"), Decimal(300)),
+            ("renew", snap(2), 1, Decimal("0.40"), Decimal(300)),
+            ("change", snap(), 1, Decimal("0.40"), Decimal(300)),
         ):
             with self.subTest(operation=operation), self.assertRaises(TariffCalculationError):
                 calculate_tariff_value(operation_type=operation,
@@ -77,7 +79,7 @@ class TariffValueCalculatorTests(unittest.TestCase):
                         result = calculate_tariff_value(
                             operation_type="change", source_paid_hours=remaining, source_paid_value_rub=source_value,
                             source_tariff=source, target_tariff=snap(2, hours, target_price),
-                            confirmed_additional_payment_rub=max(Decimal("0"), Decimal(target_price) - source_value).quantize(Decimal("1"), rounding=__import__("decimal").ROUND_CEILING), bonus_hours=168)
+                            confirmed_additional_payment_rub=max(Decimal(0), Decimal(target_price) - source_value).quantize(Decimal(1), rounding=__import__("decimal").ROUND_CEILING), bonus_hours=168)
                         self.assertTrue(result.invariant_holds)
                         self.assertLessEqual(result.paid_value_after_rub,
                                              source_value + result.required_payment_rub)

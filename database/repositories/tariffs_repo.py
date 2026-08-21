@@ -1,6 +1,5 @@
-from typing import Optional, List
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Tariff
@@ -14,7 +13,7 @@ ALLOWED_TARIFF_UPDATE_FIELDS = {
 }
 
 
-async def get_active_tariffs(session: AsyncSession) -> List[Tariff]:
+async def get_active_tariffs(session: AsyncSession) -> list[Tariff]:
     stmt = (
         select(Tariff)
         .where(Tariff.is_active.is_(True))
@@ -31,7 +30,7 @@ async def get_active_tariffs(session: AsyncSession) -> List[Tariff]:
 async def get_tariff_by_id(
     session: AsyncSession,
     tariff_id: int,
-) -> Optional[Tariff]:
+) -> Tariff | None:
     stmt = select(Tariff).where(Tariff.id == tariff_id)
     result = await session.execute(stmt)
     return result.scalar_one_or_none()

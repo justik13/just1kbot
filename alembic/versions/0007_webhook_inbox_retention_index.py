@@ -5,9 +5,9 @@ Revises: 0006_add_user_subscription_token
 Create Date: 2026-08-18 14:40:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0007_webhook_retention"

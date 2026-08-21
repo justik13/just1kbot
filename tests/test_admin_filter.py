@@ -88,8 +88,7 @@ class TestAdminRouterTreeArchitecture(unittest.TestCase):
         for file_path in admin_package_dir.rglob("*.py"):
             rel = file_path.relative_to(admin_package_dir.parent.parent.parent)
             module_name = str(rel.with_suffix("")).replace("/", ".").replace("\\", ".")
-            if module_name.endswith(".__init__"):
-                module_name = module_name[:-9]
+            module_name = module_name.removesuffix(".__init__")
             mod = sys.modules.get(module_name)
             if mod is None:
                 try:
@@ -117,8 +116,8 @@ class TestSetupBotLifecycleIdempotency(unittest.IsolatedAsyncioTestCase):
     """Verifies setup_bot() can be called repeatedly without router/parent conflicts."""
 
     async def test_repeated_setup_bot_lifecycle_clean(self):
-        from bot.main import setup_bot
         from bot.handlers.admin import dashboard_router, disputes_router
+        from bot.main import setup_bot
 
         fake_settings = MagicMock()
         fake_settings.BOT_TOKEN = "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"

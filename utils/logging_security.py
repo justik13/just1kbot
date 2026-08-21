@@ -8,7 +8,6 @@ import traceback
 from typing import Any
 from urllib.parse import urlsplit
 
-
 REDACTED = "[REDACTED]"
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (

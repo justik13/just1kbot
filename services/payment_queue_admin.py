@@ -1,11 +1,11 @@
 """Secret-free admin views and serialized manual retry for payment queues."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import hashlib
 import json
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case, func, or_, select
 

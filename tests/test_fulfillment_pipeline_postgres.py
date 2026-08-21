@@ -1,13 +1,14 @@
 import os
 import unittest
-from datetime import timedelta
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from database.models import APIOperation, Server, User, VPNProfile
 from services.api_operations_queue import ensure_delete_operation
-from services.profile_deletion_service import ProfileDeletionService
 from services.device_service import DeviceService, ServerUnavailable
+from services.profile_deletion_service import ProfileDeletionService
 from services.slots_cache import ServerPeerSnapshot
 
 

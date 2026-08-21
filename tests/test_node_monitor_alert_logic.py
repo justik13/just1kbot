@@ -16,14 +16,13 @@ os.environ.setdefault("SSL_EMAIL", "admin@myrealdomain.com")
 
 import time
 import unittest
-from datetime import timedelta
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.types import CallbackQuery
 
-from utils.datetime_helpers import now_utc
-
+from bot.handlers.admin.servers.card_routes import dismiss_admin_alert
 from database.models import Server
 from services.workers.node_monitor import (
     ServerHealthState,
@@ -31,7 +30,7 @@ from services.workers.node_monitor import (
     check_node_resources_and_alerts,
     get_server_monitor_state,
 )
-from bot.handlers.admin.servers.card_routes import dismiss_admin_alert
+from utils.datetime_helpers import now_utc
 
 
 class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
@@ -54,7 +53,9 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         self.patcher_scope = patch("services.workers.node_monitor.session_scope", side_effect=dummy_scope)
 
         async def mock_update_snapshot(session, server_id, expected_health_state, new_health_state, **kwargs):
-            from services.workers.node_monitor import get_all_servers as node_get_all_servers
+            from services.workers.node_monitor import (
+                get_all_servers as node_get_all_servers,
+            )
             servers = await node_get_all_servers(session)
             target = next((s for s in servers if s.id == server_id), None) if servers else None
             if target:

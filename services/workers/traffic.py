@@ -1,13 +1,12 @@
-from bot import texts
 import asyncio
 import logging
 from datetime import datetime, timezone
 
 from aiogram import Bot
-
 from cachetools import TTLCache
 from sqlalchemy import select, update
 
+from bot import texts
 from bot.constants import (
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,

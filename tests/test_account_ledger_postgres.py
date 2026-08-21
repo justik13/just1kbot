@@ -4,10 +4,10 @@ import asyncio
 import os
 import unittest
 import uuid
-from unittest.mock import AsyncMock, patch
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import DBAPIError
@@ -36,6 +36,11 @@ from database.repositories.account_ledger_repo import (
     reserve_payment_funds,
     resolve_reservation,
 )
+from services.account_purchase import (
+    AccountPurchaseError,
+    prepare_account_purchase,
+    settle_account_purchase,
+)
 from services.account_topup import (
     AccountTopupError,
     create_balance_topup,
@@ -43,13 +48,7 @@ from services.account_topup import (
     settle_succeeded_topup,
     settle_succeeded_topup_by_id,
 )
-from services.account_purchase import (
-    AccountPurchaseError,
-    prepare_account_purchase,
-    settle_account_purchase,
-)
 from utils.datetime_helpers import now_utc
-
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -87,7 +86,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 name_snapshot=tariff.name,
                 duration_hours=720,
                 device_limit=2,
-                price_rub=Decimal("100"),
+                price_rub=Decimal(100),
                 currency="RUB",
             )
             session.add(version)
@@ -172,7 +171,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             count = await session.scalar(select(func.count(AccountLedgerEntry.id)))
             self.assertEqual(count, 1)
             self.assertEqual(snapshot.available, Decimal("100.00"))
-            self.assertEqual(snapshot.debt, Decimal("0"))
+            self.assertEqual(snapshot.debt, Decimal(0))
 
     async def test_topup_creation_is_durable_and_reuses_visible_intent(self):
         async with self.sessions.begin() as session:
@@ -441,13 +440,12 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             with patch(
                 "services.account_purchase.SubscriptionService.extend_subscription",
                 new=AsyncMock(side_effect=AccountPurchaseError("forced_failure")),
-            ):
-                with self.assertRaisesRegex(AccountPurchaseError, "forced_failure"):
-                    await settle_account_purchase(
-                        session,
-                        user_id=self.user_id,
-                        quote_public_id=intent.quote.public_id,
-                    )
+            ), self.assertRaisesRegex(AccountPurchaseError, "forced_failure"):
+                await settle_account_purchase(
+                    session,
+                    user_id=self.user_id,
+                    quote_public_id=intent.quote.public_id,
+                )
             self.assertEqual(
                 await session.scalar(
                     select(func.count(AccountLedgerEntry.id)).where(
@@ -613,7 +611,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             snapshot = await get_account_balance(session, user_id=self.user_id)
             self.assertEqual(snapshot.available, Decimal("100.00"))
-            self.assertEqual(snapshot.reserved, Decimal("0"))
+            self.assertEqual(snapshot.reserved, Decimal(0))
 
     async def test_chargeback_debt_is_repaid_before_new_money_is_available(self):
         async with self.sessions.begin() as session:
@@ -634,14 +632,14 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 idempotency_key=f"chargeback:{disputed.id}",
             )
             snapshot = await get_account_balance(session, user_id=self.user_id)
-            self.assertEqual(snapshot.available, Decimal("0"))
+            self.assertEqual(snapshot.available, Decimal(0))
             self.assertEqual(snapshot.debt, Decimal("30.00"))
             repayment = await self.topup(session, 40)
             credit, _ = await credit_succeeded_topup(
                 session, payment_id=repayment.id
             )
             snapshot = await get_account_balance(session, user_id=self.user_id)
-            self.assertEqual(snapshot.debt, Decimal("0"))
+            self.assertEqual(snapshot.debt, Decimal(0))
             self.assertEqual(snapshot.available, Decimal("10.00"))
 
     async def test_refundable_amount_tracks_allocations_and_reservations(self):
@@ -700,7 +698,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.execute(
                     update(AccountLedgerEntry)
                     .where(AccountLedgerEntry.id == credit_id)
-                    .values(amount=Decimal("101"))
+                    .values(amount=Decimal(101))
                 )
         with self.assertRaises(DBAPIError):
             async with self.sessions.begin() as session:
@@ -727,12 +725,13 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await session.execute(
                     update(AccountBalanceReservation)
                     .where(AccountBalanceReservation.id == reservation_id)
-                    .values(amount=Decimal("21"))
+                    .values(amount=Decimal(21))
                 )
 
     async def test_ledger_balance_mathematical_invariant_with_refunds(self):
+        from sqlalchemy import func, select
+
         from database.models import AccountLedgerEntry
-        from sqlalchemy import select, func
         
         async with self.sessions.begin() as session:
             # 1. Topup 1000
@@ -767,7 +766,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             # 6. Check Invariant
             total_ledger_sum = await session.scalar(
-                select(func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal("0")))
+                select(func.coalesce(func.sum(AccountLedgerEntry.amount), Decimal(0)))
                 .where(AccountLedgerEntry.user_id == self.user_id)
             )
 

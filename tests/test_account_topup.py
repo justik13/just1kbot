@@ -15,7 +15,7 @@ def topup() -> Payment:
     return Payment(
         id=17,
         user_id=3,
-        amount=Decimal("499"),
+        amount=Decimal(499),
         currency="RUB",
         public_order_id="topup_public",
         provider_idempotency_key="topup_idempotency",
@@ -155,8 +155,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settle_succeeded_topup_does_not_set_credit_notified_at_prematurely(self):
         from unittest.mock import MagicMock, patch
-        from services.account_topup import settle_succeeded_topup
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
 
         session = AsyncMock()
         session.add = MagicMock()
@@ -176,16 +177,16 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
-            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal(499)), True))),
             patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("499"),
-                available=Decimal("499"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("499"),
-                real_available=Decimal("499"),
-                bonus_position=Decimal("0"),
-                bonus_available=Decimal("0"),
+                accounting_position=Decimal(499),
+                available=Decimal(499),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(499),
+                real_available=Decimal(499),
+                bonus_position=Decimal(0),
+                bonus_available=Decimal(0),
             ))),
             patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
             patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=0)),
@@ -228,10 +229,11 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(db_p.credit_notified_at)
 
     async def test_auto_fulfillment_failure_triggers_fallback_balance_notification(self):
-        from unittest.mock import MagicMock, patch
         import uuid
-        from services.account_topup import settle_succeeded_topup
+        from unittest.mock import MagicMock, patch
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
 
         session = AsyncMock()
         session.add = MagicMock()
@@ -253,16 +255,16 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
-            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal(499)), True))),
             patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("499"),
-                available=Decimal("499"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("499"),
-                real_available=Decimal("499"),
-                bonus_position=Decimal("0"),
-                bonus_available=Decimal("0"),
+                accounting_position=Decimal(499),
+                available=Decimal(499),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(499),
+                real_available=Decimal(499),
+                bonus_position=Decimal(0),
+                bonus_available=Decimal(0),
             ))),
             patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
             patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=0)),
@@ -299,10 +301,11 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("Баланс пополнен на +499 ₽", mock_hub.call_args[0][2])
 
     async def test_auto_fulfillment_success_marks_quote_and_payment_on_delivery(self):
-        from unittest.mock import MagicMock, patch
         import uuid
-        from services.account_topup import settle_succeeded_topup
+        from unittest.mock import MagicMock, patch
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
 
         session = AsyncMock()
         session.add = MagicMock()
@@ -328,16 +331,16 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
-            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal(499)), True))),
             patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("499"),
-                available=Decimal("499"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("499"),
-                real_available=Decimal("499"),
-                bonus_position=Decimal("0"),
-                bonus_available=Decimal("0"),
+                accounting_position=Decimal(499),
+                available=Decimal(499),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(499),
+                real_available=Decimal(499),
+                bonus_position=Decimal(0),
+                bonus_available=Decimal(0),
             ))),
             patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
             patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=0)),
@@ -379,8 +382,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("подписка успешно оформлена", mock_hub.call_args[0][2])
 
     async def test_worker_delays_payment_credit_notified_until_quote_purchase_is_notified(self):
-        from unittest.mock import AsyncMock, MagicMock, patch
         import uuid
+        from unittest.mock import AsyncMock, MagicMock, patch
+
         from services.workers.account_balance import process_balance_notifications
 
         quote_id = uuid.uuid4()
@@ -475,8 +479,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settle_succeeded_topup_queues_referrer_push_post_commit(self):
         from unittest.mock import MagicMock, patch
-        from services.account_topup import settle_succeeded_topup
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.account_topup import settle_succeeded_topup
 
         session = AsyncMock()
         session.add = MagicMock()
@@ -496,19 +501,19 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("services.account_topup.lock_checkout_user", new=AsyncMock(return_value=user)),
-            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal("499")), True))),
+            patch("services.account_topup.credit_succeeded_topup", new=AsyncMock(return_value=(MagicMock(amount=Decimal(499)), True))),
             patch("services.account_topup.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("499"),
-                available=Decimal("499"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("499"),
-                real_available=Decimal("499"),
-                bonus_position=Decimal("0"),
-                bonus_available=Decimal("0"),
+                accounting_position=Decimal(499),
+                available=Decimal(499),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(499),
+                real_available=Decimal(499),
+                bonus_position=Decimal(0),
+                bonus_available=Decimal(0),
             ))),
             patch("services.account_topup.refresh_user_dispute_hold", new=AsyncMock()),
-            patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=Decimal("50"))),
+            patch("services.referral_bonus.grant_referral_bonus_for_topup", new=AsyncMock(return_value=Decimal(50))),
             patch("database.connection.queue_post_commit_task", side_effect=lambda s, cb: queued_callbacks.append(cb)),
         ):
             created, balance = await settle_succeeded_topup(
@@ -546,8 +551,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worker_delivers_durable_referrer_notification_when_post_commit_push_was_lost(self):
         from unittest.mock import AsyncMock, MagicMock, patch
-        from services.workers.account_balance import process_balance_notifications
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.workers.account_balance import process_balance_notifications
 
         p = topup()
         p.id = 5555
@@ -576,14 +582,14 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
             patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
             patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("350"),
-                available=Decimal("350"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("350"),
-                real_available=Decimal("350"),
-                bonus_position=Decimal("0"),
-                bonus_available=Decimal("0"),
+                accounting_position=Decimal(350),
+                available=Decimal(350),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(350),
+                real_available=Decimal(350),
+                bonus_position=Decimal(0),
+                bonus_available=Decimal(0),
             ))),
         ):
             await process_balance_notifications(bot)
@@ -597,15 +603,16 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_worker_delivers_durable_purchaser_welcome_bonus_notification_when_post_commit_push_was_lost(self):
         from unittest.mock import AsyncMock, MagicMock, patch
-        from services.workers.account_balance import process_balance_notifications
+
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.workers.account_balance import process_balance_notifications
         from utils.datetime_helpers import now_utc
 
         p = topup()
         p.id = 6666
         p.user_id = 99
         p.credit_notified_at = None  # Lost post-commit push!
-        p.amount = Decimal("500")
+        p.amount = Decimal(500)
         p.topup_context = {
             "referrer_telegram_id": 88888,
             "referrer_bonus": 50,
@@ -630,14 +637,14 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
             patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
             patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
-                accounting_position=Decimal("550"),
-                available=Decimal("550"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
-                real_position=Decimal("500"),
-                real_available=Decimal("500"),
-                bonus_position=Decimal("50"),
-                bonus_available=Decimal("50"),
+                accounting_position=Decimal(550),
+                available=Decimal(550),
+                reserved=Decimal(0),
+                debt=Decimal(0),
+                real_position=Decimal(500),
+                real_available=Decimal(500),
+                bonus_position=Decimal(50),
+                bonus_available=Decimal(50),
             ))),
         ):
             await process_balance_notifications(bot)

@@ -61,9 +61,10 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         asyncio.run(_test())
 
     def test_broadcast_resume_durable_checkpoint(self):
+        from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import _send_broadcast_to_users_with_resume
         from database.models import BroadcastProgress
-        from unittest.mock import patch
 
         async def _test():
             mock_bot = AsyncMock()
@@ -124,10 +125,12 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         asyncio.run(_test())
 
     def test_broadcast_retry_after_and_retry_logging(self):
+        from unittest.mock import patch
+
+        from aiogram.exceptions import TelegramRetryAfter
+
         from bot.handlers.admin.broadcast import _send_broadcast_to_users_with_resume
         from database.models import BroadcastProgress
-        from aiogram.exceptions import TelegramRetryAfter
-        from unittest.mock import patch
 
         async def _test():
             mock_bot = AsyncMock()
@@ -200,10 +203,12 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         asyncio.run(_test())
 
     def test_broadcast_forbidden_marks_blocked(self):
+        from unittest.mock import patch
+
+        from aiogram.exceptions import TelegramForbiddenError
+
         from bot.handlers.admin.broadcast import _send_broadcast_to_users_with_resume
         from database.models import BroadcastProgress, User
-        from aiogram.exceptions import TelegramForbiddenError
-        from unittest.mock import patch
 
         async def _test():
             mock_bot = AsyncMock()
@@ -266,10 +271,11 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
     def test_broadcast_concurrent_workers_single_owner_protection(self):
         from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import (
-            _send_broadcast_to_users_with_resume,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            _send_broadcast_to_users_with_resume,
         )
         from database.models import BroadcastProgress
 
@@ -345,10 +351,11 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
     def test_broadcast_ui_launch_executes_successfully(self):
         from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import (
-            _start_broadcast_process,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            _start_broadcast_process,
         )
         from database.models import BroadcastProgress, User
 
@@ -427,10 +434,11 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
     def test_broadcast_resume_pending_executes_successfully(self):
         from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import (
-            resume_pending_broadcasts,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            resume_pending_broadcasts,
         )
         from database.models import BroadcastProgress
 
@@ -507,13 +515,14 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         are serialized/locked before the first await, creating exactly 1 progress record
         and returning BROADCAST_ALREADY_RUNNING to the duplicate invocation."""
         from unittest.mock import patch
+
+        from bot import texts
         from bot.handlers.admin.broadcast import (
-            _start_broadcast_process,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            _start_broadcast_process,
         )
         from database.models import BroadcastProgress
-        from bot import texts
 
         async def _test():
             _active_broadcast_progress_ids.clear()
@@ -603,10 +612,11 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         """Verify that if _start_background_task fails during launch,
         BroadcastProgress is updated to status='stopped' and admin_id is discarded from memory."""
         from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import (
-            _start_broadcast_process,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            _start_broadcast_process,
         )
         from database.models import BroadcastProgress
 
@@ -680,10 +690,11 @@ class TestAdminBroadcastFilters(unittest.TestCase):
         """Verify that if _start_background_task fails during resume,
         BroadcastProgress is updated to status='stopped' and admin_id is discarded from memory."""
         from unittest.mock import patch
+
         from bot.handlers.admin.broadcast import (
-            resume_pending_broadcasts,
             _active_broadcast_progress_ids,
             _broadcast_in_progress,
+            resume_pending_broadcasts,
         )
         from database.models import BroadcastProgress
 

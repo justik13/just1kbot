@@ -31,7 +31,6 @@ from services.payment_disputes import (
 from services.provider_refunds import BalanceRefundError, request_balance_topup_refund
 from utils.datetime_helpers import now_utc
 
-
 DB = os.getenv("TEST_DATABASE_URL")
 TRUNCATE_SQL = (
     "TRUNCATE payment_disputes, provider_refund_operations, webhook_inbox, "
@@ -208,7 +207,7 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(reservation.status, "consumed")
             self.assertEqual(balance.accounting_position, Decimal("-20.00"))
             self.assertEqual(balance.debt, Decimal("20.00"))
-            self.assertEqual(balance.available, Decimal("0"))
+            self.assertEqual(balance.available, Decimal(0))
             self.assertTrue(user.financial_hold)
             self.assertEqual(user.financial_block_reason, "chargeback_debt")
             self.assertEqual(
@@ -223,7 +222,7 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
 
             recovery = Payment(
                 user_id=self.user_id,
-                amount=Decimal("20"),
+                amount=Decimal(20),
                 currency="RUB",
                     public_order_id="topup_" + uuid.uuid4().hex,
                 provider_idempotency_key=uuid.uuid4().hex,
@@ -245,7 +244,7 @@ class PaymentDisputesPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             balance = await get_account_balance(session, user_id=self.user_id)
             self.assertEqual(balance.accounting_position, Decimal("0.00"))
-            self.assertEqual(balance.debt, Decimal("0"))
+            self.assertEqual(balance.debt, Decimal(0))
             self.assertFalse(user.financial_hold)
             self.assertIsNone(user.financial_block_reason)
             self.assertEqual(

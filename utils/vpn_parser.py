@@ -1,16 +1,15 @@
 import base64
 import json
-import zlib
 import logging
 import struct
-from typing import Optional
+import zlib
 
 logger = logging.getLogger(__name__)
 
 class VPNConfigParseError(Exception):
     pass
 
-def _decode_base64url(payload: str) -> Optional[bytes]:
+def _decode_base64url(payload: str) -> bytes | None:
     try:
         b64 = payload.replace("-", "+").replace("_", "/")
         padding_needed = len(b64) % 4
@@ -25,7 +24,7 @@ def _decode_base64url(payload: str) -> Optional[bytes]:
 MAX_DECOMPRESSED_CONFIG_BYTES = 1024 * 1024  # 1 MiB
 
 
-def _decompress_amnezia_format(data: bytes) -> Optional[str]:
+def _decompress_amnezia_format(data: bytes) -> str | None:
     if len(data) < 4:
         raise VPNConfigParseError("Payload too short")
     expected_length = struct.unpack(">I", data[:4])[0]
@@ -53,7 +52,7 @@ def _decompress_amnezia_format(data: bytes) -> Optional[str]:
         raise VPNConfigParseError(f"Decompress failed: {e}") from e
 
 
-def decode_vpn_uri_to_json(uri: str) -> Optional[dict]:
+def decode_vpn_uri_to_json(uri: str) -> dict | None:
     if not uri or not isinstance(uri, str):
         raise VPNConfigParseError("Invalid URI type")
     payload = uri[6:] if uri.startswith("vpn://") else None
@@ -74,13 +73,13 @@ def decode_vpn_uri_to_json(uri: str) -> Optional[dict]:
     return data
 
 
-def _looks_like_wireguard_conf(conf: Optional[str]) -> bool:
+def _looks_like_wireguard_conf(conf: str | None) -> bool:
     if not conf or not isinstance(conf, str):
         return False
     return "[Interface]" in conf and "[Peer]" in conf
 
 
-def _get_first_awg_container(data: dict) -> Optional[dict]:
+def _get_first_awg_container(data: dict) -> dict | None:
     containers = data.get("containers", [])
     if not containers or not isinstance(containers, list):
         return None
@@ -93,7 +92,7 @@ def _get_first_awg_container(data: dict) -> Optional[dict]:
     return None
 
 
-def _parse_last_config(awg: dict) -> Optional[dict]:
+def _parse_last_config(awg: dict) -> dict | None:
     last_config_str = awg.get("last_config")
     if not last_config_str or not isinstance(last_config_str, str):
         return None
@@ -106,7 +105,7 @@ def _parse_last_config(awg: dict) -> Optional[dict]:
     return last_config
 
 
-def _build_conf_fallback(data: dict, last_config: dict) -> Optional[str]:
+def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
     client_priv_key = last_config.get("client_priv_key")
     server_pub_key = last_config.get("server_pub_key")
     host_name = last_config.get("hostName") or data.get("hostName")
@@ -178,7 +177,7 @@ def build_vpn_file_from_dict(data: dict) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-def build_conf_file_from_dict(data: dict) -> Optional[str]:
+def build_conf_file_from_dict(data: dict) -> str | None:
     try:
         awg = _get_first_awg_container(data)
         if not awg:
@@ -200,7 +199,7 @@ def build_conf_file_from_dict(data: dict) -> Optional[str]:
         raise VPNConfigParseError(f"Unexpected error: {e}") from e
 
 
-def build_vpn_file(uri: str) -> Optional[str]:
+def build_vpn_file(uri: str) -> str | None:
     if not uri or not isinstance(uri, str):
         return None
     try:
@@ -212,7 +211,7 @@ def build_vpn_file(uri: str) -> Optional[str]:
         return None
 
 
-def build_conf_file(uri: str) -> Optional[str]:
+def build_conf_file(uri: str) -> str | None:
     if not uri or not isinstance(uri, str):
         return None
     try:
@@ -253,7 +252,7 @@ def is_valid_vpn_uri(uri: str) -> bool:
 
 def customize_vpn_config_dict(
     data: dict,
-    description: Optional[str] = None,
+    description: str | None = None,
     dns1: str = "8.8.8.8",
     dns2: str = "8.8.4.4",
     mtu: str = "1280",
@@ -320,7 +319,7 @@ def encode_json_to_vpn_uri(data: dict) -> str:
 
 def customize_vpn_uri(
     uri: str,
-    description: Optional[str] = None,
+    description: str | None = None,
     dns1: str = "8.8.8.8",
     dns2: str = "8.8.4.4",
     mtu: str = "1280",

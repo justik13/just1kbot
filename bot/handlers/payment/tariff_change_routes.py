@@ -9,7 +9,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-
 from bot.keyboards import (
     get_back_button,
     get_balance_change_confirm_keyboard,
@@ -29,7 +28,6 @@ from utils.tariff_names import get_tariff_display_name
 from utils.telegram import render_hub
 
 from .balance_routes import _create_and_render_topup
-
 
 router = Router()
 logger = logging.getLogger(__name__)

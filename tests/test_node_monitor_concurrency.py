@@ -2,8 +2,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from database.repositories.servers_repo import update_server, update_server_health_snapshot
-from services.workers.node_monitor import check_node_resources_and_alerts, get_server_monitor_state
+from database.repositories.servers_repo import (
+    update_server,
+    update_server_health_snapshot,
+)
+from services.workers.node_monitor import (
+    check_node_resources_and_alerts,
+    get_server_monitor_state,
+)
 
 
 class NodeMonitorConcurrencyUnitTests(unittest.IsolatedAsyncioTestCase):

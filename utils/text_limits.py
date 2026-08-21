@@ -1,4 +1,3 @@
-from typing import Optional
 
 
 def split_text_by_lines(
@@ -43,7 +42,7 @@ def split_text_by_lines(
 
 
 def truncate_details(
-    value: Optional[str],
+    value: str | None,
     limit: int = 300,
 ) -> str:
     """

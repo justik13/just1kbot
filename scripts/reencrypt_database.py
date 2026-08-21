@@ -20,7 +20,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from config.settings import get_settings
 from database.connection import session_scope
-from database.models import Server, VPNProfile, APIOperation
+from database.models import APIOperation, Server, VPNProfile
 
 logging.basicConfig(
     level=logging.INFO,

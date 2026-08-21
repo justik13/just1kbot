@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-from sqlalchemy import func
+from sqlalchemy import func, select
 
 from database.connection import session_scope
 from database.models import APIOperation, Server, VPNProfile
@@ -256,7 +255,9 @@ async def finalize_operation_failure(
             profile.last_sync_error = human_readable[:2000]
             if not should_retry:
                 if operation.operation_type == "create_peer":
-                    from services.api_operations_queue import CREATE_CLEANUP_REQUIRED_CODES
+                    from services.api_operations_queue import (
+                        CREATE_CLEANUP_REQUIRED_CODES,
+                    )
                     cleanup = bool(operation.peer_id) or error_code in CREATE_CLEANUP_REQUIRED_CODES
                     profile.provisioning_status = (
                         "create_cleanup_pending" if cleanup else "create_failed"

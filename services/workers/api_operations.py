@@ -4,10 +4,11 @@ import uuid
 from datetime import timedelta
 
 from services.api_operations_executor import execute_claimed_api_operation
-from services.api_operations_queue import (
-    claim_api_operations, recover_stale_api_operations,
-)
 from services.api_operations_finalizer import finalize_operation_failure
+from services.api_operations_queue import (
+    claim_api_operations,
+    recover_stale_api_operations,
+)
 
 logger = logging.getLogger(__name__)
 PROCESS_ID = uuid.uuid4()

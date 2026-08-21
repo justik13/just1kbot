@@ -16,42 +16,42 @@ from aiogram.types import (
     MenuButtonCommands,
 )
 from aiogram.utils.chat_action import ChatActionMiddleware
+from aiohttp import web
 from cachetools import TTLCache
 from cryptography.fernet import Fernet
-from aiohttp import web
 
 from bot import texts
+from bot.handlers.admin.broadcast import (
+    _background_tasks,
+    _broadcast_stop_events,
+    resume_pending_broadcasts,
+)
+from bot.handlers.webhook import setup_webhook_routes
 from bot.middlewares import (
+    ActionLockMiddleware,
+    CleanChatMiddleware,
+    CorrelationFilter,
+    CorrelationMiddleware,
     DBSessionMiddleware,
+    PrivateChatMiddleware,
     ThrottlingMiddleware,
     UserContextMiddleware,
-    CleanChatMiddleware,
-    ActionLockMiddleware,
-    CorrelationMiddleware,
-    CorrelationFilter,
-    PrivateChatMiddleware,
 )
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
 from services.amnezia_client import close_http_session
-from services.yookassa_service import close_yookassa_client
 from services.workers import (
+    shutdown_event,
     start_background_workers,
     stop_background_workers,
-    shutdown_event,
 )
+from services.yookassa_service import close_yookassa_client
 from utils.logging_security import (
     install_sensitive_data_filter,
     sanitize_short,
     sanitize_text,
-)
-from bot.handlers.webhook import setup_webhook_routes
-from bot.handlers.admin.broadcast import (
-    resume_pending_broadcasts,
-    _background_tasks,
-    _broadcast_stop_events,
 )
 
 logging.basicConfig(

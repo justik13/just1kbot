@@ -3,8 +3,9 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, Mock, patch
 
-from alembic import context
 from alembic.config import Config
+
+from alembic import context
 
 
 class _AsyncConnectionContext:

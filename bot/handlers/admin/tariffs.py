@@ -1,7 +1,7 @@
 import logging
 import math
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -92,8 +92,7 @@ async def _show_tariffs_list(
         math.ceil(total_tariffs / TARIFFS_PER_PAGE),
     )
 
-    if page > total_pages:
-        page = total_pages
+    page = min(page, total_pages)
 
     tariffs = await get_tariffs_paginated(
         session,

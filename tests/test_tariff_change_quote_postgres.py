@@ -4,34 +4,35 @@ import asyncio
 import os
 import unittest
 import uuid
-from unittest.mock import AsyncMock, patch
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from database.models import (
+    AccountLedgerEntry,
+    EntitlementEntry,
     PaidValueLedgerEntry,
     Payment,
     PaymentProviderOperation,
     Tariff,
     TariffQuote,
     User,
-    AccountLedgerEntry,
-    EntitlementEntry,
 )
 from database.repositories.account_ledger_repo import create_admin_adjustment
-from services.account_tariff_change import (
-    AccountTariffChangeError,
-    settle_account_tariff_change,
-)
-from services.tariff_change_quote import create_tariff_change_quote
-from services.subscription_balance_service import get_subscription_balance_snapshot
 from database.repositories.tariff_quotes_repo import (
     get_or_create_checkout_quote,
     lock_checkout_user,
 )
+from services.account_tariff_change import (
+    AccountTariffChangeError,
+    settle_account_tariff_change,
+)
+from services.subscription_balance_service import get_subscription_balance_snapshot
+from services.tariff_change_quote import create_tariff_change_quote
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -159,11 +160,11 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(
                 (quote.current_paid_hours, quote.current_paid_value_rub),
-                (720, Decimal("90")),
+                (720, Decimal(90)),
             )
             self.assertEqual(
                 (quote.amount_due_rub, quote.resulting_bonus_hours),
-                (Decimal("90"), 0),
+                (Decimal(90), 0),
             )
             self.assertIsNotNone(quote.source_tariff_version_id)
             self.assertNotEqual(
@@ -338,7 +339,10 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
 
     async def test_change_first_blocks_balance_purchase_before_side_effects(self):
-        from services.account_purchase import AccountPurchaseError, prepare_account_purchase
+        from services.account_purchase import (
+            AccountPurchaseError,
+            prepare_account_purchase,
+        )
 
         user, source, target, as_of = await self.seed()
         async with self.sessions.begin() as session:
@@ -464,7 +468,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(first.created)
             self.assertFalse(repeated.created)
-            self.assertEqual(first.debit.amount, Decimal("-90"))
+            self.assertEqual(first.debit.amount, Decimal(-90))
             self.assertEqual(first.quote.status, "consumed")
             self.assertEqual(first.entitlement.hours_delta, 720)
             self.assertEqual(

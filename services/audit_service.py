@@ -1,8 +1,9 @@
 import json
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from database.repositories.audit_repo import create_audit_log
 
 logger = logging.getLogger(__name__)
@@ -14,8 +15,8 @@ class AuditService:
         session: AsyncSession,
         admin_id: int,
         action: str,
-        target_type: Optional[str] = None,
-        target_id: Optional[int] = None,
+        target_type: str | None = None,
+        target_id: int | None = None,
         details: Any = None,
     ):
         """Universal audit logger supporting string and dictionary details."""
@@ -73,7 +74,7 @@ class AuditService:
         admin_id: int,
         action: str,
         target_type: str,
-        target_id: Optional[int] = None,
+        target_id: int | None = None,
         details: Any = None,
     ):
         """Convenience method for logging admin-initiated events."""

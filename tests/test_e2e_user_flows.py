@@ -160,9 +160,9 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.chat = Chat(id=123456789, type="private")
 
     async def asyncTearDown(self):
-        from database.connection import close_db
         from bot.middlewares.clean_chat import stop_clean_chat_worker
         from config.settings import get_settings
+        from database.connection import close_db
         from utils.telegram import _hub_cache, _hub_render_locks
         await close_db()
         await stop_clean_chat_worker()

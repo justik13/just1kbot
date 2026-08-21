@@ -1,12 +1,11 @@
 from datetime import datetime
-from typing import List, Optional, TypedDict
+from typing import TypedDict
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
-
 
 CAPACITY_CONSUMING_STATUSES = (
     "pending_create",
@@ -64,12 +63,12 @@ HEALTH_UPDATE_FIELDS = {
 }
 
 
-async def get_all_servers(session: AsyncSession) -> List[Server]:
+async def get_all_servers(session: AsyncSession) -> list[Server]:
     result = await session.execute(select(Server).order_by(Server.name))
     return result.scalars().all()
 
 
-async def get_active_servers(session: AsyncSession) -> List[Server]:
+async def get_active_servers(session: AsyncSession) -> list[Server]:
     result = await session.execute(
         select(Server).where(Server.is_active.is_(True)).order_by(Server.name)
     )
@@ -85,7 +84,7 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
     return {row[0]: row[1] for row in result.all()}
 
 
-async def get_available_servers(session: AsyncSession) -> List[Server]:
+async def get_available_servers(session: AsyncSession) -> list[Server]:
     servers = await get_active_servers(session)
     if not servers:
         return []
@@ -96,7 +95,7 @@ async def get_available_servers(session: AsyncSession) -> List[Server]:
         .group_by(VPNProfile.server_id)
     )
     db_counts = {row[0]: row[1] for row in result.all()}
-    available: List[Server] = []
+    available: list[Server] = []
     for server in servers:
         cached_count = get_cached_peer_count(server.id)
         db_count = db_counts.get(server.id, 0)
@@ -111,7 +110,7 @@ async def get_server_by_id(
     server_id: int,
     *,
     for_update: bool = False,
-) -> Optional[Server]:
+) -> Server | None:
     stmt = select(Server).where(Server.id == server_id)
     if for_update:
         stmt = stmt.with_for_update()
@@ -165,10 +164,10 @@ async def update_server_health_snapshot(
     *,
     expected_health_state: str,
     new_health_state: str,
-    expected_consecutive_fails: Optional[int] = None,
-    expected_consecutive_successes: Optional[int] = None,
+    expected_consecutive_fails: int | None = None,
+    expected_consecutive_successes: int | None = None,
     **health_kwargs: ServerUpdateFields,
-) -> tuple[Optional[Server], bool]:
+) -> tuple[Server | None, bool]:
     """
     Safely update server health state from the node monitor using CAS.
 
@@ -263,7 +262,7 @@ async def get_servers_paginated(
     return result.scalars().all()
 
 
-async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Optional[Server]:
+async def get_server_by_api_url(session: AsyncSession, api_url: str) -> Server | None:
     result = await session.execute(select(Server).where(Server.api_url == api_url))
     return result.scalar_one_or_none()
 

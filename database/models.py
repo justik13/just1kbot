@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -27,7 +27,6 @@ from sqlalchemy.orm import (
 
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
-
 
 API_OPERATION_TYPES = (
     "create_peer",

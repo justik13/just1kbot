@@ -106,9 +106,10 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_worker_recovery(self):
         """Test that _recover_stale_topups correctly serializes concurrent workers via skip_locked."""
-        from services.workers.payments import _recover_stale_topups
         import asyncio
+
         from database.models import AccountLedgerEntry
+        from services.workers.payments import _recover_stale_topups
 
         async with self.session_factory() as session:
             referrer = User(telegram_id=300)

@@ -380,6 +380,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
     def test_all_codebase_text_references_exist(self):
         import ast
         import os
+
         from bot import texts
 
         available = set(dir(texts))

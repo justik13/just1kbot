@@ -410,6 +410,7 @@ def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
 
 def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering():
     import asyncio
+
     # Simulate P1 (id=1) and P2 (id=2) where P1 recovery runs AFTER P2 is processed.
     from unittest.mock import AsyncMock, MagicMock
 

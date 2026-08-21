@@ -2,7 +2,7 @@ import asyncio
 import html
 import logging
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,

@@ -1,18 +1,16 @@
 import logging
 from datetime import timedelta
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import (
-    PERMANENT_SUBSCRIPTION_DAYS,
     PERMANENT_END_DATE,
+    PERMANENT_SUBSCRIPTION_DAYS,
 )
 from bot.middlewares.user_context import invalidate_user_cache
 from database.models import User
-from services.api_operations_queue import enqueue_api_operation
 from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
@@ -22,11 +20,12 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     get_user_by_telegram_id_any,
 )
+from services.api_operations_queue import enqueue_api_operation
 from utils.datetime_helpers import (
     is_expired,
+    is_permanent_subscription,
     is_vpn_access_expired,
     now_utc,
-    is_permanent_subscription,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +40,7 @@ class SubscriptionService:
         await SubscriptionService._sync_access_state(session, user)
 
     @staticmethod
-    def check_vpn_access(user: Optional[User]) -> bool:
+    def check_vpn_access(user: User | None) -> bool:
         if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
             return False
         return not is_vpn_access_expired(user.subscription_end, grace_hours=4)
@@ -111,7 +110,7 @@ class SubscriptionService:
         username: str | None,
         first_name: str | None,
         ref_id: int | None = None,
-    ) -> Optional[User]:
+    ) -> User | None:
         user = await get_user_by_telegram_id_any(session, telegram_id)
 
         if user is not None and user.is_deleted:
@@ -277,9 +276,9 @@ class SubscriptionService:
         session: AsyncSession,
         telegram_id: int,
         days: int,
-        new_device_limit: Optional[int] = None,
-        new_tariff_id: Optional[int] = None,
-    ) -> Optional[User]:
+        new_device_limit: int | None = None,
+        new_tariff_id: int | None = None,
+    ) -> User | None:
         if days < 0:
             raise ValueError("days must be >= 0")
 

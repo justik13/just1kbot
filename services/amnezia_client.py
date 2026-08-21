@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Generic, List, Optional, TypeVar
+from typing import Any, Generic, TypeVar
 from urllib.parse import urlsplit
 
 import aiohttp
@@ -12,15 +12,15 @@ from pydantic import BaseModel, Field
 
 from bot.constants import (
     AMNEZIA_PROTOCOL,
-    API_TIMEOUT,
     API_CONCURRENCY_LIMIT,
     API_RETRY_COUNT,
+    API_TIMEOUT,
 )
 from utils.security import SafeResolver, allow_local_networks
 
 logger = logging.getLogger(__name__)
 
-_http_session: Optional[aiohttp.ClientSession] = None
+_http_session: aiohttp.ClientSession | None = None
 
 
 def _safe_api_target(api_url: str) -> str:
@@ -58,9 +58,9 @@ class AmneziaErrorKind(str, Enum):
 @dataclass(frozen=True)
 class AmneziaAPIResult(Generic[T]):
     ok: bool
-    value: Optional[T]
-    error_kind: Optional[AmneziaErrorKind]
-    status_code: Optional[int]
+    value: T | None
+    error_kind: AmneziaErrorKind | None
+    status_code: int | None
     retryable: bool
     ambiguous: bool
 
@@ -237,9 +237,9 @@ class AmneziaClientListItem(BaseModel):
     traffics: AmneziaClientTraffic = Field(
         default_factory=AmneziaClientTraffic
     )
-    lastHandshake: Optional[float] = None
-    lastSeen: Optional[float] = None
-    updatedAt: Optional[float] = None
+    lastHandshake: float | None = None
+    lastSeen: float | None = None
+    updatedAt: float | None = None
 
     @property
     def clientName(self) -> str:
@@ -252,7 +252,7 @@ class AmneziaClientListItem(BaseModel):
 
 class AmneziaServerInfo(BaseModel):
     name: str = ""
-    protocols: List[str] = Field(default_factory=list)
+    protocols: list[str] = Field(default_factory=list)
     maxPeers: int = 0
     serverMaxPeers: int = 0
     SERVER_MAX_PEERS: int = 250
@@ -305,7 +305,7 @@ class AmneziaClient:
     @staticmethod
     def _success(
         value: Any = None,
-        status_code: Optional[int] = None,
+        status_code: int | None = None,
     ) -> AmneziaAPIResult[Any]:
         return AmneziaAPIResult(
             ok=True,
@@ -321,9 +321,9 @@ class AmneziaClient:
         kind: AmneziaErrorKind,
         semantics: RequestSemantics,
         *,
-        status_code: Optional[int] = None,
+        status_code: int | None = None,
         retryable: bool = False,
-        ambiguous: Optional[bool] = None,
+        ambiguous: bool | None = None,
     ) -> AmneziaAPIResult[Any]:
         if ambiguous is None:
             ambiguous = semantics is not RequestSemantics.READ
@@ -660,7 +660,7 @@ class AmneziaClient:
         semantics: RequestSemantics = RequestSemantics.READ,
         not_found_as_success: bool = False,
         **kwargs,
-    ) -> Optional[Any]:
+    ) -> Any | None:
         result = await self._request_result(
             method,
             path,
@@ -675,7 +675,7 @@ class AmneziaClient:
     async def create_user_result(
         self,
         client_name: str,
-        expires_at: Optional[int] = None,
+        expires_at: int | None = None,
     ) -> AmneziaAPIResult[AmneziaClientCreateResponse]:
         # Проверка емкости сервера удалена - она должна выполняться на уровне бизнес-логики (DeviceService)
         # чтобы избежать лишних HTTP-запросов и TOCTOU race conditions
@@ -722,8 +722,8 @@ class AmneziaClient:
     async def create_user(
         self,
         client_name: str,
-        expires_at: Optional[int] = None,
-    ) -> Optional[AmneziaClientCreateResponse]:
+        expires_at: int | None = None,
+    ) -> AmneziaClientCreateResponse | None:
         result = await self.create_user_result(client_name, expires_at)
         return result.value if result.ok else None
 
@@ -752,8 +752,8 @@ class AmneziaClient:
     async def update_client_result(
         self,
         client_id: str,
-        status: Optional[str] = None,
-        expires_at: Optional[int] = None,
+        status: str | None = None,
+        expires_at: int | None = None,
         clear_expires_at: bool = False,
     ) -> AmneziaAPIResult[None]:
         data = {
@@ -782,8 +782,8 @@ class AmneziaClient:
     async def update_client(
         self,
         client_id: str,
-        status: Optional[str] = None,
-        expires_at: Optional[int] = None,
+        status: str | None = None,
+        expires_at: int | None = None,
         clear_expires_at: bool = False,
     ) -> bool:
         result = await self.update_client_result(
@@ -796,7 +796,7 @@ class AmneziaClient:
 
     async def get_server_info(
         self,
-    ) -> Optional[AmneziaServerInfo]:
+    ) -> AmneziaServerInfo | None:
         result = await self._request(
             "GET",
             "/server",
@@ -822,7 +822,7 @@ class AmneziaClient:
             )
         ) is not None
 
-    async def get_server_load(self, timeout: float = 5.0) -> Optional[dict]:
+    async def get_server_load(self, timeout: float = 5.0) -> dict | None:
         """
         Запрашивает метрики загрузки сервера (/server/load или /server).
         Возвращает словарь с cpu_percent, ram_percent, disk_percent, uptime_seconds и т.д.
@@ -834,7 +834,7 @@ class AmneziaClient:
             logger.warning("get_server_load timed out or failed for %s: %s", self._log_target, exc)
             return None
 
-    async def _get_server_load_internal(self) -> Optional[dict]:
+    async def _get_server_load_internal(self) -> dict | None:
         res = await self._request("GET", "/server/load", semantics=RequestSemantics.READ)
         if not res:
             res = await self._request("GET", "/server", semantics=RequestSemantics.READ)
@@ -845,7 +845,7 @@ class AmneziaClient:
 
     async def get_all_clients(
         self,
-    ) -> Optional[List[AmneziaClientListItem]]:
+    ) -> list[AmneziaClientListItem] | None:
         """Возвращает полный список клиентов со всех страниц через подсистему пагинации."""
         from services.amnezia_client_pagination import get_all_clients_with_retry
         return await get_all_clients_with_retry(self)
@@ -853,8 +853,8 @@ class AmneziaClient:
     @staticmethod
     def _parse_clients_page(
         items_raw: list,
-    ) -> List[AmneziaClientListItem]:
-        clients: List[AmneziaClientListItem] = []
+    ) -> list[AmneziaClientListItem]:
+        clients: list[AmneziaClientListItem] = []
 
         for item in items_raw:
             if not isinstance(item, dict):

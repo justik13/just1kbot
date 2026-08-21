@@ -1,6 +1,7 @@
 import ast
 import unittest
 from pathlib import Path
+
 from database.models import VPNProfile
 
 ROOT = Path(__file__).parents[1]

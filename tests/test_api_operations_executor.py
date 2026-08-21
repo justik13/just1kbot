@@ -1,33 +1,35 @@
-import os
-import unittest
 import base64
 import json
+import os
 import struct
+import unittest
 import zlib
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
-from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from database import connection
 from database.models import APIOperation, Server, User, VPNProfile
 from services.amnezia_client import (
     AmneziaAPIResult,
     AmneziaClientCreateResponse,
     AmneziaErrorKind,
 )
+from services.api_operations_executor import execute_claimed_api_operation
+from services.api_operations_finalizer import (
+    finalize_create_success,
+    finalize_delete_success,
+    finalize_operation_failure,
+    finalize_update_success,
+)
 from services.api_operations_queue import (
     claim_api_operations,
     recover_stale_api_operations,
 )
-from services.api_operations_executor import execute_claimed_api_operation
 from utils.vpn_parser import build_conf_file, is_valid_vpn_uri
-import database.connection as connection
-from services.api_operations_finalizer import (
-    finalize_create_success,
-    finalize_update_success,
-    finalize_delete_success,
-    finalize_operation_failure,
-)
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
