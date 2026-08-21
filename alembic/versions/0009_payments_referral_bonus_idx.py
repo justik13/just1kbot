@@ -31,6 +31,20 @@ def upgrade() -> None:
                 ) THEN
                     DROP INDEX ix_payments_referral_bonus_unprocessed;
                 END IF;
+                IF EXISTS (
+                    SELECT 1 FROM pg_index i
+                    JOIN pg_class c ON i.indexrelid = c.oid
+                    WHERE c.relname = 'ix_payments_recovery_pending' AND i.indisvalid = false
+                ) THEN
+                    DROP INDEX ix_payments_recovery_pending;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM pg_index i
+                    JOIN pg_class c ON i.indexrelid = c.oid
+                    WHERE c.relname = 'ix_payments_recovery_unfulfilled' AND i.indisvalid = false
+                ) THEN
+                    DROP INDEX ix_payments_recovery_unfulfilled;
+                END IF;
             END $$;
             """)
             op.execute(
@@ -40,12 +54,19 @@ def upgrade() -> None:
                 "AND fulfillment_status = 'succeeded' "
                 "AND NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb);"
             )
-
+            op.execute(
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_recovery_pending "
+                "ON payments (created_at) "
+                "WHERE external_id IS NOT NULL AND provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown');"
+            )
+            op.execute(
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_recovery_unfulfilled "
+                "ON payments (created_at) "
+                "WHERE provider_status = 'succeeded' AND provider_confirmed_at IS NOT NULL AND fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review');"
+            )
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index(
-        "ix_payments_referral_bonus_unprocessed",
-        table_name="payments",
-        if_exists=True
-    )
+    op.drop_index("ix_payments_referral_bonus_unprocessed", table_name="payments", if_exists=True)
+    op.drop_index("ix_payments_recovery_pending", table_name="payments", if_exists=True)
+    op.drop_index("ix_payments_recovery_unfulfilled", table_name="payments", if_exists=True)

@@ -182,6 +182,8 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
     async def test_needs_recovery_uses_partial_index(self):
         """Test that the _needs_recovery query actually uses the partial index."""
         async with self.session_factory() as session:
+            # Disable Seq Scan to ensure Postgres chooses the index scan over seq scan for small test tables.
+            await session.execute(text("SET enable_seqscan = off;"))
             stmt = select(Payment).where(_needs_recovery())
             compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
             explain_query = f"EXPLAIN {compiled!s}"
