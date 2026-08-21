@@ -1,13 +1,14 @@
 """payments_referral_bonus_idx
 
 Revision ID: c20a97270920
-Revises: bac83372da22
+Revises: 0007_webhook_retention
 Create Date: 2026-08-21 16:12:12.338575
 
 """
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -56,7 +57,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.execute("COMMIT")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_referral_bonus_unprocessed")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_pending")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_unfulfilled")
+    bind = op.get_bind()
+    if bind and bind.dialect.name == "postgresql":
+        with op.get_context().autocommit_block():
+            op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_referral_bonus_unprocessed")
+            op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_pending")
+            op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_unfulfilled")
+

@@ -5,9 +5,9 @@ Revises: 0005_payment_statuses_sync
 Create Date: 2026-08-18 01:30:00.000000
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0006_add_user_subscription_token"
@@ -28,7 +28,12 @@ def upgrade() -> None:
     op.execute("CREATE UNIQUE INDEX CONCURRENTLY ix_users_subscription_token ON users (subscription_token)")
 
 def downgrade() -> None:
-    # Disable transaction to allow concurrent index drop
-    op.execute("COMMIT")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_subscription_token")
+    # Use autocommit_block to allow CONCURRENT index drop (requires no active transaction)
+    bind = op.get_bind()
+    if bind and bind.dialect.name == "postgresql":
+        with op.get_context().autocommit_block():
+            op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_subscription_token")
+    else:
+        op.execute("DROP INDEX IF EXISTS ix_users_subscription_token")
     op.drop_column("users", "subscription_token")
+

@@ -128,6 +128,21 @@ async def cancel_pending_create_operations(session, payment_id: int):
 
 
 async def mark_dead_operation(session, operation_id: int):
+    # Read without lock first to get payment_id for proper lock ordering.
+    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    op_info = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+    )
+    if not op_info or op_info.status != "dead":
+        raise ValueError("operation is not dead")
+    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise ValueError("payment not found")
+    # Now safely lock the operation
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == operation_id)
@@ -135,11 +150,6 @@ async def mark_dead_operation(session, operation_id: int):
     )
     if not operation or operation.status != "dead":
         raise ValueError("operation is not dead")
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == operation.payment_id).with_for_update()
-    )
-    if payment is None:
-        raise ValueError("payment not found")
     operation.status = "cancelled"
     await session.flush()
 
@@ -147,6 +157,21 @@ async def mark_dead_operation(session, operation_id: int):
 async def retry_dead_provider_operation(
     session, operation_id, *, reset_attempts, reason
 ):
+    # Read without lock first to get payment_id for proper lock ordering.
+    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    op_info = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+    )
+    if not op_info or op_info.status != "dead":
+        raise ValueError("operation is not dead")
+    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise ValueError("payment not found")
+    # Now safely lock the operation
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == operation_id)
@@ -154,11 +179,6 @@ async def retry_dead_provider_operation(
     )
     if not operation or operation.status != "dead":
         raise ValueError("operation is not dead")
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == operation.payment_id).with_for_update()
-    )
-    if payment is None:
-        raise ValueError("payment not found")
     if (
         operation.operation_type == "create_payment"
         and not payment.external_id
