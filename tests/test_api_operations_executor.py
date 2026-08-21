@@ -37,6 +37,8 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        connection._sessionmaker = self.sessions
+        connection._engine = self.engine
         async with self.sessions.begin() as s:
             await s.execute(
                 text(
@@ -59,21 +61,8 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
             await s.flush()
             self.user_id = user.id
             self.server_id = server.id
-        self.old_sessionmaker = connection._sessionmaker
-        connection._sessionmaker = self.sessions
 
     async def asyncTearDown(self):
-        async with self.sessions.begin() as s:
-            await s.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, api_operations, vpn_profiles, users, servers "
-                    "RESTART IDENTITY CASCADE"
-                )
-            )
-        connection._sessionmaker = self.old_sessionmaker
         await self.engine.dispose()
 
     async def create_claimed(
@@ -240,6 +229,7 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
                 api_key_snapshot="key",
                 client_name="exact",
                 payload={"desired_version": 1},
+                next_attempt_at=datetime.now(timezone.utc) - timedelta(seconds=1),
             )
             s.add(op)
             await s.flush()
@@ -255,7 +245,7 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def ready_retry(self, oid):
         async with self.sessions.begin() as s:
             op = await s.get(APIOperation, oid)
-            op.next_attempt_at = datetime.now(timezone.utc)
+            op.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
 
     async def test_ambiguous_create_reconciles_without_duplicate(self):
         pid, oid = await self.queued_create()

@@ -473,28 +473,46 @@ async def finalize(session, claim, result, bot=None):
     await session.flush()
 
 
-async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
-    operations = (
-        await session.scalars(
-            select(PaymentProviderOperation)
+async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
+    stale_rows = (
+        await session.execute(
+            select(PaymentProviderOperation.id, PaymentProviderOperation.payment_id)
             .where(
                 PaymentProviderOperation.status == "processing",
                 PaymentProviderOperation.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
-            .with_for_update(skip_locked=True)
+            .limit(100)
         )
     ).all()
-    for operation in operations:
+    count = 0
+    for op_id, payment_id in stale_rows:
+        # Respect global hierarchy: Payment -> PaymentProviderOperation
+        payment = await session.scalar(
+            select(Payment)
+            .where(Payment.id == payment_id)
+            .with_for_update(skip_locked=True)
+        )
+        if payment is None:
+            continue
+        operation = await session.scalar(
+            select(PaymentProviderOperation)
+            .where(
+                PaymentProviderOperation.id == op_id,
+                PaymentProviderOperation.status == "processing",
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if operation is None:
+            continue
+
         dead = operation.attempts >= operation.max_attempts
         operation.status = "dead" if dead else "retry"
         operation.completed_at = now_utc() if dead else None
         operation.locked_at = None
         operation.locked_by = None
         operation.next_attempt_at = now_utc()
-        payment = await session.get(Payment, operation.payment_id)
-        if payment is None:
-            continue
+
         if payment.provider_status in {"succeeded", "refunded", "canceled"}:
             payment.reconciliation_status = "manual_review" if dead else "required"
         elif dead:
@@ -503,7 +521,10 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
             payment.fulfillment_status = "manual_review"
         else:
             payment.reconciliation_status = "required"
-    return len(operations)
+        count += 1
+    if count > 0:
+        await session.flush()
+    return count
 
 
 async def finalize_provider_failure(session, claim, *, error_code, retryable):

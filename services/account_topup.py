@@ -451,35 +451,74 @@ async def settle_succeeded_topup(
                 quote_raw = payment.topup_context.get("quote_public_id")
                 if auto_action and quote_raw:
                     import logging
+                    from contextlib import asynccontextmanager
+
+                    @asynccontextmanager
+                    async def _safe_begin_nested(s):
+                        if callable(getattr(s, "begin_nested", None)):
+                            nested = s.begin_nested()
+                            if hasattr(nested, "__aenter__"):
+                                async with nested:
+                                    yield
+                                return
+                        yield
+
                     import uuid
+
                     quote_uuid = uuid.UUID(str(quote_raw))
-                    if auto_action == "tariff_change":
-                        from services.account_tariff_change import (
-                            settle_account_tariff_change,
-                        )
-                        await settle_account_tariff_change(
-                            session,
-                            user_id=payment.user_id,
-                            quote_public_id=quote_uuid,
-                        )
-                        auto_fulfilled_action = "tariff_change"
-                        payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "succeeded"}
-                        logging.getLogger(__name__).info("Auto-fulfilled tariff change for payment %s, user_id=%s", payment.id, payment.user_id)
-                    elif auto_action == "purchase":
-                        from services.account_purchase import settle_account_purchase
-                        await settle_account_purchase(
-                            session,
-                            user_id=payment.user_id,
-                            quote_public_id=quote_uuid,
-                        )
-                        auto_fulfilled_action = "purchase"
-                        payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "succeeded"}
-                        logging.getLogger(__name__).info("Auto-fulfilled purchase for payment %s, user_id=%s", payment.id, payment.user_id)
+                    async with _safe_begin_nested(session):
+                        if auto_action == "tariff_change":
+                            from services.account_tariff_change import (
+                                settle_account_tariff_change,
+                            )
+
+                            await settle_account_tariff_change(
+                                session,
+                                user_id=payment.user_id,
+                                quote_public_id=quote_uuid,
+                            )
+                            auto_fulfilled_action = "tariff_change"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled tariff change for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
+                        elif auto_action == "purchase":
+                            from services.account_purchase import (
+                                settle_account_purchase,
+                            )
+
+                            await settle_account_purchase(
+                                session,
+                                user_id=payment.user_id,
+                                quote_public_id=quote_uuid,
+                            )
+                            auto_fulfilled_action = "purchase"
+                            payment.topup_context = {
+                                **payment.topup_context,
+                                "auto_fulfill_status": "succeeded",
+                            }
+                            logging.getLogger(__name__).info(
+                                "Auto-fulfilled purchase for payment %s, user_id=%s",
+                                payment.id,
+                                payment.user_id,
+                            )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning("Auto-fulfillment failed for topup payment %s: %s", payment.id, e)
+
+            logging.getLogger(__name__).warning(
+                "Auto-fulfillment failed for topup payment %s: %s", payment.id, e
+            )
             if payment.topup_context and isinstance(payment.topup_context, dict):
-                payment.topup_context = {**payment.topup_context, "auto_fulfill_status": "failed", "auto_fulfill_error": str(e)}
+                payment.topup_context = {
+                    **payment.topup_context,
+                    "auto_fulfill_status": "failed",
+                    "auto_fulfill_error": str(e),
+                }
 
         if bot is not None and user is not None and user.telegram_id:
             try:
