@@ -286,6 +286,7 @@ async def reverse_referral_bonus_for_topup(
 ) -> Decimal:
     """Debit/reverse the referral bonus previously credited for a top-up if the top-up is refunded."""
     from database.models import Payment
+    from sqlalchemy import text
 
     payment = await session.get(Payment, payment_id)
     if payment is None or payment.user_id is None:
@@ -309,7 +310,6 @@ async def reverse_referral_bonus_for_topup(
 
     # 1. Reverse referrer bonus for this top-up if present and referrer exists.
     if referrer is not None:
-        from sqlalchemy import text
         candidate_credits = (
             await session.scalars(
                 select(AccountLedgerEntry).where(
