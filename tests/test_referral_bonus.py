@@ -1,4 +1,4 @@
-import pytest
+
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -384,8 +384,8 @@ def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
 
 
 
-@pytest.mark.asyncio
-async def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering():
+def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering():
+    import asyncio
     # Simulate P1 (id=1) and P2 (id=2) where P1 recovery runs AFTER P2 is processed.
     from unittest.mock import AsyncMock, MagicMock
 
@@ -412,7 +412,7 @@ async def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering
     # 5. existing_purchaser -> None
     session.scalar.side_effect = [mock_purchaser, mock_referrer, None, 0, None]
     
-    res = await grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100))
+    res = asyncio.run(grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100)))
     
     # Welcome bonus MUST be granted (10% of 100 = 10)
     assert res.purchaser_welcome_bonus == Decimal(10)
