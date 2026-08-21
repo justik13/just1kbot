@@ -28,13 +28,23 @@ def _drop_invalid_index_concurrently(conn, index_name: str) -> None:
 
 
 def upgrade() -> None:
-    # Add the column first
-    op.add_column(
-        "users",
-        sa.Column("subscription_token", sa.String(length=64), nullable=True),
-    )
-
     bind = op.get_bind()
+    has_col = False
+    if bind:
+        has_col = bool(
+            bind.execute(
+                sa.text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'users' AND column_name = 'subscription_token'"
+                )
+            ).scalar()
+        )
+    if not has_col:
+        op.add_column(
+            "users",
+            sa.Column("subscription_token", sa.String(length=64), nullable=True),
+        )
+
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
             _drop_invalid_index_concurrently(bind, "ix_users_subscription_token")
@@ -53,13 +63,24 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Use autocommit_block to allow CONCURRENT index drop (requires no active transaction)
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
             op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_subscription_token")
     else:
         op.execute("DROP INDEX IF EXISTS ix_users_subscription_token")
-    op.drop_column("users", "subscription_token")
+
+    has_col = False
+    if bind:
+        has_col = bool(
+            bind.execute(
+                sa.text(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'users' AND column_name = 'subscription_token'"
+                )
+            ).scalar()
+        )
+    if has_col:
+        op.drop_column("users", "subscription_token")
 
 

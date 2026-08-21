@@ -33,10 +33,15 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
+            _drop_invalid_index_concurrently(bind, 'ix_users_subscription_token')
             _drop_invalid_index_concurrently(bind, 'ix_payments_referral_bonus_unprocessed')
             _drop_invalid_index_concurrently(bind, 'ix_payments_recovery_pending')
             _drop_invalid_index_concurrently(bind, 'ix_payments_recovery_unfulfilled')
 
+            op.execute(
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS ix_users_subscription_token "
+                "ON users (subscription_token);"
+            )
             op.execute(
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_referral_bonus_unprocessed "
                 "ON payments (created_at) "
