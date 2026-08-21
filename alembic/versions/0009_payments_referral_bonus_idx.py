@@ -21,10 +21,24 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
+            op.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_index i
+                    JOIN pg_class c ON i.indexrelid = c.oid
+                    WHERE c.relname = 'ix_payments_referral_bonus_unprocessed' AND i.indisvalid = false
+                ) THEN
+                    DROP INDEX ix_payments_referral_bonus_unprocessed;
+                END IF;
+            END $$;
+            """)
             op.execute(
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_referral_bonus_unprocessed "
-                "ON payments (id) "
-                "WHERE NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb);"
+                "ON payments (created_at) "
+                "WHERE provider_status = 'succeeded' "
+                "AND fulfillment_status = 'succeeded' "
+                "AND NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb);"
             )
 
 

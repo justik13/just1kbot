@@ -33,7 +33,7 @@ def _needs_attention():
 
 
 def _needs_recovery():
-    from sqlalchemy import func, or_, select, text
+    from sqlalchemy import or_, select, text
     from sqlalchemy.orm import aliased
 
     from database.models import User
@@ -61,7 +61,7 @@ def _needs_recovery():
         Payment.provider_confirmed_at.is_not(None),
         Payment.fulfillment_status == "succeeded",
         user_subquery.exists(),
-        ~func.coalesce(Payment.topup_context, text("'{}'::jsonb")).contains({"referral_bonus_processed": True}),
+        text("NOT (COALESCE(payments.topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"),
     )
 
     return or_(

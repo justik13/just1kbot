@@ -21,13 +21,21 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
-            op.create_index(
-                "ix_users_subscription_token",
-                "users",
-                ["subscription_token"],
-                unique=True,
-                postgresql_concurrently=True,
-                if_not_exists=True,
+            op.execute("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_index i
+                    JOIN pg_class c ON i.indexrelid = c.oid
+                    WHERE c.relname = 'ix_users_subscription_token' AND i.indisvalid = false
+                ) THEN
+                    DROP INDEX ix_users_subscription_token;
+                END IF;
+            END $$;
+            """)
+            op.execute(
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS ix_users_subscription_token "
+                "ON users (subscription_token);"
             )
     else:
         op.create_index(

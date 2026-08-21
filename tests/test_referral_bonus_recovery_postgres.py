@@ -178,3 +178,16 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             )).all()
     
             self.assertEqual(len(entries), 1, "Only one welcome bonus should be granted despite 5 concurrent workers")
+
+    async def test_needs_recovery_uses_partial_index(self):
+        """Test that the _needs_recovery query actually uses the partial index."""
+        async with self.session_factory() as session:
+            stmt = select(Payment).where(_needs_recovery())
+            compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
+            explain_query = f"EXPLAIN {compiled!s}"
+            
+            result = await session.execute(text(explain_query))
+            explain_plan = "\n".join([row[0] for row in result.fetchall()])
+            
+            index_name = "ix_payments_referral_bonus_unprocessed"
+            self.assertIn(index_name, explain_plan, f"The query planner did NOT use the partial index! Plan:\\n{explain_plan}")
