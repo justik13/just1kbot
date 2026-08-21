@@ -128,6 +128,8 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             ),
         ]
 
+        fake_payments_dict = {p.id: p for p in fake_payments}
+
         query_count = 0
 
         @asynccontextmanager
@@ -136,9 +138,16 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session = AsyncMock()
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = fake_payments
+                mock_scalars.all.return_value = [p.id for p in fake_payments]
             else:
                 mock_scalars.all.return_value = []
+            
+            async def mock_get(model, pk):
+                if model == Payment:
+                    return fake_payments_dict.get(pk)
+                return None
+                
+            mock_session.get.side_effect = mock_get
             query_count += 1
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
@@ -186,9 +195,16 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = [fake_payment]
+                mock_scalars.all.return_value = [fake_payment.id]
             else:
                 mock_scalars.all.return_value = []
+            
+            async def mock_get(model, pk):
+                if model == Payment and pk == fake_payment.id:
+                    return fake_payment
+                return None
+            mock_session.get.side_effect = mock_get
+                
             query_count += 1
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
@@ -236,9 +252,16 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = [fake_payment]
+                mock_scalars.all.return_value = [fake_payment.id]
             else:
                 mock_scalars.all.return_value = []
+                
+            async def mock_get(model, pk):
+                if model == Payment and pk == fake_payment.id:
+                    return fake_payment
+                return None
+            mock_session.get.side_effect = mock_get
+                
             query_count += 1
             mock_session.scalars.return_value = mock_scalars
             yield mock_session

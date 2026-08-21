@@ -259,6 +259,7 @@ async def _cleanup_stuck_profiles():
                     VPNProfile.provisioning_status.in_(["pending_create", "create_cleanup_pending", "deleting"]),
                     VPNProfile.created_at < cutoff_time,
                 )
+                .limit(100)
                 .with_for_update(skip_locked=True)
             )
         ).scalars().all()
