@@ -153,8 +153,17 @@ async def _recover_stale_topups(bot: Bot | None = None):
             last_processed_id = pid
             try:
                 async with session_scope() as session:
-                    payment = await session.get(Payment, pid)
+                    payment = await session.scalar(
+                        select(Payment)
+                        .where(Payment.id == pid)
+                        .with_for_update(skip_locked=True)
+                    )
                     if not payment:
+                        continue
+
+                    ctx = payment.topup_context or {}
+                    # Fast-path check after acquiring lock for concurrency safety
+                    if ctx.get("referral_bonus_processed"):
                         continue
 
                     if payment.external_id and payment.provider_status in {

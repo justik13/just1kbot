@@ -21,26 +21,7 @@ def upgrade() -> None:
         "users",
         sa.Column("subscription_token", sa.String(length=64), nullable=True),
     )
-    bind = op.get_bind()
-    if bind and bind.dialect.name == "postgresql":
-        with op.get_context().autocommit_block():
-            op.create_index(
-                "ix_users_subscription_token",
-                "users",
-                ["subscription_token"],
-                unique=True,
-                postgresql_concurrently=True,
-                if_not_exists=True,
-            )
-    else:
-        op.create_index(
-            "ix_users_subscription_token",
-            "users",
-            ["subscription_token"],
-            unique=True,
-        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_users_subscription_token", table_name="users")
     op.drop_column("users", "subscription_token")

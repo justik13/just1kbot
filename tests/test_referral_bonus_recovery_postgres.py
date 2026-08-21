@@ -102,5 +102,79 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(payments), 0, "P1 should NOT be selected again after bonus granted")
 
             res1_dup = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p1_id, topup_amount=Decimal(100))
-            # Idempotency guarantees it returns 0 for dup
             self.assertEqual(res1_dup.purchaser_welcome_bonus, Decimal(0))
+
+    async def test_concurrent_worker_recovery(self):
+        """Test that _recover_stale_topups correctly serializes concurrent workers via skip_locked."""
+        from services.workers.payments import _recover_stale_topups
+        import asyncio
+        from database.models import AccountLedgerEntry
+
+        async with self.session_factory() as session:
+            referrer = User(telegram_id=300)
+            session.add(referrer)
+            await session.flush()
+            
+            purchaser = User(telegram_id=400, referred_by=300)
+            session.add(purchaser)
+            await session.commit()
+            
+            p_id = purchaser.id
+
+        from datetime import timedelta
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        async with self.session_factory() as session:
+            p1 = Payment(
+                user_id=p_id, amount=Decimal(100), currency='RUB',
+                public_order_id=str(uuid.uuid4()), external_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()), provider_status='succeeded',
+                provider_confirmed_at=stale_time,
+                fulfillment_status='succeeded', credited_at=stale_time,
+                created_at=stale_time,
+                reconciliation_status='ok', checkout_status='active',
+            )
+            session.add(p1)
+            await session.commit()
+            p1_id = p1.id
+
+        # We need a patch for session_scope so the worker uses our test DB
+        from unittest.mock import patch
+
+        async def dummy_session_scope():
+            # Return a real async session connected to the test DB
+            return self.session_factory()
+
+        # Since _recover_stale_topups uses session_scope as an async context manager, we must wrap it
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def patched_session_scope():
+            async with self.session_factory() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except:
+                    await s.rollback()
+                    raise
+
+        with patch("services.workers.payments.session_scope", new=patched_session_scope):
+            # Run 5 concurrent workers!
+            await asyncio.gather(
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+            )
+            
+        # Verify exactly one welcome bonus ledger entry was created
+        async with self.session_factory() as session:
+            entries = (await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == p_id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.metadata_["reason"].as_string() == "first_topup_welcome"
+                )
+            )).all()
+    
+            self.assertEqual(len(entries), 1, "Only one welcome bonus should be granted despite 5 concurrent workers")
