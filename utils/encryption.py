@@ -1,7 +1,7 @@
 import logging
 from functools import lru_cache
 
-from cryptography.fernet import Fernet, MultiFernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy.types import Text, TypeDecorator
 
 logger = logging.getLogger(__name__)

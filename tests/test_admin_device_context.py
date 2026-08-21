@@ -153,8 +153,8 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_profile_count_excludes_all_non_visible_deletion_states(self):
         from database.repositories.profiles_repo import (
-            get_user_profiles_count,
             PROFILE_QUOTA_EXCLUDED_STATUSES,
+            get_user_profiles_count,
         )
 
         result = MagicMock()

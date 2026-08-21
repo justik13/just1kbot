@@ -19,7 +19,6 @@ from services.workers.cleanup import (
 )
 
 
-
 class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
     def test_retention_constants(self):
         self.assertEqual(30, WEBHOOK_INBOX_RETENTION_DAYS)

@@ -76,6 +76,9 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
         # P2 processed BEFORE P1 recovery
         async with self.session_factory() as session:
             res2 = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p2_id, topup_amount=Decimal(200))
+            # simulate worker updating the flag
+            p2_model = await session.get(Payment, p2_id)
+            p2_model.topup_context = {**(p2_model.topup_context or {}), "referral_bonus_processed": True}
             await session.commit()
             # P2 shouldn't receive welcome bonus because P1 exists (id < P2.id)
             self.assertEqual(res2.purchaser_welcome_bonus, Decimal(0))
@@ -86,6 +89,9 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(len(payments) > 0, "P1 should be selected for recovery")
             
             res1 = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p1_id, topup_amount=Decimal(100))
+            # simulate worker updating the flag
+            p1_model = await session.get(Payment, p1_id)
+            p1_model.topup_context = {**(p1_model.topup_context or {}), "referral_bonus_processed": True}
             await session.commit()
             # P1 MUST receive the welcome bonus (10% of 100 = 10) exactly once after the fix
             self.assertEqual(res1.purchaser_welcome_bonus, Decimal(10))
@@ -96,5 +102,228 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(payments), 0, "P1 should NOT be selected again after bonus granted")
 
             res1_dup = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p1_id, topup_amount=Decimal(100))
-            # Idempotency guarantees it returns 0 for dup
             self.assertEqual(res1_dup.purchaser_welcome_bonus, Decimal(0))
+
+    async def test_concurrent_worker_recovery(self):
+        """Test that _recover_stale_topups correctly serializes concurrent workers via skip_locked."""
+        import asyncio
+
+        from database.models import AccountLedgerEntry
+        from services.workers.payments import _recover_stale_topups
+
+        async with self.session_factory() as session:
+            referrer = User(telegram_id=300)
+            session.add(referrer)
+            await session.flush()
+            
+            purchaser = User(telegram_id=400, referred_by=300)
+            session.add(purchaser)
+            await session.commit()
+            
+            p_id = purchaser.id
+
+        from datetime import timedelta
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        async with self.session_factory() as session:
+            p1 = Payment(
+                user_id=p_id, amount=Decimal(100), currency='RUB',
+                public_order_id=str(uuid.uuid4()), external_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()), provider_status='succeeded',
+                provider_confirmed_at=stale_time,
+                fulfillment_status='succeeded', credited_at=stale_time,
+                created_at=stale_time,
+                reconciliation_status='ok', checkout_status='active',
+            )
+            session.add(p1)
+            await session.commit()
+
+        # We need a patch for session_scope so the worker uses our test DB
+        from unittest.mock import patch
+
+        async def dummy_session_scope():
+            # Return a real async session connected to the test DB
+            return self.session_factory()
+
+        # Since _recover_stale_topups uses session_scope as an async context manager, we must wrap it
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def patched_session_scope():
+            async with self.session_factory() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except:
+                    await s.rollback()
+                    raise
+
+        with patch("services.workers.payments.session_scope", new=patched_session_scope):
+            # Run 5 concurrent workers!
+            await asyncio.gather(
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+                _recover_stale_topups(None),
+            )
+            
+        # Verify exactly one welcome bonus ledger entry was created
+        async with self.session_factory() as session:
+            entries = (await session.scalars(
+                select(AccountLedgerEntry).where(
+                    AccountLedgerEntry.user_id == p_id,
+                    AccountLedgerEntry.entry_type == "admin_adjustment",
+                    AccountLedgerEntry.metadata_["reason"].as_string() == "first_topup_welcome"
+                )
+            )).all()
+    
+            self.assertEqual(len(entries), 1, "Only one welcome bonus should be granted despite 5 concurrent workers")
+
+    async def test_needs_recovery_uses_partial_index(self):
+        """Test that the _needs_recovery query actually uses the partial index on production data sizes."""
+        async with self.session_factory() as session:
+            # Create user 1 first to satisfy foreign key constraints
+            await session.merge(User(id=1, telegram_id=1))
+            await session.commit()
+            
+            # Insert 50000 irrelevant rows so the planner naturally prefers an Index Scan
+            # over a full Seq Scan without artificial settings.
+            await session.execute(
+                text(
+                    "INSERT INTO payments (user_id, amount, currency, provider_status, fulfillment_status, created_at, updated_at, public_order_id, external_id, provider_idempotency_key) "
+                    "SELECT 1, 100, 'RUB', 'succeeded', 'succeeded', now(), now(), md5(random()::text), md5(random()::text), md5(random()::text) "
+                    "FROM generate_series(1, 50000)"
+                )
+            )
+            await session.execute(
+                text(
+                    "UPDATE payments SET topup_context = '{\"referral_bonus_processed\": true}'::jsonb"
+                )
+            )
+            await session.commit()
+            
+        # Now run ANALYZE explicitly outside transaction to update table statistics
+        async with self.engine.connect() as conn:
+            autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit_conn.execute(text("ANALYZE payments"))
+
+        async with self.session_factory() as session:
+            stmt = select(Payment).where(_needs_recovery())
+            compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
+            explain_query = f"EXPLAIN {compiled!s}"
+            
+            result = await session.execute(text(explain_query))
+            explain_plan = "\n".join([row[0] for row in result.fetchall()])
+            
+            index_name1 = "ix_payments_referral_bonus_unprocessed"
+            index_name2 = "ix_payments_recovery_pending"
+            index_name3 = "ix_payments_recovery_unfulfilled"
+            
+            # The query planner should use a BitmapOr to combine the partial indexes on real data distribution
+            self.assertTrue(
+                index_name1 in explain_plan or index_name2 in explain_plan or index_name3 in explain_plan,
+                f"The query planner did NOT use recovery indexes! Plan:\n{explain_plan}"
+            )
+
+    async def test_concurrent_provider_finalize_and_recovery(self):
+        """Test that provider finalize and _recover_stale_topups can run concurrently without deadlock."""
+        import asyncio
+        import uuid
+        from decimal import Decimal
+        from datetime import datetime, timezone
+        from unittest.mock import patch, MagicMock
+        from contextlib import asynccontextmanager
+
+        from database.models import User, Payment, PaymentProviderOperation
+        from services.workers.payments import _recover_stale_topups
+        from services.payment_provider_operations import finalize
+
+        async with self.session_factory() as session:
+            purchaser = User(telegram_id=400, topup_blocked=False)
+            session.add(purchaser)
+            await session.commit()
+            p_id = purchaser.id
+
+        active_time = datetime.now(timezone.utc)
+        ext_id = f"yoo_{uuid.uuid4()}"
+        order_id = str(uuid.uuid4())
+
+        async with self.session_factory() as session:
+            p1 = Payment(
+                user_id=p_id, amount=Decimal(100), currency='RUB',
+                public_order_id=order_id, external_id=ext_id,
+                provider_idempotency_key=str(uuid.uuid4()), provider_status='pending',
+                created_at=active_time,
+                reconciliation_status='required', checkout_status='active',
+            )
+            session.add(p1)
+            await session.flush()
+            
+            op = PaymentProviderOperation(
+                payment_id=p1.id,
+                operation_type="reconcile_payment",
+                status="processing",
+                locked_by="test-worker",
+                locked_at=active_time,
+                attempts=1,
+                max_attempts=10,
+                idempotency_key=str(uuid.uuid4()),
+                payload={}
+            )
+            session.add(op)
+            await session.commit()
+            
+            pid = p1.id
+            opid = op.id
+
+        @asynccontextmanager
+        async def patched_session_scope():
+            async with self.session_factory() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except:
+                    await s.rollback()
+                    raise
+
+        class MockResult:
+            ok = True
+            value = {
+                "id": ext_id,
+                "status": "succeeded",
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "amount": {"value": "100.00", "currency": "RUB"},
+                "metadata": {
+                    "order_id": order_id,
+                    "local_payment_id": str(pid),
+                },
+            }
+            error_kind = None
+            retryable = False
+
+        async def run_finalize():
+            async with self.session_factory() as s:
+                claim = MagicMock()
+                claim.payment_id = pid
+                claim.operation_id = opid
+                claim.operation_type = "reconcile_payment"
+                claim.worker_id = "test-worker"
+                claim.attempt_number = 1
+                claim.external_id = ext_id
+                try:
+                    await finalize(s, claim, MockResult())
+                    await s.commit()
+                except Exception:
+                    await s.rollback()
+                    raise
+
+        with patch("services.workers.payments.session_scope", new=patched_session_scope):
+            await asyncio.gather(
+                run_finalize(),
+                _recover_stale_topups(None),
+            )
+
+        async with self.session_factory() as session:
+            p = await session.get(Payment, pid)
+            self.assertEqual(p.provider_status, "succeeded")
+            self.assertEqual(p.fulfillment_status, "succeeded")

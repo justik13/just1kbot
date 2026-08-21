@@ -2,7 +2,10 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 
 from database.models import WebhookInbox
-from services.workers.webhook_inbox import auto_resolve_untracked_canceled_webhooks, recover_stale
+from services.workers.webhook_inbox import (
+    auto_resolve_untracked_canceled_webhooks,
+    recover_stale,
+)
 
 
 class WebhookAutoHealTests(unittest.IsolatedAsyncioTestCase):

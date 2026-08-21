@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from aiogram import Router, F
 
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -270,6 +270,7 @@ async def apply_mass_bonus(
         pass
 
     import hashlib
+
     from utils.datetime_helpers import now_utc
     batch_str = f"{target_aud}_{amount}_{reason}_{now_utc().strftime('%Y-%m-%d')}"
     batch_id = hashlib.sha256(batch_str.encode()).hexdigest()[:16]
@@ -308,6 +309,7 @@ async def _run_mass_bonus_background(
       newly credited users (`created=True`) in each chunk.
     """
     from aiogram.exceptions import TelegramForbiddenError
+
     from database.connection import session_scope
     from utils.rate_limiter import global_send_limiter
 

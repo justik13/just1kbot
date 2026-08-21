@@ -91,7 +91,6 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
             PaymentProviderOperation.status.in_(("pending", "retry", "processing")),
         )
         .order_by(PaymentProviderOperation.id.desc())
-        .with_for_update()
     )
     if active:
         return active
@@ -111,9 +110,39 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
     return operation
 
 
-async def retry_dead_provider_operation(
-    session, operation_id, *, reset_attempts, reason
-):
+async def cancel_pending_create_operations(session, payment_id: int):
+    operations = (
+        await session.scalars(
+            select(PaymentProviderOperation)
+            .where(
+                PaymentProviderOperation.payment_id == payment_id,
+                PaymentProviderOperation.operation_type == "create_payment",
+                PaymentProviderOperation.status.in_(("pending", "retry")),
+            )
+            .with_for_update()
+        )
+    ).all()
+    for operation in operations:
+        operation.status = "cancelled"
+    await session.flush()
+
+
+async def mark_dead_operation(session, operation_id: int):
+    # Read without lock first to get payment_id for proper lock ordering.
+    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    op_info = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+    )
+    if not op_info or op_info.status != "dead":
+        raise ValueError("operation is not dead")
+    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise ValueError("payment not found")
+    # Now safely lock the operation
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == operation_id)
@@ -121,11 +150,35 @@ async def retry_dead_provider_operation(
     )
     if not operation or operation.status != "dead":
         raise ValueError("operation is not dead")
+    operation.status = "cancelled"
+    await session.flush()
+
+
+async def retry_dead_provider_operation(
+    session, operation_id, *, reset_attempts, reason
+):
+    # Read without lock first to get payment_id for proper lock ordering.
+    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    op_info = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+    )
+    if not op_info or op_info.status != "dead":
+        raise ValueError("operation is not dead")
+    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
     payment = await session.scalar(
-        select(Payment).where(Payment.id == operation.payment_id).with_for_update()
+        select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
     )
     if payment is None:
         raise ValueError("payment not found")
+    # Now safely lock the operation
+    operation = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+        .with_for_update()
+    )
+    if not operation or operation.status != "dead":
+        raise ValueError("operation is not dead")
     if (
         operation.operation_type == "create_payment"
         and not payment.external_id
@@ -239,8 +292,9 @@ async def _push_payment_url(bot, session, payment) -> None:
     from aiogram.exceptions import TelegramForbiddenError
     user = None
     try:
-        from database.models import User
         from sqlalchemy import select as _select
+
+        from database.models import User
         user = await session.scalar(_select(User).where(User.id == payment.user_id))
         if user is None or not user.telegram_id:
             return
@@ -419,28 +473,46 @@ async def finalize(session, claim, result, bot=None):
     await session.flush()
 
 
-async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
-    operations = (
-        await session.scalars(
-            select(PaymentProviderOperation)
+async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
+    stale_rows = (
+        await session.execute(
+            select(PaymentProviderOperation.id, PaymentProviderOperation.payment_id)
             .where(
                 PaymentProviderOperation.status == "processing",
                 PaymentProviderOperation.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
-            .with_for_update(skip_locked=True)
+            .limit(100)
         )
     ).all()
-    for operation in operations:
+    count = 0
+    for op_id, payment_id in stale_rows:
+        # Respect global hierarchy: Payment -> PaymentProviderOperation
+        payment = await session.scalar(
+            select(Payment)
+            .where(Payment.id == payment_id)
+            .with_for_update(skip_locked=True)
+        )
+        if payment is None:
+            continue
+        operation = await session.scalar(
+            select(PaymentProviderOperation)
+            .where(
+                PaymentProviderOperation.id == op_id,
+                PaymentProviderOperation.status == "processing",
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if operation is None:
+            continue
+
         dead = operation.attempts >= operation.max_attempts
         operation.status = "dead" if dead else "retry"
         operation.completed_at = now_utc() if dead else None
         operation.locked_at = None
         operation.locked_by = None
         operation.next_attempt_at = now_utc()
-        payment = await session.get(Payment, operation.payment_id)
-        if payment is None:
-            continue
+
         if payment.provider_status in {"succeeded", "refunded", "canceled"}:
             payment.reconciliation_status = "manual_review" if dead else "required"
         elif dead:
@@ -449,7 +521,10 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
             payment.fulfillment_status = "manual_review"
         else:
             payment.reconciliation_status = "required"
-    return len(operations)
+        count += 1
+    if count > 0:
+        await session.flush()
+    return count
 
 
 async def finalize_provider_failure(session, claim, *, error_code, retryable):

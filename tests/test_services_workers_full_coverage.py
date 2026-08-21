@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import User, Server, VPNProfile
+from database.models import Server, User, VPNProfile
+from services.payment_queue_health import PaymentQueueHealthSnapshot, QueueSnapshot
 from services.workers import (
-    notifications,
     cleanup,
     heartbeat,
+    notifications,
     queue_health,
 )
-from services.payment_queue_health import QueueSnapshot, PaymentQueueHealthSnapshot
 
 DB = os.getenv("TEST_DATABASE_URL")
 

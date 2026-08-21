@@ -1,15 +1,15 @@
 import os
 import re
+
 try:
     import pwd
 except ImportError:
     pwd = None
 from functools import lru_cache
-from typing import Any, List
+from typing import Any
 
-from pydantic import field_validator, model_validator, Field
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 _SERVICE_USER = "just1kbot"
 _SERVICE_RUNTIME_HOME = "/run/just1kbot"
@@ -46,7 +46,7 @@ class Settings(BaseSettings):
 
     # ── Telegram ──
     BOT_TOKEN: str = Field(repr=False)
-    ADMIN_IDS: List[int]
+    ADMIN_IDS: list[int]
     SUPPORT_USERNAME: str
 
     # ── Database ──
@@ -117,7 +117,7 @@ class Settings(BaseSettings):
 
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
-    def validate_admin_ids(cls, value: Any) -> List[int]:
+    def validate_admin_ids(cls, value: Any) -> list[int]:
         if isinstance(value, str):
             value = value.strip().strip("'").strip('"')
             import json
@@ -280,6 +280,6 @@ class Settings(BaseSettings):
         return value
 
 
-@lru_cache()
+@lru_cache
 def get_settings() -> Settings:
     return Settings()

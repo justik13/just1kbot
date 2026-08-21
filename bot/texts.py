@@ -15,11 +15,11 @@ from importlib import reload
 from typing import Any
 
 from bot.texts_data import admin_texts as _admin_texts_module
-from bot.texts_data import referral_texts as _referral_texts_module
-from bot.texts_data import user_texts as _user_texts_module
-from bot.texts_data import ui_texts as _ui_texts_module
-from bot.texts_data import runtime_texts as _runtime_texts_module
 from bot.texts_data import overrides as _overrides_module
+from bot.texts_data import referral_texts as _referral_texts_module
+from bot.texts_data import runtime_texts as _runtime_texts_module
+from bot.texts_data import ui_texts as _ui_texts_module
+from bot.texts_data import user_texts as _user_texts_module
 
 logger = logging.getLogger(__name__)
 

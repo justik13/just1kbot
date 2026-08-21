@@ -129,7 +129,7 @@ class SubscriptionBalancePostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertTrue(snapshot.tracked)
             self.assertEqual(snapshot.remaining_paid_hours, 24)
-            self.assertEqual(snapshot.remaining_paid_value_rub, Decimal("49"))
+            self.assertEqual(snapshot.remaining_paid_value_rub, Decimal(49))
 
     async def test_reader_does_not_commit_or_mutate_history(self):
         async with self.sessions.begin() as session:

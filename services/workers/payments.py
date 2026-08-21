@@ -33,39 +33,10 @@ def _needs_attention():
 
 
 def _needs_recovery():
-    from database.models import AccountLedgerEntry, User
-    from sqlalchemy import func
+    from sqlalchemy import or_, select, text
     from sqlalchemy.orm import aliased
 
-    referrer_bonus_subquery = (
-        select(1)
-        .select_from(AccountLedgerEntry)
-        .where(
-            AccountLedgerEntry.idempotency_key.like(
-                func.concat("referral-bonus:topup:", Payment.id, ":%")
-            )
-        )
-    )
-
-    welcome_bonus_subquery = (
-        select(1)
-        .select_from(AccountLedgerEntry)
-        .where(
-            AccountLedgerEntry.idempotency_key == func.concat("referral-bonus:first-topup-welcome:", Payment.user_id)
-        )
-    )
-
-    prior_payment = aliased(Payment)
-    prior_payment_subquery = (
-        select(1)
-        .select_from(prior_payment)
-        .where(
-            prior_payment.user_id == Payment.user_id,
-            prior_payment.credited_at.is_not(None),
-            prior_payment.fulfillment_status == "succeeded",
-            prior_payment.id < Payment.id,
-        )
-    )
+    from database.models import User
 
     purchaser = aliased(User)
     referrer = aliased(User)
@@ -85,30 +56,17 @@ def _needs_recovery():
         )
     )
 
-    needs_referrer_bonus = ~referrer_bonus_subquery.exists()
-    needs_welcome_bonus = and_(
-        ~prior_payment_subquery.exists(),
-        ~welcome_bonus_subquery.exists(),
-    )
-
     needs_bonus_retry = and_(
-        Payment.provider_status == "succeeded",
+        text("payments.provider_status = 'succeeded'"),
         Payment.provider_confirmed_at.is_not(None),
-        Payment.fulfillment_status == "succeeded",
+        text("payments.fulfillment_status = 'succeeded'"),
         user_subquery.exists(),
-        or_(needs_referrer_bonus, needs_welcome_bonus),
+        text("NOT (COALESCE(payments.topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"),
     )
 
     return or_(
-        and_(
-            Payment.external_id.is_not(None),
-            Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
-        ),
-        and_(
-            Payment.provider_status == "succeeded",
-            Payment.provider_confirmed_at.is_not(None),
-            Payment.fulfillment_status.notin_(("succeeded", "reversed", "manual_review")),
-        ),
+        text("payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"),
+        text("payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"),
         needs_bonus_retry,
     )
 
@@ -168,9 +126,9 @@ async def _recover_stale_topups(bot: Bot | None = None):
 
     for _ in range(max_batches):
         async with session_scope() as session:
-            payment_ids = (
-                await session.scalars(
-                    select(Payment.id)
+            rows = (
+                await session.execute(
+                    select(Payment.id, Payment.user_id)
                     .where(
                         Payment.id > last_processed_id,
                         _needs_recovery(),
@@ -181,17 +139,23 @@ async def _recover_stale_topups(bot: Bot | None = None):
                 )
             ).all()
 
-        if not payment_ids:
+        if not rows:
             break
 
-        for pid in payment_ids:
+        for pid, _uid in rows:
             last_processed_id = pid
             try:
                 async with session_scope() as session:
-                    payment = await session.get(Payment, pid)
+                    payment = await session.scalar(
+                        select(Payment)
+                        .where(Payment.id == pid)
+                        .with_for_update(skip_locked=True)
+                    )
                     if not payment:
                         continue
 
+                    ctx = payment.topup_context or {}
+                    
                     if payment.external_id and payment.provider_status in {
                         "creating",
                         "pending",
@@ -222,6 +186,7 @@ async def _recover_stale_topups(bot: Bot | None = None):
                         payment.provider_status == "succeeded"
                         and payment.provider_confirmed_at is not None
                         and payment.fulfillment_status == "succeeded"
+                        and not (payment.topup_context and payment.topup_context.get("referral_bonus_processed"))
                     ):
                         try:
                             async with session.begin_nested():
@@ -231,6 +196,8 @@ async def _recover_stale_topups(bot: Bot | None = None):
                                     payment_id=payment.id,
                                     topup_amount=payment.amount,
                                 )
+                                ctx = payment.topup_context or {}
+                                payment.topup_context = {**ctx, "referral_bonus_processed": True}
                         except Exception:
                             logger.exception(
                                 "Referral bonus retry failed for topup payment %s",

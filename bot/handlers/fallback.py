@@ -1,4 +1,4 @@
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
@@ -19,6 +19,7 @@ router = Router()
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
     import asyncio
+
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     await state.clear()
@@ -62,6 +63,7 @@ async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0)
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
     import asyncio
+
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     await state.clear()

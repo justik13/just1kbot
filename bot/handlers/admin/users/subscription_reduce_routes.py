@@ -1,7 +1,7 @@
 import logging
 from datetime import timedelta
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -195,8 +195,9 @@ async def admin_sub_apply_reduce(
     await callback.answer(show_alert=False)
 
     try:
-        from database.models import User
         from sqlalchemy import select
+
+        from database.models import User
         user = await session.scalar(
             select(User)
             .where(User.telegram_id == telegram_id, User.is_deleted.is_(False))

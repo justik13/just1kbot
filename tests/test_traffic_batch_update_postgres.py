@@ -9,7 +9,6 @@ from unittest.mock import patch
 from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-
 from database.models import Server, User, VPNProfile
 from services.amnezia_client import AmneziaClientListItem, AmneziaClientTraffic
 from services.workers.traffic import _process_server_traffic

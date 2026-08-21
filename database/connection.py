@@ -1,18 +1,18 @@
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Awaitable, Callable
 
-from sqlalchemy import select, func
+from alembic.command import upgrade
+from alembic.config import Config
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from alembic.config import Config
-from alembic.command import upgrade
 from config.settings import get_settings
 from database.models import Tariff
 

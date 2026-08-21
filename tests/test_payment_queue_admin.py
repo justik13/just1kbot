@@ -1,6 +1,6 @@
+import json
 import unittest
 from datetime import datetime, timezone
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 

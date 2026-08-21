@@ -1,10 +1,14 @@
 import os
 import unittest
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import Server
-from database.repositories.servers_repo import update_server, update_server_health_snapshot
+from database.repositories.servers_repo import (
+    update_server,
+    update_server_health_snapshot,
+)
 
 TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
@@ -113,6 +117,7 @@ class ServerMonitorConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_blocking_transactions_on_postgres(self):
         import asyncio
+
         from sqlalchemy import select
 
         async with self.sessions.begin() as s:

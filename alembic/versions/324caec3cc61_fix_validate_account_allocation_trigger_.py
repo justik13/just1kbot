@@ -5,16 +5,15 @@ Revises: 0001_clean_baseline
 Create Date: 2026-08-07 18:44:59.227397
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = '324caec3cc61'
-down_revision: Union[str, Sequence[str], None] = '0001_clean_baseline'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '0001_clean_baseline'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

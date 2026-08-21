@@ -83,8 +83,7 @@ async def _show_servers_list(
 ):
     total_servers = await get_server_count(session)
     total_pages = max(1, math.ceil(total_servers / SERVERS_PER_PAGE))
-    if page > total_pages:
-        page = total_pages
+    page = min(page, total_pages)
     servers = await get_servers_paginated(
         session, page=page, per_page=SERVERS_PER_PAGE,
     )
@@ -102,8 +101,8 @@ async def _show_servers_list(
 async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
-    from utils.formatters import format_admin_breadcrumbs
     from utils.datetime_helpers import format_datetime_msk
+    from utils.formatters import format_admin_breadcrumbs
 
     flag = server.country_flag or "🌐"
 

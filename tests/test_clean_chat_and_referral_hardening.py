@@ -3,7 +3,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import quote
 
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, User as TelegramUser
+from aiogram.types import Message
+from aiogram.types import User as TelegramUser
 
 from bot.handlers.payment.balance_routes import accept_custom_amount
 from bot.handlers.start import cmd_start, parse_referral_id
@@ -206,6 +207,7 @@ class TestReferralCycleDetection(unittest.IsolatedAsyncioTestCase):
 class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
     async def test_first_topup_push_includes_welcome_bonus_celebration(self):
         from decimal import Decimal
+
         from database.models import Payment
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
         from services.account_topup import settle_succeeded_topup
@@ -217,7 +219,7 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
         payment = Payment(
             id=100,
             user_id=20,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),
@@ -239,20 +241,20 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
         patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
-            accounting_position=Decimal("550"),
-            available=Decimal("550"),
-            reserved=Decimal("0"),
-            debt=Decimal("0"),
-            real_position=Decimal("500"),
-            bonus_position=Decimal("50"),
-            real_available=Decimal("500"),
-            bonus_available=Decimal("50"),
+            accounting_position=Decimal(550),
+            available=Decimal(550),
+            reserved=Decimal(0),
+            debt=Decimal(0),
+            real_position=Decimal(500),
+            bonus_position=Decimal(50),
+            real_available=Decimal(500),
+            bonus_available=Decimal(50),
         ))), \
         patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
         patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
         patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
-            referrer_bonus=Decimal("50"),
-            purchaser_welcome_bonus=Decimal("50"),
+            referrer_bonus=Decimal(50),
+            purchaser_welcome_bonus=Decimal(50),
         ))):
             await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
 
@@ -261,6 +263,7 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
 
     async def test_subsequent_topup_push_excludes_welcome_bonus(self):
         from decimal import Decimal
+
         from database.models import Payment
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
         from services.account_topup import settle_succeeded_topup
@@ -272,7 +275,7 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
         payment = Payment(
             id=101,
             user_id=20,
-            amount=Decimal("1000"),
+            amount=Decimal(1000),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),
@@ -293,20 +296,20 @@ class TestTopupWelcomeBonusPushNotification(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=user)), \
         patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(
-            accounting_position=Decimal("1550"),
-            available=Decimal("1550"),
-            reserved=Decimal("0"),
-            debt=Decimal("0"),
-            real_position=Decimal("1500"),
-            bonus_position=Decimal("50"),
-            real_available=Decimal("1500"),
-            bonus_available=Decimal("50"),
+            accounting_position=Decimal(1550),
+            available=Decimal(1550),
+            reserved=Decimal(0),
+            debt=Decimal(0),
+            real_position=Decimal(1500),
+            bonus_position=Decimal(50),
+            real_available=Decimal(1500),
+            bonus_available=Decimal(50),
         ))), \
         patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(MagicMock(), True))), \
         patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
         patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=ReferralBonusGrantResult(
-            referrer_bonus=Decimal("100"),
-            purchaser_welcome_bonus=Decimal("0"),
+            referrer_bonus=Decimal(100),
+            purchaser_welcome_bonus=Decimal(0),
         ))):
             await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
 
@@ -344,6 +347,7 @@ class TestReferralPaginationClamping(unittest.IsolatedAsyncioTestCase):
 
     async def test_show_referrals_list_renders_last_page_on_out_of_bounds_page(self):
         from aiogram.types import CallbackQuery
+
         from bot.handlers.profile import show_referrals_list
 
         callback = MagicMock(spec=CallbackQuery)

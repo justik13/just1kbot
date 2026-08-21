@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, date
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
@@ -27,7 +27,6 @@ from sqlalchemy.orm import (
 
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
-
 
 API_OPERATION_TYPES = (
     "create_peer",
@@ -489,6 +488,29 @@ class Payment(Base):
             "created_at",
             postgresql_where=text(
                 "reconciliation_status IN ('required','mismatch','manual_review')"
+            ),
+        ),
+        Index(
+            "ix_payments_referral_bonus_unprocessed",
+            "created_at",
+            postgresql_where=text(
+                "provider_status = 'succeeded' "
+                "AND fulfillment_status = 'succeeded' "
+                "AND NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"
+            ),
+        ),
+        Index(
+            "ix_payments_recovery_pending",
+            "created_at",
+            postgresql_where=text(
+                "external_id IS NOT NULL AND provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"
+            ),
+        ),
+        Index(
+            "ix_payments_recovery_unfulfilled",
+            "created_at",
+            postgresql_where=text(
+                "provider_status = 'succeeded' AND provider_confirmed_at IS NOT NULL AND fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"
             ),
         ),
         CheckConstraint(

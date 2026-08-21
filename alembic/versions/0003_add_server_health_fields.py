@@ -5,14 +5,16 @@ Revises: 0002_system_settings
 Create Date: 2026-08-11 21:45:00.000000
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
+
 import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = '0003_add_server_health_fields'
-down_revision: Union[str, Sequence[str], None] = '0002_system_settings'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '0002_system_settings'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

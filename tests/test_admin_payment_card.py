@@ -1,10 +1,11 @@
 import unittest
-from decimal import Decimal
 from datetime import datetime, timezone
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import CallbackQuery, Message, User as TelegramUser
 from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+from aiogram.types import User as TelegramUser
 
 from bot.handlers.admin.payments import show_payment_card
 from database.models import Payment, User
@@ -20,7 +21,7 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
         mock_get_payment_by_id,
         mock_is_admin,
     ):
-        mock_get_refundable.return_value = Decimal("0")
+        mock_get_refundable.return_value = Decimal(0)
 
         dummy_user = User(
             id=1,

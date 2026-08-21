@@ -1,12 +1,11 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from utils.formatters import format_admin_breadcrumbs
 from database.repositories.system_settings_repo import set_system_setting
 from database.repositories.users_repo import search_user_flexible
-from services.workers.node_monitor import check_node_resources_and_alerts
 from services.amnezia_client import AmneziaClient
-
+from services.workers.node_monitor import check_node_resources_and_alerts
+from utils.formatters import format_admin_breadcrumbs
 
 
 class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
@@ -116,8 +115,9 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_not_called()
 
             # Fast-forward 30s confirmation window
-            from services.workers.node_monitor import get_server_monitor_state
             import time
+
+            from services.workers.node_monitor import get_server_monitor_state
             st = get_server_monitor_state(2)
             st.next_check_at = time.monotonic() - 1.0
 

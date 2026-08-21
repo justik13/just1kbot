@@ -32,6 +32,7 @@ class TestAdminDisputesRouter(unittest.IsolatedAsyncioTestCase):
 
     async def test_setup_bot_includes_disputes_router(self):
         from aiogram.fsm.storage.memory import MemoryStorage
+
         from bot.main import setup_bot
 
         with (

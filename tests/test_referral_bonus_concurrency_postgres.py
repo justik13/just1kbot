@@ -10,7 +10,7 @@ from unittest.mock import patch
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import User, Payment, AccountLedgerEntry
+from database.models import AccountLedgerEntry, Payment, User
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import settle_succeeded_topup
 from services.referral_bonus import (
@@ -90,10 +90,9 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_concurrent_first_topup(self):
         async def process_payment(payment_id):
-            async with self.sessions() as session:
-                async with session.begin():
-                    payment = await session.get(Payment, payment_id)
-                    await settle_succeeded_topup(session, payment=payment, source="test")
+            async with self.sessions() as session, session.begin():
+                payment = await session.get(Payment, payment_id)
+                await settle_succeeded_topup(session, payment=payment, source="test")
 
         await asyncio.gather(
             process_payment(self.payment_a_id),
@@ -148,17 +147,15 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(credited)
 
     async def test_concurrent_referral_refund_reversal_is_idempotent(self):
-        async with self.sessions() as session:
-            async with session.begin():
-                payment = await session.get(Payment, self.payment_a_id)
-                await settle_succeeded_topup(session, payment=payment, source="test")
+        async with self.sessions() as session, session.begin():
+            payment = await session.get(Payment, self.payment_a_id)
+            await settle_succeeded_topup(session, payment=payment, source="test")
 
         async def reverse_once():
-            async with self.sessions() as session:
-                async with session.begin():
-                    return await reverse_referral_bonus_for_topup(
-                        session, payment_id=self.payment_a_id
-                    )
+            async with self.sessions() as session, session.begin():
+                return await reverse_referral_bonus_for_topup(
+                    session, payment_id=self.payment_a_id
+                )
 
         first, second = await asyncio.gather(reverse_once(), reverse_once())
 
@@ -201,5 +198,5 @@ class ReferralBonusConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(referrer_balance.bonus_position, Decimal("0.00"))
             self.assertEqual(purchaser_balance.bonus_position, Decimal("0.00"))
-            self.assertEqual(referrer_referral_balance, Decimal("0"))
-            self.assertEqual(purchaser_referral_balance, Decimal("0"))
+            self.assertEqual(referrer_referral_balance, Decimal(0))
+            self.assertEqual(purchaser_referral_balance, Decimal(0))

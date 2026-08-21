@@ -7,7 +7,6 @@ Create Date: 2026-08-16 20:00:00.000000
 
 from alembic import op
 
-
 # revision identifiers, used by Alembic.
 revision: str = "0005_payment_statuses_sync"
 down_revision: str = "0004_referral_entitlements"

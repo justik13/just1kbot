@@ -14,7 +14,6 @@ from sqlalchemy import case, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 from database.models import (
     AccountBalanceReservation,
     AccountLedgerAllocation,
@@ -26,8 +25,7 @@ from database.models import (
 from database.repositories.tariff_quotes_repo import lock_checkout_user
 from utils.datetime_helpers import now_utc
 
-
-ZERO = Decimal("0")
+ZERO = Decimal(0)
 
 
 class AccountLedgerError(RuntimeError):

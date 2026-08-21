@@ -1,7 +1,7 @@
 import logging
 import math
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -17,7 +17,6 @@ from database.repositories.users_repo import (
     get_filtered_users_count,
     get_filtered_users_paginated,
 )
-
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_audit_details
@@ -367,7 +366,11 @@ async def show_user_audit(
         return
 
     import math
-    from database.repositories.audit_repo import get_user_audit_logs, get_user_audit_logs_count
+
+    from database.repositories.audit_repo import (
+        get_user_audit_logs,
+        get_user_audit_logs_count,
+    )
     from utils.formatters import format_datetime
 
     page_size = 10

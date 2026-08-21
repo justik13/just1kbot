@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-import services.workers as workers
+from services import workers
 from services.workers import heartbeat
 
 

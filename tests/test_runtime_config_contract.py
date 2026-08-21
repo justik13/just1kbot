@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from config.settings import Settings
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 BASE = {

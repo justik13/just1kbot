@@ -30,6 +30,7 @@ from database.repositories.paid_value_repo import (
     PaidValueLedgerConflictError,
     get_or_create_conversion_entry,
 )
+from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariff_quotes_repo import (
     get_or_create_current_version,
     lock_checkout_user,
@@ -45,8 +46,6 @@ from services.tariff_value_calculator import (
     calculate_tariff_value,
 )
 from utils.datetime_helpers import now_utc
-
-from database.repositories.profiles_repo import get_user_profiles_count
 
 logger = logging.getLogger(__name__)
 

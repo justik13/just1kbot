@@ -68,6 +68,10 @@ class TestReferralBonusLedgerEntryShape:
                 captured_entry["obj"] = entry
 
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
         session.add = fake_add
         session.flush = AsyncMock()
@@ -120,20 +124,26 @@ class TestReferralBonusLedgerEntryShape:
         referrer = MagicMock()
         referrer.id = 1
 
-        def fake_get(model, pk):
+        def fake_get(model, pk, *args, **kwargs):
             if pk == 42:
                 return payment
             if pk == 4:
                 return purchaser
             return None
 
-        scalars_mock = MagicMock()
-        scalars_mock.all.return_value = [existing_bonus_credit]
-
+        scalars_mock_1 = MagicMock()
+        scalars_mock_1.all.return_value = [existing_bonus_credit]
+        scalars_mock_2 = MagicMock()
+        scalars_mock_2.all.return_value = []
+        
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.get = AsyncMock(side_effect=fake_get)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
-        session.scalars = AsyncMock(return_value=scalars_mock)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None, None])
+        session.scalars = AsyncMock(side_effect=[scalars_mock_1, scalars_mock_2, scalars_mock_2])
         session.add = fake_add
         session.flush = AsyncMock()
 
@@ -177,6 +187,10 @@ def test_first_topup_bonus_credits_both_purchaser_and_referrer():
             added_entries.append(entry)
 
     session = AsyncMock()
+    mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+    mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+    mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+    session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
     # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (0), 5. existing purchaser bonus check (None)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 0, None])
     session.add = fake_add
@@ -226,6 +240,10 @@ def test_second_topup_credits_only_referrer():
             added_entries.append(entry)
 
     session = AsyncMock()
+    mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+    mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+    mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+    session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
     # 1. purchaser, 2. referrer, 3. existing referrer bonus check (None), 4. prev_credited (1 = previous topup exists)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, 1])
     session.add = fake_add
@@ -283,7 +301,7 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     referrer = MagicMock()
     referrer.id = 10
 
-    def fake_get(model, pk):
+    def fake_get(model, pk, *args, **kwargs):
         if pk == 101:
             return payment
         if pk == 20:
@@ -297,6 +315,10 @@ def test_reverse_referral_bonus_reverses_both_referrer_and_purchaser_bonus():
     scalars_mock_purchaser.all.return_value = [purchaser_credit]
 
     session = AsyncMock()
+    mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+    mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+    mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+    session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
     session.get = AsyncMock(side_effect=fake_get)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None])
     session.scalars = AsyncMock(
@@ -361,6 +383,10 @@ def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
     scalars_mock_purchaser.all.return_value = []
 
     session = AsyncMock()
+    mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+    mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+    mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+    session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
     session.get = AsyncMock(return_value=payment)
     session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
     session.scalars = AsyncMock(
@@ -386,6 +412,7 @@ def test_reverse_referral_bonus_does_not_overallocate_spent_credit():
 
 def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering():
     import asyncio
+
     # Simulate P1 (id=1) and P2 (id=2) where P1 recovery runs AFTER P2 is processed.
     from unittest.mock import AsyncMock, MagicMock
 

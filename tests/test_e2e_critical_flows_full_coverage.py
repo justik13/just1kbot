@@ -1,18 +1,17 @@
 import os
 import unittest
-from unittest.mock import patch
-
 from decimal import Decimal
+from unittest.mock import patch
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import Tariff
 from database.repositories import (
-    users_repo,
-    servers_repo,
-    profiles_repo,
     account_ledger_repo,
+    profiles_repo,
+    servers_repo,
+    users_repo,
 )
 from services import (
     account_purchase,
@@ -119,7 +118,7 @@ class E2ECriticalFlowsFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 tariff_id=tariff.id,
             )
             self.assertIsNotNone(intent.quote)
-            self.assertEqual(intent.shortage, Decimal("0"))
+            self.assertEqual(intent.shortage, Decimal(0))
 
             # Extend user subscription manually to simulate successful settlement
             await users_repo.extend_subscription(session, user, 30)

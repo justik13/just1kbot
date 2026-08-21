@@ -1,7 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 from zoneinfo import ZoneInfo
-
 
 MSK_TZ = ZoneInfo("Europe/Moscow")
 
@@ -14,7 +12,7 @@ def now_msk() -> datetime:
     return datetime.now(MSK_TZ)
 
 
-def to_msk(dt: Optional[datetime]) -> Optional[datetime]:
+def to_msk(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
 
@@ -25,7 +23,7 @@ def to_msk(dt: Optional[datetime]) -> Optional[datetime]:
 
 
 def format_datetime_msk(
-    dt: Optional[datetime],
+    dt: datetime | None,
     format_str: str = "%d.%m.%Y %H:%M",
 ) -> str:
     if dt is None:
@@ -35,12 +33,12 @@ def format_datetime_msk(
     return msk_dt.strftime(format_str)
 
 
-def is_permanent_subscription(dt: Optional[datetime]) -> bool:
+def is_permanent_subscription(dt: datetime | None) -> bool:
     if dt is None:
         return False
     return dt.year >= 2100 or (dt.replace(tzinfo=timezone.utc) - now_utc()).days >= 36500
 
-def days_left_msk(dt: Optional[datetime]) -> str:
+def days_left_msk(dt: datetime | None) -> str:
     """
     Возвращает человекочитаемый остаток дней.
 
@@ -75,7 +73,7 @@ def days_left_msk(dt: Optional[datetime]) -> str:
     return f"{hours} ч."
 
 
-def is_expired(dt: Optional[datetime]) -> bool:
+def is_expired(dt: datetime | None) -> bool:
     if dt is None:
         return True
 
@@ -85,7 +83,7 @@ def is_expired(dt: Optional[datetime]) -> bool:
     return dt < now_utc()
 
 
-def is_vpn_access_expired(dt: Optional[datetime], grace_hours: int = 4) -> bool:
+def is_vpn_access_expired(dt: datetime | None, grace_hours: int = 4) -> bool:
     if dt is None:
         return True
 

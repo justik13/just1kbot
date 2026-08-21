@@ -5,9 +5,9 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import User, Payment, AccountLedgerEntry
+from database.models import AccountLedgerEntry, Payment, User
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import settle_succeeded_topup
 from utils import now_utc
@@ -86,10 +86,9 @@ class AccountTopupConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         # Exactly one ledger credit entry must be created regardless of concurrency.
 
         async def process_payment():
-            async with self.sessions() as session:
-                async with session.begin():
-                    payment = await session.get(Payment, self.payment_id)
-                    await settle_succeeded_topup(session, payment=payment, source="test")
+            async with self.sessions() as session, session.begin():
+                payment = await session.get(Payment, self.payment_id)
+                await settle_succeeded_topup(session, payment=payment, source="test")
 
         results = await asyncio.gather(
             process_payment(),

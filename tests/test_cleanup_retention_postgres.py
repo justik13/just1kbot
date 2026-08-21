@@ -6,7 +6,6 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -30,7 +29,7 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
-        import database.connection as connection
+        from database import connection
         self.old_sessionmaker = connection._sessionmaker
         connection._sessionmaker = self.sessions
         async with self.sessions.begin() as session:
@@ -72,7 +71,7 @@ class TestCleanupRetentionPostgres(unittest.IsolatedAsyncioTestCase):
                     )
                 )
         finally:
-            import database.connection as connection
+            from database import connection
             connection._sessionmaker = self.old_sessionmaker
             await self.engine.dispose()
 

@@ -7,13 +7,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import Tariff
-from database.repositories import users_repo, account_ledger_repo, audit_repo
+from database.repositories import account_ledger_repo, audit_repo, users_repo
 from services import (
     account_purchase,
-    ban_service,
     audit_service,
-    tariff_value_calculator,
+    ban_service,
     referral_bonus,
+    tariff_value_calculator,
     yookassa_service,
 )
 
@@ -70,19 +70,19 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_tariff_value_calculator(self):
         t_src = tariff_value_calculator.TariffVersionSnapshot(
-            tariff_id=1, version_id=1, duration_hours=720, price_rub=Decimal("300")
+            tariff_id=1, version_id=1, duration_hours=720, price_rub=Decimal(300)
         )
         t_tgt = tariff_value_calculator.TariffVersionSnapshot(
-            tariff_id=2, version_id=2, duration_hours=720, price_rub=Decimal("600")
+            tariff_id=2, version_id=2, duration_hours=720, price_rub=Decimal(600)
         )
 
         calc = tariff_value_calculator.calculate_tariff_value(
             operation_type="change",
             source_paid_hours=360,
-            source_paid_value_rub=Decimal("150"),
+            source_paid_value_rub=Decimal(150),
             source_tariff=t_src,
             target_tariff=t_tgt,
-            confirmed_additional_payment_rub=Decimal("450"),
+            confirmed_additional_payment_rub=Decimal(450),
             bonus_hours=0,
         )
         self.assertTrue(calc.invariant_holds)
@@ -98,9 +98,9 @@ class ServicesCoreFullCoverageTests(unittest.IsolatedAsyncioTestCase):
                 session,
                 purchaser_user_id=user.id,
                 payment_id=1,
-                topup_amount=Decimal("1000"),
+                topup_amount=Decimal(1000),
             )
-            self.assertEqual(granted, Decimal("100"))
+            self.assertEqual(granted, Decimal(100))
 
     async def test_account_purchase_and_topup(self):
         async with self.sessions.begin() as session:

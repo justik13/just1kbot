@@ -2,22 +2,22 @@ import logging
 import math
 from datetime import timedelta
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.handlers.admin.disputes import router as disputes_router
 from bot.keyboards import (
-    get_admin_menu,
-    get_admin_cat_users_keyboard,
-    get_admin_cat_infra_keyboard,
     get_admin_cat_finance_keyboard,
+    get_admin_cat_infra_keyboard,
     get_admin_cat_system_keyboard,
+    get_admin_cat_users_keyboard,
+    get_admin_menu,
     get_audit_keyboard,
     get_back_button,
     get_maintenance_confirm_keyboard,
@@ -29,13 +29,20 @@ from database.repositories.audit_repo import (
     get_total_audit_logs_count,
 )
 from database.repositories.servers_repo import get_total_free_ips
-from database.repositories.system_settings_repo import get_system_setting, set_system_setting
+from database.repositories.system_settings_repo import (
+    get_system_setting,
+    set_system_setting,
+)
 from database.repositories.users_repo import get_dashboard_stats
 from services.audit_service import AuditService
 from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_admin_breadcrumbs, format_datetime, format_audit_details
+from utils.formatters import (
+    format_admin_breadcrumbs,
+    format_audit_details,
+    format_datetime,
+)
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 
@@ -101,7 +108,10 @@ async def _get_dead_queues_count(session: AsyncSession) -> int:
 
 
 async def _get_servers_capacity_summary(session: AsyncSession) -> str:
-    from database.repositories.servers_repo import get_active_servers, get_server_peer_counts
+    from database.repositories.servers_repo import (
+        get_active_servers,
+        get_server_peer_counts,
+    )
     from services.slots_cache import get_cached_peer_count
 
     servers = await get_active_servers(session)

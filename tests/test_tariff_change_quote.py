@@ -4,10 +4,19 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from services.subscription_balance_projector import (
-    ProjectedBonusLot, ProjectedPaidLot, SubscriptionBalanceSnapshot,
+    ProjectedBonusLot,
+    ProjectedPaidLot,
+    SubscriptionBalanceSnapshot,
 )
-from services.tariff_change_quote import SnapshotCanonicalizationError, balance_snapshot_fingerprint
-from services.tariff_value_calculator import TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value
+from services.tariff_change_quote import (
+    SnapshotCanonicalizationError,
+    balance_snapshot_fingerprint,
+)
+from services.tariff_value_calculator import (
+    TariffCalculationError,
+    TariffVersionSnapshot,
+    calculate_tariff_value,
+)
 
 T0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -18,7 +27,7 @@ def snapshot():
         paid_value_ledger_entry_id=20,
         tariff_version_id=200,
         original_paid_hours=720,
-        original_paid_value_rub=Decimal("90"),
+        original_paid_value_rub=Decimal(90),
         remaining_whole_hours=300,
         remaining_paid_value_rub=Decimal("37.500000"),
         segment_start=T0,
@@ -53,15 +62,15 @@ def snapshot():
 class TariffChangeQuoteTests(unittest.TestCase):
     def test_change_calculation_contract(self):
         upgrade = calculate_tariff_value(operation_type="change", source_paid_hours=360,
-            source_paid_value_rub=Decimal("150"), source_tariff=TariffVersionSnapshot(1, 1, 720, Decimal("300")),
-            target_tariff=TariffVersionSnapshot(2, 2, 720, Decimal("600")),
-            confirmed_additional_payment_rub=Decimal("450"), bonus_hours=24)
+            source_paid_value_rub=Decimal(150), source_tariff=TariffVersionSnapshot(1, 1, 720, Decimal(300)),
+            target_tariff=TariffVersionSnapshot(2, 2, 720, Decimal(600)),
+            confirmed_additional_payment_rub=Decimal(450), bonus_hours=24)
         downgrade = calculate_tariff_value(operation_type="change", source_paid_hours=720,
-            source_paid_value_rub=Decimal("600"), source_tariff=TariffVersionSnapshot(2, 2, 720, Decimal("600")),
-            target_tariff=TariffVersionSnapshot(1, 1, 720, Decimal("300")),
-            confirmed_additional_payment_rub=Decimal("0"), bonus_hours=24)
-        self.assertEqual(upgrade.required_payment_rub, Decimal("450"))
-        self.assertEqual(downgrade.required_payment_rub, Decimal("0"))
+            source_paid_value_rub=Decimal(600), source_tariff=TariffVersionSnapshot(2, 2, 720, Decimal(600)),
+            target_tariff=TariffVersionSnapshot(1, 1, 720, Decimal(300)),
+            confirmed_additional_payment_rub=Decimal(0), bonus_hours=24)
+        self.assertEqual(upgrade.required_payment_rub, Decimal(450))
+        self.assertEqual(downgrade.required_payment_rub, Decimal(0))
         self.assertEqual(upgrade.retained_bonus_hours, 24)
         self.assertLess(upgrade.rounding_loss_hours, 1)
         self.assertLessEqual(upgrade.paid_value_after_rub,
@@ -70,31 +79,31 @@ class TariffChangeQuoteTests(unittest.TestCase):
     def test_fractional_due_and_hours_rounding(self):
         result = calculate_tariff_value(operation_type="change", source_paid_hours=1,
             source_paid_value_rub=Decimal("0.01"),
-            source_tariff=TariffVersionSnapshot(1, 1, 100, Decimal("1")),
-            target_tariff=TariffVersionSnapshot(2, 2, 3, Decimal("2")),
-            confirmed_additional_payment_rub=Decimal("2"), bonus_hours=0)
-        self.assertEqual(result.required_payment_rub, Decimal("2"))
+            source_tariff=TariffVersionSnapshot(1, 1, 100, Decimal(1)),
+            target_tariff=TariffVersionSnapshot(2, 2, 3, Decimal(2)),
+            confirmed_additional_payment_rub=Decimal(2), bonus_hours=0)
+        self.assertEqual(result.required_payment_rub, Decimal(2))
         self.assertEqual(result.resulting_paid_hours, 3)
 
     def test_unsupported_currency_and_arbitrary_duration_fail_closed(self):
         common = dict(operation_type="change", source_paid_hours=1,
-            source_paid_value_rub=Decimal("1"),
-            source_tariff=TariffVersionSnapshot(1, 1, 24, Decimal("24")),
-            target_tariff=TariffVersionSnapshot(2, 2, 24, Decimal("48")),
-            confirmed_additional_payment_rub=Decimal("47"), bonus_hours=0)
+            source_paid_value_rub=Decimal(1),
+            source_tariff=TariffVersionSnapshot(1, 1, 24, Decimal(24)),
+            target_tariff=TariffVersionSnapshot(2, 2, 24, Decimal(48)),
+            confirmed_additional_payment_rub=Decimal(47), bonus_hours=0)
         with self.assertRaises(TariffCalculationError):
-            calculate_tariff_value(**(common | {"target_tariff": TariffVersionSnapshot(2, 2, 24, Decimal("48"), "USD")}))
+            calculate_tariff_value(**(common | {"target_tariff": TariffVersionSnapshot(2, 2, 24, Decimal(48), "USD")}))
         with self.assertRaises(TariffCalculationError):
             calculate_tariff_value(**(common | {"requested_duration_hours": 12}))
 
     def test_historical_value_is_authoritative_when_current_price_increased_or_decreased(self):
-        for current_price in (Decimal("30"), Decimal("300")):
+        for current_price in (Decimal(30), Decimal(300)):
             result = calculate_tariff_value(operation_type="change", source_paid_hours=10,
-                source_paid_value_rub=Decimal("150"),
+                source_paid_value_rub=Decimal(150),
                 source_tariff=TariffVersionSnapshot(1, 9, 720, current_price),
-                target_tariff=TariffVersionSnapshot(2, 10, 720, Decimal("200")),
-                confirmed_additional_payment_rub=Decimal("50"), bonus_hours=7)
-            self.assertEqual(result.paid_value_before_rub, Decimal("150"))
+                target_tariff=TariffVersionSnapshot(2, 10, 720, Decimal(200)),
+                confirmed_additional_payment_rub=Decimal(50), bonus_hours=7)
+            self.assertEqual(result.paid_value_before_rub, Decimal(150))
             self.assertEqual(result.retained_bonus_hours, 7)
 
     def test_fingerprint_is_deterministic_and_ids_are_order_independent(self):

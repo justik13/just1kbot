@@ -3,6 +3,7 @@ import logging
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
 from cachetools import TTLCache
+
 from bot import texts
 
 logger = logging.getLogger(__name__)

@@ -7,6 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import GRACE_PERIOD_HOURS
 from bot.keyboards import get_back_button
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -20,7 +21,6 @@ from services.subscription_token_service import SubscriptionTokenService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
-from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger(__name__)
 

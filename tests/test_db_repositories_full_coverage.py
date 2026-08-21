@@ -2,7 +2,6 @@ import os
 import unittest
 from unittest.mock import patch
 
-
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -10,12 +9,12 @@ from database.models import (
     Tariff,
 )
 from database.repositories import (
-    users_repo,
+    audit_repo,
+    maintenance_repo,
+    profiles_repo,
     servers_repo,
     tariffs_repo,
-    profiles_repo,
-    maintenance_repo,
-    audit_repo,
+    users_repo,
 )
 
 DB = os.getenv("TEST_DATABASE_URL")

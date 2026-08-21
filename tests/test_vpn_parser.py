@@ -66,7 +66,10 @@ class VPNParserTests(unittest.TestCase):
         self.assertEqual(decode_vpn_uri_to_json(uri), config)
 
     def test_customize_vpn_config_dict_updates_description_dns_and_mtu(self):
-        from utils.vpn_parser import build_conf_file_from_dict, customize_vpn_config_dict
+        from utils.vpn_parser import (
+            build_conf_file_from_dict,
+            customize_vpn_config_dict,
+        )
 
         config = {
             "containers": [

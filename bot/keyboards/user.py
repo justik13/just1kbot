@@ -1,6 +1,6 @@
 from urllib.parse import quote
 
-from aiogram.types import InlineKeyboardMarkup, CopyTextButton
+from aiogram.types import CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts

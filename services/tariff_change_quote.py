@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import select
 
@@ -15,12 +15,16 @@ from database.models import Tariff, TariffQuote, TariffVersion
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.profiles_repo import get_user_profiles_count
 from database.repositories.tariff_quotes_repo import (
-    QUOTE_LIFETIME, get_active_financial_quotes_for_update,
-    get_or_create_current_version, lock_checkout_user,
+    QUOTE_LIFETIME,
+    get_active_financial_quotes_for_update,
+    get_or_create_current_version,
+    lock_checkout_user,
 )
 from services.subscription_balance_service import get_subscription_balance_snapshot
 from services.tariff_value_calculator import (
-    TariffCalculationError, TariffVersionSnapshot, calculate_tariff_value,
+    TariffCalculationError,
+    TariffVersionSnapshot,
+    calculate_tariff_value,
 )
 
 logger = logging.getLogger(__name__)
@@ -223,7 +227,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         existing_change = None
 
     required = max(Decimal(0), target_version.price_rub - snapshot.remaining_paid_value_rub).quantize(
-        Decimal("1"), rounding=ROUND_CEILING)
+        Decimal(1), rounding=ROUND_CEILING)
     try:
         calculation = calculate_tariff_value(
             operation_type="change", source_paid_hours=snapshot.remaining_paid_hours,

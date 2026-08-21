@@ -1,9 +1,10 @@
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 from services.payment_provider_operations import ProviderOperationClaim, perform_http
-from utils.datetime_helpers import now_utc
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult
+from utils.datetime_helpers import now_utc
 
 
 class FakeJSONResponse:
@@ -40,6 +41,7 @@ class FakeJSONClient:
 class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
     async def _transport_call(self, method, *values):
         from unittest.mock import patch
+
         from services.yookassa_service import YooKassaService
 
         FakeJSONClient.responses = list(values)
@@ -79,6 +81,7 @@ class PaymentStateMachineTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_2xx_has_command_specific_ambiguity(self):
         from unittest.mock import patch
+
         from services.yookassa_service import YooKassaService
 
         class Response:
@@ -233,16 +236,17 @@ class ProviderCapturedAtTests(unittest.TestCase):
 
 class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
     async def test_late_succeeded_webhook_conflicts_with_manual_review(self):
-        from services.payment_provider_state import apply_provider_transition
-        from database.models import Payment
         from decimal import Decimal
+
+        from database.models import Payment
+        from services.payment_provider_state import apply_provider_transition
         
         payment = Payment(
             id=1,
             user_id=1,
             external_id="p",
             public_order_id="pay_x",
-            amount=Decimal("100"),
+            amount=Decimal(100),
             currency="RUB",
             provider_status="canceled",
             checkout_status="abandoned",
@@ -278,16 +282,17 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.added[0].reason, "canceled_to_succeeded")
 
     async def test_late_canceled_webhook_conflicts(self):
-        from services.payment_provider_state import apply_provider_transition
-        from database.models import Payment
         from decimal import Decimal
+
+        from database.models import Payment
+        from services.payment_provider_state import apply_provider_transition
         
         payment = Payment(
             id=1,
             user_id=1,
             external_id="p",
             public_order_id="pay_x",
-            amount=Decimal("100"),
+            amount=Decimal(100),
             currency="RUB",
             provider_status="succeeded",
             fulfillment_status="succeeded"

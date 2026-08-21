@@ -1,6 +1,6 @@
 import logging
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
@@ -158,9 +158,12 @@ async def toggle_server_apply(
 
     new_status = not server.is_active
 
-    from utils.datetime_helpers import now_utc
-    from services.workers.node_monitor import reset_server_monitor_state, ServerHealthState
     from services.amnezia_client import cleanup_server_circuit_breakers
+    from services.workers.node_monitor import (
+        ServerHealthState,
+        reset_server_monitor_state,
+    )
+    from utils.datetime_helpers import now_utc
 
     if new_status:
         await update_server(
@@ -244,6 +247,7 @@ async def ping_server(
     await callback.answer("⚡ Проверка связи...", show_alert=False)
 
     import time
+
     from services.amnezia_client import AmneziaClient
 
     client = AmneziaClient(server.api_url, server.api_key)

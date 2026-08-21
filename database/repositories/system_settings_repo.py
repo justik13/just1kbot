@@ -1,20 +1,20 @@
 import time
-from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import SystemSetting
 from utils.datetime_helpers import now_utc
 
-_SETTINGS_CACHE: dict[str, tuple[Optional[str], float]] = {}
+_SETTINGS_CACHE: dict[str, tuple[str | None, float]] = {}
 CACHE_TTL_SECONDS = 60.0
 
 
 async def get_system_setting(
     session: AsyncSession,
     key: str,
-    default: Optional[str] = None,
-) -> Optional[str]:
+    default: str | None = None,
+) -> str | None:
     now = time.monotonic()
     if key in _SETTINGS_CACHE:
         val, cached_at = _SETTINGS_CACHE[key]
@@ -32,8 +32,8 @@ async def get_system_setting(
 async def set_system_setting(
     session: AsyncSession,
     key: str,
-    value: Optional[str],
-    updated_by: Optional[int] = None,
+    value: str | None,
+    updated_by: int | None = None,
 ) -> SystemSetting:
     setting = await session.get(SystemSetting, key)
     if setting is None:

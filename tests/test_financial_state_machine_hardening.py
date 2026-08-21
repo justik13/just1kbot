@@ -10,12 +10,13 @@ Validates:
 7. Worker supervisor cooldown and stability window.
 """
 
+import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
-import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.types import Message, User as TgUser
+from aiogram.types import Message
+from aiogram.types import User as TgUser
 
 from database.models import (
     Payment,
@@ -27,7 +28,6 @@ from database.repositories.account_ledger_repo import (
     AccountLedgerConflictError,
     credit_succeeded_topup,
 )
-from utils.datetime_helpers import now_utc
 from services.account_topup import (
     settle_succeeded_topup,
 )
@@ -35,6 +35,7 @@ from services.api_operations_executor import _is_usable_created_config
 from services.payment_provider_state import (
     apply_provider_transition,
 )
+from utils.datetime_helpers import now_utc
 
 
 class MockSession:
@@ -91,7 +92,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_101",
             public_order_id="pay_101",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -130,7 +131,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_102",
             public_order_id="pay_102",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -165,7 +166,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_103",
             public_order_id="pay_103",
-            amount=Decimal("300"),
+            amount=Decimal(300),
             currency="RUB",
             provider_status="canceled",
             checkout_status="abandoned",
@@ -200,7 +201,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
         payment = Payment(
             id=104,
             user_id=1,
-            amount=Decimal("1000"),
+            amount=Decimal(1000),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -212,10 +213,10 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("services.account_topup.get_account_balance", new_callable=AsyncMock) as mock_balance:
             mock_balance.return_value = AccountBalanceSnapshot(
-                accounting_position=Decimal("0"),
-                available=Decimal("0"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
+                accounting_position=Decimal(0),
+                available=Decimal(0),
+                reserved=Decimal(0),
+                debt=Decimal(0),
             )
             credited, snapshot = await settle_succeeded_topup(
                 session,
@@ -236,7 +237,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
         payment = Payment(
             id=105,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -260,7 +261,7 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_106",
             public_order_id="pay_106",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="pending",
             provider_confirmed_at=captured,
@@ -297,10 +298,10 @@ class FinancialStateMachineHardeningTests(unittest.IsolatedAsyncioTestCase):
             mock_lock_user.return_value = user
             mock_credit.return_value = (MagicMock(), True)
             mock_balance.return_value = AccountBalanceSnapshot(
-                accounting_position=Decimal("500"),
-                available=Decimal("500"),
-                reserved=Decimal("0"),
-                debt=Decimal("0"),
+                accounting_position=Decimal(500),
+                available=Decimal(500),
+                reserved=Decimal(0),
+                debt=Decimal(0),
             )
             credited, snapshot = await settle_succeeded_topup(
                 session,
@@ -542,14 +543,17 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
     async def test_channel_1_provider_operations_finalize_fails_closed(self):
         """Channel 1: services.payment_provider_operations.finalize must not credit money when manual_review locked."""
         from database.models import PaymentProviderOperation
-        from services.payment_provider_operations import ProviderOperationClaim, finalize
+        from services.payment_provider_operations import (
+            ProviderOperationClaim,
+            finalize,
+        )
         from services.yookassa_service import YooKassaResult
 
         captured = datetime(2026, 8, 17, 12, 0, 0, tzinfo=timezone.utc)
         payment = Payment(
             id=201,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -608,7 +612,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_202",
             public_order_id="pay_202",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -675,7 +679,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
         payment = Payment(
             id=203,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=captured,
@@ -705,7 +709,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
                 payment = Payment(
                     id=204,
                     user_id=1,
-                    amount=Decimal("500"),
+                    amount=Decimal(500),
                     currency="RUB",
                     provider_status="succeeded",
                     provider_confirmed_at=captured,
@@ -716,10 +720,10 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
 
                 with patch("services.account_topup.get_account_balance", new_callable=AsyncMock) as mock_balance:
                     mock_balance.return_value = AccountBalanceSnapshot(
-                        accounting_position=Decimal("0"),
-                        available=Decimal("0"),
-                        reserved=Decimal("0"),
-                        debt=Decimal("0"),
+                        accounting_position=Decimal(0),
+                        available=Decimal(0),
+                        reserved=Decimal(0),
+                        debt=Decimal(0),
                     )
                     credited, _ = await settle_succeeded_topup(session, payment=payment, source="test")
                     self.assertFalse(credited)
@@ -731,10 +735,16 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_channels_unmocked_pipeline_guarantees_no_credit_on_conflict(self):
         """Cross-component test: full unmocked transition pipeline on conflict creates zero ledger credits."""
-        from database.models import AccountLedgerEntry, PaymentProviderOperation, WebhookInbox
-        from services.payment_provider_operations import ProviderOperationClaim, finalize as finalize_provider
-        from services.workers.webhook_inbox import InboxClaim, finalize as finalize_webhook
+        from database.models import (
+            AccountLedgerEntry,
+            PaymentProviderOperation,
+            WebhookInbox,
+        )
         from services.account_topup_refresh import request_topup_status_refresh
+        from services.payment_provider_operations import ProviderOperationClaim
+        from services.payment_provider_operations import finalize as finalize_provider
+        from services.workers.webhook_inbox import InboxClaim
+        from services.workers.webhook_inbox import finalize as finalize_webhook
         from services.yookassa_service import YooKassaResult
 
         user = User(id=1, telegram_id=12345, is_deleted=False, topup_blocked=False, financial_hold=False)
@@ -743,7 +753,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
         p1 = Payment(
             id=301,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="canceled",
             fulfillment_status="not_ready",
@@ -785,7 +795,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             external_id="yoo_302",
             public_order_id="pay_302",
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="pending",
             fulfillment_status="not_ready",
@@ -831,7 +841,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
         p3 = Payment(
             id=303,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),
@@ -854,7 +864,7 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
         p = Payment(
             id=401,
             user_id=1,
-            amount=Decimal("500"),
+            amount=Decimal(500),
             currency="RUB",
             provider_status="succeeded",
             provider_confirmed_at=now_utc(),

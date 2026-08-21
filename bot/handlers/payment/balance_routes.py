@@ -24,7 +24,6 @@ from database.repositories.account_ledger_repo import (
     get_account_history,
     get_account_history_count,
 )
-
 from database.repositories.tariffs_repo import get_active_tariffs
 from services.account_topup import (
     AccountTopupError,
@@ -37,7 +36,6 @@ from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
 from utils.telegram import render_hub
-
 
 router = Router()
 logger = logging.getLogger(__name__)

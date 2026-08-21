@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiogram.exceptions import TelegramForbiddenError
+
 from bot.handlers.admin.users.mass_bonus import _run_mass_bonus_background
 from database.models import User
 
@@ -316,7 +317,10 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_mass_bonus_concurrent_click_protection(self):
         """Verify that multiple concurrent calls to apply_mass_bonus by the same admin
         are debounced so only 1 background task is spawned and the duplicate receives an alert."""
-        from bot.handlers.admin.users.mass_bonus import _mass_bonus_in_progress, apply_mass_bonus
+        from bot.handlers.admin.users.mass_bonus import (
+            _mass_bonus_in_progress,
+            apply_mass_bonus,
+        )
 
         _mass_bonus_in_progress.clear()
         admin_id = 888888
@@ -361,7 +365,10 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
     async def test_apply_mass_bonus_task_start_failure_cleans_up(self):
         """Verify that if starting the mass bonus background task raises an exception,
         _mass_bonus_in_progress is cleanly unlocked."""
-        from bot.handlers.admin.users.mass_bonus import _mass_bonus_in_progress, apply_mass_bonus
+        from bot.handlers.admin.users.mass_bonus import (
+            _mass_bonus_in_progress,
+            apply_mass_bonus,
+        )
 
         _mass_bonus_in_progress.clear()
         admin_id = 777777

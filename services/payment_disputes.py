@@ -28,7 +28,6 @@ from database.repositories.account_ledger_repo import (
 from services.audit_service import AuditService
 from utils.datetime_helpers import now_utc
 
-
 ACTIVE_DISPUTE_STATUSES = ("open", "manual_review")
 DISPUTE_HOLD_REASONS = {"open_payment_dispute", "chargeback_debt"}
 
@@ -64,7 +63,7 @@ async def _remaining_payment_exposure(session, payment: Payment) -> Decimal:
             or 0
         )
     )
-    return max(Decimal("0"), Decimal(payment.amount) - removed)
+    return max(Decimal(0), Decimal(payment.amount) - removed)
 
 
 async def refresh_user_dispute_hold(session, *, user_id: int) -> None:
@@ -285,6 +284,18 @@ async def resolve_payment_dispute(
 ) -> PaymentDispute:
     if outcome not in {"won_by_merchant", "lost_by_merchant"}:
         raise PaymentDisputeError("dispute_outcome_invalid")
+    dispute_info = await session.scalar(
+        select(PaymentDispute).where(PaymentDispute.id == dispute_id)
+    )
+    if dispute_info is None:
+        raise PaymentDisputeError("dispute_not_found")
+
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == dispute_info.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise PaymentDisputeError("payment_not_found")
+
     dispute = await session.scalar(
         select(PaymentDispute)
         .where(PaymentDispute.id == dispute_id)
@@ -296,11 +307,6 @@ async def resolve_payment_dispute(
         return dispute
     if dispute.status not in ACTIVE_DISPUTE_STATUSES:
         raise PaymentDisputeError("dispute_already_resolved")
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == dispute.payment_id).with_for_update()
-    )
-    if payment is None:
-        raise PaymentDisputeError("payment_not_found")
 
     if outcome == "won_by_merchant":
         if dispute.reservation_id is not None:

@@ -7,7 +7,6 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Dict, Optional
 
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -21,7 +20,6 @@ from database.repositories.servers_repo import (
     update_server,
     update_server_health_snapshot,
 )
-
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
@@ -50,11 +48,11 @@ class ServerMonitorState:
         self.health_state = ServerHealthState.ONLINE
         self.consecutive_fails = 0
         self.consecutive_successes = 0
-        self.problem_started_at: Optional[float] = None
-        self.next_check_at: Optional[float] = None
+        self.problem_started_at: float | None = None
+        self.next_check_at: float | None = None
         self.last_check_monotonic: float = 0.0
-        self.last_alert_sent_state: Optional[str] = None
-        self.disk_alert_last_sent: Optional[float] = None
+        self.last_alert_sent_state: str | None = None
+        self.disk_alert_last_sent: float | None = None
         self.recovery_notice_sent: bool = False
 
     def sync_from_db_server(self, db_server: Server):
@@ -87,11 +85,11 @@ class ServerMonitorState:
                 self.next_check_at = None
 
 
-_monitor_states: Dict[int, ServerMonitorState] = {}
+_monitor_states: dict[int, ServerMonitorState] = {}
 _server_states = _monitor_states
 
 
-def get_server_monitor_state(server_id: int, server: Optional[Server] = None) -> ServerMonitorState:
+def get_server_monitor_state(server_id: int, server: Server | None = None) -> ServerMonitorState:
     if server_id not in _monitor_states:
         st = ServerMonitorState(server_id)
         if server:
@@ -147,7 +145,7 @@ async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
     settings = get_settings()
     admin_ids = settings.ADMIN_IDS
     if not admin_ids:
-        return False
+        return True
 
     success = False
     for admin_id in admin_ids:
@@ -260,9 +258,7 @@ async def check_node_resources_and_alerts(bot: Bot):
                         if disk_percent is not None and isinstance(disk_percent, (int, float)):
                             if disk_percent > 85.0:
                                 should_alert = False
-                                if st.disk_alert_last_sent is None:
-                                    should_alert = True
-                                elif (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
+                                if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
                                     should_alert = True
 
                                 if should_alert:

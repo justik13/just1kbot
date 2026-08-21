@@ -5,8 +5,7 @@ providers.  Bonus time is carried separately and never enters the value pool.
 """
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, localcontext
-
+from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, localcontext
 
 RUB = "RUB"
 
@@ -59,7 +58,7 @@ def calculate_tariff_value(
     confirmed_additional_payment_rub,
     bonus_hours: int,
     requested_duration_hours: int | None = None,
-    bonus_value_rub=Decimal("0"),
+    bonus_value_rub=Decimal(0),
 ) -> TariffCalculation:
     """Convert residual paid value to whole target-tariff hours, fail closed."""
     if operation_type not in {"purchase", "renew", "change"}:
@@ -120,9 +119,9 @@ def calculate_tariff_value(
     due_base = (
         target_price
         if operation_type in {"purchase", "renew"}
-        else max(Decimal("0"), target_price - source_value)
+        else max(Decimal(0), target_price - source_value)
     )
-    required = due_base.quantize(Decimal("1"), rounding=ROUND_CEILING)
+    required = due_base.quantize(Decimal(1), rounding=ROUND_CEILING)
     if abs(payment - required) > Decimal("1.00"):  # Allow small tolerance for rounding/gateway fees
         raise TariffCalculationError("confirmed payment must match frozen due within tolerance")
 
@@ -130,12 +129,12 @@ def calculate_tariff_value(
         whole_hours = target_tariff.duration_hours
         paid_after = target_price
         loss_value = payment - target_price
-        loss_hours = Decimal("0")
+        loss_hours = Decimal(0)
     elif operation_type == "renew":
         whole_hours = source_paid_hours + target_tariff.duration_hours
         paid_after = source_value + target_price
         loss_value = payment - target_price
-        loss_hours = Decimal("0")
+        loss_hours = Decimal(0)
     else:
         pool = source_value + payment
         with localcontext() as context:

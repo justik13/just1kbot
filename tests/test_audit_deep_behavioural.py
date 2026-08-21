@@ -1,7 +1,7 @@
 import os
+import unittest
 import uuid
 from datetime import timedelta
-import unittest
 from unittest.mock import patch
 
 from sqlalchemy import select, text
@@ -242,6 +242,7 @@ class AuditDeepBehaviouralIntegrationTests(unittest.IsolatedAsyncioTestCase):
         Unlocked users are processed and updated atomically."""
         from contextlib import asynccontextmanager
         from unittest.mock import AsyncMock
+
         from services.workers import notifications
 
         now = now_utc()

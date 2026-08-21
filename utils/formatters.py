@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
-from typing import Optional
 
-from utils.datetime_helpers import format_datetime_msk, days_left_msk
+from utils.datetime_helpers import days_left_msk, format_datetime_msk
 
 
 def format_traffic(bytes_value: int) -> str:
@@ -22,11 +21,11 @@ def format_traffic(bytes_value: int) -> str:
         return f"{size:.1f} {units[unit_index]}"
 
 
-def format_datetime(dt: Optional[datetime]) -> str:
+def format_datetime(dt: datetime | None) -> str:
     return format_datetime_msk(dt, "%d.%m.%Y %H:%M")
 
 
-def format_days_left(dt: Optional[datetime]) -> str:
+def format_days_left(dt: datetime | None) -> str:
     return days_left_msk(dt)
 
 
@@ -69,14 +68,14 @@ def format_user_card_text(
 
 
 
-def get_country_display(country_flag: Optional[str], default_text: str = "🌐") -> str:
+def get_country_display(country_flag: str | None, default_text: str = "🌐") -> str:
     """Return country flag string configured on the server, or default fallback."""
     if not country_flag:
         return default_text
     return country_flag.strip()
 
 
-def format_audit_details(details: Optional[str]) -> str:
+def format_audit_details(details: str | None) -> str:
     """Format audit log raw JSON / key-value details into human-readable Russian text."""
     if not details:
         return ""

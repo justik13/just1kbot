@@ -77,14 +77,14 @@ async def request_balance_topup_refund(
     requested_by_admin_id: int | None,
 ) -> BalanceRefundRequest:
     """Reserve every currently refundable ruble and enqueue one provider command."""
-    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
+    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
     if payment is None:
         raise BalanceRefundError("payment_not_found")
     
     await lock_account_user(session, payment.user_id)
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise BalanceRefundError("payment_not_refundable")
     if not payment.external_id:
@@ -466,7 +466,7 @@ async def _consume_matching_reservation(
             )
             session.add(new_reservation)
             await session.flush()
-            remaining_to_consume = Decimal("0")
+            remaining_to_consume = Decimal(0)
 
     return first_consumed
 
@@ -761,18 +761,38 @@ async def place_financial_hold_for_missing_payment(
 
 
 async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
-    operations = (
-        await session.scalars(
-            select(ProviderRefundOperation)
+    stale_rows = (
+        await session.execute(
+            select(ProviderRefundOperation.id, ProviderRefundOperation.payment_id)
             .where(
                 ProviderRefundOperation.status == "processing",
                 ProviderRefundOperation.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
-            .with_for_update(skip_locked=True)
+            .limit(100)
         )
     ).all()
-    for operation in operations:
+    count = 0
+    for op_id, payment_id in stale_rows:
+        # Respect global hierarchy: Payment -> ProviderRefundOperation
+        payment = await session.scalar(
+            select(Payment)
+            .where(Payment.id == payment_id)
+            .with_for_update(skip_locked=True)
+        )
+        if payment is None:
+            continue
+        operation = await session.scalar(
+            select(ProviderRefundOperation)
+            .where(
+                ProviderRefundOperation.id == op_id,
+                ProviderRefundOperation.status == "processing"
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if operation is None:
+            continue
+
         dead = operation.attempts >= operation.max_attempts
         operation.status = "failed" if dead else "retry"
         operation.completed_at = now_utc() if dead else None
@@ -780,18 +800,13 @@ async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
         operation.locked_at = None
         operation.locked_by = None
         if dead:
-            payment = await session.scalar(
-                select(Payment)
-                .where(Payment.id == operation.payment_id)
-                .with_for_update()
+            await place_financial_hold(
+                session,
+                payment=payment,
+                reason="provider_refund_lease_exhausted",
             )
-            if payment is not None:
-                await place_financial_hold(
-                    session,
-                    payment=payment,
-                    reason="provider_refund_lease_exhausted",
-                )
-    return len(operations)
+        count += 1
+    return count
 
 
 async def finalize_provider_failure(

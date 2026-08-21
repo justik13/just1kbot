@@ -1,8 +1,8 @@
 import ast
 import io
 import logging
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 from utils.logging_security import (
     SensitiveDataFilter,

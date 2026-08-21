@@ -24,7 +24,7 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
                     id=100,
                     tariff_id=10,
                     duration_hours=24,
-                    price_rub=Decimal("49"),
+                    price_rub=Decimal(49),
                     currency="RUB",
                 )
             },
@@ -45,7 +45,7 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             user_id=7,
             entry_type="account_purchase",
             paid_hours_delta=24,
-            paid_value_rub_delta=Decimal("49"),
+            paid_value_rub_delta=Decimal(49),
             currency="RUB",
             tariff_version_id=100,
             quote_id=55,
@@ -54,7 +54,7 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
         result = self.project(events=(event,), ledger=(ledger,))
         self.assertTrue(result.tracked)
         self.assertEqual(result.remaining_paid_hours, 24)
-        self.assertEqual(result.remaining_paid_value_rub, Decimal("49"))
+        self.assertEqual(result.remaining_paid_value_rub, Decimal(49))
         self.assertEqual(result.source_entitlement_entry_ids, (1,))
         self.assertEqual(result.source_ledger_entry_ids, (11,))
 
@@ -64,7 +64,7 @@ class SubscriptionBalanceProjectorTests(unittest.TestCase):
             user_id=7,
             entry_type="account_purchase",
             paid_hours_delta=24,
-            paid_value_rub_delta=Decimal("49"),
+            paid_value_rub_delta=Decimal(49),
             currency="RUB",
             tariff_version_id=100,
             quote_id=55,

@@ -1,5 +1,4 @@
 from datetime import timedelta
-from typing import Optional
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +33,7 @@ ALLOWED_USER_UPDATE_FIELDS = {
 
 async def get_user_by_telegram_id(
     session: AsyncSession, telegram_id: int
-) -> Optional[User]:
+) -> User | None:
     stmt = select(User).where(
         User.telegram_id == telegram_id,
         User.is_deleted.is_(False),
@@ -45,7 +44,7 @@ async def get_user_by_telegram_id(
 
 async def get_user_by_telegram_id_any(
     session: AsyncSession, telegram_id: int
-) -> Optional[User]:
+) -> User | None:
     """
     Ищет пользователя включая soft-deleted.
     Используется для безопасного восстановления и предотвращения unique constraint.
@@ -228,7 +227,7 @@ async def get_user_referrals(session: AsyncSession, telegram_id: int) -> list[Us
 
 async def get_user_with_referrals(
     session: AsyncSession, telegram_id: int
-) -> tuple[Optional[User], list[User]]:
+) -> tuple[User | None, list[User]]:
     stmt = (
         select(User)
         .options(selectinload(User.profiles))
@@ -267,7 +266,7 @@ async def count_users_with_tariff(session: AsyncSession, tariff_id: int) -> int:
     return result.scalar_one() or 0
 
 
-async def get_user_by_username(session: AsyncSession, username: str) -> Optional[User]:
+async def get_user_by_username(session: AsyncSession, username: str) -> User | None:
     clean = username.lstrip("@").strip()
     stmt = (
         select(User)
@@ -278,7 +277,7 @@ async def get_user_by_username(session: AsyncSession, username: str) -> Optional
     return result.scalar_one_or_none()
 
 
-async def search_user_flexible(session: AsyncSession, query: str) -> Optional[User]:
+async def search_user_flexible(session: AsyncSession, query: str) -> User | None:
     query_str = query.strip()
     if not query_str:
         return None
@@ -395,7 +394,7 @@ async def get_filtered_users_paginated_with_profiles(
 
 async def get_user_by_subscription_token(
     session: AsyncSession, token: str
-) -> Optional[User]:
+) -> User | None:
     if not token:
         return None
     stmt = select(User).where(

@@ -1,4 +1,3 @@
-from bot import texts
 import asyncio
 import logging
 import time
@@ -7,9 +6,12 @@ from datetime import timedelta
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import texts
+from bot.constants import GRACE_PERIOD_HOURS
 from database.connection import session_scope
 from database.models import (
     APIOperation,
@@ -25,9 +27,6 @@ from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
-from bot.constants import GRACE_PERIOD_HOURS
-
-from cachetools import TTLCache
 
 logger = logging.getLogger("BackgroundWorker")
 
@@ -248,7 +247,8 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
 async def _cleanup_stuck_profiles():
     # Cleanup dangling pending_create, create_cleanup_pending, and deleting profiles.
     # Only clean up profiles that do NOT have an active APIOperation in flight.
-    from sqlalchemy import func, update as sa_update
+    from sqlalchemy import func
+    from sqlalchemy import update as sa_update
     async with session_scope() as session:
         cutoff_time = now_utc() - timedelta(hours=1)
 
@@ -315,22 +315,25 @@ async def _cleanup_stuck_profiles():
             elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
-                    await session.execute(
-                        sa_update(APIOperation)
-                        .where(APIOperation.id == create_op.id)
-                        .values(
-                            status="retry",
-                            attempts=0,
-                            next_attempt_at=func.now(),
-                            completed_at=None,
-                            locked_at=None,
-                            locked_by=None,
-                            updated_at=func.now(),
-                            last_error_code="stuck_cleanup_requeued",
-                            last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
+                    from database.models import Server
+                    server = await session.get(Server, profile.server_id)
+                    if server and server.is_active:
+                        await session.execute(
+                            sa_update(APIOperation)
+                            .where(APIOperation.id == create_op.id)
+                            .values(
+                                status="retry",
+                                attempts=0,
+                                next_attempt_at=func.now(),
+                                completed_at=None,
+                                locked_at=None,
+                                locked_by=None,
+                                updated_at=func.now(),
+                                last_error_code="stuck_cleanup_requeued",
+                                last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
+                            )
                         )
-                    )
-                    logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
+                        logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
                 elif not create_op and profile.provisioning_status == "create_cleanup_pending":
                     # Recreate the durable reconciliation command instead of
                     # deleting a state that explicitly means a peer may exist.

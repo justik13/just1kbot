@@ -1,6 +1,6 @@
 import re
 
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -35,6 +35,7 @@ ALLOWED_DELETE_STATES = frozenset({
     "update_failed",
     "create_failed",
     "delete_failed",
+    "create_cleanup_pending",
 })
 
 
