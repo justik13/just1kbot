@@ -168,9 +168,9 @@ async def _recover_stale_topups(bot: Bot | None = None):
 
     for _ in range(max_batches):
         async with session_scope() as session:
-            payments = (
+            payment_ids = (
                 await session.scalars(
-                    select(Payment)
+                    select(Payment.id)
                     .where(
                         Payment.id > last_processed_id,
                         _needs_recovery(),
@@ -181,55 +181,63 @@ async def _recover_stale_topups(bot: Bot | None = None):
                 )
             ).all()
 
-            if not payments:
-                break
+        if not payment_ids:
+            break
 
-            for payment in payments:
-                last_processed_id = payment.id
-                if payment.external_id and payment.provider_status in {
-                    "creating",
-                    "pending",
-                    "waiting_for_capture",
-                    "unknown",
-                }:
-                    await ensure_reconcile_payment_operation(
-                        session, payment, reason="stale_topup_worker"
-                    )
+        for pid in payment_ids:
+            last_processed_id = pid
+            try:
+                async with session_scope() as session:
+                    payment = await session.get(Payment, pid)
+                    if not payment:
+                        continue
 
-                if (
-                    payment.provider_status == "succeeded"
-                    and payment.provider_confirmed_at is not None
-                    and payment.fulfillment_status
-                    not in {"succeeded", "reversed", "manual_review"}
-                ):
-                    await settle_succeeded_topup_by_id(
-                        session,
-                        payment_id=payment.id,
-                        source="stale_topup_recovery",
-                        bot=bot,
-                    )
-
-                # Referral bonuses are ledger entries with their own idempotency key.
-                # Retry them in a savepoint so a transient bonus failure cannot roll
-                # back a verified user payment. The next worker pass retries it.
-                if (
-                    payment.provider_status == "succeeded"
-                    and payment.provider_confirmed_at is not None
-                    and payment.fulfillment_status == "succeeded"
-                ):
-                    try:
-                        async with session.begin_nested():
-                            await grant_referral_bonus_for_topup(
-                                session,
-                                purchaser_user_id=payment.user_id,
-                                payment_id=payment.id,
-                                topup_amount=payment.amount,
-                            )
-                    except Exception:
-                        logger.exception(
-                            "Referral bonus retry failed for topup payment %s",
-                            payment.id,
+                    if payment.external_id and payment.provider_status in {
+                        "creating",
+                        "pending",
+                        "waiting_for_capture",
+                        "unknown",
+                    }:
+                        await ensure_reconcile_payment_operation(
+                            session, payment, reason="stale_topup_worker"
                         )
+
+                    if (
+                        payment.provider_status == "succeeded"
+                        and payment.provider_confirmed_at is not None
+                        and payment.fulfillment_status
+                        not in {"succeeded", "reversed", "manual_review"}
+                    ):
+                        await settle_succeeded_topup_by_id(
+                            session,
+                            payment_id=payment.id,
+                            source="stale_topup_recovery",
+                            bot=bot,
+                        )
+
+                    # Referral bonuses are ledger entries with their own idempotency key.
+                    # Retry them in a savepoint so a transient bonus failure cannot roll
+                    # back a verified user payment. The next worker pass retries it.
+                    if (
+                        payment.provider_status == "succeeded"
+                        and payment.provider_confirmed_at is not None
+                        and payment.fulfillment_status == "succeeded"
+                    ):
+                        try:
+                            async with session.begin_nested():
+                                await grant_referral_bonus_for_topup(
+                                    session,
+                                    purchaser_user_id=payment.user_id,
+                                    payment_id=payment.id,
+                                    topup_amount=payment.amount,
+                                )
+                        except Exception:
+                            logger.exception(
+                                "Referral bonus retry failed for topup payment %s",
+                                payment.id,
+                            )
+            except Exception:
+                logger.exception("Failed to recover stale topup payment %s", pid)
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):

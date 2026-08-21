@@ -13,7 +13,7 @@ from database.models import Payment, User
 from services.referral_bonus import grant_referral_bonus_for_topup
 from services.workers.payments import _needs_recovery
 
-DB = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/justikbot_test")
+DB = os.getenv("TEST_DATABASE_URL")
 
 TRUNCATE_SQL = (
     "TRUNCATE provider_refund_operations, webhook_inbox, payment_refunds, "
@@ -22,6 +22,7 @@ TRUNCATE_SQL = (
     "payment_events, audit_logs, payments, users, system_settings, payment_disputes RESTART IDENTITY CASCADE"
 )
 
+@unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(DB)
