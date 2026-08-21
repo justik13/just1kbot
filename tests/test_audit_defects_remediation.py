@@ -128,8 +128,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             ),
         ]
 
-        fake_payments_dict = {p.id: p for p in fake_payments}
-
         query_count = 0
 
         @asynccontextmanager

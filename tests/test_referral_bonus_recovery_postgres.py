@@ -137,7 +137,6 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             )
             session.add(p1)
             await session.commit()
-            p1_id = p1.id
 
         # We need a patch for session_scope so the worker uses our test DB
         from unittest.mock import patch

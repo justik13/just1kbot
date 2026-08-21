@@ -1280,7 +1280,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         fake_server.name = "mock_server"
         session.get = AsyncMock(return_value=fake_server)
 
-        with patch("services.device_service.ensure_delete_operation", new=AsyncMock()) as mock_ensure:
+        with patch("services.device_service.ensure_delete_operation", new=AsyncMock()):
             from services.device_service import DeviceService
             await DeviceService.delete_device(session, cleanup_profile, force=True)
             session.delete.assert_called_once_with(cleanup_profile)
