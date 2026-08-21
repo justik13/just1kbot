@@ -76,6 +76,9 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
         # P2 processed BEFORE P1 recovery
         async with self.session_factory() as session:
             res2 = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p2_id, topup_amount=Decimal(200))
+            # simulate worker updating the flag
+            p2_model = await session.get(Payment, p2_id)
+            p2_model.topup_context = {**(p2_model.topup_context or {}), "referral_bonus_processed": True}
             await session.commit()
             # P2 shouldn't receive welcome bonus because P1 exists (id < P2.id)
             self.assertEqual(res2.purchaser_welcome_bonus, Decimal(0))
@@ -86,6 +89,9 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(len(payments) > 0, "P1 should be selected for recovery")
             
             res1 = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p1_id, topup_amount=Decimal(100))
+            # simulate worker updating the flag
+            p1_model = await session.get(Payment, p1_id)
+            p1_model.topup_context = {**(p1_model.topup_context or {}), "referral_bonus_processed": True}
             await session.commit()
             # P1 MUST receive the welcome bonus (10% of 100 = 10) exactly once after the fix
             self.assertEqual(res1.purchaser_welcome_bonus, Decimal(10))
