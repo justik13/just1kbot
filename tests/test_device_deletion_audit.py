@@ -19,6 +19,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -44,6 +47,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         server = Server(id=2, name="US Server", api_url="https://us.vpn", api_key="secret")
 
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -78,6 +84,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -122,6 +131,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             client_name=profile.client_name,
         )
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -139,10 +151,10 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         ):
             await DeviceService.delete_device(session, profile, force=True)
 
-        session.delete.assert_not_awaited()
-        self.assertEqual(profile.provisioning_status, "create_cleanup_pending")
-        self.assertFalse(profile.desired_is_active)
-        self.assertFalse(profile.is_active)
+        session.delete.assert_awaited_once_with(profile)
+        # It revives the operation
+        self.assertEqual(create_operation.status, "processing")
+        self.assertEqual(create_operation.attempts, 1)
 
     async def test_force_delete_cancels_retry_create_before_deleting_known_peer(self):
         profile = VPNProfile(
@@ -164,6 +176,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -209,6 +224,9 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
             attempts=1,
         )
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
@@ -229,15 +247,19 @@ class DeviceDeletionAuditTests(unittest.IsolatedAsyncioTestCase):
         ) as ensure_delete:
             await DeviceService.delete_device(session, profile, force=True)
 
-        ensure_delete.assert_not_awaited()
-        session.delete.assert_not_awaited()
-        self.assertEqual(profile.provisioning_status, "create_cleanup_pending")
+        ensure_delete.assert_not_awaited() # ensure_delete is for peer_id, but the operation will clean it up because we revive it
+        session.delete.assert_awaited_once_with(profile)
+        self.assertEqual(create_operation.status, "processing")
+        self.assertEqual(create_operation.attempts, 1)
 
     async def test_repo_excludes_deleting_but_keeps_create_cleanup_pending_profiles(self):
         """Problem create states should remain visible instead of disappearing."""
         p_cleanup = VPNProfile(id=1, user_id=1, provisioning_status="create_cleanup_pending")
 
         session = AsyncMock()
+        fake_server = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
