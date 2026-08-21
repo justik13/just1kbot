@@ -128,6 +128,9 @@ async def create_balance_topup(
     if rubles > Decimal(cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB):
         raise AccountTopupError("topup_above_maximum")
 
+    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
+    existing = await _visible_topup_for_update(session, user_id)
+
     user = await lock_checkout_user(session, user_id)
     if user is None or user.is_deleted:
         raise AccountTopupError("topup_user_missing")
@@ -139,7 +142,6 @@ async def create_balance_topup(
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
     )
-    existing = await _visible_topup_for_update(session, user.id)
     if existing is not None:
         return TopupCreationResult(existing, False, balance)
 
@@ -230,7 +232,7 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Force cancel all unfinished topups for a user."""
-    await lock_checkout_user(session, user_id)
+    # To prevent deadlocks with provider webhooks/pollers, we MUST lock Payment BEFORE User.
     payments = (
         await session.scalars(
             select(Payment)
@@ -239,9 +241,11 @@ async def cancel_all_unfinished_topups(
                 Payment.credited_at.is_(None),
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
+            .order_by(Payment.id)  # Lock multiple payments in a deterministic order
             .with_for_update()
         )
     ).all()
+    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:

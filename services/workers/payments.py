@@ -147,7 +147,6 @@ async def _recover_stale_topups(bot: Bot | None = None):
             last_processed_id = pid
             try:
                 async with session_scope() as session:
-                    await lock_checkout_user(session, uid)
                     payment = await session.scalar(
                         select(Payment)
                         .where(Payment.id == pid)

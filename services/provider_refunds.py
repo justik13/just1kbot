@@ -77,14 +77,14 @@ async def request_balance_topup_refund(
     requested_by_admin_id: int | None,
 ) -> BalanceRefundRequest:
     """Reserve every currently refundable ruble and enqueue one provider command."""
-    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
+    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
     if payment is None:
         raise BalanceRefundError("payment_not_found")
     
     await lock_account_user(session, payment.user_id)
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise BalanceRefundError("payment_not_refundable")
     if not payment.external_id:
