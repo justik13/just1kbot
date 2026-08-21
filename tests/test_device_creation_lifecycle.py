@@ -95,6 +95,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
@@ -140,6 +144,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
@@ -183,6 +191,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         captured = {}
         async def mock_render_hub(_bot, _chat_id, _text, keyboard, **_kwargs):
@@ -397,6 +409,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(return_value=active_profile)
         mock_session.close = AsyncMock()
 
@@ -409,6 +425,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
     async def test_10_await_profile_ready_closes_session_on_exception(self):
         """If session.get raises an exception, session.close is still called in finally block."""
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(side_effect=RuntimeError("Database query failed"))
         mock_session.close = AsyncMock()
 
@@ -427,6 +447,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         responses = [partial_profile_1, partial_profile_2, valid_profile]
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(side_effect=responses)
         mock_session.close = AsyncMock()
 
@@ -453,6 +477,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
@@ -471,6 +499,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         """If session.commit fails during creation, user lock is properly cleared and error is rendered."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         # Fail on the second commit (the one after create_device)
         session.commit = AsyncMock(side_effect=[None, RuntimeError("DB commit failed")])
 
@@ -505,6 +537,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(return_value=pending_profile)
         mock_session.close = AsyncMock()
 
@@ -526,6 +562,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
 
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         import asyncio
         with (
@@ -568,6 +608,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.execute.return_value = mock_result
         nested_ctx = MagicMock()
         nested_ctx.__aenter__ = AsyncMock()
@@ -629,6 +673,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.execute.return_value = mock_result
         nested_ctx = MagicMock()
         nested_ctx.__aenter__ = AsyncMock()
@@ -682,6 +730,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.execute.return_value = mock_result
 
         captured = {}
@@ -724,6 +776,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         result = MagicMock()
         result.scalar_one_or_none.return_value = profile
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.execute = AsyncMock(return_value=result)
         captured = {}
 
@@ -879,6 +935,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=pending_profile)),
@@ -918,6 +978,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=deleting_profile)),
@@ -937,6 +1001,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         responses = [pending_1, pending_2, ready_3]
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(side_effect=responses)
         mock_session.close = AsyncMock()
 
@@ -985,6 +1053,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         responses = [corrupted_profile, valid_profile]
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(side_effect=responses)
         mock_session.close = AsyncMock()
 
@@ -1021,6 +1093,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
@@ -1057,6 +1133,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
@@ -1107,6 +1187,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=cleanup_profile)),
@@ -1146,6 +1230,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_delete_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
@@ -1174,6 +1262,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_create_routes.get_user_profiles", new=AsyncMock(return_value=[])),
@@ -1197,6 +1289,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         target.bot = MagicMock()
         target.chat.id = 100
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         failed_profile = SimpleNamespace(
             id=42,
@@ -1245,6 +1341,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=deleting_profile)):
             await rename_device_start(callback, state, session, db_user)
@@ -1267,6 +1367,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=cleanup_profile)))
         session.get = AsyncMock(return_value=MagicMock(name="Server"))
 
@@ -1292,6 +1396,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         # First query: stuck_profiles returns [stuck_profile]
         # Inside loop: active_op returns None (operation dead/absent)
         # Inside resolve_profile_endpoint_snapshot: prev_op returns None (falls back to server)
@@ -1333,6 +1441,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         active_op = SimpleNamespace(id=101, operation_type="create_peer", status="processing")
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         # First query: stuck_profiles returns [stuck_profile]
         # Inside loop: active_op returns active_op
         mock_session.execute = AsyncMock(side_effect=[
@@ -1367,6 +1479,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
@@ -1398,6 +1514,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.from_user.id = 100
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         with (
             patch("bot.handlers.connection.device_create_routes.capture_server_peer_snapshot", new=AsyncMock()),
@@ -1424,6 +1544,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         deleting_profile = SimpleNamespace(
             id=42,
@@ -1468,6 +1592,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_op_peer.scalar_one_or_none.return_value = SimpleNamespace(id=99, peer_id="peer_recovered_123")
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_snapshot_op = MagicMock()
         mock_snapshot_op.scalar_one_or_none.return_value = None
         mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_op_active, mock_op_peer, mock_snapshot_op])
@@ -1519,6 +1647,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             raw_config=None,
         )
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(return_value=mock_prof)
         mock_scope = MagicMock()
         mock_scope.__aenter__.return_value = mock_session
@@ -1562,6 +1694,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             raw_config=None,
         )
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.get = AsyncMock(return_value=mock_prof)
         mock_scope = MagicMock()
         mock_scope.__aenter__.return_value = mock_session
@@ -1588,6 +1724,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
 
         _creating_devices[999] = True
         try:
@@ -1607,6 +1747,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock()
         session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         with patch("bot.handlers.connection.incy_routes.render_hub", new=AsyncMock()) as mock_render:
             await show_incy_subscription(callback, state, session, db_user=None)
 
@@ -1646,6 +1790,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_prof
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute.return_value = mock_result
 
         mock_scope = MagicMock()
@@ -1712,6 +1860,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=target_profile)))
         nested_ctx = MagicMock()
         nested_ctx.__aenter__ = AsyncMock()
@@ -1754,6 +1906,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             # 1. Stuck profiles query
@@ -1793,6 +1949,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         mock_server = Server(id=10, name="DE Server", api_url="https://de.vpn", api_key="secret")
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute = AsyncMock(side_effect=[
             MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[stuck_profile])))),
             MagicMock(scalar_one_or_none=MagicMock(return_value=None)),
@@ -1826,6 +1986,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         p2 = VPNProfile(id=2, user_id=1, server_id=10, device_name="Устройство #2", provisioning_status="deleting")
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.add = MagicMock()
         mock_session.execute = AsyncMock(side_effect=[
             # 1. select User FOR UPDATE
@@ -1871,6 +2035,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from services.api_operations_finalizer import _lock_operation_and_profile
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute = AsyncMock(side_effect=RuntimeError("PostgreSQL connection failure"))
 
         with self.assertRaises(RuntimeError) as ctx:
@@ -1898,6 +2066,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=profile)))
         mock_session.get = AsyncMock(return_value=None)  # Server is None!
 
@@ -1941,6 +2113,10 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         mock_active_op_res.scalar_one_or_none.return_value = 999  # Found active op id
 
         mock_session = AsyncMock()
+        mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
+        mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
+        mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
+        session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         mock_session.execute = AsyncMock(side_effect=[mock_prof_res, mock_active_op_res])
 
         mock_scope = MagicMock()
