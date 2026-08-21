@@ -8,12 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import Server, User, VPNProfile
+from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
     ServerAtCapacity,
     ServerCapacityUnavailable,
     ensure_server_capacity,
 )
-from services.api_operations_queue import enqueue_api_operation, ensure_delete_operation
+from services.api_operations_queue import (
+    enqueue_api_operation,
+    ensure_delete_operation,
+    resolve_profile_endpoint_snapshot,
+)
 from services.audit_service import AuditService
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
@@ -25,6 +30,8 @@ RESERVING_STATUSES = (
     "active",
     "pending_update",
     "update_failed",
+    "create_cleanup_pending",
+    "delete_failed",
 )
 
 
@@ -75,7 +82,7 @@ class DeviceService:
         *,
         user_id: int,
         server_id: int,
-        device_name: str,
+        device_name: str | None = None,
         snapshot: ServerPeerSnapshot,
     ) -> VPNProfile:
         if snapshot.server_id != server_id or datetime.now(
@@ -100,6 +107,26 @@ class DeviceService:
             or is_expired(user.subscription_end)
         ):
             raise NoActiveSubscription("No active subscription")
+        if not device_name:
+            user_profiles = (
+                await session.execute(
+                    select(VPNProfile).where(VPNProfile.user_id == user.id)
+                )
+            ).scalars().all()
+            used = set()
+            for p in user_profiles:
+                m = re.search(r"#(\d+)$", p.device_name)
+                if m:
+                    used.add(int(m.group(1)))
+            limit = user.device_limit or 5
+            slot_index = 1
+            for i in range(1, limit + 1):
+                if i not in used:
+                    slot_index = i
+                    break
+            else:
+                slot_index = max(used) + 1 if used else 1
+            device_name = f"Устройство #{slot_index}"
         duplicate = (
             await session.execute(
                 select(VPNProfile.id).where(
@@ -239,65 +266,52 @@ class DeviceService:
         ).scalar_one_or_none()
         if not profile:
             return True
-        if profile.provisioning_status == "pending_create" and not force:
-            raise DeviceStillCreating("Устройство ещё создаётся")
+        if not force:
+            if profile.provisioning_status == "pending_create":
+                raise DeviceStillCreating("Device still creating")
+            if profile.provisioning_status == "deleting":
+                return True
+            if profile.provisioning_status not in ALLOWED_DELETE_STATES:
+                raise DeviceCreationError(f"Deletion not allowed in status: {profile.provisioning_status}")
 
         # Capture server and device info for audit before deletion
-        server = await session.get(Server, profile.server_id)
-        server_name = server.name if server else ""
+        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(session, profile)
         device_name = profile.device_name
         profile_id = profile.id
         user_id = profile.user_id
 
-        if not profile.peer_id or force:
-            if profile.peer_id:
-                try:
-                    await ensure_delete_operation(
-                        session,
-                        idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-                        server_id=server.id if server else None,
-                        profile_id=profile.id,
-                        server_name_snapshot=server.name if server else None,
-                        api_url_snapshot=server.api_url if server else None,
-                        api_key_snapshot=server.api_key if server else None,
-                        peer_id=profile.peer_id,
-                        client_name=profile.client_name,
-                        audit_reason="device_delete_force" if force else "device_delete",
-                    )
-                except Exception as exc:
-                    logger.warning("Failed to enqueue background delete_peer operation: %s", exc)
-            await session.delete(profile)
-            action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
-            admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
-            await AuditService.log_action(
-                session,
-                admin_id=admin_id,
-                action=action,
-                target_type="user",
-                target_id=user_id,
-                details={
-                    "device_name": device_name,
-                    "profile_id": profile_id,
-                    "server_name": server_name,
-                    "force": force,
-                },
-            )
-            return True
-
-        profile.provisioning_status = "deleting"
-        await ensure_delete_operation(
-            session,
-            idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
-            server_id=server.id if server else None,
-            profile_id=profile.id,
-            server_name_snapshot=server.name if server else None,
-            api_url_snapshot=server.api_url if server else None,
-            api_key_snapshot=server.api_key if server else None,
-            peer_id=profile.peer_id,
-            client_name=profile.client_name,
-            audit_reason="device_delete",
-        )
-        if not server:
+        if profile.peer_id:
+            if not force:
+                profile.provisioning_status = "deleting"
+                await ensure_delete_operation(
+                    session,
+                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    server_id=server_id,
+                    profile_id=profile.id,
+                    server_name_snapshot=server_name,
+                    api_url_snapshot=api_url,
+                    api_key_snapshot=api_key,
+                    peer_id=profile.peer_id,
+                    client_name=profile.client_name,
+                    audit_reason="device_delete",
+                )
+            else:
+                # Force delete: ensure durable delete_peer is enqueued before removing local row.
+                # If enqueue fails, exception propagates to maintain fail-closed consistency.
+                await ensure_delete_operation(
+                    session,
+                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    server_id=server_id,
+                    profile_id=profile.id,
+                    server_name_snapshot=server_name,
+                    api_url_snapshot=api_url,
+                    api_key_snapshot=api_key,
+                    peer_id=profile.peer_id,
+                    client_name=profile.client_name,
+                    audit_reason="device_delete_force",
+                )
+                await session.delete(profile)
+        else:
             await session.delete(profile)
 
         action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
@@ -311,7 +325,7 @@ class DeviceService:
             details={
                 "device_name": device_name,
                 "profile_id": profile_id,
-                "server_name": server_name,
+                "server_name": server_name or "",
                 "force": force,
             },
         )

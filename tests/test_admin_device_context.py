@@ -152,7 +152,10 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
         delete_device.assert_not_awaited()
 
     async def test_profile_count_excludes_all_non_visible_deletion_states(self):
-        from database.repositories.profiles_repo import get_user_profiles_count
+        from database.repositories.profiles_repo import (
+            get_user_profiles_count,
+            PROFILE_QUOTA_EXCLUDED_STATUSES,
+        )
 
         result = MagicMock()
         result.scalar_one.return_value = 2
@@ -165,7 +168,12 @@ class TestAdminDeviceContext(unittest.IsolatedAsyncioTestCase):
         sql = str(stmt.compile(compile_kwargs={"literal_binds": True}))
         self.assertIn("provisioning_status", sql)
         self.assertIn("deleting", sql)
-        self.assertIn("create_cleanup_pending", sql)
+        # create_failed (no peer on server) is excluded from quota
+        self.assertIn("create_failed", sql)
+        # create_cleanup_pending and delete_failed have active server peers —
+        # they must NOT be excluded from quota to prevent downgrade exploits.
+        self.assertNotIn("create_cleanup_pending", PROFILE_QUOTA_EXCLUDED_STATUSES)
+        self.assertNotIn("delete_failed", PROFILE_QUOTA_EXCLUDED_STATUSES)
 
 
 if __name__ == "__main__":

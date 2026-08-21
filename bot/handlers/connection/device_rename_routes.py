@@ -1,18 +1,21 @@
 import re
-from aiogram import Router, F
+
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button, get_device_keyboard
 from bot.states import DeviceManagementStates
-from database.models import User
+from database.models import User, VPNProfile
 from database.repositories.profiles_repo import (
     get_profile_by_id,
     get_user_profiles,
     update_profile,
 )
+from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.telegram import render_hub, safe
@@ -29,8 +32,6 @@ async def rename_device_start(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
-
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
@@ -46,6 +47,16 @@ async def rename_device_start(
         )
         return
 
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
+        if profile.provisioning_status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif profile.provisioning_status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        await callback.answer(msg, show_alert=True)
+        return
+
     has_access = await SubscriptionService.check_access(
         session,
         db_user.telegram_id,
@@ -58,6 +69,7 @@ async def rename_device_start(
         )
         return
 
+    await callback.answer(show_alert=False)
     await state.update_data(profile_id=profile_id)
     await state.set_state(DeviceManagementStates.rename_device)
 
@@ -87,17 +99,50 @@ async def rename_device_process(
 
     data = await state.get_data()
     profile_id = data.get("profile_id")
-
-    profile = await get_profile_by_id(session, profile_id)
-
-    if not profile or not db_user or profile.user_id != db_user.id:
+    if not profile_id or not db_user:
         await state.clear()
-
         await render_hub(
             message.bot,
             message.chat.id,
             texts.ERROR_ACCESS_DENIED,
             get_back_button("back_to_connections"),
+        )
+        return
+
+    profile = (
+        await session.execute(
+            select(VPNProfile)
+            .where(
+                VPNProfile.id == profile_id,
+                VPNProfile.user_id == db_user.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+
+    if not profile:
+        await state.clear()
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.ERROR_ACCESS_DENIED,
+            get_back_button("back_to_connections"),
+        )
+        return
+
+    if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
+        await state.clear()
+        if profile.provisioning_status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif profile.provisioning_status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            msg,
+            get_back_button(f"manage_device:{profile.id}"),
         )
         return
 
@@ -117,27 +162,38 @@ async def rename_device_process(
         )
         return
 
-    base_new_name = message.text.strip()
+    raw_text = message.text.strip()
 
-    if (
-        not base_new_name
-        or len(base_new_name) > 16
-        or not DEVICE_NAME_REGEX.match(base_new_name)
-    ):
-        await state.clear()
+    # Extract the permanent slot number assigned to this device
+    m = re.search(r'#(\d+)$', profile.device_name)
+    slot_num = m.group(1) if m else str(profile.id)
+
+    # Strip any user-typed trailing #... to get the clean base name
+    cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
+    if not cleaned_base:
+        cleaned_base = "Устройство"
+
+    if len(cleaned_base) > 16:
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ERROR_INVALID_DEVICE_NAME,
+            f"⚠️ Имя слишком длинное ({len(cleaned_base)} из 16 символов).\n\nПожалуйста, введите имя покороче (максимум 16 символов):",
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
 
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    new_name = f"{base_new_name}{slot_suffix}"
+    if not DEVICE_NAME_REGEX.match(cleaned_base):
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            "⚠️ Имя содержит недопустимые символы.\n\nРазрешены только буквы, цифры, пробелы, дефисы, подчёркивания и знак #.\n\nПопробуйте ещё раз:",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
 
-    existing_profiles = await get_user_profiles(session, db_user.id)
+    new_name = f"{cleaned_base} #{slot_num}"
+
+    existing_profiles = await get_user_profiles(session, db_user.id, include_deleting=True)
 
     for p in existing_profiles:
         if (
@@ -145,21 +201,47 @@ async def rename_device_process(
             and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
-            await state.clear()
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.DEVICE_NAME_DUPLICATE.format(device_name=safe(new_name)),
+                f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
                 get_back_button(f"manage_device:{profile.id}"),
             )
             return
 
     old_name = profile.device_name
-    await update_profile(
-        session,
-        profile,
-        device_name=new_name,
-    )
+    from sqlalchemy.exc import IntegrityError
+    try:
+        nested_ctx = getattr(session, "begin_nested", None)
+        if callable(nested_ctx):
+            ctx = nested_ctx()
+            if hasattr(ctx, "__aenter__"):
+                async with ctx:
+                    await update_profile(
+                        session,
+                        profile,
+                        device_name=new_name,
+                    )
+            else:
+                await update_profile(
+                    session,
+                    profile,
+                    device_name=new_name,
+                )
+        else:
+            await update_profile(
+                session,
+                profile,
+                device_name=new_name,
+            )
+    except IntegrityError:
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
+            get_back_button(f"manage_device:{profile.id}"),
+        )
+        return
 
     from services.audit_service import AuditService
     await AuditService.log_action(
@@ -175,13 +257,39 @@ async def rename_device_process(
         },
     )
 
+    server = await get_server_by_id(session, profile.server_id)
+    from config.settings import get_settings
+    from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
+
+    from .device_view_routes import (
+        can_show_amnezia_bridge,
+        can_show_config_actions,
+        can_show_delete_action,
+    )
+
+    config_ready = can_show_config_actions(profile)
+    show_delete = can_show_delete_action(profile)
+    amnezia_bridge_url = None
+    if can_show_amnezia_bridge(profile, server):
+        settings = get_settings()
+        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
+            domain=settings.DOMAIN,
+            profile_id=profile.id,
+            user_id=db_user.id,
+        )
+
     await render_hub(
         message.bot,
         message.chat.id,
         texts.DEVICE_RENAMED_SUCCESS.format(
             device_name=safe(new_name),
         ),
-        get_device_keyboard(profile.id),
+        get_device_keyboard(
+            profile.id,
+            config_ready=config_ready,
+            show_delete=show_delete,
+            amnezia_bridge_url=amnezia_bridge_url,
+        ),
     )
 
     await state.clear()

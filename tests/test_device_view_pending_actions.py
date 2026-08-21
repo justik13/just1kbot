@@ -6,12 +6,27 @@ from bot.handlers.connection.device_view_routes import device_help, manage_devic
 
 
 class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
-    async def test_pending_profile_keeps_same_device_actions_as_ready_profile(self):
+    def setUp(self):
+        super().setUp()
+        self.bridge_patch = patch("services.amnezia_bridge_token_service.AmneziaBridgeTokenService.is_enabled", return_value=False)
+        self.bridge_patch.start()
+
+    def tearDown(self):
+        self.bridge_patch.stop()
+        super().tearDown()
+
+    async def test_pending_create_profile_hides_config_and_delete_actions_while_ready_shows_them(self):
+        from utils.vpn_parser import encode_json_to_vpn_uri
+        valid_raw_config = encode_json_to_vpn_uri({
+            "containers": [{"awg": {"protocol_version": 2, "last_config": "{\"config\": \"[Interface]\\nPrivateKey = a\\n[Peer]\\nPublicKey = b\\n\"}"}}],
+        })
+
         db_user = SimpleNamespace(id=7, telegram_id=700)
         server = SimpleNamespace(
             country_flag="🇩🇪",
             name="Germany",
             protocol="amneziawg2",
+            is_active=True,
         )
 
         pending_profile = SimpleNamespace(
@@ -25,6 +40,7 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             traffic_down=0,
             traffic_up=0,
             last_connected=None,
+            is_active=True,
         )
         ready_profile = SimpleNamespace(
             id=1,
@@ -33,10 +49,11 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             device_name="Устройство #1",
             provisioning_status="active",
             peer_id="peer-1",
-            raw_config="amnezia://ready",
+            raw_config=valid_raw_config,
             traffic_down=0,
             traffic_up=0,
             last_connected=None,
+            is_active=True,
         )
 
         def make_callback():
@@ -77,17 +94,28 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             await manage_device(make_callback(), state, session, db_user)
 
         self.assertEqual(len(rendered_keyboards), 2)
-        self.assertEqual(
-            rendered_keyboards[0].model_dump(),
-            rendered_keyboards[1].model_dump(),
-        )
-        callback_data = {
+        
+        pending_callback_data = {
             button.callback_data
             for row in rendered_keyboards[0].inline_keyboard
             for button in row
         }
-        self.assertIn("show_config:1", callback_data)
-        self.assertIn("download_conf:1", callback_data)
+        self.assertNotIn("show_config:1", pending_callback_data)
+        self.assertNotIn("download_conf:1", pending_callback_data)
+        self.assertNotIn("request_delete_device:1", pending_callback_data)
+        self.assertIn("rename_device:1", pending_callback_data)
+        self.assertIn("support_help:device_1", pending_callback_data)
+
+        ready_callback_data = {
+            button.callback_data
+            for row in rendered_keyboards[1].inline_keyboard
+            for button in row
+        }
+        self.assertIn("show_config:1", ready_callback_data)
+        self.assertIn("download_conf:1", ready_callback_data)
+        self.assertIn("request_delete_device:1", ready_callback_data)
+        self.assertIn("rename_device:1", ready_callback_data)
+        self.assertIn("support_help:device_1", ready_callback_data)
 
     async def test_device_help_topic_buttons_keep_device_context(self):
         callback = MagicMock()

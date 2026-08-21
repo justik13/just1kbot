@@ -10,12 +10,13 @@ from bot import texts
 from bot.keyboards import get_back_button
 from database.models import User
 from database.repositories.profiles_repo import (
+    PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
-    get_user_profiles_count,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
+from services.subscription_token_service import SubscriptionTokenService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
@@ -23,11 +24,18 @@ from bot.constants import GRACE_PERIOD_HOURS
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_-]+$")
+DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_#-]+$")
 
 _PROTOCOL_DISPLAY = {
     "amneziawg2": "AmneziaWG",
 }
+
+
+def can_show_incy_subscription(read_only: bool = False) -> bool:
+    """Check if INCY subscription button should be displayed."""
+    if read_only:
+        return False
+    return SubscriptionTokenService.is_enabled()
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
@@ -111,11 +119,16 @@ async def _render_maintenance(
 async def _build_connections_screen(
     user: User,
     session: AsyncSession,
+    profiles: list,
     *,
     read_only: bool = False,
 ) -> tuple[str, InlineKeyboardBuilder]:
-    profiles = await get_user_profiles(session, user.id)
-    profiles_count = len(profiles)
+    visible_profiles_count = len(profiles)
+
+    quota_profiles_count = len([
+        p for p in profiles
+        if getattr(p, "provisioning_status", "") not in PROFILE_QUOTA_EXCLUDED_STATUSES
+    ])
 
     device_limit = await _get_effective_device_limit(
         user,
@@ -123,7 +136,7 @@ async def _build_connections_screen(
     )
 
     rendered = texts.CONNECTION_LIST_HEADER.format(
-        count=profiles_count,
+        count=quota_profiles_count,
         limit=device_limit,
     )
 
@@ -140,7 +153,7 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
-    if profiles_count == 0:
+    if visible_profiles_count == 0:
         rendered += texts.CONNECTION_EMPTY
     else:
         for profile in profiles:
@@ -172,18 +185,19 @@ async def _build_connections_screen(
             if profile.provisioning_status in labels:
                 rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
 
-        rendered += "\n\n<i>Нажмите на устройство ниже для управления и получения ключа:</i>"
+        rendered += "\n\n<i>Нажмите на устройство ниже для просмотра статуса и управления:</i>"
 
-    if not read_only and profiles_count < device_limit:
+    if not read_only and quota_profiles_count < device_limit:
         builder.button(
             text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
             callback_data="add_device",
         )
 
-    builder.button(
-        text="🔗 Добавить в INCY (iOS / Android) [🧪]",
-        callback_data="menu_incy_subscription",
-    )
+    if can_show_incy_subscription(read_only=read_only):
+        builder.button(
+            text="🔗 Добавить в INCY (iOS / Android) [🧪]",
+            callback_data="menu_incy_subscription",
+        )
 
     builder.button(
         text="🌐 Статус серверов",
@@ -218,16 +232,18 @@ async def _render_connections(
         user.telegram_id,
     )
 
-    profiles_count = await get_user_profiles_count(
+    visible_profiles = await get_user_profiles(
         session,
         user.id,
     )
+    visible_profiles_count = len(visible_profiles)
 
     if not has_access:
-        if profiles_count > 0:
+        if visible_profiles_count > 0:
             rendered, builder = await _build_connections_screen(
                 user,
                 session,
+                visible_profiles,
                 read_only=True,
             )
 
@@ -267,6 +283,7 @@ async def _render_connections(
     rendered, builder = await _build_connections_screen(
         user,
         session,
+        visible_profiles,
         read_only=False,
     )
 

@@ -1,21 +1,21 @@
 import logging
 import re
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
 
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button, get_device_keyboard
 from config.settings import get_settings
 from database.models import User
-from .common import _render_connections
-from database.repositories.profiles_repo import get_profile_by_id
+from database.repositories.profiles_repo import (
+    ALLOWED_DELETE_STATES,
+    get_profile_by_id,
+)
 from database.repositories.servers_repo import get_server_by_id
 from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from services.subscription import SubscriptionService
@@ -38,7 +38,7 @@ from utils.vpn_parser import (
     decode_vpn_uri_to_json,
 )
 
-from .common import _format_protocol
+from .common import _format_protocol, _render_connections
 
 # Kept in sync with bot/handlers/support.py::AMNEZIA_DOCS
 _AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
@@ -55,6 +55,49 @@ async def _get_safe_device_name(session: AsyncSession, profile) -> str:
     return "".join(
         c for c in f"{server_name}{slot_suffix}" if c.isalnum() or c in (" ", "_", "-")
     ).strip().replace(" ", "_") or "client"
+
+
+def has_usable_vpn_uri(profile) -> bool:
+    """Check if profile has a syntactically valid vpn:// URI."""
+    if not profile or getattr(profile, "is_active", False) is not True:
+        return False
+    raw = getattr(profile, "raw_config", None)
+    if not raw or not getattr(profile, "peer_id", None):
+        return False
+    from utils.vpn_parser import is_valid_vpn_uri
+    return is_valid_vpn_uri(raw)
+
+
+def is_profile_ready_for_user(profile) -> bool:
+    """Check if profile is fully provisioned with active status and valid vpn:// URI."""
+    if not profile or getattr(profile, "provisioning_status", "") != "active":
+        return False
+    return has_usable_vpn_uri(profile)
+
+
+def can_show_config_actions(profile) -> bool:
+    """Check if Show Key and Download Conf buttons should be displayed."""
+    if not has_usable_vpn_uri(profile):
+        return False
+    return getattr(profile, "provisioning_status", "") in ("active", "pending_update", "update_failed")
+
+
+def can_show_amnezia_bridge(profile, server) -> bool:
+    """Check if 1-click 'Open in Amnezia' button should be displayed."""
+    if not can_show_config_actions(profile) or not server:
+        return False
+    return (
+        getattr(server, "is_active", False) is True
+        and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
+        and AmneziaBridgeTokenService.is_enabled()
+    )
+
+
+def can_show_delete_action(profile) -> bool:
+    """Check if device deletion is permissible in the current state (Fail-Closed)."""
+    if not profile:
+        return False
+    return getattr(profile, "provisioning_status", "") in ALLOWED_DELETE_STATES
 
 
 async def render_device_screen(
@@ -83,20 +126,29 @@ async def render_device_screen(
         ),
     )
 
+    status = getattr(profile, "provisioning_status", "")
+    if status == "pending_create":
+        rendered += "\n\n⏳ <b>Устройство создаётся на сервере...</b>"
+    elif status == "pending_update":
+        rendered += "\n\n🔄 <b>Конфигурация устройства обновляется...</b>"
+    elif status == "update_failed":
+        rendered += "\n\n⚠️ <b>Не удалось обновить конфигурацию на сервере (действует текущая версия).</b>"
+    elif status == "create_failed":
+        rendered += "\n\n❌ <b>Не удалось создать устройство на сервере.</b>"
+    elif status == "create_cleanup_pending":
+        rendered += "\n\n⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"
+    elif status == "deleting":
+        rendered += "\n\n🗑 <b>Устройство удаляется с сервера...</b>"
+    elif status == "delete_failed":
+        rendered += "\n\n⚠️ <b>Не удалось удалить устройство на сервере. Попробуйте повторить.</b>"
+
     has_access = await SubscriptionService.check_access(session, user.telegram_id)
+    show_delete = can_show_delete_action(profile)
 
     if has_access:
+        config_ready = can_show_config_actions(profile)
         amnezia_bridge_url = None
-        if (
-            getattr(profile, "is_active", True)
-            and getattr(profile, "provisioning_status", "") == "active"
-            and getattr(profile, "peer_id", None)
-            and (getattr(profile, "raw_config", "") or "").startswith("vpn://")
-            and server
-            and getattr(server, "is_active", True)
-            and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
-            and AmneziaBridgeTokenService.is_enabled()
-        ):
+        if can_show_amnezia_bridge(profile, server):
             settings = get_settings()
             amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
                 domain=settings.DOMAIN,
@@ -106,14 +158,16 @@ async def render_device_screen(
 
         keyboard = get_device_keyboard(
             profile.id,
-            config_ready=True,
+            config_ready=config_ready,
+            show_delete=show_delete,
             amnezia_bridge_url=amnezia_bridge_url,
         )
     else:
         rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
 
         builder = InlineKeyboardBuilder()
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
+        if show_delete:
+            builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
         builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
         builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
         builder.adjust(1)
@@ -134,7 +188,6 @@ async def manage_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -156,6 +209,7 @@ async def manage_device(
         db_user,
         session,
     )
+    await callback.answer(show_alert=False)
 
 
 def _get_device_config_keyboard(profile_id: int):
@@ -184,8 +238,6 @@ async def device_help(
     user returns to their device card, not to the generic support menu.
     DO NOT replace the back button with menu_support — that breaks the device flow.
     """
-    await callback.answer(show_alert=False)
-
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
         await callback.answer("Некорректный запрос", show_alert=True)
@@ -218,6 +270,7 @@ async def device_help(
         builder.as_markup(),
         trigger_message_id=callback.message.message_id,
     )
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("show_config:"))
@@ -227,7 +280,6 @@ async def show_config(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -246,7 +298,7 @@ async def show_config(
         return
 
     raw_config = profile.raw_config or ""
-    if profile.provisioning_status != "active" or not profile.peer_id or not raw_config:
+    if not can_show_config_actions(profile) or not raw_config:
         await callback.answer(texts.DEVICE_CONFIG_UNAVAILABLE, show_alert=True)
         return
 
@@ -282,6 +334,7 @@ async def show_config(
             reply_markup=_get_device_config_keyboard(profile.id),
             parse_mode="HTML",
         )
+        await callback.answer(show_alert=False)
         return
 
     await render_hub(
@@ -294,6 +347,7 @@ async def show_config(
         _get_device_config_keyboard(profile.id),
         trigger_message_id=callback.message.message_id,
     )
+    await callback.answer(show_alert=False)
 
 
 @router.callback_query(F.data.startswith("download_conf:"))
@@ -325,7 +379,7 @@ async def download_conf(
     safe_device_name = await _get_safe_device_name(session, profile)
 
     raw_config = profile.raw_config or ""
-    if profile.provisioning_status != "active" or not profile.peer_id or not raw_config:
+    if not can_show_config_actions(profile) or not raw_config:
         await render_hub(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),

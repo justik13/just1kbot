@@ -201,7 +201,7 @@ async def grant_referral_bonus_for_topup(
             },
         )
     else:
-        referrer_bonus_granted = existing.amount
+        referrer_bonus_granted = Decimal("0")
 
     # 2. Check if this is the purchaser's first successful top-up. If so, grant purchaser +10% bonus as well.
     purchaser_welcome_granted = Decimal("0")
@@ -259,7 +259,7 @@ async def grant_referral_bonus_for_topup(
                 },
             )
         else:
-            purchaser_welcome_granted = existing_purchaser.amount
+            purchaser_welcome_granted = Decimal("0")
 
     await session.flush()
     return ReferralBonusGrantResult(

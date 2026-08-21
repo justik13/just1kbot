@@ -1,14 +1,13 @@
-from aiogram import Router, F
+import logging
+
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import (
-    get_device_delete_confirm_keyboard,
-    get_device_keyboard,
-)
+from bot.keyboards import get_device_delete_confirm_keyboard
 from database.models import User
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.users_repo import get_user_by_telegram_id
@@ -18,6 +17,7 @@ from utils.telegram import render_hub, safe
 
 from .common import _render_connections
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 _deleting_devices: TTLCache[int, bool] = TTLCache(
@@ -33,7 +33,6 @@ async def request_delete_device(
     session: AsyncSession,
     db_user: User | None = None,
 ):
-    await callback.answer(show_alert=False)
     await state.clear()
 
     profile_id = parse_callback_id(callback.data, 1)
@@ -47,6 +46,24 @@ async def request_delete_device(
     if not profile or not db_user or profile.user_id != db_user.id:
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+
+    from .device_view_routes import can_show_delete_action, render_device_screen
+
+    if not can_show_delete_action(profile):
+        status = getattr(profile, "provisioning_status", "")
+        if status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif status == "create_cleanup_pending":
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        elif status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+        await callback.answer(msg, show_alert=True)
+        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        return
+
+    await callback.answer(show_alert=False)
 
     await render_hub(
         callback.bot,
@@ -79,11 +96,13 @@ async def cancel_delete_device(
 
     await callback.answer(texts.DEVICE_DELETE_CANCELLED, show_alert=False)
 
-    await render_hub(
+    from .device_view_routes import render_device_screen
+    await render_device_screen(
         callback.bot,
         callback.message.chat.id,
-        texts.DEVICE_MANAGE_TITLE,
-        get_device_keyboard(profile_id),
+        profile,
+        db_user,
+        session,
     )
 
 
@@ -106,17 +125,33 @@ async def confirm_delete_device(
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
 
+    from .device_view_routes import can_show_delete_action, render_device_screen
+
+    if not can_show_delete_action(profile):
+        status = getattr(profile, "provisioning_status", "")
+        if status == "deleting":
+            msg = "🗑 Устройство уже удаляется с сервера."
+        elif status == "create_cleanup_pending":
+            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+        elif status == "pending_create":
+            msg = texts.DEVICE_CREATE_IN_PROGRESS
+        else:
+            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+        await callback.answer(msg, show_alert=True)
+        await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
+        return
+
     if profile_id in _deleting_devices:
         await callback.answer(texts.DEVICE_DELETE_IN_PROGRESS, show_alert=True)
         return
 
     _deleting_devices[profile_id] = True
+    answered = False
 
     try:
-        await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
         await state.clear()
 
-        from services.device_service import DeviceStillCreating
+        from services.device_service import DeviceCreationError, DeviceStillCreating
 
         try:
             success = await DeviceService.delete_device(
@@ -126,6 +161,11 @@ async def confirm_delete_device(
             )
         except DeviceStillCreating:
             await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
+            answered = True
+            return
+        except DeviceCreationError:
+            await callback.answer("⚠️ Идёт автоматическое восстановление или действие недоступно.", show_alert=True)
+            answered = True
             return
 
         if not success:
@@ -133,7 +173,11 @@ async def confirm_delete_device(
                 texts.ERROR_SERVER_UNAVAILABLE_GENERIC,
                 show_alert=True,
             )
+            answered = True
             return
+
+        await callback.answer(texts.DEVICE_DELETING_PROGRESS, show_alert=False)
+        answered = True
 
         user = db_user or await get_user_by_telegram_id(
             session,
@@ -142,6 +186,12 @@ async def confirm_delete_device(
 
         if user:
             await _render_connections(callback.message, user, session)
-
+    except Exception:
+        logger.exception("Unexpected error in confirm_delete_device for profile_id=%s", profile_id)
+        if not answered:
+            try:
+                await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+            except Exception:
+                pass
     finally:
         _deleting_devices.pop(profile_id, None)

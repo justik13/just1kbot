@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import API_OPERATION_TYPES, APIOperation, VPNProfile
+from database.models import API_OPERATION_TYPES, APIOperation, Server, VPNProfile
 
 
 class APIOperationValidationError(Exception):
@@ -42,6 +42,14 @@ CREATE_SIDE_EFFECT_ERROR_CODES = frozenset({
     "create_ambiguous_reconcile", "executor_exception", "stale_lease_max_attempts",
     "network_error", "timeout", "server_error", "invalid_response", "unknown_error",
 })
+CREATE_CLEANUP_REQUIRED_CODES = frozenset(
+    CREATE_CLEANUP_ERROR_CODES
+    | CREATE_SIDE_EFFECT_ERROR_CODES
+    | {
+        "duplicate_exact_client_name",
+        "stale_create_lease",
+    }
+)
 
 
 def classify_create_side_effect_risk(operation: APIOperation) -> str:
@@ -233,6 +241,48 @@ async def ensure_delete_operation(session: AsyncSession, *, idempotency_key: str
     return operation
 
 
+async def resolve_profile_endpoint_snapshot(
+    session: AsyncSession,
+    profile: VPNProfile,
+) -> tuple[int | None, str | None, str | None, str | None]:
+    """Resolve (server_id, server_name_snapshot, api_url_snapshot, api_key_snapshot) for a profile.
+
+    1. First check if the profile has an immutable historical snapshot from previous operations.
+       This guarantees that even if the Server row's api_url/api_key was edited later by an admin,
+       the lifecycle operations for this specific peer will target the exact endpoint where the
+       peer was actually provisioned.
+    2. If no historical snapshot exists, fallback to the current Server row in the database.
+    """
+    if profile.id is not None:
+        prev_op = (
+            await session.execute(
+                select(APIOperation)
+                .where(
+                    APIOperation.profile_id == profile.id,
+                    APIOperation.api_url_snapshot.is_not(None),
+                    APIOperation.api_key_snapshot.is_not(None),
+                )
+                .order_by(APIOperation.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if prev_op is not None and getattr(prev_op, "api_url_snapshot", None) is not None:
+            return (
+                getattr(prev_op, "server_id", None) or profile.server_id,
+                getattr(prev_op, "server_name_snapshot", None),
+                getattr(prev_op, "api_url_snapshot", None),
+                getattr(prev_op, "api_key_snapshot", None),
+            )
+
+    server = None
+    if profile.server_id is not None:
+        server = await session.get(Server, profile.server_id)
+    if server is not None:
+        return server.id, server.name, server.api_url, server.api_key
+
+    return profile.server_id, None, None, None
+
+
 @asynccontextmanager
 async def _transaction(session_factory: SessionFactory | None) -> AsyncIterator[AsyncSession]:
     if session_factory is None:
@@ -279,21 +329,46 @@ async def claim_api_operations(
     claimed: list[ClaimedAPIOperation] = []
     async with _transaction(session_factory) as session:
         now = now_utc()
-        exhausted = (await session.execute(select(APIOperation).where(
-            APIOperation.status.in_(("pending", "retry")),
-            APIOperation.attempts >= APIOperation.max_attempts,
-        ).with_for_update(skip_locked=True))).scalars().all()
-        for operation in exhausted:
-            previous_error_code = operation.last_error_code
-            previous_status = operation.status
-            await _sync_terminal_profile(session, operation,
-                previous_error_code=previous_error_code,
-                previous_status=previous_status)
-            operation.status = "dead"
-            operation.completed_at = now
-            operation.updated_at = now
-            operation.last_error_code = "max_attempts_exhausted"
-            operation.locked_at = operation.locked_by = None
+        exhausted_candidates = (
+            await session.execute(
+                select(APIOperation.id, APIOperation.profile_id).where(
+                    APIOperation.status.in_(("pending", "retry")),
+                    APIOperation.attempts >= APIOperation.max_attempts,
+                )
+            )
+        ).all()
+        for op_id, profile_id in exhausted_candidates:
+            if profile_id is not None:
+                await session.execute(
+                    select(VPNProfile)
+                    .where(VPNProfile.id == profile_id)
+                    .with_for_update()
+                )
+            operation = (
+                await session.execute(
+                    select(APIOperation)
+                    .where(
+                        APIOperation.id == op_id,
+                        APIOperation.status.in_(("pending", "retry")),
+                        APIOperation.attempts >= APIOperation.max_attempts,
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if operation:
+                previous_error_code = operation.last_error_code
+                previous_status = operation.status
+                await _sync_terminal_profile(
+                    session,
+                    operation,
+                    previous_error_code=previous_error_code,
+                    previous_status=previous_status,
+                )
+                operation.status = "dead"
+                operation.completed_at = now
+                operation.updated_at = now
+                operation.last_error_code = "max_attempts_exhausted"
+                operation.locked_at = operation.locked_by = None
         operations = (
             await session.execute(
                 select(APIOperation)
@@ -459,28 +534,51 @@ def _validate_expected_attempt_number(expected_attempt_number: int) -> None:
 async def recover_stale_api_operations(
     *,
     lease_timeout: timedelta,
+    limit: int = 100,
     session_factory: SessionFactory | None = None,
 ) -> tuple[int, int]:
     if lease_timeout <= timedelta(0):
         raise APIOperationValidationError("lease_timeout must be positive")
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+        raise APIOperationValidationError("limit must be a positive integer")
     from sqlalchemy import func
 
     retried = dead = 0
     async with _transaction(session_factory) as session:
-        operations = (
+        stale_candidates = (
             await session.execute(
-                select(APIOperation)
-                .where(
+                select(APIOperation.id, APIOperation.profile_id).where(
                     APIOperation.status == "processing",
                     or_(
                         APIOperation.locked_at.is_(None),
                         APIOperation.locked_at < func.now() - lease_timeout,
                     ),
-                )
-                .with_for_update(skip_locked=True)
+                ).order_by(APIOperation.id).limit(limit)
             )
-        ).scalars().all()
-        for operation in operations:
+        ).all()
+        for op_id, profile_id in stale_candidates:
+            if profile_id is not None:
+                await session.execute(
+                    select(VPNProfile)
+                    .where(VPNProfile.id == profile_id)
+                    .with_for_update()
+                )
+            operation = (
+                await session.execute(
+                    select(APIOperation)
+                    .where(
+                        APIOperation.id == op_id,
+                        APIOperation.status == "processing",
+                        or_(
+                            APIOperation.locked_at.is_(None),
+                            APIOperation.locked_at < func.now() - lease_timeout,
+                        ),
+                    )
+                    .with_for_update(skip_locked=True)
+                )
+            ).scalar_one_or_none()
+            if not operation:
+                continue
             operation.locked_at = None
             operation.locked_by = None
             operation.updated_at = func.now()
@@ -493,9 +591,12 @@ async def recover_stale_api_operations(
                 retried += 1
             else:
                 previous_error_code = operation.last_error_code
-                await _sync_terminal_profile(session, operation,
+                await _sync_terminal_profile(
+                    session,
+                    operation,
                     previous_error_code=previous_error_code,
-                    previous_status="processing")
+                    previous_status="processing",
+                )
                 operation.status = "dead"
                 operation.completed_at = func.now()
                 operation.last_error_code = "stale_lease_max_attempts"

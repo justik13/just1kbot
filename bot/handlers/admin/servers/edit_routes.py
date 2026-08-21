@@ -3,13 +3,13 @@ import logging
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
-from database.models import VPNProfile
+from database.models import APIOperation, VPNProfile
 from database.repositories.servers_repo import (
     get_server_by_api_url,
     get_server_by_id,
@@ -387,6 +387,8 @@ async def process_edit_server_url(
 
         return
 
+    validated_api_url = server.api_url
+    validated_api_key = server.api_key
     new_url = normalize_api_url(message.text)
 
     if len(new_url) > 500:
@@ -479,10 +481,89 @@ async def process_edit_server_url(
             get_back_button("admin_servers"),
             parse_mode="HTML",
         )
-
         await state.clear()
-
         return
+
+    if server.api_url != new_url:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if not server:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_NOT_FOUND,
+                get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
+
+        if (
+            server.api_url != validated_api_url
+            or server.api_key != validated_api_key
+        ):
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_OPERATION_CANCELLED,
+                get_back_button(f"admin_server_card:{server_id}"),
+            )
+            await state.clear()
+            return
+
+        existing = await get_server_by_api_url(session, new_url)
+        if existing and existing.id != server_id:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_DUPLICATE_URL.format(api_url=safe(new_url)),
+                get_back_button("admin_servers"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
+
+        profiles_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.server_id == server_id,
+                    or_(
+                        VPNProfile.peer_id.is_not(None),
+                        VPNProfile.provisioning_status.in_((
+                            "pending_create",
+                            "pending_update",
+                            "deleting",
+                            "create_cleanup_pending",
+                            "create_failed",
+                            "update_failed",
+                            "delete_failed",
+                            "active",
+                        )),
+                    ),
+                )
+            )
+        ).scalar_one()
+
+        active_ops_count = (
+            await session.execute(
+                select(func.count(APIOperation.id)).where(
+                    APIOperation.server_id == server_id,
+                    APIOperation.status.in_(("pending", "processing", "retry")),
+                )
+            )
+        ).scalar_one()
+
+        if profiles_count > 0 or active_ops_count > 0:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                f"❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.\n\n"
+                f"• Связанных устройств: {profiles_count}\n"
+                f"• Операций в обработке: {active_ops_count}\n\n"
+                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                get_back_button(f"admin_server_card:{server_id}"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     old_url = server.api_url
 
@@ -600,6 +681,8 @@ async def process_edit_server_key(
 
         return
 
+    validated_api_url = server.api_url
+    validated_api_key = server.api_key
     new_key = message.text.strip()
     try:
         await message.delete()
@@ -655,7 +738,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L652_1
+                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
                 ),
             ),
             get_back_button("admin_servers"),
@@ -665,6 +748,73 @@ async def process_edit_server_key(
         await state.clear()
 
         return
+
+    if server.api_key != new_key:
+        server = await get_server_by_id(session, server_id, for_update=True)
+        if not server:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_SERVER_NOT_FOUND,
+                get_back_button("admin_servers"),
+            )
+            await state.clear()
+            return
+        if (
+            server.api_url != validated_api_url
+            or server.api_key != validated_api_key
+        ):
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                texts.ERROR_OPERATION_CANCELLED,
+                get_back_button(f"admin_server_card:{server_id}"),
+            )
+            await state.clear()
+            return
+        profiles_count = (
+            await session.execute(
+                select(func.count(VPNProfile.id)).where(
+                    VPNProfile.server_id == server_id,
+                    or_(
+                        VPNProfile.peer_id.is_not(None),
+                        VPNProfile.provisioning_status.in_((
+                            "pending_create",
+                            "pending_update",
+                            "deleting",
+                            "create_cleanup_pending",
+                            "create_failed",
+                            "update_failed",
+                            "delete_failed",
+                            "active",
+                        )),
+                    ),
+                )
+            )
+        ).scalar_one()
+
+        active_ops_count = (
+            await session.execute(
+                select(func.count(APIOperation.id)).where(
+                    APIOperation.server_id == server_id,
+                    APIOperation.status.in_(("pending", "processing", "retry")),
+                )
+            )
+        ).scalar_one()
+
+        if profiles_count > 0 or active_ops_count > 0:
+            await render_hub(
+                message.bot,
+                message.chat.id,
+                f"❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.\n\n"
+                f"• Связанных устройств: {profiles_count}\n"
+                f"• Операций в обработке: {active_ops_count}\n\n"
+                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                get_back_button(f"admin_server_card:{server_id}"),
+                parse_mode="HTML",
+            )
+            await state.clear()
+            return
 
     await update_server(session, server, api_key=new_key)
 

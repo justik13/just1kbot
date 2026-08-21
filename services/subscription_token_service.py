@@ -17,6 +17,19 @@ MAX_SUBSCRIPTION_TOKEN_LENGTH = 64
 
 
 class SubscriptionTokenService:
+    @classmethod
+    def is_enabled(cls) -> bool:
+        """Check if subscription feed / INCY feature is enabled and domain is available."""
+        try:
+            from config.settings import get_settings
+            settings = get_settings()
+            if not getattr(settings, "INCY_SUBSCRIPTION_ENABLED", True):
+                return False
+            domain = getattr(settings, "DOMAIN", "")
+            return bool(domain and str(domain).strip())
+        except Exception:
+            return False
+
     @staticmethod
     def generate_token() -> str:
         # secrets.token_urlsafe(32) produces a 43-character string, safely fitting in VARCHAR(64)

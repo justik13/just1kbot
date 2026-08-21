@@ -24,6 +24,30 @@ TRUNCATE_SQL = (
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
 class AccountTopupConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        from unittest.mock import patch
+        self.env_patcher = patch.dict(
+            os.environ,
+            {
+                "BOT_TOKEN": "123:test",
+                "REDIS_URL": "redis://localhost:6379/1",
+                "REDIS_PASSWORD": "test",
+                "ADMIN_IDS": "[123456789]",
+                "SUPPORT_USERNAME": "test_support",
+                "DOMAIN": "test.domain",
+                "SSL_EMAIL": "test@domain.com",
+                "YOOKASSA_SHOP_ID": "123456",
+                "YOOKASSA_SECRET_KEY": "test_secret",
+                "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
+                "YOOKASSA_WEBHOOK_PORT": "8080",
+                "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+                "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                "DATABASE_URL": os.environ["TEST_DATABASE_URL"],
+            },
+        )
+        self.env_patcher.start()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+
         self.engine = create_async_engine(DB, pool_size=5)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
@@ -53,6 +77,9 @@ class AccountTopupConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncTearDown(self):
         await self.engine.dispose()
+        self.env_patcher.stop()
+        from config.settings import get_settings
+        get_settings.cache_clear()
 
     async def test_concurrent_same_payment_topup(self):
         # Simulate two concurrent webhooks processing the exact same payment.

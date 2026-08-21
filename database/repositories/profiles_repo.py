@@ -14,14 +14,28 @@ ALLOWED_PROFILE_UPDATE_FIELDS = {
     'is_active',
 }
 
-# These lifecycle states represent profiles that are being removed or are
-# waiting for cleanup and therefore must not count as active user devices.
-NON_VISIBLE_PROFILE_STATUSES = (
+# Lifecycle states hidden from the user's UI connection list.
+# Only in-flight deletions are hidden; recoverable and failure states remain visible.
+PROFILE_LIST_HIDDEN_STATUSES = (
     "deleting",
-    "create_cleanup_pending",
-    "delete_failed",
+)
+
+# Lifecycle states excluded from active quota / capacity count calculations.
+# delete_failed and create_cleanup_pending still have active server peers,
+# so they MUST consume quota to prevent downgrade exploits.
+PROFILE_QUOTA_EXCLUDED_STATUSES = (
+    "deleting",
     "create_failed",
 )
+
+# Provisioning states in which a profile can be deleted by a user or service (Fail-Closed).
+ALLOWED_DELETE_STATES = frozenset({
+    "active",
+    "pending_update",
+    "update_failed",
+    "create_failed",
+    "delete_failed",
+})
 
 
 def sort_profiles_naturally(profiles: list[VPNProfile]) -> list[VPNProfile]:
@@ -41,7 +55,7 @@ async def get_user_profiles(
     stmt = select(VPNProfile).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
+            VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES)
         )
     stmt = stmt.options(selectinload(VPNProfile.server)).order_by(VPNProfile.created_at.asc(), VPNProfile.id.asc())
     result = await session.execute(stmt)
@@ -94,10 +108,17 @@ async def delete_profile(session: AsyncSession, profile: VPNProfile) -> None:
 async def get_user_profiles_count(
     session: AsyncSession, user_id: int, include_deleting: bool = False
 ) -> int:
+    """Return count of active/reserving profiles for quota checks.
+
+    Excludes PROFILE_QUOTA_EXCLUDED_STATUSES ('deleting', 'create_failed') by default.
+    """
     stmt = select(func.count(VPNProfile.id)).where(VPNProfile.user_id == user_id)
     if not include_deleting:
         stmt = stmt.where(
-            VPNProfile.provisioning_status.notin_(NON_VISIBLE_PROFILE_STATUSES)
+            VPNProfile.provisioning_status.notin_(PROFILE_QUOTA_EXCLUDED_STATUSES)
         )
     result = await session.execute(stmt)
     return result.scalar_one()
+
+
+get_user_quota_profiles_count = get_user_profiles_count

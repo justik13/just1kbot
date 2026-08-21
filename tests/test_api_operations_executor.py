@@ -7,7 +7,7 @@ import zlib
 from types import SimpleNamespace
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from database.models import APIOperation, Server, User, VPNProfile
 from services.amnezia_client import (
@@ -127,6 +127,43 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
                 (p.provisioning_status, p.peer_id, op.status),
                 ("active", "peer", "succeeded"),
             )
+
+    async def test_follow_up_update_keeps_create_endpoint_snapshot(self):
+        pid, oid = await self.create_claimed(version=1)
+        async with self.sessions.begin() as s:
+            p = await s.get(VPNProfile, pid)
+            p.desired_version = 2
+            p.desired_is_active = True
+            server = await s.get(Server, self.server_id)
+            server.api_url = "https://new-endpoint"
+            server.api_key = "new-key"
+
+        await finalize_create_success(
+            oid,
+            worker_id="worker",
+            expected_attempt_number=1,
+            peer_id="peer",
+            raw_config="vpn://config",
+            sent_desired_version=1,
+            sent_is_active=True,
+            sent_expires_at=None,
+            server_name_snapshot="fake",
+            api_url_snapshot="https://fake",
+            api_key_snapshot="key",
+            session_factory=self.sessions,
+        )
+
+        async with self.sessions() as s:
+            update = (
+                await s.execute(
+                    select(APIOperation).where(
+                        APIOperation.operation_type == "update_peer",
+                        APIOperation.profile_id == pid,
+                    )
+                )
+            ).scalar_one()
+            self.assertEqual(update.api_url_snapshot, "https://fake")
+            self.assertEqual(update.api_key_snapshot, "key")
 
     async def test_update_version_race_records_sent_actual(self):
         pid, oid = await self.create_claimed(

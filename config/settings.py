@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # ── Amnezia Bridge ──
     AMNEZIA_BRIDGE_HMAC_SECRET: str | None = Field(default=None, repr=False)
 
+    # ── INCY / Subscription Feed ──
+    INCY_SUBSCRIPTION_ENABLED: bool = Field(default=True)
+
     # Removed greenfield settings are declared only so stale .env files fail.
     AMNEZIA_API_URL: str | None = None
     AMNEZIA_API_KEY: str | None = None

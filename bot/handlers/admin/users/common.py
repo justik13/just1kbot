@@ -11,7 +11,7 @@ from bot import texts
 from bot.keyboards.admin.users import get_admin_user_card_keyboard
 from database.models import Tariff, User
 from database.repositories.profiles_repo import (
-    NON_VISIBLE_PROFILE_STATUSES,
+    PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
 from database.repositories.tariffs_repo import get_tariff_by_id
@@ -209,7 +209,7 @@ async def _build_users_list_text_and_kb(
             )
             days = format_days_left(user.subscription_end)
             profiles_count = (
-                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in NON_VISIBLE_PROFILE_STATUSES])
+                len([p for p in user.profiles if getattr(p, "provisioning_status", None) not in PROFILE_QUOTA_EXCLUDED_STATUSES])
                 if user.profiles
                 else 0
             )

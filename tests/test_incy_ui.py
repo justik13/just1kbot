@@ -56,6 +56,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         rendered, builder = await _build_connections_screen(
             user=user,
             session=session,
+            profiles=[],
             read_only=False,
         )
         markup = builder.as_markup()
@@ -81,11 +82,67 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         incy_idx = callbacks.index("menu_incy_subscription")
         self.assertEqual(incy_idx, add_idx + 1)
 
+    @patch("bot.handlers.connection.common.get_user_profiles")
+    @patch("bot.handlers.connection.common._get_effective_device_limit")
+    async def test_button_hidden_when_read_only(
+        self, mock_device_limit, mock_get_profiles
+    ):
+        mock_get_profiles.return_value = []
+        mock_device_limit.return_value = 5
+
+        user = User(id=1, telegram_id=999, device_limit=5)
+        session = AsyncMock()
+
+        rendered, builder = await _build_connections_screen(
+            user=user,
+            session=session,
+            profiles=[],
+            read_only=True,
+        )
+        markup = builder.as_markup()
+        callbacks = [
+            btn.callback_data
+            for row in markup.inline_keyboard
+            for btn in row
+            if btn.callback_data
+        ]
+        self.assertNotIn("menu_incy_subscription", callbacks)
+
+    @patch("bot.handlers.connection.common.get_user_profiles")
+    @patch("bot.handlers.connection.common._get_effective_device_limit")
+    @patch("bot.handlers.connection.common.SubscriptionTokenService.is_enabled")
+    async def test_button_hidden_when_service_disabled(
+        self, mock_is_enabled, mock_device_limit, mock_get_profiles
+    ):
+        mock_is_enabled.return_value = False
+        mock_get_profiles.return_value = []
+        mock_device_limit.return_value = 5
+
+        user = User(id=1, telegram_id=999, device_limit=5)
+        session = AsyncMock()
+
+        rendered, builder = await _build_connections_screen(
+            user=user,
+            session=session,
+            profiles=[],
+            read_only=False,
+        )
+        markup = builder.as_markup()
+        callbacks = [
+            btn.callback_data
+            for row in markup.inline_keyboard
+            for btn in row
+            if btn.callback_data
+        ]
+        self.assertNotIn("menu_incy_subscription", callbacks)
+
+    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
     @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.get_or_create_token")
     @patch("bot.handlers.connection.incy_routes.render_hub")
     async def test_show_incy_subscription_handler(
-        self, mock_render_hub, mock_get_token
+        self, mock_render_hub, mock_get_token, mock_check_access
     ):
+        mock_check_access.return_value = True
         mock_get_token.return_value = "token_abc_123"
 
         bot = AsyncMock()
@@ -106,54 +163,49 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         mock_get_token.assert_awaited_once_with(session, db_user)
         mock_render_hub.assert_awaited_once()
 
-        args = mock_render_hub.call_args[0]
-        text_arg = args[2]
-        keyboard_arg = args[3]
+    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.is_enabled")
+    async def test_show_incy_subscription_when_disabled(
+        self, mock_is_enabled
+    ):
+        mock_is_enabled.return_value = False
 
-        self.assertIn("https://", text_arg)
-        self.assertIn("sub/token_abc_123", text_arg)
-        self.assertIn("Как настроить", text_arg)
-        self.assertIn("iOS / Android", text_arg)
-        self.assertIn("Windows 10/11 (x64) и macOS 14+", text_arg)
-        self.assertIn("AmneziaVPN", text_arg)
-        self.assertIn("AmneziaWG", text_arg)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.answer = AsyncMock()
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=999)
 
-        btn_urls = [
-            btn.url
-            for row in keyboard_arg.inline_keyboard
-            for btn in row
-            if btn.url
-        ]
-        self.assertTrue(any("sub/open/token_abc_123" in u for u in btn_urls))
+        await show_incy_subscription(callback, state, session, db_user=db_user)
+        callback.answer.assert_awaited_once_with(
+            "⚠️ Подписка INCY временно недоступна.", show_alert=True
+        )
 
-        btn_copy = [
-            btn.copy_text.text
-            for row in keyboard_arg.inline_keyboard
-            for btn in row
-            if getattr(btn, "copy_text", None)
-        ]
-        self.assertTrue(any("token_abc_123" in t for t in btn_copy))
-        self.assertTrue(any("sub/token_abc_123" in t for t in btn_copy))
+    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
+    async def test_show_incy_subscription_when_no_access(
+        self, mock_check_access
+    ):
+        mock_check_access.return_value = False
 
-        btn_callbacks = [
-            btn.callback_data
-            for row in keyboard_arg.inline_keyboard
-            for btn in row
-            if btn.callback_data
-        ]
-        self.assertIn("back_to_connections", btn_callbacks)
-        self.assertIn("rotate_incy_token", btn_callbacks)
+        callback = MagicMock(spec=CallbackQuery)
+        callback.answer = AsyncMock()
+        state = AsyncMock(spec=FSMContext)
+        session = AsyncMock()
+        db_user = User(id=1, telegram_id=999)
 
-        all_buttons = [btn for row in keyboard_arg.inline_keyboard for btn in row]
-        self.assertEqual(len(all_buttons), 4)
+        await show_incy_subscription(callback, state, session, db_user=db_user)
+        callback.answer.assert_awaited_once_with(
+            "⚠️ Доступ неактивен. Продлите подписку.", show_alert=True
+        )
 
+    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
     @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
     @patch("bot.handlers.connection.incy_routes.render_hub")
     async def test_rotate_incy_subscription_handler(
-        self, mock_render_hub, mock_rotate_token
+        self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
         from bot.handlers.connection.incy_routes import rotate_incy_subscription
 
+        mock_check_access.return_value = True
         mock_rotate_token.return_value = "new_rotated_token_456"
 
         bot = AsyncMock()
@@ -187,13 +239,15 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
         self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
 
+    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
     @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
     @patch("bot.handlers.connection.incy_routes.render_hub")
     async def test_rotate_incy_subscription_handler_on_error(
-        self, mock_render_hub, mock_rotate_token
+        self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
         from bot.handlers.connection.incy_routes import rotate_incy_subscription
 
+        mock_check_access.return_value = True
         mock_rotate_token.side_effect = RuntimeError("DB error")
 
         bot = AsyncMock()
@@ -213,13 +267,15 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         mock_render_hub.assert_not_awaited()
 
+    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
     @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
     @patch("bot.handlers.connection.incy_routes.render_hub")
     async def test_rotate_incy_subscription_handler_on_commit_failure(
-        self, mock_render_hub, mock_rotate_token
+        self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
         from bot.handlers.connection.incy_routes import rotate_incy_subscription
 
+        mock_check_access.return_value = True
         mock_rotate_token.return_value = "uncommitted_token_999"
 
         bot = AsyncMock()

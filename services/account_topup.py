@@ -301,28 +301,30 @@ async def settle_succeeded_topup(
         return False, snapshot
 
     user = await lock_checkout_user(session, payment.user_id)
-    if user is not None:
-        hard_block = user.topup_blocked
-        recovery_topup = (
-            user.financial_hold
-            and user.financial_block_reason == "chargeback_debt"
-        )
-        if hard_block or (user.financial_hold and not recovery_topup):
-            payment.fulfillment_status = "manual_review"
-            payment.reconciliation_status = "manual_review"
-            payment.manual_review_reason = "user_financially_blocked"
-            session.add(
-                PaymentEvent(
-                    payment_id=payment.id,
-                    event_type="topup_blocked_by_hold",
-                    provider_status=payment.provider_status,
-                    reason="user_financially_blocked",
-                    source=source,
-                )
+    if user is None:
+        raise AccountTopupError("topup_user_missing")
+
+    hard_block = user.topup_blocked
+    recovery_topup = (
+        user.financial_hold
+        and user.financial_block_reason == "chargeback_debt"
+    )
+    if hard_block or (user.financial_hold and not recovery_topup):
+        payment.fulfillment_status = "manual_review"
+        payment.reconciliation_status = "manual_review"
+        payment.manual_review_reason = "user_financially_blocked"
+        session.add(
+            PaymentEvent(
+                payment_id=payment.id,
+                event_type="topup_blocked_by_hold",
+                provider_status=payment.provider_status,
+                reason="user_financially_blocked",
+                source=source,
             )
-            await session.flush()
-            snapshot = await get_account_balance(session, user_id=payment.user_id)
-            return False, snapshot
+        )
+        await session.flush()
+        snapshot = await get_account_balance(session, user_id=payment.user_id)
+        return False, snapshot
 
     entry, created = await credit_succeeded_topup(
         session,

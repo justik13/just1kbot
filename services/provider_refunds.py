@@ -373,7 +373,7 @@ async def _consume_matching_reservation(
             await resolve_reservation(
                 session, reservation_id=reservation.id, outcome="consumed"
             )
-            new_res_key = f"refund-split-res:{payment_id}:{reservation.id}:{amount}:{now_utc().timestamp()}"
+            new_res_key = f"refund-split-res:{payment_id}:{reservation.id}:{amount}"
             new_reservation = AccountBalanceReservation(
                 user_id=reservation.user_id,
                 payment_id=payment_id,
@@ -444,7 +444,7 @@ async def _consume_matching_reservation(
             await resolve_reservation(
                 session, reservation_id=res.id, outcome="consumed"
             )
-            new_res_key = f"refund-split-res:{payment_id}:{res.id}:{remaining_to_consume}:{now_utc().timestamp()}"
+            new_res_key = f"refund-split-res:{payment_id}:{res.id}:{remaining_to_consume}"
             new_reservation = AccountBalanceReservation(
                 user_id=res.user_id,
                 payment_id=payment_id,
