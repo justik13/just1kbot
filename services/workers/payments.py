@@ -13,7 +13,6 @@ from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
-from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
@@ -143,7 +142,7 @@ async def _recover_stale_topups(bot: Bot | None = None):
         if not rows:
             break
 
-        for pid, uid in rows:
+        for pid, _uid in rows:
             last_processed_id = pid
             try:
                 async with session_scope() as session:
