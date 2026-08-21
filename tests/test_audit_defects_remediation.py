@@ -136,7 +136,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session = AsyncMock()
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = [p.id for p in fake_payments]
+                mock_scalars.all.return_value = [(p.id, p.user_id) for p in fake_payments]
             else:
                 mock_scalars.all.return_value = []
             
@@ -147,6 +147,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
                 
             mock_session.scalar.side_effect = mock_get
             query_count += 1
+            mock_session.execute.return_value = mock_scalars
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
 
@@ -193,7 +194,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = [fake_payment.id]
+                mock_scalars.all.return_value = [(fake_payment.id, fake_payment.user_id)]
             else:
                 mock_scalars.all.return_value = []
             
@@ -202,6 +203,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.scalar.side_effect = mock_get
                 
             query_count += 1
+            mock_session.execute.return_value = mock_scalars
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
 
@@ -248,7 +250,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
-                mock_scalars.all.return_value = [fake_payment.id]
+                mock_scalars.all.return_value = [(fake_payment.id, fake_payment.user_id)]
             else:
                 mock_scalars.all.return_value = []
                 
@@ -257,6 +259,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             mock_session.scalar.side_effect = mock_get
                 
             query_count += 1
+            mock_session.execute.return_value = mock_scalars
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
 
