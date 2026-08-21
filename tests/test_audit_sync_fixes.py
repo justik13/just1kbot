@@ -17,7 +17,7 @@ class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
         self.assertEqual(scripts.get_heads(), ["c20a97270920"])
         rev_0009 = scripts.get_revision("c20a97270920")
-        self.assertEqual(rev_0009.down_revision, "bac83372da22")
+        self.assertEqual(rev_0009.down_revision, "0007_webhook_retention")
 
 
     def test_users_repo_allowed_fields_no_referral_days(self):
