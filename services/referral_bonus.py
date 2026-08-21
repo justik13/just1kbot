@@ -288,7 +288,9 @@ async def reverse_referral_bonus_for_topup(
     from database.models import Payment
     from sqlalchemy import text
 
-    payment = await session.get(Payment, payment_id)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
     if payment is None or payment.user_id is None:
         return Decimal(0)
 
