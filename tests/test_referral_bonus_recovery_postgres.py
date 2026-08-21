@@ -186,13 +186,13 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             await session.merge(User(id=1, telegram_id=1))
             await session.commit()
             
-            # Insert 5000 irrelevant rows so the planner naturally prefers an Index Scan
+            # Insert 50000 irrelevant rows so the planner naturally prefers an Index Scan
             # over a full Seq Scan without artificial settings.
             await session.execute(
                 text(
                     "INSERT INTO payments (user_id, amount, currency, provider_status, fulfillment_status, created_at, updated_at, public_order_id, external_id, provider_idempotency_key) "
                     "SELECT 1, 100, 'RUB', 'succeeded', 'succeeded', now(), now(), md5(random()::text), md5(random()::text), md5(random()::text) "
-                    "FROM generate_series(1, 5000)"
+                    "FROM generate_series(1, 50000)"
                 )
             )
             await session.execute(
