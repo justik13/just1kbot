@@ -37,8 +37,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
@@ -64,8 +62,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         state.get_data.return_value = {"target_telegram_id": 888}
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),
@@ -93,8 +89,6 @@ class TestAdminBalanceRoutes(unittest.IsolatedAsyncioTestCase):
         user.username = "test_user"
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.balance_routes.is_admin", return_value=True),

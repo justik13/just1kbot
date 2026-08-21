@@ -25,8 +25,6 @@ TRUNCATE_SQL = (
 
 def _make_mock_session(user_in_db: User):
     session = AsyncMock()
-    session.begin_nested.return_value.__aenter__.return_value = session
-    session.begin_nested.return_value.__aexit__.return_value = None
     session.begin_nested = MagicMock()
     nested = AsyncMock()
     nested.__aenter__.return_value = nested
@@ -89,8 +87,6 @@ class SubscriptionTokenServiceUnitTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_get_user_by_token_validation(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         res_empty = await SubscriptionTokenService.get_user_by_token(session, "")
         self.assertIsNone(res_empty)
 
@@ -104,8 +100,6 @@ class SubscriptionTokenServiceUnitTests(unittest.IsolatedAsyncioTestCase):
         user = User(id=42, telegram_id=999, subscription_token="valid_token")
         mock_get_repo.return_value = user
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         found = await SubscriptionTokenService.get_user_by_token(session, "valid_token")
         self.assertEqual(found, user)

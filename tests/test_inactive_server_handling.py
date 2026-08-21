@@ -12,8 +12,6 @@ class InactiveServerHandlingTests(unittest.IsolatedAsyncioTestCase):
     @patch("services.workers.traffic.AmneziaClient")
     async def test_traffic_sync_once_ignores_inactive_servers(self, mock_client_cls, mock_session_scope):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         # Prepare 1 active server row for query #1
@@ -46,8 +44,6 @@ class InactiveServerHandlingTests(unittest.IsolatedAsyncioTestCase):
     @patch("services.workers.cleanup.AmneziaClient")
     async def test_cleanup_dangling_peers_ignores_inactive_servers(self, mock_client_cls, mock_session_scope):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         active_server = SimpleNamespace(id=1, api_url="http://active:8443", api_key="key1", name="Active", is_active=True)
@@ -99,8 +95,6 @@ class InactiveServerHandlingTests(unittest.IsolatedAsyncioTestCase):
         callback.data = "admin_server_toggle_apply:5"
         state = AsyncMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         await toggle_server_apply(callback, state, session)
 

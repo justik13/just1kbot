@@ -269,8 +269,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         server = Server(
@@ -326,8 +324,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_get_user,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         mock_get_profile.return_value = None
 
@@ -350,8 +346,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         server = Server(id=10, name="Server", protocol="amneziawg2", is_active=True)
@@ -394,8 +388,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         server = Server(id=10, name="Server", protocol="amneziawg2", is_active=True)
@@ -442,8 +434,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
 
         server = Server(id=10, name="Server", protocol="amneziawg2", is_active=True)
@@ -479,8 +469,6 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         mock_check_access,
     ):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session_scope.return_value.__aenter__.return_value = mock_session
         user = User(id=88, is_deleted=False, is_banned=False, financial_hold=False)
         mock_get_user.return_value = user

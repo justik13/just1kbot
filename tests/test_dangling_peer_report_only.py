@@ -202,8 +202,6 @@ class DanglingPeerReportOnlyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cleanup_old_records_executes_without_compile_error(self):
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_res = MagicMock(rowcount=0)
         mock_res.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_res

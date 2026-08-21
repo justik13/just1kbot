@@ -39,8 +39,6 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         scalars_mock = MagicMock()
         scalars_mock.all.return_value = [server]
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalars = AsyncMock(return_value=scalars_mock)
 
         with patch("bot.handlers.admin.users.list_routes.is_admin", return_value=True):
@@ -101,8 +99,6 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
             api_url="https://example.invalid/api",
         )
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with patch.object(
             common,
@@ -125,8 +121,6 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
             message=SimpleNamespace(edit_text=AsyncMock()),
         )
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         tariffs = [
             SimpleNamespace(id=1, name="Базовый", device_limit=2, duration_days=7, is_active=True),

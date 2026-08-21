@@ -158,8 +158,6 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         state = MagicMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock()
 
         with (
@@ -184,8 +182,6 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         state = MagicMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock()
 
         with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[999])):
@@ -206,8 +202,6 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         state = MagicMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock()
 
         with (
@@ -230,8 +224,6 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
 
         state = MagicMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = MagicMock()
 
         # When chat has no hubs in DB at all, it returns []

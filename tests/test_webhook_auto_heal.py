@@ -17,8 +17,6 @@ class WebhookAutoHealTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalars = AsyncMock(
             return_value=MagicMock(all=MagicMock(return_value=[dead_row]))
         )
@@ -40,8 +38,6 @@ class WebhookAutoHealTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalars = AsyncMock(
             side_effect=[
                 MagicMock(all=MagicMock(return_value=[dead_row])),
@@ -65,8 +61,6 @@ class WebhookAutoHealTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.scalars = AsyncMock(
             return_value=MagicMock(all=MagicMock(return_value=[succeeded_dead_row]))
         )

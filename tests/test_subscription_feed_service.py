@@ -124,8 +124,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         configs = await SubscriptionFeedService.get_exportable_configs(session, 10)
 
         # Only p1_valid must be exported
@@ -158,8 +156,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         status, headers, body = await SubscriptionFeedService.build_feed(session, user)
 
         self.assertEqual(status, 200)
@@ -214,8 +210,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         status, headers, body = await SubscriptionFeedService.build_feed(session, user)
 
         self.assertEqual(status, 200)
@@ -242,8 +236,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         status, headers, body = await SubscriptionFeedService.build_feed(session, user)
 
         self.assertEqual(status, 200)
@@ -261,8 +253,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         status, headers, body = await SubscriptionFeedService.build_feed(session, user_expired)
 
         self.assertEqual(status, 200)
@@ -310,8 +300,6 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         status, headers, body = await SubscriptionFeedService.build_feed(session, user)
 
         self.assertEqual(status, 200)

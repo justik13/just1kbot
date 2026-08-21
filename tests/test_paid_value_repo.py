@@ -35,8 +35,6 @@ class PaidValueRepoTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_entry_type_raises_value_error(self):
         """Verify that attempting to insert an unsupported entry_type raises ValueError."""
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         values = {
             "entry_type": "unknown_legacy_type",
             "user_id": 1,
@@ -64,8 +62,6 @@ class PaidValueRepoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.scalar.return_value = 101
         mock_session.get.return_value = entry
 
@@ -98,8 +94,6 @@ class PaidValueRepoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.scalar.return_value = 102
         mock_session.get.return_value = entry
 
@@ -133,8 +127,6 @@ class PaidValueRepoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         # Simulate on_conflict_do_nothing returning None (conflict exists)
         mock_session.scalar.side_effect = [None, existing_entry]
 

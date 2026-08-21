@@ -159,8 +159,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         p = topup()
         p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
@@ -214,8 +212,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             db_p = topup()
             db_p.credit_notified_at = None
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.get.return_value = db_p
 
             class DummyContext:
@@ -238,8 +234,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         p = topup()
         p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
@@ -290,8 +284,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             # Test that fallback notification sent has balance text, not purchase confirmation
             with patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub:
                 mock_session = AsyncMock()
-                session.begin_nested.return_value.__aenter__.return_value = session
-                session.begin_nested.return_value.__aexit__.return_value = None
                 mock_session.get.return_value = p
 
                 class DummyContext:
@@ -313,8 +305,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         p = topup()
         p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
@@ -369,8 +359,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             db_p = topup()
             db_p.credit_notified_at = None
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.get.return_value = db_p
             mock_session.scalar.return_value = mock_quote
 
@@ -410,8 +398,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         mock_quote.purchase_notified_at = None  # Not notified yet!
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(1234, 777)]))
 
         async def _scalar_mock(query):
@@ -493,8 +479,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         p = topup()
         p.provider_confirmed_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
@@ -541,8 +525,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             db_p = topup()
             db_p.topup_context = dict(p.topup_context)
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.get.return_value = db_p
 
             class DummyContext:
@@ -578,8 +560,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         }
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(5555, 777)]))
         mock_session.scalar.return_value = p
 
@@ -634,8 +614,6 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         }
 
         mock_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(6666, 777)]))
         mock_session.scalar.return_value = p
 

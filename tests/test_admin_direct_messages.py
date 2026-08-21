@@ -22,8 +22,6 @@ class TestAdminDirectMessages(unittest.IsolatedAsyncioTestCase):
         user.telegram_id = 777
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch("bot.handlers.admin.users.message_routes.is_admin", return_value=True),
@@ -60,8 +58,6 @@ class TestAdminDirectMessages(unittest.IsolatedAsyncioTestCase):
         user.telegram_id = 777
 
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         mock_show_card = AsyncMock()
         with (

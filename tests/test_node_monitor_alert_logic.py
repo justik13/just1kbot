@@ -46,8 +46,6 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         self.patcher_settings_2 = patch("config.settings.get_settings", return_value=self.mock_settings)
 
         dummy_session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         @asynccontextmanager
         async def dummy_scope():

@@ -54,8 +54,6 @@ class AdminPaymentCardTests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         await show_payment_card(callback, state, session)
 

@@ -136,8 +136,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         async def fake_session_scope():
             nonlocal query_count
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_scalars = MagicMock()
             if query_count == 0:
                 mock_scalars.all.return_value = [p.id for p in fake_payments]
@@ -194,8 +192,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         async def fake_session_scope():
             nonlocal query_count
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
@@ -253,8 +249,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         async def fake_session_scope():
             nonlocal query_count
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.begin_nested = fake_nested
             mock_scalars = MagicMock()
             if query_count == 0:
@@ -297,8 +291,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         @asynccontextmanager
         async def fake_session_scope():
             mock_session = AsyncMock()
-            session.begin_nested.return_value.__aenter__.return_value = session
-            session.begin_nested.return_value.__aexit__.return_value = None
             mock_session.get.return_value = server
             yield mock_session
 
@@ -311,8 +303,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_untracked_refund_not_auto_resolved(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         mock_scalars = MagicMock()
         mock_scalars.all.return_value = []
         session.scalars.return_value = mock_scalars
@@ -321,8 +311,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_welcome_bonus_reversal_without_referrer(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         payment = MagicMock()
         payment.id = 55
@@ -368,8 +356,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_refund_reservation_split(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         existing_reservation = AccountBalanceReservation(
             id=77,
@@ -411,8 +397,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_refund_selection_picks_sufficient_reservation(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Reservation 700 covers 500 refund
         res_700 = AccountBalanceReservation(
@@ -450,8 +434,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_refund_multi_reservation_consumption(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Two smaller reservations 300 and 200 covering 500 refund
         res_300 = AccountBalanceReservation(
@@ -496,8 +478,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_refund_insufficient_reservations_returns_none(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         # Reservations total only 300, but refund is 500
         res_200 = AccountBalanceReservation(
@@ -560,8 +540,6 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
 
     async def test_update_server_health_snapshot_auto_disabled_allowed(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         server = Server(
             id=3,

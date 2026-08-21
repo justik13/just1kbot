@@ -52,8 +52,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         user = User(id=1, telegram_id=999, device_limit=5)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         rendered, builder = await _build_connections_screen(
             user=user,
@@ -94,8 +92,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         user = User(id=1, telegram_id=999, device_limit=5)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         rendered, builder = await _build_connections_screen(
             user=user,
@@ -124,8 +120,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         user = User(id=1, telegram_id=999, device_limit=5)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         rendered, builder = await _build_connections_screen(
             user=user,
@@ -161,8 +155,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = User(id=1, telegram_id=999, subscription_token="token_abc_123")
 
         await show_incy_subscription(callback, state, session, db_user=db_user)
@@ -181,8 +173,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = User(id=1, telegram_id=999)
 
         await show_incy_subscription(callback, state, session, db_user=db_user)
@@ -200,8 +190,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = User(id=1, telegram_id=999)
 
         await show_incy_subscription(callback, state, session, db_user=db_user)
@@ -230,8 +218,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.commit = AsyncMock()
         db_user = User(id=1, telegram_id=999, subscription_token="old_token")
 
@@ -274,8 +260,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         db_user = User(id=1, telegram_id=999, subscription_token="old_token")
 
         await rotate_incy_subscription(callback, state, session, db_user=db_user)
@@ -304,8 +288,6 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock(spec=FSMContext)
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.commit.side_effect = RuntimeError("DB connection dropped on commit")
         db_user = User(id=1, telegram_id=999, subscription_token="old_token")
 

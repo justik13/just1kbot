@@ -17,8 +17,6 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
 
     async def test_system_settings_repo(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         session.add = MagicMock()
         session.get.return_value = None
 
@@ -30,8 +28,6 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
 
     async def test_search_user_flexible_username(self):
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
         user_mock = MagicMock()
         user_mock.username = "test_user"
 

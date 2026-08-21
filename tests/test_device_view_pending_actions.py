@@ -71,8 +71,6 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         session = AsyncMock()
-        session.begin_nested.return_value.__aenter__.return_value = session
-        session.begin_nested.return_value.__aexit__.return_value = None
 
         with (
             patch(
