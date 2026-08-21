@@ -124,7 +124,6 @@ async def grant_referral_bonus_for_topup(
             User.id == purchaser_user_id,
             User.is_deleted.is_(False),
         )
-        .with_for_update()
     )
     if purchaser is None or purchaser.referred_by is None:
         return ReferralBonusGrantResult(
@@ -144,7 +143,6 @@ async def grant_referral_bonus_for_topup(
             User.telegram_id == purchaser.referred_by,
             User.is_deleted.is_(False),
         )
-        .with_for_update()
     )
     if referrer is None or referrer.is_banned:
         return ReferralBonusGrantResult(
@@ -296,7 +294,6 @@ async def reverse_referral_bonus_for_topup(
     purchaser = await session.scalar(
         select(User)
         .where(User.id == payment.user_id)
-        .with_for_update()
     )
     if purchaser is None:
         return Decimal(0)
@@ -306,7 +303,6 @@ async def reverse_referral_bonus_for_topup(
         referrer = await session.scalar(
             select(User)
             .where(User.telegram_id == purchaser.referred_by)
-            .with_for_update()
         )
 
     total_reversed = Decimal(0)
