@@ -317,7 +317,7 @@ async def reverse_referral_bonus_for_topup(
                     AccountLedgerEntry.entry_type == "admin_adjustment",
                     AccountLedgerEntry.amount > 0,
                     AccountLedgerEntry.reversal_of_id.is_(None),
-                    text("metadata_ @> :metadata_filter").bindparams(
+                    text("metadata @> :metadata_filter").bindparams(
                         metadata_filter='{"topup_payment_id": %d, "source_type": "%s"}' % (payment_id, REFERRAL_BONUS_SOURCE)
                     )
                 )
@@ -387,7 +387,7 @@ async def reverse_referral_bonus_for_topup(
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
                 AccountLedgerEntry.reversal_of_id.is_(None),
-                text("metadata_ @> :metadata_filter2").bindparams(
+                text("metadata @> :metadata_filter2").bindparams(
                     metadata_filter2='{"topup_payment_id": %d, "reason": "first_topup_welcome"}' % payment_id
                 )
             )
