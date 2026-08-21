@@ -33,7 +33,7 @@ def _needs_attention():
 
 
 def _needs_recovery():
-    from sqlalchemy import or_
+    from sqlalchemy import or_, and_, select, func, text
     from sqlalchemy.orm import aliased
 
     from database.models import User
@@ -61,7 +61,7 @@ def _needs_recovery():
         Payment.provider_confirmed_at.is_not(None),
         Payment.fulfillment_status == "succeeded",
         user_subquery.exists(),
-        ~Payment.topup_context.contains({"referral_bonus_processed": True}),
+        ~func.coalesce(Payment.topup_context, text("'{}'::jsonb")).contains({"referral_bonus_processed": True}),
     )
 
     return or_(
@@ -162,10 +162,7 @@ async def _recover_stale_topups(bot: Bot | None = None):
                         continue
 
                     ctx = payment.topup_context or {}
-                    # Fast-path check after acquiring lock for concurrency safety
-                    if ctx.get("referral_bonus_processed"):
-                        continue
-
+                    
                     if payment.external_id and payment.provider_status in {
                         "creating",
                         "pending",

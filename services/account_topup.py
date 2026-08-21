@@ -436,7 +436,11 @@ async def settle_succeeded_topup(
                     logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
         else:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
-            payment.topup_context = {**ctx, "referral_bonus_processed": True}
+            payment.topup_context = {
+                **ctx, 
+                "referral_bonus_processed": True,
+                "purchaser_welcome_bonus": int(purchaser_welcome_amount),
+            }
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")

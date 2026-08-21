@@ -142,12 +142,12 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             else:
                 mock_scalars.all.return_value = []
             
-            async def mock_get(model, pk):
-                if model == Payment:
-                    return fake_payments_dict.get(pk)
+            async def mock_get(*args, **kwargs):
+                if len(processed_payment_ids) < len(fake_payments):
+                    return fake_payments[len(processed_payment_ids)]
                 return None
                 
-            mock_session.get.side_effect = mock_get
+            mock_session.scalar.side_effect = mock_get
             query_count += 1
             mock_session.scalars.return_value = mock_scalars
             yield mock_session
@@ -199,11 +199,9 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             else:
                 mock_scalars.all.return_value = []
             
-            async def mock_get(model, pk):
-                if model == Payment and pk == fake_payment.id:
-                    return fake_payment
-                return None
-            mock_session.get.side_effect = mock_get
+            async def mock_get(*args, **kwargs):
+                return fake_payment
+            mock_session.scalar.side_effect = mock_get
                 
             query_count += 1
             mock_session.scalars.return_value = mock_scalars
@@ -256,11 +254,9 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
             else:
                 mock_scalars.all.return_value = []
                 
-            async def mock_get(model, pk):
-                if model == Payment and pk == fake_payment.id:
-                    return fake_payment
-                return None
-            mock_session.get.side_effect = mock_get
+            async def mock_get(*args, **kwargs):
+                return fake_payment
+            mock_session.scalar.side_effect = mock_get
                 
             query_count += 1
             mock_session.scalars.return_value = mock_scalars

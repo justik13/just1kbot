@@ -957,13 +957,13 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="unknown_custom_state")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="pending_create")))
         self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="deleting")))
-        self.assertFalse(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
 
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="active")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="pending_update")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="update_failed")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_failed")))
         self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="delete_failed")))
+        self.assertTrue(can_show_delete_action(SimpleNamespace(provisioning_status="create_cleanup_pending")))
 
     async def test_24_await_profile_ready_rejects_corrupted_raw_config_until_valid(self):
         """Profile with active status and peer_id but invalid raw_config is not treated as ready."""
@@ -1082,7 +1082,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("active", PROFILE_QUOTA_EXCLUDED_STATUSES)
 
     async def test_28_confirm_delete_device_stale_callback_fail_closed_rejection(self):
-        """If device transitioned to create_cleanup_pending, confirm_delete rejects it fail-closed."""
+        """If device transitioned to deleting, confirm_delete rejects it fail-closed."""
         from bot.handlers.connection.device_delete_routes import confirm_delete_device
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
@@ -1091,7 +1091,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             server_id=10,
             device_name="Мой телефон",
-            provisioning_status="create_cleanup_pending",
+            provisioning_status="deleting",
             peer_id="p1",
             raw_config=None,
             is_active=True,
@@ -1116,7 +1116,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await confirm_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_once_with("⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже.", show_alert=True)
+            callback.answer.assert_called_once_with("🗑 Устройство уже удаляется с сервера.", show_alert=True)
             mock_delete.assert_not_called()
             mock_render.assert_called_once()
 
@@ -1268,12 +1268,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         session = AsyncMock()
         session.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=cleanup_profile)))
-        session.get = AsyncMock(return_value=MagicMock(name="Server"))
+        fake_server = MagicMock(name="Server")
+        fake_server.name = "mock_server"
+        session.get = AsyncMock(return_value=fake_server)
 
-        with patch("services.device_service.ensure_delete_operation", new=AsyncMock()):
-            from services.device_service import DeviceCreationError
-            with self.assertRaises(DeviceCreationError):
-                await DeviceService.delete_device(session, cleanup_profile, force=False)
+        with patch("services.device_service.ensure_delete_operation", new=AsyncMock()) as mock_ensure:
+            from services.device_service import DeviceService
+            await DeviceService.delete_device(session, cleanup_profile, force=True)
+            session.delete.assert_called_once_with(cleanup_profile)
 
     async def test_34_cleanup_worker_stuck_profile_with_peer_id_queues_delete_operation(self):
         """Cleanup worker ensures delete_peer operation is queued if stuck profile has peer_id."""

@@ -476,7 +476,7 @@ async def get_referral_bonus_balance(
                 AccountLedgerEntry.user_id == user_id,
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
-                AccountLedgerEntry.metadata_["source_type"].as_string()
+                AccountLedgerEntry.metadata_["source_type"].astext
                 == REFERRAL_BONUS_SOURCE,
             )
         )
@@ -491,9 +491,9 @@ async def get_referral_bonus_balance(
                 AccountLedgerEntry.user_id == user_id,
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount < 0,
-                AccountLedgerEntry.metadata_["source_type"].as_string()
+                AccountLedgerEntry.metadata_["source_type"].astext
                 == REFERRAL_BONUS_SOURCE,
-                AccountLedgerEntry.metadata_["reason"].as_string()
+                AccountLedgerEntry.metadata_["reason"].astext
                 == "topup_refund_reversal",
             )
         )

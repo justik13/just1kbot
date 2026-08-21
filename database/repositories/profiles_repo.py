@@ -35,6 +35,7 @@ ALLOWED_DELETE_STATES = frozenset({
     "update_failed",
     "create_failed",
     "delete_failed",
+    "create_cleanup_pending",
 })
 
 

@@ -355,11 +355,23 @@ class DeviceService:
                 != "never_started"
             )
         ):
-            # Keep a durable profile anchor while an attempted CREATE may still
-            # have a remote side effect. Cleanup can then reconcile by name.
-            profile.provisioning_status = "create_cleanup_pending"
-            profile.is_active = False
-            profile.desired_is_active = False
+            # The profile is being force-deleted, but we have a durable CREATE operation
+            # that might have a remote side effect (an orphan peer on the node).
+            # The API operation will outlive the VPNProfile (its profile_id becomes NULL
+            # due to ON DELETE SET NULL).
+            # If the operation is dead, we revive it so the API executor can wake up,
+            # discover the profile is missing, and execute its orphan cleanup block.
+            if create_operation.status in {"dead", "cancelled"}:
+                create_operation.status = "retry"
+                create_operation.attempts = 0
+                create_operation.next_attempt_at = now_utc()
+                create_operation.completed_at = None
+                create_operation.locked_at = None
+                create_operation.locked_by = None
+                create_operation.last_error_code = "device_delete_force_revive"
+                create_operation.last_error = "Revived by force delete for orphan cleanup"
+            
+            await session.delete(profile)
         else:
             await session.delete(profile)
 

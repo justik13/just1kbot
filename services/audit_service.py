@@ -19,7 +19,7 @@ class AuditService:
         details: Any = None,
     ):
         """Universal audit logger supporting string and dictionary details."""
-        if session.in_transaction():
+        if callable(getattr(session, "in_transaction", None)) and session.in_transaction():
             # Flush pending business changes BEFORE entering the silent audit try-block
             # so that business constraint violations bubble up to the caller and aren't
             # swallowed as "audit failures", which would leave the transaction poisoned.

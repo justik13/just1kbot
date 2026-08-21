@@ -315,22 +315,25 @@ async def _cleanup_stuck_profiles():
             elif profile.provisioning_status in {"create_cleanup_pending", "deleting"}:
                 # Peer ID unknown: requeue create_peer for reconciliation by client_name on Amnezia
                 if create_op and create_op.status in {"dead", "cancelled"}:
-                    await session.execute(
-                        sa_update(APIOperation)
-                        .where(APIOperation.id == create_op.id)
-                        .values(
-                            status="retry",
-                            attempts=0,
-                            next_attempt_at=func.now(),
-                            completed_at=None,
-                            locked_at=None,
-                            locked_by=None,
-                            updated_at=func.now(),
-                            last_error_code="stuck_cleanup_requeued",
-                            last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
+                    from database.models import Server
+                    server = await session.get(Server, profile.server_id)
+                    if server and server.is_active:
+                        await session.execute(
+                            sa_update(APIOperation)
+                            .where(APIOperation.id == create_op.id)
+                            .values(
+                                status="retry",
+                                attempts=0,
+                                next_attempt_at=func.now(),
+                                completed_at=None,
+                                locked_at=None,
+                                locked_by=None,
+                                updated_at=func.now(),
+                                last_error_code="stuck_cleanup_requeued",
+                                last_error="Requeued by stuck profile cleanup worker for peer reconciliation",
+                            )
                         )
-                    )
-                    logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
+                        logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
                 elif not create_op and profile.provisioning_status == "create_cleanup_pending":
                     # Recreate the durable reconciliation command instead of
                     # deleting a state that explicitly means a peer may exist.

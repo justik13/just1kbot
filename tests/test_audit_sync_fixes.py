@@ -14,11 +14,11 @@ from services.workers.traffic import traffic_sync_loop
 
 
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
-    def test_alembic_head_is_0007_webhook_retention(self):
+    def test_alembic_head_is_0009_payments_referral_bonus_idx(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["0007_webhook_retention"])
-        rev_0007 = scripts.get_revision("0007_webhook_retention")
-        self.assertEqual(rev_0007.down_revision, "0006_add_user_subscription_token")
+        self.assertEqual(scripts.get_heads(), ["c20a97270920"])
+        rev_0009 = scripts.get_revision("c20a97270920")
+        self.assertEqual(rev_0009.down_revision, "bac83372da22")
 
 
     def test_users_repo_allowed_fields_no_referral_days(self):

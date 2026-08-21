@@ -26,7 +26,7 @@ def upgrade() -> None:
             op.execute(
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_referral_bonus_unprocessed "
                 "ON payments (id) "
-                "WHERE NOT (topup_context @> '{\"referral_bonus_processed\": true}'::jsonb);"
+                "WHERE NOT (COALESCE(topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb);"
             )
 
 
