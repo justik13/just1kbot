@@ -58,23 +58,16 @@ def _needs_recovery():
     )
 
     needs_bonus_retry = and_(
-        Payment.provider_status == "succeeded",
+        text("payments.provider_status = 'succeeded'"),
         Payment.provider_confirmed_at.is_not(None),
-        Payment.fulfillment_status == "succeeded",
+        text("payments.fulfillment_status = 'succeeded'"),
         user_subquery.exists(),
         text("NOT (COALESCE(payments.topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"),
     )
 
     return or_(
-        and_(
-            Payment.external_id.is_not(None),
-            Payment.provider_status.in_(("creating", "pending", "waiting_for_capture", "unknown")),
-        ),
-        and_(
-            Payment.provider_status == "succeeded",
-            Payment.provider_confirmed_at.is_not(None),
-            Payment.fulfillment_status.notin_(("succeeded", "reversed", "manual_review")),
-        ),
+        text("payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"),
+        text("payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"),
         needs_bonus_retry,
     )
 
