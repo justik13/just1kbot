@@ -204,8 +204,8 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             
         # Now run ANALYZE explicitly outside transaction to update table statistics
         async with self.engine.connect() as conn:
-            conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
-            await conn.execute(text("ANALYZE payments"))
+            autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit_conn.execute(text("ANALYZE payments"))
 
         async with self.session_factory() as session:
             stmt = select(Payment).where(_needs_recovery())
