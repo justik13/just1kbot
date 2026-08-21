@@ -23,7 +23,7 @@ from services.api_operations_queue import (
 from services.audit_service import AuditService
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
-from utils.datetime_helpers import is_expired, now_msk
+from utils.datetime_helpers import is_expired, now_msk, now_utc
 
 logger = logging.getLogger(__name__)
 RESERVING_STATUSES = (
@@ -298,7 +298,23 @@ class DeviceService:
         cleanup_peer_id = profile.peer_id or (
             create_operation.peer_id if create_operation else None
         )
-        if cleanup_peer_id:
+        if (
+            force
+            and create_operation is not None
+            and create_operation.status in {"pending", "retry"}
+        ):
+            create_operation.status = "cancelled"
+            create_operation.completed_at = now_utc()
+            create_operation.locked_at = None
+            create_operation.locked_by = None
+            create_operation.last_error_code = "create_cancelled_by_force_delete"
+        processing_create_without_profile_peer = (
+            force
+            and create_operation is not None
+            and create_operation.status == "processing"
+            and profile.peer_id is None
+        )
+        if cleanup_peer_id and not processing_create_without_profile_peer:
             delete_key = f"delete-peer:{profile.id}:{cleanup_peer_id}"
             if not force:
                 profile.provisioning_status = "deleting"
@@ -330,9 +346,15 @@ class DeviceService:
                     audit_reason="device_delete_force",
                 )
                 await session.delete(profile)
-        elif force and create_operation is not None and classify_create_side_effect_risk(
-            create_operation
-        ) != "never_started":
+        elif (
+            force
+            and create_operation is not None
+            and (
+                create_operation.status == "processing"
+                or classify_create_side_effect_risk(create_operation)
+                != "never_started"
+            )
+        ):
             # Keep a durable profile anchor while an attempted CREATE may still
             # have a remote side effect. Cleanup can then reconcile by name.
             profile.provisioning_status = "create_cleanup_pending"
