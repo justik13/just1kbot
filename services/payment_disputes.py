@@ -284,6 +284,18 @@ async def resolve_payment_dispute(
 ) -> PaymentDispute:
     if outcome not in {"won_by_merchant", "lost_by_merchant"}:
         raise PaymentDisputeError("dispute_outcome_invalid")
+    dispute_info = await session.scalar(
+        select(PaymentDispute).where(PaymentDispute.id == dispute_id)
+    )
+    if dispute_info is None:
+        raise PaymentDisputeError("dispute_not_found")
+
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == dispute_info.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise PaymentDisputeError("payment_not_found")
+
     dispute = await session.scalar(
         select(PaymentDispute)
         .where(PaymentDispute.id == dispute_id)
@@ -295,11 +307,6 @@ async def resolve_payment_dispute(
         return dispute
     if dispute.status not in ACTIVE_DISPUTE_STATUSES:
         raise PaymentDisputeError("dispute_already_resolved")
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == dispute.payment_id).with_for_update()
-    )
-    if payment is None:
-        raise PaymentDisputeError("payment_not_found")
 
     if outcome == "won_by_merchant":
         if dispute.reservation_id is not None:

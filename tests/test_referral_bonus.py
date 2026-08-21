@@ -131,17 +131,19 @@ class TestReferralBonusLedgerEntryShape:
                 return purchaser
             return None
 
-        scalars_mock = MagicMock()
-        scalars_mock.all.return_value = [existing_bonus_credit]
-
+        scalars_mock_1 = MagicMock()
+        scalars_mock_1.all.return_value = [existing_bonus_credit]
+        scalars_mock_2 = MagicMock()
+        scalars_mock_2.all.return_value = []
+        
         session = AsyncMock()
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
         mock_ctx.__aexit__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=None)
         session.begin_nested = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock(return_value=mock_ctx)
         session.get = AsyncMock(side_effect=fake_get)
-        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None])
-        session.scalars = AsyncMock(return_value=scalars_mock)
+        session.scalar = AsyncMock(side_effect=[purchaser, referrer, None, None, None])
+        session.scalars = AsyncMock(side_effect=[scalars_mock_1, scalars_mock_2, scalars_mock_2])
         session.add = fake_add
         session.flush = AsyncMock()
 

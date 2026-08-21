@@ -309,6 +309,7 @@ async def reverse_referral_bonus_for_topup(
 
     # 1. Reverse referrer bonus for this top-up if present and referrer exists.
     if referrer is not None:
+        from sqlalchemy import text
         candidate_credits = (
             await session.scalars(
                 select(AccountLedgerEntry).where(
@@ -316,17 +317,13 @@ async def reverse_referral_bonus_for_topup(
                     AccountLedgerEntry.entry_type == "admin_adjustment",
                     AccountLedgerEntry.amount > 0,
                     AccountLedgerEntry.reversal_of_id.is_(None),
+                    text("metadata_ @> :metadata_filter").bindparams(
+                        metadata_filter='{"topup_payment_id": %d, "source_type": "%s"}' % (payment_id, REFERRAL_BONUS_SOURCE)
+                    )
                 )
             )
         ).all()
-        matching_credit = next(
-            (
-                c for c in candidate_credits
-                if (c.metadata_ or {}).get("topup_payment_id") == payment_id
-                and (c.metadata_ or {}).get("source_type") == REFERRAL_BONUS_SOURCE
-            ),
-            None,
-        )
+        matching_credit = candidate_credits[0] if candidate_credits else None
 
         if matching_credit is not None:
             idempotency_key = f"referral-bonus-reversal:topup:{payment_id}:{matching_credit.user_id}"
@@ -390,17 +387,13 @@ async def reverse_referral_bonus_for_topup(
                 AccountLedgerEntry.entry_type == "admin_adjustment",
                 AccountLedgerEntry.amount > 0,
                 AccountLedgerEntry.reversal_of_id.is_(None),
+                text("metadata_ @> :metadata_filter2").bindparams(
+                    metadata_filter2='{"topup_payment_id": %d, "reason": "first_topup_welcome"}' % payment_id
+                )
             )
         )
     ).all()
-    matching_purchaser_credit = next(
-        (
-            c for c in purchaser_credits
-            if (c.metadata_ or {}).get("topup_payment_id") == payment_id
-            and (c.metadata_ or {}).get("reason") == "first_topup_welcome"
-        ),
-        None,
-    )
+    matching_purchaser_credit = purchaser_credits[0] if purchaser_credits else None
 
     if matching_purchaser_credit is not None:
         purchaser_rev_key = f"referral-bonus-reversal:first-topup-welcome:{payment_id}:{purchaser.id}"
