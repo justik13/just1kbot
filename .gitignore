@@ -47,3 +47,15 @@ fix_texts.py
 test_admin_card.py
 mcp_args.json
 audit.md
+
+# AI Agent & Scratch Files
+.agents/
+.gemini/
+AGENTS.md
+GEMINI.md
+scratch_*.py
+*.patch
+pr_body.txt
+audit_report.md
+log.txt
+log-failed.txt
