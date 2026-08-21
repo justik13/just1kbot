@@ -56,6 +56,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
-    op.drop_index("ix_payments_referral_bonus_unprocessed", table_name="payments", if_exists=True)
-    op.drop_index("ix_payments_recovery_pending", table_name="payments", if_exists=True)
-    op.drop_index("ix_payments_recovery_unfulfilled", table_name="payments", if_exists=True)
+    op.execute("COMMIT")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_referral_bonus_unprocessed")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_pending")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_payments_recovery_unfulfilled")

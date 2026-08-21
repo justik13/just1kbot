@@ -330,13 +330,13 @@ async def _push_payment_url(bot, session, payment) -> None:
 
 
 async def finalize(session, claim, result, bot=None):
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
+    )
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == claim.operation_id)
         .with_for_update()
-    )
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         payment is None
@@ -487,13 +487,13 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
 
 
 async def finalize_provider_failure(session, claim, *, error_code, retryable):
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
+    )
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == claim.operation_id)
         .with_for_update()
-    )
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         payment is None

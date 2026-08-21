@@ -17,18 +17,18 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Add the column first
     op.add_column(
         "users",
         sa.Column("subscription_token", sa.String(length=64), nullable=True),
     )
-    op.create_index(
-        "ix_users_subscription_token",
-        "users",
-        ["subscription_token"],
-        unique=True,
-    )
 
+    # Disable transaction to allow concurrent index creation
+    op.execute("COMMIT")
+    op.execute("CREATE UNIQUE INDEX CONCURRENTLY ix_users_subscription_token ON users (subscription_token)")
 
 def downgrade() -> None:
-    op.drop_index("ix_users_subscription_token", table_name="users")
+    # Disable transaction to allow concurrent index drop
+    op.execute("COMMIT")
+    op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_subscription_token")
     op.drop_column("users", "subscription_token")

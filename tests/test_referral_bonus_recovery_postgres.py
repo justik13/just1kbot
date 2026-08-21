@@ -215,5 +215,93 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             result = await session.execute(text(explain_query))
             explain_plan = "\n".join([row[0] for row in result.fetchall()])
             
-            index_name = "ix_payments_referral_bonus_unprocessed"
-            self.assertIn(index_name, explain_plan, f"The query planner did NOT use the partial index! Plan:\n{explain_plan}")
+            index_name1 = "ix_payments_referral_bonus_unprocessed"
+            index_name2 = "ix_payments_recovery_pending"
+            index_name3 = "ix_payments_recovery_unfulfilled"
+            
+            # The query planner should use a BitmapOr to combine the 3 partial indexes
+            self.assertIn(index_name1, explain_plan, f"The query planner did NOT use {index_name1}! Plan:\n{explain_plan}")
+            self.assertIn(index_name2, explain_plan, f"The query planner did NOT use {index_name2}! Plan:\n{explain_plan}")
+            self.assertIn(index_name3, explain_plan, f"The query planner did NOT use {index_name3}! Plan:\n{explain_plan}")
+    async def test_concurrent_provider_finalize_and_recovery(self):
+        """Test that provider finalize and _recover_stale_topups can run concurrently without deadlock."""
+        import asyncio
+        import uuid
+        from decimal import Decimal
+        from datetime import datetime, timezone, timedelta
+        from unittest.mock import patch, MagicMock
+        from contextlib import asynccontextmanager
+
+        from database.models import User, Payment, PaymentProviderOperation
+        from services.workers.payments import _recover_stale_topups
+        from services.payment_provider_operations import finalize
+
+        async with self.session_factory() as session:
+            purchaser = User(telegram_id=400, topup_blocked=False)
+            session.add(purchaser)
+            await session.commit()
+            p_id = purchaser.id
+
+        stale_time = datetime.now(timezone.utc) - timedelta(minutes=10)
+
+        async with self.session_factory() as session:
+            p1 = Payment(
+                user_id=p_id, amount=Decimal(100), currency='RUB',
+                public_order_id=str(uuid.uuid4()), external_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()), provider_status='pending',
+                created_at=stale_time,
+                reconciliation_status='pending', checkout_status='active',
+            )
+            session.add(p1)
+            await session.flush()
+            
+            op = PaymentProviderOperation(
+                payment_id=p1.id,
+                operation_type="reconcile",
+                status="processing",
+                locked_by="test-worker",
+                attempts=1,
+                idempotency_key=str(uuid.uuid4()),
+                payload={}
+            )
+            session.add(op)
+            await session.commit()
+            
+            pid = p1.id
+            opid = op.id
+
+        @asynccontextmanager
+        async def patched_session_scope():
+            async with self.session_factory() as s:
+                try:
+                    yield s
+                    await s.commit()
+                except:
+                    await s.rollback()
+                    raise
+
+        class MockResult:
+            ok = True
+            value = {"status": "succeeded"}
+            error_kind = None
+            retryable = False
+
+        async def run_finalize():
+            async with self.session_factory() as s:
+                claim = MagicMock()
+                claim.payment_id = pid
+                claim.operation_id = opid
+                claim.worker_id = "test-worker"
+                claim.attempt_number = 1
+                try:
+                    await finalize(s, claim, MockResult())
+                    await s.commit()
+                except Exception:
+                    await s.rollback()
+                    raise
+
+        with patch("services.workers.payments.session_scope", new=patched_session_scope):
+            await asyncio.gather(
+                run_finalize(),
+                _recover_stale_topups(None),
+            )
