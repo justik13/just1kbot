@@ -213,7 +213,7 @@ async def grant_referral_bonus_for_topup(
             Payment.user_id == purchaser.id,
             Payment.credited_at.is_not(None),
             Payment.fulfillment_status == "succeeded",
-            Payment.id != payment_id,
+            Payment.id < payment_id,
         )
     )
     if (prev_credited or 0) == 0:
