@@ -250,7 +250,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
                 public_order_id=str(uuid.uuid4()), external_id=str(uuid.uuid4()),
                 provider_idempotency_key=str(uuid.uuid4()), provider_status='pending',
                 created_at=stale_time,
-                reconciliation_status='pending', checkout_status='active',
+                reconciliation_status='required', checkout_status='active',
             )
             session.add(p1)
             await session.flush()
