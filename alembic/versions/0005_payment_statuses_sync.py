@@ -55,14 +55,14 @@ def upgrade() -> None:
         "CHECK (provider_status IN ("
         "  'not_created', 'creating', 'pending', 'waiting_for_capture', "
         "  'succeeded', 'canceled', 'refunded', 'unknown', 'manual_review'"
-        "))"
+        ")) NOT VALID"
     )
     op.execute(
         "ALTER TABLE public.payments "
         "ADD CONSTRAINT ck_payments_fulfillment_status "
         "CHECK (fulfillment_status IN ("
         "  'not_ready', 'processing', 'succeeded', 'failed', 'reversed', 'manual_review'"
-        "))"
+        ")) NOT VALID"
     )
 
 

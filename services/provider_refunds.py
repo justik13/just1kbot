@@ -22,6 +22,7 @@ from database.refund_models import ProviderRefundOperation
 from database.repositories.account_ledger_repo import (
     create_payment_debit,
     get_payment_refundable_amount,
+    lock_account_user,
     reserve_payment_funds,
     resolve_reservation,
     whole_rubles,
@@ -76,11 +77,14 @@ async def request_balance_topup_refund(
     requested_by_admin_id: int | None,
 ) -> BalanceRefundRequest:
     """Reserve every currently refundable ruble and enqueue one provider command."""
+    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
+    if payment is None:
+        raise BalanceRefundError("payment_not_found")
+    
+    await lock_account_user(session, payment.user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
-    if payment is None:
-        raise BalanceRefundError("payment_not_found")
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise BalanceRefundError("payment_not_refundable")
     if not payment.external_id:

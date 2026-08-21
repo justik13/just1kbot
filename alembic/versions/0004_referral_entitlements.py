@@ -34,7 +34,7 @@ def upgrade() -> None:
         "  'account_purchase_grant', 'referral_user_bonus', "
         "  'referral_referrer_bonus', 'referral_reversal', "
         "  'manual_grant', 'tariff_change'"
-        "))"
+        ")) NOT VALID"
     )
     op.execute(
         "ALTER TABLE public.entitlement_entries "
@@ -50,7 +50,7 @@ def upgrade() -> None:
         "  (entry_type = 'referral_reversal' AND days_delta < 0"
         "   AND reversed_entry_id IS NOT NULL"
         "   AND (hours_delta IS NULL OR hours_delta = days_delta * 24))"
-        ")"
+        ") NOT VALID"
     )
 
 

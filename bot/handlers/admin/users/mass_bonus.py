@@ -270,7 +270,10 @@ async def apply_mass_bonus(
     except Exception:
         pass
 
-    batch_id = uuid.uuid4().hex
+    import hashlib
+    from utils.datetime_helpers import now_utc
+    batch_str = f"{target_aud}_{amount}_{reason}_{now_utc().strftime('%Y-%m-%d')}"
+    batch_id = hashlib.sha256(batch_str.encode()).hexdigest()[:16]
     try:
         _start_mass_bonus_task(
             _run_mass_bonus_background(
