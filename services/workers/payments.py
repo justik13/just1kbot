@@ -13,6 +13,7 @@ from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
+from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.account_topup import settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
@@ -133,9 +134,9 @@ async def _recover_stale_topups(bot: Bot | None = None):
 
     for _ in range(max_batches):
         async with session_scope() as session:
-            payment_ids = (
-                await session.scalars(
-                    select(Payment.id)
+            rows = (
+                await session.execute(
+                    select(Payment.id, Payment.user_id)
                     .where(
                         Payment.id > last_processed_id,
                         _needs_recovery(),
@@ -146,13 +147,14 @@ async def _recover_stale_topups(bot: Bot | None = None):
                 )
             ).all()
 
-        if not payment_ids:
+        if not rows:
             break
 
-        for pid in payment_ids:
+        for pid, uid in rows:
             last_processed_id = pid
             try:
                 async with session_scope() as session:
+                    await lock_checkout_user(session, uid)
                     payment = await session.scalar(
                         select(Payment)
                         .where(Payment.id == pid)

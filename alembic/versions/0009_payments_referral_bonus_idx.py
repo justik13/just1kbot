@@ -7,13 +7,24 @@ Create Date: 2026-08-21 16:12:12.338575
 """
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'c20a97270920'
-down_revision: str | Sequence[str] | None = 'bac83372da22'
+down_revision: str | Sequence[str] | None = '0007_webhook_retention'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+def _drop_invalid_index_concurrently(conn, index_name: str):
+    res = conn.execute(
+        sa.text(
+            f"SELECT 1 FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid "
+            f"WHERE c.relname = '{index_name}' AND i.indisvalid = false"
+        )
+    ).scalar()
+    if res:
+        conn.execute(sa.text(f"DROP INDEX CONCURRENTLY IF EXISTS {index_name}"))
 
 
 def upgrade() -> None:
@@ -21,32 +32,10 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind and bind.dialect.name == "postgresql":
         with op.get_context().autocommit_block():
-            op.execute("""
-            DO $$
-            BEGIN
-                IF EXISTS (
-                    SELECT 1 FROM pg_index i
-                    JOIN pg_class c ON i.indexrelid = c.oid
-                    WHERE c.relname = 'ix_payments_referral_bonus_unprocessed' AND i.indisvalid = false
-                ) THEN
-                    DROP INDEX ix_payments_referral_bonus_unprocessed;
-                END IF;
-                IF EXISTS (
-                    SELECT 1 FROM pg_index i
-                    JOIN pg_class c ON i.indexrelid = c.oid
-                    WHERE c.relname = 'ix_payments_recovery_pending' AND i.indisvalid = false
-                ) THEN
-                    DROP INDEX ix_payments_recovery_pending;
-                END IF;
-                IF EXISTS (
-                    SELECT 1 FROM pg_index i
-                    JOIN pg_class c ON i.indexrelid = c.oid
-                    WHERE c.relname = 'ix_payments_recovery_unfulfilled' AND i.indisvalid = false
-                ) THEN
-                    DROP INDEX ix_payments_recovery_unfulfilled;
-                END IF;
-            END $$;
-            """)
+            _drop_invalid_index_concurrently(bind, 'ix_payments_referral_bonus_unprocessed')
+            _drop_invalid_index_concurrently(bind, 'ix_payments_recovery_pending')
+            _drop_invalid_index_concurrently(bind, 'ix_payments_recovery_unfulfilled')
+
             op.execute(
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_payments_referral_bonus_unprocessed "
                 "ON payments (created_at) "

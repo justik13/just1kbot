@@ -180,10 +180,28 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(entries), 1, "Only one welcome bonus should be granted despite 5 concurrent workers")
 
     async def test_needs_recovery_uses_partial_index(self):
-        """Test that the _needs_recovery query actually uses the partial index."""
+        """Test that the _needs_recovery query actually uses the partial index on production data sizes."""
         async with self.session_factory() as session:
-            # Disable Seq Scan to ensure Postgres chooses the index scan over seq scan for small test tables.
-            await session.execute(text("SET enable_seqscan = off;"))
+            # Insert 5000 irrelevant rows so the planner naturally prefers an Index Scan
+            # over a full Seq Scan without artificial settings.
+            await session.execute(
+                text(
+                    "INSERT INTO payments (user_id, amount, currency, provider_status, fulfillment_status, created_at, updated_at) "
+                    "SELECT 1, 100, 'RUB', 'succeeded', 'succeeded', now(), now() "
+                    "FROM generate_series(1, 5000)"
+                )
+            )
+            await session.execute(
+                text(
+                    "UPDATE payments SET topup_context = '{\"referral_bonus_processed\": true}'::jsonb"
+                )
+            )
+            await session.commit()
+            
+        async with self.engine.connect() as conn:
+            await conn.execution_options(isolation_level="AUTOCOMMIT").execute(text("ANALYZE payments"))
+
+        async with self.session_factory() as session:
             stmt = select(Payment).where(_needs_recovery())
             compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
             explain_query = f"EXPLAIN {compiled!s}"
@@ -192,4 +210,4 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             explain_plan = "\n".join([row[0] for row in result.fetchall()])
             
             index_name = "ix_payments_referral_bonus_unprocessed"
-            self.assertIn(index_name, explain_plan, f"The query planner did NOT use the partial index! Plan:\\n{explain_plan}")
+            self.assertIn(index_name, explain_plan, f"The query planner did NOT use the partial index! Plan:\n{explain_plan}")

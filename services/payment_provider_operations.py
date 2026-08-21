@@ -91,7 +91,6 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
             PaymentProviderOperation.status.in_(("pending", "retry", "processing")),
         )
         .order_by(PaymentProviderOperation.id.desc())
-        .with_for_update()
     )
     if active:
         return active
@@ -109,6 +108,40 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
     session.add(operation)
     await session.flush()
     return operation
+
+
+async def cancel_pending_create_operations(session, payment_id: int):
+    operations = (
+        await session.scalars(
+            select(PaymentProviderOperation)
+            .where(
+                PaymentProviderOperation.payment_id == payment_id,
+                PaymentProviderOperation.operation_type == "create_payment",
+                PaymentProviderOperation.status.in_(("pending", "retry")),
+            )
+            .with_for_update()
+        )
+    ).all()
+    for operation in operations:
+        operation.status = "cancelled"
+    await session.flush()
+
+
+async def mark_dead_operation(session, operation_id: int):
+    operation = await session.scalar(
+        select(PaymentProviderOperation)
+        .where(PaymentProviderOperation.id == operation_id)
+        .with_for_update()
+    )
+    if not operation or operation.status != "dead":
+        raise ValueError("operation is not dead")
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == operation.payment_id).with_for_update()
+    )
+    if payment is None:
+        raise ValueError("payment not found")
+    operation.status = "cancelled"
+    await session.flush()
 
 
 async def retry_dead_provider_operation(
@@ -297,13 +330,13 @@ async def _push_payment_url(bot, session, payment) -> None:
 
 
 async def finalize(session, claim, result, bot=None):
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
-    )
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == claim.operation_id)
         .with_for_update()
+    )
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         payment is None
@@ -454,13 +487,13 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS):
 
 
 async def finalize_provider_failure(session, claim, *, error_code, retryable):
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
-    )
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == claim.operation_id)
         .with_for_update()
+    )
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         payment is None

@@ -625,13 +625,13 @@ async def finalize(
     claim: ProviderRefundClaim,
     result: YooKassaResult[dict],
 ) -> None:
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
-    )
     operation = await session.scalar(
         select(ProviderRefundOperation)
         .where(ProviderRefundOperation.id == claim.operation_id)
         .with_for_update()
+    )
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         operation is None
@@ -801,13 +801,13 @@ async def finalize_provider_failure(
     error_code: str,
     retryable: bool,
 ) -> None:
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
-    )
     operation = await session.scalar(
         select(ProviderRefundOperation)
         .where(ProviderRefundOperation.id == claim.operation_id)
         .with_for_update()
+    )
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
     if (
         operation is None
