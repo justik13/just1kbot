@@ -251,7 +251,13 @@ async def _execute_update(op, client):
         if not profile or op.payload.get("desired_version") != profile.desired_version:
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="stale_desired_version")
-        if profile.provisioning_status in {"pending_create", "create_failed", "create_cleanup_pending"}:
+        if profile.provisioning_status in {
+            "pending_create",
+            "create_failed",
+            "create_cleanup_pending",
+            "deleting",
+            "delete_failed",
+        }:
             return await mark_api_operation_cancelled(op.id, worker_id=op.locked_by,
                 expected_attempt_number=op.attempt_number, reason="profile_not_updatable")
     sent_version = op.payload.get("desired_version")

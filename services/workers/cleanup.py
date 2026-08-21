@@ -330,6 +330,39 @@ async def _cleanup_stuck_profiles():
                         )
                     )
                     logger.info("Requeued create_peer op %s for profile %s reconciliation", create_op.id, profile.id)
+                elif not create_op and profile.provisioning_status == "create_cleanup_pending":
+                    # Recreate the durable reconciliation command instead of
+                    # deleting a state that explicitly means a peer may exist.
+                    try:
+                        from services.api_operations_queue import (
+                            enqueue_api_operation,
+                            resolve_profile_endpoint_snapshot,
+                        )
+                        server_id, server_name, api_url, api_key = await resolve_profile_endpoint_snapshot(
+                            session, profile
+                        )
+                        await enqueue_api_operation(
+                            session,
+                            operation_type="create_peer",
+                            idempotency_key=f"create-peer:{profile.id}:v{profile.desired_version}",
+                            server_id=server_id,
+                            profile_id=profile.id,
+                            server_name_snapshot=server_name,
+                            api_url_snapshot=api_url,
+                            api_key_snapshot=api_key,
+                            client_name=profile.client_name,
+                            payload={"desired_version": profile.desired_version},
+                        )
+                        logger.info(
+                            "Recreated missing CREATE reconciliation op for profile %s",
+                            profile.id,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to recreate CREATE reconciliation op for profile %s: %s",
+                            profile.id,
+                            type(exc).__name__,
+                        )
                 elif not create_op and profile.provisioning_status == "deleting":
                     # No operation ever existed and no peer_id; safe to delete local tombstone
                     await session.delete(profile)
@@ -610,5 +643,4 @@ async def _cleanup_old_records():
             payments_expired,
             webhooks_deleted,
         )
-
 

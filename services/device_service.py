@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
-from database.models import Server, User, VPNProfile
+from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
     ServerAtCapacity,
@@ -15,6 +15,7 @@ from services.amnezia_capacity import (
     ensure_server_capacity,
 )
 from services.api_operations_queue import (
+    classify_create_side_effect_risk,
     enqueue_api_operation,
     ensure_delete_operation,
     resolve_profile_endpoint_snapshot,
@@ -22,7 +23,7 @@ from services.api_operations_queue import (
 from services.audit_service import AuditService
 from services.slots_cache import ServerPeerSnapshot
 from utils.admin import is_admin
-from utils.datetime_helpers import is_expired, now_msk
+from utils.datetime_helpers import is_expired, now_msk, now_utc
 
 logger = logging.getLogger(__name__)
 RESERVING_STATUSES = (
@@ -280,18 +281,52 @@ class DeviceService:
         profile_id = profile.id
         user_id = profile.user_id
 
-        if profile.peer_id:
+        create_operation = None
+        if force and not profile.peer_id:
+            create_operation = (
+                await session.execute(
+                    select(APIOperation)
+                    .where(
+                        APIOperation.profile_id == profile.id,
+                        APIOperation.operation_type == "create_peer",
+                    )
+                    .order_by(APIOperation.id.desc())
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+
+        cleanup_peer_id = profile.peer_id or (
+            create_operation.peer_id if create_operation else None
+        )
+        if (
+            force
+            and create_operation is not None
+            and create_operation.status in {"pending", "retry"}
+        ):
+            create_operation.status = "cancelled"
+            create_operation.completed_at = now_utc()
+            create_operation.locked_at = None
+            create_operation.locked_by = None
+            create_operation.last_error_code = "create_cancelled_by_force_delete"
+        processing_create_without_profile_peer = (
+            force
+            and create_operation is not None
+            and create_operation.status == "processing"
+            and profile.peer_id is None
+        )
+        if cleanup_peer_id and not processing_create_without_profile_peer:
+            delete_key = f"delete-peer:{profile.id}:{cleanup_peer_id}"
             if not force:
                 profile.provisioning_status = "deleting"
                 await ensure_delete_operation(
                     session,
-                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    idempotency_key=delete_key,
                     server_id=server_id,
                     profile_id=profile.id,
                     server_name_snapshot=server_name,
                     api_url_snapshot=api_url,
                     api_key_snapshot=api_key,
-                    peer_id=profile.peer_id,
+                    peer_id=cleanup_peer_id,
                     client_name=profile.client_name,
                     audit_reason="device_delete",
                 )
@@ -300,17 +335,31 @@ class DeviceService:
                 # If enqueue fails, exception propagates to maintain fail-closed consistency.
                 await ensure_delete_operation(
                     session,
-                    idempotency_key=f"delete-peer:{profile.id}:{profile.peer_id}",
+                    idempotency_key=delete_key,
                     server_id=server_id,
                     profile_id=profile.id,
                     server_name_snapshot=server_name,
                     api_url_snapshot=api_url,
                     api_key_snapshot=api_key,
-                    peer_id=profile.peer_id,
+                    peer_id=cleanup_peer_id,
                     client_name=profile.client_name,
                     audit_reason="device_delete_force",
                 )
                 await session.delete(profile)
+        elif (
+            force
+            and create_operation is not None
+            and (
+                create_operation.status == "processing"
+                or classify_create_side_effect_risk(create_operation)
+                != "never_started"
+            )
+        ):
+            # Keep a durable profile anchor while an attempted CREATE may still
+            # have a remote side effect. Cleanup can then reconcile by name.
+            profile.provisioning_status = "create_cleanup_pending"
+            profile.is_active = False
+            profile.desired_is_active = False
         else:
             await session.delete(profile)
 
