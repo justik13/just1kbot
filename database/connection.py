@@ -189,6 +189,9 @@ async def cancel_post_commit_tasks() -> None:
 
 
 async def close_db():
+    global _engine, _sessionmaker
     await cancel_post_commit_tasks()
     if _engine:
         await _engine.dispose()
+        _engine = None
+        _sessionmaker = None

@@ -41,6 +41,10 @@ BASE_MOCK_ENV = {
 
 
 class EncryptionRotationTests(unittest.TestCase):
+    def tearDown(self):
+        from config.settings import get_settings
+        get_settings.cache_clear()
+        _get_fernet_engine.cache_clear()
     def test_single_key_encryption_and_decryption(self):
         key1 = Fernet.generate_key().decode("utf-8")
         env = {**BASE_MOCK_ENV, "DB_ENCRYPTION_KEY": key1, "DB_ENCRYPTION_KEYS": ""}
@@ -245,6 +249,11 @@ class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
 
                 await reencrypt_all()
 
+    async def asyncTearDown(self):
+        from config.settings import get_settings
+        get_settings.cache_clear()
+        _get_fernet_engine.cache_clear()
+
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "TEST_DATABASE_URL is not set")
 class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
@@ -283,6 +292,9 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
                     except Exception:
                         pass
         await self.engine.dispose()
+        from config.settings import get_settings
+        get_settings.cache_clear()
+        _get_fernet_engine.cache_clear()
 
     async def _cleanup_test_records(self):
         async with self.sessions.begin() as s:

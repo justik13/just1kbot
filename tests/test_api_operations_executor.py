@@ -37,6 +37,8 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.engine = create_async_engine(os.environ["TEST_DATABASE_URL"])
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
+        self.old_sessionmaker = connection._sessionmaker
+        self.old_engine = connection._engine
         connection._sessionmaker = self.sessions
         connection._engine = self.engine
         async with self.sessions.begin() as s:
@@ -63,6 +65,8 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
             self.server_id = server.id
 
     async def asyncTearDown(self):
+        connection._sessionmaker = self.old_sessionmaker
+        connection._engine = self.old_engine
         await self.engine.dispose()
 
     async def create_claimed(

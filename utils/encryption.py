@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 @lru_cache(maxsize=10)
 def _get_fernet_engine(keys_str: str) -> MultiFernet:
-    keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+    keys = [k.strip().strip("'").strip('"') for k in keys_str.split(",") if k.strip().strip("'").strip('"')]
     if not keys:
         raise ValueError("No encryption keys provided")
     fernets = [Fernet(k.encode("utf-8")) for k in keys]
@@ -21,12 +21,12 @@ def _get_active_keys() -> str:
 
     settings = get_settings()
     primary = getattr(settings, "DB_ENCRYPTION_KEY", None)
-    primary_str = primary.strip() if isinstance(primary, str) else ""
+    primary_str = primary.strip().strip("'").strip('"') if isinstance(primary, str) else ""
 
     additional = getattr(settings, "DB_ENCRYPTION_KEYS", None)
     additional_list: list[str] = []
     if isinstance(additional, str) and additional.strip():
-        additional_list = [k.strip() for k in additional.split(",") if k.strip()]
+        additional_list = [k.strip().strip("'").strip('"') for k in additional.split(",") if k.strip().strip("'").strip('"')]
 
     keys: list[str] = []
     if primary_str:
