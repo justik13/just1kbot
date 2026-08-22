@@ -337,9 +337,12 @@ async def render_hub(
                         text=plain,
                         reply_markup=markup,
                         link_preview_options=link_preview_opts,
-                        message_effect_id=message_effect_id,
+                        # NOTE: No message_effect_id here — the HTML parse failed,
+                        # meaning this is already an exceptional fallback. Effects are
+                        # best-effort and must not cause a second TelegramBadRequest.
                     )
             sent_ids.append(message.message_id)
+
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
