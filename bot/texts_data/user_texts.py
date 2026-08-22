@@ -86,9 +86,16 @@ TEXTS = {
     "DEVICE_NOT_CONNECTED": "⏱ Ещё не подключалось",
     "DEVICE_RECENTLY_ACTIVE": "⏱ Активно недавно ({last_connected})",
 
-    "DEVICE_MANAGE_HEADER": """📱 <b>{device_name}</b>
+    "DEVICE_MANAGE_HEADER": """📱 <b>Управление устройством</b>
 
-📍 Локация: <b>{country_display}</b>""",
+<b>{device_name}</b>
+
+📍 Страна / Локация: <b>{country_display}</b> ({server_name})
+📡 Протокол: {protocol}
+📊 Трафик: ∑ {traffic_total}
+⏱ Последняя активность: {last_connected}
+
+<i>Нажмите «🔑 Показать ключ», чтобы получить ключ подключения.</i>""",
 
     "DEVICE_SHOW_KEY": """🔑 <b>Ключ подключения для {device_name}:</b>
 

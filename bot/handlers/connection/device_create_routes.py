@@ -308,9 +308,10 @@ async def _process_server_selection(
             callback.bot,
             callback.message.chat.id,
             (
-                "⏳ <b>Создаём подключение...</b>\n\n"
-                f"🌍 Локация: <b>{server_name}</b>\n\n"
-                "<i>Подготавливаем доступ, секундочку...</i>"
+                "⏳ <b>Подготовка подключения...</b>\n\n"
+                f"📍 Локация: <b>{server_name}</b>\n"
+                "📡 Протокол: <b>AmneziaWG</b>\n\n"
+                "<i>Генерируем ключ шифрования и настраиваем туннель...</i>"
             ),
             get_back_button("add_device"),
             parse_mode="HTML",
