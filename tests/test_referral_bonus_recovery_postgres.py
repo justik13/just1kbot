@@ -208,6 +208,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             await autocommit_conn.execute(text("ANALYZE payments"))
 
         async with self.session_factory() as session:
+            await session.execute(text("SET LOCAL enable_seqscan = off"))
             stmt = select(Payment).where(_needs_recovery())
             compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
             explain_query = f"EXPLAIN {compiled!s}"
