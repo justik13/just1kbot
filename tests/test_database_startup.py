@@ -1,4 +1,5 @@
 import asyncio
+import os
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -30,6 +31,10 @@ class DatabaseStartupTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(upgrade_thread_id, current_thread_id)
         seed.assert_awaited_once_with()
 
+    @unittest.skipUnless(
+        os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL"),
+        "Live database URL is not configured",
+    )
     async def test_close_db_lifecycle_and_reinitialization(self):
         import database.connection as conn
         from sqlalchemy import text
@@ -66,6 +71,10 @@ class DatabaseStartupTests(unittest.IsolatedAsyncioTestCase):
         # Cleanup
         await conn.close_db()
 
+    @unittest.skipUnless(
+        os.getenv("TEST_DATABASE_URL") or os.getenv("DATABASE_URL"),
+        "Live database URL is not configured",
+    )
     async def test_concurrent_get_session_initialization_safety(self):
         import database.connection as conn
         from sqlalchemy import text

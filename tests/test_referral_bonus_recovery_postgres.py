@@ -205,11 +205,13 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
         # Now run ANALYZE explicitly outside transaction to update table statistics
         async with self.engine.connect() as conn:
             autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit_conn.execute(text("ANALYZE users"))
             await autocommit_conn.execute(text("ANALYZE payments"))
 
         async with self.session_factory() as session:
-            await session.execute(text("SET LOCAL enable_seqscan = off"))
-            stmt = select(Payment).where(_needs_recovery())
+            from datetime import datetime, timezone, timedelta
+            threshold = datetime.now(timezone.utc) - timedelta(minutes=5)
+            stmt = select(Payment).where(_needs_recovery(), Payment.created_at < threshold)
             compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
             explain_query = f"EXPLAIN {compiled!s}"
             
