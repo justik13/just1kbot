@@ -475,6 +475,7 @@ async def _process_server_selection(
                             "⚙️ <b>Подготовка подключения</b>\n\n"
                             "<b>[2/2]</b> ✅ Профиль готов! Загружаем карточку... 🎉"
                         ),
+                        reply_markup=None,
                         parse_mode="HTML",
                     )
                     await asyncio.sleep(0.35)

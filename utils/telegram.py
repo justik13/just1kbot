@@ -221,7 +221,7 @@ async def render_hub(
     bot,
     chat_id: int,
     text: str,
-    reply_markup: InlineKeyboardMarkup,
+    reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str = "HTML",
     force_new: bool = False,
     trigger_message_id: int | None = None,
