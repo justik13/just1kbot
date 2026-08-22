@@ -100,9 +100,21 @@ class BanService:
         user,
         telegram_id: int,
     ) -> tuple:
-        # Блокируем платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
-        # Fulfillment и topup используют порядок Payment -> User, поэтому обратного
-        # порядка блокировок здесь быть не должно.
+        # 1. Блокируем платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
+        await session.scalars(
+            select(Payment.id)
+            .where(Payment.user_id == user.id)
+            .order_by(Payment.id)
+            .with_for_update()
+        )
+
+        # 2. Используем тот же per-user advisory lock, что и checkout.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": -user.id},
+        )
+
+        # 3. Повторно читаем платежи под сериализованным локом, исключая окно гонки.
         payment_ids = list(
             (
                 await session.scalars(
@@ -112,13 +124,6 @@ class BanService:
                     .with_for_update()
                 )
             ).all()
-        )
-
-        # Используем тот же per-user advisory lock, что и checkout.
-        # Новый платёж не сможет появиться между чтением платежей и баном.
-        await session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": -user.id},
         )
 
         locked_user = await session.scalar(

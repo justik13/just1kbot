@@ -17,7 +17,8 @@ def get_device_keyboard(
     adjustments = []
 
     if config_ready:
-        if raw_config:
+        # Telegram Bot API enforces CopyTextButton text length of 1-256 characters
+        if raw_config and 1 <= len(raw_config) <= 256:
             builder.button(
                 text="📋 Скопировать ключ",
                 copy_text=CopyTextButton(text=raw_config),

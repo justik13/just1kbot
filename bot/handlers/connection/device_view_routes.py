@@ -104,6 +104,28 @@ def can_show_delete_action(profile) -> bool:
     return getattr(profile, "provisioning_status", "") in ALLOWED_DELETE_STATES
 
 
+def build_display_vpn_key(raw_config: str | None, profile, server) -> str | None:
+    """Build standardized display VPN URI with server name, slot suffix, DNS, and MTU."""
+    if not raw_config:
+        return None
+    server_name = getattr(server, "name", None) or "server"
+    device_name = getattr(profile, "device_name", "") or ""
+    m = re.search(r'#(\d+)$', device_name)
+    slot_suffix = f" #{m.group(1)}" if m else ""
+    client_description = f"{server_name}{slot_suffix}"
+    try:
+        return customize_vpn_uri(
+            raw_config,
+            description=client_description,
+            dns1="8.8.8.8",
+            dns2="8.8.4.4",
+            mtu="1280",
+        )
+    except Exception as exc:
+        logger.warning("Failed to format vpn uri for profile %s: %s", getattr(profile, "id", None), exc)
+        return raw_config
+
+
 async def render_device_screen(
     bot,
     chat_id: int,
@@ -154,17 +176,21 @@ async def render_device_screen(
         display_key = None
         raw_cfg = getattr(profile, "raw_config", None)
         if config_ready and raw_cfg:
-            try:
-                display_key = customize_vpn_uri(raw_cfg, getattr(profile, "device_name", ""))
-            except Exception as exc:
-                logger.warning("Failed to format vpn uri for profile %s: %s", getattr(profile, "id", None), exc)
+            display_key = build_display_vpn_key(raw_cfg, profile, server)
 
         if display_key:
-            rendered += (
+            key_block = (
                 f"\n\n🔑 <b>Ключ подключения:</b>\n"
                 f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
                 f"<i>👆 Нажмите на ключ внутри блока, чтобы скопировать текст, либо используйте зелёную кнопку ниже.</i>"
             )
+            if len(rendered) + len(key_block) <= 4000:
+                rendered += key_block
+            else:
+                rendered += (
+                    "\n\n🔑 <b>Ключ подключения:</b>\n"
+                    "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
+                )
 
         amnezia_bridge_url = None
         if can_show_amnezia_bridge(profile, server):
@@ -328,18 +354,7 @@ async def show_config(
         return
 
     server = await get_server_by_id(session, profile.server_id)
-    server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    client_description = f"{server_name}{slot_suffix}"
-
-    display_key = customize_vpn_uri(
-        raw_config,
-        description=client_description,
-        dns1="8.8.8.8",
-        dns2="8.8.4.4",
-        mtu="1280",
-    )
+    display_key = build_display_vpn_key(raw_config, profile, server) or raw_config
 
     if len(display_key) > TELEGRAM_MESSAGE_LIMIT - 300:
         safe_device_name = await _get_safe_device_name(session, profile)

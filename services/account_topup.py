@@ -128,8 +128,8 @@ async def create_balance_topup(
     if rubles > Decimal(cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB):
         raise AccountTopupError("topup_above_maximum")
 
-    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
-    existing = await _visible_topup_for_update(session, user_id)
+    # To respect global Payment -> User lock hierarchy, lock any visible top-up first
+    await _visible_topup_for_update(session, user_id)
 
     user = await lock_checkout_user(session, user_id)
     if user is None or user.is_deleted:
@@ -138,6 +138,9 @@ async def create_balance_topup(
         raise AccountTopupError("topup_user_banned")
     if user.topup_blocked:
         raise AccountTopupError("topup_blocked")
+
+    # Re-fetch under serialized checkout lock to eliminate race window
+    existing = await _visible_topup_for_update(session, user_id)
 
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
@@ -232,8 +235,21 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Force cancel all unfinished topups for a user."""
-    # To respect global Payment -> User lock hierarchy and prevent deadlocks with create_balance_topup/webhooks,
-    # we MUST lock Payment rows (ordered deterministically by ID) BEFORE acquiring the User checkout lock.
+    # 1. Lock existing payment rows in deterministic order to respect Payment -> User lock hierarchy
+    await session.scalars(
+        select(Payment.id)
+        .where(
+            Payment.user_id == user_id,
+            Payment.credited_at.is_(None),
+            Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+        )
+        .order_by(Payment.id)
+        .with_for_update()
+    )
+    # 2. Acquire per-user checkout advisory lock
+    await lock_checkout_user(session, user_id)
+
+    # 3. Re-read all unfinished payments under the serialized checkout lock to eliminate race window
     payments = (
         await session.scalars(
             select(Payment)
@@ -242,11 +258,10 @@ async def cancel_all_unfinished_topups(
                 Payment.credited_at.is_(None),
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
-            .order_by(Payment.id)  # Lock multiple payments in a deterministic order
+            .order_by(Payment.id)
             .with_for_update()
         )
     ).all()
-    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:
