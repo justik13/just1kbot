@@ -139,6 +139,51 @@ class EncryptionRotationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 get_settings()
 
+    def test_quoted_keys_normalization_in_settings_and_rotation(self):
+        from config.settings import get_settings
+
+        primary_key = Fernet.generate_key().decode("utf-8")
+        old_key_1 = Fernet.generate_key().decode("utf-8")
+        old_key_2 = Fernet.generate_key().decode("utf-8")
+
+        # 1. Test quoted elements in DB_ENCRYPTION_KEYS (e.g. "'KEY1','KEY2'" or '"KEY1", "KEY2"')
+        env = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": f"'{primary_key}'",
+            "DB_ENCRYPTION_KEYS": f"'{old_key_1}','{old_key_2}'",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            get_settings.cache_clear()
+            _get_fernet_engine.cache_clear()
+
+            settings = get_settings()
+            self.assertEqual(settings.DB_ENCRYPTION_KEY, primary_key)
+            self.assertEqual(settings.DB_ENCRYPTION_KEYS, f"{old_key_1},{old_key_2}")
+
+            # Verify that ciphertext encrypted with old_key_1 or old_key_2 can be decrypted
+            enc_field = EncryptedString(critical=True)
+            f1 = Fernet(old_key_1.encode("utf-8"))
+            cipher1 = f1.encrypt(b"secret_from_old_1").decode("utf-8")
+            self.assertEqual(enc_field.process_result_value(cipher1, None), "secret_from_old_1")
+
+            f2 = Fernet(old_key_2.encode("utf-8"))
+            cipher2 = f2.encrypt(b"secret_from_old_2").decode("utf-8")
+            self.assertEqual(enc_field.process_result_value(cipher2, None), "secret_from_old_2")
+
+        # 2. Test double-quoted elements with surrounding outer quotes
+        env_double = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": f'"{primary_key}"',
+            "DB_ENCRYPTION_KEYS": f'"{old_key_1}", "{old_key_2}"',
+        }
+        with patch.dict("os.environ", env_double, clear=True):
+            get_settings.cache_clear()
+            _get_fernet_engine.cache_clear()
+
+            settings = get_settings()
+            self.assertEqual(settings.DB_ENCRYPTION_KEY, primary_key)
+            self.assertEqual(settings.DB_ENCRYPTION_KEYS, f"{old_key_1},{old_key_2}")
+
 
 class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

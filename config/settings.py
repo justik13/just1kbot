@@ -185,13 +185,19 @@ class Settings(BaseSettings):
         if not normalized:
             return ""
         from cryptography.fernet import Fernet
-        keys = [k.strip() for k in normalized.split(",") if k.strip()]
-        for k in keys:
+        raw_keys = [
+            k.strip().strip("'").strip('"')
+            for k in normalized.split(",")
+            if k.strip().strip("'").strip('"')
+        ]
+        valid_keys: list[str] = []
+        for k in raw_keys:
             try:
                 Fernet(k.encode("utf-8"))
+                valid_keys.append(k)
             except Exception as exc:
                 raise ValueError(f"Invalid Fernet key in DB_ENCRYPTION_KEYS: {exc}") from exc
-        return normalized
+        return ",".join(valid_keys)
 
     @field_validator("DOMAIN", mode="before")
     @classmethod
