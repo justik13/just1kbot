@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
@@ -309,7 +309,7 @@ async def _process_server_selection(
             callback.message.chat.id,
             (
                 "⏳ <b>Настраиваем подключение...</b>\n\n"
-                f"🌍 Сервер: <b>{server_name}</b>\n\n"
+                f"🌍 Сервер: <b>{safe(server_name)}</b>\n\n"
                 "<i>Подготавливаем защищенный доступ...</i>"
             ),
             get_back_button("add_device"),

@@ -104,7 +104,7 @@ async def admin_user_devices(
             lines.append(
                 f"• 📱 <b>{safe(name)}</b>\n"
                 f"   🆔 ID устройства: <code>{profile.id}</code>\n"
-                f"   🖥 Сервер: {server_flag} <b>{server_name}</b>\n"
+                f"   🖥 Сервер: {server_flag} <b>{safe(server_name)}</b>\n"
                 f"   Состояние: {status_hs}\n"
                 f"   Трафик: <code>{traffic_total}</code>\n"
                 f"   Активность: <i>{last_conn}</i>\n"
