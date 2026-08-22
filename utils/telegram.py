@@ -314,9 +314,8 @@ async def render_hub(
                 )
             except TelegramBadRequest as exc:
                 error = str(exc).lower()
-                if "parse" not in error and "entities" not in error:
-                    # If message_effect_id failed or other bad request
-                    if "effect" in error and message_effect_id:
+                if "effect" in error and message_effect_id:
+                    try:
                         message = await bot.send_message(
                             chat_id=chat_id,
                             text=part,
@@ -324,9 +323,24 @@ async def render_hub(
                             parse_mode=parse_mode,
                             link_preview_options=link_preview_opts,
                         )
-                    else:
-                        raise
-                else:
+                    except TelegramBadRequest as inner_exc:
+                        inner_error = str(inner_exc).lower()
+                        if "parse" in inner_error or "entities" in inner_error:
+                            logger.warning(
+                                "HTML parse failed in render_hub retry for chat %s; using plain text",
+                                chat_id,
+                            )
+                            plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                            message = await bot.send_message(
+                                chat_id=chat_id,
+                                text=plain,
+                                reply_markup=markup,
+                                link_preview_options=link_preview_opts,
+                                parse_mode=None,
+                            )
+                        else:
+                            raise
+                elif "parse" in error or "entities" in error:
                     logger.warning(
                         "HTML parse failed in render_hub for chat %s; using plain text",
                         chat_id,
@@ -337,10 +351,10 @@ async def render_hub(
                         text=plain,
                         reply_markup=markup,
                         link_preview_options=link_preview_opts,
-                        # NOTE: No message_effect_id here — the HTML parse failed,
-                        # meaning this is already an exceptional fallback. Effects are
-                        # best-effort and must not cause a second TelegramBadRequest.
+                        parse_mode=None,
                     )
+                else:
+                    raise
             sent_ids.append(message.message_id)
 
 
@@ -473,10 +487,12 @@ async def append_hub_message(
                         chat_id,
                         e,
                     )
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
                     msg = await bot.send_message(
                         chat_id=chat_id,
-                        text=part,
+                        text=plain,
                         reply_markup=kb,
+                        parse_mode=None,
                     )
                 else:
                     raise

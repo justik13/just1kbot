@@ -162,7 +162,7 @@ async def render_device_screen(
         if display_key:
             rendered += (
                 f"\n\n🔑 <b>Ключ подключения:</b>\n"
-                f"<blockquote expandable><code>{display_key}</code></blockquote>\n"
+                f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
                 f"<i>👆 Нажмите на ключ внутри блока, чтобы скопировать текст, либо используйте зелёную кнопку ниже.</i>"
             )
 
@@ -413,34 +413,32 @@ async def alt_connection(
         )
         return
 
-    decoded = decode_vpn_uri_to_json(raw_config)
-    if decoded is None:
-        await render_hub(
-            callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
-            trigger_message_id=callback.message.message_id,
+    try:
+        decoded = decode_vpn_uri_to_json(raw_config)
+        if decoded is None:
+            raise ValueError("Failed to decode raw_config to JSON")
+
+        server = await get_server_by_id(session, profile.server_id)
+        server_name = server.name if server else "server"
+        m = re.search(r'#(\d+)$', profile.device_name)
+        slot_suffix = f" #{m.group(1)}" if m else ""
+        client_description = f"{server_name}{slot_suffix}"
+
+        customized_data = customize_vpn_config_dict(
+            decoded,
+            description=client_description,
+            dns1="8.8.8.8",
+            dns2="8.8.4.4",
+            mtu="1280",
         )
-        return
 
-    server = await get_server_by_id(session, profile.server_id)
-    server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    client_description = f"{server_name}{slot_suffix}"
+        vpn_content = build_vpn_file_from_dict(customized_data)
+        conf_content = build_conf_file_from_dict(customized_data)
 
-    customized_data = customize_vpn_config_dict(
-        decoded,
-        description=client_description,
-        dns1="8.8.8.8",
-        dns2="8.8.4.4",
-        mtu="1280",
-    )
-
-    vpn_content = build_vpn_file_from_dict(customized_data)
-    conf_content = build_conf_file_from_dict(customized_data)
-
-    if not vpn_content or not conf_content:
+        if not vpn_content or not conf_content:
+            raise ValueError("Empty vpn or conf file content")
+    except Exception as exc:
+        logger.warning("Failed to prepare alt connection files for profile %s: %s", profile.id, exc)
         await render_hub(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
