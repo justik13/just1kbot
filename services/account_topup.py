@@ -232,7 +232,8 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Force cancel all unfinished topups for a user."""
-    # To prevent deadlocks with provider webhooks/pollers, we MUST lock Payment BEFORE User.
+    # Canonical lock hierarchy: lock user checkout mutex (advisory lock) first, then lock Payment rows deterministically by ID.
+    await lock_checkout_user(session, user_id)
     payments = (
         await session.scalars(
             select(Payment)
@@ -245,7 +246,6 @@ async def cancel_all_unfinished_topups(
             .with_for_update()
         )
     ).all()
-    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:
@@ -419,7 +419,13 @@ async def settle_succeeded_topup(
                     async def _send_ref_push():
                         try:
                             from utils.telegram import render_hub
-                            await render_hub(bot, ref_target, ref_text, ref_markup)
+                            await render_hub(
+                                bot,
+                                ref_target,
+                                ref_text,
+                                ref_markup,
+                                message_effect_id="5104841245755180586",  # 🔥 Fire effect
+                            )
                             from database.connection import session_scope
                             async with session_scope() as notify_session:
                                 p = await notify_session.get(Payment, target_payment_id)
@@ -570,7 +576,13 @@ async def settle_succeeded_topup(
                 async def _send_topup_push():
                     try:
                         from utils.telegram import render_hub
-                        await render_hub(bot, target_user_id, push_text, push_markup)
+                        await render_hub(
+                            bot,
+                            target_user_id,
+                            push_text,
+                            push_markup,
+                            message_effect_id="5046509860389126442",  # 🎉 Party popper / Confetti
+                        )
                         from database.connection import session_scope
                         async with session_scope() as notify_session:
                             p = await notify_session.get(Payment, target_payment_id)

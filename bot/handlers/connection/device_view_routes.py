@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
-from bot.keyboards import get_back_button, get_device_keyboard
+from bot.keyboards import (
+    get_alt_connection_keyboard,
+    get_back_button,
+    get_device_keyboard,
+)
 from config.settings import get_settings
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -147,6 +151,21 @@ async def render_device_screen(
 
     if has_access:
         config_ready = can_show_config_actions(profile)
+        display_key = None
+        raw_cfg = getattr(profile, "raw_config", None)
+        if config_ready and raw_cfg:
+            try:
+                display_key = customize_vpn_uri(raw_cfg, getattr(profile, "device_name", ""))
+            except Exception as exc:
+                logger.warning("Failed to format vpn uri for profile %s: %s", getattr(profile, "id", None), exc)
+
+        if display_key:
+            rendered += (
+                f"\n\n🔑 <b>Ключ подключения:</b>\n"
+                f"<blockquote expandable><code>{display_key}</code></blockquote>\n"
+                f"<i>👆 Нажмите на ключ внутри блока, чтобы скопировать текст, либо используйте зелёную кнопку ниже.</i>"
+            )
+
         amnezia_bridge_url = None
         if can_show_amnezia_bridge(profile, server):
             settings = get_settings()
@@ -158,6 +177,7 @@ async def render_device_screen(
 
         keyboard = get_device_keyboard(
             profile.id,
+            raw_config=display_key,
             config_ready=config_ready,
             show_delete=show_delete,
             amnezia_bridge_url=amnezia_bridge_url,
@@ -251,9 +271,10 @@ async def device_help(
         "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
         "В этом разделе вы найдёте руководства по подключению, "
         "скачиванию клиента и настройке сервиса.\n\n"
-        "⚠️ <b>Правила и особенности работы:</b>\n"
+        "<blockquote expandable>⚠️ <b>Правила и особенности работы:</b>\n"
         "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n\n"
+        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n"
+        "• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b></blockquote>\n\n"
         "Выберите нужную тему ниже:"
     )
 
@@ -354,8 +375,8 @@ async def show_config(
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data.startswith("download_conf:"))
-async def download_conf(
+@router.callback_query(F.data.startswith("alt_connection:") | F.data.startswith("download_conf:"))
+async def alt_connection(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
@@ -428,10 +449,29 @@ async def download_conf(
         )
         return
 
+    amnezia_bridge_url = None
+    if can_show_amnezia_bridge(profile, server):
+        settings = get_settings()
+        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
+            domain=settings.DOMAIN,
+            profile_id=profile.id,
+            user_id=db_user.id,
+        )
+
     vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
     conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
 
     old_hub_ids = await get_hub_ids(callback.message.chat.id)
+
+    alt_guide_text = (
+        f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
+        "Если прямая вставка ключа не сработала или ваше приложение не поддерживает протокол:\n\n"
+        "1. Сохраните один из прикреплённых файлов конфигурации:\n"
+        "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
+        "   • <code>.conf</code> — для приложения <b>WireGuard</b> или роутеров\n"
+        "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>.\n"
+        "3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."
+    )
 
     try:
         await append_hub_document(
@@ -456,8 +496,8 @@ async def download_conf(
     try:
         await append_hub_message(
             callback.bot, callback.message.chat.id,
-            text=texts.DEVICE_CONFIG_INSTRUCTION,
-            reply_markup=_get_device_config_keyboard(profile.id),
+            text=alt_guide_text,
+            reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
             parse_mode="HTML",
         )
     except Exception as e:

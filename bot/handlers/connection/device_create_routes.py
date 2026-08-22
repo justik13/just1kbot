@@ -306,7 +306,11 @@ async def _process_server_selection(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.DEVICE_CREATING,
+            (
+                "⚙️ <b>Подготовка подключения</b>\n\n"
+                "<b>[1/2]</b> 🔐 Генерация профиля на сервере... ⏳\n"
+                "<i>Создаем уникальные ключи шифрования AmneziaWG</i>"
+            ),
             get_back_button("add_device"),
             parse_mode="HTML",
         )
@@ -463,6 +467,18 @@ async def _process_server_selection(
 
             if ready_profile and ready_profile.provisioning_status in ("active", "create_failed", "create_cleanup_pending"):
                 from .device_view_routes import render_device_screen
+                if ready_profile.provisioning_status == "active":
+                    await render_hub(
+                        callback.bot,
+                        callback.message.chat.id,
+                        (
+                            "⚙️ <b>Подготовка подключения</b>\n\n"
+                            "<b>[2/2]</b> ✅ Профиль готов! Загружаем карточку... 🎉"
+                        ),
+                        parse_mode="HTML",
+                    )
+                    await asyncio.sleep(0.35)
+
                 await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:

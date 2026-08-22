@@ -22,6 +22,35 @@ def get_tariff_showcase_keyboard(
     return builder.as_markup()
 
 
+def format_dynamic_tariff_button(t, base_tariff=None) -> str:
+    """Dynamically calculates monthly price equivalent and discount percent relative to base duration."""
+    days = getattr(t, "duration_days", 0)
+    price = getattr(t, "price_rub", 0)
+
+    if not base_tariff or getattr(base_tariff, "id", None) == getattr(t, "id", None) or getattr(base_tariff, "duration_days", 0) <= 0:
+        return f"⏱ {days} дн. — {price} ₽"
+
+    base_days = base_tariff.duration_days
+    base_price = base_tariff.price_rub
+    base_daily_rate = base_price / base_days
+    undiscounted_price = base_daily_rate * days
+    savings_rub = round(undiscounted_price - price)
+    discount_pct = round((savings_rub / undiscounted_price) * 100) if undiscounted_price > 0 else 0
+    price_per_month = round((price * 30) / days) if days > 0 else price
+
+    if savings_rub <= 0 or discount_pct <= 0:
+        return f"⏱ {days} дн. — {price} ₽"
+
+    if days >= 360:
+        return f"💎 {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+    elif days >= 180:
+        return f"⚡️ {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%)"
+    elif days >= 90:
+        return f"⏱ {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+
+    return f"⏱ {days} дн. — {price} ₽ (-{discount_pct}%)"
+
+
 def get_tariff_duration_keyboard(
     tariffs: list,
     *,
@@ -29,12 +58,10 @@ def get_tariff_duration_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
+    base_tariff = tariffs_sorted[0] if tariffs_sorted else None
+
     for t in tariffs_sorted:
-        text = texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L34_1.format(value_0=t.duration_days, value_1=t.price_rub)
-        if t.duration_days >= 90:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L36_1
-        elif t.duration_days >= 30:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L38_1
+        text = format_dynamic_tariff_button(t, base_tariff)
         builder.button(
             text=text, callback_data=f"select_tariff:{t.id}:{source}"
         )
@@ -57,12 +84,10 @@ def get_tariff_duration_keyboard(
 def get_renew_keyboard(tariffs: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
+    base_tariff = tariffs_sorted[0] if tariffs_sorted else None
+
     for t in tariffs_sorted:
-        text = texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L62_1.format(value_0=t.duration_days, value_1=t.price_rub)
-        if t.duration_days >= 90:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L64_1
-        elif t.duration_days >= 30:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L66_1
+        text = format_dynamic_tariff_button(t, base_tariff)
         builder.button(
             text=text, callback_data=f"select_tariff:{t.id}:renew"
         )

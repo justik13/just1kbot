@@ -226,6 +226,7 @@ async def render_hub(
     force_new: bool = False,
     trigger_message_id: int | None = None,
     disable_web_page_preview: bool = True,
+    message_effect_id: str | None = None,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
@@ -309,22 +310,35 @@ async def render_hub(
                     reply_markup=markup,
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
+                    message_effect_id=message_effect_id,
                 )
             except TelegramBadRequest as exc:
                 error = str(exc).lower()
                 if "parse" not in error and "entities" not in error:
-                    raise
-                logger.warning(
-                    "HTML parse failed in render_hub for chat %s; using plain text",
-                    chat_id,
-                )
-                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                message = await bot.send_message(
-                    chat_id=chat_id,
-                    text=plain,
-                    reply_markup=markup,
-                    link_preview_options=link_preview_opts,
-                )
+                    # If message_effect_id failed or other bad request
+                    if "effect" in error and message_effect_id:
+                        message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=part,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            link_preview_options=link_preview_opts,
+                        )
+                    else:
+                        raise
+                else:
+                    logger.warning(
+                        "HTML parse failed in render_hub for chat %s; using plain text",
+                        chat_id,
+                    )
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                    message = await bot.send_message(
+                        chat_id=chat_id,
+                        text=plain,
+                        reply_markup=markup,
+                        link_preview_options=link_preview_opts,
+                        message_effect_id=message_effect_id,
+                    )
             sent_ids.append(message.message_id)
 
         if old_ids:
