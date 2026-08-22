@@ -549,7 +549,12 @@ async def settle_succeeded_topup(
                     "auto_fulfill_error": str(e),
                 }
 
-        if bot is not None and user is not None and user.telegram_id:
+        if (
+            bot is not None
+            and user is not None
+            and user.telegram_id
+            and not source.startswith("user_refresh")
+        ):
             try:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 builder = InlineKeyboardBuilder()
