@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -47,17 +49,19 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     savings_rub = round(undiscounted_price - price)
     price_per_month = round((price * 30) / days) if days > 0 else price
 
+    display_price = int(price) if isinstance(price, (int, float, Decimal)) and int(price) == price else price
+
     if savings_rub <= 0 or discount_pct <= 0:
-        return f"⏱ {days} дн. — {price} ₽"
+        return f"⏱ {days} дн. — {display_price} ₽"
 
     if days >= 360:
-        return f"💎 {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+        return f"💎 {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
     elif days >= 180:
-        return f"⚡️ {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%)"
+        return f"⚡️ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%)"
     elif days >= 90:
-        return f"⏱ {days} дн. — {price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+        return f"⏱ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
 
-    return f"⏱ {days} дн. — {price} ₽ (-{discount_pct}%)"
+    return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 
 def get_tariff_duration_keyboard(

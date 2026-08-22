@@ -478,7 +478,6 @@ async def _process_server_selection(
                         reply_markup=None,
                         parse_mode="HTML",
                     )
-                    await asyncio.sleep(0.35)
 
                 await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)

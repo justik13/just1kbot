@@ -68,14 +68,35 @@ class TestDynamicTariffCalculator(unittest.TestCase):
         self.assertIn('⏱ 90 дн. — 400 ₽ (133 ₽/мес • -11%) 🔥', texts_in_kb)
 
     def test_precision_boundary_discount_calculation(self):
-        # Base: 30 days for 149 RUB (daily rate = 4.9666... RUB)
-        # 90 days undiscounted = 447 RUB, Price = 399 RUB.
-        # Undiscounted price - Price = 48.0 RUB.
-        # Direct: 48.0 / 447.0 * 100 = 10.738255... -> round = 11%
         t_base = SimpleNamespace(id=20, duration_days=30, price_rub=149)
         t_target = SimpleNamespace(id=21, duration_days=90, price_rub=399)
         text = format_dynamic_tariff_button(t_target, t_base)
         self.assertEqual(text, '⏱ 90 дн. — 399 ₽ (133 ₽/мес • -11%) 🔥')
+
+    def test_decimal_prices_and_attribute_edge_cases(self):
+        from decimal import Decimal
+        t_base = SimpleNamespace(id=30, duration_days=30, price_rub=Decimal("150.00"))
+        t_target = SimpleNamespace(id=31, duration_days=90, price_rub=Decimal("400.00"))
+        text = format_dynamic_tariff_button(t_target, t_base)
+        self.assertEqual(text, '⏱ 90 дн. — 400 ₽ (133 ₽/мес • -11%) 🔥')
+
+    def test_duration_boundary_tiers_31_89_179_359_360(self):
+        t30 = SimpleNamespace(id=2, duration_days=30, price_rub=150)
+        t31 = SimpleNamespace(id=40, duration_days=31, price_rub=140)
+        t89 = SimpleNamespace(id=41, duration_days=89, price_rub=350)
+        t179 = SimpleNamespace(id=42, duration_days=179, price_rub=650)
+        t359 = SimpleNamespace(id=43, duration_days=359, price_rub=1300)
+        t360 = SimpleNamespace(id=44, duration_days=360, price_rub=1300)
+
+        self.assertIn('-10%', format_dynamic_tariff_button(t31, t30))
+        self.assertIn('-21%', format_dynamic_tariff_button(t89, t30))
+        self.assertIn('⏱ 179 дн.', format_dynamic_tariff_button(t179, t30))
+        self.assertIn('⚡️ 359 дн.', format_dynamic_tariff_button(t359, t30))
+        self.assertIn('💎 360 дн.', format_dynamic_tariff_button(t360, t30))
+
+    def test_empty_or_none_fields_handled_safely(self):
+        empty_obj = SimpleNamespace()
+        self.assertEqual(format_dynamic_tariff_button(empty_obj, None), '⏱ 0 дн. — 0 ₽')
 
 
 if __name__ == '__main__':

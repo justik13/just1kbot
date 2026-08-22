@@ -300,6 +300,13 @@ async def settle_succeeded_topup(
     A referral-bonus failure must abort the settlement so the provider event can
     be retried rather than silently crediting money without its attributable bonus.
     """
+    # 1. Lock Payment row FOR UPDATE first to enforce strict global lock hierarchy (Payment -> Advisory -> User)
+    locked_payment = await session.scalar(
+        select(Payment).where(Payment.id == payment.id).with_for_update()
+    )
+    if isinstance(locked_payment, Payment):
+        payment = locked_payment
+
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
 
