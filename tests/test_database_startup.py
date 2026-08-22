@@ -69,17 +69,31 @@ class DatabaseStartupTests(unittest.IsolatedAsyncioTestCase):
     async def test_concurrent_get_session_initialization_safety(self):
         import database.connection as conn
         from sqlalchemy import text
+        from unittest.mock import patch
 
         await conn.close_db()
+        conn._db_lock = None  # ensure fresh lock for this test
 
-        # Concurrently request sessions from uninitialized state
+        original_init = conn.init_db
+        init_call_count = 0
+
+        async def counting_init():
+            nonlocal init_call_count
+            init_call_count += 1
+            return await original_init()
+
+        # Concurrently request sessions from uninitialized state;
+        # with the lock in place, init_db() should be called exactly once.
         async def fetch_one(val):
             async with conn.session_scope() as s:
                 r = await s.execute(text(f"SELECT {val}"))
                 return r.scalar()
 
-        results = await asyncio.gather(*[fetch_one(i) for i in range(10)])
-        self.assertEqual(results, list(range(10)))
+        with patch.object(conn, "init_db", side_effect=counting_init):
+            results = await asyncio.gather(*[fetch_one(i) for i in range(10)])
+
+        self.assertEqual(sorted(results), list(range(10)))
+        self.assertEqual(init_call_count, 1, f"init_db called {init_call_count} times instead of 1")
 
         # Cleanup
         await conn.close_db()

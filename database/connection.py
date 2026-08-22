@@ -24,11 +24,7 @@ _post_commit_background_tasks: set[asyncio.Task[None]] = set()
 
 def _get_db_lock() -> asyncio.Lock:
     global _db_lock
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if _db_lock is None or getattr(_db_lock, "_loop", None) is not loop:
+    if _db_lock is None:
         _db_lock = asyncio.Lock()
     return _db_lock
 
@@ -208,9 +204,13 @@ async def cancel_post_commit_tasks() -> None:
 
 async def close_db():
     global _engine, _sessionmaker
+    # Cancel post-commit tasks BEFORE acquiring the lock.
+    # Post-commit tasks may call session_scope() -> get_session() -> init_db(),
+    # which would try to acquire _db_lock. If close_db() held the lock while
+    # awaiting cancel_post_commit_tasks(), that would cause a deadlock.
+    await cancel_post_commit_tasks()
     lock = _get_db_lock()
     async with lock:
-        await cancel_post_commit_tasks()
         if _engine:
             await _engine.dispose()
             _engine = None
