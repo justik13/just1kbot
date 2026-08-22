@@ -26,7 +26,7 @@ class TestDynamicTariffCalculator(unittest.TestCase):
 
     def test_180_days_savings_and_discount(self):
         text = format_dynamic_tariff_button(self.t180, self.t30)
-        self.assertEqual(text, '⚡️ 180 дн. — 700 ₽ (117 ₽/мес • -22%)')
+        self.assertEqual(text, '⚡️ 180 дн. — 700 ₽ (117 ₽/мес • -22%) 🔥')
 
     def test_365_days_savings_and_discount(self):
         text = format_dynamic_tariff_button(self.t365, self.t30)

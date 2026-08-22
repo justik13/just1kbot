@@ -57,7 +57,7 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     if days >= 360:
         return f"💎 {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
     elif days >= 180:
-        return f"⚡️ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%)"
+        return f"⚡️ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
     elif days >= 90:
         return f"⏱ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
 
