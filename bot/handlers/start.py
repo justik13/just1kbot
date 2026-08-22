@@ -209,6 +209,44 @@ async def cmd_start(
 
     await _ensure_bot_unblocked(session, telegram_id)
 
+    if command.args and (command.args.startswith("pay") or command.args.startswith("topup")):
+        try:
+            from services.account_topup import get_visible_balance_topup, request_topup_status_refresh
+            payment = await get_visible_balance_topup(session, user_id=user.id)
+            if payment:
+                refreshed = await request_topup_status_refresh(session, payment_id=payment.id)
+                if refreshed.fulfillment_status == "succeeded":
+                    from bot.handlers.payment.balance_routes import _render_balance
+                    await _render_balance(
+                        message.bot,
+                        message.chat.id,
+                        session,
+                        user,
+                        notice=texts.TOPUP_CREDITED_NOTICE,
+                    )
+                    return
+                elif refreshed.provider_status == "succeeded":
+                    from bot.keyboards.payment import get_topup_waiting_keyboard
+                    await render_hub(
+                        message.bot,
+                        message.chat.id,
+                        texts.TOPUP_CONFIRMED_NOTICE,
+                        get_topup_waiting_keyboard(refreshed.id),
+                    )
+                    return
+                else:
+                    from bot.handlers.payment.balance_routes import _render_topup
+                    await _render_topup(
+                        message.bot,
+                        message.chat.id,
+                        session,
+                        user,
+                        refreshed,
+                    )
+                    return
+        except Exception as pay_exc:
+            logger.warning("Error resolving payment deep-link return in cmd_start: %s", pay_exc)
+
     builder = InlineKeyboardBuilder()
     builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
 
