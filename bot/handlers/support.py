@@ -115,8 +115,16 @@ async def show_support_help(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📥 Скачать клиент Amnezia",
+        text="📥 Скачать AmneziaVPN",
         callback_data=f"help_download{suffix}",
+    )
+    builder.button(
+        text="🔗 Приложение INCY (iOS / Android)",
+        callback_data=f"help_incy{suffix}",
+    )
+    builder.button(
+        text="🍏 DefaultVPN (для iOS)",
+        callback_data=f"help_defaultvpn{suffix}",
     )
     builder.button(
         text="🍏 Инструкция iOS (для РФ)",
@@ -144,7 +152,7 @@ async def show_support_help(callback: CallbackQuery):
             text="← Назад в поддержку",
             callback_data="menu_support",
         )
-    builder.adjust(1, 1, 1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1, 1, 1, 1, 1)
 
     await render_hub(
         callback.bot,
@@ -152,6 +160,57 @@ async def show_support_help(callback: CallbackQuery):
         text,
         builder.as_markup(),
     )
+
+
+@router.callback_query(F.data.startswith("help_incy"))
+async def show_help_incy(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
+
+    text = (
+        "🔗 <b>Приложение INCY (iOS / Android)</b>\n\n"
+        "<b>INCY</b> — мобильное приложение с поддержкой протокола AmneziaWG, позволяющее подключить <b>все ваши серверы сразу</b> через одну самообновляемую подписку.\n\n"
+        "📖 <b>Как настроить на телефоне:</b>\n"
+        "1. Установите <b>INCY</b> из App Store или Google Play;\n"
+        "2. В главном меню бота откройте «🔌 Мои подключения» → <b>«🔗 Добавить в INCY»</b>;\n"
+        "3. Нажмите <b>«📱 Открыть в INCY»</b> — приложение сразу импортирует все серверы;\n"
+        "4. Выберите локацию и нажмите переключатель для включения защиты.\n\n"
+        "<i>💡 При создании новых устройств или смене серверов список в INCY обновляется автоматически!</i>"
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🍏 App Store (iOS)", url="https://apps.apple.com/app/incy/id6756943388")
+    builder.button(text="🤖 Google Play (Android)", url="https://play.google.com/store/apps/details?id=llc.itdev.incy")
+    builder.button(text="🌐 Сайт INCY", url="https://incy.cc/")
+    builder.button(text="← Назад", callback_data=back_cb)
+    builder.adjust(1, 1, 1, 1)
+
+    await render_hub(callback.bot, callback.message.chat.id, text, builder.as_markup())
+
+
+@router.callback_query(F.data.startswith("help_defaultvpn"))
+async def show_help_defaultvpn(callback: CallbackQuery):
+    await callback.answer(show_alert=False)
+    device_id = _extract_device_id(callback.data)
+    back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
+
+    text = (
+        "🍏 <b>DefaultVPN для iOS (iPhone / iPad)</b>\n\n"
+        "<b>DefaultVPN</b> — легкий нативный клиент от команды Amnezia, оптимизированный под iOS 17+.\n\n"
+        "📖 <b>Как настроить:</b>\n"
+        "1. Установите <b>DefaultVPN</b> из App Store;\n"
+        "2. Скопируйте ключ подключения <code>vpn://...</code> в карточке устройства;\n"
+        "3. Откройте DefaultVPN и вставьте ключ (или импортируйте файл <code>.conf</code> из раздела «🔄 Другой способ подключения»);\n"
+        "4. Включите подключение переключателем."
+    )
+
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🍏 DefaultVPN в App Store", url="https://apps.apple.com/app/defaultvpn/id6744725017")
+    builder.button(text="← Назад", callback_data=back_cb)
+    builder.adjust(1, 1)
+
+    await render_hub(callback.bot, callback.message.chat.id, text, builder.as_markup())
 
 
 @router.callback_query(F.data.startswith("help_download"))
