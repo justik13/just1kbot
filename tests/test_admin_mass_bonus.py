@@ -69,7 +69,7 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             })
             return MagicMock(), True
 
-        async def fake_send_message(chat_id, text, parse_mode="HTML"):
+        async def fake_send_message(chat_id, text, parse_mode="HTML", **kwargs):
             current_committed = session_commits[-1] if session_commits else 0
             if chat_id == 1030:
                 sent_messages.append((chat_id, text, current_committed))
@@ -171,7 +171,7 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
             }
             return MagicMock(), True
 
-        async def fake_send_message(chat_id, text, parse_mode="HTML"):
+        async def fake_send_message(chat_id, text, parse_mode="HTML", **kwargs):
             sent_messages.append((chat_id, text))
 
         mock_bot.send_message.side_effect = fake_send_message
@@ -255,7 +255,7 @@ class AdminMassBonusTests(unittest.IsolatedAsyncioTestCase):
 
         should_crash = True
 
-        async def crashable_send_message(chat_id, text, parse_mode="HTML"):
+        async def crashable_send_message(chat_id, text, parse_mode="HTML", **kwargs):
             nonlocal should_crash
             sent_messages.append((chat_id, text))
             if should_crash and chat_id == 3025:  # crash on user 25 during batch 1 notification

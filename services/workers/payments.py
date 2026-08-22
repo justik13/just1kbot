@@ -248,11 +248,18 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         )
     message = texts.STALE_TOPUP_ALERT.format(
         count=len(new_rows),
-        details="".join(details),
+        details="\n".join(details),
     )
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔍 Открыть админку", callback_data="admin_menu")
+    builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+    builder.adjust(1, 1)
+    reply_markup = builder.as_markup()
+
     for admin_id in settings.ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, message, parse_mode="HTML")
+            await bot.send_message(admin_id, message, parse_mode="HTML", reply_markup=reply_markup)
         except Exception as exc:
             logger.error("Stale alert failed to %s: %s", admin_id, exc)
     for payment, _ in new_rows:

@@ -146,10 +146,17 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
     message = texts.RUNTIME_SERVICES_WORKERS_INIT_L119_1.format(value_0=title, value_1=worker, value_2=failure_count, value_3=error_type)
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🔍 Открыть админку", callback_data="admin_menu")
+    builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+    builder.adjust(1, 1)
+    reply_markup = builder.as_markup()
+
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
-                await bot.send_message(admin_id, message, parse_mode="HTML")
+                await bot.send_message(admin_id, message, parse_mode="HTML", reply_markup=reply_markup)
             except Exception:
                 logger.exception("Failed to send worker alert to admin")
     except Exception:

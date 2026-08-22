@@ -332,7 +332,11 @@ async def _send_quota_alert(
             text=texts.UI_SERVICES_WORKERS_TRAFFIC_L319_1,
             callback_data=f"admin_user_card:{telegram_id}",
         )
-        builder.adjust(1)
+        builder.button(
+            text="✅ Прочитано",
+            callback_data="dismiss_notification",
+        )
+        builder.adjust(1, 1)
 
         for admin_id in admin_ids:
             try:

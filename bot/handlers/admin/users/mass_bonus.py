@@ -353,6 +353,13 @@ async def _run_mass_bonus_background(
                         logger.error("Failed mass bonus credit for user %s: %s", uid, exc)
 
             blocked_uids = []
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            bonus_builder = InlineKeyboardBuilder()
+            bonus_builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+            bonus_builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+            bonus_builder.adjust(2)
+            bonus_markup = bonus_builder.as_markup()
+
             for uid, tg_id in credited_in_batch:
                 if tg_id and tg_id != admin_id:
                     try:
@@ -361,6 +368,7 @@ async def _run_mass_bonus_background(
                             tg_id,
                             f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
                             f"Причина: <i>{safe(reason)}</i>",
+                            reply_markup=bonus_markup,
                             parse_mode="HTML",
                         )
                     except TelegramForbiddenError:

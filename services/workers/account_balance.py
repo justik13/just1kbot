@@ -318,11 +318,16 @@ async def process_balance_notifications(bot: Bot) -> int:
                         value_1=telegram_id,
                         value_2=int(balance.real_position),
                     )
+                    diag_builder = InlineKeyboardBuilder()
+                    diag_builder.button(text="🔍 Пользователь", callback_data=f"admin_user_card:{telegram_id}")
+                    diag_builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+                    diag_builder.adjust(1, 1)
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()
                         await bot.send_message(
                             admin_id,
                             diagnostic,
+                            reply_markup=diag_builder.as_markup(),
                             parse_mode="HTML",
                         )
             except TelegramForbiddenError:

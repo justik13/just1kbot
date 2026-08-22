@@ -141,10 +141,17 @@ async def global_error_handler(
         if alert_key not in _error_alert_cache:
             _error_alert_cache[alert_key] = True
 
+            from aiogram.utils.keyboard import InlineKeyboardBuilder
+            err_builder = InlineKeyboardBuilder()
+            err_builder.button(text="🔍 Открыть админку", callback_data="admin_menu")
+            err_builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+            err_builder.adjust(1, 1)
+            err_markup = err_builder.as_markup()
+
             for admin_id in settings.ADMIN_IDS:
                 try:
                     await event.bot.send_message(
-                        admin_id, error_msg, parse_mode="HTML"
+                        admin_id, error_msg, parse_mode="HTML", reply_markup=err_markup
                     )
                 except Exception:
                     pass
