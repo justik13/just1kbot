@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.account_topup import cancel_all_unfinished_topups
 from services.ban_service import BanService
-from database.models import Payment, User
+from database.models import Payment
 
 
 class TestConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
