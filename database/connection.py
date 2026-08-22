@@ -18,7 +18,20 @@ from database.models import Tariff
 
 _engine = None
 _sessionmaker = None
+_db_lock: asyncio.Lock | None = None
 _post_commit_background_tasks: set[asyncio.Task[None]] = set()
+
+
+def _get_db_lock() -> asyncio.Lock:
+    global _db_lock
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if _db_lock is None or getattr(_db_lock, "_loop", None) is not loop:
+        _db_lock = asyncio.Lock()
+    return _db_lock
+
 
 DEFAULT_TARIFFS = [
     {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35, "sort_order": 10},
@@ -33,24 +46,29 @@ DEFAULT_TARIFFS = [
 
 async def init_db():
     global _engine, _sessionmaker
-    settings = get_settings()
-    # P1 #8: Reduced pool_size from 50 to 10 for single-process deployment
-    # 50 connections was excessive for a single bot process
-    _engine = create_async_engine(
-        settings.DATABASE_URL,
-        echo=False,
-        pool_size=10,
-        max_overflow=10,
-        pool_timeout=30,
-        pool_pre_ping=True,
-    )
-    _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
+    lock = _get_db_lock()
+    async with lock:
+        if _engine is not None and _sessionmaker is not None:
+            return _engine, _sessionmaker
 
-    # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
-    await _seed_default_data()
+        settings = get_settings()
+        # P1 #8: Reduced pool_size from 50 to 10 for single-process deployment
+        # 50 connections was excessive for a single bot process
+        _engine = create_async_engine(
+            settings.DATABASE_URL,
+            echo=False,
+            pool_size=10,
+            max_overflow=10,
+            pool_timeout=30,
+            pool_pre_ping=True,
+        )
+        _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
-    logging.info("PostgreSQL database initialized successfully")
-    return _engine, _sessionmaker
+        # Seed default tariffs and maintenance mode (migrations are executed by docker-entrypoint.sh or alembic CLI)
+        await _seed_default_data()
+
+        logging.info("PostgreSQL database initialized successfully")
+        return _engine, _sessionmaker
 
 
 async def _run_alembic_migrations(database_url: str) -> None:
@@ -190,8 +208,10 @@ async def cancel_post_commit_tasks() -> None:
 
 async def close_db():
     global _engine, _sessionmaker
-    await cancel_post_commit_tasks()
-    if _engine:
-        await _engine.dispose()
-        _engine = None
-        _sessionmaker = None
+    lock = _get_db_lock()
+    async with lock:
+        await cancel_post_commit_tasks()
+        if _engine:
+            await _engine.dispose()
+            _engine = None
+            _sessionmaker = None
