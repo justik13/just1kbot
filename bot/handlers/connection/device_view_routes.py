@@ -198,6 +198,22 @@ async def render_device_screen(
                     "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
                 )
 
+        btn_info_lines = [
+            "\n\n💡 <b>Кнопки управления:</b>",
+        ]
+        if config_ready:
+            if display_key and (1 <= len(raw_cfg or "") <= 256):
+                btn_info_lines.append("• <b>📋 Скопировать ключ</b> — скопировать для вставки в приложение")
+            btn_info_lines.append("• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик")
+        btn_info_lines.append("• <b>✏️ Переименовать</b> — изменить название устройства")
+        btn_info_lines.append("• <b>📖 Инструкция</b> — пошаговое руководство по настройке")
+        if show_delete:
+            btn_info_lines.append("• <b>🗑 Удалить</b> — отозвать ключ и освободить слот")
+
+        btn_info = "\n".join(btn_info_lines)
+        if len(rendered) + len(btn_info) <= 4000:
+            rendered += btn_info
+
         amnezia_bridge_url = None
         if can_show_amnezia_bridge(profile, server):
             settings = get_settings()
