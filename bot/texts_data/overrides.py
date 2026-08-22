@@ -125,18 +125,12 @@ OVERRIDES["HUB_HEADER"] = """🏠 <b>Главное меню</b>
 Выберите нужный раздел:"""
 
 # Device connection methods: key is primary, file is the fallback.
-OVERRIDES["DEVICE_MANAGE_HEADER"] = """📱 <b>Управление устройством</b>
+OVERRIDES["DEVICE_MANAGE_HEADER"] = """📱 <b>{device_name}</b>
 
-<b>{device_name}</b>
-
-📍 Страна / Локация: <b>{country_display}</b> ({server_name})
-📡 Протокол: {protocol}
-📊 Трафик: ∑ {traffic_total}
-⏱ Последняя активность: {last_connected}
-
-💡 <b>Способы подключения:</b>
-• 🔑 <b>Ключ</b> — основной и самый простой способ подключения.
-• 📁 <b>Скачать файлом</b> — дополнительный резервный способ, если ключ не работает или приложение его не поддерживает."""
+🌍 Локация: <b>{country_display}</b>
+📡 Протокол: <b>{protocol}</b>
+📊 Трафик: <b>{traffic_total}</b>
+⏱ Активность: <b>{last_connected}</b>"""
 
 OVERRIDES["DEVICE_SHOW_KEY"] = """🔑 <b>Ключ подключения для {device_name}:</b>
 
