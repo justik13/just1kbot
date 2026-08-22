@@ -239,7 +239,7 @@ async def render_hub(
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
 
         target_edit_id = None
-        if not force_new and len(text_parts) == 1:
+        if not force_new and not message_effect_id and len(text_parts) == 1:
             if trigger_message_id and trigger_message_id in old_ids:
                 target_edit_id = trigger_message_id
             elif old_ids:

@@ -232,8 +232,8 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Force cancel all unfinished topups for a user."""
-    # Canonical lock hierarchy: lock user checkout mutex (advisory lock) first, then lock Payment rows deterministically by ID.
-    await lock_checkout_user(session, user_id)
+    # To respect global Payment -> User lock hierarchy and prevent deadlocks with create_balance_topup/webhooks,
+    # we MUST lock Payment rows (ordered deterministically by ID) BEFORE acquiring the User checkout lock.
     payments = (
         await session.scalars(
             select(Payment)
@@ -246,6 +246,7 @@ async def cancel_all_unfinished_topups(
             .with_for_update()
         )
     ).all()
+    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:

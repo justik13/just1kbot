@@ -27,7 +27,12 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     days = getattr(t, "duration_days", 0)
     price = getattr(t, "price_rub", 0)
 
-    if not base_tariff or getattr(base_tariff, "id", None) == getattr(t, "id", None) or getattr(base_tariff, "duration_days", 0) <= 0:
+    if (
+        not base_tariff
+        or getattr(base_tariff, "id", None) == getattr(t, "id", None)
+        or getattr(base_tariff, "duration_days", 0) <= 0
+        or days <= getattr(base_tariff, "duration_days", 0)
+    ):
         return f"⏱ {days} дн. — {price} ₽"
 
     base_days = base_tariff.duration_days
@@ -58,7 +63,11 @@ def get_tariff_duration_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
-    base_tariff = tariffs_sorted[0] if tariffs_sorted else None
+    # Prefer standard 30-day tariff as baseline if available, otherwise shortest duration
+    base_tariff = next(
+        (t for t in tariffs_sorted if getattr(t, "duration_days", 0) == 30),
+        tariffs_sorted[0] if tariffs_sorted else None,
+    )
 
     for t in tariffs_sorted:
         text = format_dynamic_tariff_button(t, base_tariff)
@@ -84,7 +93,11 @@ def get_tariff_duration_keyboard(
 def get_renew_keyboard(tariffs: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
-    base_tariff = tariffs_sorted[0] if tariffs_sorted else None
+    # Prefer standard 30-day tariff as baseline if available, otherwise shortest duration
+    base_tariff = next(
+        (t for t in tariffs_sorted if getattr(t, "duration_days", 0) == 30),
+        tariffs_sorted[0] if tariffs_sorted else None,
+    )
 
     for t in tariffs_sorted:
         text = format_dynamic_tariff_button(t, base_tariff)
