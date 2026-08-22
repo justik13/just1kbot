@@ -11,6 +11,8 @@ from utils.telegram import render_hub
 router = Router()
 
 
+AMNEZIA_APP_STORE = "https://apps.apple.com/app/amneziavpn/id1600529900"
+AMNEZIA_GOOGLE_PLAY = "https://play.google.com/store/apps/details?id=org.amnezia.vpn"
 AMNEZIA_DOWNLOAD_MIRROR = "https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads"
 AMNEZIA_GITHUB_LATEST = "https://github.com/amnezia-vpn/amnezia-client/releases/latest"
 AMNEZIA_OFFICIAL_SITE = "https://storage.googleapis.com/amnezia/amnezia.org"
@@ -98,13 +100,17 @@ async def show_support_help(callback: CallbackQuery):
     suffix = f":device_{device_id}" if device_id else ""
 
     text = (
-        "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
-        "В этом разделе вы найдёте руководства по подключению, скачиванию клиента и настройке сервиса.\n\n"
-        "<blockquote expandable>⚠️ <b>Правила и особенности работы:</b>\n"
-        "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n"
-        "• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b></blockquote>\n\n"
-        "Выберите нужную тему ниже:"
+        "📖 <b>Инструкция по подключению AmneziaVPN</b>\n\n"
+        "🚀 <b>Быстрый старт за 3 шага:</b>\n"
+        "1. Скачайте приложение <b>AmneziaVPN</b> на ваш телефон или ПК.\n"
+        "2. Скопируйте ключ подключения в разделе «📱 Мои подключения».\n"
+        "3. В приложении AmneziaVPN нажмите <b>«Приступим»</b> (или <b>«+»</b> внизу справа) → нажмите кнопку <b>«Вставить»</b> → <b>«Подключиться»</b>.\n\n"
+        "<blockquote expandable>✅ <b>Как понять, что всё работает:</b>\n"
+        "• Индикатор в приложении станет золотистым с надписью <b>«Подключено»</b>;\n"
+        "• В строке состояния вверху экрана появится значок <b>VPN</b> (или 🔑);\n"
+        "• На сайте <code>2ip.ru</code> отобразится страна вашего сервера;\n"
+        "• Заблокированные и замедленные сервисы (YouTube, Instagram, ChatGPT) открываются без ограничений.</blockquote>\n\n"
+        "Выберите раздел подробных руководств ниже:"
     )
 
     builder = InlineKeyboardBuilder()
@@ -155,20 +161,28 @@ async def show_help_download(callback: CallbackQuery):
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
-        "📥 <b>Скачать клиент Amnezia для подключения</b>\n\n"
-        "Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:\n\n"
-        "• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиенту\n"
-        "• <b>GitHub Releases</b> — релизы и бинарные файлы всех версий\n"
-        "• <b>Официальный сайт Amnezia</b> — подробная информация"
+        "📥 <b>Скачать клиент AmneziaVPN</b>\n\n"
+        "Выберите вашу платформу для быстрой установки приложения:\n\n"
+        "• <b>iOS (iPhone / iPad)</b> — установка из App Store\n"
+        "• <b>Android</b> — Google Play или прямой APK (GitHub)\n"
+        "• <b>Windows / macOS / Linux</b> — официальный установщик (Зеркало)"
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🌐 Скачать клиент (Зеркало)",
+        text="🍏 App Store (iPhone / iPad)",
+        url=AMNEZIA_APP_STORE,
+    )
+    builder.button(
+        text="🤖 Google Play (Android)",
+        url=AMNEZIA_GOOGLE_PLAY,
+    )
+    builder.button(
+        text="💻 Windows / Mac (Зеркало)",
         url=AMNEZIA_DOWNLOAD_MIRROR,
     )
     builder.button(
-        text="📦 Последняя версия (GitHub)",
+        text="📦 GitHub Releases (APK / Бинарники)",
         url=AMNEZIA_GITHUB_LATEST,
     )
     builder.button(
@@ -179,7 +193,7 @@ async def show_help_download(callback: CallbackQuery):
         text="← Назад",
         callback_data=back_cb,
     )
-    builder.adjust(1, 1, 1, 1)
+    builder.adjust(1, 1, 1, 1, 1, 1)
 
     await render_hub(
         callback.bot,
