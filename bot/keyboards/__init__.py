@@ -27,7 +27,11 @@ from .admin.users import (
     get_admin_user_devices_keyboard,
 )
 from .common import get_back_button, get_hub_keyboard
-from .device import get_device_delete_confirm_keyboard, get_device_keyboard
+from .device import (
+    get_alt_connection_keyboard,
+    get_device_delete_confirm_keyboard,
+    get_device_keyboard,
+)
 from .payment import (
     get_balance_amounts_keyboard,
     get_balance_change_confirm_keyboard,
@@ -64,6 +68,7 @@ __all__ = [
     "get_referrals_list_keyboard",
     # device
     "get_device_keyboard",
+    "get_alt_connection_keyboard",
     "get_device_delete_confirm_keyboard",
     # payment
     "get_tariff_showcase_keyboard",

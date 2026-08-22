@@ -9,6 +9,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
+from services.account_topup import UNFINISHED_TOPUP_PROVIDER_STATUSES
 from services.audit_service import AuditService
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
@@ -100,21 +101,34 @@ class BanService:
         user,
         telegram_id: int,
     ) -> tuple:
-        # Используем тот же per-user advisory lock, что и checkout.
-        # Новый платёж не сможет появиться между чтением платежей и баном.
+        # 1. Блокируем незавершённые платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
+        await session.scalars(
+            select(Payment.id)
+            .where(
+                Payment.user_id == user.id,
+                Payment.credited_at.is_(None),
+                Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+            )
+            .order_by(Payment.id)
+            .with_for_update()
+        )
+
+        # 2. Используем тот же per-user advisory lock, что и checkout.
         await session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"),
             {"key": -user.id},
         )
 
-        # Блокируем платежи в стабильном порядке до блокировки User.
-        # Fulfillment использует порядок Payment -> User, поэтому обратного
-        # порядка блокировок здесь быть не должно.
+        # 3. Повторно читаем незавершённые платежи под сериализованным локом, исключая окно гонки.
         payment_ids = list(
             (
                 await session.scalars(
                     select(Payment.id)
-                    .where(Payment.user_id == user.id)
+                    .where(
+                        Payment.user_id == user.id,
+                        Payment.credited_at.is_(None),
+                        Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+                    )
                     .order_by(Payment.id)
                     .with_for_update()
                 )

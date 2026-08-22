@@ -276,6 +276,7 @@ async def confirm_purchase(
             value_5=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
+        message_effect_id="5107584321108051014",  # 👍 Thumbs up effect
     )
 
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()

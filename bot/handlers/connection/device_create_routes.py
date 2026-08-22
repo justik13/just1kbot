@@ -303,10 +303,15 @@ async def _process_server_selection(
         return
 
     try:
+        server_name = server.name if server else "VPN Сервер"
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.DEVICE_CREATING,
+            (
+                "⏳ <b>Настраиваем подключение...</b>\n\n"
+                f"🌍 Сервер: <b>{server_name}</b>\n\n"
+                "<i>Подготавливаем защищенный доступ...</i>"
+            ),
             get_back_button("add_device"),
             parse_mode="HTML",
         )

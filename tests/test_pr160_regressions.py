@@ -211,23 +211,24 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         show_showcase.assert_not_awaited()
 
     def test_device_download_file_action_is_preserved(self):
-        ready = get_device_keyboard(profile_id=123, config_ready=True)
+        ready = get_device_keyboard(profile_id=123, raw_config="vpn://test", config_ready=True)
         ready_callbacks = [
             button.callback_data
             for row in ready.inline_keyboard
             for button in row
+            if button.callback_data
         ]
-        self.assertIn("show_config:123", ready_callbacks)
-        self.assertIn("download_conf:123", ready_callbacks)
+        self.assertIn("alt_connection:123", ready_callbacks)
+        self.assertIn("support_help:device_123", ready_callbacks)
 
         pending = get_device_keyboard(profile_id=123, config_ready=False)
         pending_callbacks = [
             button.callback_data
             for row in pending.inline_keyboard
             for button in row
+            if button.callback_data
         ]
-        self.assertNotIn("show_config:123", pending_callbacks)
-        self.assertNotIn("download_conf:123", pending_callbacks)
+        self.assertNotIn("alt_connection:123", pending_callbacks)
 
     def test_legal_urls_and_faq_match_current_navigation(self):
         tos_url = "https://telegra.ph/Polzovatelskoe-soglashenie-07-23-48"

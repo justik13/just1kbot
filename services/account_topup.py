@@ -128,8 +128,8 @@ async def create_balance_topup(
     if rubles > Decimal(cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB):
         raise AccountTopupError("topup_above_maximum")
 
-    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
-    existing = await _visible_topup_for_update(session, user_id)
+    # To respect global Payment -> User lock hierarchy, lock any visible top-up first
+    await _visible_topup_for_update(session, user_id)
 
     user = await lock_checkout_user(session, user_id)
     if user is None or user.is_deleted:
@@ -138,6 +138,9 @@ async def create_balance_topup(
         raise AccountTopupError("topup_user_banned")
     if user.topup_blocked:
         raise AccountTopupError("topup_blocked")
+
+    # Re-fetch under serialized checkout lock to eliminate race window
+    existing = await _visible_topup_for_update(session, user_id)
 
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
@@ -232,7 +235,21 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Force cancel all unfinished topups for a user."""
-    # To prevent deadlocks with provider webhooks/pollers, we MUST lock Payment BEFORE User.
+    # 1. Lock existing payment rows in deterministic order to respect Payment -> User lock hierarchy
+    await session.scalars(
+        select(Payment.id)
+        .where(
+            Payment.user_id == user_id,
+            Payment.credited_at.is_(None),
+            Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+        )
+        .order_by(Payment.id)
+        .with_for_update()
+    )
+    # 2. Acquire per-user checkout advisory lock
+    await lock_checkout_user(session, user_id)
+
+    # 3. Re-read all unfinished payments under the serialized checkout lock to eliminate race window
     payments = (
         await session.scalars(
             select(Payment)
@@ -241,11 +258,10 @@ async def cancel_all_unfinished_topups(
                 Payment.credited_at.is_(None),
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
-            .order_by(Payment.id)  # Lock multiple payments in a deterministic order
+            .order_by(Payment.id)
             .with_for_update()
         )
     ).all()
-    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:
@@ -284,6 +300,13 @@ async def settle_succeeded_topup(
     A referral-bonus failure must abort the settlement so the provider event can
     be retried rather than silently crediting money without its attributable bonus.
     """
+    # 1. Lock Payment row FOR UPDATE first to enforce strict global lock hierarchy (Payment -> Advisory -> User)
+    locked_payment = await session.scalar(
+        select(Payment).where(Payment.id == payment.id).with_for_update()
+    )
+    if isinstance(locked_payment, Payment):
+        payment = locked_payment
+
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
 
@@ -419,7 +442,13 @@ async def settle_succeeded_topup(
                     async def _send_ref_push():
                         try:
                             from utils.telegram import render_hub
-                            await render_hub(bot, ref_target, ref_text, ref_markup)
+                            await render_hub(
+                                bot,
+                                ref_target,
+                                ref_text,
+                                ref_markup,
+                                message_effect_id="5104841245755180586",  # 🔥 Fire effect
+                            )
                             from database.connection import session_scope
                             async with session_scope() as notify_session:
                                 p = await notify_session.get(Payment, target_payment_id)
@@ -520,7 +549,12 @@ async def settle_succeeded_topup(
                     "auto_fulfill_error": str(e),
                 }
 
-        if bot is not None and user is not None and user.telegram_id:
+        if (
+            bot is not None
+            and user is not None
+            and user.telegram_id
+            and not source.startswith("user_refresh")
+        ):
             try:
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
                 builder = InlineKeyboardBuilder()
@@ -570,7 +604,13 @@ async def settle_succeeded_topup(
                 async def _send_topup_push():
                     try:
                         from utils.telegram import render_hub
-                        await render_hub(bot, target_user_id, push_text, push_markup)
+                        await render_hub(
+                            bot,
+                            target_user_id,
+                            push_text,
+                            push_markup,
+                            message_effect_id="5046509860389126442",  # 🎉 Party popper / Confetti
+                        )
                         from database.connection import session_scope
                         async with session_scope() as notify_session:
                             p = await notify_session.get(Payment, target_payment_id)

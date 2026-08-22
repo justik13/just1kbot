@@ -153,12 +153,14 @@ def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
         f"H2 = {last_config.get('H2')}",
         f"H3 = {last_config.get('H3')}",
         f"H4 = {last_config.get('H4')}",
-        "",
-        f"I1 = {last_config.get('I1', '') or ''}",
-        f"I2 = {last_config.get('I2', '') or ''}",
-        f"I3 = {last_config.get('I3', '') or ''}",
-        f"I4 = {last_config.get('I4', '') or ''}",
-        f"I5 = {last_config.get('I5', '') or ''}",
+    ])
+
+    for i in range(1, 6):
+        val = last_config.get(f"I{i}")
+        if val and str(val).strip():
+            lines.append(f"I{i} = {val}")
+
+    lines.extend([
         "",
         "[Peer]",
         f"PublicKey = {server_pub_key}",

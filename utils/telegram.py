@@ -217,15 +217,28 @@ async def delete_hub_ids(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
         return await _delete_hub_messages(bot, chat_id, msg_ids)
 
 
+def _is_message_effect_error(exc: Exception) -> bool:
+    """Return True if TelegramBadRequest was caused by an unsupported or invalid message_effect_id."""
+    err = str(exc).lower()
+    return (
+        "effect_id_invalid" in err
+        or "effect_chat_invalid" in err
+        or "message_effect_id" in err
+        or "message can't be sent with effect" in err
+        or ("effect" in err and "parse" not in err and "entities" not in err and "tag" not in err)
+    )
+
+
 async def render_hub(
     bot,
     chat_id: int,
     text: str,
-    reply_markup: InlineKeyboardMarkup,
+    reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str = "HTML",
     force_new: bool = False,
     trigger_message_id: int | None = None,
     disable_web_page_preview: bool = True,
+    message_effect_id: str | None = None,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
@@ -238,7 +251,7 @@ async def render_hub(
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
 
         target_edit_id = None
-        if not force_new and len(text_parts) == 1:
+        if not force_new and not message_effect_id and len(text_parts) == 1:
             if trigger_message_id and trigger_message_id in old_ids:
                 target_edit_id = trigger_message_id
             elif old_ids:
@@ -253,8 +266,7 @@ async def render_hub(
                 pass
 
 
-        edited = False
-        if target_edit_id:
+        if target_edit_id is not None:
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id,
@@ -264,39 +276,38 @@ async def render_hub(
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
                 )
-                edited = True
-            except TelegramBadRequest as exc:
-                error = str(exc).lower()
-                if "message is not modified" in error:
-                    edited = True
-                else:
-                    logger.debug(
-                        "Hub edit unavailable for chat %s message %s: %s",
-                        chat_id,
-                        target_edit_id,
-                        exc,
-                    )
-            except Exception as exc:
-                logger.warning(
-                    "Unexpected hub edit failure for chat %s message %s: %s",
-                    chat_id,
-                    target_edit_id,
-                    type(exc).__name__,
-                )
+                stale_ids = [mid for mid in old_ids if mid != target_edit_id]
+                if stale_ids:
+                    await _delete_hub_messages(bot, chat_id, stale_ids)
+                _hub_cache[chat_id] = {"ids": [target_edit_id]}
+                await _store_hub_id_in_db(chat_id, target_edit_id)
+                return target_edit_id
+            except TelegramBadRequest as e:
+                err_str = str(e).lower()
+                if "message is not modified" in err_str:
+                    stale_ids = [mid for mid in old_ids if mid != target_edit_id]
+                    if stale_ids:
+                        await _delete_hub_messages(bot, chat_id, stale_ids)
+                    _hub_cache[chat_id] = {"ids": [target_edit_id]}
+                    return target_edit_id
 
-        if edited and target_edit_id:
+                logger.debug(
+                    "edit_message_text failed for %s in chat %s: %s; falling back to send",
+                    target_edit_id,
+                    chat_id,
+                    e,
+                )
+                target_edit_id = None
+
+        if target_edit_id and target_edit_id in old_ids:
+            old_ids.remove(target_edit_id)
+
+        if target_edit_id is not None:
             stale_ids = [mid for mid in old_ids if mid != target_edit_id]
             if stale_ids:
                 await _delete_hub_messages(bot, chat_id, stale_ids)
             _hub_cache[chat_id] = {"ids": [target_edit_id]}
             await _store_hub_id_in_db(chat_id, target_edit_id)
-            return target_edit_id
-
-        if trigger_message_id and trigger_message_id not in old_ids:
-            try:
-                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
-            except Exception:
-                pass
 
         sent_ids: list[int] = []
         for index, part in enumerate(text_parts):
@@ -309,23 +320,53 @@ async def render_hub(
                     reply_markup=markup,
                     parse_mode=parse_mode,
                     link_preview_options=link_preview_opts,
+                    message_effect_id=message_effect_id,
                 )
             except TelegramBadRequest as exc:
                 error = str(exc).lower()
-                if "parse" not in error and "entities" not in error:
+                if message_effect_id and _is_message_effect_error(exc):
+                    try:
+                        message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=part,
+                            reply_markup=markup,
+                            parse_mode=parse_mode,
+                            link_preview_options=link_preview_opts,
+                        )
+                    except TelegramBadRequest as inner_exc:
+                        inner_error = str(inner_exc).lower()
+                        if "parse" in inner_error or "entities" in inner_error:
+                            logger.warning(
+                                "HTML parse failed in render_hub retry for chat %s; using plain text",
+                                chat_id,
+                            )
+                            plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                            message = await bot.send_message(
+                                chat_id=chat_id,
+                                text=plain,
+                                reply_markup=markup,
+                                link_preview_options=link_preview_opts,
+                                parse_mode=None,
+                            )
+                        else:
+                            raise
+                elif "parse" in error or "entities" in error:
+                    logger.warning(
+                        "HTML parse failed in render_hub for chat %s; using plain text",
+                        chat_id,
+                    )
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                    message = await bot.send_message(
+                        chat_id=chat_id,
+                        text=plain,
+                        reply_markup=markup,
+                        link_preview_options=link_preview_opts,
+                        parse_mode=None,
+                    )
+                else:
                     raise
-                logger.warning(
-                    "HTML parse failed in render_hub for chat %s; using plain text",
-                    chat_id,
-                )
-                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                message = await bot.send_message(
-                    chat_id=chat_id,
-                    text=plain,
-                    reply_markup=markup,
-                    link_preview_options=link_preview_opts,
-                )
             sent_ids.append(message.message_id)
+
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
@@ -456,10 +497,12 @@ async def append_hub_message(
                         chat_id,
                         e,
                     )
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
                     msg = await bot.send_message(
                         chat_id=chat_id,
-                        text=part,
+                        text=plain,
                         reply_markup=kb,
+                        parse_mode=None,
                     )
                 else:
                     raise
