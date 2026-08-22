@@ -303,13 +303,14 @@ async def _process_server_selection(
         return
 
     try:
+        server_name = server.name if server else "VPN Server"
         await render_hub(
             callback.bot,
             callback.message.chat.id,
             (
-                "⚙️ <b>Подготовка подключения</b>\n\n"
-                "<b>[1/2]</b> 🔐 Генерация профиля на сервере... ⏳\n"
-                "<i>Создаем уникальные ключи шифрования AmneziaWG</i>"
+                "⏳ <b>Создаём подключение...</b>\n\n"
+                f"🌍 Локация: <b>{server_name}</b>\n\n"
+                "<i>Подготавливаем доступ, секундочку...</i>"
             ),
             get_back_button("add_device"),
             parse_mode="HTML",
@@ -467,18 +468,6 @@ async def _process_server_selection(
 
             if ready_profile and ready_profile.provisioning_status in ("active", "create_failed", "create_cleanup_pending"):
                 from .device_view_routes import render_device_screen
-                if ready_profile.provisioning_status == "active":
-                    await render_hub(
-                        callback.bot,
-                        callback.message.chat.id,
-                        (
-                            "⚙️ <b>Подготовка подключения</b>\n\n"
-                            "<b>[2/2]</b> ✅ Профиль готов! Загружаем карточку... 🎉"
-                        ),
-                        reply_markup=None,
-                        parse_mode="HTML",
-                    )
-
                 await session.refresh(user)
                 await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
             else:
