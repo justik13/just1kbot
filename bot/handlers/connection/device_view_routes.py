@@ -179,10 +179,16 @@ async def render_device_screen(
             display_key = build_display_vpn_key(raw_cfg, profile, server)
 
         if display_key:
+            has_copy_btn = 1 <= len(raw_cfg or "") <= 256
+            copy_hint = (
+                "<i>👆 Нажмите на ключ выше, чтобы скопировать его в буфер обмена.</i>"
+                if not has_copy_btn
+                else "<i>👆 Нажмите на ключ или кнопку ниже, чтобы скопировать его.</i>"
+            )
             key_block = (
                 f"\n\n🔑 <b>Ключ подключения:</b>\n"
                 f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
-                f"<i>👆 Нажмите на ключ внутри блока, чтобы скопировать текст, либо используйте зелёную кнопку ниже.</i>"
+                f"{copy_hint}"
             )
             if len(rendered) + len(key_block) <= 4000:
                 rendered += key_block
