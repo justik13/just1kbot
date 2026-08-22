@@ -476,15 +476,9 @@ async def alt_connection(
 
     old_hub_ids = await get_hub_ids(callback.message.chat.id)
 
-    alt_guide_text = (
-        f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
-        "Если прямая вставка ключа не сработала или ваше приложение не поддерживает протокол:\n\n"
-        "1. Сохраните один из прикреплённых файлов конфигурации:\n"
-        "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
-        "   • <code>.conf</code> — для приложения <b>WireGuard</b> или роутеров\n"
-        "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>.\n"
-        "3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."
-    )
+    vpn_sent = False
+    conf_sent = False
+    guide_sent = False
 
     try:
         await append_hub_document(
@@ -493,6 +487,7 @@ async def alt_connection(
             caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
             parse_mode="HTML",
         )
+        vpn_sent = True
     except Exception as e:
         logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
 
@@ -503,8 +498,36 @@ async def alt_connection(
             caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
             parse_mode="HTML",
         )
+        conf_sent = True
     except Exception as e:
         logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
+
+    if vpn_sent and conf_sent:
+        files_info = (
+            "1. Сохраните один из прикреплённых файлов конфигурации:\n"
+            "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
+            "   • <code>.conf</code> — для приложения <b>WireGuard</b> или роутеров\n"
+        )
+    elif vpn_sent:
+        files_info = (
+            "1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).\n"
+        )
+    elif conf_sent:
+        files_info = (
+            "1. Сохраните прикреплённый файл <code>.conf</code> (для приложения <b>WireGuard</b> или роутеров).\n"
+        )
+    else:
+        files_info = (
+            "⚠️ <i>Не удалось прикрепить файлы конфигурации. Используйте кнопку авто-настройки ниже либо ключ из главного экрана.</i>\n"
+        )
+
+    alt_guide_text = (
+        f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
+        "Если прямая вставка ключа не сработала или ваше приложение не поддерживает протокол:\n\n"
+        f"{files_info}"
+        "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>.\n"
+        "3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."
+    )
 
     try:
         await append_hub_message(
@@ -513,9 +536,11 @@ async def alt_connection(
             reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
             parse_mode="HTML",
         )
+        guide_sent = True
     except Exception as e:
         logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
-    finally:
+
+    if guide_sent and old_hub_ids:
         try:
             await delete_hub_ids(callback.bot, callback.message.chat.id, old_hub_ids)
         except Exception as e:

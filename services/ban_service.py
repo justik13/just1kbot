@@ -9,6 +9,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
+from services.account_topup import UNFINISHED_TOPUP_PROVIDER_STATUSES
 from services.audit_service import AuditService
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
@@ -100,10 +101,14 @@ class BanService:
         user,
         telegram_id: int,
     ) -> tuple:
-        # 1. Блокируем платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
+        # 1. Блокируем незавершённые платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
         await session.scalars(
             select(Payment.id)
-            .where(Payment.user_id == user.id)
+            .where(
+                Payment.user_id == user.id,
+                Payment.credited_at.is_(None),
+                Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+            )
             .order_by(Payment.id)
             .with_for_update()
         )
@@ -114,12 +119,16 @@ class BanService:
             {"key": -user.id},
         )
 
-        # 3. Повторно читаем платежи под сериализованным локом, исключая окно гонки.
+        # 3. Повторно читаем незавершённые платежи под сериализованным локом, исключая окно гонки.
         payment_ids = list(
             (
                 await session.scalars(
                     select(Payment.id)
-                    .where(Payment.user_id == user.id)
+                    .where(
+                        Payment.user_id == user.id,
+                        Payment.credited_at.is_(None),
+                        Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+                    )
                     .order_by(Payment.id)
                     .with_for_update()
                 )

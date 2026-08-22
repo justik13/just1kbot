@@ -39,8 +39,12 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     base_price = base_tariff.price_rub
     base_daily_rate = base_price / base_days
     undiscounted_price = base_daily_rate * days
+    discount_pct = (
+        round(((undiscounted_price - price) / undiscounted_price) * 100)
+        if undiscounted_price > 0
+        else 0
+    )
     savings_rub = round(undiscounted_price - price)
-    discount_pct = round((savings_rub / undiscounted_price) * 100) if undiscounted_price > 0 else 0
     price_per_month = round((price * 30) / days) if days > 0 else price
 
     if savings_rub <= 0 or discount_pct <= 0:

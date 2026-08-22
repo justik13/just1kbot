@@ -67,6 +67,16 @@ class TestDynamicTariffCalculator(unittest.TestCase):
         self.assertIn('⏱ 30 дн. — 150 ₽', texts_in_kb)
         self.assertIn('⏱ 90 дн. — 400 ₽ (133 ₽/мес • -11%) 🔥', texts_in_kb)
 
+    def test_precision_boundary_discount_calculation(self):
+        # Base: 30 days for 149 RUB (daily rate = 4.9666... RUB)
+        # 90 days undiscounted = 447 RUB, Price = 399 RUB.
+        # Undiscounted price - Price = 48.0 RUB.
+        # Direct: 48.0 / 447.0 * 100 = 10.738255... -> round = 11%
+        t_base = SimpleNamespace(id=20, duration_days=30, price_rub=149)
+        t_target = SimpleNamespace(id=21, duration_days=90, price_rub=399)
+        text = format_dynamic_tariff_button(t_target, t_base)
+        self.assertEqual(text, '⏱ 90 дн. — 399 ₽ (133 ₽/мес • -11%) 🔥')
+
 
 if __name__ == '__main__':
     unittest.main()

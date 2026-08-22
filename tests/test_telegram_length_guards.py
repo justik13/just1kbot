@@ -70,5 +70,66 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Другой способ подключения', rendered_text)
 
 
+    async def test_alt_connection_preserves_old_hub_if_guide_send_fails(self):
+        from bot.handlers.connection.device_view_routes import alt_connection
+
+        callback = MagicMock()
+        callback.data = 'alt_connection:1'
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=12345)
+        callback.message.message_id = 99
+        callback.bot = MagicMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = SimpleNamespace(id=10, telegram_id=12345)
+        profile = SimpleNamespace(id=1, user_id=10, server_id=1, device_name='iPhone', raw_config='vpn://dummy', provisioning_status='active')
+        server = SimpleNamespace(id=1, name='Germany')
+
+        with patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
+             patch('bot.handlers.connection.device_view_routes.get_profile_by_id', new=AsyncMock(return_value=profile)), \
+             patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
+             patch('bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json', return_value={'containers': [{'awg': {'last_config': '{}'}}]}), \
+             patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
+             patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
+             patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
+             patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
+             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
+             patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[99, 100])), \
+             patch('bot.handlers.connection.device_view_routes.append_hub_document', new=AsyncMock()), \
+             patch('bot.handlers.connection.device_view_routes.append_hub_message', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
+             patch('bot.handlers.connection.device_view_routes.delete_hub_ids', new=AsyncMock()) as mock_delete:
+
+            await alt_connection(callback, state, session, db_user)
+
+            # Invariant: If append_hub_message fails, old_hub_ids MUST NOT be deleted!
+            self.assertFalse(mock_delete.called)
+
+    def test_build_conf_fallback_omits_empty_i_parameters(self):
+        from utils.vpn_parser import _build_conf_fallback
+        data = {'hostName': '1.2.3.4', 'port': 51820}
+        last_config = {
+            'client_priv_key': 'priv',
+            'server_pub_key': 'pub',
+            'client_ip': '10.0.0.2',
+            'Jc': 4, 'Jmin': 10, 'Jmax': 50,
+            'S1': 15, 'S2': 20, 'S3': 5, 'S4': 10,
+            'H1': '100', 'H2': '200', 'H3': '300', 'H4': '400',
+            'I1': '<r 2>',
+            'I2': '',  # Empty
+            'I3': None, # None
+            'I4': '   ', # Whitespace
+            'I5': '',
+        }
+        conf = _build_conf_fallback(data, last_config)
+        self.assertIsNotNone(conf)
+        self.assertIn('I1 = <r 2>', conf)
+        self.assertNotIn('I2 =', conf)
+        self.assertNotIn('I3 =', conf)
+        self.assertNotIn('I4 =', conf)
+        self.assertNotIn('I5 =', conf)
+
+
 if __name__ == '__main__':
     unittest.main()
