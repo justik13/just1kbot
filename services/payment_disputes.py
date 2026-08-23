@@ -21,6 +21,7 @@ from database.repositories.account_ledger_repo import (
     create_payment_debit,
     get_account_balance,
     get_payment_refundable_amount,
+    lock_account_user,
     reserve_payment_funds,
     resolve_reservation,
     whole_rubles,

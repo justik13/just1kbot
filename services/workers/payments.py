@@ -14,7 +14,7 @@ from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
 from database.repositories.tariff_quotes_repo import lock_checkout_user
-from services.account_topup import settle_succeeded_topup, settle_succeeded_topup_by_id
+from services.account_topup import settle_succeeded_topup
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
 from services.referral_bonus import grant_referral_bonus_for_topup

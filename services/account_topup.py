@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.settings import get_settings
-from database.models import Payment, PaymentEvent
+from database.models import Payment, PaymentEvent, User
 from database.repositories.account_ledger_repo import (
     AccountBalanceSnapshot,
     credit_succeeded_topup,
