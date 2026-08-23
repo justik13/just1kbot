@@ -41,7 +41,6 @@ UNFINISHED_TOPUP_PROVIDER_STATUSES = (
     "pending",
     "waiting_for_capture",
     "unknown",
-    "manual_review",
     "succeeded",
 )
 
@@ -244,9 +243,8 @@ async def cancel_all_unfinished_topups(
             .where(
                 Payment.user_id == user_id,
                 Payment.credited_at.is_(None),
-                Payment.ui_visible.is_(True),
                 Payment.checkout_status == "active",
-                Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
+                Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
             )
             .order_by(Payment.id)
             .with_for_update()

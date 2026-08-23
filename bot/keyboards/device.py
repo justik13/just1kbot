@@ -37,7 +37,6 @@ def get_device_keyboard(
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
             callback_data=f"request_delete_device:{profile_id}",
-            style="danger",
         )
         adjustments.append(1)
 
@@ -65,7 +64,6 @@ def get_alt_connection_keyboard(
         builder.button(
             text="🚀 Открыть в Amnezia",
             url=amnezia_bridge_url,
-            style="primary",
         )
 
     builder.button(

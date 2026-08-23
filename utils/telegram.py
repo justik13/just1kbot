@@ -394,6 +394,9 @@ async def send_hub_photo(
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
 
+        if caption:
+            caption = caption[:1024]
+
         msg = await bot.send_photo(
             chat_id=chat_id,
             photo=photo,
@@ -424,6 +427,9 @@ async def send_hub_document(
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
 
+        if caption:
+            caption = caption[:1024]
+
         msg = await bot.send_document(
             chat_id=chat_id,
             document=document,
@@ -452,6 +458,9 @@ async def append_hub_document(
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
+        if caption:
+            caption = caption[:1024]
+        
         msg = await bot.send_document(
             chat_id=chat_id,
             document=document,

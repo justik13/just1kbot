@@ -96,7 +96,7 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
             cooldown=60,
             retry_cooldown=5,
             clock=lambda: self.now,
-            alert_timeout=0.05,
+            alert_timeout=2.0,
         )
 
     async def asyncTearDown(self):

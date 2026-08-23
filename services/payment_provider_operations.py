@@ -111,6 +111,9 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
 
 
 async def cancel_pending_create_operations(session, payment_id: int):
+    # Lock Payment first to respect global lock hierarchy
+    await session.execute(select(Payment).where(Payment.id == payment_id).with_for_update())
+
     operations = (
         await session.scalars(
             select(PaymentProviderOperation)
