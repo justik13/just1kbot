@@ -140,7 +140,9 @@ async def create_balance_topup(
         raise AccountTopupError("topup_blocked")
 
     # Re-fetch under serialized checkout lock to eliminate race window
-    existing = await _visible_topup_for_update(session, user_id)
+    existing = await get_visible_balance_topup(
+        session, user_id=user_id, for_update=False
+    )
 
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
@@ -263,7 +265,6 @@ async def cancel_all_unfinished_topups(
                 Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
             )
             .order_by(Payment.id)
-            .with_for_update()
         )
     ).all()
 

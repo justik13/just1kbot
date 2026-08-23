@@ -130,7 +130,6 @@ class BanService:
                         Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
                     )
                     .order_by(Payment.id)
-                    .with_for_update()
                 )
             ).all()
         )

@@ -177,9 +177,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             user_id = user.id
 
+        barrier = asyncio.Event()
+
         async def worker_ban():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     u = await session.get(User, user_id)
                     return await BanService._ban_user(
                         session=session,
@@ -189,8 +193,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     )
 
         async def worker_topup():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     try:
                         return await create_balance_topup(
                             session=session,
@@ -201,7 +207,11 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     except Exception as e:
                         return e
 
-        results = await asyncio.gather(worker_ban(), worker_topup(), return_exceptions=True)
+        t1 = asyncio.create_task(worker_ban())
+        t2 = asyncio.create_task(worker_topup())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
             if isinstance(r, Exception) and not isinstance(r, RuntimeError):
                 self.fail(f"Unexpected non-domain exception during concurrent ban/topup: {r}")
@@ -226,9 +236,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             user_id = user.id
 
+        barrier = asyncio.Event()
+
         async def worker_topup_1():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     return await create_balance_topup(
                         session=session,
                         user_id=user_id,
@@ -237,8 +251,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     )
 
         async def worker_topup_2():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     return await create_balance_topup(
                         session=session,
                         user_id=user_id,
@@ -246,7 +262,11 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                         bot_username="testbot",
                     )
 
-        results = await asyncio.gather(worker_topup_1(), worker_topup_2(), return_exceptions=True)
+        t1 = asyncio.create_task(worker_topup_1())
+        t2 = asyncio.create_task(worker_topup_2())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
             self.assertNotIsInstance(r, Exception, f"Concurrent create_topup failed: {r}")
 
@@ -287,9 +307,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             payment_id = payment.id
 
+        barrier = asyncio.Event()
+
         async def worker_ban():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     u = await session.get(User, user_id)
                     return await BanService._ban_user(
                         session=session,
@@ -299,8 +323,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     )
 
         async def worker_settle():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     p = await session.get(Payment, payment_id)
                     return await settle_succeeded_topup(
                         session=session,
@@ -308,13 +334,23 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                         source="webhook_test",
                     )
 
-        results = await asyncio.gather(worker_ban(), worker_settle(), return_exceptions=True)
+        t1 = asyncio.create_task(worker_ban())
+        t2 = asyncio.create_task(worker_settle())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
             self.assertNotIsInstance(r, Exception, f"Concurrent ban/settle failed: {r}")
 
         async with self.session_factory() as session:
             u = await session.get(User, user_id)
             self.assertTrue(u.is_banned)
+            p = await session.get(Payment, payment_id)
+            bal = await get_account_balance(session, user_id=user_id)
+            # Succeeded payment must always settle and credit funds safely even when banned
+            self.assertEqual(p.provider_status, "succeeded")
+            self.assertIsNotNone(p.credited_at)
+            self.assertEqual(bal.available, Decimal("400.00"))
 
 
 if __name__ == "__main__":
