@@ -246,12 +246,21 @@ async def credit_succeeded_topup(
     if locked_payment is None and payment_id is None:
         raise ValueError("payment_id or locked_payment is required")
 
-    payment = locked_payment or await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    user = await lock_account_user(session, payment.user_id)
+    if locked_payment is not None:
+        payment = locked_payment
+        user = await lock_account_user(session, payment.user_id)
+    else:
+        payment_user_id = await session.scalar(
+            select(Payment.user_id).where(Payment.id == payment_id)
+        )
+        if payment_user_id is None:
+            raise LookupError("topup_payment_not_found")
+        user = await lock_account_user(session, payment_user_id)
+        payment = await session.scalar(
+            select(Payment).where(Payment.id == payment_id).with_for_update()
+        )
+        if payment is None:
+            raise LookupError("topup_payment_not_found")
     # Provider and webhook finalizers already own the Payment lock. Keep their
     # documented Payment -> User order so concurrent confirmations serialize.
     if payment.user_id != user.id:
