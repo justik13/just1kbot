@@ -232,7 +232,6 @@ async def render_device_screen(
 
         keyboard = get_device_keyboard(
             profile.id,
-            raw_config=display_key,
             config_ready=config_ready,
             show_delete=show_delete,
             amnezia_bridge_url=amnezia_bridge_url,

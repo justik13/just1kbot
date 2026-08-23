@@ -4,28 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from bot.handlers.connection.device_view_routes import build_display_vpn_key, render_device_screen
-from bot.keyboards.device import get_device_keyboard
 
 
 class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
-    def test_copy_text_button_included_when_under_telegram_limit(self):
-        short_key = 'vpn://' + 'a' * 200
-        kb = get_device_keyboard(profile_id=1, raw_config=short_key, config_ready=True)
-        copy_buttons = [btn for row in kb.inline_keyboard for btn in row if getattr(btn, 'copy_text', None)]
-        self.assertEqual(len(copy_buttons), 1)
-        self.assertEqual(copy_buttons[0].copy_text.text, short_key)
-
-    def test_copy_text_button_omitted_when_exceeds_telegram_limit(self):
-        long_key = 'vpn://' + 'a' * 300
-        kb = get_device_keyboard(profile_id=1, raw_config=long_key, config_ready=True)
-        copy_buttons = [btn for row in kb.inline_keyboard for btn in row if getattr(btn, 'copy_text', None)]
-        self.assertEqual(len(copy_buttons), 0)
-
-        long_key = 'vpn://' + 'a' * 260
-        kb2 = get_device_keyboard(profile_id=1, raw_config=long_key, config_ready=True)
-        copy_buttons2 = [btn for row in kb2.inline_keyboard for btn in row if getattr(btn, 'copy_text', None)]
-        self.assertEqual(len(copy_buttons2), 0)
-
     def test_build_display_vpn_key_standardized(self):
         profile = SimpleNamespace(id=1, device_name='iPhone #1')
         server = SimpleNamespace(id=1, name='Germany')

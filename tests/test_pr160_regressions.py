@@ -211,7 +211,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         show_showcase.assert_not_awaited()
 
     def test_device_download_file_action_is_preserved(self):
-        ready = get_device_keyboard(profile_id=123, raw_config="vpn://test", config_ready=True)
+        ready = get_device_keyboard(profile_id=123, config_ready=True)
         ready_callbacks = [
             button.callback_data
             for row in ready.inline_keyboard
