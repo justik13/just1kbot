@@ -465,6 +465,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 "paid": True,
                 "amount": {"value": "300.00", "currency": "RUB"},
                 "captured_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": {
+                    "order_id": payment.public_order_id,
+                    "local_payment_id": str(payment.id),
+                },
             },
         )
 
@@ -551,6 +555,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 "paid": True,
                 "amount": {"value": "500.00", "currency": "RUB"},
                 "captured_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": {
+                    "order_id": payment.public_order_id,
+                    "local_payment_id": str(payment.id),
+                },
             },
         )
 
