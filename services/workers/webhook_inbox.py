@@ -121,31 +121,34 @@ async def fetch_provider(claim, transport=YooKassaService):
     return await transport.get_payment_result(claim.payment_external_id)
 
 
-async def _find_payment(session, claim):
-    payment = None
+async def _lookup_payment_identity(session, claim):
+    row = None
     if claim.payment_external_id:
-        payment = await session.scalar(
-            select(Payment)
-            .where(Payment.external_id == claim.payment_external_id)
-            .with_for_update()
-        )
-    if payment is None and claim.public_order_id:
-        payment = await session.scalar(
-            select(Payment)
-            .where(Payment.public_order_id == claim.public_order_id)
-            .with_for_update()
-        )
-        if payment and claim.payment_external_id:
+        row = (
+            await session.execute(
+                select(Payment.id, Payment.user_id, Payment.external_id)
+                .where(Payment.external_id == claim.payment_external_id)
+            )
+        ).first()
+    if row is None and claim.public_order_id:
+        row = (
+            await session.execute(
+                select(Payment.id, Payment.user_id, Payment.external_id)
+                .where(Payment.public_order_id == claim.public_order_id)
+            )
+        ).first()
+        if row and claim.payment_external_id and row.external_id != claim.payment_external_id:
             conflict = await session.scalar(
                 select(Payment.id).where(
                     Payment.external_id == claim.payment_external_id,
-                    Payment.id != payment.id,
+                    Payment.id != row.id,
                 )
             )
             if conflict:
-                return None, "external_id_conflict"
-            payment.external_id = claim.payment_external_id
-    return payment, None
+                return None, None, "payment_external_id_conflict"
+    if row is None:
+        return None, None, None
+    return row.id, row.user_id, None
 
 
 async def _manual_refund_review(session, payment, *, reason):
@@ -184,8 +187,8 @@ async def finalize(session, claim, result, bot=None):
     ):
         raise WebhookInboxOwnershipError(claim.inbox_id)
 
-    payment, error = await _find_payment(session, claim)
-    if payment is None:
+    payment_id, user_id, error = await _lookup_payment_identity(session, claim)
+    if payment_id is None:
         # For payment.canceled webhooks, the payment may legitimately not exist
         # in our DB (e.g. created externally, or external_id not yet linked).
         # Retrying 30 times is wasteful — silently succeed to avoid dead queue spam.
@@ -204,6 +207,21 @@ async def finalize(session, claim, result, bot=None):
             return
         _schedule_retry(row, code=error or "payment_not_visible", seconds=10)
         return
+
+    # Enforce canonical lock hierarchy: Advisory(user) -> User FOR UPDATE -> Payment FOR UPDATE
+    if user_id is not None:
+        from database.repositories.tariff_quotes_repo import lock_checkout_user
+        await lock_checkout_user(session, user_id)
+
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
+    if payment is None:
+        _schedule_retry(row, code="payment_not_visible", seconds=10)
+        return
+
+    if claim.public_order_id and claim.payment_external_id and not payment.external_id:
+        payment.external_id = claim.payment_external_id
 
     if not result or not result.ok:
         code = (

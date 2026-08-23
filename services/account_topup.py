@@ -327,21 +327,24 @@ async def settle_succeeded_topup(
         snapshot = await get_account_balance(session, user_id=payment.user_id)
         return False, snapshot
 
-    hard_block = user.topup_blocked
+    user_is_banned = getattr(user, "is_banned", False) is True
+    hard_block = (getattr(user, "topup_blocked", False) is True) or user_is_banned
     recovery_topup = (
-        user.financial_hold
-        and user.financial_block_reason == "chargeback_debt"
+        (getattr(user, "financial_hold", False) is True)
+        and getattr(user, "financial_block_reason", None) == "chargeback_debt"
+        and not user_is_banned
     )
-    if hard_block or (user.financial_hold and not recovery_topup):
+    if hard_block or ((getattr(user, "financial_hold", False) is True) and not recovery_topup):
+        reason = "user_banned" if user_is_banned else "user_financially_blocked"
         payment.fulfillment_status = "manual_review"
         payment.reconciliation_status = "manual_review"
-        payment.manual_review_reason = "user_financially_blocked"
+        payment.manual_review_reason = reason
         session.add(
             PaymentEvent(
                 payment_id=payment.id,
                 event_type="topup_blocked_by_hold",
                 provider_status=payment.provider_status,
-                reason="user_financially_blocked",
+                reason=reason,
                 source=source,
             )
         )

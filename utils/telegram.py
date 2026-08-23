@@ -7,6 +7,7 @@ import time
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
 from database.connection import session_scope
@@ -138,25 +139,31 @@ def _maybe_cleanup_cache() -> None:
         )
 
 
-async def _load_hub_ids_from_db(chat_id: int) -> list[int]:
+async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = None) -> list[int]:
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         return list(cached["ids"])
 
     try:
-        async with session_scope() as session:
+        if session is not None:
             ids = await hub_repo.get_hub_message_ids(session, chat_id)
-            _hub_cache[chat_id] = {"ids": list(ids)}
-            return list(ids)
+        else:
+            async with session_scope() as sess:
+                ids = await hub_repo.get_hub_message_ids(sess, chat_id)
+        _hub_cache[chat_id] = {"ids": list(ids)}
+        return list(ids)
     except Exception as e:
         logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
         return []
 
 
-async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
+async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSession | None = None) -> None:
     try:
-        async with session_scope() as session:
+        if session is not None:
             await hub_repo.add_hub_message_id(session, chat_id, message_id)
+        else:
+            async with session_scope() as sess:
+                await hub_repo.add_hub_message_id(sess, chat_id, message_id)
         cached = _hub_cache.get(chat_id)
         if cached and "ids" in cached:
             if message_id not in cached["ids"]:
@@ -167,13 +174,16 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
         logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
 
 
-async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
+async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session: AsyncSession | None = None) -> None:
     if not message_ids:
         return
 
     try:
-        async with session_scope() as session:
+        if session is not None:
             await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
+        else:
+            async with session_scope() as sess:
+                await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
         cached = _hub_cache.get(chat_id)
         if cached and "ids" in cached:
             old_set = set(message_ids)
@@ -182,18 +192,18 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
         logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
 
 
-async def get_hub_ids(chat_id: int) -> list[int]:
-    return await _load_hub_ids_from_db(chat_id)
+async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:
+    return await _load_hub_ids_from_db(chat_id, session=session)
 
 
-async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
+async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int], session: AsyncSession | None = None) -> list[int]:
     if not msg_ids:
         return []
 
     deleted_ids, failed_ids = await _safe_delete_batch(bot, chat_id, msg_ids)
 
     if deleted_ids:
-        await _remove_hub_ids_from_db(chat_id, deleted_ids)
+        await _remove_hub_ids_from_db(chat_id, deleted_ids, session=session)
 
     if failed_ids:
         logger.warning(
@@ -467,6 +477,7 @@ async def _append_hub_document_unlocked(
     caption: str = None,
     reply_markup: InlineKeyboardMarkup = None,
     parse_mode: str = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     if caption:
         caption = caption[:1024]
@@ -479,7 +490,7 @@ async def _append_hub_document_unlocked(
         parse_mode=parse_mode,
     )
 
-    await _store_hub_id_in_db(chat_id, msg.message_id)
+    await _store_hub_id_in_db(chat_id, msg.message_id, session=session)
     return msg.message_id
 
 
@@ -490,6 +501,7 @@ async def append_hub_document(
     caption: str = None,
     reply_markup: InlineKeyboardMarkup = None,
     parse_mode: str = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()
     lock = _get_hub_render_lock(chat_id)
@@ -501,6 +513,7 @@ async def append_hub_document(
             caption=caption,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            session=session,
         )
 
 
@@ -510,6 +523,7 @@ async def _append_hub_message_unlocked(
     text: str,
     reply_markup: InlineKeyboardMarkup = None,
     parse_mode: str = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     text_parts = split_text_by_lines(text, limit=4096)
 
@@ -551,13 +565,13 @@ async def _append_hub_message_unlocked(
     except Exception:
         if sent_ids:
             try:
-                await _delete_hub_messages(bot, chat_id, sent_ids)
+                await _delete_hub_messages(bot, chat_id, sent_ids, session=session)
             except Exception:
                 pass
         raise
 
     for mid in sent_ids:
-        await _store_hub_id_in_db(chat_id, mid)
+        await _store_hub_id_in_db(chat_id, mid, session=session)
 
     return sent_ids[-1]
 

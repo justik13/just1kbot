@@ -772,6 +772,123 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         for r in results:
             self.assertNotIsInstance(r, Exception, f"Concurrent multi-user recovery failed: {r}")
 
+    async def test_webhook_inbox_finalize_and_ban_user_concurrent(self):
+        """Webhook inbox finalize and ban_user concurrently execute without deadlock."""
+        from services.workers.webhook_inbox import finalize as webhook_finalize, WebhookInboxClaim
+        from database.models.webhook_inbox import WebhookInbox
+        from services.payment_provider_yookassa import YooKassaResult
+
+        async with self.session_factory() as session:
+            user = User(telegram_id=999888)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("100"),
+                currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
+                provider_status="pending",
+                external_id="yoo_webhook_test_1",
+            )
+            session.add(payment)
+            await session.flush()
+            inbox = WebhookInbox(
+                event_key=f"ev_{uuid.uuid4().hex}",
+                event_type="payment.succeeded",
+                provider_object_id="yoo_webhook_test_1",
+                payment_external_id="yoo_webhook_test_1",
+                public_order_id=payment.public_order_id,
+                status="processing",
+                locked_by="worker_webhook",
+                locked_at=datetime.now(timezone.utc),
+                attempts=1,
+            )
+            session.add(inbox)
+            await session.commit()
+            inbox_id = inbox.id
+            user_id = user.id
+
+        claim = WebhookInboxClaim(
+            inbox_id=inbox_id,
+            worker_id="worker_webhook",
+            attempt_number=1,
+            event_type="payment.succeeded",
+            event_key=inbox.event_key,
+            payment_external_id="yoo_webhook_test_1",
+            public_order_id=payment.public_order_id,
+            provider_object_id="yoo_webhook_test_1",
+            payload={"object": {"id": "yoo_webhook_test_1", "status": "succeeded"}},
+            created_at=datetime.now(timezone.utc),
+        )
+        fake_result = YooKassaResult(
+            True,
+            value={
+                "id": "yoo_webhook_test_1",
+                "status": "succeeded",
+                "paid": True,
+                "amount": {"value": "100.00", "currency": "RUB"},
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+        barrier = asyncio.Event()
+
+        async def run_webhook_finalize():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    try:
+                        return await webhook_finalize(session, claim, fake_result)
+                    except Exception as e:
+                        return e
+
+        async def run_ban():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    u = await session.get(User, user_id)
+                    return await BanService._ban_user(session, 1, u, 999888)
+
+        t1 = asyncio.create_task(run_webhook_finalize())
+        t2 = asyncio.create_task(run_ban())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        for r in results:
+            self.assertNotIsInstance(r, asyncio.CancelledError)
+
+    async def test_settle_succeeded_topup_blocks_banned_user(self):
+        """Settlement on a banned user sets manual_review with reason 'user_banned' and does not credit."""
+        async with self.session_factory() as session:
+            user = User(telegram_id=999777, is_banned=True)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("200"),
+                currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
+                provider_status="succeeded",
+                provider_confirmed_at=datetime.now(timezone.utc),
+                external_id="yoo_banned_test_1",
+            )
+            await session.commit()
+            payment_id = payment.id
+
+        async with self.session_factory() as session:
+            async with session.begin():
+                p = await session.get(Payment, payment_id)
+                success, snapshot = await settle_succeeded_topup(session, payment=p, source="test")
+                self.assertFalse(success)
+                self.assertEqual(p.fulfillment_status, "manual_review")
+                self.assertEqual(p.reconciliation_status, "manual_review")
+                self.assertEqual(p.manual_review_reason, "user_banned")
+                self.assertIsNone(p.credited_at)
+
 
 if __name__ == "__main__":
     unittest.main()

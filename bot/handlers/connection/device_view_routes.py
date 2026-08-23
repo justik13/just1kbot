@@ -506,7 +506,7 @@ async def alt_connection(
     chat_lock = _get_hub_render_lock(callback.message.chat.id)
 
     async with chat_lock:
-        old_hub_ids = await get_hub_ids(callback.message.chat.id)
+        old_hub_ids = await get_hub_ids(callback.message.chat.id, session=session)
 
         sent_doc_ids = []
         vpn_sent = False
@@ -519,6 +519,7 @@ async def alt_connection(
                 document=vpn_file,
                 caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
                 parse_mode="HTML",
+                session=session,
             )
             sent_doc_ids.append(doc_msg_1)
             vpn_sent = True
@@ -531,6 +532,7 @@ async def alt_connection(
                 document=conf_file,
                 caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
                 parse_mode="HTML",
+                session=session,
             )
             sent_doc_ids.append(doc_msg_2)
             conf_sent = True
@@ -578,6 +580,7 @@ async def alt_connection(
                 text=alt_guide_text,
                 reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
                 parse_mode="HTML",
+                session=session,
             )
             guide_sent = True
         except Exception as e:
@@ -586,12 +589,12 @@ async def alt_connection(
         if guide_sent:
             if old_hub_ids:
                 try:
-                    await _delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids)
+                    await _delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids, session=session)
                 except Exception as e:
                     logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
         else:
             if sent_doc_ids:
                 try:
-                    await _delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids)
+                    await _delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids, session=session)
                 except Exception as clean_exc:
                     logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)
