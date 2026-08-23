@@ -13,11 +13,13 @@ from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
-from services.account_topup import settle_succeeded_topup_by_id
+from database.repositories.tariff_quotes_repo import lock_checkout_user
+from services.account_topup import settle_succeeded_topup, settle_succeeded_topup_by_id
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.payment_status import payment_display_status
 from services.referral_bonus import grant_referral_bonus_for_topup
 from utils.datetime_helpers import now_utc
+from utils.telegram import safe
 
 logger = logging.getLogger("BackgroundWorker")
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
@@ -146,6 +148,10 @@ async def _recover_stale_topups(bot: Bot | None = None):
             last_processed_id = pid
             try:
                 async with session_scope() as session:
+                    # 1. Acquire per-user checkout advisory lock first (Advisory -> User -> Payment)
+                    user = await lock_checkout_user(session, _uid)
+                    if user is None:
+                        continue
                     payment = await session.scalar(
                         select(Payment)
                         .where(Payment.id == pid)
@@ -172,11 +178,13 @@ async def _recover_stale_topups(bot: Bot | None = None):
                         and payment.fulfillment_status
                         not in {"succeeded", "reversed", "manual_review"}
                     ):
-                        await settle_succeeded_topup_by_id(
+                        await settle_succeeded_topup(
                             session,
-                            payment_id=payment.id,
+                            payment=payment,
                             source="stale_topup_recovery",
                             bot=bot,
+                            locked_user=user,
+                            locked_payment=payment,
                         )
 
                     # Referral bonuses are ledger entries with their own idempotency key.
@@ -239,7 +247,7 @@ async def _alert_new_stale_payments(bot: Bot, settings):
                 telegram_id=telegram_id,
                 amount=payment.amount,
                 currency=payment.currency,
-                method=payment.payment_method or texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L147_1,
+                method=safe(payment.payment_method or texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L147_1),
             )
         )
     if len(new_rows) > 10:

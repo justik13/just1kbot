@@ -892,6 +892,8 @@ class FourChannelFinancialInvariantTests(unittest.IsolatedAsyncioTestCase):
                 source="test_by_id",
                 settings=mock_settings,
                 bot=mock_bot,
+                locked_user=user,
+                locked_payment=p,
             )
             self.assertTrue(credited)
 

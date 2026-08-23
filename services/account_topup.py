@@ -280,6 +280,8 @@ async def settle_succeeded_topup(
     source: str,
     settings=None,
     bot=None,
+    locked_user: User | None = None,
+    locked_payment: Payment | None = None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
     """Credit a verified top-up and close its non-subscription lifecycle.
 
@@ -288,16 +290,22 @@ async def settle_succeeded_topup(
     be retried rather than silently crediting money without its attributable bonus.
     """
     # 1. Acquire per-user checkout advisory lock first (Advisory -> User -> Payment)
-    user = await lock_checkout_user(session, payment.user_id)
-    if user is None:
-        raise AccountTopupError("topup_user_missing")
+    if locked_user is not None:
+        user = locked_user
+    else:
+        user = await lock_checkout_user(session, payment.user_id)
+        if user is None:
+            raise AccountTopupError("topup_user_missing")
 
     # 2. Lock Payment row FOR UPDATE under serialized checkout lock
-    locked_payment = await session.scalar(
-        select(Payment).where(Payment.id == payment.id).with_for_update()
-    )
-    if isinstance(locked_payment, Payment):
+    if locked_payment is not None:
         payment = locked_payment
+    else:
+        locked = await session.scalar(
+            select(Payment).where(Payment.id == payment.id).with_for_update()
+        )
+        if isinstance(locked, Payment):
+            payment = locked
 
     if payment.provider_confirmed_at is None:
         raise AccountTopupError("topup_provider_not_verified")
@@ -344,6 +352,7 @@ async def settle_succeeded_topup(
     entry, created = await credit_succeeded_topup(
         session,
         locked_payment=payment,
+        locked_user=user,
         metadata={"settlement_source": source},
     )
     payment.fulfillment_status = "succeeded"
@@ -357,7 +366,6 @@ async def settle_succeeded_topup(
     await refresh_user_dispute_hold(session, user_id=payment.user_id)
     cfg = settings or get_settings()
     if balance.real_position > Decimal(cfg.BALANCE_MAX_AVAILABLE_RUB):
-        user = await lock_checkout_user(session, payment.user_id)
         user.topup_blocked = True
         user.financial_block_reason = "balance_limit_exceeded_by_late_payment"
         session.add(
@@ -641,11 +649,26 @@ async def settle_succeeded_topup_by_id(
     settings=None,
     bot=None,
 ) -> tuple[bool, AccountBalanceSnapshot]:
+    res = await session.scalar(
+        select(Payment.user_id).where(Payment.id == payment_id)
+    )
+    if res is None:
+        raise AccountTopupError("topup_not_found")
+    payment_user_id = getattr(res, "user_id", res)
+    user = await lock_checkout_user(session, payment_user_id)
+    if user is None:
+        raise AccountTopupError("topup_user_missing")
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
     if payment is None:
         raise AccountTopupError("topup_not_found")
     return await settle_succeeded_topup(
-        session, payment=payment, source=source, settings=settings, bot=bot
+        session,
+        payment=payment,
+        source=source,
+        settings=settings,
+        bot=bot,
+        locked_user=user,
+        locked_payment=payment,
     )

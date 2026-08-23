@@ -10,7 +10,7 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from database.models import Payment, User
+from database.models import Payment, PaymentProviderOperation, User
 from database.repositories.account_ledger_repo import get_account_balance
 from services.account_topup import (
     cancel_all_unfinished_topups,
@@ -18,6 +18,8 @@ from services.account_topup import (
     settle_succeeded_topup,
 )
 from services.ban_service import BanService
+from services.payment_provider_operations import ProviderOperationClaim, finalize
+from services.yookassa_service import YooKassaResult
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -409,6 +411,166 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 if p.credited_at is None:
                     self.assertEqual(p.checkout_status, "abandoned", f"Payment {p.id} was not abandoned on ban!")
                     self.assertFalse(p.ui_visible, f"Payment {p.id} remained ui_visible on ban!")
+
+    async def test_concurrent_finalize_and_cancel_unfinished(self):
+        """Test concurrent provider finalize and cancel_all_unfinished_topups without deadlock."""
+        telegram_id = 999009
+        async with self.session_factory() as session:
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("300"),
+                currency="RUB",
+                provider_status="pending",
+                external_id="yoo_test_fin_1",
+            )
+            session.add(payment)
+            await session.flush()
+            op = PaymentProviderOperation(
+                payment_id=payment.id,
+                operation_type="create_payment",
+                status="processing",
+                idempotency_key=f"op_{uuid.uuid4().hex}",
+                payload={},
+                locked_by="worker_1",
+                locked_at=datetime.now(timezone.utc),
+                attempts=1,
+            )
+            session.add(op)
+            await session.commit()
+            user_id = user.id
+            payment_id = payment.id
+            op_id = op.id
+
+        claim = ProviderOperationClaim(
+            operation_id=op_id,
+            payment_id=payment_id,
+            operation_type="create_payment",
+            payload={},
+            idempotency_key=f"op_{uuid.uuid4().hex}",
+            worker_id="worker_1",
+            attempt_number=1,
+            external_id="yoo_test_fin_1",
+            created_at=datetime.now(timezone.utc),
+        )
+        fake_result = YooKassaResult(
+            True,
+            value={"id": "yoo_test_fin_1", "status": "succeeded", "paid": True, "amount": {"value": "300.00", "currency": "RUB"}},
+        )
+
+        barrier = asyncio.Event()
+
+        async def worker_finalize():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    return await finalize(session, claim, fake_result)
+
+        async def worker_cancel():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    return await cancel_all_unfinished_topups(session=session, user_id=user_id)
+
+        t1 = asyncio.create_task(worker_finalize())
+        t2 = asyncio.create_task(worker_cancel())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        for r in results:
+            self.assertNotIsInstance(r, Exception, f"Concurrent finalize vs cancel failed with exception: {r}")
+
+        async with self.session_factory() as session:
+            p = await session.get(Payment, payment_id)
+            self.assertEqual(p.provider_status, "succeeded")
+            bal = await get_account_balance(session, user_id=user_id)
+            self.assertEqual(bal.accounting_position, Decimal("300.00"))
+
+    async def test_concurrent_finalize_and_ban_user(self):
+        """Test concurrent provider finalize and BanService._ban_user without deadlock."""
+        telegram_id = 999010
+        async with self.session_factory() as session:
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("500"),
+                currency="RUB",
+                provider_status="pending",
+                external_id="yoo_test_fin_ban_1",
+            )
+            session.add(payment)
+            await session.flush()
+            op = PaymentProviderOperation(
+                payment_id=payment.id,
+                operation_type="create_payment",
+                status="processing",
+                idempotency_key=f"op_{uuid.uuid4().hex}",
+                payload={},
+                locked_by="worker_1",
+                locked_at=datetime.now(timezone.utc),
+                attempts=1,
+            )
+            session.add(op)
+            await session.commit()
+            user_id = user.id
+            payment_id = payment.id
+            op_id = op.id
+
+        claim = ProviderOperationClaim(
+            operation_id=op_id,
+            payment_id=payment_id,
+            operation_type="create_payment",
+            payload={},
+            idempotency_key=f"op_{uuid.uuid4().hex}",
+            worker_id="worker_1",
+            attempt_number=1,
+            external_id="yoo_test_fin_ban_1",
+            created_at=datetime.now(timezone.utc),
+        )
+        fake_result = YooKassaResult(
+            True,
+            value={"id": "yoo_test_fin_ban_1", "status": "succeeded", "paid": True, "amount": {"value": "500.00", "currency": "RUB"}},
+        )
+
+        barrier = asyncio.Event()
+
+        async def worker_finalize():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    return await finalize(session, claim, fake_result)
+
+        async def worker_ban():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    u = await session.get(User, user_id)
+                    return await BanService._ban_user(
+                        session=session,
+                        admin_id=1,
+                        user=u,
+                        telegram_id=telegram_id,
+                    )
+
+        t1 = asyncio.create_task(worker_finalize())
+        t2 = asyncio.create_task(worker_ban())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        for r in results:
+            self.assertNotIsInstance(r, Exception, f"Concurrent finalize vs ban failed with exception: {r}")
+
+        async with self.session_factory() as session:
+            u = await session.get(User, user_id)
+            self.assertTrue(u.is_banned)
 
 
 if __name__ == "__main__":

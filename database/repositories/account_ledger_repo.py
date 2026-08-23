@@ -241,12 +241,16 @@ async def credit_succeeded_topup(
     *,
     payment_id: int | None = None,
     locked_payment: Payment | None = None,
+    locked_user: User | None = None,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
     if locked_payment is None and payment_id is None:
         raise ValueError("payment_id or locked_payment is required")
 
-    if locked_payment is not None:
+    if locked_user is not None and locked_payment is not None:
+        user = locked_user
+        payment = locked_payment
+    elif locked_payment is not None:
         payment = locked_payment
         user = await lock_account_user(session, payment.user_id)
     else:

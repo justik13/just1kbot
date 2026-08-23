@@ -109,6 +109,7 @@ async def grant_referral_bonus_for_topup(
     purchaser_user_id: int,
     payment_id: int,
     topup_amount: object,
+    locked_user: User | None = None,
 ) -> ReferralBonusGrantResult:
     """Credit the referrer with 10% of a top-up, and credit the purchaser with 10% if it is their first top-up."""
     bonus = calculate_referral_bonus(topup_amount)
@@ -118,13 +119,16 @@ async def grant_referral_bonus_for_topup(
             purchaser_welcome_bonus=Decimal(0),
         )
 
-    purchaser = await session.scalar(
-        select(User)
-        .where(
-            User.id == purchaser_user_id,
-            User.is_deleted.is_(False),
+    if locked_user is not None and locked_user.id == purchaser_user_id:
+        purchaser = locked_user
+    else:
+        purchaser = await session.scalar(
+            select(User)
+            .where(
+                User.id == purchaser_user_id,
+                User.is_deleted.is_(False),
+            )
         )
-    )
     if purchaser is None or purchaser.referred_by is None:
         return ReferralBonusGrantResult(
             referrer_bonus=Decimal(0),

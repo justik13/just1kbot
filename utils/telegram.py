@@ -138,7 +138,7 @@ def _maybe_cleanup_cache() -> None:
         )
 
 
-async def _load_hub_ids_from_db(chat_id: int) -> list[int] | None:
+async def _load_hub_ids_from_db(chat_id: int) -> list[int]:
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         return list(cached["ids"])
@@ -150,7 +150,7 @@ async def _load_hub_ids_from_db(chat_id: int) -> list[int] | None:
             return list(ids)
     except Exception as e:
         logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
-        return None
+        return []
 
 
 async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
@@ -309,76 +309,84 @@ async def render_hub(
                 pass
 
         sent_ids: list[int] = []
-        for index, part in enumerate(text_parts):
-            is_last = index == len(text_parts) - 1
-            markup = reply_markup if is_last else None
-            try:
-                message = await bot.send_message(
-                    chat_id=chat_id,
-                    text=part,
-                    reply_markup=markup,
-                    parse_mode=parse_mode,
-                    link_preview_options=link_preview_opts,
-                    message_effect_id=message_effect_id,
-                )
-            except TelegramBadRequest as exc:
-                error = str(exc).lower()
-                if message_effect_id and _is_message_effect_error(exc):
-                    try:
-                        message = await bot.send_message(
-                            chat_id=chat_id,
-                            text=part,
-                            reply_markup=markup,
-                            parse_mode=parse_mode,
-                            link_preview_options=link_preview_opts,
-                        )
-                    except TelegramBadRequest as inner_exc:
-                        inner_error = str(inner_exc).lower()
-                        if "parse" in inner_error or "entities" in inner_error:
-                            logger.warning(
-                                "HTML parse failed in render_hub retry for chat %s; using plain text",
-                                chat_id,
-                            )
-                            plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                            message = await bot.send_message(
-                                chat_id=chat_id,
-                                text=plain,
-                                reply_markup=markup,
-                                link_preview_options=link_preview_opts,
-                                parse_mode=None,
-                            )
-                        else:
-                            raise
-                elif "parse" in error or "entities" in error:
-                    logger.warning(
-                        "HTML parse failed in render_hub for chat %s; using plain text",
-                        chat_id,
+        try:
+            for index, part in enumerate(text_parts):
+                is_last = index == len(text_parts) - 1
+                markup = reply_markup if is_last else None
+                effect = message_effect_id if index == 0 else None
+                try:
+                    message = await bot.send_message(
+                        chat_id=chat_id,
+                        text=part,
+                        reply_markup=markup,
+                        parse_mode=parse_mode,
+                        link_preview_options=link_preview_opts,
+                        message_effect_id=effect,
                     )
-                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                    try:
-                        message = await bot.send_message(
-                            chat_id=chat_id,
-                            text=plain,
-                            reply_markup=markup,
-                            link_preview_options=link_preview_opts,
-                            parse_mode=None,
-                            message_effect_id=message_effect_id,
+                except TelegramBadRequest as exc:
+                    error = str(exc).lower()
+                    if effect and _is_message_effect_error(exc):
+                        try:
+                            message = await bot.send_message(
+                                chat_id=chat_id,
+                                text=part,
+                                reply_markup=markup,
+                                parse_mode=parse_mode,
+                                link_preview_options=link_preview_opts,
+                            )
+                        except TelegramBadRequest as inner_exc:
+                            inner_error = str(inner_exc).lower()
+                            if "parse" in inner_error or "entities" in inner_error:
+                                logger.warning(
+                                    "HTML parse failed in render_hub retry for chat %s; using plain text",
+                                    chat_id,
+                                )
+                                plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                                message = await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=plain,
+                                    reply_markup=markup,
+                                    link_preview_options=link_preview_opts,
+                                    parse_mode=None,
+                                )
+                            else:
+                                raise
+                    elif "parse" in error or "entities" in error:
+                        logger.warning(
+                            "HTML parse failed in render_hub for chat %s; using plain text",
+                            chat_id,
                         )
-                    except TelegramBadRequest as effect_exc:
-                        if message_effect_id and _is_message_effect_error(effect_exc):
+                        plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                        try:
                             message = await bot.send_message(
                                 chat_id=chat_id,
                                 text=plain,
                                 reply_markup=markup,
                                 link_preview_options=link_preview_opts,
                                 parse_mode=None,
+                                message_effect_id=effect,
                             )
-                        else:
-                            raise
-                else:
-                    raise
-            sent_ids.append(message.message_id)
-
+                        except TelegramBadRequest as effect_exc:
+                            if effect and _is_message_effect_error(effect_exc):
+                                message = await bot.send_message(
+                                    chat_id=chat_id,
+                                    text=plain,
+                                    reply_markup=markup,
+                                    link_preview_options=link_preview_opts,
+                                    parse_mode=None,
+                                )
+                            else:
+                                raise
+                    else:
+                        raise
+                sent_ids.append(message.message_id)
+        except Exception:
+            if sent_ids:
+                try:
+                    await _delete_hub_messages(bot, chat_id, sent_ids)
+                except Exception:
+                    pass
+            raise
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
@@ -499,36 +507,44 @@ async def append_hub_message(
             text_parts = ["—"]
 
         sent_ids = []
-        for i, part in enumerate(text_parts):
-            is_last = (i == len(text_parts) - 1)
-            kb = reply_markup if is_last else None
-            
-            try:
-                msg = await bot.send_message(
-                    chat_id=chat_id,
-                    text=part,
-                    reply_markup=kb,
-                    parse_mode=parse_mode,
-                )
-            except TelegramBadRequest as e:
-                err_str = str(e).lower()
-                if "parse" in err_str or "entities" in err_str:
-                    logger.warning(
-                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
-                        chat_id,
-                        e,
-                    )
-                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+        try:
+            for i, part in enumerate(text_parts):
+                is_last = (i == len(text_parts) - 1)
+                kb = reply_markup if is_last else None
+                
+                try:
                     msg = await bot.send_message(
                         chat_id=chat_id,
-                        text=plain,
+                        text=part,
                         reply_markup=kb,
-                        parse_mode=None,
+                        parse_mode=parse_mode,
                     )
-                else:
-                    raise
-            
-            sent_ids.append(msg.message_id)
+                except TelegramBadRequest as e:
+                    err_str = str(e).lower()
+                    if "parse" in err_str or "entities" in err_str:
+                        logger.warning(
+                            "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
+                            chat_id,
+                            e,
+                        )
+                        plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                        msg = await bot.send_message(
+                            chat_id=chat_id,
+                            text=plain,
+                            reply_markup=kb,
+                            parse_mode=None,
+                        )
+                    else:
+                        raise
+                
+                sent_ids.append(msg.message_id)
+        except Exception:
+            if sent_ids:
+                try:
+                    await _delete_hub_messages(bot, chat_id, sent_ids)
+                except Exception:
+                    pass
+            raise
 
         for mid in sent_ids:
             await _store_hub_id_in_db(chat_id, mid)

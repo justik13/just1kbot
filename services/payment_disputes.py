@@ -129,6 +129,13 @@ async def open_payment_dispute(
     except ValueError as exc:
         raise PaymentDisputeError("dispute_amount_invalid") from exc
 
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.external_id == provider_payment_id)
+    )
+    if payment_user_id is None:
+        raise PaymentDisputeError("payment_not_found")
+
+    await lock_account_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment)
         .where(Payment.external_id == provider_payment_id)
@@ -249,6 +256,12 @@ async def mark_payment_dispute_manual_review(
     admin_id: int,
     note: str,
 ) -> PaymentDispute:
+    dispute_info = await session.scalar(
+        select(PaymentDispute).where(PaymentDispute.id == dispute_id)
+    )
+    if dispute_info is None:
+        raise PaymentDisputeError("dispute_not_found")
+    await lock_account_user(session, dispute_info.user_id)
     dispute = await session.scalar(
         select(PaymentDispute)
         .where(PaymentDispute.id == dispute_id)
@@ -289,6 +302,8 @@ async def resolve_payment_dispute(
     )
     if dispute_info is None:
         raise PaymentDisputeError("dispute_not_found")
+
+    await lock_account_user(session, dispute_info.user_id)
 
     payment = await session.scalar(
         select(Payment).where(Payment.id == dispute_info.payment_id).with_for_update()

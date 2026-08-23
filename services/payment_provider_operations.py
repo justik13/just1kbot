@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from database.models import Payment, PaymentEvent, PaymentProviderOperation
+from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
 from services.yookassa_service import YooKassaErrorKind, YooKassaResult, YooKassaService
@@ -78,6 +79,13 @@ async def enqueue_create(session, payment, description, return_url):
 
 
 async def ensure_reconcile_payment_operation(session, payment, *, reason):
+    payment_user_id = getattr(payment, "user_id", None)
+    if payment_user_id is None:
+        payment_user_id = await session.scalar(
+            select(Payment.user_id).where(Payment.id == payment.id)
+        )
+    if payment_user_id is not None:
+        await lock_checkout_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment.id).with_for_update()
     )
@@ -111,7 +119,12 @@ async def ensure_reconcile_payment_operation(session, payment, *, reason):
 
 
 async def cancel_pending_create_operations(session, payment_id: int):
-    # Lock Payment first to respect global lock hierarchy
+    # Canonical hierarchy: Advisory(user) -> User -> Payment -> ProviderOperation
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_checkout_user(session, payment_user_id)
     await session.execute(select(Payment).where(Payment.id == payment_id).with_for_update())
 
     operations = (
@@ -132,14 +145,18 @@ async def cancel_pending_create_operations(session, payment_id: int):
 
 async def mark_dead_operation(session, operation_id: int):
     # Read without lock first to get payment_id for proper lock ordering.
-    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    # Global hierarchy: Advisory(user) -> User -> Payment -> ProviderOperation
     op_info = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == operation_id)
     )
     if not op_info or op_info.status != "dead":
         raise ValueError("operation is not dead")
-    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == op_info.payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_checkout_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
     )
@@ -161,14 +178,18 @@ async def retry_dead_provider_operation(
     session, operation_id, *, reset_attempts, reason
 ):
     # Read without lock first to get payment_id for proper lock ordering.
-    # Global hierarchy: Payment MUST be locked before PaymentProviderOperation.
+    # Global hierarchy: Advisory(user) -> User -> Payment -> ProviderOperation
     op_info = await session.scalar(
         select(PaymentProviderOperation)
         .where(PaymentProviderOperation.id == operation_id)
     )
     if not op_info or op_info.status != "dead":
         raise ValueError("operation is not dead")
-    # Lock Payment first (global hierarchy: Payment → ProviderOperation)
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == op_info.payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_checkout_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == op_info.payment_id).with_for_update()
     )
@@ -360,6 +381,18 @@ async def _push_payment_url(bot, session, payment) -> None:
 
 
 async def finalize(session, claim, result, bot=None):
+    # Canonical hierarchy: Advisory(user) -> User -> Payment -> ProviderOperation
+    res = await session.scalar(
+        select(Payment.user_id).where(Payment.id == claim.payment_id)
+    )
+    if res is None:
+        raise PaymentProviderOperationOwnershipError(claim.operation_id)
+    payment_user_id = getattr(res, "user_id", res)
+
+    user = await lock_checkout_user(session, payment_user_id)
+    if user is None:
+        raise PaymentProviderOperationOwnershipError(claim.operation_id)
+
     payment = await session.scalar(
         select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
@@ -442,6 +475,8 @@ async def finalize(session, claim, result, bot=None):
                         payment=payment,
                         source=provider_transition_source(claim),
                         bot=bot,
+                        locked_user=user,
+                        locked_payment=payment,
                     )
 
     if result and result.ok:
@@ -538,6 +573,12 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
 
 
 async def finalize_provider_failure(session, claim, *, error_code, retryable):
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == claim.payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_checkout_user(session, payment_user_id)
+
     payment = await session.scalar(
         select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )

@@ -77,14 +77,18 @@ async def request_balance_topup_refund(
     requested_by_admin_id: int | None,
 ) -> BalanceRefundRequest:
     """Reserve every currently refundable ruble and enqueue one provider command."""
-    # To respect global Payment -> User lock hierarchy, we MUST lock Payment first
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == payment_id)
+    )
+    if payment_user_id is None:
+        raise BalanceRefundError("payment_not_found")
+    
+    await lock_account_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
     if payment is None:
         raise BalanceRefundError("payment_not_found")
-    
-    await lock_account_user(session, payment.user_id)
     if payment.provider_status not in {"succeeded", "refunded"}:
         raise BalanceRefundError("payment_not_refundable")
     if not payment.external_id:
@@ -625,6 +629,12 @@ async def finalize(
     claim: ProviderRefundClaim,
     result: YooKassaResult[dict],
 ) -> None:
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == claim.payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_account_user(session, payment_user_id)
+
     payment = await session.scalar(
         select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )
@@ -816,6 +826,12 @@ async def finalize_provider_failure(
     error_code: str,
     retryable: bool,
 ) -> None:
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == claim.payment_id)
+    )
+    if payment_user_id is not None:
+        await lock_account_user(session, payment_user_id)
+
     payment = await session.scalar(
         select(Payment).where(Payment.id == claim.payment_id).with_for_update()
     )

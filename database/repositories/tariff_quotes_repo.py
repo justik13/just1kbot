@@ -17,11 +17,24 @@ class CheckoutQuoteConflictError(RuntimeError):
     pass
 
 
-async def lock_checkout_user(session: AsyncSession, user_id: int) -> User | None:
+async def lock_checkout_user(session: AsyncSession, user_id: int | object) -> User | None:
     """The sole per-user checkout lock; callers derive state only afterwards."""
-    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -user_id})
+    if isinstance(user_id, User):
+        uid = user_id.id
+    elif hasattr(user_id, "user_id"):
+        uid = getattr(user_id, "user_id")
+    elif hasattr(user_id, "id") and not isinstance(user_id, int):
+        uid = getattr(user_id, "id")
+    else:
+        uid = user_id
+    try:
+        uid_int = int(uid)
+    except (TypeError, ValueError):
+        return None
+
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": -uid_int})
     return await session.scalar(
-        select(User).where(User.id == user_id).with_for_update()
+        select(User).where(User.id == uid_int).with_for_update()
     )
 
 
