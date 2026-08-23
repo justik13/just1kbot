@@ -432,7 +432,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.flush()
             op = PaymentProviderOperation(
                 payment_id=payment.id,
-                operation_type="create_payment",
+                operation_type="reconcile_payment",
                 status="processing",
                 idempotency_key=f"op_{uuid.uuid4().hex}",
                 payload={},
@@ -449,7 +449,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         claim = ProviderOperationClaim(
             operation_id=op_id,
             payment_id=payment_id,
-            operation_type="create_payment",
+            operation_type="reconcile_payment",
             payload={},
             idempotency_key=f"op_{uuid.uuid4().hex}",
             worker_id="worker_1",
@@ -459,7 +459,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         )
         fake_result = YooKassaResult(
             True,
-            value={"id": "yoo_test_fin_1", "status": "succeeded", "paid": True, "amount": {"value": "300.00", "currency": "RUB"}},
+            value={
+                "id": "yoo_test_fin_1",
+                "status": "succeeded",
+                "paid": True,
+                "amount": {"value": "300.00", "currency": "RUB"},
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
         barrier = asyncio.Event()
@@ -512,7 +518,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.flush()
             op = PaymentProviderOperation(
                 payment_id=payment.id,
-                operation_type="create_payment",
+                operation_type="reconcile_payment",
                 status="processing",
                 idempotency_key=f"op_{uuid.uuid4().hex}",
                 payload={},
@@ -529,7 +535,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         claim = ProviderOperationClaim(
             operation_id=op_id,
             payment_id=payment_id,
-            operation_type="create_payment",
+            operation_type="reconcile_payment",
             payload={},
             idempotency_key=f"op_{uuid.uuid4().hex}",
             worker_id="worker_1",
@@ -539,7 +545,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         )
         fake_result = YooKassaResult(
             True,
-            value={"id": "yoo_test_fin_ban_1", "status": "succeeded", "paid": True, "amount": {"value": "500.00", "currency": "RUB"}},
+            value={
+                "id": "yoo_test_fin_ban_1",
+                "status": "succeeded",
+                "paid": True,
+                "amount": {"value": "500.00", "currency": "RUB"},
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+            },
         )
 
         barrier = asyncio.Event()
