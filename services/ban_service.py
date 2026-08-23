@@ -102,24 +102,6 @@ class BanService:
         telegram_id: int,
     ) -> tuple:
         # 1. Блокируем незавершённые платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
-        await session.scalars(
-            select(Payment.id)
-            .where(
-                Payment.user_id == user.id,
-                Payment.credited_at.is_(None),
-                Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
-            )
-            .order_by(Payment.id)
-            .with_for_update()
-        )
-
-        # 2. Используем тот же per-user advisory lock, что и checkout.
-        await session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": -user.id},
-        )
-
-        # 3. Повторно читаем незавершённые платежи под сериализованным локом, исключая окно гонки.
         payment_ids = list(
             (
                 await session.scalars(
@@ -130,8 +112,15 @@ class BanService:
                         Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
                     )
                     .order_by(Payment.id)
+                    .with_for_update()
                 )
             ).all()
+        )
+
+        # 2. Используем тот же per-user advisory lock, что и checkout.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": -user.id},
         )
 
         locked_user = await session.scalar(

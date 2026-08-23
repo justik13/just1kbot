@@ -140,9 +140,7 @@ async def create_balance_topup(
         raise AccountTopupError("topup_blocked")
 
     # Re-fetch under serialized checkout lock to eliminate race window
-    existing = await get_visible_balance_topup(
-        session, user_id=user_id, for_update=False
-    )
+    existing = await _visible_topup_for_update(session, user_id)
 
     balance = await get_account_balance(
         session, user_id=user.id, locked_user=user
@@ -160,24 +158,20 @@ async def create_balance_topup(
         )
         or 0
     )
-    if unfinished >= cfg.BALANCE_MAX_UNFINISHED_TOPUPS:
-        raise AccountTopupError("too_many_unfinished_topups")
+    if unfinished >= int(cfg.BALANCE_MAX_UNFINISHED_TOPUPS):
+        raise AccountTopupError("topup_too_many_unfinished")
 
-    pending = await _pending_topup_exposure(session, user.id)
-    projected_position = balance.real_position + pending + rubles
-    if max(Decimal(0), projected_position) > Decimal(
-        cfg.BALANCE_MAX_AVAILABLE_RUB
-    ):
-        raise AccountTopupError("topup_balance_limit_exceeded")
+    exposure = await _pending_topup_exposure(session, user.id)
+    if (exposure + rubles) > Decimal(cfg.BALANCE_MAX_PENDING_EXPOSURE_RUB):
+        raise AccountTopupError("topup_exposure_limit_exceeded")
 
     payment = Payment(
         user_id=user.id,
         amount=rubles,
         currency="RUB",
-        public_order_id="topup_" + uuid.uuid4().hex,
-        provider_idempotency_key=uuid.uuid4().hex,
-        provider_status="creating",
-        fulfillment_status="not_ready",
+        public_order_id=uuid.uuid4().hex[:12].upper(),
+        provider_idempotency_key=str(uuid.uuid4()),
+        provider_status="not_created",
         reconciliation_status="ok",
         checkout_status="active",
         ui_visible=True,
@@ -200,7 +194,7 @@ async def create_balance_topup(
             payment_id=payment.id,
             event_type="balance_topup_created",
             provider_status=payment.provider_status,
-            source="account_topup",
+            source="telegram",
         )
     )
     await session.flush()
@@ -238,22 +232,6 @@ async def cancel_all_unfinished_topups(
 ) -> int:
     """Abandon all active topup checkout sessions for a user without mutating provider truth."""
     # 1. Lock existing active checkout payments in deterministic order
-    await session.scalars(
-        select(Payment.id)
-        .where(
-            Payment.user_id == user_id,
-            Payment.credited_at.is_(None),
-            Payment.ui_visible.is_(True),
-            Payment.checkout_status == "active",
-            Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
-        )
-        .order_by(Payment.id)
-        .with_for_update()
-    )
-    # 2. Acquire per-user checkout advisory lock
-    await lock_checkout_user(session, user_id)
-
-    # 3. Re-read active checkout payments under the serialized checkout lock to eliminate race window
     payments = (
         await session.scalars(
             select(Payment)
@@ -265,8 +243,11 @@ async def cancel_all_unfinished_topups(
                 Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
             )
             .order_by(Payment.id)
+            .with_for_update()
         )
     ).all()
+    # 2. Acquire per-user checkout advisory lock
+    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:
