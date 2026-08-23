@@ -95,14 +95,19 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
              patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[99, 100])), \
-             patch('bot.handlers.connection.device_view_routes.append_hub_document', new=AsyncMock()), \
+             patch('bot.handlers.connection.device_view_routes.append_hub_document', new=AsyncMock(side_effect=[101, 102])), \
              patch('bot.handlers.connection.device_view_routes.append_hub_message', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
              patch('bot.handlers.connection.device_view_routes.delete_hub_ids', new=AsyncMock()) as mock_delete:
 
             await alt_connection(callback, state, session, db_user)
 
-            # Invariant: If append_hub_message fails, old_hub_ids MUST NOT be deleted!
-            self.assertFalse(mock_delete.called)
+            # Invariant: If append_hub_message fails, old_hub_ids [99, 100] MUST NOT be deleted,
+            # and partial sent docs [101, 102] MUST be cleaned up!
+            self.assertTrue(mock_delete.called)
+            deleted_ids = mock_delete.call_args[0][2]
+            self.assertEqual(deleted_ids, [101, 102])
+            self.assertNotIn(99, deleted_ids)
+            self.assertNotIn(100, deleted_ids)
 
     def test_build_conf_fallback_omits_empty_i_parameters(self):
         from utils.vpn_parser import _build_conf_fallback

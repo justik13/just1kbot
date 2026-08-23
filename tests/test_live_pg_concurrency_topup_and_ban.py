@@ -18,7 +18,11 @@ from services.account_topup import (
     settle_succeeded_topup,
 )
 from services.ban_service import BanService
-from services.payment_provider_operations import ProviderOperationClaim, finalize
+from services.payment_provider_operations import (
+    ProviderOperationClaim,
+    finalize,
+    recover_stale,
+)
 from services.yookassa_service import YooKassaResult
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -595,6 +599,130 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         async with self.session_factory() as session:
             u = await session.get(User, user_id)
             self.assertTrue(u.is_banned)
+
+    async def test_ban_user_with_succeeded_uncredited_payment_sets_manual_review(self):
+        """Banning user when payment is succeeded at provider marks fulfillment as manual_review."""
+        telegram_id = 999011
+        async with self.session_factory() as session:
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("300"),
+                currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
+                provider_status="succeeded",
+                provider_confirmed_at=datetime.now(timezone.utc),
+                fulfillment_status="not_ready",
+                credited_at=None,
+                checkout_status="active",
+                ui_visible=True,
+            )
+            session.add(payment)
+            await session.commit()
+            user_id = user.id
+            payment_id = payment.id
+
+        async with self.session_factory() as session:
+            async with session.begin():
+                u = await session.get(User, user_id)
+                await BanService._ban_user(session, admin_id=1, user=u, telegram_id=telegram_id)
+
+        async with self.session_factory() as session:
+            p = await session.get(Payment, payment_id)
+            self.assertEqual(p.checkout_status, "abandoned")
+            self.assertFalse(p.ui_visible)
+            self.assertEqual(p.fulfillment_status, "manual_review")
+            self.assertEqual(p.reconciliation_status, "manual_review")
+            self.assertEqual(p.manual_review_reason, "user_banned_before_credit")
+
+    async def test_concurrent_recover_stale_and_finalize(self):
+        """Test concurrent recover_stale and finalize without deadlock."""
+        telegram_id = 999012
+        async with self.session_factory() as session:
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.flush()
+            payment = Payment(
+                user_id=user.id,
+                amount=Decimal("300"),
+                currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
+                provider_status="pending",
+                external_id="yoo_test_stale_1",
+            )
+            session.add(payment)
+            await session.flush()
+            op = PaymentProviderOperation(
+                payment_id=payment.id,
+                operation_type="reconcile_payment",
+                status="processing",
+                idempotency_key=f"op_{uuid.uuid4().hex}",
+                payload={},
+                locked_by="worker_stale",
+                locked_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+                attempts=1,
+            )
+            session.add(op)
+            await session.commit()
+            payment_id = payment.id
+            op_id = op.id
+
+        claim = ProviderOperationClaim(
+            operation_id=op_id,
+            payment_id=payment_id,
+            operation_type="reconcile_payment",
+            payload={},
+            idempotency_key=f"op_{uuid.uuid4().hex}",
+            worker_id="worker_stale",
+            attempt_number=1,
+            external_id="yoo_test_stale_1",
+            created_at=datetime.now(timezone.utc),
+        )
+        fake_result = YooKassaResult(
+            True,
+            value={
+                "id": "yoo_test_stale_1",
+                "status": "succeeded",
+                "paid": True,
+                "amount": {"value": "300.00", "currency": "RUB"},
+                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": {
+                    "order_id": payment.public_order_id,
+                    "local_payment_id": str(payment.id),
+                },
+            },
+        )
+
+        barrier = asyncio.Event()
+
+        async def worker_finalize():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    try:
+                        return await finalize(session, claim, fake_result)
+                    except Exception as e:
+                        return e
+
+        async def worker_recover():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    return await recover_stale(session, lease_seconds=10)
+
+        t1 = asyncio.create_task(worker_finalize())
+        t2 = asyncio.create_task(worker_recover())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        for r in results:
+            self.assertNotIsInstance(r, asyncio.CancelledError)
 
 
 if __name__ == "__main__":

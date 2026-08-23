@@ -236,37 +236,15 @@ async def _insert_or_get_entry(
     return entry, False
 
 
-async def credit_succeeded_topup(
+async def credit_succeeded_topup_locked(
     session: AsyncSession,
     *,
-    payment_id: int | None = None,
-    locked_payment: Payment | None = None,
-    locked_user: User | None = None,
+    locked_user: User,
+    locked_payment: Payment,
     metadata: dict | None = None,
 ) -> tuple[AccountLedgerEntry, bool]:
-    if locked_payment is None and payment_id is None:
-        raise ValueError("payment_id or locked_payment is required")
-
-    if locked_user is not None and locked_payment is not None:
-        user = locked_user
-        payment = locked_payment
-    elif locked_payment is not None:
-        payment = locked_payment
-        user = await lock_account_user(session, payment.user_id)
-    else:
-        payment_user_id = await session.scalar(
-            select(Payment.user_id).where(Payment.id == payment_id)
-        )
-        if payment_user_id is None:
-            raise LookupError("topup_payment_not_found")
-        user = await lock_account_user(session, payment_user_id)
-        payment = await session.scalar(
-            select(Payment).where(Payment.id == payment_id).with_for_update()
-        )
-        if payment is None:
-            raise LookupError("topup_payment_not_found")
-    # Provider and webhook finalizers already own the Payment lock. Keep their
-    # documented Payment -> User order so concurrent confirmations serialize.
+    user = locked_user
+    payment = locked_payment
     if payment.user_id != user.id:
         raise AccountLedgerConflictError("topup_owner_changed")
     if (
@@ -301,6 +279,48 @@ async def credit_succeeded_topup(
     if created:
         payment.credited_at = payment.credited_at or now_utc()
     return entry, created
+
+
+async def credit_succeeded_topup(
+    session: AsyncSession,
+    *,
+    payment_id: int | None = None,
+    locked_payment: Payment | None = None,
+    locked_user: User | None = None,
+    metadata: dict | None = None,
+) -> tuple[AccountLedgerEntry, bool]:
+    if locked_user is not None and locked_payment is not None:
+        return await credit_succeeded_topup_locked(
+            session,
+            locked_user=locked_user,
+            locked_payment=locked_payment,
+            metadata=metadata,
+        )
+
+    if payment_id is None and locked_payment is not None:
+        payment_id = locked_payment.id
+    if payment_id is None:
+        raise ValueError("payment_id or (locked_user and locked_payment) is required")
+
+    # Follow global hierarchy: Advisory(user) -> User -> Payment
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == payment_id)
+    )
+    if payment_user_id is None:
+        raise LookupError("topup_payment_not_found")
+    user = await lock_account_user(session, payment_user_id)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
+    if payment is None:
+        raise LookupError("topup_payment_not_found")
+
+    return await credit_succeeded_topup_locked(
+        session,
+        locked_user=user,
+        locked_payment=payment,
+        metadata=metadata,
+    )
 
 
 async def create_admin_adjustment(

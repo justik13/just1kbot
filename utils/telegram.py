@@ -157,15 +157,14 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
     try:
         async with session_scope() as session:
             await hub_repo.add_hub_message_id(session, chat_id, message_id)
+        cached = _hub_cache.get(chat_id)
+        if cached and "ids" in cached:
+            if message_id not in cached["ids"]:
+                cached["ids"].append(message_id)
+        else:
+            _hub_cache[chat_id] = {"ids": [message_id]}
     except Exception as e:
         logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
-
-    cached = _hub_cache.get(chat_id)
-    if cached and "ids" in cached:
-        if message_id not in cached["ids"]:
-            cached["ids"].append(message_id)
-    else:
-        _hub_cache[chat_id] = {"ids": [message_id]}
 
 
 async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
@@ -175,13 +174,12 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
     try:
         async with session_scope() as session:
             await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
+        cached = _hub_cache.get(chat_id)
+        if cached and "ids" in cached:
+            old_set = set(message_ids)
+            cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
     except Exception as e:
         logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
-
-    cached = _hub_cache.get(chat_id)
-    if cached and "ids" in cached:
-        old_set = set(message_ids)
-        cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
 
 
 async def get_hub_ids(chat_id: int) -> list[int]:

@@ -135,10 +135,25 @@ class BanService:
                 )
                 if payment.external_id:
                     operation = await ensure_reconcile_payment_operation(
-                        session, payment, reason="user_banned"
+                        session,
+                        payment,
+                        reason="user_banned",
+                        locked_user=locked_user,
+                        locked_payment=payment,
                     )
                     if operation is not None:
                         reconciliations_queued += 1
+            elif payment.provider_status == "succeeded" and payment.credited_at is None:
+                # Payment succeeded at provider before ban but was not credited yet.
+                # Mark manual_review and abandon checkout to prevent automatic credit.
+                if payment.checkout_status != "abandoned" or payment.ui_visible:
+                    payments_closed += 1
+                payment.checkout_status = "abandoned"
+                payment.ui_visible = False
+                payment.payment_url = None
+                payment.fulfillment_status = "manual_review"
+                payment.reconciliation_status = "manual_review"
+                payment.manual_review_reason = payment.manual_review_reason or "user_banned_before_credit"
 
         await update_user(
             session,

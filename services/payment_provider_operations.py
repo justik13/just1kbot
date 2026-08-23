@@ -1,11 +1,12 @@
 import logging
+import random
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
 from sqlalchemy import select
 
-from database.models import Payment, PaymentEvent, PaymentProviderOperation
+from database.models import Payment, PaymentEvent, PaymentProviderOperation, User
 from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
@@ -78,17 +79,29 @@ async def enqueue_create(session, payment, description, return_url):
     return operation
 
 
-async def ensure_reconcile_payment_operation(session, payment, *, reason):
-    payment_user_id = getattr(payment, "user_id", None)
-    if payment_user_id is None:
-        payment_user_id = await session.scalar(
-            select(Payment.user_id).where(Payment.id == payment.id)
+async def ensure_reconcile_payment_operation(
+    session,
+    payment,
+    *,
+    reason,
+    locked_user: User | None = None,
+    locked_payment: Payment | None = None,
+):
+    if locked_user is None:
+        payment_user_id = getattr(payment, "user_id", None)
+        if payment_user_id is None:
+            payment_user_id = await session.scalar(
+                select(Payment.user_id).where(Payment.id == payment.id)
+            )
+        if payment_user_id is not None:
+            await lock_checkout_user(session, payment_user_id)
+
+    if locked_payment is not None:
+        payment = locked_payment
+    else:
+        payment = await session.scalar(
+            select(Payment).where(Payment.id == payment.id).with_for_update()
         )
-    if payment_user_id is not None:
-        await lock_checkout_user(session, payment_user_id)
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment.id).with_for_update()
-    )
     if payment is None or not payment.external_id:
         return None
     active = await session.scalar(
@@ -315,7 +328,9 @@ async def perform_http(claim, transport=YooKassaService):
 
 
 def _retry_delay(attempts: int) -> timedelta:
-    return timedelta(seconds=min(300, 2 ** min(attempts, 8)))
+    base = min(300, 2 ** min(attempts, 8))
+    jitter = random.uniform(0.8, 1.2)
+    return timedelta(seconds=base * jitter)
 
 
 async def _push_payment_url(bot, session, payment) -> None:
@@ -451,8 +466,20 @@ async def finalize(session, claim, result, bot=None):
                             ambiguous=False,
                         )
                     elif not old_url and payment.payment_url and bot is not None:
-                        # URL just became available — push payment link to user immediately
-                        await _push_payment_url(bot, session, payment)
+                        # URL just became available — push payment link to user post-commit without holding DB locks
+                        from database.connection import queue_post_commit_task, session_scope
+                        target_payment_id = payment.id
+
+                        async def _send_payment_url_post_commit():
+                            try:
+                                async with session_scope() as push_session:
+                                    p = await push_session.get(Payment, target_payment_id)
+                                    if p and not p.payment_url_notified_at and p.payment_url:
+                                        await _push_payment_url(bot, push_session, p)
+                            except Exception as push_exc:
+                                logger.warning("Failed in post-commit payment URL push for payment %s: %s", target_payment_id, push_exc)
+
+                        queue_post_commit_task(session, _send_payment_url_post_commit)
             if result.ok:
                 transition = await apply_provider_transition(
                     session,
@@ -532,7 +559,12 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
     ).all()
     count = 0
     for op_id, payment_id in stale_rows:
-        # Respect global hierarchy: Payment -> PaymentProviderOperation
+        # Respect global hierarchy: Advisory(user) -> User -> Payment -> PaymentProviderOperation
+        payment_user_id = await session.scalar(
+            select(Payment.user_id).where(Payment.id == payment_id)
+        )
+        if payment_user_id is not None:
+            await lock_checkout_user(session, payment_user_id)
         payment = await session.scalar(
             select(Payment)
             .where(Payment.id == payment_id)
