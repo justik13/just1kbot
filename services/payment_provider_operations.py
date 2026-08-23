@@ -221,6 +221,13 @@ async def retry_dead_provider_operation(
 
 
 async def claim(session, worker_id):
+    """Claim next pending provider operation via SKIP LOCKED.
+
+    Invariant: Worker claim locks PaymentProviderOperation exclusively to dispatch
+    the background job, and reads Payment as a non-locking snapshot for HTTP parameters.
+    Subsequent state-modifying operations (finalize, recover_stale) strictly follow the
+    canonical hierarchy: Payment FOR UPDATE -> PaymentProviderOperation FOR UPDATE.
+    """
     operation = await session.scalar(
         select(PaymentProviderOperation)
         .where(

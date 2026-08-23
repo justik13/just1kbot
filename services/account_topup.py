@@ -159,17 +159,23 @@ async def create_balance_topup(
         or 0
     )
     if unfinished >= int(cfg.BALANCE_MAX_UNFINISHED_TOPUPS):
-        raise AccountTopupError("topup_too_many_unfinished")
+        raise AccountTopupError("too_many_unfinished_topups")
 
-    exposure = await _pending_topup_exposure(session, user.id)
-    if (exposure + rubles) > Decimal(cfg.BALANCE_MAX_PENDING_EXPOSURE_RUB):
-        raise AccountTopupError("topup_exposure_limit_exceeded")
+    pending = await _pending_topup_exposure(session, user.id)
+    projected_position = balance.real_position + pending + rubles
+    if max(Decimal(0), projected_position) > Decimal(
+        cfg.BALANCE_MAX_AVAILABLE_RUB
+    ):
+        raise AccountTopupError("topup_balance_limit_exceeded")
+
+    if (pending + rubles) > Decimal(cfg.BALANCE_MAX_PENDING_EXPOSURE_RUB):
+        raise AccountTopupError("topup_balance_limit_exceeded")
 
     payment = Payment(
         user_id=user.id,
         amount=rubles,
         currency="RUB",
-        public_order_id=uuid.uuid4().hex[:12].upper(),
+        public_order_id="topup_" + uuid.uuid4().hex,
         provider_idempotency_key=str(uuid.uuid4()),
         provider_status="not_created",
         reconciliation_status="ok",
