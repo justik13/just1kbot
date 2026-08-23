@@ -423,6 +423,8 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 user_id=user.id,
                 amount=Decimal("300"),
                 currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
                 provider_status="pending",
                 external_id="yoo_test_fin_1",
             )
@@ -501,6 +503,8 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 user_id=user.id,
                 amount=Decimal("500"),
                 currency="RUB",
+                public_order_id=str(uuid.uuid4()),
+                provider_idempotency_key=str(uuid.uuid4()),
                 provider_status="pending",
                 external_id="yoo_test_fin_ban_1",
             )
