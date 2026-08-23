@@ -63,7 +63,8 @@ class TestConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         session.execute = AsyncMock()
         session.scalar = AsyncMock(return_value=user)
 
-        with patch("services.ban_service.update_user", new=AsyncMock()), \
+        with patch("services.ban_service.lock_checkout_user", new=AsyncMock(return_value=user)), \
+             patch("services.ban_service.update_user", new=AsyncMock()), \
              patch("services.ban_service.ProfileDeletionService.delete_profiles_for_user", new=AsyncMock(return_value=0)), \
              patch("services.ban_service.AuditService.log_action", new=AsyncMock()), \
              patch("services.ban_service.invalidate_user_cache"):

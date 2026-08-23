@@ -17,13 +17,18 @@ async def request_topup_status_refresh(
     source: str = "user_refresh",
 ) -> Payment:
     """Queue provider reconciliation and recover a verified but uncredited top-up."""
+    payment_user_id = await session.scalar(
+        select(Payment.user_id).where(Payment.id == payment_id)
+    )
+    if payment_user_id is None:
+        raise AccountTopupError("topup_not_found")
+
+    user = await lock_checkout_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
     if payment is None:
         raise AccountTopupError("topup_not_found")
-
-    user = await lock_checkout_user(session, payment.user_id)
     if user is not None:
         recovery_topup = (
             user.financial_hold

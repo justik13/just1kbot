@@ -57,7 +57,7 @@ class MockSession:
     async def refresh(self, obj):
         pass
 
-    async def execute(self, stmt):
+    async def execute(self, stmt, params=None):
         result = MagicMock()
         result.scalar_one_or_none = MagicMock(return_value=self._user)
         result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
@@ -71,6 +71,8 @@ class MockSession:
             return self._row
         if "payment_provider_operations" in sql:
             return self._row
+        if "users" in sql:
+            return self._user or User(id=1, telegram_id=12345, is_deleted=False)
         return self._user or self._payment or self._row
 
     async def get(self, model, ident):

@@ -352,6 +352,64 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(p.credited_at)
             self.assertEqual(bal.available, Decimal("400.00"))
 
+    async def test_ban_and_create_interleaving_serializes_and_leaves_no_active_checkout(self):
+        """Verify that under unified advisory locking, no active checkout can survive user ban."""
+        telegram_id = 999006
+        async with self.session_factory() as session:
+            user = User(telegram_id=telegram_id)
+            session.add(user)
+            await session.commit()
+            user_id = user.id
+
+        barrier = asyncio.Event()
+
+        async def worker_ban():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    u = await session.get(User, user_id)
+                    return await BanService._ban_user(
+                        session=session,
+                        admin_id=1,
+                        user=u,
+                        telegram_id=telegram_id,
+                    )
+
+        async def worker_create():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    try:
+                        return await create_balance_topup(
+                            session=session,
+                            user_id=user_id,
+                            amount=Decimal("150"),
+                            bot_username="testbot",
+                        )
+                    except Exception as e:
+                        return e
+
+        t1 = asyncio.create_task(worker_ban())
+        t2 = asyncio.create_task(worker_create())
+        barrier.set()
+
+        await asyncio.gather(t1, t2)
+
+        async with self.session_factory() as session:
+            u = await session.get(User, user_id)
+            self.assertTrue(u.is_banned)
+            payments = (
+                await session.scalars(
+                    select(Payment).where(Payment.user_id == user_id)
+                )
+            ).all()
+            for p in payments:
+                if p.credited_at is None:
+                    self.assertEqual(p.checkout_status, "abandoned", f"Payment {p.id} was not abandoned on ban!")
+                    self.assertFalse(p.ui_visible, f"Payment {p.id} remained ui_visible on ban!")
+
 
 if __name__ == "__main__":
     unittest.main()

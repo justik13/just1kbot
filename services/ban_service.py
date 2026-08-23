@@ -1,14 +1,15 @@
 import logging
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.middlewares.user_context import invalidate_user_cache
-from database.models import Payment, User
+from database.models import Payment
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
+from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.audit_service import AuditService
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
@@ -100,7 +101,12 @@ class BanService:
         user,
         telegram_id: int,
     ) -> tuple:
-        # 1. Блокируем незавершённые платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
+        # 1. Используем тот же per-user advisory lock, что и checkout (Advisory -> User -> Payment).
+        locked_user = await lock_checkout_user(session, user.id)
+        if locked_user is None or locked_user.is_deleted:
+            return False, "Пользователь не найден"
+
+        # 2. Блокируем незавершённые платежи под сериализованным локом пользователя
         payments = (
             await session.scalars(
                 select(Payment)
@@ -112,20 +118,6 @@ class BanService:
                 .with_for_update()
             )
         ).all()
-
-        # 2. Используем тот же per-user advisory lock, что и checkout.
-        await session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": -user.id},
-        )
-
-        locked_user = await session.scalar(
-            select(User)
-            .where(User.id == user.id)
-            .with_for_update()
-        )
-        if locked_user is None or locked_user.is_deleted:
-            return False, "Пользователь не найден"
 
         payments_closed = 0
         reconciliations_queued = 0

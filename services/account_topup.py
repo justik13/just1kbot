@@ -128,9 +128,6 @@ async def create_balance_topup(
     if rubles > Decimal(cfg.BALANCE_MAX_CUSTOM_TOPUP_RUB):
         raise AccountTopupError("topup_above_maximum")
 
-    # To respect global Payment -> User lock hierarchy, lock any visible top-up first
-    await _visible_topup_for_update(session, user_id)
-
     user = await lock_checkout_user(session, user_id)
     if user is None or user.is_deleted:
         raise AccountTopupError("topup_user_missing")
@@ -139,7 +136,7 @@ async def create_balance_topup(
     if user.topup_blocked:
         raise AccountTopupError("topup_blocked")
 
-    # Re-fetch under serialized checkout lock to eliminate race window
+    # Re-fetch under serialized checkout lock
     existing = await _visible_topup_for_update(session, user_id)
 
     balance = await get_account_balance(
@@ -212,12 +209,12 @@ async def hide_balance_topup(
     session: AsyncSession, *, user_id: int, payment_id: int
 ) -> Payment:
     """Hide only the checkout UI; provider truth continues to reconcile."""
-    payment = await session.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
-    if payment is None or payment.user_id != user_id:
-        raise AccountTopupError("topup_not_found")
     await lock_checkout_user(session, user_id)
+    payment = await session.scalar(
+        select(Payment).where(Payment.id == payment_id, Payment.user_id == user_id).with_for_update()
+    )
+    if payment is None:
+        raise AccountTopupError("topup_not_found")
     if payment.provider_status in {"succeeded", "canceled", "refunded"}:
         raise AccountTopupError("topup_already_terminal")
     payment.ui_visible = False
@@ -238,7 +235,10 @@ async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
     """Abandon all active topup checkout sessions for a user without mutating provider truth."""
-    # 1. Lock existing active checkout payments in deterministic order
+    # 1. Acquire per-user checkout advisory lock first
+    await lock_checkout_user(session, user_id)
+
+    # 2. Lock existing active checkout payments under the advisory lock
     payments = (
         await session.scalars(
             select(Payment)
@@ -252,8 +252,6 @@ async def cancel_all_unfinished_topups(
             .with_for_update()
         )
     ).all()
-    # 2. Acquire per-user checkout advisory lock
-    await lock_checkout_user(session, user_id)
 
     count = 0
     for payment in payments:
@@ -289,7 +287,12 @@ async def settle_succeeded_topup(
     A referral-bonus failure must abort the settlement so the provider event can
     be retried rather than silently crediting money without its attributable bonus.
     """
-    # 1. Lock Payment row FOR UPDATE first to enforce strict global lock hierarchy (Payment -> Advisory -> User)
+    # 1. Acquire per-user checkout advisory lock first (Advisory -> User -> Payment)
+    user = await lock_checkout_user(session, payment.user_id)
+    if user is None:
+        raise AccountTopupError("topup_user_missing")
+
+    # 2. Lock Payment row FOR UPDATE under serialized checkout lock
     locked_payment = await session.scalar(
         select(Payment).where(Payment.id == payment.id).with_for_update()
     )
@@ -315,10 +318,6 @@ async def settle_succeeded_topup(
         await session.flush()
         snapshot = await get_account_balance(session, user_id=payment.user_id)
         return False, snapshot
-
-    user = await lock_checkout_user(session, payment.user_id)
-    if user is None:
-        raise AccountTopupError("topup_user_missing")
 
     hard_block = user.topup_blocked
     recovery_topup = (
