@@ -545,9 +545,15 @@ async def alt_connection(
             "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров).\n"
         )
     else:
+        escaped_key = safe(profile.raw_config or "")
+        key_block = (
+            f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{escaped_key}</code></blockquote>\n"
+            if len(escaped_key) <= 3500
+            else "🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.\n"
+        )
         files_info = (
             "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
-            f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{safe(profile.raw_config or '')}</code></blockquote>\n"
+            f"{key_block}"
         )
 
     bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""

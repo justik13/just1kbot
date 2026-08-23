@@ -9,7 +9,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
 )
-from services.account_topup import UNFINISHED_TOPUP_PROVIDER_STATUSES
 from services.audit_service import AuditService
 from services.payment_provider_operations import ensure_reconcile_payment_operation
 from services.profile_deletion_service import ProfileDeletionService
@@ -102,20 +101,17 @@ class BanService:
         telegram_id: int,
     ) -> tuple:
         # 1. Блокируем незавершённые платежи в стабильном порядке до блокировки User (глобальная иерархия Payment -> User).
-        payment_ids = list(
-            (
-                await session.scalars(
-                    select(Payment.id)
-                    .where(
-                        Payment.user_id == user.id,
-                        Payment.credited_at.is_(None),
-                        Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
-                    )
-                    .order_by(Payment.id)
-                    .with_for_update()
+        payments = (
+            await session.scalars(
+                select(Payment)
+                .where(
+                    Payment.user_id == user.id,
+                    Payment.credited_at.is_(None),
                 )
-            ).all()
-        )
+                .order_by(Payment.id)
+                .with_for_update()
+            )
+        ).all()
 
         # 2. Используем тот же per-user advisory lock, что и checkout.
         await session.execute(
@@ -131,30 +127,11 @@ class BanService:
         if locked_user is None or locked_user.is_deleted:
             return False, "Пользователь не найден"
 
-        # 3. Re-query under serialized advisory lock to capture any payments created in the race window
-        post_lock_ids = list(
-            (
-                await session.scalars(
-                    select(Payment.id)
-                    .where(
-                        Payment.user_id == user.id,
-                        Payment.credited_at.is_(None),
-                        Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
-                    )
-                    .order_by(Payment.id)
-                )
-            ).all()
-        )
-        all_payment_ids = list(dict.fromkeys(payment_ids + post_lock_ids))
-
         payments_closed = 0
         reconciliations_queued = 0
         current_time = now_utc()
 
-        for payment_id in all_payment_ids:
-            payment = await session.get(Payment, payment_id)
-            if payment is None:
-                continue
+        for payment in payments:
             if payment.provider_status not in {"succeeded", "canceled", "refunded"}:
                 if payment.checkout_status != "abandoned" or payment.ui_visible:
                     payments_closed += 1

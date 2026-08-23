@@ -41,6 +41,7 @@ UNFINISHED_TOPUP_PROVIDER_STATUSES = (
     "pending",
     "waiting_for_capture",
     "unknown",
+    "manual_review",
     "succeeded",
 )
 
@@ -254,25 +255,8 @@ async def cancel_all_unfinished_topups(
     # 2. Acquire per-user checkout advisory lock
     await lock_checkout_user(session, user_id)
 
-    # 3. Re-scan under serialized advisory lock to capture any payments created in the race window
-    post_lock_payments = (
-        await session.scalars(
-            select(Payment)
-            .where(
-                Payment.user_id == user_id,
-                Payment.credited_at.is_(None),
-                Payment.checkout_status == "active",
-                Payment.provider_status.not_in(("succeeded", "canceled", "refunded")),
-            )
-            .order_by(Payment.id)
-        )
-    ).all()
-
-    seen_ids = {p.id for p in payments}
-    all_payments = list(payments) + [p for p in post_lock_payments if p.id not in seen_ids]
-
     count = 0
-    for payment in all_payments:
+    for payment in payments:
         payment.checkout_status = "abandoned"
         payment.ui_visible = False
         payment.user_cancel_requested_at = payment.user_cancel_requested_at or now_utc()
