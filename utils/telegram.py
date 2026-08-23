@@ -301,17 +301,12 @@ async def render_hub(
                     chat_id,
                     e,
                 )
-                target_edit_id = None
 
-        if target_edit_id and target_edit_id in old_ids:
-            old_ids.remove(target_edit_id)
-
-        if target_edit_id is not None:
-            stale_ids = [mid for mid in old_ids if mid != target_edit_id]
-            if stale_ids:
-                await _delete_hub_messages(bot, chat_id, stale_ids)
-            _hub_cache[chat_id] = {"ids": [target_edit_id]}
-            await _store_hub_id_in_db(chat_id, target_edit_id)
+        if trigger_message_id and trigger_message_id not in old_ids:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=trigger_message_id)
+            except Exception:
+                pass
 
         sent_ids: list[int] = []
         for index, part in enumerate(text_parts):

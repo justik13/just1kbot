@@ -64,6 +64,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             rendered_text = mock_hub.call_args[0][2]
             # Must not exceed Telegram 4096 character limit
             self.assertLessEqual(len(rendered_text), 4096)
+            self.assertIn('Локация: <b>🇩🇪 Germany</b>', rendered_text)
             self.assertIn('Другой способ подключения', rendered_text)
 
 

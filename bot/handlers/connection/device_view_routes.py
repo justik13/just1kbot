@@ -138,11 +138,11 @@ async def render_device_screen(
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
     protocol = _format_protocol(server.protocol if server else None)
 
+    country_display = f"{flag} {server_name}".strip() if flag else server_name
+
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
-        flag=flag,
-        country_display=server_name,
-        server_name=flag,
+        country_display=safe(country_display),
         protocol=protocol,
         traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
         last_connected=(
