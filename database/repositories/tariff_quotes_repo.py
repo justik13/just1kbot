@@ -22,9 +22,9 @@ async def lock_checkout_user(session: AsyncSession, user_id: int | object) -> Us
     if isinstance(user_id, User):
         uid = user_id.id
     elif hasattr(user_id, "user_id"):
-        uid = getattr(user_id, "user_id")
+        uid = user_id.user_id
     elif hasattr(user_id, "id") and not isinstance(user_id, int):
-        uid = getattr(user_id, "id")
+        uid = user_id.id
     else:
         uid = user_id
     try:
