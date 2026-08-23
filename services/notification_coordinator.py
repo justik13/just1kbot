@@ -173,7 +173,7 @@ async def execute_notification_presentation(
                 notif.state = "dead"
                 notif.last_error = "bot_blocked"
         return True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         telegram_error = str(exc)
         logger.warning(
             "Telegram notification send failed for payment %s: %s",
@@ -226,7 +226,7 @@ async def execute_notification_presentation(
             try:
                 await _delete_hub_messages(bot, claim.chat_id, [new_msg_id])
                 del_ok = True
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("Failed to compensate orphan message %s: %s", new_msg_id, exc)
 
             async with session_scope() as session:
@@ -254,7 +254,7 @@ async def _execute_compensation_phase(bot: Bot, claim: NotificationClaim) -> boo
     try:
         await _delete_hub_messages(bot, claim.chat_id, [claim.telegram_message_id])
         del_ok = True
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.warning("Failed to delete compensated message %s: %s", claim.telegram_message_id, exc)
 
     async with session_scope() as session:
