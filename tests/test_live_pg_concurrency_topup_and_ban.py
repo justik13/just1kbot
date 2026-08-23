@@ -802,6 +802,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 provider_object_id="yoo_webhook_test_1",
                 payment_external_id="yoo_webhook_test_1",
                 public_order_id=payment.public_order_id,
+                payload={"object": {"id": "yoo_webhook_test_1", "status": "succeeded"}},
                 status="processing",
                 locked_by="worker_webhook",
                 locked_at=datetime.now(timezone.utc),
