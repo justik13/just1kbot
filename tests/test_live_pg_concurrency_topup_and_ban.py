@@ -777,7 +777,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
     async def test_webhook_inbox_finalize_and_ban_user_concurrent(self):
         """Webhook inbox finalize and ban_user concurrently execute without deadlock."""
         from services.workers.webhook_inbox import finalize as webhook_finalize, InboxClaim
-        from database.models.webhook_inbox import WebhookInbox
+        from database.models import WebhookInbox
         from services.payment_provider_yookassa import YooKassaResult
 
         async with self.session_factory() as session:
