@@ -212,7 +212,8 @@ async def cmd_start(
     if command.args and (command.args.startswith("pay") or command.args.startswith("topup")):
         try:
             from database.models import Payment
-            from services.account_topup import get_visible_balance_topup, request_topup_status_refresh
+            from services.account_topup import get_visible_balance_topup
+            from services.account_topup_refresh import request_topup_status_refresh
 
             payment_match = re.search(r"(?:pay|topup)[_-]?(\d+)", command.args)
             payment = None

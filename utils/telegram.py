@@ -355,13 +355,26 @@ async def render_hub(
                         chat_id,
                     )
                     plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                    message = await bot.send_message(
-                        chat_id=chat_id,
-                        text=plain,
-                        reply_markup=markup,
-                        link_preview_options=link_preview_opts,
-                        parse_mode=None,
-                    )
+                    try:
+                        message = await bot.send_message(
+                            chat_id=chat_id,
+                            text=plain,
+                            reply_markup=markup,
+                            link_preview_options=link_preview_opts,
+                            parse_mode=None,
+                            message_effect_id=message_effect_id,
+                        )
+                    except TelegramBadRequest as effect_exc:
+                        if message_effect_id and _is_message_effect_error(effect_exc):
+                            message = await bot.send_message(
+                                chat_id=chat_id,
+                                text=plain,
+                                reply_markup=markup,
+                                link_preview_options=link_preview_opts,
+                                parse_mode=None,
+                            )
+                        else:
+                            raise
                 else:
                     raise
             sent_ids.append(message.message_id)

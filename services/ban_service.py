@@ -131,11 +131,27 @@ class BanService:
         if locked_user is None or locked_user.is_deleted:
             return False, "Пользователь не найден"
 
+        # 3. Re-query under serialized advisory lock to capture any payments created in the race window
+        post_lock_ids = list(
+            (
+                await session.scalars(
+                    select(Payment.id)
+                    .where(
+                        Payment.user_id == user.id,
+                        Payment.credited_at.is_(None),
+                        Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+                    )
+                    .order_by(Payment.id)
+                )
+            ).all()
+        )
+        all_payment_ids = list(dict.fromkeys(payment_ids + post_lock_ids))
+
         payments_closed = 0
         reconciliations_queued = 0
         current_time = now_utc()
 
-        for payment_id in payment_ids:
+        for payment_id in all_payment_ids:
             payment = await session.get(Payment, payment_id)
             if payment is None:
                 continue

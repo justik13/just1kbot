@@ -238,6 +238,37 @@ class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):
             cb.answer.assert_awaited_once_with(show_alert=False)
             cb.message.delete.assert_awaited_once()
 
+    async def test_cmd_start_handles_payment_deep_link_successfully(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from bot.handlers.start import cmd_start
+        from database.models import User, Payment
+
+        message = MagicMock()
+        message.chat.id = 12345
+        message.from_user.id = 12345
+        message.from_user.username = "testuser"
+        message.bot = MagicMock()
+
+        command = MagicMock()
+        command.args = "pay_42"
+
+        state = AsyncMock()
+        session = AsyncMock()
+
+        user = User(id=10, telegram_id=12345)
+        payment = Payment(id=42, user_id=10, fulfillment_status="succeeded", provider_status="succeeded")
+
+        refreshed_payment = Payment(id=42, user_id=10, fulfillment_status="succeeded", provider_status="succeeded")
+
+        with patch("bot.handlers.start.SubscriptionService.process_onboarding", new=AsyncMock(return_value=user)), \
+             patch("bot.handlers.start._ensure_bot_unblocked", new=AsyncMock()), \
+             patch.object(session, "get", new=AsyncMock(return_value=payment)), \
+             patch("services.account_topup_refresh.request_topup_status_refresh", new=AsyncMock(return_value=refreshed_payment)), \
+             patch("bot.handlers.payment.balance_routes._render_balance", new=AsyncMock()) as mock_render_bal:
+
+            await cmd_start(message, state, command, session)
+            mock_render_bal.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()
