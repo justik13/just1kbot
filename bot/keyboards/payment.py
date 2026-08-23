@@ -283,7 +283,7 @@ def get_topup_payment_keyboard(
     payment_url: str, payment_id: int
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BUTTON_OPEN_PAYMENT, url=payment_url)
+    builder.button(text=texts.BUTTON_OPEN_PAYMENT, url=payment_url, style="success")
     builder.button(
         text=texts.BUTTON_CHECK_TOPUP,
         callback_data=f"balance_check:{payment_id}",
@@ -319,6 +319,7 @@ def get_balance_purchase_confirm_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L219_1,
         callback_data=f"balance_purchase_confirm:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.BUTTON_BACK,
@@ -348,6 +349,7 @@ def get_balance_change_confirm_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L245_1,
         callback_data=f"balance_change_confirm:{quote_public_id}",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
