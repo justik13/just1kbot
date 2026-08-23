@@ -26,9 +26,10 @@ from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
-    append_hub_document,
-    append_hub_message,
-    delete_hub_ids,
+    _append_hub_document_unlocked,
+    _append_hub_message_unlocked,
+    _delete_hub_messages,
+    _get_hub_render_lock,
     get_hub_ids,
     render_hub,
     safe,
@@ -502,7 +503,6 @@ async def alt_connection(
     vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
     conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
 
-    from utils.telegram import _get_hub_render_lock
     chat_lock = _get_hub_render_lock(callback.message.chat.id)
 
     async with chat_lock:
@@ -514,7 +514,7 @@ async def alt_connection(
         guide_sent = False
 
         try:
-            doc_msg_1 = await append_hub_document(
+            doc_msg_1 = await _append_hub_document_unlocked(
                 callback.bot, callback.message.chat.id,
                 document=vpn_file,
                 caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
@@ -526,7 +526,7 @@ async def alt_connection(
             logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
 
         try:
-            doc_msg_2 = await append_hub_document(
+            doc_msg_2 = await _append_hub_document_unlocked(
                 callback.bot, callback.message.chat.id,
                 document=conf_file,
                 caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
@@ -573,7 +573,7 @@ async def alt_connection(
         )
 
         try:
-            await append_hub_message(
+            await _append_hub_message_unlocked(
                 callback.bot, callback.message.chat.id,
                 text=alt_guide_text,
                 reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
@@ -586,12 +586,12 @@ async def alt_connection(
         if guide_sent:
             if old_hub_ids:
                 try:
-                    await delete_hub_ids(callback.bot, callback.message.chat.id, old_hub_ids)
+                    await _delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids)
                 except Exception as e:
                     logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
         else:
             if sent_doc_ids:
                 try:
-                    await delete_hub_ids(callback.bot, callback.message.chat.id, sent_doc_ids)
+                    await _delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids)
                 except Exception as clean_exc:
                     logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)

@@ -773,18 +773,30 @@ async def place_financial_hold_for_missing_payment(
 async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
     stale_rows = (
         await session.execute(
-            select(ProviderRefundOperation.id, ProviderRefundOperation.payment_id)
+            select(
+                ProviderRefundOperation.id,
+                ProviderRefundOperation.payment_id,
+                Payment.user_id,
+            )
+            .join(Payment, Payment.id == ProviderRefundOperation.payment_id)
             .where(
                 ProviderRefundOperation.status == "processing",
                 ProviderRefundOperation.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
-            .limit(100)
+            .order_by(
+                Payment.user_id.asc(),
+                Payment.id.asc(),
+                ProviderRefundOperation.id.asc(),
+            )
+            .limit(20)
         )
     ).all()
     count = 0
-    for op_id, payment_id in stale_rows:
-        # Respect global hierarchy: Payment -> ProviderRefundOperation
+    for op_id, payment_id, user_id in stale_rows:
+        # Respect global hierarchy: Advisory(user) -> User -> Payment -> ProviderRefundOperation
+        if user_id is not None:
+            await lock_account_user(session, user_id)
         payment = await session.scalar(
             select(Payment)
             .where(Payment.id == payment_id)
@@ -796,7 +808,7 @@ async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
             select(ProviderRefundOperation)
             .where(
                 ProviderRefundOperation.id == op_id,
-                ProviderRefundOperation.status == "processing"
+                ProviderRefundOperation.status == "processing",
             )
             .with_for_update(skip_locked=True)
         )

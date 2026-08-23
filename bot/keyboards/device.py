@@ -1,4 +1,4 @@
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -15,6 +15,13 @@ def get_device_keyboard(
     builder = InlineKeyboardBuilder()
 
     adjustments = []
+
+    if raw_config and len(raw_config) <= 256:
+        builder.button(
+            text="📋 Скопировать ключ",
+            copy_text=CopyTextButton(text=raw_config),
+        )
+        adjustments.append(1)
 
     if config_ready:
         builder.button(

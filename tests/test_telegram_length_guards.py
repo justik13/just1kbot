@@ -1,15 +1,23 @@
+import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bot.keyboards.device import get_device_keyboard
 from bot.handlers.connection.device_view_routes import build_display_vpn_key, render_device_screen
+from bot.keyboards.device import get_device_keyboard
 
 
 class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
-    def test_copy_text_button_omitted_completely_from_device_keyboard(self):
+    def test_copy_text_button_included_when_under_telegram_limit(self):
         short_key = 'vpn://' + 'a' * 200
         kb = get_device_keyboard(profile_id=1, raw_config=short_key, config_ready=True)
+        copy_buttons = [btn for row in kb.inline_keyboard for btn in row if getattr(btn, 'copy_text', None)]
+        self.assertEqual(len(copy_buttons), 1)
+        self.assertEqual(copy_buttons[0].copy_text.text, short_key)
+
+    def test_copy_text_button_omitted_when_exceeds_telegram_limit(self):
+        long_key = 'vpn://' + 'a' * 300
+        kb = get_device_keyboard(profile_id=1, raw_config=long_key, config_ready=True)
         copy_buttons = [btn for row in kb.inline_keyboard for btn in row if getattr(btn, 'copy_text', None)]
         self.assertEqual(len(copy_buttons), 0)
 
@@ -95,9 +103,9 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
              patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[99, 100])), \
-             patch('bot.handlers.connection.device_view_routes.append_hub_document', new=AsyncMock(side_effect=[101, 102])), \
-             patch('bot.handlers.connection.device_view_routes.append_hub_message', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
-             patch('bot.handlers.connection.device_view_routes.delete_hub_ids', new=AsyncMock()) as mock_delete:
+             patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=[101, 102])), \
+             patch('bot.handlers.connection.device_view_routes._append_hub_message_unlocked', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
+             patch('bot.handlers.connection.device_view_routes._delete_hub_messages', new=AsyncMock()) as mock_delete:
 
             await alt_connection(callback, state, session, db_user)
 
@@ -108,6 +116,50 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(deleted_ids, [101, 102])
             self.assertNotIn(99, deleted_ids)
             self.assertNotIn(100, deleted_ids)
+
+    async def test_alt_connection_live_execution_no_self_deadlock(self):
+        """Verify alt_connection executes end-to-end through real utils.telegram with zero self-deadlock."""
+        from bot.handlers.connection.device_view_routes import alt_connection
+
+        callback = MagicMock()
+        callback.data = 'alt_connection:1'
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=999222)
+        callback.message.message_id = 50
+        callback.bot = MagicMock()
+        callback.bot.send_document = AsyncMock(side_effect=[
+            SimpleNamespace(message_id=51),
+            SimpleNamespace(message_id=52),
+        ])
+        callback.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=53))
+        callback.bot.delete_messages = AsyncMock()
+        callback.bot.delete_message = AsyncMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = SimpleNamespace(id=10, telegram_id=999222)
+        profile = SimpleNamespace(id=1, user_id=10, server_id=1, device_name='iPhone', raw_config='vpn://dummy', provisioning_status='active')
+        server = SimpleNamespace(id=1, name='Germany')
+
+        with patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
+             patch('bot.handlers.connection.device_view_routes.get_profile_by_id', new=AsyncMock(return_value=profile)), \
+             patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
+             patch('bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json', return_value={'containers': [{'awg': {'last_config': '{}'}}]}), \
+             patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
+             patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
+             patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
+             patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
+             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
+             patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[49, 50])), \
+             patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
+             patch('utils.telegram._remove_hub_ids_from_db', new=AsyncMock()):
+
+            # Must finish within 2 seconds without deadlocking on _get_hub_render_lock!
+            await asyncio.wait_for(alt_connection(callback, state, session, db_user), timeout=2.0)
+
+            self.assertEqual(callback.bot.send_document.await_count, 2)
+            self.assertEqual(callback.bot.send_message.await_count, 1)
 
     def test_build_conf_fallback_omits_empty_i_parameters(self):
         from utils.vpn_parser import _build_conf_fallback

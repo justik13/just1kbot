@@ -460,22 +460,42 @@ async def send_hub_document(
         return msg.message_id
 
 
+async def _append_hub_document_unlocked(
+    bot,
+    chat_id: int,
+    document: InputFile,
+    caption: str = None,
+    reply_markup: InlineKeyboardMarkup = None,
+    parse_mode: str = "HTML",
+) -> int:
+    if caption:
+        caption = caption[:1024]
+
+    msg = await bot.send_document(
+        chat_id=chat_id,
+        document=document,
+        caption=caption,
+        reply_markup=reply_markup,
+        parse_mode=parse_mode,
+    )
+
+    await _store_hub_id_in_db(chat_id, msg.message_id)
+    return msg.message_id
+
+
 async def append_hub_document(
     bot,
     chat_id: int,
     document: InputFile,
-    caption: str,
+    caption: str = None,
     reply_markup: InlineKeyboardMarkup = None,
     parse_mode: str = "HTML",
 ) -> int:
     _maybe_cleanup_cache()
-
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        if caption:
-            caption = caption[:1024]
-        
-        msg = await bot.send_document(
+        return await _append_hub_document_unlocked(
+            bot,
             chat_id=chat_id,
             document=document,
             caption=caption,
@@ -483,9 +503,63 @@ async def append_hub_document(
             parse_mode=parse_mode,
         )
 
-        await _store_hub_id_in_db(chat_id, msg.message_id)
 
-        return msg.message_id
+async def _append_hub_message_unlocked(
+    bot,
+    chat_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup = None,
+    parse_mode: str = "HTML",
+) -> int:
+    text_parts = split_text_by_lines(text, limit=4096)
+
+    if not text_parts:
+        text_parts = ["—"]
+
+    sent_ids = []
+    try:
+        for i, part in enumerate(text_parts):
+            is_last = (i == len(text_parts) - 1)
+            kb = reply_markup if is_last else None
+
+            try:
+                msg = await bot.send_message(
+                    chat_id=chat_id,
+                    text=part,
+                    reply_markup=kb,
+                    parse_mode=parse_mode,
+                )
+            except TelegramBadRequest as e:
+                err_str = str(e).lower()
+                if "parse" in err_str or "entities" in err_str:
+                    logger.warning(
+                        "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
+                        chat_id,
+                        e,
+                    )
+                    plain = html.unescape(re.sub(r"<[^>]+>", "", part))
+                    msg = await bot.send_message(
+                        chat_id=chat_id,
+                        text=plain,
+                        reply_markup=kb,
+                        parse_mode=None,
+                    )
+                else:
+                    raise
+
+            sent_ids.append(msg.message_id)
+    except Exception:
+        if sent_ids:
+            try:
+                await _delete_hub_messages(bot, chat_id, sent_ids)
+            except Exception:
+                pass
+        raise
+
+    for mid in sent_ids:
+        await _store_hub_id_in_db(chat_id, mid)
+
+    return sent_ids[-1]
 
 
 async def append_hub_message(
@@ -496,55 +570,12 @@ async def append_hub_message(
     parse_mode: str = "HTML",
 ) -> int:
     _maybe_cleanup_cache()
-
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        text_parts = split_text_by_lines(text, limit=4096)
-
-        if not text_parts:
-            text_parts = ["—"]
-
-        sent_ids = []
-        try:
-            for i, part in enumerate(text_parts):
-                is_last = (i == len(text_parts) - 1)
-                kb = reply_markup if is_last else None
-                
-                try:
-                    msg = await bot.send_message(
-                        chat_id=chat_id,
-                        text=part,
-                        reply_markup=kb,
-                        parse_mode=parse_mode,
-                    )
-                except TelegramBadRequest as e:
-                    err_str = str(e).lower()
-                    if "parse" in err_str or "entities" in err_str:
-                        logger.warning(
-                            "HTML parse failed in append_hub_message for chat %s, fallback to plain text: %s",
-                            chat_id,
-                            e,
-                        )
-                        plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                        msg = await bot.send_message(
-                            chat_id=chat_id,
-                            text=plain,
-                            reply_markup=kb,
-                            parse_mode=None,
-                        )
-                    else:
-                        raise
-                
-                sent_ids.append(msg.message_id)
-        except Exception:
-            if sent_ids:
-                try:
-                    await _delete_hub_messages(bot, chat_id, sent_ids)
-                except Exception:
-                    pass
-            raise
-
-        for mid in sent_ids:
-            await _store_hub_id_in_db(chat_id, mid)
-
-        return sent_ids[-1]
+        return await _append_hub_message_unlocked(
+            bot,
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )

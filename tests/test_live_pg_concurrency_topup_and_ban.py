@@ -724,6 +724,54 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         for r in results:
             self.assertNotIsInstance(r, asyncio.CancelledError)
 
+    async def test_concurrent_multi_user_recover_stale_no_deadlock(self):
+        """Two concurrent recover_stale workers over multiple users never deadlock."""
+        async with self.session_factory() as session:
+            for i in range(5):
+                user = User(telegram_id=999100 + i)
+                session.add(user)
+                await session.flush()
+                payment = Payment(
+                    user_id=user.id,
+                    amount=Decimal("100"),
+                    currency="RUB",
+                    public_order_id=str(uuid.uuid4()),
+                    provider_idempotency_key=str(uuid.uuid4()),
+                    provider_status="pending",
+                    external_id=f"yoo_multi_stale_{i}",
+                )
+                session.add(payment)
+                await session.flush()
+                op = PaymentProviderOperation(
+                    payment_id=payment.id,
+                    operation_type="reconcile_payment",
+                    status="processing",
+                    idempotency_key=f"op_{uuid.uuid4().hex}",
+                    payload={},
+                    locked_by=f"worker_stale_{i}",
+                    locked_at=datetime.fromtimestamp(1000, tz=timezone.utc),
+                    attempts=1,
+                )
+                session.add(op)
+            await session.commit()
+
+        barrier = asyncio.Event()
+
+        async def worker_recover():
+            await barrier.wait()
+            async with self.session_factory() as session:
+                async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
+                    return await recover_stale(session, lease_seconds=10)
+
+        t1 = asyncio.create_task(worker_recover())
+        t2 = asyncio.create_task(worker_recover())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        for r in results:
+            self.assertNotIsInstance(r, Exception, f"Concurrent multi-user recovery failed: {r}")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -262,8 +262,8 @@ async def claim(session, worker_id):
 
     Invariant: Worker claim locks PaymentProviderOperation exclusively to dispatch
     the background job, and reads Payment as a non-locking snapshot for HTTP parameters.
-    Subsequent state-modifying operations (finalize, recover_stale) strictly follow the
-    canonical hierarchy: Payment FOR UPDATE -> PaymentProviderOperation FOR UPDATE.
+    State-modifying operations (finalize, recover_stale) strictly follow the canonical hierarchy:
+    Advisory(user) -> User FOR UPDATE -> Payment FOR UPDATE -> PaymentProviderOperation FOR UPDATE.
     """
     operation = await session.scalar(
         select(PaymentProviderOperation)
@@ -548,23 +548,30 @@ async def finalize(session, claim, result, bot=None):
 async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
     stale_rows = (
         await session.execute(
-            select(PaymentProviderOperation.id, PaymentProviderOperation.payment_id)
+            select(
+                PaymentProviderOperation.id,
+                PaymentProviderOperation.payment_id,
+                Payment.user_id,
+            )
+            .join(Payment, Payment.id == PaymentProviderOperation.payment_id)
             .where(
                 PaymentProviderOperation.status == "processing",
                 PaymentProviderOperation.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
-            .limit(100)
+            .order_by(
+                Payment.user_id.asc(),
+                Payment.id.asc(),
+                PaymentProviderOperation.id.asc(),
+            )
+            .limit(20)
         )
     ).all()
     count = 0
-    for op_id, payment_id in stale_rows:
+    for op_id, payment_id, user_id in stale_rows:
         # Respect global hierarchy: Advisory(user) -> User -> Payment -> PaymentProviderOperation
-        payment_user_id = await session.scalar(
-            select(Payment.user_id).where(Payment.id == payment_id)
-        )
-        if payment_user_id is not None:
-            await lock_checkout_user(session, payment_user_id)
+        if user_id is not None:
+            await lock_checkout_user(session, user_id)
         payment = await session.scalar(
             select(Payment)
             .where(Payment.id == payment_id)

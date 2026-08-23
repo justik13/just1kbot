@@ -410,6 +410,8 @@ async def recover_stale(session, lease_seconds=WEBHOOK_LEASE_SECONDS):
                 WebhookInbox.locked_at
                 < now_utc() - timedelta(seconds=lease_seconds),
             )
+            .order_by(WebhookInbox.id.asc())
+            .limit(20)
             .with_for_update(skip_locked=True)
         )
     ).all()
@@ -419,12 +421,20 @@ async def recover_stale(session, lease_seconds=WEBHOOK_LEASE_SECONDS):
             payment = await session.scalar(
                 select(Payment)
                 .where(Payment.external_id == row.payment_external_id)
-                .with_for_update()
             )
             if payment:
-                payment.reconciliation_status = "manual_review"
-                payment.fulfillment_status = "manual_review"
-                payment.manual_review_reason = "webhook_lease_exhausted"
+                if payment.user_id is not None:
+                    from database.repositories.tariff_quotes_repo import lock_checkout_user
+                    await lock_checkout_user(session, payment.user_id)
+                locked_payment = await session.scalar(
+                    select(Payment)
+                    .where(Payment.id == payment.id)
+                    .with_for_update(skip_locked=True)
+                )
+                if locked_payment:
+                    locked_payment.reconciliation_status = "manual_review"
+                    locked_payment.fulfillment_status = "manual_review"
+                    locked_payment.manual_review_reason = "webhook_lease_exhausted"
     return len(rows)
 
 
