@@ -796,6 +796,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             session.add(payment)
             await session.flush()
             inbox = WebhookInbox(
+                provider="yookassa",
                 event_key=f"ev_{uuid.uuid4().hex}",
                 event_type="payment.succeeded",
                 provider_object_id="yoo_webhook_test_1",
