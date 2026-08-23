@@ -1,10 +1,15 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from utils.tariff_names import get_tariff_group_name
+
+
+def _round_half_up(val: Decimal | float | int) -> int:
+    d = Decimal(str(val))
+    return int(d.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def get_tariff_showcase_keyboard(
@@ -37,19 +42,23 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     ):
         return f"⏱ {days} дн. — {price} ₽"
 
-    base_days = base_tariff.duration_days
-    base_price = base_tariff.price_rub
-    base_daily_rate = base_price / base_days
-    undiscounted_price = base_daily_rate * days
-    discount_pct = (
-        round(((undiscounted_price - price) / undiscounted_price) * 100)
-        if undiscounted_price > 0
-        else 0
-    )
-    savings_rub = round(undiscounted_price - price)
-    price_per_month = round((price * 30) / days) if days > 0 else price
+    base_days = Decimal(str(base_tariff.duration_days))
+    base_price = Decimal(str(base_tariff.price_rub))
+    curr_days = Decimal(str(days))
+    curr_price = Decimal(str(price))
 
-    display_price = int(price) if isinstance(price, (int, float, Decimal)) and int(price) == price else price
+    base_daily_rate = base_price / base_days
+    undiscounted_price = base_daily_rate * curr_days
+    if undiscounted_price > 0 and undiscounted_price > curr_price:
+        discount_pct = _round_half_up(((undiscounted_price - curr_price) / undiscounted_price) * Decimal("100"))
+        savings_rub = _round_half_up(undiscounted_price - curr_price)
+    else:
+        discount_pct = 0
+        savings_rub = 0
+
+    price_per_month = _round_half_up((curr_price * Decimal("30")) / curr_days) if curr_days > 0 else int(curr_price)
+
+    display_price = int(curr_price) if int(curr_price) == curr_price else curr_price
 
     if savings_rub <= 0 or discount_pct <= 0:
         return f"⏱ {days} дн. — {display_price} ₽"

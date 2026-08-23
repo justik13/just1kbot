@@ -220,12 +220,16 @@ async def delete_hub_ids(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
 def _is_message_effect_error(exc: Exception) -> bool:
     """Return True if TelegramBadRequest was caused by an unsupported or invalid message_effect_id."""
     err = str(exc).lower()
-    return (
-        "effect_id_invalid" in err
-        or "effect_chat_invalid" in err
-        or "message_effect_id" in err
-        or "message can't be sent with effect" in err
-        or ("effect" in err and "parse" not in err and "entities" not in err and "tag" not in err)
+    return any(
+        marker in err
+        for marker in (
+            "effect_id_invalid",
+            "effect_chat_invalid",
+            "message_effect_id",
+            "message effect invalid",
+            "message can't be sent with effect",
+            "can't be sent with effect",
+        )
     )
 
 

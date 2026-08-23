@@ -57,9 +57,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             user_id = user.id
 
+        barrier = asyncio.Event()
+
         async def worker_create():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     return await create_balance_topup(
                         session=session,
                         user_id=user_id,
@@ -68,16 +72,20 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     )
 
         async def worker_cancel():
-            # Small yield to ensure both transactions enter competition
-            await asyncio.sleep(0.005)
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     return await cancel_all_unfinished_topups(
                         session=session,
                         user_id=user_id,
                     )
 
-        results = await asyncio.gather(worker_create(), worker_cancel(), return_exceptions=True)
+        t1 = asyncio.create_task(worker_create())
+        t2 = asyncio.create_task(worker_cancel())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
             self.assertNotIsInstance(r, Exception, f"Concurrent task failed with exception: {r}")
 
@@ -88,7 +96,6 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 )
             ).all()
             self.assertGreaterEqual(len(payments), 1)
-            # All payments must be either in a valid active state or canceled without orphan corruption
             for p in payments:
                 self.assertIn(p.provider_status, ("creating", "pending", "canceled"))
 
@@ -120,9 +127,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             await session.commit()
             payment_id = payment.id
 
+        barrier = asyncio.Event()
+
         async def worker_settle():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     p = await session.get(Payment, payment_id)
                     return await settle_succeeded_topup(
                         session=session,
@@ -131,14 +142,20 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                     )
 
         async def worker_cancel():
+            await barrier.wait()
             async with self.session_factory() as session:
                 async with session.begin():
+                    await session.execute(text("SET LOCAL statement_timeout = '5s'"))
                     return await cancel_all_unfinished_topups(
                         session=session,
                         user_id=user_id,
                     )
 
-        results = await asyncio.gather(worker_settle(), worker_cancel(), return_exceptions=True)
+        t1 = asyncio.create_task(worker_settle())
+        t2 = asyncio.create_task(worker_cancel())
+        barrier.set()
+
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
             self.assertNotIsInstance(r, Exception, f"Concurrent task failed with exception: {r}")
 

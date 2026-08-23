@@ -179,12 +179,7 @@ async def render_device_screen(
             display_key = build_display_vpn_key(raw_cfg, profile, server)
 
         if display_key:
-            has_copy_btn = 1 <= len(raw_cfg or "") <= 256
-            copy_hint = (
-                "<i>👆 Нажмите на ключ выше, чтобы скопировать его в буфер обмена.</i>"
-                if not has_copy_btn
-                else "<i>👆 Нажмите на ключ или кнопку ниже, чтобы скопировать его.</i>"
-            )
+            copy_hint = "<i>👆 Нажмите на ключ выше, чтобы скопировать его в буфер обмена.</i>"
             key_block = (
                 f"\n\n🔑 <b>Ключ подключения:</b>\n"
                 f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
@@ -215,8 +210,6 @@ async def render_device_screen(
             "\n\n💡 <b>Кнопки управления:</b>",
         ]
         if config_ready:
-            if display_key and (1 <= len(raw_cfg or "") <= 256):
-                btn_info_lines.append("• <b>📋 Скопировать ключ</b> — скопировать для вставки в приложение")
             btn_info_lines.append("• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик")
         btn_info_lines.append("• <b>✏️ Переименовать</b> — изменить название устройства")
         btn_info_lines.append("• <b>📖 Инструкция</b> — пошаговое руководство по настройке")
@@ -541,7 +534,7 @@ async def alt_connection(
         files_info = (
             "1. Сохраните один из прикреплённых файлов конфигурации:\n"
             "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
-            "   • <code>.conf</code> — для приложения <b>WireGuard</b> или роутеров\n"
+            "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров\n"
         )
     elif vpn_sent:
         files_info = (
@@ -549,19 +542,21 @@ async def alt_connection(
         )
     elif conf_sent:
         files_info = (
-            "1. Сохраните прикреплённый файл <code>.conf</code> (для приложения <b>WireGuard</b> или роутеров).\n"
+            "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров).\n"
         )
     else:
         files_info = (
-            "⚠️ <i>Не удалось прикрепить файлы конфигурации. Используйте кнопку авто-настройки ниже либо ключ из главного экрана.</i>\n"
+            "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
+            f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{safe(profile.raw_config or '')}</code></blockquote>\n"
         )
 
+    bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""
     alt_guide_text = (
         f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
-        "Если прямая вставка ключа не сработала или ваше приложение не поддерживает протокол:\n\n"
+        "Если прямая вставка ключа не сработала или ваше приложение требует файл:\n\n"
         f"{files_info}"
-        "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>.\n"
-        "3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."
+        "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
+        f"{bridge_hint}"
     )
 
     try:

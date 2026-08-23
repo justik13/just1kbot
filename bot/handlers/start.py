@@ -211,8 +211,20 @@ async def cmd_start(
 
     if command.args and (command.args.startswith("pay") or command.args.startswith("topup")):
         try:
+            from database.models import Payment
             from services.account_topup import get_visible_balance_topup, request_topup_status_refresh
-            payment = await get_visible_balance_topup(session, user_id=user.id)
+
+            payment_match = re.search(r"(?:pay|topup)[_-]?(\d+)", command.args)
+            payment = None
+            if payment_match:
+                pid = int(payment_match.group(1))
+                payment = await session.get(Payment, pid)
+                if payment and payment.user_id != user.id:
+                    payment = None
+
+            if not payment:
+                payment = await get_visible_balance_topup(session, user_id=user.id)
+
             if payment:
                 refreshed = await request_topup_status_refresh(session, payment_id=payment.id)
                 if refreshed.fulfillment_status == "succeeded":

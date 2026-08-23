@@ -1,4 +1,4 @@
-from aiogram.types import CopyTextButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
@@ -17,15 +17,6 @@ def get_device_keyboard(
     adjustments = []
 
     if config_ready:
-        # Telegram Bot API enforces CopyTextButton text length of 1-256 characters
-        if raw_config and 1 <= len(raw_config) <= 256:
-            builder.button(
-                text="📋 Скопировать ключ",
-                copy_text=CopyTextButton(text=raw_config),
-                style="success",
-            )
-            adjustments.append(1)
-
         builder.button(
             text="🔄 Другой способ подключения",
             callback_data=f"alt_connection:{profile_id}",
