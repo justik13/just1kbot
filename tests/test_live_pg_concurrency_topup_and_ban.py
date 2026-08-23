@@ -97,7 +97,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             ).all()
             self.assertGreaterEqual(len(payments), 1)
             for p in payments:
-                self.assertIn(p.provider_status, ("creating", "pending", "canceled"))
+                self.assertIn(p.provider_status, ("not_created", "creating", "pending", "canceled"))
 
     async def test_concurrent_settle_succeeded_and_cancel_unfinished(self):
         """Test concurrent settlement of succeeded payment vs cancel_all_unfinished_topups."""

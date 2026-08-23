@@ -167,7 +167,8 @@ async def create_balance_topup(
     ):
         raise AccountTopupError("topup_balance_limit_exceeded")
 
-    if (pending + rubles) > Decimal(cfg.BALANCE_MAX_PENDING_EXPOSURE_RUB):
+    pending_limit = getattr(cfg, "BALANCE_MAX_PENDING_EXPOSURE_RUB", 5000)
+    if (pending + rubles) > Decimal(pending_limit):
         raise AccountTopupError("topup_balance_limit_exceeded")
 
     payment = Payment(

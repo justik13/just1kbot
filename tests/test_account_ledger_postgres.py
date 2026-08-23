@@ -121,6 +121,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
             "BALANCE_MIN_TOPUP_RUB": 10,
             "BALANCE_MAX_CUSTOM_TOPUP_RUB": 5000,
             "BALANCE_MAX_AVAILABLE_RUB": 10000,
+            "BALANCE_MAX_PENDING_EXPOSURE_RUB": 5000,
             "BALANCE_MAX_UNFINISHED_TOPUPS": 3,
             "BALANCE_MAX_TOPUP_CREATIONS_24H": 10,
             "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
