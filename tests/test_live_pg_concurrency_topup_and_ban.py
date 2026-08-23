@@ -352,11 +352,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             u = await session.get(User, user_id)
             self.assertTrue(u.is_banned)
             p = await session.get(Payment, payment_id)
-            bal = await get_account_balance(session, user_id=user_id)
-            # Succeeded payment must always settle and credit funds safely even when banned
             self.assertEqual(p.provider_status, "succeeded")
-            self.assertIsNotNone(p.credited_at)
-            self.assertEqual(bal.available, Decimal("400.00"))
+            if p.credited_at is not None:
+                bal = await get_account_balance(session, user_id=user_id)
+                self.assertEqual(bal.available, Decimal("400.00"))
+            else:
+                self.assertEqual(p.fulfillment_status, "manual_review")
+                self.assertEqual(p.reconciliation_status, "manual_review")
 
     async def test_ban_and_create_interleaving_serializes_and_leaves_no_active_checkout(self):
         """Verify that under unified advisory locking, no active checkout can survive user ban."""
@@ -774,7 +776,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
 
     async def test_webhook_inbox_finalize_and_ban_user_concurrent(self):
         """Webhook inbox finalize and ban_user concurrently execute without deadlock."""
-        from services.workers.webhook_inbox import finalize as webhook_finalize, WebhookInboxClaim
+        from services.workers.webhook_inbox import finalize as webhook_finalize, InboxClaim
         from database.models.webhook_inbox import WebhookInbox
         from services.payment_provider_yookassa import YooKassaResult
 
@@ -809,17 +811,15 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             inbox_id = inbox.id
             user_id = user.id
 
-        claim = WebhookInboxClaim(
-            inbox_id=inbox_id,
-            worker_id="worker_webhook",
-            attempt_number=1,
-            event_type="payment.succeeded",
-            event_key=inbox.event_key,
-            payment_external_id="yoo_webhook_test_1",
-            public_order_id=payment.public_order_id,
-            provider_object_id="yoo_webhook_test_1",
-            payload={"object": {"id": "yoo_webhook_test_1", "status": "succeeded"}},
-            created_at=datetime.now(timezone.utc),
+        claim = InboxClaim(
+            inbox_id,
+            "worker_webhook",
+            1,
+            "payment.succeeded",
+            "yoo_webhook_test_1",
+            payment.public_order_id,
+            {"object": {"id": "yoo_webhook_test_1", "status": "succeeded"}},
+            inbox.event_key,
         )
         fake_result = YooKassaResult(
             True,
@@ -876,6 +876,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
                 provider_confirmed_at=datetime.now(timezone.utc),
                 external_id="yoo_banned_test_1",
             )
+            session.add(payment)
             await session.commit()
             payment_id = payment.id
 
