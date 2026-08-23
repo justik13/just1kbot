@@ -898,6 +898,53 @@ class EntitlementEntry(Base):
     )
 
 
+class PaymentNotification(Base):
+    """Durable notification outbox for all external Telegram presentation events."""
+
+    __tablename__ = "payment_notifications"
+    __table_args__ = (
+        UniqueConstraint("payment_id", "kind", name="uq_payment_notifications_payment_kind"),
+        CheckConstraint(
+            "kind IN ('payment_url','balance_credit','referral_bonus','account_purchase')",
+            name="ck_payment_notifications_kind",
+        ),
+        CheckConstraint(
+            "state IN ('pending','claimed','delivered','compensation_required','compensation_retryable','compensated','dead')",
+            name="ck_payment_notifications_state",
+        ),
+        Index(
+            "ix_payment_notifications_claim",
+            "claim_until",
+            "id",
+            postgresql_where=text("state IN ('pending', 'compensation_retryable')"),
+        ),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="pending", server_default=text("'pending'")
+    )
+    claim_token: Mapped[str | None] = mapped_column(String(64))
+    claim_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payload_snapshot: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=10, server_default=text("10"))
+    last_error: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, onupdate=now_utc, server_default=text("now()")
+    )
+
+    payment = relationship("Payment")
+
+
 class PaymentRefund(Base):
     __tablename__ = "payment_refunds"
     __table_args__ = (CheckConstraint("provider_status IN ('pending','succeeded','canceled')", name="ck_payment_refunds_provider_status"),)

@@ -98,11 +98,29 @@ async def get_visible_balance_topup(
 async def _pending_topup_exposure(
     session: AsyncSession, user_id: int
 ) -> Decimal:
+    from sqlalchemy import and_, or_
+    from database.models import PaymentProviderOperation
+
     amount = await session.scalar(
         select(func.coalesce(func.sum(Payment.amount), 0)).where(
             Payment.user_id == user_id,
             Payment.credited_at.is_(None),
-            Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+            or_(
+                and_(
+                    Payment.external_id.is_not(None),
+                    Payment.provider_status.not_in(("canceled", "refunded", "succeeded")),
+                ),
+                and_(
+                    Payment.external_id.is_(None),
+                    select(1)
+                    .where(
+                        PaymentProviderOperation.payment_id == Payment.id,
+                        PaymentProviderOperation.operation_type == "create_payment",
+                        PaymentProviderOperation.status.in_(("pending", "retry", "processing")),
+                    )
+                    .exists(),
+                ),
+            ),
         )
     )
     return Decimal(amount or 0)
@@ -150,6 +168,7 @@ async def create_balance_topup(
             select(func.count(Payment.id)).where(
                 Payment.user_id == user.id,
                 Payment.credited_at.is_(None),
+                Payment.checkout_status != "abandoned",
                 Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
             )
         )
@@ -254,10 +273,13 @@ async def cancel_all_unfinished_topups(
     ).all()
 
     count = 0
+    from services.payment_provider_operations import cancel_pending_create_operations
+
     for payment in payments:
         payment.checkout_status = "abandoned"
         payment.ui_visible = False
         payment.user_cancel_requested_at = payment.user_cancel_requested_at or now_utc()
+        await cancel_pending_create_operations(session, payment.id)
         session.add(
             PaymentEvent(
                 payment_id=payment.id,

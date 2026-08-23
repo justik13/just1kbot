@@ -179,6 +179,27 @@ def queue_post_commit_task(
     session.info["post_commit_tasks"].append(task)
 
 
+def queue_rollback_task(
+    session: AsyncSession,
+    task: Callable[[], Awaitable[None]],
+) -> None:
+    if "rollback_tasks" not in session.info:
+        session.info["rollback_tasks"] = []
+    session.info["rollback_tasks"].append(task)
+
+
+async def _run_rollback_tasks(session: AsyncSession) -> None:
+    tasks: list[Callable[[], Awaitable[None]]] = session.info.pop(
+        "rollback_tasks", []
+    )
+    if not tasks:
+        return
+    for task in tasks:
+        background_task = asyncio.create_task(_safe_run_post_commit(task))
+        _post_commit_background_tasks.add(background_task)
+        background_task.add_done_callback(_handle_task_result)
+
+
 @asynccontextmanager
 async def session_scope():
     session = await get_session()
@@ -189,6 +210,7 @@ async def session_scope():
     except (Exception, asyncio.CancelledError):
         await session.rollback()
         session.info.pop("post_commit_tasks", None)
+        await _run_rollback_tasks(session)
         raise
     finally:
         await session.close()

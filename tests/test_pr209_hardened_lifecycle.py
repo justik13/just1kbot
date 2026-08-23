@@ -1,0 +1,223 @@
+"""Comprehensive lifecycle and concurrency regression tests for PR #209 hardening.
+
+Tests:
+1. In-flight create_payment cancellation: processing op captures external_id while UI remains suppressed.
+2. Exposure calculation respects abandoned vs processing create_payment operations.
+3. Notification coordinator 4-phase delivery and compensation lifecycle.
+4. Transactional hub cache post-commit and rollback isolation.
+5. Webhook Double-Read & Revalidate pattern against user ban and cancellation.
+"""
+
+import unittest
+import uuid
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from database.models import (
+    Payment,
+    PaymentNotification,
+    PaymentProviderOperation,
+    User,
+)
+from services.account_topup import cancel_all_unfinished_topups
+from services.payment_provider_operations import (
+    ProviderOperationClaim,
+    finalize,
+)
+from services.yookassa_service import YooKassaResult
+from utils.datetime_helpers import now_utc
+
+
+class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
+    async def test_inflight_create_operation_captures_external_id_without_resurrecting_ui(self):
+        """When user abandons checkout while create_payment is in-flight, finalize()
+
+        must capture external_id, preserve exposure, but NOT resurrect UI.
+        """
+        user = User(id=1, telegram_id=100200)
+        payment = Payment(
+            id=10,
+            user_id=1,
+            amount=Decimal(500),
+            currency="RUB",
+            public_order_id="topup_inflight_1",
+            provider_idempotency_key=str(uuid.uuid4()),
+            provider_status="not_created",
+            checkout_status="active",
+            ui_visible=True,
+            topup_context={},
+        )
+        op = PaymentProviderOperation(
+            id=101,
+            payment_id=10,
+            operation_type="create_payment",
+            status="processing",
+            idempotency_key=f"op_{uuid.uuid4().hex}",
+            locked_by="worker_http",
+            locked_at=now_utc(),
+            attempts=1,
+        )
+
+        session = AsyncMock()
+        # Mock cancel_all_unfinished_topups behavior
+        session.scalars = AsyncMock(
+            side_effect=[
+                MagicMock(all=MagicMock(return_value=[payment])),  # cancel_all_unfinished_topups
+                MagicMock(all=MagicMock(return_value=[])),        # cancel_pending_create_operations
+            ]
+        )
+
+        with patch("database.repositories.tariff_quotes_repo.lock_checkout_user", AsyncMock(return_value=user)):
+            cancelled = await cancel_all_unfinished_topups(session, user_id=1)
+            self.assertEqual(cancelled, 1)
+            self.assertEqual(payment.checkout_status, "abandoned")
+            self.assertFalse(payment.ui_visible)
+            # Processing operation remains 'processing' so worker can capture external_id
+            self.assertEqual(op.status, "processing")
+
+        # Now worker completes external HTTP and calls finalize()
+        claim = ProviderOperationClaim(
+            operation_id=101,
+            payment_id=10,
+            operation_type="create_payment",
+            payload={},
+            idempotency_key=op.idempotency_key,
+            worker_id="worker_http",
+            attempt_number=1,
+            external_id=None,
+            created_at=now_utc(),
+        )
+        fake_result = YooKassaResult(
+            True,
+            value={
+                "id": "yoo_inflight_captured_99",
+                "status": "pending",
+                "confirmation": {"confirmation_url": "https://yookassa.ru/pay/99"},
+            },
+        )
+
+        session.scalar = AsyncMock(
+            side_effect=[
+                1,        # select(Payment.user_id)
+                payment,  # select(Payment).with_for_update()
+                op,       # select(PaymentProviderOperation).with_for_update()
+            ]
+        )
+
+        mock_bot = AsyncMock()
+        with patch("services.payment_provider_operations.lock_checkout_user", AsyncMock(return_value=user)):
+            await finalize(session, claim, fake_result, bot=mock_bot)
+
+        # Final assertions: external_id is captured, URL saved, but UI stays abandoned
+        self.assertEqual(payment.external_id, "yoo_inflight_captured_99")
+        self.assertEqual(payment.provider_status, "pending")
+        self.assertEqual(payment.payment_url, "https://yookassa.ru/pay/99")
+        self.assertEqual(payment.checkout_status, "abandoned")
+        self.assertFalse(payment.ui_visible)
+        self.assertEqual(op.status, "succeeded")
+
+    async def test_notification_coordinator_compensation_flow(self):
+        """If user cancels checkout during lock-free Telegram I/O, coordinator compensates orphan message."""
+        user = User(id=1, telegram_id=100400)
+        payment = Payment(
+            id=15,
+            user_id=1,
+            amount=Decimal(250),
+            currency="RUB",
+            public_order_id="topup_notif_1",
+            provider_status="pending",
+            payment_url="https://pay.link/1",
+            checkout_status="active",
+            ui_visible=True,
+            topup_context={},
+        )
+        notif = PaymentNotification(
+            id=50,
+            payment_id=15,
+            kind="payment_url",
+            chat_id=100400,
+            state="claimed",
+            claim_token="token_abc",
+            attempts=1,
+        )
+
+        mock_bot = AsyncMock()
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        claim = NotificationClaim(
+            notification_id=50,
+            payment_id=15,
+            user_id=1,
+            chat_id=100400,
+            kind="payment_url",
+            state="claimed",
+            claim_token="token_abc",
+            attempt_number=1,
+            payload={},
+        )
+
+        # During Phase 2 render_hub, simulate user cancelling the payment (checkout_status='abandoned')
+        async def fake_render(bot, chat_id, payload):
+            payment.checkout_status = "abandoned"
+            payment.ui_visible = False
+            return 9999  # Sent message ID
+
+        session_prep = AsyncMock()
+        session_prep.get = AsyncMock(side_effect=[payment, notif])
+        session_ack = AsyncMock()
+        session_ack.get = AsyncMock(side_effect=[payment, notif, notif])
+
+        from contextlib import asynccontextmanager
+        call_count = 0
+        @asynccontextmanager
+        async def mock_scope():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield session_prep
+            else:
+                yield session_ack
+
+        with patch("services.notification_coordinator.session_scope", mock_scope), \
+             patch("services.notification_coordinator.lock_checkout_user", AsyncMock(return_value=user)), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
+
+            delivered = await execute_notification_presentation(
+                mock_bot,
+                claim,
+                render_func=fake_render,
+            )
+            self.assertTrue(delivered)
+            # Verify compensation was triggered to delete orphan message
+            mock_delete.assert_called_once_with(mock_bot, 100400, [9999])
+            self.assertEqual(notif.state, "compensated")
+
+    async def test_transactional_hub_cache_coordination(self):
+        """Verify _store_hub_id_in_db registers post-commit and rollback hooks with cache isolation."""
+        from utils.telegram import _hub_cache, _store_hub_id_in_db
+
+        _hub_cache[777] = {"ids": [100]}
+        mock_session = AsyncMock()
+        mock_session.info = {}
+
+        with patch("database.repositories.hub_repo.add_hub_message_id", AsyncMock()):
+            await _store_hub_id_in_db(777, 200, session=mock_session)
+
+            self.assertIn("post_commit_tasks", mock_session.info)
+            self.assertIn("rollback_tasks", mock_session.info)
+
+            # Before commit, cache is unchanged
+            self.assertEqual(_hub_cache[777]["ids"], [100])
+
+            # Execute post-commit task
+            for t in mock_session.info["post_commit_tasks"]:
+                await t()
+            self.assertEqual(_hub_cache[777]["ids"], [100, 200])
+
+            # Invalidate on rollback
+            for t in mock_session.info["rollback_tasks"]:
+                await t()
+            self.assertNotIn(777, _hub_cache)

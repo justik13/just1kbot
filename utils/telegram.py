@@ -161,15 +161,30 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSessi
     try:
         if session is not None:
             await hub_repo.add_hub_message_id(session, chat_id, message_id)
+            from database.connection import queue_post_commit_task, queue_rollback_task
+
+            async def _update_cache_post_commit():
+                cached = _hub_cache.get(chat_id)
+                if cached and "ids" in cached:
+                    if message_id not in cached["ids"]:
+                        cached["ids"].append(message_id)
+                else:
+                    _hub_cache[chat_id] = {"ids": [message_id]}
+
+            async def _invalidate_cache_on_rollback():
+                _hub_cache.pop(chat_id, None)
+
+            queue_post_commit_task(session, _update_cache_post_commit)
+            queue_rollback_task(session, _invalidate_cache_on_rollback)
         else:
             async with session_scope() as sess:
                 await hub_repo.add_hub_message_id(sess, chat_id, message_id)
-        cached = _hub_cache.get(chat_id)
-        if cached and "ids" in cached:
-            if message_id not in cached["ids"]:
-                cached["ids"].append(message_id)
-        else:
-            _hub_cache[chat_id] = {"ids": [message_id]}
+            cached = _hub_cache.get(chat_id)
+            if cached and "ids" in cached:
+                if message_id not in cached["ids"]:
+                    cached["ids"].append(message_id)
+            else:
+                _hub_cache[chat_id] = {"ids": [message_id]}
     except Exception as e:
         logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
 
@@ -181,13 +196,26 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
     try:
         if session is not None:
             await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
+            from database.connection import queue_post_commit_task, queue_rollback_task
+
+            async def _update_cache_post_commit():
+                cached = _hub_cache.get(chat_id)
+                if cached and "ids" in cached:
+                    old_set = set(message_ids)
+                    cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+
+            async def _invalidate_cache_on_rollback():
+                _hub_cache.pop(chat_id, None)
+
+            queue_post_commit_task(session, _update_cache_post_commit)
+            queue_rollback_task(session, _invalidate_cache_on_rollback)
         else:
             async with session_scope() as sess:
                 await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
-        cached = _hub_cache.get(chat_id)
-        if cached and "ids" in cached:
-            old_set = set(message_ids)
-            cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+            cached = _hub_cache.get(chat_id)
+            if cached and "ids" in cached:
+                old_set = set(message_ids)
+                cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
     except Exception as e:
         logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
 
@@ -388,10 +416,10 @@ async def render_hub(
                     else:
                         raise
                 sent_ids.append(message.message_id)
-        except Exception:
+        except BaseException:
             if sent_ids:
                 try:
-                    await _delete_hub_messages(bot, chat_id, sent_ids)
+                    await asyncio.shield(_delete_hub_messages(bot, chat_id, sent_ids))
                 except Exception:
                     pass
             raise
@@ -562,10 +590,10 @@ async def _append_hub_message_unlocked(
                     raise
 
             sent_ids.append(msg.message_id)
-    except Exception:
+    except BaseException:
         if sent_ids:
             try:
-                await _delete_hub_messages(bot, chat_id, sent_ids, session=session)
+                await asyncio.shield(_delete_hub_messages(bot, chat_id, sent_ids))
             except Exception:
                 pass
         raise

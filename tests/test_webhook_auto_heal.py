@@ -42,10 +42,10 @@ class WebhookAutoHealTests(unittest.IsolatedAsyncioTestCase):
 
         session = AsyncMock()
         session.scalars = AsyncMock(
-            side_effect=[
-                MagicMock(all=MagicMock(return_value=[dead_row])),
-                MagicMock(all=MagicMock(return_value=[])),
-            ]
+            return_value=MagicMock(all=MagicMock(return_value=[dead_row]))
+        )
+        session.execute = AsyncMock(
+            return_value=MagicMock(all=MagicMock(return_value=[]))
         )
 
         await recover_stale(session)

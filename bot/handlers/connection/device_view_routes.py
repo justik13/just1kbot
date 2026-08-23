@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 
@@ -513,87 +514,95 @@ async def alt_connection(
         guide_sent = False
 
         try:
-            doc_msg_1 = await _append_hub_document_unlocked(
-                callback.bot, callback.message.chat.id,
-                document=vpn_file,
-                caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
-                parse_mode="HTML",
-                session=session,
-            )
-            sent_doc_ids.append(doc_msg_1)
-            vpn_sent = True
-        except Exception as e:
-            logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
+            try:
+                doc_msg_1 = await _append_hub_document_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    document=vpn_file,
+                    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
+                    parse_mode="HTML",
+                    session=session,
+                )
+                sent_doc_ids.append(doc_msg_1)
+                vpn_sent = True
+            except Exception as e:
+                logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
 
-        try:
-            doc_msg_2 = await _append_hub_document_unlocked(
-                callback.bot, callback.message.chat.id,
-                document=conf_file,
-                caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
-                parse_mode="HTML",
-                session=session,
-            )
-            sent_doc_ids.append(doc_msg_2)
-            conf_sent = True
-        except Exception as e:
-            logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
+            try:
+                doc_msg_2 = await _append_hub_document_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    document=conf_file,
+                    caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
+                    parse_mode="HTML",
+                    session=session,
+                )
+                sent_doc_ids.append(doc_msg_2)
+                conf_sent = True
+            except Exception as e:
+                logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
 
-        if vpn_sent and conf_sent:
-            files_info = (
-                "1. Сохраните один из прикреплённых файлов конфигурации:\n"
-                "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
-                "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров\n"
-            )
-        elif vpn_sent:
-            files_info = (
-                "1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).\n"
-            )
-        elif conf_sent:
-            files_info = (
-                "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров).\n"
-            )
-        else:
-            escaped_key = safe(profile.raw_config or "")
-            key_block = (
-                f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{escaped_key}</code></blockquote>\n"
-                if len(escaped_key) <= 3500
-                else "🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.\n"
-            )
-            files_info = (
-                "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
-                f"{key_block}"
+            if vpn_sent and conf_sent:
+                files_info = (
+                    "1. Сохраните один из прикреплённых файлов конфигурации:\n"
+                    "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
+                    "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров\n"
+                )
+            elif vpn_sent:
+                files_info = (
+                    "1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).\n"
+                )
+            elif conf_sent:
+                files_info = (
+                    "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров).\n"
+                )
+            else:
+                escaped_key = safe(profile.raw_config or "")
+                key_block = (
+                    f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{escaped_key}</code></blockquote>\n"
+                    if len(escaped_key) <= 3500
+                    else "🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.\n"
+                )
+                files_info = (
+                    "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
+                    f"{key_block}"
+                )
+
+            bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""
+            alt_guide_text = (
+                f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
+                "Если прямая вставка ключа не сработала или ваше приложение требует файл:\n\n"
+                f"{files_info}"
+                "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
+                f"{bridge_hint}"
             )
 
-        bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""
-        alt_guide_text = (
-            f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
-            "Если прямая вставка ключа не сработала или ваше приложение требует файл:\n\n"
-            f"{files_info}"
-            "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
-            f"{bridge_hint}"
-        )
+            try:
+                await _append_hub_message_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    text=alt_guide_text,
+                    reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
+                    parse_mode="HTML",
+                    session=session,
+                )
+                guide_sent = True
+            except Exception as e:
+                logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
 
-        try:
-            await _append_hub_message_unlocked(
-                callback.bot, callback.message.chat.id,
-                text=alt_guide_text,
-                reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
-                parse_mode="HTML",
-                session=session,
-            )
-            guide_sent = True
-        except Exception as e:
-            logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
-
-        if guide_sent:
-            if old_hub_ids:
+            if guide_sent:
+                if old_hub_ids:
+                    try:
+                        await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids, session=session))
+                    except Exception as e:
+                        logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
+            else:
+                if sent_doc_ids:
+                    try:
+                        await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids, session=session))
+                    except Exception as clean_exc:
+                        logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)
+        except BaseException as root_exc:
+            if sent_doc_ids and not guide_sent:
                 try:
-                    await _delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids, session=session)
-                except Exception as e:
-                    logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
-        else:
-            if sent_doc_ids:
-                try:
-                    await _delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids, session=session)
-                except Exception as clean_exc:
-                    logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)
+                    await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids))
+                except Exception:
+                    pass
+            raise root_exc

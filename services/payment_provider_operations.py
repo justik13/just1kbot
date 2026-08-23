@@ -472,10 +472,95 @@ async def finalize(session, claim, result, bot=None):
 
                         async def _send_payment_url_post_commit():
                             try:
-                                async with session_scope() as push_session:
-                                    p = await push_session.get(Payment, target_payment_id)
-                                    if p and not p.payment_url_notified_at and p.payment_url:
-                                        await _push_payment_url(bot, push_session, p)
+                                # Phase 1: Snapshot parameters in short read
+                                user_tg_id = None
+                                user_db_id = None
+                                amount = 0
+                                purl = None
+                                ctx = {}
+                                avail = 0
+                                async with session_scope() as prep_session:
+                                    p = await prep_session.get(Payment, target_payment_id)
+                                    if (
+                                        not p
+                                        or p.payment_url_notified_at
+                                        or not p.payment_url
+                                        or p.checkout_status != "active"
+                                        or not p.ui_visible
+                                    ):
+                                        return
+                                    u = await prep_session.get(User, p.user_id)
+                                    if not u or not u.telegram_id:
+                                        return
+                                    user_tg_id = u.telegram_id
+                                    user_db_id = u.id
+                                    amount = int(p.amount)
+                                    purl = p.payment_url
+                                    ctx = dict(p.topup_context or {})
+                                    from database.repositories.account_ledger_repo import get_account_balance
+                                    bal = await get_account_balance(prep_session, user_id=u.id)
+                                    avail = int(bal.available)
+
+                                # Phase 2: Lock-Free External Telegram I/O
+                                chat_id = ctx.get("chat_id") or user_tg_id
+                                message_id = ctx.get("message_id")
+                                from bot import texts as _texts
+                                text = (
+                                    f"💳 <b>Ссылка на оплату готова!</b>\n\n"
+                                    f"Сумма: <b>{amount} ₽</b>\n"
+                                    f"Текущий баланс: <b>{avail} ₽</b>\n\n"
+                                    f"Нажмите кнопку ниже, чтобы перейти к оплате."
+                                )
+                                from aiogram.utils.keyboard import InlineKeyboardBuilder
+                                builder = InlineKeyboardBuilder()
+                                builder.button(text=_texts.BUTTON_OPEN_PAYMENT, url=purl)
+                                builder.button(text=_texts.BUTTON_CHECK_TOPUP, callback_data=f"balance_check:{target_payment_id}")
+                                builder.button(text=_texts.BUTTON_CLOSE_TOPUP, callback_data=f"balance_cancel:{target_payment_id}")
+                                builder.adjust(1)
+                                keyboard = builder.as_markup()
+
+                                from utils.telegram import render_hub
+                                from aiogram.exceptions import TelegramForbiddenError
+                                new_msg_id = None
+                                bot_blocked = False
+                                try:
+                                    new_msg_id = await render_hub(bot, chat_id, text, keyboard, trigger_message_id=message_id)
+                                except TelegramForbiddenError:
+                                    bot_blocked = True
+                                except Exception as exc:
+                                    logger.warning("Failed in lock-free payment URL push for payment %s: %s", target_payment_id, exc)
+                                    return
+
+                                # Phase 3: Short Verification & Acknowledge TX
+                                needs_compensation = False
+                                async with session_scope() as ack_session:
+                                    await lock_checkout_user(ack_session, user_db_id)
+                                    p = await ack_session.get(Payment, target_payment_id)
+                                    if p is None:
+                                        needs_compensation = True
+                                    elif bot_blocked:
+                                        p.payment_url_notified_at = now_utc()
+                                        from database.repositories.users_repo import mark_user_bot_blocked
+                                        await mark_user_bot_blocked(ack_session, user_tg_id)
+                                    elif p.checkout_status != "active" or not p.ui_visible:
+                                        # Concurrent checkout abandonment while Telegram I/O was in flight!
+                                        needs_compensation = True
+                                        p.payment_url_notified_at = now_utc()
+                                    else:
+                                        p.payment_url_notified_at = now_utc()
+                                        p.topup_context = {
+                                            **(p.topup_context or {}),
+                                            "message_id": new_msg_id or message_id,
+                                            "auto_show": False,
+                                        }
+
+                                # Phase 4: Lock-Free Compensation I/O
+                                if needs_compensation and new_msg_id:
+                                    from utils.telegram import _delete_hub_messages
+                                    try:
+                                        await _delete_hub_messages(bot, chat_id, [new_msg_id])
+                                    except Exception as exc:
+                                        logger.warning("Failed to compensate orphan payment URL push %s: %s", new_msg_id, exc)
                             except Exception as push_exc:
                                 logger.warning("Failed in post-commit payment URL push for payment %s: %s", target_payment_id, push_exc)
 
@@ -584,6 +669,8 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
             .where(
                 PaymentProviderOperation.id == op_id,
                 PaymentProviderOperation.status == "processing",
+                PaymentProviderOperation.locked_at
+                < now_utc() - timedelta(seconds=lease_seconds),
             )
             .with_for_update(skip_locked=True)
         )

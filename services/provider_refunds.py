@@ -809,6 +809,8 @@ async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
             .where(
                 ProviderRefundOperation.id == op_id,
                 ProviderRefundOperation.status == "processing",
+                ProviderRefundOperation.locked_at
+                < now_utc() - timedelta(seconds=lease_seconds),
             )
             .with_for_update(skip_locked=True)
         )

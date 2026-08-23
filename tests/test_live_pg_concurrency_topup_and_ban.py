@@ -706,10 +706,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             async with self.session_factory() as session:
                 async with session.begin():
                     await session.execute(text("SET LOCAL statement_timeout = '5s'"))
-                    try:
-                        return await finalize(session, claim, fake_result)
-                    except Exception as e:
-                        return e
+                    return await finalize(session, claim, fake_result)
 
         async def worker_recover():
             await barrier.wait()
@@ -724,7 +721,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
 
         results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
-            self.assertNotIsInstance(r, asyncio.CancelledError)
+            self.assertNotIsInstance(r, BaseException, f"Concurrent task failed with exception: {r}")
+
+        async with self.session_factory() as session:
+            p = await session.get(Payment, payment_id)
+            op = await session.get(PaymentProviderOperation, op_id)
+            self.assertEqual(p.provider_status, "succeeded")
+            self.assertIn(op.status, ("succeeded", "dead", "retry"))
 
     async def test_concurrent_multi_user_recover_stale_no_deadlock(self):
         """Two concurrent recover_stale workers over multiple users never deadlock."""
@@ -841,10 +844,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             async with self.session_factory() as session:
                 async with session.begin():
                     await session.execute(text("SET LOCAL statement_timeout = '5s'"))
-                    try:
-                        return await webhook_finalize(session, claim, fake_result)
-                    except Exception as e:
-                        return e
+                    return await webhook_finalize(session, claim, fake_result)
 
         async def run_ban():
             await barrier.wait()
@@ -860,7 +860,13 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
 
         results = await asyncio.gather(t1, t2, return_exceptions=True)
         for r in results:
-            self.assertNotIsInstance(r, asyncio.CancelledError)
+            self.assertNotIsInstance(r, BaseException, f"Concurrent task failed with exception: {r}")
+
+        async with self.session_factory() as session:
+            u = await session.get(User, user_id)
+            self.assertTrue(u.is_banned)
+            p = await session.scalar(select(Payment).where(Payment.id == payment.id))
+            self.assertEqual(p.provider_status, "succeeded")
 
     async def test_settle_succeeded_topup_blocks_banned_user(self):
         """Settlement on a banned user sets manual_review with reason 'user_banned' and does not credit."""

@@ -89,23 +89,9 @@ async def prepare_account_purchase(
     )
     if balance.debt > 0:
         raise AccountPurchaseError("account_debt")
-    tariff = await session.scalar(
-        select(Tariff).where(Tariff.id == tariff_id).with_for_update()
-    )
-    if tariff is None or not tariff.is_active:
-        raise AccountPurchaseError("tariff_unavailable")
     now = now_utc()
-    operation_type = "purchase"
-    if _active(user, now):
-        if user.current_tariff_id is None:
-            raise AccountPurchaseError("current_tariff_unknown")
-        current = await session.get(Tariff, user.current_tariff_id)
-        if current is None:
-            raise AccountPurchaseError("current_tariff_unknown")
-        if current.device_limit != tariff.device_limit:
-            raise AccountPurchaseError("tariff_change_required")
-        operation_type = "renew"
 
+    # Lock active quotes before locking Tariff to preserve DAG: User -> Quote -> Tariff
     active_quotes = await get_active_financial_quotes_for_update(
         session, user_id=user.id, as_of=now
     )
@@ -117,9 +103,25 @@ async def prepare_account_purchase(
                 TariffVersion.id == active_quote.target_tariff_version_id
             )
         )
-        if target_tariff_id != tariff.id:
+        if target_tariff_id != tariff_id:
             active_quote.status = "cancelled"
             active_quote.diagnostic_reason = "replaced_by_new_balance_quote"
+
+    tariff = await session.scalar(
+        select(Tariff).where(Tariff.id == tariff_id).with_for_update()
+    )
+    if tariff is None or not tariff.is_active:
+        raise AccountPurchaseError("tariff_unavailable")
+    operation_type = "purchase"
+    if _active(user, now):
+        if user.current_tariff_id is None:
+            raise AccountPurchaseError("current_tariff_unknown")
+        current = await session.get(Tariff, user.current_tariff_id)
+        if current is None:
+            raise AccountPurchaseError("current_tariff_unknown")
+        if current.device_limit != tariff.device_limit:
+            raise AccountPurchaseError("tariff_change_required")
+        operation_type = "renew"
 
     try:
         quote, version = await get_or_create_checkout_quote(
@@ -176,6 +178,9 @@ async def cancel_account_purchase_quote(
     a purchase debit is never cancelled here: that would hide a financial
     operation from the settlement/idempotency machinery.
     """
+    user = await lock_checkout_user(session, user_id)
+    if user is None or user.is_deleted:
+        raise AccountPurchaseError("purchase_user_missing")
     quote = await session.scalar(
         select(TariffQuote)
         .where(
