@@ -234,14 +234,16 @@ async def hide_balance_topup(
 async def cancel_all_unfinished_topups(
     session: AsyncSession, *, user_id: int
 ) -> int:
-    """Force cancel all unfinished topups for a user."""
-    # 1. Lock existing payment rows in deterministic order to respect Payment -> User lock hierarchy
+    """Abandon all active topup checkout sessions for a user without mutating provider truth."""
+    # 1. Lock existing active checkout payments in deterministic order
     await session.scalars(
         select(Payment.id)
         .where(
             Payment.user_id == user_id,
             Payment.credited_at.is_(None),
-            Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+            Payment.ui_visible.is_(True),
+            Payment.checkout_status == "active",
+            Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
         )
         .order_by(Payment.id)
         .with_for_update()
@@ -249,14 +251,16 @@ async def cancel_all_unfinished_topups(
     # 2. Acquire per-user checkout advisory lock
     await lock_checkout_user(session, user_id)
 
-    # 3. Re-read all unfinished payments under the serialized checkout lock to eliminate race window
+    # 3. Re-read active checkout payments under the serialized checkout lock to eliminate race window
     payments = (
         await session.scalars(
             select(Payment)
             .where(
                 Payment.user_id == user_id,
                 Payment.credited_at.is_(None),
-                Payment.provider_status.in_(UNFINISHED_TOPUP_PROVIDER_STATUSES),
+                Payment.ui_visible.is_(True),
+                Payment.checkout_status == "active",
+                Payment.provider_status.not_in(("succeeded", "canceled", "refunded", "manual_review")),
             )
             .order_by(Payment.id)
             .with_for_update()
@@ -265,9 +269,6 @@ async def cancel_all_unfinished_topups(
 
     count = 0
     for payment in payments:
-        if payment.provider_status in {"succeeded", "canceled", "refunded"}:
-            continue
-        payment.provider_status = "canceled"
         payment.checkout_status = "abandoned"
         payment.ui_visible = False
         payment.user_cancel_requested_at = payment.user_cancel_requested_at or now_utc()
@@ -275,7 +276,7 @@ async def cancel_all_unfinished_topups(
             PaymentEvent(
                 payment_id=payment.id,
                 event_type="balance_topup_hidden",
-                provider_status="canceled",
+                provider_status=payment.provider_status,
                 source="telegram",
             )
         )

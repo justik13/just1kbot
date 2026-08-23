@@ -221,8 +221,7 @@ async def cmd_start(
                 payment = await session.get(Payment, pid)
                 if payment and payment.user_id != user.id:
                     payment = None
-
-            if not payment:
+            else:
                 payment = await get_visible_balance_topup(session, user_id=user.id)
 
             if payment:

@@ -28,10 +28,12 @@ class TestConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         with patch('services.account_topup.lock_checkout_user', new=AsyncMock(return_value=SimpleNamespace(id=10))):
             count = await cancel_all_unfinished_topups(session, user_id=10)
 
-            # Both payments must be canceled because re-read caught the concurrent payment
+            # Both payments must have checkout abandoned without corrupting provider truth
             self.assertEqual(count, 2)
-            self.assertEqual(p1.provider_status, 'canceled')
-            self.assertEqual(p2.provider_status, 'canceled')
+            self.assertEqual(p1.provider_status, 'creating')
+            self.assertEqual(p2.provider_status, 'pending')
+            self.assertEqual(p1.checkout_status, 'abandoned')
+            self.assertEqual(p2.checkout_status, 'abandoned')
             self.assertFalse(p1.ui_visible)
             self.assertFalse(p2.ui_visible)
 

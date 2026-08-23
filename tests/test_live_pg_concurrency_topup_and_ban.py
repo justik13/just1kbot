@@ -163,14 +163,10 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
             p = await session.get(Payment, payment_id)
             bal = await get_account_balance(session, user_id=user_id)
             
-            # Deterministic state:
-            # Either settled & credited (balance 300 RUB), or canceled before credit (balance 0 RUB).
-            if p.credited_at is not None:
-                self.assertEqual(p.provider_status, "succeeded")
-                self.assertEqual(bal.available, Decimal("300.00"))
-            else:
-                self.assertEqual(p.provider_status, "canceled")
-                self.assertEqual(bal.available, Decimal("0.00"))
+            # Succeeded payment must always be safely settled and credited, never corrupted by cancel
+            self.assertEqual(p.provider_status, "succeeded")
+            self.assertIsNotNone(p.credited_at)
+            self.assertEqual(bal.available, Decimal("300.00"))
 
     async def test_concurrent_ban_and_create_topup(self):
         """Test concurrent ban execution vs topup creation."""
