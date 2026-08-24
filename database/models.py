@@ -903,6 +903,8 @@ class PaymentNotification(Base):
 
     __tablename__ = "payment_notifications"
     __table_args__ = (
+        UniqueConstraint("payment_id", "kind", name="uq_payment_notifications_payment_kind"),
+        UniqueConstraint("quote_id", "kind", name="uq_payment_notifications_quote_kind"),
         CheckConstraint(
             "kind IN ('payment_url','balance_credit','referral_bonus','account_purchase')",
             name="ck_payment_notifications_kind",
@@ -914,20 +916,6 @@ class PaymentNotification(Base):
         CheckConstraint(
             "state IN ('pending','claimed','delivered','compensation_required','compensation_retryable','compensated','dead')",
             name="ck_payment_notifications_state",
-        ),
-        Index(
-            "uq_payment_notifications_payment_kind",
-            "payment_id",
-            "kind",
-            unique=True,
-            postgresql_where=text("payment_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_payment_notifications_quote_kind",
-            "quote_id",
-            "kind",
-            unique=True,
-            postgresql_where=text("quote_id IS NOT NULL"),
         ),
         Index(
             "ix_payment_notifications_claim",
