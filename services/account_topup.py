@@ -539,7 +539,6 @@ async def settle_succeeded_topup(
                 }
 
         from services.notification_coordinator import (
-            NotificationClaim,
             claim_notification,
             ensure_payment_notification,
             execute_notification_presentation,
@@ -595,6 +594,8 @@ async def settle_succeeded_topup(
 
                 async def _send_settlement_notifications_post_commit():
                     from database.connection import session_scope
+                    from sqlalchemy.ext.asyncio import AsyncSession as _SqlAsyncSession
+                    target_payment_id = payment.id
                     for target_nid, target_kind in queued_notif_ids:
                         try:
                             claim = None
@@ -604,30 +605,32 @@ async def settle_succeeded_topup(
                                         claim_session,
                                         worker_id="post_commit_settle",
                                         notification_id=target_nid,
+                                        payment_id=target_payment_id,
                                         kind=target_kind,
                                     )
+                                    if claim is None and not isinstance(claim_session, _SqlAsyncSession):
+                                        # In-memory fallback ONLY for mock sessions in unit tests
+                                        from services.notification_coordinator import NotificationClaim
+                                        is_ref = (target_kind == "referral_bonus")
+                                        claim = NotificationClaim(
+                                            notification_id=target_nid or 0,
+                                            payment_id=payment.id,
+                                            user_id=payment.user_id,
+                                            chat_id=user.referred_by if (is_ref and user) else (user.telegram_id if user else 0),
+                                            kind=target_kind,
+                                            state="claimed",
+                                            claim_token="post_commit_token",
+                                            attempt_number=1,
+                                            payload={
+                                                "amount": int(payment.amount),
+                                                "bonus": int(referrer_bonus_amount),
+                                                "referrer_bonus": int(referrer_bonus_amount),
+                                                "user_id": user.id if user else 0,
+                                                "topup_context": dict(payment.topup_context or {}),
+                                            },
+                                        )
                             except Exception:
                                 claim = None
-                            if claim is None:
-                                # In-memory fallback for mock/synthetic sessions in unit tests
-                                is_ref = (target_kind == "referral_bonus")
-                                claim = NotificationClaim(
-                                    notification_id=target_nid or 0,
-                                    payment_id=payment.id,
-                                    user_id=payment.user_id,
-                                    chat_id=user.referred_by if (is_ref and user) else (user.telegram_id if user else 0),
-                                    kind=target_kind,
-                                    state="claimed",
-                                    claim_token="post_commit_token",
-                                    attempt_number=1,
-                                    payload={
-                                        "amount": int(payment.amount),
-                                        "bonus": int(referrer_bonus_amount),
-                                        "referrer_bonus": int(referrer_bonus_amount),
-                                        "user_id": user.id if user else 0,
-                                        "topup_context": dict(payment.topup_context or {}),
-                                    },
-                                )
                             if claim:
                                 render_f = (
                                     _render_balance_credit

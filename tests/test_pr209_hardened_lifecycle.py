@@ -561,7 +561,7 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             yield session_comp
 
         with patch("database.connection.session_scope", mock_comp_scope), \
-             patch("utils.telegram._delete_hub_messages", AsyncMock()) as mock_delete:
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
             cleaned = await execute_notification_presentation(mock_bot, claim, render_func=AsyncMock())
             self.assertTrue(cleaned)
             mock_delete.assert_awaited_once_with(mock_bot, 100600, [101, 102])
@@ -691,4 +691,114 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             )
             # The returned ID MUST match mock_doc_msg.message_id so caller can delete it on rollback
             self.assertEqual(returned_id, 445566)
+
+    async def test_compensation_partial_telegram_delete_failure_marks_retryable(self):
+        """Verify that when _delete_hub_messages returns failed_ids, coordinator transitions to compensation_retryable."""
+        from services.notification_coordinator import execute_notification_presentation, NotificationClaim
+
+        mock_bot = AsyncMock()
+        mock_msg = AsyncMock(message_id=901)
+        mock_bot.send_message = AsyncMock(return_value=mock_msg)
+
+        claim = NotificationClaim(
+            notification_id=888,
+            payment_id=50,
+            user_id=1,
+            chat_id=12345,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="claim_tok_888",
+            attempt_number=1,
+            payload={"amount": 100, "user_id": 1},
+        )
+
+        mock_notif = PaymentNotification(
+            id=888,
+            payment_id=50,
+            chat_id=12345,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="claim_tok_888",
+        )
+
+        mock_db_session = AsyncMock()
+        mock_db_session.get = AsyncMock(return_value=mock_notif)
+
+        class DummyContext:
+            async def __aenter__(self):
+                return mock_db_session
+            async def __aexit__(self, *args):
+                pass
+
+        async def render_func(b, c_id, payload):
+            return 901
+
+        # Simulate Phase 3 DB failure triggering Phase 4 compensation,
+        # and _delete_hub_messages returns failed_ids=[901] (Telegram failure)
+        with patch("database.connection.session_scope", return_value=DummyContext()), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[901])), \
+             patch.object(mock_db_session, "execute", AsyncMock(side_effect=Exception("DB deadlocked in Phase 3"))):
+
+            res = await execute_notification_presentation(mock_bot, claim, render_func=render_func)
+            self.assertTrue(res)
+            # Must transition to compensation_retryable (NOT compensated)
+            self.assertEqual(mock_notif.state, "compensation_retryable")
+            self.assertIsNotNone(mock_notif.claim_until)
+
+    async def test_post_commit_topup_settle_skips_when_claim_is_none(self):
+        """Verify post-commit settlement callback yields to worker without sending duplicate message if claim is None."""
+        from services.account_topup import settle_succeeded_topup
+        from sqlalchemy.ext.asyncio import AsyncSession as _SqlAsyncSession
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        session = AsyncMock()
+        session.add = MagicMock()
+        mock_user = User(id=1, telegram_id=777, is_banned=False, referred_by=None)
+        mock_payment = Payment(
+            id=77, user_id=1, amount=Decimal(100), currency="RUB",
+            public_order_id="topup_test_77", provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="pending", checkout_status="active",
+            ui_visible=True, topup_context={},
+        )
+
+        queued_callbacks = []
+        mock_bot = AsyncMock()
+
+        with patch("services.account_topup.lock_checkout_user", AsyncMock(return_value=mock_user)), \
+             patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(AsyncMock(amount=100), True))), \
+             patch("services.account_topup.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(accounting_position=Decimal(100), available=Decimal(100), reserved=Decimal(0), debt=Decimal(0)))), \
+             patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=Decimal(0))), \
+             patch("services.audit_service.AuditService.log_action", AsyncMock()), \
+             patch("services.notification_coordinator.ensure_payment_notification", AsyncMock(return_value=AsyncMock(id=321))), \
+             patch("database.connection.queue_post_commit_task", side_effect=lambda s, cb: queued_callbacks.append(cb)):
+
+            await settle_succeeded_topup(
+                session,
+                payment=mock_payment,
+                source="test",
+                bot=mock_bot,
+                settings=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000),
+            )
+
+            self.assertEqual(len(queued_callbacks), 1)
+
+            # Create a mock session that passes isinstance(sess, _SqlAsyncSession)
+            real_mock_session = AsyncMock(spec=_SqlAsyncSession)
+
+            class RealSessionContext:
+                async def __aenter__(self):
+                    return real_mock_session
+                async def __aexit__(self, *args):
+                    pass
+
+            # When post-commit callback runs on real session and claim_notification returns None (claimed by worker)
+            with patch("database.connection.session_scope", return_value=RealSessionContext()), \
+                 patch("services.notification_coordinator.claim_notification", AsyncMock(return_value=None)), \
+                 patch("services.notification_coordinator.execute_notification_presentation", AsyncMock()) as mock_present:
+
+                await queued_callbacks[0]()
+                # execute_notification_presentation MUST NOT be called with a synthetic claim
+                mock_present.assert_not_called()
 

@@ -440,10 +440,11 @@ async def execute_notification_presentation(
                 del_ok = True
             else:
                 try:
-                    await _delete_hub_messages(bot, claim.chat_id, msg_ids)
-                    del_ok = True
+                    failed_ids = await _delete_hub_messages(bot, claim.chat_id, msg_ids)
+                    del_ok = not bool(failed_ids)
                 except Exception as exc:
                     logger.warning("Failed to compensate orphan message %s: %s", msg_ids, exc)
+                    del_ok = False
 
             try:
                 async with session_scope() as session:
@@ -480,10 +481,11 @@ async def _execute_compensation_phase(bot: Bot, claim: NotificationClaim) -> boo
 
     del_ok = False
     try:
-        await _delete_hub_messages(bot, claim.chat_id, del_ids)
-        del_ok = True
+        failed_ids = await _delete_hub_messages(bot, claim.chat_id, del_ids)
+        del_ok = not bool(failed_ids)
     except Exception as exc:
         logger.warning("Failed to delete compensated messages %s: %s", del_ids, exc)
+        del_ok = False
 
     async with session_scope() as session:
         notif = await session.get(PaymentNotification, claim.notification_id)
