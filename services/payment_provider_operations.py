@@ -472,6 +472,7 @@ async def finalize(session, claim, result, bot=None):
                             claim_notification,
                             ensure_payment_notification,
                             execute_notification_presentation,
+                            safe_begin_nested,
                         )
 
                         ctx = dict(payment.topup_context or {})
@@ -480,18 +481,23 @@ async def finalize(session, claim, result, bot=None):
                         target_payment_id = payment.id
 
                         if chat_id and ctx.get("auto_show", True):
-                            notif = await ensure_payment_notification(
-                                session,
-                                payment_id=payment.id,
-                                kind="payment_url",
-                                chat_id=chat_id,
-                                payload_snapshot={
-                                    "payment_url": payment.payment_url,
-                                    "payment_id": payment.id,
-                                    "amount": int(payment.amount),
-                                    "message_id": ctx.get("message_id"),
-                                },
-                            )
+                            notif = None
+                            try:
+                                async with safe_begin_nested(session):
+                                    notif = await ensure_payment_notification(
+                                        session,
+                                        payment_id=payment.id,
+                                        kind="payment_url",
+                                        chat_id=chat_id,
+                                        payload_snapshot={
+                                            "payment_url": payment.payment_url,
+                                            "payment_id": payment.id,
+                                            "amount": int(payment.amount),
+                                            "message_id": ctx.get("message_id"),
+                                        },
+                                    )
+                            except Exception as purl_err:
+                                logger.error("Failed to enqueue payment_url notification for payment %s: %s", payment.id, purl_err)
                             target_notif_id = notif.id if notif else None
 
                             async def _send_payment_url_post_commit():

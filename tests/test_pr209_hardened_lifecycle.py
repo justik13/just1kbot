@@ -10,6 +10,7 @@ Tests:
 
 import unittest
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +18,7 @@ from database.models import (
     Payment,
     PaymentNotification,
     PaymentProviderOperation,
+    TariffQuote,
     User,
 )
 from services.account_topup import cancel_all_unfinished_topups
@@ -518,4 +520,175 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             # Verify TariffQuote was retrieved by quote_id (199) in Phase 1
             session_phase1.get.assert_awaited_once_with(TariffQuote, 199)
             self.assertEqual(mock_notif.state, "delivered")
+
+    async def test_phase3_crash_to_compensation_required_recovery(self):
+        """Verify crash after Phase 3 setting compensation_required is reclaimed and cleaned up."""
+        from services.notification_coordinator import (
+            claim_notification,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        mock_notif = PaymentNotification(
+            id=99,
+            payment_id=20,
+            kind="payment_url",
+            state="compensation_required",
+            chat_id=100600,
+            claim_token="old_stale_token",
+            claim_until=now_utc() - timedelta(seconds=5),
+            attempts=1,
+            max_attempts=5,
+            telegram_message_ids=[101, 102],
+        )
+
+        session_claim = AsyncMock()
+        session_claim.scalar = AsyncMock(return_value=mock_notif)
+        session_claim.get = AsyncMock(return_value=None)
+
+        # Claim the stuck compensation_required notification
+        claim = await claim_notification(session_claim, worker_id="recovery_worker")
+        self.assertIsNotNone(claim)
+        self.assertEqual(claim.state, "compensation_required")
+        self.assertEqual(claim.telegram_message_ids, [101, 102])
+
+        session_comp = AsyncMock()
+        session_comp.get = AsyncMock(return_value=mock_notif)
+
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def mock_comp_scope():
+            yield session_comp
+
+        with patch("database.connection.session_scope", mock_comp_scope), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock()) as mock_delete:
+            cleaned = await execute_notification_presentation(mock_bot, claim, render_func=AsyncMock())
+            self.assertTrue(cleaned)
+            mock_delete.assert_awaited_once_with(mock_bot, 100600, [101, 102])
+            self.assertEqual(mock_notif.state, "compensated")
+
+    async def test_outbox_db_failure_does_not_abort_financial_purchase(self):
+        """Verify outbox DB failure inside begin_nested savepoint does not abort quote purchase settlement."""
+        from services.account_purchase import settle_account_purchase
+        from database.models import Tariff, TariffVersion
+        from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+
+        mock_session = AsyncMock()
+        mock_user = User(id=1, telegram_id=55555, is_banned=False, is_deleted=False, current_tariff_id=None, financial_hold=False)
+        q_uuid = uuid.uuid4()
+        mock_quote = TariffQuote(
+            id=123, public_id=q_uuid, user_id=1, operation_type="purchase",
+            target_tariff_version_id=1, status="active",
+            current_paid_hours=0, current_paid_value_rub=Decimal(0),
+            bonus_hours=0, amount_due_rub=Decimal(300), currency="RUB",
+            resulting_paid_hours=720, resulting_paid_value_rub=Decimal(300),
+            resulting_bonus_hours=0, rounding_loss_hours=Decimal(0),
+            rounding_loss_value_rub=Decimal(0),
+            expires_at=now_utc() + timedelta(days=30),
+        )
+        mock_tariff = Tariff(id=1, name="Standard", is_active=True, device_limit=2)
+        mock_version = TariffVersion(
+            id=1, tariff_id=1, version_number=1, name_snapshot="Standard",
+            duration_hours=720, price_rub=Decimal(300), currency="RUB", device_limit=2,
+        )
+
+        mock_session.scalar = AsyncMock(side_effect=[mock_quote, mock_tariff])
+        mock_session.get = AsyncMock(return_value=mock_version)
+
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def mock_savepoint():
+            try:
+                yield
+            except Exception:
+                raise
+
+        mock_session.begin_nested = mock_savepoint
+
+        with patch("services.account_purchase.lock_checkout_user", AsyncMock(return_value=mock_user)), \
+             patch("services.account_purchase._settled_state", AsyncMock(return_value=(None, False))), \
+             patch("services.account_purchase.get_or_create_current_version", AsyncMock(return_value=mock_version)), \
+             patch("services.account_purchase.get_user_profiles_count", AsyncMock(return_value=0)), \
+             patch("services.account_purchase.get_account_balance", AsyncMock(return_value=AccountBalanceSnapshot(accounting_position=Decimal(700), available=Decimal(700), reserved=Decimal(0), debt=Decimal(0)))), \
+             patch("services.account_purchase.create_purchase_debit", AsyncMock(return_value=(AsyncMock(id=999), True))), \
+             patch("services.account_purchase.get_or_create_account_purchase_entry", AsyncMock()), \
+             patch("services.account_purchase._get_or_create_entitlement", AsyncMock(return_value=(AsyncMock(), True))), \
+             patch("services.account_purchase.SubscriptionService.extend_subscription", AsyncMock(return_value=AsyncMock())), \
+             patch("services.account_purchase.grant_referral_bonus_for_purchase", AsyncMock()), \
+             patch("services.audit_service.AuditService.log_action", AsyncMock()), \
+             patch("services.notification_coordinator.ensure_payment_notification", AsyncMock(side_effect=Exception("DB outbox error"))):
+
+            settlement = await settle_account_purchase(
+                mock_session,
+                user_id=1,
+                quote_public_id=q_uuid,
+            )
+            self.assertTrue(settlement.created)
+            self.assertEqual(mock_quote.status, "consumed")
+
+    async def test_outbox_db_failure_does_not_abort_topup_settlement(self):
+        """Verify outbox DB failure inside begin_nested savepoint does not abort topup credit settlement."""
+        from services.account_topup import settle_succeeded_topup
+
+        mock_session = AsyncMock()
+        mock_user = User(id=1, telegram_id=66666, is_banned=False, referred_by=77777)
+        mock_payment = Payment(
+            id=50, user_id=1, amount=Decimal(500), currency="RUB",
+            public_order_id="topup_test_50", provider_status="succeeded",
+            provider_confirmed_at=now_utc(),
+            fulfillment_status="pending", checkout_status="active",
+            ui_visible=True, topup_context={},
+        )
+
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def mock_savepoint():
+            try:
+                yield
+            except Exception:
+                raise
+
+        mock_session.begin_nested = mock_savepoint
+
+        mock_settings = MagicMock(BALANCE_MAX_AVAILABLE_RUB=100000)
+
+        with patch("services.notification_coordinator.ensure_payment_notification", AsyncMock(side_effect=Exception("DB deadlock on outbox"))), \
+             patch("services.referral_bonus.grant_referral_bonus_for_topup", AsyncMock(return_value=Decimal(50))), \
+             patch("services.account_topup.credit_succeeded_topup", AsyncMock(return_value=(AsyncMock(amount=500), True))), \
+             patch("services.account_topup.get_account_balance", AsyncMock(return_value=AsyncMock(real_position=Decimal(500), accounting_position=Decimal(500)))), \
+             patch("services.account_topup.refresh_user_dispute_hold", AsyncMock()), \
+             patch("services.audit_service.AuditService.log_action", AsyncMock()):
+
+            res = await settle_succeeded_topup(
+                mock_session,
+                payment=mock_payment,
+                source="test",
+                locked_user=mock_user,
+                locked_payment=mock_payment,
+                settings=mock_settings,
+            )
+            self.assertTrue(res[0])
+            self.assertEqual(mock_payment.fulfillment_status, "succeeded")
+            self.assertIsNotNone(mock_payment.credited_at)
+
+    async def test_telegram_send_success_db_failure_retains_doc_id_for_compensation(self):
+        """Verify _append_hub_document_unlocked still returns doc ID even if DB storage fails."""
+        from utils.telegram import _append_hub_document_unlocked
+        from aiogram.types import BufferedInputFile
+
+        mock_bot = AsyncMock()
+        mock_doc_msg = AsyncMock(message_id=445566)
+        mock_bot.send_document = AsyncMock(return_value=mock_doc_msg)
+
+        fake_file = BufferedInputFile(b"test", filename="test.vpn")
+
+        with patch("utils.telegram._store_hub_id_in_db", AsyncMock(side_effect=Exception("DB pool timeout"))):
+            returned_id = await _append_hub_document_unlocked(
+                mock_bot,
+                chat_id=12345,
+                document=fake_file,
+                caption="Test",
+            )
+            # The returned ID MUST match mock_doc_msg.message_id so caller can delete it on rollback
+            self.assertEqual(returned_id, 445566)
 

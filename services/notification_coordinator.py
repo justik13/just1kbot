@@ -22,12 +22,32 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import Payment, PaymentNotification, User
 from database.repositories.tariff_quotes_repo import lock_checkout_user
+from contextlib import asynccontextmanager
+
 from database.repositories.users_repo import mark_user_bot_blocked
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
 NOTIFICATION_LEASE_SECONDS = 120
+
+
+@asynccontextmanager
+async def safe_begin_nested(session: AsyncSession):
+    """Savepoint context manager resilient to AsyncMock in tests."""
+    nested_func = getattr(session, "begin_nested", None)
+    if callable(nested_func):
+        try:
+            res = nested_func()
+            if hasattr(res, "__aenter__"):
+                async with res:
+                    yield
+                return
+        except TypeError:
+            pass
+        except Exception:
+            raise
+    yield
 
 
 @dataclass
@@ -172,6 +192,13 @@ async def claim_notification(
             & (PaymentNotification.claim_until <= now)
         )
         | (
+            (PaymentNotification.state == "compensation_required")
+            & (
+                PaymentNotification.claim_until.is_(None)
+                | (PaymentNotification.claim_until <= now)
+            )
+        )
+        | (
             (PaymentNotification.state == "compensation_retryable")
             & (PaymentNotification.claim_until <= now)
         )
@@ -201,7 +228,11 @@ async def claim_notification(
         return None
 
     claim_token = uuid.uuid4().hex
-    row.state = "claimed" if row.state != "compensation_retryable" else "compensation_required"
+    row.state = (
+        "claimed"
+        if row.state not in ("compensation_required", "compensation_retryable")
+        else "compensation_required"
+    )
     row.claim_token = claim_token
     row.claim_until = now + timedelta(seconds=lease_seconds)
     row.attempts += 1
@@ -350,6 +381,7 @@ async def execute_notification_presentation(
                         notif.state = "compensation_required"
                         notif.telegram_message_id = last_msg_id
                         notif.telegram_message_ids = msg_ids
+                        notif.claim_until = now_utc()
                     needs_compensation = True
                 else:
                     # Success!

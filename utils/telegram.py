@@ -431,7 +431,15 @@ async def render_hub(
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
         for message_id in sent_ids:
-            await _store_hub_id_in_db(chat_id, message_id)
+            try:
+                await _store_hub_id_in_db(chat_id, message_id)
+            except Exception as db_exc:
+                logger.error(
+                    "Failed to persist hub message ID %s in DB for chat %s: %s",
+                    message_id,
+                    chat_id,
+                    db_exc,
+                )
         return sent_ids[-1]
 
 
@@ -522,7 +530,16 @@ async def _append_hub_document_unlocked(
         parse_mode=parse_mode,
     )
 
-    await _store_hub_id_in_db(chat_id, msg.message_id, session=session)
+    try:
+        await _store_hub_id_in_db(chat_id, msg.message_id, session=session)
+    except Exception as db_exc:
+        logger.error(
+            "Failed to persist hub document ID %s in DB for chat %s: %s",
+            msg.message_id,
+            chat_id,
+            db_exc,
+        )
+
     return msg.message_id
 
 
@@ -603,7 +620,15 @@ async def _append_hub_message_unlocked(
         raise
 
     for mid in sent_ids:
-        await _store_hub_id_in_db(chat_id, mid, session=session)
+        try:
+            await _store_hub_id_in_db(chat_id, mid, session=session)
+        except Exception as db_exc:
+            logger.error(
+                "Failed to persist hub message ID %s in DB for chat %s: %s",
+                mid,
+                chat_id,
+                db_exc,
+            )
 
     return sent_ids[-1]
 

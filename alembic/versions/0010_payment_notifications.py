@@ -59,7 +59,7 @@ def upgrade() -> None:
         "ix_payment_notifications_claim",
         "payment_notifications",
         ["claim_until", "id"],
-        postgresql_where=sa.text("state IN ('pending', 'claimed', 'compensation_retryable')"),
+        postgresql_where=sa.text("state IN ('pending', 'claimed', 'compensation_required', 'compensation_retryable')"),
     )
     op.create_index(
         "ix_payment_notifications_payment_id",

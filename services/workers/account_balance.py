@@ -78,6 +78,7 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
         claim_notification,
         ensure_payment_notification,
         execute_notification_presentation,
+        safe_begin_nested,
     )
 
     # 1. Backfill outbox for any consumed quotes that have not been notified
@@ -119,20 +120,21 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
             dev_lim,
         ) in rows:
             try:
-                await ensure_payment_notification(
-                    session,
-                    quote_id=quote_id,
-                    kind="account_purchase",
-                    chat_id=telegram_id,
-                    payload_snapshot={
-                        "quote_id": quote_id,
-                        "operation_type": op_type,
-                        "resulting_paid_hours": paid_h,
-                        "resulting_bonus_hours": bonus_h,
-                        "duration_hours": dur_h,
-                        "device_limit": dev_lim,
-                    },
-                )
+                async with safe_begin_nested(session):
+                    await ensure_payment_notification(
+                        session,
+                        quote_id=quote_id,
+                        kind="account_purchase",
+                        chat_id=telegram_id,
+                        payload_snapshot={
+                            "quote_id": quote_id,
+                            "operation_type": op_type,
+                            "resulting_paid_hours": paid_h,
+                            "resulting_bonus_hours": bonus_h,
+                            "duration_hours": dur_h,
+                            "device_limit": dev_lim,
+                        },
+                    )
             except Exception as row_exc:
                 logger.error("Failed to backfill purchase notification for quote %s: %s", quote_id, row_exc)
 
@@ -254,6 +256,7 @@ async def process_topup_link_presentations(bot: Bot) -> int:
         claim_notification,
         ensure_payment_notification,
         execute_notification_presentation,
+        safe_begin_nested,
     )
 
     # 1. Backfill outbox for any active unnotified payments
@@ -283,18 +286,22 @@ async def process_topup_link_presentations(bot: Bot) -> int:
             if not ctx.get("auto_show", True) or not purl:
                 continue
             chat_id = int(ctx.get("chat_id") or user_tg_id)
-            await ensure_payment_notification(
-                session,
-                payment_id=pid,
-                kind="payment_url",
-                chat_id=chat_id,
-                payload_snapshot={
-                    "payment_url": purl,
-                    "payment_id": pid,
-                    "amount": int(amount),
-                    "message_id": ctx.get("message_id"),
-                },
-            )
+            try:
+                async with safe_begin_nested(session):
+                    await ensure_payment_notification(
+                        session,
+                        payment_id=pid,
+                        kind="payment_url",
+                        chat_id=chat_id,
+                        payload_snapshot={
+                            "payment_url": purl,
+                            "payment_id": pid,
+                            "amount": int(amount),
+                            "message_id": ctx.get("message_id"),
+                        },
+                    )
+            except Exception as purl_exc:
+                logger.error("Failed to backfill payment_url notification for payment %s: %s", pid, purl_exc)
 
     # 2. Claim and present via unified coordinator
     presented = 0
@@ -324,6 +331,7 @@ async def process_balance_notifications(bot: Bot) -> int:
         claim_notification,
         ensure_payment_notification,
         execute_notification_presentation,
+        safe_begin_nested,
     )
 
     # 1. Backfill outbox for any pending credit / referral notifications
@@ -376,17 +384,18 @@ async def process_balance_notifications(bot: Bot) -> int:
                     ref_id = int(ref_id_raw)
                     ref_bonus = int(ref_bonus_raw)
                     if ref_id > 0 and ref_bonus > 0:
-                        await ensure_payment_notification(
-                            session,
-                            payment_id=pid,
-                            kind="referral_bonus",
-                            chat_id=ref_id,
-                            payload_snapshot={
-                                "bonus": ref_bonus,
-                                "referrer_bonus": ref_bonus,
-                                "payment_id": pid,
-                            },
-                        )
+                        async with safe_begin_nested(session):
+                            await ensure_payment_notification(
+                                session,
+                                payment_id=pid,
+                                kind="referral_bonus",
+                                chat_id=ref_id,
+                                payload_snapshot={
+                                    "bonus": ref_bonus,
+                                    "referrer_bonus": ref_bonus,
+                                    "payment_id": pid,
+                                },
+                            )
                 except (ValueError, TypeError):
                     pass
 
@@ -408,17 +417,21 @@ async def process_balance_notifications(bot: Bot) -> int:
                             logger.warning("Error checking quote for auto-fulfilled payment %s: %s", pid, exc)
                             continue
 
-                await ensure_payment_notification(
-                    session,
-                    payment_id=pid,
-                    kind="balance_credit",
-                    chat_id=telegram_id,
-                    payload_snapshot={
-                        "amount": int(amount or 0),
-                        "user_id": uid,
-                        "topup_context": ctx,
-                    },
-                )
+                try:
+                    async with safe_begin_nested(session):
+                        await ensure_payment_notification(
+                            session,
+                            payment_id=pid,
+                            kind="balance_credit",
+                            chat_id=telegram_id,
+                            payload_snapshot={
+                                "amount": int(amount or 0),
+                                "user_id": uid,
+                                "topup_context": ctx,
+                            },
+                        )
+                except Exception as credit_err:
+                    logger.error("Failed to backfill credit notification for payment %s: %s", pid, credit_err)
 
     # 2. Claim and execute via unified coordinator
     delivered = 0

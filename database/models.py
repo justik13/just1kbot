@@ -921,7 +921,7 @@ class PaymentNotification(Base):
             "ix_payment_notifications_claim",
             "claim_until",
             "id",
-            postgresql_where=text("state IN ('pending', 'claimed', 'compensation_retryable')"),
+            postgresql_where=text("state IN ('pending', 'claimed', 'compensation_required', 'compensation_retryable')"),
         ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
