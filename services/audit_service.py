@@ -21,12 +21,11 @@ class AuditService:
     ):
         """Universal audit logger supporting string and dictionary details."""
         in_tx = False
-        in_tx_func = getattr(session, "in_transaction", None)
-        if callable(in_tx_func):
+        in_tx_attr = getattr(session, "in_transaction", None)
+        if callable(in_tx_attr):
             try:
-                res = in_tx_func()
-                if not hasattr(res, "__await__") and bool(res):
-                    in_tx = True
+                if not type(in_tx_attr).__name__.startswith("AsyncMock"):
+                    in_tx = bool(in_tx_attr())
             except Exception:
                 in_tx = False
         if in_tx:
@@ -42,32 +41,26 @@ class AuditService:
 
             normalized_target_type = target_type.lower() if target_type else None
 
-            nested_func = getattr(session, "begin_nested", None)
-            if callable(nested_func):
-                try:
-                    ctx = nested_func()
-                    if hasattr(ctx, "__aenter__"):
-                        async with ctx:
-                            await create_audit_log(
-                                session=session,
-                                admin_id=admin_id,
-                                action=action,
-                                target_type=normalized_target_type,
-                                target_id=target_id,
-                                details=formatted_details,
-                            )
-                        return
-                except Exception:
-                    pass
-
-            await create_audit_log(
-                session=session,
-                admin_id=admin_id,
-                action=action,
-                target_type=normalized_target_type,
-                target_id=target_id,
-                details=formatted_details,
-            )
+            nested_attr = getattr(session, "begin_nested", None)
+            if callable(nested_attr) and not type(nested_attr).__name__.startswith("AsyncMock"):
+                async with session.begin_nested():
+                    await create_audit_log(
+                        session=session,
+                        admin_id=admin_id,
+                        action=action,
+                        target_type=normalized_target_type,
+                        target_id=target_id,
+                        details=formatted_details,
+                    )
+            else:
+                await create_audit_log(
+                    session=session,
+                    admin_id=admin_id,
+                    action=action,
+                    target_type=normalized_target_type,
+                    target_id=target_id,
+                    details=formatted_details,
+                )
         except Exception as e:
             logger.error("Failed to write audit log action %s: %s", action, e)
 

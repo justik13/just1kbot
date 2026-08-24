@@ -597,7 +597,61 @@ async def finalize(session, claim, result, bot=None):
 
 
 async def recover_stale(session=None, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
-    """Recover stale operations (delegates to isolated per-user transaction handler)."""
+    """Recover stale operations (delegates to isolated per-user transaction handler when session is None)."""
+    if session is not None:
+        threshold = now_utc() - timedelta(seconds=lease_seconds)
+        stale_rows = (
+            await session.execute(
+                select(
+                    PaymentProviderOperation.id,
+                    PaymentProviderOperation.payment_id,
+                    Payment.user_id,
+                )
+                .join(Payment, Payment.id == PaymentProviderOperation.payment_id)
+                .where(
+                    PaymentProviderOperation.status == "processing",
+                    PaymentProviderOperation.locked_at < threshold,
+                )
+                .order_by(
+                    Payment.user_id.asc(),
+                    Payment.id.asc(),
+                    PaymentProviderOperation.id.asc(),
+                )
+                .limit(20)
+            )
+        ).all()
+
+        count = 0
+        for op_id, payment_id, user_id in stale_rows:
+            if user_id is not None:
+                await lock_checkout_user(session, user_id)
+            payment = await session.scalar(
+                select(Payment)
+                .where(Payment.id == payment_id)
+                .with_for_update(skip_locked=True)
+            )
+            if not payment:
+                continue
+
+            operation = await session.scalar(
+                select(PaymentProviderOperation)
+                .where(PaymentProviderOperation.id == op_id)
+                .with_for_update(skip_locked=True)
+            )
+            if not operation or operation.status != "processing" or (operation.locked_at and operation.locked_at >= threshold):
+                continue
+
+            if operation.attempts >= operation.max_attempts:
+                operation.status = "dead"
+                operation.last_error_code = "lease_expired"
+            else:
+                operation.status = "retry"
+            operation.locked_at = None
+            operation.locked_by = None
+            await session.flush()
+            count += 1
+        return count
+
     return await recover_stale_isolated(lease_seconds=lease_seconds)
 
 
