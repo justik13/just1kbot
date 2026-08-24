@@ -203,7 +203,7 @@ async def render_device_screen(
             "1. В приложении статус сменится на <b>«Подключено»</b>;\n"
             "2. В строке состояния появится значок подключения (или 🔑);\n"
             "3. На сайте <code>2ip.ru</code> страна сменится на локацию сервера;\n"
-            "4. YouTube, Instagram, ChatGPT открываются без ограничений.</blockquote>"
+            "4. Популярные сервисы и зарубежные сайты открываются быстро и стабильно.</blockquote>"
         )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block

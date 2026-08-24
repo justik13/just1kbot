@@ -191,6 +191,7 @@ async def _build_connections_screen(
         builder.button(
             text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
             callback_data="add_device",
+            style="success",
         )
 
     if can_show_incy_subscription(read_only=read_only):

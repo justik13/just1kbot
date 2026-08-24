@@ -187,11 +187,13 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         builder.button(
             text=texts.BUTTON_RESUME_TOPUP,
             callback_data="balance_resume_topup",
+            style="primary",
         )
     else:
         builder.button(
             text=texts.BUTTON_TOPUP,
             callback_data="balance_topup",
+            style="success",
         )
     builder.button(
         text="🧾 История пополнений",
@@ -257,6 +259,7 @@ def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text="❌ Закрыть незавершённые ссылки",
         callback_data="balance_cancel_all",
+        style="danger",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
     builder.adjust(1)
@@ -272,6 +275,7 @@ def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
+        style="danger",
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -289,6 +293,7 @@ def get_topup_payment_keyboard(
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
+        style="danger",
     )
     builder.adjust(1)
     return builder.as_markup()
