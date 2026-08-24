@@ -916,7 +916,7 @@ class PaymentNotification(Base):
             "ix_payment_notifications_claim",
             "claim_until",
             "id",
-            postgresql_where=text("state IN ('pending', 'compensation_retryable')"),
+            postgresql_where=text("state IN ('pending', 'claimed', 'compensation_retryable')"),
         ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -928,6 +928,9 @@ class PaymentNotification(Base):
     claim_token: Mapped[str | None] = mapped_column(String(64))
     claim_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger)
+    telegram_message_ids: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     payload_snapshot: Mapped[dict] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")

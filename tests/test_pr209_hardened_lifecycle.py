@@ -96,11 +96,15 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+        mock_notif = PaymentNotification(
+            id=1, payment_id=10, kind="payment_url", chat_id=100200, state="pending"
+        )
         session.scalar = AsyncMock(
             side_effect=[
-                1,        # select(Payment.user_id)
-                payment,  # select(Payment).with_for_update()
-                op,       # select(PaymentProviderOperation).with_for_update()
+                1,           # select(Payment.user_id)
+                payment,     # select(Payment).with_for_update()
+                op,          # select(PaymentProviderOperation).with_for_update()
+                mock_notif,  # select(PaymentNotification) in ensure_payment_notification
             ]
         )
 
@@ -238,3 +242,58 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
         self.assertIn("payments.credited_at IS NULL", compiled)
         self.assertIn("payment_provider_operations", compiled)
         self.assertIn("reconciliation_status", compiled)
+
+    async def test_ensure_payment_notification_upsert_and_payload_refresh(self):
+        """Verify ensure_payment_notification performs atomic upsert and refreshes payload."""
+        from services.notification_coordinator import ensure_payment_notification
+
+        mock_session = AsyncMock()
+        mock_notif = PaymentNotification(
+            id=1,
+            payment_id=10,
+            kind="payment_url",
+            chat_id=12345,
+            state="pending",
+            payload_snapshot={"old": "val"},
+        )
+        mock_session.scalar.return_value = mock_notif
+
+        notif = await ensure_payment_notification(
+            mock_session,
+            payment_id=10,
+            kind="payment_url",
+            chat_id=12345,
+            payload_snapshot={"new": "val"},
+        )
+        self.assertEqual(notif.id, 1)
+        self.assertEqual(notif.payload_snapshot, {"old": "val", "new": "val"})
+
+    async def test_process_topup_link_presentations_uses_coordinator(self):
+        """Verify process_topup_link_presentations claims from coordinator and presents link."""
+        from services.workers.account_balance import process_topup_link_presentations
+        from services.notification_coordinator import NotificationClaim
+
+        mock_bot = AsyncMock()
+        mock_claim = NotificationClaim(
+            notification_id=10,
+            payment_id=5,
+            user_id=1,
+            chat_id=999,
+            kind="payment_url",
+            state="claimed",
+            claim_token="tok1",
+            attempt_number=1,
+            payload={"payment_url": "https://pay.ru/1", "payment_id": 5, "amount": 300},
+        )
+
+        with patch("services.workers.account_balance.session_scope") as mock_scope, \
+             patch("services.notification_coordinator.claim_notification", AsyncMock(side_effect=[mock_claim, None])), \
+             patch("services.notification_coordinator.execute_notification_presentation", AsyncMock(return_value=True)) as mock_exec:
+
+            mock_session = AsyncMock()
+            mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[]))
+            mock_scope.return_value.__aenter__.return_value = mock_session
+
+            count = await process_topup_link_presentations(mock_bot)
+            self.assertEqual(count, 1)
+            mock_exec.assert_awaited_once()

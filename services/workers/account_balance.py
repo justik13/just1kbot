@@ -11,7 +11,7 @@ from sqlalchemy import select
 from bot import texts
 from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
 from bot.keyboards import get_topup_credit_keyboard, get_topup_payment_keyboard
-from config.settings import get_settings
+from config.settings import get_settings  # noqa: F401
 from database.connection import session_scope
 from database.models import Payment, TariffQuote, TariffVersion, User
 from database.repositories.account_ledger_repo import get_account_balance
@@ -128,13 +128,78 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
     return delivered
 
 
+async def _render_topup_payment_url(bot: Bot, chat_id: int, payload: dict) -> int | None:
+    purl = payload.get("payment_url")
+    pid = payload.get("payment_id")
+    amount = payload.get("amount", 0)
+    msg_id = payload.get("message_id")
+    text = texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(value_0=int(amount))
+    keyboard = get_topup_payment_keyboard(purl, pid)
+    return await render_hub(bot, chat_id, text, keyboard, trigger_message_id=msg_id)
+
+
+async def _render_balance_credit(bot: Bot, chat_id: int, payload: dict) -> int | None:
+    await global_send_limiter.acquire()
+    amount = payload.get("amount", 0)
+    user_id = payload.get("user_id")
+    topup_ctx = payload.get("topup_context") or {}
+    async with session_scope() as session:
+        balance = await get_account_balance(session, user_id=user_id) if user_id else None
+
+    real_avail = int(balance.real_available) if balance else 0
+    bonus_avail = int(balance.bonus_available) if balance else 0
+    resume = bool(topup_ctx.get("operation"))
+    suffix = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1 if resume else ""
+    message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
+        value_0=int(amount),
+        value_1=real_avail,
+        value_2=bonus_avail,
+        value_3=suffix,
+    )
+    if topup_ctx.get("purchaser_welcome_bonus", 0) > 0:
+        wb = topup_ctx["purchaser_welcome_bonus"]
+        message += (
+            f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
+            f"за первое пополнение по приглашению!</b>"
+        )
+    credit_keyboard = get_topup_credit_keyboard(topup_ctx)
+    return await render_hub(
+        bot,
+        chat_id,
+        message,
+        credit_keyboard,
+        message_effect_id="5046509860389126442",
+    )
+
+
+async def _render_referral_bonus(bot: Bot, chat_id: int, payload: dict) -> int | None:
+    await global_send_limiter.acquire()
+    bonus = payload.get("bonus") or payload.get("referrer_bonus", 0)
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(bonus)} ₽</b> бонусов на баланс."
+    return await render_hub(
+        bot,
+        chat_id,
+        ref_text,
+        builder.as_markup(),
+        message_effect_id="5104841245755180586",
+    )
+
+
 async def process_topup_link_presentations(bot: Bot) -> int:
+    from services.notification_coordinator import (
+        claim_notification,
+        ensure_payment_notification,
+        execute_notification_presentation,
+    )
+
+    # 1. Backfill outbox for any active unnotified payments
     async with session_scope() as session:
         candidates = (
             await session.execute(
                 select(
                     Payment.id,
-                    Payment.user_id,
                     Payment.amount,
                     Payment.payment_url,
                     Payment.topup_context,
@@ -151,60 +216,38 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                 .limit(BALANCE_NOTIFICATION_BATCH)
             )
         ).all()
+        for pid, amount, purl, topup_ctx, user_tg_id in candidates:
+            ctx = dict(topup_ctx or {})
+            if not ctx.get("auto_show", True) or not purl:
+                continue
+            chat_id = int(ctx.get("chat_id") or user_tg_id)
+            await ensure_payment_notification(
+                session,
+                payment_id=pid,
+                kind="payment_url",
+                chat_id=chat_id,
+                payload_snapshot={
+                    "payment_url": purl,
+                    "payment_id": pid,
+                    "amount": int(amount),
+                    "message_id": ctx.get("message_id"),
+                },
+            )
 
+    # 2. Claim and present via unified coordinator
     presented = 0
-    for pid, uid, amount, purl, topup_ctx, user_tg_id in candidates:
-        ctx = dict(topup_ctx or {})
-        if not ctx.get("auto_show") or not purl:
-            continue
-
-        chat_id = int(ctx.get("chat_id") or user_tg_id)
-        text = texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(
-            value_0=int(amount)
-        )
-        keyboard = get_topup_payment_keyboard(purl, pid)
-
-        # Lock-Free External Telegram I/O
-        new_msg_id = None
-        bot_blocked = False
-        try:
-            new_msg_id = await render_hub(bot, chat_id, text, keyboard)
-        except TelegramForbiddenError:
-            bot_blocked = True
-        except Exception:
-            logger.exception("Failed to present top-up URL payment=%s", pid)
-            continue
-
-        # Short Post-Send Verification & Acknowledge Transaction
-        needs_compensation = False
+    for _ in range(BALANCE_NOTIFICATION_BATCH):
         async with session_scope() as session:
-            from database.repositories.tariff_quotes_repo import lock_checkout_user
-            await lock_checkout_user(session, uid)
-            payment = await session.get(Payment, pid)
-            if payment is None:
-                needs_compensation = True
-            elif bot_blocked:
-                await mark_user_bot_blocked(session, user_tg_id)
-                payment.payment_url_notified_at = now_utc()
-            elif payment.checkout_status != "active" or not payment.ui_visible:
-                needs_compensation = True
-                payment.payment_url_notified_at = now_utc()
-            else:
-                payment.payment_url_notified_at = now_utc()
-                payment.topup_context = {
-                    **(payment.topup_context or {}),
-                    "message_id": new_msg_id,
-                    "auto_show": False,
-                }
+            claim = await claim_notification(session, worker_id="topup_url_worker")
+        if claim is None:
+            break
+        if claim.kind == "payment_url":
+            ok = await execute_notification_presentation(bot, claim, render_func=_render_topup_payment_url)
+            if ok:
                 presented += 1
-
-        # Lock-Free Compensation if checkout was abandoned concurrently
-        if needs_compensation and new_msg_id:
-            from utils.telegram import _delete_hub_messages
-            try:
-                await _delete_hub_messages(bot, chat_id, [new_msg_id])
-            except Exception as exc:
-                logger.warning("Failed to compensate orphan topup message %s: %s", new_msg_id, exc)
+        elif claim.kind in ("balance_credit", "referral_bonus"):
+            render_f = _render_balance_credit if claim.kind == "balance_credit" else _render_referral_bonus
+            await execute_notification_presentation(bot, claim, render_func=render_f)
 
     return presented
 
@@ -213,8 +256,9 @@ present_topup_urls = process_topup_link_presentations
 
 
 async def process_balance_notifications(bot: Bot) -> int:
+    from sqlalchemy import and_, or_
+
     async with session_scope() as session:
-        from sqlalchemy import or_, and_
         rows = (
             await session.execute(
                 select(
@@ -295,10 +339,17 @@ async def process_balance_notifications(bot: Bot) -> int:
             try:
                 await global_send_limiter.acquire()
                 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
                 b_builder = InlineKeyboardBuilder()
                 b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
                 ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
-                await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
+                await render_hub(
+                    bot,
+                    ref_id,
+                    ref_text,
+                    b_builder.as_markup(),
+                    message_effect_id="5104841245755180586",
+                )
                 ref_sent = True
             except TelegramForbiddenError:
                 ref_blocked = True
@@ -306,15 +357,23 @@ async def process_balance_notifications(bot: Bot) -> int:
                 logger.warning("Failed to deliver durable referrer push to %s: %s", ref_id, exc)
 
             if ref_sent or ref_blocked:
+                now_str = now_utc().isoformat()
                 async with session_scope() as session:
-                    p = await session.scalar(select(Payment).where(Payment.id == pid)) or await session.get(Payment, pid)
-                    if p:
-                        cur_ctx = dict(p.topup_context or {})
-                        p.topup_context = {
+                    p_db = await session.scalar(select(Payment).where(Payment.id == pid)) or await session.get(Payment, pid)
+                    if p_db:
+                        cur_ctx = dict(p_db.topup_context or {})
+                        p_db.topup_context = {
                             **cur_ctx,
-                            "referrer_notified_at": now_utc().isoformat(),
+                            "referrer_notified_at": now_str,
                             "referrer_bot_blocked": ref_blocked,
                         }
+                if p:
+                    cur_ctx = dict(p.topup_context or {})
+                    p.topup_context = {
+                        **cur_ctx,
+                        "referrer_notified_at": now_str,
+                        "referrer_bot_blocked": ref_blocked,
+                    }
 
         # 2. Handle main credit push if pending
         if credit_notified is not None:
@@ -337,7 +396,12 @@ async def process_balance_notifications(bot: Bot) -> int:
                     logger.warning("Error checking quote for auto-fulfilled payment %s: %s", pid, exc)
                     continue
 
-            p.credit_notified_at = now_utc()
+            async with session_scope() as session:
+                p_db = await session.scalar(select(Payment).where(Payment.id == pid)) or await session.get(Payment, pid)
+                if p_db and p_db.credit_notified_at is None:
+                    p_db.credit_notified_at = now_utc()
+            if p:
+                p.credit_notified_at = now_utc()
             continue
 
         # Calculate message text in short read session
@@ -346,10 +410,12 @@ async def process_balance_notifications(bot: Bot) -> int:
 
         resume = bool(ctx.get("operation"))
         suffix = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1 if resume else ""
+        real_avail = int(balance.real_available) if balance else 0
+        bonus_avail = int(balance.bonus_available) if balance else 0
         message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
-            value_0=int(amount),
-            value_1=int(balance.real_available),
-            value_2=int(balance.bonus_available),
+            value_0=int(amount or 0),
+            value_1=real_avail,
+            value_2=bonus_avail,
             value_3=suffix,
         )
         if ctx.get("purchaser_welcome_bonus", 0) > 0:
@@ -366,7 +432,13 @@ async def process_balance_notifications(bot: Bot) -> int:
         user_sent = False
         try:
             await global_send_limiter.acquire()
-            await render_hub(bot, telegram_id, message, credit_keyboard)
+            await render_hub(
+                bot,
+                telegram_id,
+                message,
+                credit_keyboard,
+                message_effect_id="5046509860389126442",
+            )
             user_sent = True
         except TelegramForbiddenError:
             user_blocked = True
@@ -375,32 +447,16 @@ async def process_balance_notifications(bot: Bot) -> int:
 
         if user_sent or user_blocked:
             async with session_scope() as session:
-                p = await session.scalar(select(Payment).where(Payment.id == pid)) or await session.get(Payment, pid)
-                if p:
-                    p.credit_notified_at = now_utc()
-                    delivered += 1
-                if user_blocked:
+                p_db = await session.scalar(select(Payment).where(Payment.id == pid)) or await session.get(Payment, pid)
+                if p_db:
+                    p_db.credit_notified_at = now_utc()
+            if p:
+                p.credit_notified_at = now_utc()
+            delivered += 1
+            if user_blocked:
+                async with session_scope() as session:
                     await mark_user_bot_blocked(session, telegram_id)
 
-            if user_sent and balance.real_position > get_settings().BALANCE_MAX_AVAILABLE_RUB:
-                diagnostic = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(
-                    value_0=pid,
-                    value_1=telegram_id,
-                    value_2=int(balance.real_position),
-                )
-                diag_builder = InlineKeyboardBuilder()
-                diag_builder.button(text="🔍 Пользователь", callback_data=f"admin_user_card:{telegram_id}")
-                for admin_id in get_settings().ADMIN_IDS:
-                    try:
-                        await global_send_limiter.acquire()
-                        await bot.send_message(
-                            admin_id,
-                            diagnostic,
-                            reply_markup=diag_builder.as_markup(),
-                            parse_mode="HTML",
-                        )
-                    except Exception:
-                        pass
     return delivered
 
 

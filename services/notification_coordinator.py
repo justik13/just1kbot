@@ -43,6 +43,7 @@ class NotificationClaim:
     attempt_number: int
     payload: dict[str, Any]
     telegram_message_id: int | None = None
+    telegram_message_ids: list[int] = ()
 
 
 async def ensure_payment_notification(
@@ -53,25 +54,59 @@ async def ensure_payment_notification(
     chat_id: int,
     payload_snapshot: dict[str, Any] | None = None,
 ) -> PaymentNotification:
-    """Ensure a durable outbox record exists for a payment notification."""
+    """Ensure a durable outbox record exists for a payment notification (atomic UPSERT)."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    snapshot = payload_snapshot or {}
+    now = now_utc()
+
+    try:
+        stmt = (
+            pg_insert(PaymentNotification)
+            .values(
+                payment_id=payment_id,
+                kind=kind,
+                chat_id=chat_id,
+                payload_snapshot=snapshot,
+                telegram_message_ids=[],
+                state="pending",
+                claim_until=now,
+            )
+            .on_conflict_do_nothing(index_elements=["payment_id", "kind"])
+        )
+        await session.execute(stmt)
+        await session.flush()
+    except Exception:
+        # Fallback for SQLite in non-PostgreSQL unit tests
+        existing = await session.scalar(
+            select(PaymentNotification).where(
+                PaymentNotification.payment_id == payment_id,
+                PaymentNotification.kind == kind,
+            )
+        )
+        if existing is None:
+            notif = PaymentNotification(
+                payment_id=payment_id,
+                kind=kind,
+                chat_id=chat_id,
+                payload_snapshot=snapshot,
+                telegram_message_ids=[],
+                state="pending",
+                claim_until=now,
+            )
+            session.add(notif)
+            await session.flush()
+
     notif = await session.scalar(
         select(PaymentNotification).where(
             PaymentNotification.payment_id == payment_id,
             PaymentNotification.kind == kind,
         )
     )
-    if notif is None:
-        notif = PaymentNotification(
-            payment_id=payment_id,
-            kind=kind,
-            chat_id=chat_id,
-            payload_snapshot=payload_snapshot or {},
-            state="pending",
-            claim_until=now_utc(),
-        )
-        session.add(notif)
+    if isinstance(notif, PaymentNotification) and notif.state == "pending" and snapshot:
+        notif.payload_snapshot = {**(notif.payload_snapshot or {}), **snapshot}
         await session.flush()
-    return notif
+    return notif if isinstance(notif, PaymentNotification) else None
 
 
 async def claim_notification(
@@ -130,6 +165,7 @@ async def claim_notification(
         attempt_number=row.attempts,
         payload=row.payload_snapshot or {},
         telegram_message_id=row.telegram_message_id,
+        telegram_message_ids=list(row.telegram_message_ids or []),
     )
 
 
@@ -158,10 +194,10 @@ async def execute_notification_presentation(
             return True
 
     # Phase 2: Lock-Free External Telegram I/O
-    new_msg_id: int | None = None
+    raw_msg_result: Any = None
     telegram_error: str | None = None
     try:
-        new_msg_id = await render_func(bot, claim.chat_id, claim.payload)
+        raw_msg_result = await render_func(bot, claim.chat_id, claim.payload)
     except TelegramForbiddenError:
         async with session_scope() as session:
             if claim.user_id:
@@ -188,6 +224,13 @@ async def execute_notification_presentation(
                 notif.claim_until = now_utc() + timedelta(seconds=10)
         return False
 
+    msg_ids = (
+        [raw_msg_result]
+        if isinstance(raw_msg_result, int)
+        else [m for m in list(raw_msg_result or []) if isinstance(m, int)]
+    )
+    last_msg_id = msg_ids[-1] if msg_ids else None
+
     # Phase 3 & 4: Shielded Verification, Acknowledge & Compensation TX
     async def _ack_and_compensate() -> bool:
         needs_compensation = False
@@ -203,31 +246,40 @@ async def execute_notification_presentation(
             elif p is None or p.checkout_status != "active" or not p.ui_visible:
                 # Concurrent cancellation occurred while Telegram I/O was in-flight!
                 notif.state = "compensation_required"
-                notif.telegram_message_id = new_msg_id
+                notif.telegram_message_id = last_msg_id
+                notif.telegram_message_ids = msg_ids
                 needs_compensation = True
             else:
                 # Success!
                 notif.state = "delivered"
-                notif.telegram_message_id = new_msg_id
+                notif.telegram_message_id = last_msg_id
+                notif.telegram_message_ids = msg_ids
                 if claim.kind == "payment_url":
                     p.payment_url_notified_at = now_utc()
                     p.topup_context = {
                         **(p.topup_context or {}),
-                        "message_id": new_msg_id,
+                        "message_id": last_msg_id,
                         "auto_show": False,
                     }
                 elif claim.kind == "balance_credit":
                     p.credit_notified_at = now_utc()
+                elif claim.kind == "referral_bonus":
+                    cur_ctx = dict(p.topup_context or {})
+                    p.topup_context = {
+                        **cur_ctx,
+                        "referrer_notified_at": now_utc().isoformat(),
+                    }
 
         # Phase 4: Lock-Free Compensation I/O
-        if needs_compensation and new_msg_id:
+        if needs_compensation and msg_ids:
             from utils.telegram import _delete_hub_messages
+
             del_ok = False
             try:
-                await _delete_hub_messages(bot, claim.chat_id, [new_msg_id])
+                await _delete_hub_messages(bot, claim.chat_id, msg_ids)
                 del_ok = True
             except Exception as exc:
-                logger.warning("Failed to compensate orphan message %s: %s", new_msg_id, exc)
+                logger.warning("Failed to compensate orphan message %s: %s", msg_ids, exc)
 
             async with session_scope() as session:
                 notif = await session.get(PaymentNotification, claim.notification_id)
@@ -242,7 +294,11 @@ async def execute_notification_presentation(
 
 async def _execute_compensation_phase(bot: Bot, claim: NotificationClaim) -> bool:
     """Execute compensation cleanup for a stolen/abandoned notification."""
-    if not claim.telegram_message_id:
+    del_ids = list(claim.telegram_message_ids or [])
+    if not del_ids and claim.telegram_message_id:
+        del_ids = [claim.telegram_message_id]
+
+    if not del_ids:
         async with session_scope() as session:
             notif = await session.get(PaymentNotification, claim.notification_id)
             if notif:
@@ -250,12 +306,13 @@ async def _execute_compensation_phase(bot: Bot, claim: NotificationClaim) -> boo
         return True
 
     from utils.telegram import _delete_hub_messages
+
     del_ok = False
     try:
-        await _delete_hub_messages(bot, claim.chat_id, [claim.telegram_message_id])
+        await _delete_hub_messages(bot, claim.chat_id, del_ids)
         del_ok = True
     except Exception as exc:
-        logger.warning("Failed to delete compensated message %s: %s", claim.telegram_message_id, exc)
+        logger.warning("Failed to delete compensated messages %s: %s", del_ids, exc)
 
     async with session_scope() as session:
         notif = await session.get(PaymentNotification, claim.notification_id)

@@ -99,6 +99,7 @@ async def _pending_topup_exposure(
     session: AsyncSession, user_id: int
 ) -> Decimal:
     from sqlalchemy import and_, or_
+
     from database.models import PaymentProviderOperation
 
     amount = await session.scalar(
@@ -443,6 +444,23 @@ async def settle_succeeded_topup(
         referrer_bonus_amount = getattr(bonus_result, "referrer_bonus", bonus_result)
         purchaser_welcome_amount = getattr(bonus_result, "purchaser_welcome_bonus", Decimal(0))
 
+        from services.notification_coordinator import (
+            ensure_payment_notification,
+        )
+
+        if user and user.telegram_id:
+            await ensure_payment_notification(
+                session,
+                payment_id=payment.id,
+                kind="balance_credit",
+                chat_id=user.telegram_id,
+                payload_snapshot={
+                    "amount": int(payment.amount),
+                    "user_id": user.id,
+                    "topup_context": dict(payment.topup_context or {}),
+                },
+            )
+
         if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
             payment.topup_context = {
@@ -456,6 +474,9 @@ async def settle_succeeded_topup(
             if bot is not None:
                 try:
                     from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+                    from database.connection import queue_post_commit_task
+
                     b_builder = InlineKeyboardBuilder()
                     b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
                     ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(referrer_bonus_amount)} ₽</b> бонусов на баланс."
@@ -465,7 +486,9 @@ async def settle_succeeded_topup(
 
                     async def _send_ref_push():
                         try:
+                            from database.connection import session_scope
                             from utils.telegram import render_hub
+
                             await render_hub(
                                 bot,
                                 ref_target,
@@ -473,7 +496,6 @@ async def settle_succeeded_topup(
                                 ref_markup,
                                 message_effect_id="5104841245755180586",  # 🔥 Fire effect
                             )
-                            from database.connection import session_scope
                             async with session_scope() as notify_session:
                                 p = await notify_session.get(Payment, target_payment_id)
                                 if p and p.topup_context and isinstance(p.topup_context, dict):
@@ -486,7 +508,6 @@ async def settle_succeeded_topup(
                             import logging
                             logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", ref_target, exc)
 
-                    from database.connection import queue_post_commit_task
                     queue_post_commit_task(session, _send_ref_push)
                 except Exception as exc:
                     import logging

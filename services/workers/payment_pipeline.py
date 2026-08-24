@@ -15,8 +15,12 @@ POLL_SECONDS = 1.0
 
 
 async def _claim(module, worker_id):
+    if hasattr(module, "recover_stale_isolated"):
+        await module.recover_stale_isolated()
+    else:
+        async with session_scope() as session:
+            await module.recover_stale(session)
     async with session_scope() as session:
-        await module.recover_stale(session)
         return await module.claim(session, worker_id)
 
 

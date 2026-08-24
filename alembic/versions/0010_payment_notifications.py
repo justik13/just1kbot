@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("claim_token", sa.String(length=64), nullable=True),
         sa.Column("claim_until", sa.DateTime(timezone=True), nullable=True),
         sa.Column("telegram_message_id", sa.BigInteger(), nullable=True),
+        sa.Column("telegram_message_ids", postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'[]'::jsonb"), nullable=False),
         sa.Column("chat_id", sa.BigInteger(), nullable=False),
         sa.Column("payload_snapshot", postgresql.JSONB(astext_type=sa.Text()), server_default=sa.text("'{}'::jsonb"), nullable=False),
         sa.Column("attempts", sa.Integer(), server_default=sa.text("0"), nullable=False),
@@ -51,7 +52,7 @@ def upgrade() -> None:
         "ix_payment_notifications_claim",
         "payment_notifications",
         ["claim_until", "id"],
-        postgresql_where=sa.text("state IN ('pending', 'compensation_retryable')"),
+        postgresql_where=sa.text("state IN ('pending', 'claimed', 'compensation_retryable')"),
     )
     op.create_index(
         "ix_payment_notifications_payment_id",

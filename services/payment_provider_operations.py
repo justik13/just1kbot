@@ -466,105 +466,64 @@ async def finalize(session, claim, result, bot=None):
                             ambiguous=False,
                         )
                     elif not old_url and payment.payment_url and bot is not None:
-                        # URL just became available — push payment link to user post-commit without holding DB locks
+                        # URL just became available — register durable outbox notification & trigger lock-free presentation post-commit
                         from database.connection import queue_post_commit_task, session_scope
+                        from services.notification_coordinator import (
+                            claim_notification,
+                            ensure_payment_notification,
+                            execute_notification_presentation,
+                        )
+
+                        ctx = dict(payment.topup_context or {})
+                        user_tg_id = user.telegram_id if user else None
+                        chat_id = int(ctx.get("chat_id") or (user_tg_id or 0))
                         target_payment_id = payment.id
 
-                        async def _send_payment_url_post_commit():
-                            try:
-                                # Phase 1: Snapshot parameters in short read
-                                user_tg_id = None
-                                user_db_id = None
-                                amount = 0
-                                purl = None
-                                ctx = {}
-                                avail = 0
-                                async with session_scope() as prep_session:
-                                    p = await prep_session.get(Payment, target_payment_id)
-                                    if (
-                                        not p
-                                        or p.payment_url_notified_at
-                                        or not p.payment_url
-                                        or p.checkout_status != "active"
-                                        or not p.ui_visible
-                                    ):
-                                        return
-                                    u = await prep_session.get(User, p.user_id)
-                                    if not u or not u.telegram_id:
-                                        return
-                                    user_tg_id = u.telegram_id
-                                    user_db_id = u.id
-                                    amount = int(p.amount)
-                                    purl = p.payment_url
-                                    ctx = dict(p.topup_context or {})
-                                    from database.repositories.account_ledger_repo import get_account_balance
-                                    bal = await get_account_balance(prep_session, user_id=u.id)
-                                    avail = int(bal.available)
+                        if chat_id and ctx.get("auto_show", True):
+                            await ensure_payment_notification(
+                                session,
+                                payment_id=payment.id,
+                                kind="payment_url",
+                                chat_id=chat_id,
+                                payload_snapshot={
+                                    "payment_url": payment.payment_url,
+                                    "payment_id": payment.id,
+                                    "amount": int(payment.amount),
+                                    "message_id": ctx.get("message_id"),
+                                },
+                            )
 
-                                # Phase 2: Lock-Free External Telegram I/O
-                                chat_id = ctx.get("chat_id") or user_tg_id
-                                message_id = ctx.get("message_id")
-                                from bot import texts as _texts
-                                text = (
-                                    f"💳 <b>Ссылка на оплату готова!</b>\n\n"
-                                    f"Сумма: <b>{amount} ₽</b>\n"
-                                    f"Текущий баланс: <b>{avail} ₽</b>\n\n"
-                                    f"Нажмите кнопку ниже, чтобы перейти к оплате."
-                                )
-                                from aiogram.utils.keyboard import InlineKeyboardBuilder
-                                builder = InlineKeyboardBuilder()
-                                builder.button(text=_texts.BUTTON_OPEN_PAYMENT, url=purl)
-                                builder.button(text=_texts.BUTTON_CHECK_TOPUP, callback_data=f"balance_check:{target_payment_id}")
-                                builder.button(text=_texts.BUTTON_CLOSE_TOPUP, callback_data=f"balance_cancel:{target_payment_id}")
-                                builder.adjust(1)
-                                keyboard = builder.as_markup()
-
-                                from utils.telegram import render_hub
-                                from aiogram.exceptions import TelegramForbiddenError
-                                new_msg_id = None
-                                bot_blocked = False
+                            async def _send_payment_url_post_commit():
                                 try:
-                                    new_msg_id = await render_hub(bot, chat_id, text, keyboard, trigger_message_id=message_id)
-                                except TelegramForbiddenError:
-                                    bot_blocked = True
-                                except Exception as exc:
-                                    logger.warning("Failed in lock-free payment URL push for payment %s: %s", target_payment_id, exc)
-                                    return
+                                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                                    from bot import texts as _texts
+                                    from utils.telegram import render_hub
 
-                                # Phase 3: Short Verification & Acknowledge TX
-                                needs_compensation = False
-                                async with session_scope() as ack_session:
-                                    await lock_checkout_user(ack_session, user_db_id)
-                                    p = await ack_session.get(Payment, target_payment_id)
-                                    if p is None:
-                                        needs_compensation = True
-                                    elif bot_blocked:
-                                        p.payment_url_notified_at = now_utc()
-                                        from database.repositories.users_repo import mark_user_bot_blocked
-                                        await mark_user_bot_blocked(ack_session, user_tg_id)
-                                    elif p.checkout_status != "active" or not p.ui_visible:
-                                        # Concurrent checkout abandonment while Telegram I/O was in flight!
-                                        needs_compensation = True
-                                        p.payment_url_notified_at = now_utc()
-                                    else:
-                                        p.payment_url_notified_at = now_utc()
-                                        p.topup_context = {
-                                            **(p.topup_context or {}),
-                                            "message_id": new_msg_id or message_id,
-                                            "auto_show": False,
-                                        }
+                                    async def _render_purl(b, c_id, payload):
+                                        purl = payload.get("payment_url")
+                                        pid = payload.get("payment_id")
+                                        amt = payload.get("amount", 0)
+                                        msg_id = payload.get("message_id")
+                                        text = (
+                                            f"💳 <b>Ссылка на оплату готова!</b>\n\n"
+                                            f"Сумма: <b>{amt} ₽</b>\n\n"
+                                            f"Нажмите кнопку ниже, чтобы перейти к оплате."
+                                        )
+                                        builder = InlineKeyboardBuilder()
+                                        builder.button(text=_texts.BUTTON_OPEN_PAYMENT, url=purl)
+                                        builder.button(text=_texts.BUTTON_CHECK_TOPUP, callback_data=f"balance_check:{pid}")
+                                        builder.button(text=_texts.BUTTON_CLOSE_TOPUP, callback_data=f"balance_cancel:{pid}")
+                                        builder.adjust(1)
+                                        return await render_hub(b, c_id, text, builder.as_markup(), trigger_message_id=msg_id)
 
-                                # Phase 4: Lock-Free Compensation I/O
-                                if needs_compensation and new_msg_id:
-                                    from utils.telegram import _delete_hub_messages
-                                    try:
-                                        await _delete_hub_messages(bot, chat_id, [new_msg_id])
-                                    except Exception as exc:
-                                        logger.warning("Failed to compensate orphan payment URL push %s: %s", new_msg_id, exc)
-                            except Exception as push_exc:
-                                logger.warning("Failed in post-commit payment URL push for payment %s: %s", target_payment_id, push_exc)
+                                    async with session_scope() as claim_session:
+                                        claim = await claim_notification(claim_session, worker_id="post_commit_provider")
+                                    if claim and claim.payment_id == target_payment_id:
+                                        await execute_notification_presentation(bot, claim, render_func=_render_purl)
+                                except Exception as push_exc:
+                                    logger.warning("Failed in post-commit payment URL push for payment %s: %s", target_payment_id, push_exc)
 
-                        queue_post_commit_task(session, _send_payment_url_post_commit)
+                            queue_post_commit_task(session, _send_payment_url_post_commit)
             if result.ok:
                 transition = await apply_provider_transition(
                     session,
@@ -693,8 +652,73 @@ async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
         else:
             payment.reconciliation_status = "required"
         count += 1
-    if count > 0:
-        await session.flush()
+async def recover_stale_isolated(lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
+    """Recover stale operations using isolated short transactions per user."""
+    from database.connection import session_scope
+
+    threshold = now_utc() - timedelta(seconds=lease_seconds)
+    async with session_scope() as session:
+        stale_rows = (
+            await session.execute(
+                select(
+                    PaymentProviderOperation.id,
+                    PaymentProviderOperation.payment_id,
+                    Payment.user_id,
+                )
+                .join(Payment, Payment.id == PaymentProviderOperation.payment_id)
+                .where(
+                    PaymentProviderOperation.status == "processing",
+                    PaymentProviderOperation.locked_at < threshold,
+                )
+                .order_by(
+                    Payment.user_id.asc(),
+                    Payment.id.asc(),
+                    PaymentProviderOperation.id.asc(),
+                )
+                .limit(20)
+            )
+        ).all()
+
+    count = 0
+    for op_id, payment_id, user_id in stale_rows:
+        async with session_scope() as session:
+            if user_id is not None:
+                await lock_checkout_user(session, user_id)
+            payment = await session.scalar(
+                select(Payment)
+                .where(Payment.id == payment_id)
+                .with_for_update(skip_locked=True)
+            )
+            if payment is None:
+                continue
+            operation = await session.scalar(
+                select(PaymentProviderOperation)
+                .where(
+                    PaymentProviderOperation.id == op_id,
+                    PaymentProviderOperation.status == "processing",
+                    PaymentProviderOperation.locked_at < threshold,
+                )
+                .with_for_update(skip_locked=True)
+            )
+            if operation is None:
+                continue
+
+            dead = operation.attempts >= operation.max_attempts
+            operation.status = "dead" if dead else "retry"
+            operation.completed_at = now_utc() if dead else None
+            operation.locked_at = None
+            operation.locked_by = None
+            operation.next_attempt_at = now_utc()
+
+            if payment.provider_status in {"succeeded", "refunded", "canceled"}:
+                payment.reconciliation_status = "manual_review" if dead else "required"
+            elif dead:
+                payment.provider_status = "manual_review"
+                payment.reconciliation_status = "manual_review"
+                payment.fulfillment_status = "manual_review"
+            else:
+                payment.reconciliation_status = "required"
+            count += 1
     return count
 
 

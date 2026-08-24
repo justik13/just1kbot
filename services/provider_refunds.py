@@ -833,6 +833,73 @@ async def recover_stale(session, lease_seconds=REFUND_LEASE_SECONDS) -> int:
     return count
 
 
+async def recover_stale_isolated(lease_seconds=REFUND_LEASE_SECONDS) -> int:
+    """Recover stale refund operations using isolated short transactions per user."""
+    from database.connection import session_scope
+
+    threshold = now_utc() - timedelta(seconds=lease_seconds)
+    async with session_scope() as session:
+        stale_rows = (
+            await session.execute(
+                select(
+                    ProviderRefundOperation.id,
+                    ProviderRefundOperation.payment_id,
+                    Payment.user_id,
+                )
+                .join(Payment, Payment.id == ProviderRefundOperation.payment_id)
+                .where(
+                    ProviderRefundOperation.status == "processing",
+                    ProviderRefundOperation.locked_at < threshold,
+                )
+                .order_by(
+                    Payment.user_id.asc(),
+                    Payment.id.asc(),
+                    ProviderRefundOperation.id.asc(),
+                )
+                .limit(20)
+            )
+        ).all()
+
+    count = 0
+    for op_id, payment_id, user_id in stale_rows:
+        async with session_scope() as session:
+            if user_id is not None:
+                await lock_account_user(session, user_id)
+            payment = await session.scalar(
+                select(Payment)
+                .where(Payment.id == payment_id)
+                .with_for_update(skip_locked=True)
+            )
+            if payment is None:
+                continue
+            operation = await session.scalar(
+                select(ProviderRefundOperation)
+                .where(
+                    ProviderRefundOperation.id == op_id,
+                    ProviderRefundOperation.status == "processing",
+                    ProviderRefundOperation.locked_at < threshold,
+                )
+                .with_for_update(skip_locked=True)
+            )
+            if operation is None:
+                continue
+
+            dead = operation.attempts >= operation.max_attempts
+            operation.status = "failed" if dead else "retry"
+            operation.completed_at = now_utc() if dead else None
+            operation.next_attempt_at = now_utc()
+            operation.locked_at = None
+            operation.locked_by = None
+            if dead:
+                await place_financial_hold(
+                    session,
+                    payment=payment,
+                    reason="provider_refund_lease_exhausted",
+                )
+            count += 1
+    return count
+
+
 async def finalize_provider_failure(
     session,
     claim: ProviderRefundClaim,
