@@ -24,7 +24,7 @@ def upgrade() -> None:
         "payment_notifications",
         sa.Column("id", sa.BigInteger(), nullable=False, primary_key=True),
         sa.Column("payment_id", sa.Integer(), nullable=True),
-        sa.Column("quote_id", sa.Integer(), nullable=True),
+        sa.Column("quote_id", sa.BigInteger(), nullable=True),
         sa.Column("kind", sa.String(length=40), nullable=False),
         sa.Column("state", sa.String(length=30), server_default=sa.text("'pending'"), nullable=False),
         sa.Column("claim_token", sa.String(length=64), nullable=True),

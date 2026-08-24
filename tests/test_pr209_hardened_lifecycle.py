@@ -435,6 +435,87 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
              patch("utils.telegram._delete_hub_messages", AsyncMock()) as mock_delete:
             delivered = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
             self.assertTrue(delivered)
-            # Ensure _delete_hub_messages was NEVER called because it was an edited hub message
             mock_delete.assert_not_called()
             self.assertEqual(mock_notif.state, "compensated")
+
+    async def test_account_purchase_phase1_applicability_uses_quote_id(self):
+        """Verify Phase 1 applicability check retrieves TariffQuote via claim.quote_id."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+        from database.models import TariffQuote
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=88,
+            payment_id=None,
+            quote_id=199,
+            chat_id=100500,
+            kind="account_purchase",
+            state="claimed",
+            claim_token="tok_quote",
+            attempt_number=1,
+            payload={"quote_id": 199},
+        )
+
+        mock_quote = TariffQuote(
+            id=199,
+            user_id=1,
+            operation_type="purchase",
+            target_tariff_version_id=1,
+            current_paid_hours=0,
+            current_paid_value_rub=Decimal(0),
+            bonus_hours=0,
+            amount_due_rub=Decimal(100),
+            resulting_paid_hours=720,
+            resulting_paid_value_rub=Decimal(100),
+            resulting_bonus_hours=0,
+            rounding_loss_hours=Decimal(0),
+            rounding_loss_value_rub=Decimal(0),
+            status="consumed",
+            expires_at=now_utc(),
+        )
+        mock_notif = PaymentNotification(
+            id=88,
+            payment_id=None,
+            quote_id=199,
+            kind="account_purchase",
+            chat_id=100500,
+            state="claimed",
+            claim_token="tok_quote",
+            attempts=1,
+        )
+
+        session_phase1 = AsyncMock()
+        session_phase3 = AsyncMock()
+
+        session_phase1.get = AsyncMock(return_value=mock_quote)
+        session_phase3.get = AsyncMock(side_effect=[mock_notif, mock_quote])
+
+        from contextlib import asynccontextmanager
+        call_count = 0
+        @asynccontextmanager
+        async def mock_scope():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                yield session_phase1
+            else:
+                yield session_phase3
+
+        rendered = False
+        async def fake_render(bot, chat_id, payload):
+            nonlocal rendered
+            rendered = True
+            return 9999
+
+        with patch("database.connection.session_scope", mock_scope), \
+             patch("services.notification_coordinator.lock_checkout_user", AsyncMock()):
+            ok = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            self.assertTrue(ok)
+            self.assertTrue(rendered)
+            # Verify TariffQuote was retrieved by quote_id (199) in Phase 1
+            session_phase1.get.assert_awaited_once_with(TariffQuote, 199)
+            self.assertEqual(mock_notif.state, "delivered")
+

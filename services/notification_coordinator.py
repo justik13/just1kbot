@@ -27,7 +27,7 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
 
-NOTIFICATION_LEASE_SECONDS = 30
+NOTIFICATION_LEASE_SECONDS = 120
 
 
 @dataclass
@@ -252,7 +252,7 @@ async def execute_notification_presentation(
     from database.connection import session_scope
     try:
         async with session_scope() as session:
-            p = await session.get(Payment, claim.payment_id)
+            p = await session.get(Payment, claim.payment_id) if claim.payment_id else None
             if claim.kind == "payment_url":
                 if p is None or p.checkout_status != "active" or not p.ui_visible:
                     is_applicable = False
@@ -268,7 +268,7 @@ async def execute_notification_presentation(
             elif claim.kind == "account_purchase":
                 from database.models import TariffQuote
 
-                q = await session.get(TariffQuote, claim.payment_id)
+                q = await session.get(TariffQuote, claim.quote_id)
                 if q is None or q.status != "consumed":
                     is_applicable = False
                     cancel_reason = "quote_not_consumed"
