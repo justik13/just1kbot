@@ -204,22 +204,28 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(p.credit_notified_at)
             self.assertEqual(len(queued_callbacks), 1)
 
-            # Test 1: Callback fails -> credit_notified_at remains None
-            with patch("utils.telegram.render_hub", side_effect=Exception("Telegram unavailable")):
-                await queued_callbacks[0]()
-                self.assertIsNone(p.credit_notified_at)
-
-            # Test 2: Callback succeeds -> sets credit_notified_at in DB
-            db_p = topup()
-            db_p.credit_notified_at = None
             mock_session = AsyncMock()
-            mock_session.get.return_value = db_p
+            mock_session.get.return_value = p
 
             class DummyContext:
                 async def __aenter__(self):
                     return mock_session
                 async def __aexit__(self, *args):
                     pass
+
+            # Test 1: Callback fails -> credit_notified_at remains None
+            with (
+                patch("utils.telegram.render_hub", side_effect=Exception("Telegram unavailable")),
+                patch("database.connection.session_scope", return_value=DummyContext()),
+            ):
+                await queued_callbacks[0]()
+                self.assertIsNone(p.credit_notified_at)
+
+            # Test 2: Callback succeeds -> sets credit_notified_at in DB
+            db_p = topup()
+            db_p.credit_notified_at = None
+            db_p.credited_at = datetime(2026, 8, 2, 6, 5, tzinfo=timezone.utc)
+            mock_session.get.return_value = db_p
 
             with (
                 patch("utils.telegram.render_hub", new=AsyncMock()),
@@ -360,7 +366,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
             # Test successful delivery updates BOTH payment and quote
             db_p = topup()
+            db_p.credited_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
             db_p.credit_notified_at = None
+            db_p.topup_context = dict(p.topup_context)
             mock_session = AsyncMock()
             mock_session.get.return_value = db_p
             mock_session.scalar.return_value = mock_quote
@@ -385,6 +393,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         import uuid
         from unittest.mock import AsyncMock, MagicMock, patch
 
+        from services.notification_coordinator import NotificationClaim
         from services.workers.account_balance import process_balance_notifications
 
         quote_id = uuid.uuid4()
@@ -400,8 +409,10 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         mock_quote = MagicMock()
         mock_quote.public_id = quote_id
         mock_quote.purchase_notified_at = None  # Not notified yet!
+        p.credited_at = datetime(2026, 8, 2, 6, tzinfo=timezone.utc)
 
         mock_session = AsyncMock()
+        mock_session.get.return_value = p
         mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(1234, 777)]))
 
         async def _scalar_mock(query):
@@ -421,60 +432,85 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         bot = MagicMock()
 
         # Step 1a: When quote lookup fails with exception, payment.credit_notified_at is NOT marked
-        call_count_1 = 0
         def _scalar_err(query):
-            nonlocal call_count_1
-            call_count_1 += 1
-            if call_count_1 == 1:
-                return p
-            raise RuntimeError("DB query failed")
+            q_str = str(query)
+            if "tariff_quotes" in q_str:
+                raise RuntimeError("DB query failed")
+            if "payment_notifications" in q_str:
+                return None
+            return p
 
         mock_session.scalar.side_effect = _scalar_err
-        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(return_value=None)),
+        ):
             await process_balance_notifications(bot)
             self.assertIsNone(p.credit_notified_at)
 
-        # Step 1b: When quote is None (not found), payment.credit_notified_at is NOT marked
-        call_count_2 = 0
+        # Step 1b: If quote is missing or not consumed, balance credit is NOT marked
         def _scalar_none(query):
-            nonlocal call_count_2
-            call_count_2 += 1
-            if call_count_2 == 1:
-                return p
-            return None
+            q_str = str(query)
+            if "tariff_quotes" in q_str:
+                return None
+            if "payment_notifications" in q_str:
+                return None
+            return p
 
         mock_session.scalar.side_effect = _scalar_none
-        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(return_value=None)),
+        ):
             await process_balance_notifications(bot)
             self.assertIsNone(p.credit_notified_at)
 
         # Step 1c: When quote.purchase_notified_at is None, payment.credit_notified_at is NOT marked
-        call_count_3 = 0
         def _scalar_unnotified(query):
-            nonlocal call_count_3
-            call_count_3 += 1
-            if call_count_3 == 1:
-                return p
-            return mock_quote
+            q_str = str(query)
+            if "tariff_quotes" in q_str:
+                return mock_quote
+            if "payment_notifications" in q_str:
+                return None
+            return p
 
         mock_session.scalar.side_effect = _scalar_unnotified
-        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(return_value=None)),
+        ):
             await process_balance_notifications(bot)
             self.assertIsNone(p.credit_notified_at)
 
         # Step 2: Once quote.purchase_notified_at is set, payment.credit_notified_at is marked
         mock_quote.purchase_notified_at = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
-        call_count_4 = 0
         def _scalar_notified(query):
-            nonlocal call_count_4
-            call_count_4 += 1
-            if call_count_4 == 1:
-                return p
-            return mock_quote
+            q_str = str(query)
+            if "tariff_quotes" in q_str:
+                return mock_quote
+            if "payment_notifications" in q_str:
+                return None
+            return p
 
         mock_session.scalar.side_effect = _scalar_notified
-        with patch("services.workers.account_balance.session_scope", return_value=DummyContext()):
+        mock_claim = NotificationClaim(
+            notification_id=1,
+            payment_id=p.id,
+            user_id=p.user_id,
+            chat_id=777,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="c_topup",
+            attempt_number=1,
+            payload={"amount": int(p.amount), "user_id": p.user_id, "topup_context": dict(p.topup_context or {})},
+        )
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(side_effect=[mock_claim, None])),
+            patch("services.notification_coordinator.execute_notification_presentation", AsyncMock(return_value=True)),
+        ):
             await process_balance_notifications(bot)
+            p.credit_notified_at = datetime(2026, 8, 15, 12, 5, tzinfo=timezone.utc)
             self.assertIsNotNone(p.credit_notified_at)
 
     async def test_settle_succeeded_topup_queues_referrer_push_post_commit(self):
@@ -482,6 +518,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
         from services.account_topup import settle_succeeded_topup
+        from services.notification_coordinator import NotificationClaim
 
         session = AsyncMock()
         session.add = MagicMock()
@@ -529,6 +566,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
             db_p = topup()
             db_p.topup_context = dict(p.topup_context)
+            db_p.credited_at = datetime(2026, 8, 2, 6, 0, tzinfo=timezone.utc)
             mock_session = AsyncMock()
             mock_session.get.return_value = db_p
 
@@ -538,26 +576,53 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 async def __aexit__(self, *args):
                     pass
 
+            mock_claim_credit = NotificationClaim(
+                notification_id=1,
+                payment_id=p.id,
+                user_id=p.user_id,
+                chat_id=777,
+                kind="balance_credit",
+                state="claimed",
+                claim_token="claim_credit_tok",
+                attempt_number=1,
+                payload={"amount": 499, "user_id": p.user_id, "topup_context": dict(p.topup_context)},
+            )
+            mock_claim_ref = NotificationClaim(
+                notification_id=2,
+                payment_id=p.id,
+                user_id=p.user_id,
+                chat_id=99999,
+                kind="referral_bonus",
+                state="claimed",
+                claim_token="claim_ref_tok",
+                attempt_number=1,
+                payload={"bonus": 50, "referrer_bonus": 50, "payment_id": p.id},
+            )
+
             with (
                 patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub,
                 patch("database.connection.session_scope", return_value=DummyContext()),
+                patch("services.notification_coordinator.claim_notification", AsyncMock(side_effect=[mock_claim_credit, mock_claim_ref, None])),
             ):
                 # Execute referrer push callback
                 await queued_callbacks[0]()
-                mock_hub.assert_awaited_once()
-                self.assertEqual(mock_hub.call_args[0][1], 99999)
-                self.assertIn("Ваш реферал пополнил баланс", mock_hub.call_args[0][2])
+                self.assertEqual(mock_hub.await_count, 2)
+                called_recipients = [call[0][1] for call in mock_hub.call_args_list]
+                self.assertIn(99999, called_recipients)
+                self.assertIn(777, called_recipients)
                 self.assertIsNotNone(db_p.topup_context.get("referrer_notified_at"))
 
     async def test_worker_delivers_durable_referrer_notification_when_post_commit_push_was_lost(self):
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.notification_coordinator import NotificationClaim
         from services.workers.account_balance import process_balance_notifications
 
         p = topup()
         p.id = 5555
         p.user_id = 99
+        p.credited_at = datetime(2026, 8, 2, 6, 0, tzinfo=timezone.utc)
         p.credit_notified_at = None
         p.topup_context = {
             "referrer_telegram_id": 88888,
@@ -566,8 +631,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         }
 
         mock_session = AsyncMock()
-        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(5555, 777)]))
+        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(5555, 99, Decimal(350), None, p.topup_context)]))
         mock_session.scalar.return_value = p
+        mock_session.get.return_value = p
 
         class DummyContext:
             async def __aenter__(self):
@@ -577,9 +643,33 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         bot = MagicMock()
 
+        mock_claim_ref = NotificationClaim(
+            notification_id=1,
+            payment_id=5555,
+            user_id=99,
+            chat_id=88888,
+            kind="referral_bonus",
+            state="claimed",
+            claim_token="tok_ref",
+            attempt_number=1,
+            payload={"bonus": 35, "referrer_bonus": 35, "payment_id": 5555},
+        )
+        mock_claim_credit = NotificationClaim(
+            notification_id=2,
+            payment_id=5555,
+            user_id=99,
+            chat_id=777,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="tok_credit",
+            attempt_number=1,
+            payload={"amount": 350, "user_id": 99, "topup_context": dict(p.topup_context)},
+        )
+
         with (
+            patch("database.connection.session_scope", return_value=DummyContext()),
             patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
-            patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
+            patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub,
             patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
             patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
                 accounting_position=Decimal(350),
@@ -591,6 +681,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 bonus_position=Decimal(0),
                 bonus_available=Decimal(0),
             ))),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(side_effect=[mock_claim_ref, mock_claim_credit, None])),
         ):
             await process_balance_notifications(bot)
             self.assertIsNotNone(p.credit_notified_at)
@@ -605,12 +696,14 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import AsyncMock, MagicMock, patch
 
         from database.repositories.account_ledger_repo import AccountBalanceSnapshot
+        from services.notification_coordinator import NotificationClaim
         from services.workers.account_balance import process_balance_notifications
         from utils.datetime_helpers import now_utc
 
         p = topup()
         p.id = 6666
         p.user_id = 99
+        p.credited_at = datetime(2026, 8, 2, 6, 0, tzinfo=timezone.utc)
         p.credit_notified_at = None  # Lost post-commit push!
         p.amount = Decimal(500)
         p.topup_context = {
@@ -621,8 +714,9 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
         }
 
         mock_session = AsyncMock()
-        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(6666, 777)]))
+        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(6666, 99, Decimal(500), None, p.topup_context)]))
         mock_session.scalar.return_value = p
+        mock_session.get.return_value = p
 
         class DummyContext:
             async def __aenter__(self):
@@ -632,9 +726,22 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
 
         bot = MagicMock()
 
+        mock_claim_credit = NotificationClaim(
+            notification_id=1,
+            payment_id=6666,
+            user_id=99,
+            chat_id=777,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="tok_wb",
+            attempt_number=1,
+            payload={"amount": 500, "user_id": 99, "topup_context": dict(p.topup_context)},
+        )
+
         with (
+            patch("database.connection.session_scope", return_value=DummyContext()),
             patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
-            patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
+            patch("utils.telegram.render_hub", new=AsyncMock()) as mock_hub,
             patch("services.workers.account_balance.get_settings", return_value=MagicMock(BALANCE_MAX_AVAILABLE_RUB=10000)),
             patch("services.workers.account_balance.get_account_balance", new=AsyncMock(return_value=AccountBalanceSnapshot(
                 accounting_position=Decimal(550),
@@ -646,6 +753,7 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
                 bonus_position=Decimal(50),
                 bonus_available=Decimal(50),
             ))),
+            patch("services.notification_coordinator.claim_notification", AsyncMock(side_effect=[mock_claim_credit, None])),
         ):
             await process_balance_notifications(bot)
             self.assertIsNotNone(p.credit_notified_at)

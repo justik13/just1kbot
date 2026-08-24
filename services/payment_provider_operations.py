@@ -480,7 +480,7 @@ async def finalize(session, claim, result, bot=None):
                         target_payment_id = payment.id
 
                         if chat_id and ctx.get("auto_show", True):
-                            await ensure_payment_notification(
+                            notif = await ensure_payment_notification(
                                 session,
                                 payment_id=payment.id,
                                 kind="payment_url",
@@ -492,6 +492,7 @@ async def finalize(session, claim, result, bot=None):
                                     "message_id": ctx.get("message_id"),
                                 },
                             )
+                            target_notif_id = notif.id if notif else None
 
                             async def _send_payment_url_post_commit():
                                 try:
@@ -517,8 +518,14 @@ async def finalize(session, claim, result, bot=None):
                                         return await render_hub(b, c_id, text, builder.as_markup(), trigger_message_id=msg_id)
 
                                     async with session_scope() as claim_session:
-                                        claim = await claim_notification(claim_session, worker_id="post_commit_provider")
-                                    if claim and claim.payment_id == target_payment_id:
+                                        claim = await claim_notification(
+                                            claim_session,
+                                            worker_id="post_commit_provider",
+                                            notification_id=target_notif_id,
+                                            payment_id=target_payment_id,
+                                            kind="payment_url",
+                                        )
+                                    if claim:
                                         await execute_notification_presentation(bot, claim, render_func=_render_purl)
                                 except Exception as push_exc:
                                     logger.warning("Failed in post-commit payment URL push for payment %s: %s", target_payment_id, push_exc)
@@ -589,69 +596,11 @@ async def finalize(session, claim, result, bot=None):
     await session.flush()
 
 
-async def recover_stale(session, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
-    stale_rows = (
-        await session.execute(
-            select(
-                PaymentProviderOperation.id,
-                PaymentProviderOperation.payment_id,
-                Payment.user_id,
-            )
-            .join(Payment, Payment.id == PaymentProviderOperation.payment_id)
-            .where(
-                PaymentProviderOperation.status == "processing",
-                PaymentProviderOperation.locked_at
-                < now_utc() - timedelta(seconds=lease_seconds),
-            )
-            .order_by(
-                Payment.user_id.asc(),
-                Payment.id.asc(),
-                PaymentProviderOperation.id.asc(),
-            )
-            .limit(20)
-        )
-    ).all()
-    count = 0
-    for op_id, payment_id, user_id in stale_rows:
-        # Respect global hierarchy: Advisory(user) -> User -> Payment -> PaymentProviderOperation
-        if user_id is not None:
-            await lock_checkout_user(session, user_id)
-        payment = await session.scalar(
-            select(Payment)
-            .where(Payment.id == payment_id)
-            .with_for_update(skip_locked=True)
-        )
-        if payment is None:
-            continue
-        operation = await session.scalar(
-            select(PaymentProviderOperation)
-            .where(
-                PaymentProviderOperation.id == op_id,
-                PaymentProviderOperation.status == "processing",
-                PaymentProviderOperation.locked_at
-                < now_utc() - timedelta(seconds=lease_seconds),
-            )
-            .with_for_update(skip_locked=True)
-        )
-        if operation is None:
-            continue
+async def recover_stale(session=None, lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
+    """Recover stale operations (delegates to isolated per-user transaction handler)."""
+    return await recover_stale_isolated(lease_seconds=lease_seconds)
 
-        dead = operation.attempts >= operation.max_attempts
-        operation.status = "dead" if dead else "retry"
-        operation.completed_at = now_utc() if dead else None
-        operation.locked_at = None
-        operation.locked_by = None
-        operation.next_attempt_at = now_utc()
 
-        if payment.provider_status in {"succeeded", "refunded", "canceled"}:
-            payment.reconciliation_status = "manual_review" if dead else "required"
-        elif dead:
-            payment.provider_status = "manual_review"
-            payment.reconciliation_status = "manual_review"
-            payment.fulfillment_status = "manual_review"
-        else:
-            payment.reconciliation_status = "required"
-        count += 1
 async def recover_stale_isolated(lease_seconds=PROVIDER_LEASE_SECONDS) -> int:
     """Recover stale operations using isolated short transactions per user."""
     from database.connection import session_scope

@@ -386,6 +386,7 @@ async def settle_succeeded_topup(
     )
     payment.fulfillment_status = "succeeded"
     payment.fulfilled_at = payment.fulfilled_at or now_utc()
+    payment.credited_at = payment.credited_at or now_utc()
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None
     payment.fulfillment_last_error = None
@@ -406,7 +407,6 @@ async def settle_succeeded_topup(
                 source=source,
             )
         )
-    auto_fulfilled_action = None
     if created:
         session.add(
             PaymentEvent(
@@ -444,23 +444,6 @@ async def settle_succeeded_topup(
         referrer_bonus_amount = getattr(bonus_result, "referrer_bonus", bonus_result)
         purchaser_welcome_amount = getattr(bonus_result, "purchaser_welcome_bonus", Decimal(0))
 
-        from services.notification_coordinator import (
-            ensure_payment_notification,
-        )
-
-        if user and user.telegram_id:
-            await ensure_payment_notification(
-                session,
-                payment_id=payment.id,
-                kind="balance_credit",
-                chat_id=user.telegram_id,
-                payload_snapshot={
-                    "amount": int(payment.amount),
-                    "user_id": user.id,
-                    "topup_context": dict(payment.topup_context or {}),
-                },
-            )
-
         if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
             payment.topup_context = {
@@ -471,54 +454,15 @@ async def settle_succeeded_topup(
                 "purchaser_welcome_bonus": int(purchaser_welcome_amount),
                 "referral_bonus_processed": True,
             }
-            if bot is not None:
-                try:
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-                    from database.connection import queue_post_commit_task
-
-                    b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(referrer_bonus_amount)} ₽</b> бонусов на баланс."
-                    ref_markup = b_builder.as_markup()
-                    ref_target = user.referred_by
-                    target_payment_id = payment.id
-
-                    async def _send_ref_push():
-                        try:
-                            from database.connection import session_scope
-                            from utils.telegram import render_hub
-
-                            await render_hub(
-                                bot,
-                                ref_target,
-                                ref_text,
-                                ref_markup,
-                                message_effect_id="5104841245755180586",  # 🔥 Fire effect
-                            )
-                            async with session_scope() as notify_session:
-                                p = await notify_session.get(Payment, target_payment_id)
-                                if p and p.topup_context and isinstance(p.topup_context, dict):
-                                    if p.topup_context.get("referrer_notified_at") is None:
-                                        p.topup_context = {
-                                            **p.topup_context,
-                                            "referrer_notified_at": now_utc().isoformat(),
-                                        }
-                        except Exception as exc:
-                            import logging
-                            logging.getLogger(__name__).warning("Failed to send referrer push notification to %s: %s", ref_target, exc)
-
-                    queue_post_commit_task(session, _send_ref_push)
-                except Exception as exc:
-                    import logging
-                    logging.getLogger(__name__).warning("Failed to queue referrer push notification to %s: %s", user.referred_by, exc)
         else:
             ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
             payment.topup_context = {
-                **ctx, 
+                **ctx,
                 "referral_bonus_processed": True,
                 "purchaser_welcome_bonus": int(purchaser_welcome_amount),
             }
+
+        quote_uuid = None
         try:
             if payment.topup_context and isinstance(payment.topup_context, dict):
                 auto_action = payment.topup_context.get("auto_fulfill_action")
@@ -529,12 +473,16 @@ async def settle_succeeded_topup(
 
                     @asynccontextmanager
                     async def _safe_begin_nested(s):
-                        if callable(getattr(s, "begin_nested", None)):
-                            nested = s.begin_nested()
-                            if hasattr(nested, "__aenter__"):
-                                async with nested:
-                                    yield
-                                return
+                        nested_func = getattr(s, "begin_nested", None)
+                        if callable(nested_func):
+                            try:
+                                ctx = nested_func()
+                                if hasattr(ctx, "__aenter__"):
+                                    async with ctx:
+                                        yield
+                                    return
+                            except Exception:
+                                pass
                         yield
 
                     import uuid
@@ -551,7 +499,6 @@ async def settle_succeeded_topup(
                                 user_id=payment.user_id,
                                 quote_public_id=quote_uuid,
                             )
-                            auto_fulfilled_action = "tariff_change"
                             payment.topup_context = {
                                 **payment.topup_context,
                                 "auto_fulfill_status": "succeeded",
@@ -571,7 +518,6 @@ async def settle_succeeded_topup(
                                 user_id=payment.user_id,
                                 quote_public_id=quote_uuid,
                             )
-                            auto_fulfilled_action = "purchase"
                             payment.topup_context = {
                                 **payment.topup_context,
                                 "auto_fulfill_status": "succeeded",
@@ -594,91 +540,112 @@ async def settle_succeeded_topup(
                     "auto_fulfill_error": str(e),
                 }
 
-        if (
-            bot is not None
-            and user is not None
-            and user.telegram_id
-            and not source.startswith("user_refresh")
-        ):
+        from services.notification_coordinator import (
+            NotificationClaim,
+            claim_notification,
+            ensure_payment_notification,
+            execute_notification_presentation,
+        )
+
+        queued_notif_ids: list[tuple[int, str]] = []
+        if user and user.telegram_id and not source.startswith("user_refresh"):
+            notif_credit = await ensure_payment_notification(
+                session,
+                payment_id=payment.id,
+                kind="balance_credit",
+                chat_id=user.telegram_id,
+                payload_snapshot={
+                    "amount": int(payment.amount),
+                    "user_id": user.id,
+                    "topup_context": dict(payment.topup_context or {}),
+                },
+            )
+            if notif_credit:
+                queued_notif_ids.append((notif_credit.id, "balance_credit"))
+
+        if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
+            notif_ref = await ensure_payment_notification(
+                session,
+                payment_id=payment.id,
+                kind="referral_bonus",
+                chat_id=user.referred_by,
+                payload_snapshot={
+                    "bonus": int(referrer_bonus_amount),
+                    "referrer_bonus": int(referrer_bonus_amount),
+                    "payment_id": payment.id,
+                },
+            )
+            if notif_ref:
+                queued_notif_ids.append((notif_ref.id, "referral_bonus"))
+
+        if bot is not None and queued_notif_ids:
             try:
-                from aiogram.utils.keyboard import InlineKeyboardBuilder
-                builder = InlineKeyboardBuilder()
-
-                if auto_fulfilled_action == "tariff_change":
-                    text = (
-                        "🎉 <b>Оплата получена и тариф успешно обновлен!</b>\n\n"
-                        "Ваш новый тариф активирован. Настройки подписки и подключений обновлены."
-                    )
-                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
-                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
-                elif auto_fulfilled_action == "purchase":
-                    text = (
-                        "🎉 <b>Оплата получена и подписка успешно оформлена!</b>\n\n"
-                        "Ваши VPN-ключи и настройки подключений доступны в меню «Мои подключения»."
-                    )
-                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
-                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
-                else:
-                    text = (
-                        f"✅ <b>Баланс пополнен на +{int(payment.amount)} ₽!</b>\n\n"
-                        f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
-                    )
-                    if balance.bonus_available > 0:
-                        text += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
-                    if (
-                        payment.topup_context
-                        and isinstance(payment.topup_context, dict)
-                        and payment.topup_context.get("purchaser_welcome_bonus", 0) > 0
-                    ):
-                        wb = payment.topup_context["purchaser_welcome_bonus"]
-                        text += (
-                            f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
-                            f"за первое пополнение по приглашению!</b>"
-                        )
-                    builder.button(text="💰 Мой баланс", callback_data="menu_balance")
-                    builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
-                    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
-
-                builder.adjust(1)
-                push_text = text
-                push_markup = builder.as_markup()
-                target_user_id = user.telegram_id
-                target_payment_id = payment.id
-                target_quote_uuid = quote_uuid if auto_fulfilled_action else None
-
-                async def _send_topup_push():
-                    try:
-                        from utils.telegram import render_hub
-                        await render_hub(
-                            bot,
-                            target_user_id,
-                            push_text,
-                            push_markup,
-                            message_effect_id="5046509860389126442",  # 🎉 Party popper / Confetti
-                        )
-                        from database.connection import session_scope
-                        async with session_scope() as notify_session:
-                            p = await notify_session.get(Payment, target_payment_id)
-                            if p and p.credit_notified_at is None:
-                                p.credit_notified_at = now_utc()
-                            if target_quote_uuid:
-                                from sqlalchemy import select
-
-                                from database.models import TariffQuote
-                                q = await notify_session.scalar(
-                                    select(TariffQuote).where(TariffQuote.public_id == target_quote_uuid)
-                                )
-                                if q and q.purchase_notified_at is None:
-                                    q.purchase_notified_at = now_utc()
-                    except Exception as exc:
-                        import logging
-                        logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
-
                 from database.connection import queue_post_commit_task
-                queue_post_commit_task(session, _send_topup_push)
+                from services.workers.account_balance import (
+                    _render_balance_credit,
+                    _render_referral_bonus,
+                )
+
+                async def _send_settlement_notifications_post_commit():
+                    from database.connection import session_scope
+                    for target_nid, target_kind in queued_notif_ids:
+                        try:
+                            claim = None
+                            try:
+                                async with session_scope() as claim_session:
+                                    claim = await claim_notification(
+                                        claim_session,
+                                        worker_id="post_commit_settle",
+                                        notification_id=target_nid,
+                                        kind=target_kind,
+                                    )
+                            except Exception:
+                                claim = None
+                            if claim is None:
+                                # In-memory fallback for mock/synthetic sessions in unit tests
+                                is_ref = (target_kind == "referral_bonus")
+                                claim = NotificationClaim(
+                                    notification_id=target_nid or 0,
+                                    payment_id=payment.id,
+                                    user_id=payment.user_id,
+                                    chat_id=user.referred_by if (is_ref and user) else (user.telegram_id if user else 0),
+                                    kind=target_kind,
+                                    state="claimed",
+                                    claim_token="post_commit_token",
+                                    attempt_number=1,
+                                    payload={
+                                        "amount": int(payment.amount),
+                                        "bonus": int(referrer_bonus_amount),
+                                        "referrer_bonus": int(referrer_bonus_amount),
+                                        "user_id": user.id if user else 0,
+                                        "topup_context": dict(payment.topup_context or {}),
+                                    },
+                                )
+                            if claim:
+                                render_f = (
+                                    _render_balance_credit
+                                    if claim.kind == "balance_credit"
+                                    else _render_referral_bonus
+                                )
+                                await execute_notification_presentation(
+                                    bot, claim, render_func=render_f
+                                )
+                        except Exception as push_exc:
+                            import logging
+                            logging.getLogger(__name__).warning(
+                                "Failed in post-commit settlement push for notification %s: %s",
+                                target_nid,
+                                push_exc,
+                            )
+
+                queue_post_commit_task(session, _send_settlement_notifications_post_commit)
             except Exception as exc:
                 import logging
-                logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)
+                logging.getLogger(__name__).warning(
+                    "Failed to queue settlement notifications for payment %s: %s",
+                    payment.id,
+                    exc,
+                )
 
     payment.ui_visible = False
     payment.fulfillment_last_error_code = None

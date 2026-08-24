@@ -424,6 +424,25 @@ async def _settle_account_purchase(
         ),
     )
     after = await get_account_balance(session, user_id=user.id)
+
+    from services.notification_coordinator import ensure_payment_notification
+
+    if user.telegram_id:
+        await ensure_payment_notification(
+            session,
+            payment_id=quote.id,
+            kind="account_purchase",
+            chat_id=user.telegram_id,
+            payload_snapshot={
+                "quote_id": quote.id,
+                "operation_type": quote.operation_type,
+                "resulting_paid_hours": version.duration_hours,
+                "resulting_bonus_hours": 0,
+                "duration_hours": version.duration_hours,
+                "device_limit": version.device_limit,
+            },
+        )
+
     await session.flush()
     return AccountPurchaseSettlement(quote, debit, before, after, True)
 

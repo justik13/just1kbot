@@ -188,7 +188,8 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSessi
             else:
                 _hub_cache[chat_id] = {"ids": [message_id]}
         except Exception as e:
-            logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
+            logger.error("Failed to store hub id in DB for chat %s: %s", chat_id, e)
+            raise
 
 
 async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session: AsyncSession | None = None) -> None:
@@ -219,7 +220,8 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
                 old_set = set(message_ids)
                 cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
         except Exception as e:
-            logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
+            logger.error("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
+            raise
 
 
 async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:

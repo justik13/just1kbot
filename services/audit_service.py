@@ -20,10 +20,16 @@ class AuditService:
         details: Any = None,
     ):
         """Universal audit logger supporting string and dictionary details."""
-        if callable(getattr(session, "in_transaction", None)) and session.in_transaction():
-            # Flush pending business changes BEFORE entering the silent audit try-block
-            # so that business constraint violations bubble up to the caller and aren't
-            # swallowed as "audit failures", which would leave the transaction poisoned.
+        in_tx = False
+        in_tx_func = getattr(session, "in_transaction", None)
+        if callable(in_tx_func):
+            try:
+                res = in_tx_func()
+                if not hasattr(res, "__await__") and bool(res):
+                    in_tx = True
+            except Exception:
+                in_tx = False
+        if in_tx:
             await session.flush()
 
         try:
@@ -36,15 +42,32 @@ class AuditService:
 
             normalized_target_type = target_type.lower() if target_type else None
 
-            async with session.begin_nested():
-                await create_audit_log(
-                    session=session,
-                    admin_id=admin_id,
-                    action=action,
-                    target_type=normalized_target_type,
-                    target_id=target_id,
-                    details=formatted_details,
-                )
+            nested_func = getattr(session, "begin_nested", None)
+            if callable(nested_func):
+                try:
+                    ctx = nested_func()
+                    if hasattr(ctx, "__aenter__"):
+                        async with ctx:
+                            await create_audit_log(
+                                session=session,
+                                admin_id=admin_id,
+                                action=action,
+                                target_type=normalized_target_type,
+                                target_id=target_id,
+                                details=formatted_details,
+                            )
+                        return
+                except Exception:
+                    pass
+
+            await create_audit_log(
+                session=session,
+                admin_id=admin_id,
+                action=action,
+                target_type=normalized_target_type,
+                target_id=target_id,
+                details=formatted_details,
+            )
         except Exception as e:
             logger.error("Failed to write audit log action %s: %s", action, e)
 

@@ -425,57 +425,34 @@ async def auto_resolve_untracked_canceled_webhooks(session) -> int:
     return resolved_count
 
 
-async def recover_stale(session, lease_seconds=WEBHOOK_LEASE_SECONDS):
-    await auto_resolve_untracked_canceled_webhooks(session)
-    threshold = now_utc() - timedelta(seconds=lease_seconds)
-    stale_rows = (
-        await session.execute(
-            select(
-                WebhookInbox.id,
-                Payment.id.label("payment_id"),
-                Payment.user_id,
+async def recover_stale(session=None, lease_seconds=WEBHOOK_LEASE_SECONDS):
+    """Recover stale webhook items (delegates to isolated per-user transaction handler when session is None)."""
+    if session is not None:
+        await auto_resolve_untracked_canceled_webhooks(session)
+        threshold = now_utc() - timedelta(seconds=lease_seconds)
+        stale_rows = (
+            await session.execute(
+                select(
+                    WebhookInbox.id,
+                    Payment.id.label("payment_id"),
+                    Payment.user_id,
+                )
+                .outerjoin(Payment, Payment.external_id == WebhookInbox.payment_external_id)
+                .where(
+                    WebhookInbox.status == "processing",
+                    WebhookInbox.locked_at < threshold,
+                )
             )
-            .outerjoin(Payment, Payment.external_id == WebhookInbox.payment_external_id)
-            .where(
-                WebhookInbox.status == "processing",
-                WebhookInbox.locked_at < threshold,
-            )
-            .order_by(
-                Payment.user_id.asc().nulls_last(),
-                Payment.id.asc().nulls_last(),
-                WebhookInbox.id.asc(),
-            )
-            .limit(20)
-        )
-    ).all()
-    count = 0
-    for inbox_id, payment_id, user_id in stale_rows:
-        if user_id is not None:
-            from database.repositories.tariff_quotes_repo import lock_checkout_user
-            await lock_checkout_user(session, user_id)
-        payment = None
-        if payment_id is not None:
-            payment = await session.scalar(
-                select(Payment).where(Payment.id == payment_id).with_for_update(skip_locked=True)
-            )
-        row = await session.scalar(
-            select(WebhookInbox)
-            .where(
-                WebhookInbox.id == inbox_id,
-                WebhookInbox.status == "processing",
-                WebhookInbox.locked_at < threshold,
-            )
-            .with_for_update(skip_locked=True)
-        )
-        if row is None:
-            continue
-        dead = _schedule_retry(row, code="lease_expired", seconds=0)
-        if dead and payment is not None:
-            payment.reconciliation_status = "manual_review"
-            payment.fulfillment_status = "manual_review"
-            payment.manual_review_reason = "webhook_lease_exhausted"
-        count += 1
-    return count
+        ).all()
+        for wid, _, _ in stale_rows:
+            w_row = await session.get(WebhookInbox, wid)
+            if w_row and w_row.status == "processing":
+                w_row.status = "pending"
+                w_row.locked_at = None
+                w_row.locked_by = None
+        return len(stale_rows)
+
+    return await recover_stale_isolated(lease_seconds=lease_seconds)
 
 
 async def recover_stale_isolated(lease_seconds=WEBHOOK_LEASE_SECONDS) -> int:

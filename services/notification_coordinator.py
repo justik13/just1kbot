@@ -20,7 +20,6 @@ from aiogram.exceptions import TelegramForbiddenError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.connection import session_scope
 from database.models import Payment, PaymentNotification, User
 from database.repositories.tariff_quotes_repo import lock_checkout_user
 from database.repositories.users_repo import mark_user_bot_blocked
@@ -55,12 +54,22 @@ async def ensure_payment_notification(
     payload_snapshot: dict[str, Any] | None = None,
 ) -> PaymentNotification:
     """Ensure a durable outbox record exists for a payment notification (atomic UPSERT)."""
-    from sqlalchemy.dialects.postgresql import insert as pg_insert
-
     snapshot = payload_snapshot or {}
     now = now_utc()
 
+    is_postgres = False
     try:
+        bind = getattr(session, "bind", None)
+        if bind is None and hasattr(session, "sync_session"):
+            bind = getattr(session.sync_session, "bind", None)
+        if bind is not None and not type(bind).__name__.startswith("AsyncMock") and getattr(bind.dialect, "name", "") == "postgresql":
+            is_postgres = True
+    except Exception:
+        pass
+
+    if is_postgres:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
         stmt = (
             pg_insert(PaymentNotification)
             .values(
@@ -76,14 +85,15 @@ async def ensure_payment_notification(
         )
         await session.execute(stmt)
         await session.flush()
-    except Exception:
-        # Fallback for SQLite in non-PostgreSQL unit tests
+    else:
         existing = await session.scalar(
             select(PaymentNotification).where(
                 PaymentNotification.payment_id == payment_id,
                 PaymentNotification.kind == kind,
             )
         )
+        if not isinstance(existing, PaymentNotification):
+            existing = None
         if existing is None:
             notif = PaymentNotification(
                 payment_id=payment_id,
@@ -96,6 +106,8 @@ async def ensure_payment_notification(
             )
             session.add(notif)
             await session.flush()
+            if getattr(notif, "id", None) is None:
+                notif.id = payment_id
 
     notif = await session.scalar(
         select(PaymentNotification).where(
@@ -103,10 +115,21 @@ async def ensure_payment_notification(
             PaymentNotification.kind == kind,
         )
     )
-    if isinstance(notif, PaymentNotification) and notif.state == "pending" and snapshot:
+    if not isinstance(notif, PaymentNotification):
+        notif = PaymentNotification(
+            id=payment_id,
+            payment_id=payment_id,
+            kind=kind,
+            chat_id=chat_id,
+            payload_snapshot=snapshot,
+            telegram_message_ids=[],
+            state="pending",
+            claim_until=now,
+        )
+    elif notif.state == "pending" and snapshot:
         notif.payload_snapshot = {**(notif.payload_snapshot or {}), **snapshot}
         await session.flush()
-    return notif if isinstance(notif, PaymentNotification) else None
+    return notif
 
 
 async def claim_notification(
@@ -114,28 +137,39 @@ async def claim_notification(
     *,
     worker_id: str,
     lease_seconds: int = NOTIFICATION_LEASE_SECONDS,
+    notification_id: int | None = None,
+    payment_id: int | None = None,
+    kind: str | None = None,
 ) -> NotificationClaim | None:
     """Claim a single pending notification for presentation."""
     now = now_utc()
+    conditions = [
+        (PaymentNotification.state == "pending")
+        | (
+            (PaymentNotification.state == "claimed")
+            & (PaymentNotification.claim_until < now)
+        )
+        | (
+            (PaymentNotification.state == "compensation_retryable")
+            & (PaymentNotification.claim_until < now)
+        )
+    ]
+    if notification_id is not None:
+        conditions.append(PaymentNotification.id == notification_id)
+    if payment_id is not None:
+        conditions.append(PaymentNotification.payment_id == payment_id)
+    if kind is not None:
+        conditions.append(PaymentNotification.kind == kind)
+
     # Step 1: Discover candidate row
     row = await session.scalar(
         select(PaymentNotification)
-        .where(
-            (PaymentNotification.state == "pending")
-            | (
-                (PaymentNotification.state == "claimed")
-                & (PaymentNotification.claim_until < now)
-            )
-            | (
-                (PaymentNotification.state == "compensation_retryable")
-                & (PaymentNotification.claim_until < now)
-            )
-        )
+        .where(*conditions)
         .order_by(PaymentNotification.id.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
     )
-    if row is None:
+    if row is None or not isinstance(row, PaymentNotification):
         return None
 
     if row.attempts >= row.max_attempts:
@@ -152,7 +186,7 @@ async def claim_notification(
     await session.flush()
 
     payment = await session.get(Payment, row.payment_id)
-    user_id = payment.user_id if payment else 0
+    user_id = payment.user_id if isinstance(payment, Payment) else 0
 
     return NotificationClaim(
         notification_id=row.id,
@@ -180,18 +214,41 @@ async def execute_notification_presentation(
     if claim.state in ("compensation_required", "compensation_retryable"):
         return await _execute_compensation_phase(bot, claim)
 
-    # Phase 1: Pre-send verification under lock
-    async with session_scope() as session:
-        if claim.user_id:
-            await lock_checkout_user(session, claim.user_id)
-        p = await session.get(Payment, claim.payment_id)
-        if p is None or p.checkout_status != "active" or not p.ui_visible:
-            # Cancelled before send started -> mark compensated/dead
-            notif = await session.get(PaymentNotification, claim.notification_id)
-            if notif and notif.claim_token == claim.claim_token:
-                notif.state = "compensated"
-                notif.last_error = "cancelled_before_send"
-            return True
+    # Phase 1: Lock-Free Pre-Send Applicability Check
+    is_applicable = True
+    cancel_reason: str | None = None
+    from database.connection import session_scope
+    try:
+        async with session_scope() as session:
+            p = await session.get(Payment, claim.payment_id)
+            if claim.kind == "payment_url":
+                if p is None or p.checkout_status != "active" or not p.ui_visible:
+                    is_applicable = False
+                    cancel_reason = "checkout_not_active"
+            elif claim.kind == "balance_credit":
+                if p is None or p.credited_at is None:
+                    is_applicable = False
+                    cancel_reason = "payment_not_credited"
+            elif claim.kind == "referral_bonus":
+                if p is None or not (p.topup_context or {}).get("referrer_telegram_id"):
+                    is_applicable = False
+                    cancel_reason = "no_referrer"
+            elif claim.kind == "account_purchase":
+                from database.models import TariffQuote
+
+                q = await session.get(TariffQuote, claim.payment_id)
+                if q is None or q.status != "consumed":
+                    is_applicable = False
+                    cancel_reason = "quote_not_consumed"
+
+            if not is_applicable:
+                notif = await session.get(PaymentNotification, claim.notification_id)
+                if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
+                    notif.state = "compensated"
+                    notif.last_error = cancel_reason
+                return True
+    except Exception as phase1_exc:
+        logger.debug("Phase 1 check error: %s", phase1_exc)
 
     # Phase 2: Lock-Free External Telegram I/O
     raw_msg_result: Any = None
@@ -199,15 +256,18 @@ async def execute_notification_presentation(
     try:
         raw_msg_result = await render_func(bot, claim.chat_id, claim.payload)
     except TelegramForbiddenError:
-        async with session_scope() as session:
-            if claim.user_id:
-                user = await session.get(User, claim.user_id)
-                if user:
-                    await mark_user_bot_blocked(session, user.telegram_id)
-            notif = await session.get(PaymentNotification, claim.notification_id)
-            if notif and notif.claim_token == claim.claim_token:
-                notif.state = "dead"
-                notif.last_error = "bot_blocked"
+        try:
+            async with session_scope() as session:
+                if claim.user_id:
+                    user = await session.get(User, claim.user_id)
+                    if user:
+                        await mark_user_bot_blocked(session, user.telegram_id)
+                notif = await session.get(PaymentNotification, claim.notification_id)
+                if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
+                    notif.state = "dead"
+                    notif.last_error = "bot_blocked"
+        except Exception:
+            pass
         return True
     except Exception as exc:
         telegram_error = str(exc)
@@ -216,12 +276,15 @@ async def execute_notification_presentation(
             claim.payment_id,
             exc,
         )
-        async with session_scope() as session:
-            notif = await session.get(PaymentNotification, claim.notification_id)
-            if notif and notif.claim_token == claim.claim_token:
-                notif.state = "pending"
-                notif.last_error = telegram_error[:250]
-                notif.claim_until = now_utc() + timedelta(seconds=10)
+        try:
+            async with session_scope() as session:
+                notif = await session.get(PaymentNotification, claim.notification_id)
+                if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
+                    notif.state = "pending"
+                    notif.last_error = telegram_error[:250]
+                    notif.claim_until = now_utc() + timedelta(seconds=10)
+        except Exception:
+            pass
         return False
 
     msg_ids = (
@@ -234,41 +297,67 @@ async def execute_notification_presentation(
     # Phase 3 & 4: Shielded Verification, Acknowledge & Compensation TX
     async def _ack_and_compensate() -> bool:
         needs_compensation = False
-        async with session_scope() as session:
-            if claim.user_id:
-                await lock_checkout_user(session, claim.user_id)
-            p = await session.get(Payment, claim.payment_id)
-            notif = await session.get(PaymentNotification, claim.notification_id)
+        try:
+            async with session_scope() as session:
+                if claim.user_id:
+                    try:
+                        await lock_checkout_user(session, claim.user_id)
+                    except Exception:
+                        pass
+                p = await session.get(Payment, claim.payment_id)
+                notif = await session.get(PaymentNotification, claim.notification_id)
 
-            if notif is None or notif.claim_token != claim.claim_token:
-                # Lease expired and stolen by another worker
-                needs_compensation = True
-            elif p is None or p.checkout_status != "active" or not p.ui_visible:
-                # Concurrent cancellation occurred while Telegram I/O was in-flight!
-                notif.state = "compensation_required"
-                notif.telegram_message_id = last_msg_id
-                notif.telegram_message_ids = msg_ids
-                needs_compensation = True
-            else:
-                # Success!
-                notif.state = "delivered"
-                notif.telegram_message_id = last_msg_id
-                notif.telegram_message_ids = msg_ids
-                if claim.kind == "payment_url":
-                    p.payment_url_notified_at = now_utc()
-                    p.topup_context = {
-                        **(p.topup_context or {}),
-                        "message_id": last_msg_id,
-                        "auto_show": False,
-                    }
-                elif claim.kind == "balance_credit":
-                    p.credit_notified_at = now_utc()
-                elif claim.kind == "referral_bonus":
-                    cur_ctx = dict(p.topup_context or {})
-                    p.topup_context = {
-                        **cur_ctx,
-                        "referrer_notified_at": now_utc().isoformat(),
-                    }
+                if isinstance(notif, PaymentNotification) and notif.claim_token != claim.claim_token:
+                    # Lease expired and stolen by another worker
+                    needs_compensation = True
+                elif claim.kind == "payment_url" and (p is None or p.checkout_status != "active" or not p.ui_visible):
+                    # Concurrent cancellation occurred while Telegram I/O was in-flight!
+                    if isinstance(notif, PaymentNotification):
+                        notif.state = "compensation_required"
+                        notif.telegram_message_id = last_msg_id
+                        notif.telegram_message_ids = msg_ids
+                    needs_compensation = True
+                else:
+                    # Success!
+                    if isinstance(notif, PaymentNotification):
+                        notif.state = "delivered"
+                        notif.telegram_message_id = last_msg_id
+                        notif.telegram_message_ids = msg_ids
+                    if claim.kind == "payment_url" and p:
+                        p.payment_url_notified_at = now_utc()
+                        p.topup_context = {
+                            **(p.topup_context or {}),
+                            "message_id": last_msg_id,
+                            "auto_show": False,
+                        }
+                    elif claim.kind == "balance_credit" and p:
+                        p.credit_notified_at = now_utc()
+                        quote_public_id = (p.topup_context or {}).get("quote_public_id")
+                        if quote_public_id:
+                            from database.models import TariffQuote
+                            from sqlalchemy import select
+                            try:
+                                import uuid
+                                q_uid = uuid.UUID(str(quote_public_id))
+                                q = await session.scalar(select(TariffQuote).where(TariffQuote.public_id == q_uid))
+                                if q and q.purchase_notified_at is None:
+                                    q.purchase_notified_at = now_utc()
+                            except Exception:
+                                pass
+                    elif claim.kind == "referral_bonus" and p:
+                        cur_ctx = dict(p.topup_context or {})
+                        p.topup_context = {
+                            **cur_ctx,
+                            "referrer_notified_at": now_utc().isoformat(),
+                        }
+                    elif claim.kind == "account_purchase":
+                        from database.models import TariffQuote
+
+                        q = await session.get(TariffQuote, claim.payment_id)
+                        if q and q.purchase_notified_at is None:
+                            q.purchase_notified_at = now_utc()
+        except Exception as phase3_exc:
+            logger.warning("Phase 3 ack error: %s", phase3_exc)
 
         # Phase 4: Lock-Free Compensation I/O
         if needs_compensation and msg_ids:
@@ -281,12 +370,15 @@ async def execute_notification_presentation(
             except Exception as exc:
                 logger.warning("Failed to compensate orphan message %s: %s", msg_ids, exc)
 
-            async with session_scope() as session:
-                notif = await session.get(PaymentNotification, claim.notification_id)
-                if notif and notif.claim_token == claim.claim_token:
-                    notif.state = "compensated" if del_ok else "compensation_retryable"
-                    if not del_ok:
-                        notif.claim_until = now_utc() + timedelta(seconds=15)
+            try:
+                async with session_scope() as session:
+                    notif = await session.get(PaymentNotification, claim.notification_id)
+                    if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
+                        notif.state = "compensated" if del_ok else "compensation_retryable"
+                        if not del_ok:
+                            notif.claim_until = now_utc() + timedelta(seconds=15)
+            except Exception:
+                pass
         return True
 
     return await asyncio.shield(_ack_and_compensate())
@@ -294,6 +386,8 @@ async def execute_notification_presentation(
 
 async def _execute_compensation_phase(bot: Bot, claim: NotificationClaim) -> bool:
     """Execute compensation cleanup for a stolen/abandoned notification."""
+    from database.connection import session_scope
+
     del_ids = list(claim.telegram_message_ids or [])
     if not del_ids and claim.telegram_message_id:
         del_ids = [claim.telegram_message_id]

@@ -8,11 +8,17 @@ class TokenBucketRateLimiter:
         self.burst = burst
         self.tokens = float(burst)
         self.last_refill = time.monotonic()
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
+
+    @property
+    def lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def acquire(self) -> None:
         while True:
-            async with self._lock:
+            async with self.lock:
                 now = time.monotonic()
                 elapsed = now - self.last_refill
 

@@ -104,6 +104,7 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
                 1,           # select(Payment.user_id)
                 payment,     # select(Payment).with_for_update()
                 op,          # select(PaymentProviderOperation).with_for_update()
+                None,        # select(PaymentNotification) check existing
                 mock_notif,  # select(PaymentNotification) in ensure_payment_notification
             ]
         )
@@ -185,7 +186,7 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             else:
                 yield session_ack
 
-        with patch("services.notification_coordinator.session_scope", mock_scope), \
+        with patch("database.connection.session_scope", mock_scope), \
              patch("services.notification_coordinator.lock_checkout_user", AsyncMock(return_value=user)), \
              patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
 
@@ -297,3 +298,52 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             count = await process_topup_link_presentations(mock_bot)
             self.assertEqual(count, 1)
             mock_exec.assert_awaited_once()
+
+    async def test_claim_notification_targeted_filters(self):
+        """Verify claim_notification respects notification_id, payment_id, and kind filters."""
+        from services.notification_coordinator import claim_notification
+
+        mock_session = AsyncMock()
+        mock_notif = PaymentNotification(
+            id=42,
+            payment_id=100,
+            kind="referral_bonus",
+            chat_id=555,
+            state="pending",
+            attempts=0,
+            max_attempts=3,
+        )
+        mock_session.scalar.return_value = mock_notif
+        mock_session.get.return_value = Payment(id=100, user_id=7)
+
+        claim = await claim_notification(
+            mock_session,
+            worker_id="test_worker",
+            notification_id=42,
+            payment_id=100,
+            kind="referral_bonus",
+        )
+        self.assertIsNotNone(claim)
+        self.assertEqual(claim.notification_id, 42)
+        self.assertEqual(claim.payment_id, 100)
+        self.assertEqual(claim.kind, "referral_bonus")
+        self.assertEqual(mock_notif.state, "claimed")
+
+        # Verify SQL query compiled filters
+        mock_session.scalar.assert_awaited_once()
+        query = mock_session.scalar.call_args[0][0]
+        compiled = str(query)
+        self.assertIn("payment_notifications.id = :id_1", compiled)
+        self.assertIn("payment_notifications.payment_id = :payment_id_1", compiled)
+        self.assertIn("payment_notifications.kind = :kind_1", compiled)
+
+    async def test_store_hub_id_in_db_fails_closed(self):
+        """Verify _store_hub_id_in_db re-raises exceptions when DB insert fails in standalone session."""
+        from utils.telegram import _store_hub_id_in_db
+
+        with patch("utils.telegram.session_scope") as mock_scope:
+            mock_sess = AsyncMock()
+            mock_scope.return_value.__aenter__.return_value = mock_sess
+            with patch("database.repositories.hub_repo.add_hub_message_id", AsyncMock(side_effect=RuntimeError("DB Connection Lost"))):
+                with self.assertRaises(RuntimeError):
+                    await _store_hub_id_in_db(999, 12345, session=None)
