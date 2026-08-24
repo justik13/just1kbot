@@ -903,14 +903,31 @@ class PaymentNotification(Base):
 
     __tablename__ = "payment_notifications"
     __table_args__ = (
-        UniqueConstraint("payment_id", "kind", name="uq_payment_notifications_payment_kind"),
         CheckConstraint(
             "kind IN ('payment_url','balance_credit','referral_bonus','account_purchase')",
             name="ck_payment_notifications_kind",
         ),
         CheckConstraint(
+            "((kind = 'account_purchase' AND quote_id IS NOT NULL AND payment_id IS NULL) OR (kind != 'account_purchase' AND payment_id IS NOT NULL AND quote_id IS NULL))",
+            name="ck_payment_notifications_aggregate",
+        ),
+        CheckConstraint(
             "state IN ('pending','claimed','delivered','compensation_required','compensation_retryable','compensated','dead')",
             name="ck_payment_notifications_state",
+        ),
+        Index(
+            "uq_payment_notifications_payment_kind",
+            "payment_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("payment_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_payment_notifications_quote_kind",
+            "quote_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("quote_id IS NOT NULL"),
         ),
         Index(
             "ix_payment_notifications_claim",
@@ -920,7 +937,8 @@ class PaymentNotification(Base):
         ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), index=True)
+    payment_id: Mapped[int | None] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=True, index=True)
+    quote_id: Mapped[int | None] = mapped_column(ForeignKey("tariff_quotes.id", ondelete="RESTRICT"), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(40), nullable=False)
     state: Mapped[str] = mapped_column(
         String(30), nullable=False, default="pending", server_default=text("'pending'")
@@ -946,6 +964,7 @@ class PaymentNotification(Base):
     )
 
     payment = relationship("Payment")
+    quote = relationship("TariffQuote")
 
 
 class PaymentRefund(Base):

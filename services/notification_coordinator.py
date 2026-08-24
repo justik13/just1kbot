@@ -30,17 +30,18 @@ logger = logging.getLogger(__name__)
 NOTIFICATION_LEASE_SECONDS = 30
 
 
-@dataclass(frozen=True)
+@dataclass
 class NotificationClaim:
     notification_id: int
-    payment_id: int
-    user_id: int
     chat_id: int
     kind: str
     state: str
     claim_token: str
     attempt_number: int
     payload: dict[str, Any]
+    payment_id: int | None = None
+    quote_id: int | None = None
+    user_id: int = 0
     telegram_message_id: int | None = None
     telegram_message_ids: list[int] = ()
 
@@ -48,9 +49,10 @@ class NotificationClaim:
 async def ensure_payment_notification(
     session: AsyncSession,
     *,
-    payment_id: int,
     kind: str,
     chat_id: int,
+    payment_id: int | None = None,
+    quote_id: int | None = None,
     payload_snapshot: dict[str, Any] | None = None,
 ) -> PaymentNotification:
     """Ensure a durable outbox record exists for a payment notification (atomic UPSERT)."""
@@ -70,10 +72,12 @@ async def ensure_payment_notification(
     if is_postgres:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        conflict_target = ["quote_id", "kind"] if quote_id is not None else ["payment_id", "kind"]
         stmt = (
             pg_insert(PaymentNotification)
             .values(
                 payment_id=payment_id,
+                quote_id=quote_id,
                 kind=kind,
                 chat_id=chat_id,
                 payload_snapshot=snapshot,
@@ -81,14 +85,19 @@ async def ensure_payment_notification(
                 state="pending",
                 claim_until=now,
             )
-            .on_conflict_do_nothing(index_elements=["payment_id", "kind"])
+            .on_conflict_do_nothing(index_elements=conflict_target)
         )
         await session.execute(stmt)
         await session.flush()
     else:
+        filter_expr = (
+            (PaymentNotification.quote_id == quote_id)
+            if quote_id is not None
+            else (PaymentNotification.payment_id == payment_id)
+        )
         existing = await session.scalar(
             select(PaymentNotification).where(
-                PaymentNotification.payment_id == payment_id,
+                filter_expr,
                 PaymentNotification.kind == kind,
             )
         )
@@ -97,6 +106,7 @@ async def ensure_payment_notification(
         if existing is None:
             notif = PaymentNotification(
                 payment_id=payment_id,
+                quote_id=quote_id,
                 kind=kind,
                 chat_id=chat_id,
                 payload_snapshot=snapshot,
@@ -107,18 +117,24 @@ async def ensure_payment_notification(
             session.add(notif)
             await session.flush()
             if getattr(notif, "id", None) is None:
-                notif.id = payment_id
+                notif.id = quote_id or payment_id or 1
 
+    filter_expr = (
+        (PaymentNotification.quote_id == quote_id)
+        if quote_id is not None
+        else (PaymentNotification.payment_id == payment_id)
+    )
     notif = await session.scalar(
         select(PaymentNotification).where(
-            PaymentNotification.payment_id == payment_id,
+            filter_expr,
             PaymentNotification.kind == kind,
         )
     )
     if not isinstance(notif, PaymentNotification):
         notif = PaymentNotification(
-            id=payment_id,
+            id=quote_id or payment_id or 1,
             payment_id=payment_id,
+            quote_id=quote_id,
             kind=kind,
             chat_id=chat_id,
             payload_snapshot=snapshot,
@@ -144,14 +160,20 @@ async def claim_notification(
     """Claim a single pending notification for presentation."""
     now = now_utc()
     conditions = [
-        (PaymentNotification.state == "pending")
+        (
+            (PaymentNotification.state == "pending")
+            & (
+                PaymentNotification.claim_until.is_(None)
+                | (PaymentNotification.claim_until <= now)
+            )
+        )
         | (
             (PaymentNotification.state == "claimed")
-            & (PaymentNotification.claim_until < now)
+            & (PaymentNotification.claim_until <= now)
         )
         | (
             (PaymentNotification.state == "compensation_retryable")
-            & (PaymentNotification.claim_until < now)
+            & (PaymentNotification.claim_until <= now)
         )
     ]
     if notification_id is not None:
@@ -185,12 +207,22 @@ async def claim_notification(
     row.attempts += 1
     await session.flush()
 
-    payment = await session.get(Payment, row.payment_id)
-    user_id = payment.user_id if isinstance(payment, Payment) else 0
+    user_id = 0
+    if row.quote_id is not None:
+        from database.models import TariffQuote
+
+        quote = await session.get(TariffQuote, row.quote_id)
+        if isinstance(quote, TariffQuote) and quote.user_id:
+            user_id = quote.user_id
+    elif row.payment_id is not None:
+        payment = await session.get(Payment, row.payment_id)
+        if isinstance(payment, Payment) and payment.user_id:
+            user_id = payment.user_id
 
     return NotificationClaim(
         notification_id=row.id,
         payment_id=row.payment_id,
+        quote_id=row.quote_id,
         user_id=user_id,
         chat_id=row.chat_id,
         kind=row.kind,
@@ -353,7 +385,8 @@ async def execute_notification_presentation(
                     elif claim.kind == "account_purchase":
                         from database.models import TariffQuote
 
-                        q = await session.get(TariffQuote, claim.payment_id)
+                        target_qid = claim.quote_id or claim.payment_id
+                        q = await session.get(TariffQuote, target_qid, with_for_update=True) if target_qid else None
                         if q and q.purchase_notified_at is None:
                             q.purchase_notified_at = now_utc()
         except Exception as phase3_exc:
@@ -364,12 +397,21 @@ async def execute_notification_presentation(
         if needs_compensation and msg_ids:
             from utils.telegram import _delete_hub_messages
 
+            is_edited_hub = bool(
+                claim.kind == "payment_url"
+                and claim.payload.get("trigger_message_id")
+                and not claim.payload.get("force_new")
+            )
             del_ok = False
-            try:
-                await _delete_hub_messages(bot, claim.chat_id, msg_ids)
+            if is_edited_hub:
+                # If we edited the user's existing hub message, do not delete the entire hub.
                 del_ok = True
-            except Exception as exc:
-                logger.warning("Failed to compensate orphan message %s: %s", msg_ids, exc)
+            else:
+                try:
+                    await _delete_hub_messages(bot, claim.chat_id, msg_ids)
+                    del_ok = True
+                except Exception as exc:
+                    logger.warning("Failed to compensate orphan message %s: %s", msg_ids, exc)
 
             try:
                 async with session_scope() as session:

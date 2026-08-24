@@ -349,3 +349,92 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             with patch("database.repositories.hub_repo.add_hub_message_id", AsyncMock(side_effect=RuntimeError("DB Connection Lost"))):
                 with self.assertRaises(RuntimeError):
                     await _store_hub_id_in_db(999, 12345, session=None)
+
+    async def test_account_purchase_outbox_uses_quote_id_and_isolated_enqueue(self):
+        """Verify ensure_payment_notification stores quote_id for account_purchase kind."""
+        from services.notification_coordinator import ensure_payment_notification
+
+        mock_session = AsyncMock()
+        mock_session.bind = None
+        mock_session.scalar.return_value = None
+
+        notif = await ensure_payment_notification(
+            mock_session,
+            quote_id=184,
+            kind="account_purchase",
+            chat_id=100200,
+            payload_snapshot={"quote_id": 184},
+        )
+        self.assertEqual(notif.quote_id, 184)
+        self.assertIsNone(notif.payment_id)
+        self.assertEqual(notif.kind, "account_purchase")
+
+    async def test_claim_notification_respects_claim_until_on_pending_state(self):
+        """Verify claim_notification query filters pending rows whose claim_until is in the future."""
+        from services.notification_coordinator import claim_notification
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = None
+
+        await claim_notification(mock_session, worker_id="w1", kind="payment_url")
+        mock_session.scalar.assert_awaited_once()
+        query = mock_session.scalar.call_args[0][0]
+        compiled = str(query)
+        self.assertIn("payment_notifications.claim_until <= :claim_until_", compiled)
+
+    async def test_compensation_preserves_edited_hub_message(self):
+        """Verify compensation phase does not delete user's hub message if trigger_message_id was edited."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=77,
+            payment_id=15,
+            chat_id=100400,
+            kind="payment_url",
+            state="claimed",
+            claim_token="tok_123",
+            attempt_number=1,
+            payload={"trigger_message_id": 8888, "force_new": False},
+        )
+
+        async def fake_render(bot, chat_id, payload):
+            return 8888  # Edited existing trigger message
+
+        session_prep = AsyncMock()
+        session_ack = AsyncMock()
+        # Mock payment with checkout_status='abandoned' to trigger compensation
+        mock_payment = Payment(
+            id=15, user_id=1, amount=Decimal(100), currency="RUB",
+            public_order_id="topup_test", provider_status="pending",
+            checkout_status="abandoned", ui_visible=False,
+        )
+        mock_notif = PaymentNotification(
+            id=77, payment_id=15, kind="payment_url", chat_id=100400,
+            state="claimed", claim_token="tok_123", attempts=1,
+        )
+        session_prep.get = AsyncMock(side_effect=[mock_payment, mock_notif])
+        session_ack.get = AsyncMock(side_effect=[mock_payment, mock_notif, mock_notif])
+
+        from contextlib import asynccontextmanager
+        count = 0
+        @asynccontextmanager
+        async def mock_scope():
+            nonlocal count
+            count += 1
+            if count == 1:
+                yield session_prep
+            else:
+                yield session_ack
+
+        with patch("database.connection.session_scope", mock_scope), \
+             patch("services.notification_coordinator.lock_checkout_user", AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock()) as mock_delete:
+            delivered = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            self.assertTrue(delivered)
+            # Ensure _delete_hub_messages was NEVER called because it was an edited hub message
+            mock_delete.assert_not_called()
+            self.assertEqual(mock_notif.state, "compensated")

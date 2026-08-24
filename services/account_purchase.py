@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -41,6 +42,8 @@ from services.audit_service import AuditService
 from services.referral_bonus import grant_referral_bonus_for_purchase
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 class AccountPurchaseError(RuntimeError):
@@ -428,20 +431,23 @@ async def _settle_account_purchase(
     from services.notification_coordinator import ensure_payment_notification
 
     if user.telegram_id:
-        await ensure_payment_notification(
-            session,
-            payment_id=quote.id,
-            kind="account_purchase",
-            chat_id=user.telegram_id,
-            payload_snapshot={
-                "quote_id": quote.id,
-                "operation_type": quote.operation_type,
-                "resulting_paid_hours": version.duration_hours,
-                "resulting_bonus_hours": 0,
-                "duration_hours": version.duration_hours,
-                "device_limit": version.device_limit,
-            },
-        )
+        try:
+            await ensure_payment_notification(
+                session,
+                quote_id=quote.id,
+                kind="account_purchase",
+                chat_id=user.telegram_id,
+                payload_snapshot={
+                    "quote_id": quote.id,
+                    "operation_type": quote.operation_type,
+                    "resulting_paid_hours": version.duration_hours,
+                    "resulting_bonus_hours": 0,
+                    "duration_hours": version.duration_hours,
+                    "device_limit": version.device_limit,
+                },
+            )
+        except Exception as notif_err:
+            logger.error("Failed to enqueue account_purchase notification for quote %s: %s", quote.id, notif_err)
 
     await session.flush()
     return AccountPurchaseSettlement(quote, debit, before, after, True)

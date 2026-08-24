@@ -23,7 +23,8 @@ def upgrade() -> None:
     op.create_table(
         "payment_notifications",
         sa.Column("id", sa.BigInteger(), nullable=False, primary_key=True),
-        sa.Column("payment_id", sa.Integer(), nullable=False),
+        sa.Column("payment_id", sa.Integer(), nullable=True),
+        sa.Column("quote_id", sa.Integer(), nullable=True),
         sa.Column("kind", sa.String(length=40), nullable=False),
         sa.Column("state", sa.String(length=30), server_default=sa.text("'pending'"), nullable=False),
         sa.Column("claim_token", sa.String(length=64), nullable=True),
@@ -38,10 +39,14 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["payment_id"], ["payments.id"], ondelete="RESTRICT"),
-        sa.UniqueConstraint("payment_id", "kind", name="uq_payment_notifications_payment_kind"),
+        sa.ForeignKeyConstraint(["quote_id"], ["tariff_quotes.id"], ondelete="RESTRICT"),
         sa.CheckConstraint(
             "kind IN ('payment_url','balance_credit','referral_bonus','account_purchase')",
             name="ck_payment_notifications_kind",
+        ),
+        sa.CheckConstraint(
+            "((kind = 'account_purchase' AND quote_id IS NOT NULL AND payment_id IS NULL) OR (kind != 'account_purchase' AND payment_id IS NOT NULL AND quote_id IS NULL))",
+            name="ck_payment_notifications_aggregate",
         ),
         sa.CheckConstraint(
             "state IN ('pending','claimed','delivered','compensation_required','compensation_retryable','compensated','dead')",
@@ -59,9 +64,31 @@ def upgrade() -> None:
         "payment_notifications",
         ["payment_id"],
     )
+    op.create_index(
+        "ix_payment_notifications_quote_id",
+        "payment_notifications",
+        ["quote_id"],
+    )
+    op.create_index(
+        "uq_payment_notifications_payment_kind",
+        "payment_notifications",
+        ["payment_id", "kind"],
+        unique=True,
+        postgresql_where=sa.text("payment_id IS NOT NULL"),
+    )
+    op.create_index(
+        "uq_payment_notifications_quote_kind",
+        "payment_notifications",
+        ["quote_id", "kind"],
+        unique=True,
+        postgresql_where=sa.text("quote_id IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("uq_payment_notifications_quote_kind", table_name="payment_notifications")
+    op.drop_index("uq_payment_notifications_payment_kind", table_name="payment_notifications")
+    op.drop_index("ix_payment_notifications_quote_id", table_name="payment_notifications")
     op.drop_index("ix_payment_notifications_payment_id", table_name="payment_notifications")
     op.drop_index("ix_payment_notifications_claim", table_name="payment_notifications")
     op.drop_table("payment_notifications")

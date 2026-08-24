@@ -118,20 +118,23 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
             dur_h,
             dev_lim,
         ) in rows:
-            await ensure_payment_notification(
-                session,
-                payment_id=quote_id,
-                kind="account_purchase",
-                chat_id=telegram_id,
-                payload_snapshot={
-                    "quote_id": quote_id,
-                    "operation_type": op_type,
-                    "resulting_paid_hours": paid_h,
-                    "resulting_bonus_hours": bonus_h,
-                    "duration_hours": dur_h,
-                    "device_limit": dev_lim,
-                },
-            )
+            try:
+                await ensure_payment_notification(
+                    session,
+                    quote_id=quote_id,
+                    kind="account_purchase",
+                    chat_id=telegram_id,
+                    payload_snapshot={
+                        "quote_id": quote_id,
+                        "operation_type": op_type,
+                        "resulting_paid_hours": paid_h,
+                        "resulting_bonus_hours": bonus_h,
+                        "duration_hours": dur_h,
+                        "device_limit": dev_lim,
+                    },
+                )
+            except Exception as row_exc:
+                logger.error("Failed to backfill purchase notification for quote %s: %s", quote_id, row_exc)
 
     delivered = 0
     for _ in range(BALANCE_NOTIFICATION_BATCH):

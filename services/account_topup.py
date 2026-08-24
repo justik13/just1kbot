@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
@@ -21,6 +22,8 @@ from database.repositories.tariff_quotes_repo import lock_checkout_user
 from services.payment_disputes import refresh_user_dispute_hold
 from services.payment_provider_operations import enqueue_create
 from utils.datetime_helpers import now_utc
+
+logger = logging.getLogger(__name__)
 
 
 def get_topup_description(context: dict | None = None) -> str:
@@ -544,34 +547,40 @@ async def settle_succeeded_topup(
 
         queued_notif_ids: list[tuple[int, str]] = []
         if user and user.telegram_id and not source.startswith("user_refresh"):
-            notif_credit = await ensure_payment_notification(
-                session,
-                payment_id=payment.id,
-                kind="balance_credit",
-                chat_id=user.telegram_id,
-                payload_snapshot={
-                    "amount": int(payment.amount),
-                    "user_id": user.id,
-                    "topup_context": dict(payment.topup_context or {}),
-                },
-            )
-            if notif_credit:
-                queued_notif_ids.append((notif_credit.id, "balance_credit"))
+            try:
+                notif_credit = await ensure_payment_notification(
+                    session,
+                    payment_id=payment.id,
+                    kind="balance_credit",
+                    chat_id=user.telegram_id,
+                    payload_snapshot={
+                        "amount": int(payment.amount),
+                        "user_id": user.id,
+                        "topup_context": dict(payment.topup_context or {}),
+                    },
+                )
+                if notif_credit:
+                    queued_notif_ids.append((notif_credit.id, "balance_credit"))
+            except Exception as credit_err:
+                logger.error("Failed to enqueue balance_credit notification for payment %s: %s", payment.id, credit_err)
 
         if int(referrer_bonus_amount) > 0 and user is not None and user.referred_by:
-            notif_ref = await ensure_payment_notification(
-                session,
-                payment_id=payment.id,
-                kind="referral_bonus",
-                chat_id=user.referred_by,
-                payload_snapshot={
-                    "bonus": int(referrer_bonus_amount),
-                    "referrer_bonus": int(referrer_bonus_amount),
-                    "payment_id": payment.id,
-                },
-            )
-            if notif_ref:
-                queued_notif_ids.append((notif_ref.id, "referral_bonus"))
+            try:
+                notif_ref = await ensure_payment_notification(
+                    session,
+                    payment_id=payment.id,
+                    kind="referral_bonus",
+                    chat_id=user.referred_by,
+                    payload_snapshot={
+                        "bonus": int(referrer_bonus_amount),
+                        "referrer_bonus": int(referrer_bonus_amount),
+                        "payment_id": payment.id,
+                    },
+                )
+                if notif_ref:
+                    queued_notif_ids.append((notif_ref.id, "referral_bonus"))
+            except Exception as ref_err:
+                logger.error("Failed to enqueue referral_bonus notification for payment %s: %s", payment.id, ref_err)
 
         if bot is not None and queued_notif_ids:
             try:

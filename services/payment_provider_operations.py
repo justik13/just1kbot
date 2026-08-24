@@ -641,13 +641,21 @@ async def recover_stale(session=None, lease_seconds=PROVIDER_LEASE_SECONDS) -> i
             if not operation or operation.status != "processing" or (operation.locked_at and operation.locked_at >= threshold):
                 continue
 
-            if operation.attempts >= operation.max_attempts:
-                operation.status = "dead"
-                operation.last_error_code = "lease_expired"
-            else:
-                operation.status = "retry"
+            dead = operation.attempts >= operation.max_attempts
+            operation.status = "dead" if dead else "retry"
+            operation.completed_at = now_utc() if dead else None
             operation.locked_at = None
             operation.locked_by = None
+            operation.next_attempt_at = now_utc()
+
+            if payment.provider_status in {"succeeded", "refunded", "canceled"}:
+                payment.reconciliation_status = "manual_review" if dead else "required"
+            elif dead:
+                payment.provider_status = "manual_review"
+                payment.reconciliation_status = "manual_review"
+                payment.fulfillment_status = "manual_review"
+            else:
+                payment.reconciliation_status = "required"
             await session.flush()
             count += 1
         return count
