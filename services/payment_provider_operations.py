@@ -494,6 +494,7 @@ async def finalize(session, claim, result, bot=None):
                                             "payment_id": payment.id,
                                             "amount": int(payment.amount),
                                             "message_id": ctx.get("message_id"),
+                                            "trigger_message_id": ctx.get("message_id"),
                                         },
                                     )
                             except Exception as purl_err:

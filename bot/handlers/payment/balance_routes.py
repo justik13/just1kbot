@@ -240,6 +240,7 @@ async def _create_and_render_topup(
             **(result.payment.topup_context or {}),
             **context,
         }
+    await session.commit()
     await _render_topup(
         bot, chat_id, session, user, result.payment
     )
@@ -506,6 +507,7 @@ async def check_topup(
         payment = await request_topup_status_refresh(
             session, payment_id=payment.id
         )
+        await session.commit()
     except AccountTopupError:
         await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
         return
@@ -558,6 +560,7 @@ async def cancel_topup_ui(
         await hide_balance_topup(
             session, user_id=db_user.id, payment_id=payment_id
         )
+        await session.commit()
     except AccountTopupError:
         await callback.answer(texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True)
         return
@@ -583,6 +586,7 @@ async def cancel_all_topups_ui(
         return
     from services.account_topup import cancel_all_unfinished_topups
     count = await cancel_all_unfinished_topups(session, user_id=db_user.id)
+    await session.commit()
     if count == 0:
         await callback.answer(texts.TOPUP_ALREADY_FINISHED_ALERT, show_alert=True)
     await _render_balance(
@@ -610,6 +614,7 @@ async def return_later(
             **(payment.topup_context or {}),
             "auto_show": False,
         }
+        await session.commit()
     await _render_balance(
         callback.bot,
         callback.message.chat.id,

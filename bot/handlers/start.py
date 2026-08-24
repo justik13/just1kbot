@@ -227,6 +227,7 @@ async def cmd_start(
 
             if payment:
                 refreshed = await request_topup_status_refresh(session, payment_id=payment.id)
+                await session.commit()
                 if refreshed.fulfillment_status == "succeeded":
                     from bot.handlers.payment.balance_routes import _render_balance
                     await _render_balance(

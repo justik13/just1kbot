@@ -697,8 +697,6 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
         from services.notification_coordinator import execute_notification_presentation, NotificationClaim
 
         mock_bot = AsyncMock()
-        mock_msg = AsyncMock(message_id=901)
-        mock_bot.send_message = AsyncMock(return_value=mock_msg)
 
         claim = NotificationClaim(
             notification_id=888,
@@ -706,10 +704,11 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             user_id=1,
             chat_id=12345,
             kind="balance_credit",
-            state="claimed",
+            state="compensation_required",
             claim_token="claim_tok_888",
             attempt_number=1,
             payload={"amount": 100, "user_id": 1},
+            telegram_message_ids=[901],
         )
 
         mock_notif = PaymentNotification(
@@ -717,8 +716,9 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             payment_id=50,
             chat_id=12345,
             kind="balance_credit",
-            state="claimed",
+            state="compensation_required",
             claim_token="claim_tok_888",
+            telegram_message_ids=[901],
         )
 
         mock_db_session = AsyncMock()
@@ -730,17 +730,11 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             async def __aexit__(self, *args):
                 pass
 
-        async def render_func(b, c_id, payload):
-            return 901
-
-        # Simulate Phase 3 DB failure triggering Phase 4 compensation,
-        # and _delete_hub_messages returns failed_ids=[901] (Telegram failure)
         with patch("database.connection.session_scope", return_value=DummyContext()), \
-             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[901])), \
-             patch.object(mock_db_session, "execute", AsyncMock(side_effect=Exception("DB deadlocked in Phase 3"))):
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[901])):
 
-            res = await execute_notification_presentation(mock_bot, claim, render_func=render_func)
-            self.assertTrue(res)
+            res = await execute_notification_presentation(mock_bot, claim, render_func=AsyncMock())
+            self.assertFalse(res)
             # Must transition to compensation_retryable (NOT compensated)
             self.assertEqual(mock_notif.state, "compensation_retryable")
             self.assertIsNotNone(mock_notif.claim_until)
@@ -801,4 +795,341 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
                 await queued_callbacks[0]()
                 # execute_notification_presentation MUST NOT be called with a synthetic claim
                 mock_present.assert_not_called()
+
+    async def test_account_purchase_conditional_compensation_on_concurrent_sync_notification(self):
+        """Verify Phase 3 detects quote.purchase_notified_at set concurrently and compensates duplicate worker bubble."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=901,
+            payment_id=None,
+            quote_id=55,
+            user_id=1,
+            chat_id=12345,
+            kind="account_purchase",
+            state="claimed",
+            claim_token="claim_tok_901",
+            attempt_number=1,
+            payload={"quote_id": 55},
+        )
+
+        mock_quote_phase1 = TariffQuote(id=55, status="consumed", purchase_notified_at=None)
+        mock_quote_phase3 = TariffQuote(id=55, status="consumed", purchase_notified_at=now_utc())
+        mock_notif = PaymentNotification(
+            id=901,
+            quote_id=55,
+            chat_id=12345,
+            kind="account_purchase",
+            state="claimed",
+            claim_token="claim_tok_901",
+        )
+
+        session_phase1 = AsyncMock()
+        session_phase1.get = AsyncMock(return_value=mock_quote_phase1)
+
+        session_phase3 = AsyncMock()
+        session_phase3.get = AsyncMock(side_effect=[mock_notif, mock_quote_phase3, mock_notif])
+
+        class MultiContext:
+            calls = 0
+            async def __aenter__(self):
+                MultiContext.calls += 1
+                if MultiContext.calls == 1:
+                    return session_phase1
+                return session_phase3
+            async def __aexit__(self, *args):
+                pass
+
+        async def fake_render(bot, chat_id, payload):
+            return 888111
+
+        with patch("database.connection.session_scope", MultiContext), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
+            res = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            self.assertTrue(res)
+            # Duplicate message 888111 MUST be deleted via compensation
+            mock_delete.assert_awaited_once_with(mock_bot, 12345, [888111])
+            self.assertEqual(mock_notif.state, "compensated")
+            self.assertEqual(mock_notif.last_error, "already_notified_concurrently")
+
+    async def test_hub_message_fallback_send_deleted_on_compensation_when_not_true_edit(self):
+        """Verify fallback new message (msg_ids != [trigger_id]) is deleted on compensation."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=902,
+            payment_id=60,
+            user_id=1,
+            chat_id=12345,
+            kind="payment_url",
+            state="claimed",
+            claim_token="claim_tok_902",
+            attempt_number=1,
+            payload={"message_id": 500},  # trigger_id was 500
+        )
+
+        mock_payment_phase1 = Payment(id=60, user_id=1, checkout_status="active", ui_visible=True)
+        mock_payment_phase3 = Payment(id=60, user_id=1, checkout_status="abandoned", ui_visible=False)
+        mock_notif = PaymentNotification(
+            id=902,
+            payment_id=60,
+            chat_id=12345,
+            kind="payment_url",
+            state="claimed",
+            claim_token="claim_tok_902",
+        )
+
+        session_phase1 = AsyncMock()
+        session_phase1.get = AsyncMock(return_value=mock_payment_phase1)
+
+        session_phase3 = AsyncMock()
+        session_phase3.get = AsyncMock(side_effect=[mock_payment_phase3, mock_notif, mock_notif])
+
+        class MultiStepContext:
+            calls = 0
+            async def __aenter__(self):
+                MultiStepContext.calls += 1
+                if MultiStepContext.calls == 1:
+                    return session_phase1
+                return session_phase3
+            async def __aexit__(self, *args):
+                pass
+
+        # render_func sent a NEW message 999 instead of editing 500
+        async def fake_render(bot, chat_id, payload):
+            return 999
+
+        with patch("database.connection.session_scope", MultiStepContext), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
+            res = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            self.assertTrue(res)
+            # New orphan message 999 MUST be deleted
+            mock_delete.assert_awaited_once_with(mock_bot, 12345, [999])
+            self.assertEqual(mock_notif.state, "compensated")
+
+    async def test_hub_message_true_edit_preserved_on_compensation(self):
+        """Verify true edit (msg_ids == [trigger_id]) is preserved on compensation."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=903,
+            payment_id=61,
+            user_id=1,
+            chat_id=12345,
+            kind="payment_url",
+            state="claimed",
+            claim_token="claim_tok_903",
+            attempt_number=1,
+            payload={"message_id": 500},
+        )
+
+        mock_payment_phase1 = Payment(id=61, user_id=1, checkout_status="active", ui_visible=True)
+        mock_payment_phase3 = Payment(id=61, user_id=1, checkout_status="abandoned", ui_visible=False)
+        mock_notif = PaymentNotification(
+            id=903,
+            payment_id=61,
+            chat_id=12345,
+            kind="payment_url",
+            state="claimed",
+            claim_token="claim_tok_903",
+        )
+
+        session_phase1 = AsyncMock()
+        session_phase1.get = AsyncMock(return_value=mock_payment_phase1)
+
+        session_phase3 = AsyncMock()
+        session_phase3.get = AsyncMock(side_effect=[mock_payment_phase3, mock_notif, mock_notif])
+
+        class MultiStepContext:
+            calls = 0
+            async def __aenter__(self):
+                MultiStepContext.calls += 1
+                if MultiStepContext.calls == 1:
+                    return session_phase1
+                return session_phase3
+            async def __aexit__(self, *args):
+                pass
+
+        # render_func successfully edited the existing trigger message 500
+        async def fake_render(bot, chat_id, payload):
+            return 500
+
+        with patch("database.connection.session_scope", MultiStepContext), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock(return_value=[])) as mock_delete:
+            res = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            self.assertTrue(res)
+            # Existing hub message 500 MUST NOT be deleted
+            mock_delete.assert_not_called()
+            self.assertEqual(mock_notif.state, "compensated")
+
+    async def test_phase3_lock_failure_does_not_trigger_false_compensation(self):
+        """Verify Phase 3 user lock transient failure returns False without deleting delivered messages."""
+        from services.notification_coordinator import (
+            NotificationClaim,
+            execute_notification_presentation,
+        )
+
+        mock_bot = AsyncMock()
+        claim = NotificationClaim(
+            notification_id=904,
+            payment_id=62,
+            user_id=1,
+            chat_id=12345,
+            kind="balance_credit",
+            state="claimed",
+            claim_token="claim_tok_904",
+            attempt_number=1,
+            payload={"amount": 500},
+        )
+
+        mock_payment = Payment(id=62, user_id=1, credited_at=now_utc())
+        session_phase1 = AsyncMock()
+        session_phase1.get = AsyncMock(return_value=mock_payment)
+
+        class MultiContext:
+            calls = 0
+            async def __aenter__(self):
+                MultiContext.calls += 1
+                if MultiContext.calls == 1:
+                    return session_phase1
+                raise RuntimeError("DB lock acquisition timeout in Phase 3")
+            async def __aexit__(self, *args):
+                pass
+
+        async def fake_render(bot, chat_id, payload):
+            return 777111
+
+        with patch("database.connection.session_scope", MultiContext), \
+             patch("utils.telegram._delete_hub_messages", AsyncMock()) as mock_delete:
+            res = await execute_notification_presentation(mock_bot, claim, render_func=fake_render)
+            # Returns False (retryable)
+            self.assertFalse(res)
+            # Must NOT falsely delete the message
+            mock_delete.assert_not_called()
+
+    async def test_recover_stale_isolated_continues_on_row_failure(self):
+        """Verify recover_stale_isolated continues processing batch even if one row raises."""
+        from services.provider_refunds import (
+            ProviderRefundOperation,
+            recover_stale_isolated,
+        )
+
+        stale_rows = [(1, 10, 100), (2, 20, 200)]
+        session_list = AsyncMock()
+        session_list.execute = AsyncMock(return_value=MagicMock(all=MagicMock(return_value=stale_rows)))
+
+        mock_op = ProviderRefundOperation(
+            id=2, payment_id=20, status="processing", locked_at=now_utc() - timedelta(minutes=10),
+            attempts=1, max_attempts=5,
+        )
+        mock_pay = Payment(id=20, user_id=200)
+
+        session_row2 = AsyncMock()
+        session_row2.scalar = AsyncMock(side_effect=[mock_pay, mock_op])
+
+        class StepContext:
+            call_count = 0
+            async def __aenter__(self):
+                StepContext.call_count += 1
+                if StepContext.call_count == 1:
+                    return session_list
+                if StepContext.call_count == 2:
+                    raise RuntimeError("Transient connection error on row 1")
+                return session_row2
+            async def __aexit__(self, *args):
+                pass
+
+        with patch("database.connection.session_scope", StepContext), \
+             patch("services.provider_refunds.lock_account_user", AsyncMock()):
+            recovered = await recover_stale_isolated(lease_seconds=60)
+            # Row 2 successfully recovered despite Row 1 failure
+            self.assertEqual(recovered, 1)
+            self.assertEqual(mock_op.status, "retry")
+
+    async def test_caption_entities_error_falls_back_to_plain_text(self):
+        """Verify send_hub_photo falls back to plain text when HTML parsing fails on truncated tag."""
+        from aiogram.exceptions import TelegramBadRequest
+        from aiogram.types import BufferedInputFile
+        from utils.telegram import send_hub_photo
+
+        mock_bot = AsyncMock()
+        mock_bot.send_photo = AsyncMock(
+            side_effect=[
+                TelegramBadRequest(method="sendPhoto", message="Bad Request: can't parse entities: unclosed tag"),
+                AsyncMock(message_id=999222),
+            ]
+        )
+
+        fake_photo = BufferedInputFile(b"fake_img", filename="test.jpg")
+        with patch("utils.telegram._load_hub_ids_from_db", AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", AsyncMock()):
+            msg_id = await send_hub_photo(
+                mock_bot,
+                chat_id=12345,
+                photo=fake_photo,
+                caption="<b>Unclosed bold text",
+            )
+            self.assertEqual(msg_id, 999222)
+            self.assertEqual(mock_bot.send_photo.call_count, 2)
+            # Second call sent with parse_mode=None and stripped plain text
+            second_call_kwargs = mock_bot.send_photo.call_args_list[1].kwargs
+            self.assertIsNone(second_call_kwargs.get("parse_mode"))
+            self.assertEqual(second_call_kwargs.get("caption"), "Unclosed bold text")
+
+    async def test_ensure_payment_notification_postgres_dialect_no_unbound_local_error(self):
+        """Verify ensure_payment_notification does not raise UnboundLocalError when executed against PostgreSQL dialect."""
+        from services.notification_coordinator import ensure_payment_notification
+
+        class FakeDialect:
+            name = "postgresql"
+
+        class FakeEngine:
+            dialect = FakeDialect()
+
+        class RealLookingSession:
+            def __init__(self):
+                self.bind = FakeEngine()
+                self.executed = []
+                self.flushed = False
+
+            async def execute(self, stmt):
+                self.executed.append(stmt)
+
+            async def flush(self):
+                self.flushed = True
+
+            async def scalar(self, stmt):
+                return PaymentNotification(
+                    id=777,
+                    payment_id=42,
+                    kind="payment_url",
+                    chat_id=12345,
+                    state="pending",
+                )
+
+        fake_session = RealLookingSession()
+        notif = await ensure_payment_notification(
+            fake_session,
+            payment_id=42,
+            kind="payment_url",
+            chat_id=12345,
+            payload_snapshot={"test": 1},
+        )
+        self.assertIsNotNone(notif)
+        self.assertEqual(notif.id, 777)
+        self.assertEqual(len(fake_session.executed), 1)
+        self.assertTrue(fake_session.flushed)
+
 

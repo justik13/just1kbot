@@ -355,7 +355,7 @@ async def finalize(session, claim, result, bot=None):
                     seconds=10,
                 )
                 return
-            if observed != expected:
+            if observed != expected and transition.outcome == "conflict":
                 payment.reconciliation_status = "mismatch"
                 session.add(
                     PaymentEvent(

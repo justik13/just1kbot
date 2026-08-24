@@ -448,9 +448,9 @@ async def send_hub_photo(
     bot,
     chat_id: int,
     photo: InputFile,
-    caption: str,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
+    caption: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
 ) -> int:
     _maybe_cleanup_cache()
 
@@ -461,13 +461,31 @@ async def send_hub_photo(
         if caption:
             caption = caption[:1024]
 
-        msg = await bot.send_photo(
-            chat_id=chat_id,
-            photo=photo,
-            caption=caption,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
+        try:
+            msg = await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+        except TelegramBadRequest as exc:
+            error = str(exc).lower()
+            if "parse" in error or "entities" in error:
+                logger.warning(
+                    "HTML parse failed in send_hub_photo for chat %s; using plain text",
+                    chat_id,
+                )
+                plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
+                msg = await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=plain,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                )
+            else:
+                raise
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
@@ -481,9 +499,9 @@ async def send_hub_document(
     bot,
     chat_id: int,
     document: InputFile,
-    caption: str,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
+    caption: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
 ) -> int:
     _maybe_cleanup_cache()
 
@@ -494,13 +512,31 @@ async def send_hub_document(
         if caption:
             caption = caption[:1024]
 
-        msg = await bot.send_document(
-            chat_id=chat_id,
-            document=document,
-            caption=caption,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
-        )
+        try:
+            msg = await bot.send_document(
+                chat_id=chat_id,
+                document=document,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
+        except TelegramBadRequest as exc:
+            error = str(exc).lower()
+            if "parse" in error or "entities" in error:
+                logger.warning(
+                    "HTML parse failed in send_hub_document for chat %s; using plain text",
+                    chat_id,
+                )
+                plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
+                msg = await bot.send_document(
+                    chat_id=chat_id,
+                    document=document,
+                    caption=plain,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                )
+            else:
+                raise
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
@@ -514,21 +550,39 @@ async def _append_hub_document_unlocked(
     bot,
     chat_id: int,
     document: InputFile,
-    caption: str = None,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
+    caption: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
     session: AsyncSession | None = None,
 ) -> int:
     if caption:
         caption = caption[:1024]
 
-    msg = await bot.send_document(
-        chat_id=chat_id,
-        document=document,
-        caption=caption,
-        reply_markup=reply_markup,
-        parse_mode=parse_mode,
-    )
+    try:
+        msg = await bot.send_document(
+            chat_id=chat_id,
+            document=document,
+            caption=caption,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
+    except TelegramBadRequest as exc:
+        error = str(exc).lower()
+        if "parse" in error or "entities" in error:
+            logger.warning(
+                "HTML parse failed in _append_hub_document_unlocked for chat %s; using plain text",
+                chat_id,
+            )
+            plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
+            msg = await bot.send_document(
+                chat_id=chat_id,
+                document=document,
+                caption=plain,
+                reply_markup=reply_markup,
+                parse_mode=None,
+            )
+        else:
+            raise
 
     try:
         await _store_hub_id_in_db(chat_id, msg.message_id, session=session)
@@ -547,9 +601,9 @@ async def append_hub_document(
     bot,
     chat_id: int,
     document: InputFile,
-    caption: str = None,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
+    caption: str | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
     session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()

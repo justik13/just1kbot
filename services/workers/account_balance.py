@@ -298,6 +298,7 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                             "payment_id": pid,
                             "amount": int(amount),
                             "message_id": ctx.get("message_id"),
+                            "trigger_message_id": ctx.get("message_id"),
                         },
                     )
             except Exception as purl_exc:

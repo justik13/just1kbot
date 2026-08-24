@@ -89,6 +89,7 @@ async def ensure_payment_notification(
     except Exception:
         pass
 
+    existing: PaymentNotification | None = None
     if is_postgres:
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -136,33 +137,22 @@ async def ensure_payment_notification(
             )
             session.add(notif)
             await session.flush()
-            if getattr(notif, "id", None) is None:
-                notif.id = quote_id or payment_id or 1
+            existing = notif
 
-    filter_expr = (
-        (PaymentNotification.quote_id == quote_id)
-        if quote_id is not None
-        else (PaymentNotification.payment_id == payment_id)
-    )
-    notif = await session.scalar(
-        select(PaymentNotification).where(
-            filter_expr,
-            PaymentNotification.kind == kind,
+    notif = existing
+    if notif is None:
+        filter_expr = (
+            (PaymentNotification.quote_id == quote_id)
+            if quote_id is not None
+            else (PaymentNotification.payment_id == payment_id)
         )
-    )
-    if not isinstance(notif, PaymentNotification):
-        notif = PaymentNotification(
-            id=quote_id or payment_id or 1,
-            payment_id=payment_id,
-            quote_id=quote_id,
-            kind=kind,
-            chat_id=chat_id,
-            payload_snapshot=snapshot,
-            telegram_message_ids=[],
-            state="pending",
-            claim_until=now,
+        notif = await session.scalar(
+            select(PaymentNotification).where(
+                filter_expr,
+                PaymentNotification.kind == kind,
+            )
         )
-    elif notif.state == "pending" and snapshot:
+    if notif and notif.state == "pending" and snapshot:
         notif.payload_snapshot = {**(notif.payload_snapshot or {}), **snapshot}
         await session.flush()
     return notif
@@ -303,6 +293,9 @@ async def execute_notification_presentation(
                 if q is None or q.status != "consumed":
                     is_applicable = False
                     cancel_reason = "quote_not_consumed"
+                elif q.purchase_notified_at is not None:
+                    is_applicable = False
+                    cancel_reason = "already_notified"
 
             if not is_applicable:
                 notif = await session.get(PaymentNotification, claim.notification_id)
@@ -311,7 +304,8 @@ async def execute_notification_presentation(
                     notif.last_error = cancel_reason
                 return True
     except Exception as phase1_exc:
-        logger.debug("Phase 1 check error: %s", phase1_exc)
+        logger.warning("Phase 1 check transient error: %s", phase1_exc)
+        return False
 
     # Phase 2: Lock-Free External Telegram I/O
     raw_msg_result: Any = None
@@ -365,10 +359,7 @@ async def execute_notification_presentation(
         try:
             async with session_scope() as session:
                 if claim.user_id:
-                    try:
-                        await lock_checkout_user(session, claim.user_id)
-                    except Exception:
-                        pass
+                    await lock_checkout_user(session, claim.user_id)
                 p = await session.get(Payment, claim.payment_id, with_for_update=True) if claim.payment_id else None
                 notif = await session.get(PaymentNotification, claim.notification_id, with_for_update=True)
 
@@ -383,6 +374,31 @@ async def execute_notification_presentation(
                         notif.telegram_message_ids = msg_ids
                         notif.claim_until = now_utc()
                     needs_compensation = True
+                elif claim.kind == "account_purchase":
+                    from database.models import TariffQuote
+
+                    target_qid = claim.quote_id or claim.payment_id
+                    q = await session.get(TariffQuote, target_qid, with_for_update=True) if target_qid else None
+                    if q is None or q.status != "consumed" or q.purchase_notified_at is not None:
+                        # Interactive handler already presented success, or quote invalid while Phase 2 was in-flight.
+                        # Compensate the worker's duplicate message.
+                        if isinstance(notif, PaymentNotification):
+                            notif.state = "compensation_required"
+                            notif.telegram_message_id = last_msg_id
+                            notif.telegram_message_ids = msg_ids
+                            notif.claim_until = now_utc()
+                            notif.last_error = (
+                                "already_notified_concurrently"
+                                if (q and q.purchase_notified_at is not None)
+                                else "quote_not_consumed"
+                            )
+                        needs_compensation = True
+                    else:
+                        q.purchase_notified_at = now_utc()
+                        if isinstance(notif, PaymentNotification):
+                            notif.state = "delivered"
+                            notif.telegram_message_id = last_msg_id
+                            notif.telegram_message_ids = msg_ids
                 else:
                     # Success!
                     if isinstance(notif, PaymentNotification):
@@ -414,25 +430,19 @@ async def execute_notification_presentation(
                             **cur_ctx,
                             "referrer_notified_at": now_utc().isoformat(),
                         }
-                    elif claim.kind == "account_purchase":
-                        from database.models import TariffQuote
-
-                        target_qid = claim.quote_id or claim.payment_id
-                        q = await session.get(TariffQuote, target_qid, with_for_update=True) if target_qid else None
-                        if q and q.purchase_notified_at is None:
-                            q.purchase_notified_at = now_utc()
         except Exception as phase3_exc:
-            logger.warning("Phase 3 ack error: %s", phase3_exc)
-            needs_compensation = True
+            logger.warning("Phase 3 ack transient error: %s", phase3_exc)
+            return False
 
         # Phase 4: Lock-Free Compensation I/O
         if needs_compensation and msg_ids:
             from utils.telegram import _delete_hub_messages
 
+            trigger_id = claim.payload.get("trigger_message_id") or claim.payload.get("message_id")
             is_edited_hub = bool(
                 claim.kind == "payment_url"
-                and claim.payload.get("trigger_message_id")
-                and not claim.payload.get("force_new")
+                and trigger_id
+                and msg_ids == [trigger_id]
             )
             del_ok = False
             if is_edited_hub:
