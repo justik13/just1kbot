@@ -30,7 +30,7 @@ def get_tariff_showcase_keyboard(
 
 
 def format_dynamic_tariff_button(t, base_tariff=None) -> str:
-    """Dynamically calculates monthly price equivalent and discount percent relative to base duration."""
+    """Dynamically calculates discount percent relative to base duration."""
     days = getattr(t, "duration_days", 0)
     price = getattr(t, "price_rub", 0)
 
@@ -56,19 +56,17 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         discount_pct = 0
         savings_rub = 0
 
-    price_per_month = _round_half_up((curr_price * Decimal("30")) / curr_days) if curr_days > 0 else int(curr_price)
-
     display_price = int(curr_price) if int(curr_price) == curr_price else curr_price
 
     if savings_rub <= 0 or discount_pct <= 0:
         return f"⏱ {days} дн. — {display_price} ₽"
 
     if days >= 360:
-        return f"💎 {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+        return f"💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
     elif days >= 180:
-        return f"⚡️ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+        return f"⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
     elif days >= 90:
-        return f"⏱ {days} дн. — {display_price} ₽ ({price_per_month} ₽/мес • -{discount_pct}%) 🔥"
+        return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
     return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 

@@ -145,9 +145,13 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
         return list(cached["ids"])
 
     if session is not None:
-        ids = await hub_repo.get_hub_message_ids(session, chat_id)
-        _hub_cache[chat_id] = {"ids": list(ids)}
-        return list(ids)
+        try:
+            ids = await hub_repo.get_hub_message_ids(session, chat_id)
+            _hub_cache[chat_id] = {"ids": list(ids)}
+            return list(ids)
+        except Exception as e:
+            logger.warning("Failed to load hub ids from DB (with session) for chat %s: %s", chat_id, e)
+            return []
 
     try:
         async with session_scope() as sess:
@@ -155,28 +159,31 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
         _hub_cache[chat_id] = {"ids": list(ids)}
         return list(ids)
     except Exception as e:
-        logger.error("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
-        raise
+        logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
+        return []
 
 
 async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSession | None = None) -> None:
     if session is not None:
-        await hub_repo.add_hub_message_id(session, chat_id, message_id)
-        from database.connection import queue_post_commit_task, queue_rollback_task
+        try:
+            await hub_repo.add_hub_message_id(session, chat_id, message_id)
+            from database.connection import queue_post_commit_task, queue_rollback_task
 
-        async def _update_cache_post_commit():
-            cached = _hub_cache.get(chat_id)
-            if cached and "ids" in cached:
-                if message_id not in cached["ids"]:
-                    cached["ids"].append(message_id)
-            else:
-                _hub_cache[chat_id] = {"ids": [message_id]}
+            async def _update_cache_post_commit():
+                cached = _hub_cache.get(chat_id)
+                if cached and "ids" in cached:
+                    if message_id not in cached["ids"]:
+                        cached["ids"].append(message_id)
+                else:
+                    _hub_cache[chat_id] = {"ids": [message_id]}
 
-        async def _invalidate_cache_on_rollback():
-            _hub_cache.pop(chat_id, None)
+            async def _invalidate_cache_on_rollback():
+                _hub_cache.pop(chat_id, None)
 
-        queue_post_commit_task(session, _update_cache_post_commit)
-        queue_rollback_task(session, _invalidate_cache_on_rollback)
+            queue_post_commit_task(session, _update_cache_post_commit)
+            queue_rollback_task(session, _invalidate_cache_on_rollback)
+        except Exception as e:
+            logger.warning("Failed to store hub id in DB (with session) for chat %s: %s", chat_id, e)
     else:
         try:
             async with session_scope() as sess:
@@ -188,8 +195,7 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSessi
             else:
                 _hub_cache[chat_id] = {"ids": [message_id]}
         except Exception as e:
-            logger.error("Failed to store hub id in DB for chat %s: %s", chat_id, e)
-            raise
+            logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
 
 
 async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session: AsyncSession | None = None) -> None:
@@ -197,20 +203,23 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
         return
 
     if session is not None:
-        await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
-        from database.connection import queue_post_commit_task, queue_rollback_task
+        try:
+            await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
+            from database.connection import queue_post_commit_task, queue_rollback_task
 
-        async def _update_cache_post_commit():
-            cached = _hub_cache.get(chat_id)
-            if cached and "ids" in cached:
-                old_set = set(message_ids)
-                cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+            async def _update_cache_post_commit():
+                cached = _hub_cache.get(chat_id)
+                if cached and "ids" in cached:
+                    old_set = set(message_ids)
+                    cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
 
-        async def _invalidate_cache_on_rollback():
-            _hub_cache.pop(chat_id, None)
+            async def _invalidate_cache_on_rollback():
+                _hub_cache.pop(chat_id, None)
 
-        queue_post_commit_task(session, _update_cache_post_commit)
-        queue_rollback_task(session, _invalidate_cache_on_rollback)
+            queue_post_commit_task(session, _update_cache_post_commit)
+            queue_rollback_task(session, _invalidate_cache_on_rollback)
+        except Exception as e:
+            logger.warning("Failed to remove hub ids from DB (with session) for chat %s: %s", chat_id, e)
     else:
         try:
             async with session_scope() as sess:
@@ -220,8 +229,7 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
                 old_set = set(message_ids)
                 cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
         except Exception as e:
-            logger.error("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
-            raise
+            logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
 
 
 async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:
