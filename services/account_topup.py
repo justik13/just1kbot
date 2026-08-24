@@ -108,7 +108,10 @@ async def _pending_topup_exposure(
             or_(
                 and_(
                     Payment.external_id.is_not(None),
-                    Payment.provider_status.not_in(("canceled", "refunded", "succeeded")),
+                    or_(
+                        Payment.provider_status.not_in(("canceled", "refunded", "succeeded")),
+                        Payment.reconciliation_status.in_(("required", "mismatch", "manual_review")),
+                    ),
                 ),
                 and_(
                     Payment.external_id.is_(None),

@@ -221,3 +221,20 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
             for t in mock_session.info["rollback_tasks"]:
                 await t()
             self.assertNotIn(777, _hub_cache)
+
+    async def test_pending_topup_exposure_query_includes_reconciliation_and_pending_ops(self):
+        """Verify _pending_topup_exposure queries both in-flight ops and reconciliation_status."""
+        from services.account_topup import _pending_topup_exposure
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = Decimal("1500.00")
+
+        exposure = await _pending_topup_exposure(mock_session, user_id=42)
+        self.assertEqual(exposure, Decimal("1500.00"))
+
+        mock_session.scalar.assert_awaited_once()
+        query = mock_session.scalar.call_args[0][0]
+        compiled = str(query)
+        self.assertIn("payments.credited_at IS NULL", compiled)
+        self.assertIn("payment_provider_operations", compiled)
+        self.assertIn("reconciliation_status", compiled)
