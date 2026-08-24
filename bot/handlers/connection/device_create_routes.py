@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub
+from utils.telegram import render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
@@ -303,10 +303,15 @@ async def _process_server_selection(
         return
 
     try:
+        server_name = server.name if server else "VPN Сервер"
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.DEVICE_CREATING,
+            (
+                "⏳ <b>Настраиваем подключение...</b>\n\n"
+                f"🌍 Сервер: <b>{safe(server_name)}</b>\n\n"
+                "<i>Подготавливаем защищенный доступ...</i>"
+            ),
             get_back_button("add_device"),
             parse_mode="HTML",
         )

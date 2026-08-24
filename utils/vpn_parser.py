@@ -153,12 +153,14 @@ def _build_conf_fallback(data: dict, last_config: dict) -> str | None:
         f"H2 = {last_config.get('H2')}",
         f"H3 = {last_config.get('H3')}",
         f"H4 = {last_config.get('H4')}",
-        "",
-        f"I1 = {last_config.get('I1', '') or ''}",
-        f"I2 = {last_config.get('I2', '') or ''}",
-        f"I3 = {last_config.get('I3', '') or ''}",
-        f"I4 = {last_config.get('I4', '') or ''}",
-        f"I5 = {last_config.get('I5', '') or ''}",
+    ])
+
+    for i in range(1, 6):
+        val = last_config.get(f"I{i}")
+        if val and str(val).strip():
+            lines.append(f"I{i} = {val}")
+
+    lines.extend([
         "",
         "[Peer]",
         f"PublicKey = {server_pub_key}",
@@ -294,9 +296,9 @@ def customize_vpn_config_dict(
                                 interface_section = re.sub(r'^(MTU\s*=.*)$', '', interface_section, flags=re.MULTILINE | re.IGNORECASE)
                                 interface_section = re.sub(r'\n{2,}', '\n', interface_section)
                                 new_interface = re.sub(
-                                    r'(\[Interface\])', 
-                                    f'\\1\nDNS = {dns1}, {dns2}\nMTU = {mtu}', 
-                                    interface_section, 
+                                    r'(\[Interface\])',
+                                    f'\\1\nDNS = {dns1}, {dns2}\nMTU = {mtu}',
+                                    interface_section,
                                     flags=re.IGNORECASE
                                 )
                                 last_config["config"] = config_str.replace(match.group(1), new_interface)

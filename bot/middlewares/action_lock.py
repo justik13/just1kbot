@@ -41,6 +41,7 @@ LOCKED_ACTION_PREFIXES = (
     "admin_delete_device_apply:",
     # Генерация конфигураций.
     "download_conf:",
+    "alt_connection:",
     "show_config:",
     # Платежи.
     "balance_create:",
