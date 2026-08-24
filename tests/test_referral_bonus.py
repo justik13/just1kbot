@@ -135,7 +135,7 @@ class TestReferralBonusLedgerEntryShape:
         scalars_mock_1.all.return_value = [existing_bonus_credit]
         scalars_mock_2 = MagicMock()
         scalars_mock_2.all.return_value = []
-        
+
         session = AsyncMock()
         mock_ctx = __import__('unittest.mock', fromlist=['MagicMock']).MagicMock()
         mock_ctx.__aenter__ = __import__('unittest.mock', fromlist=['AsyncMock']).AsyncMock(return_value=session)
@@ -420,27 +420,27 @@ def test_grant_referral_bonus_for_topup_uses_strict_chronological_ordering():
 
     from database.models import User
     from services.referral_bonus import grant_referral_bonus_for_topup
-    
+
     session = AsyncMock(spec=AsyncSession)
-    
+
     mock_purchaser = MagicMock(spec=User)
     mock_purchaser.id = 10
     mock_purchaser.telegram_id = 200
     mock_purchaser.referred_by = 100
-    
+
     mock_referrer = MagicMock(spec=User)
     mock_referrer.id = 20
     mock_referrer.is_banned = False
-    
+
     # 1. purchaser -> mock_purchaser
     # 2. referrer -> mock_referrer
     # 3. existing -> None
     # 4. prev_credited -> 0
     # 5. existing_purchaser -> None
     session.scalar.side_effect = [mock_purchaser, mock_referrer, None, 0, None]
-    
+
     res = asyncio.run(grant_referral_bonus_for_topup(session, purchaser_user_id=10, payment_id=1, topup_amount=Decimal(100)))
-    
+
     # Welcome bonus MUST be granted (10% of 100 = 10)
     assert res.purchaser_welcome_bonus == Decimal(10)
 

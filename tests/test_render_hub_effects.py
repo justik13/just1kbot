@@ -18,7 +18,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         with patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[100])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
              patch('utils.telegram._delete_hub_messages', new=AsyncMock()):
-            
+
             mid = await render_hub(
                 bot,
                 chat_id=12345,
@@ -45,7 +45,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         with patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[100])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
              patch('utils.telegram._delete_hub_messages', new=AsyncMock()):
-            
+
             mid = await render_hub(
                 bot,
                 chat_id=12345,
@@ -71,7 +71,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         with patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
              patch('utils.telegram._delete_hub_messages', new=AsyncMock()):
-            
+
             mid = await render_hub(
                 bot,
                 chat_id=12345,
@@ -99,7 +99,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         with patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
              patch('utils.telegram._delete_hub_messages', new=AsyncMock()):
-            
+
             mid = await render_hub(
                 bot,
                 chat_id=12345,

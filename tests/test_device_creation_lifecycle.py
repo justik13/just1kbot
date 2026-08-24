@@ -71,7 +71,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         created_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -159,7 +159,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         ready_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -204,7 +204,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         """When worker marks create_failed -> error banner rendered, config actions hidden, delete allowed."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         failed_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -248,7 +248,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         updating_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -286,7 +286,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         update_failed_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -338,7 +338,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         """Canceling deletion when device is in pending_create builds fresh keyboard with hidden Delete button."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         pending_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -558,7 +558,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
@@ -618,7 +618,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
@@ -671,7 +671,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()

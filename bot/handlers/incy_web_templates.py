@@ -144,7 +144,7 @@ def render_inactive_html(sub_url: str, support_username: str) -> str:
     <div class="icon">⚠️</div>
     <h1>Подписка не активна</h1>
     <p>Срок действия вашей подписки истёк или она приостановлена. Для продления тарифа вернитесь в бот или свяжитесь с поддержкой.</p>
-    
+
     <a class="btn btn-primary" href="{escaped_support_url}">💬 Связаться с поддержкой</a>
     <button class="btn btn-secondary" onclick="copyLink()">📋 Скопировать ссылку на подписку</button>
     <div id="toast" class="toast">✓ Ссылка скопирована в буфер обмена</div>
@@ -300,7 +300,7 @@ def render_open_html(sub_url: str, deep_link: str) -> str:
     <div class="icon">🚀</div>
     <h1>Подключение к INCY</h1>
     <p>Нажмите кнопку ниже, чтобы открыть и импортировать подписку в приложении INCY:</p>
-    
+
     <a class="btn btn-primary" href="{escaped_deep_link}">📱 Открыть в приложении INCY</a>
     <button class="btn btn-secondary" onclick="copyLink()">📋 Скопировать ссылку на подписку</button>
     <div id="toast" class="toast">✓ Ссылка скопирована в буфер обмена</div>
@@ -327,7 +327,7 @@ def render_open_html(sub_url: str, deep_link: str) -> str:
   <script>
     const deepLink = {js_deep_link};
     const subUrl = {js_sub_url};
-    
+
     try {{
       window.location.href = deepLink;
     }} catch (e) {{}}

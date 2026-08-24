@@ -679,7 +679,7 @@ class AmneziaClient:
     ) -> AmneziaAPIResult[AmneziaClientCreateResponse]:
         # Проверка емкости сервера удалена - она должна выполняться на уровне бизнес-логики (DeviceService)
         # чтобы избежать лишних HTTP-запросов и TOCTOU race conditions
-        
+
         data = {
             "clientName": client_name,
             "protocol": AMNEZIA_PROTOCOL,

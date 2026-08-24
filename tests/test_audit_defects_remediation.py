@@ -139,12 +139,12 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
                 mock_scalars.all.return_value = [(p.id, p.user_id) for p in fake_payments]
             else:
                 mock_scalars.all.return_value = []
-            
+
             async def mock_get(*args, **kwargs):
                 if len(processed_payment_ids) < len(fake_payments):
                     return fake_payments[len(processed_payment_ids)]
                 return None
-                
+
             mock_session.scalar.side_effect = mock_get
             query_count += 1
             mock_session.execute.return_value = mock_scalars
@@ -197,11 +197,11 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
                 mock_scalars.all.return_value = [(fake_payment.id, fake_payment.user_id)]
             else:
                 mock_scalars.all.return_value = []
-            
+
             async def mock_get(*args, **kwargs):
                 return fake_payment
             mock_session.scalar.side_effect = mock_get
-                
+
             query_count += 1
             mock_session.execute.return_value = mock_scalars
             mock_session.scalars.return_value = mock_scalars
@@ -253,11 +253,11 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
                 mock_scalars.all.return_value = [(fake_payment.id, fake_payment.user_id)]
             else:
                 mock_scalars.all.return_value = []
-                
+
             async def mock_get(*args, **kwargs):
                 return fake_payment
             mock_session.scalar.side_effect = mock_get
-                
+
             query_count += 1
             mock_session.execute.return_value = mock_scalars
             mock_session.scalars.return_value = mock_scalars

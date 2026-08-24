@@ -194,7 +194,7 @@ class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.webhook.session_scope") as mock_session_scope, \
              patch("bot.handlers.webhook._get_healthcheck_redis") as mock_get_redis:
-            
+
             mock_session = AsyncMock()
             mock_session_scope.return_value.__aenter__.return_value = mock_session
             mock_redis = AsyncMock()
@@ -217,7 +217,7 @@ class HealthcheckCacheTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("bot.handlers.webhook.session_scope") as mock_session_scope, \
              patch("bot.handlers.webhook._get_healthcheck_redis") as mock_get_redis:
-            
+
             mock_session = AsyncMock()
             mock_session_scope.return_value.__aenter__.return_value = mock_session
             mock_redis = AsyncMock()

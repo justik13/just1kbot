@@ -11,7 +11,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
         profile = SimpleNamespace(id=1, device_name='iPhone #1')
         server = SimpleNamespace(id=1, name='Germany')
         key = 'vpn://testkey'
-        
+
         with patch('bot.handlers.connection.device_view_routes.customize_vpn_uri') as mock_cust:
             mock_cust.return_value = 'vpn://customized'
             res = build_display_vpn_key(key, profile, server)

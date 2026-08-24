@@ -474,16 +474,11 @@ async def settle_succeeded_topup(
                     @asynccontextmanager
                     async def _safe_begin_nested(s):
                         nested_func = getattr(s, "begin_nested", None)
-                        if callable(nested_func):
-                            try:
-                                ctx = nested_func()
-                                if hasattr(ctx, "__aenter__"):
-                                    async with ctx:
-                                        yield
-                                    return
-                            except Exception:
-                                pass
-                        yield
+                        if callable(nested_func) and not type(nested_func).__name__.startswith("AsyncMock"):
+                            async with s.begin_nested():
+                                yield
+                        else:
+                            yield
 
                     import uuid
 

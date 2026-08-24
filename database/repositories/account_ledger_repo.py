@@ -151,7 +151,7 @@ async def get_account_balance(
             rem = real_negative - real_available
             real_available = ZERO
             bonus_available = max(ZERO, bonus_available - rem)
-            
+
     # Deduct bonus_negative from bonus_available, then real_available
     if bonus_negative > ZERO:
         if bonus_available >= bonus_negative:

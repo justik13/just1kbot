@@ -82,7 +82,7 @@ async def request_balance_topup_refund(
     )
     if payment_user_id is None:
         raise BalanceRefundError("payment_not_found")
-    
+
     await lock_account_user(session, payment_user_id)
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()

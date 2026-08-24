@@ -172,8 +172,10 @@ class TestPR209HardenedLifecycle(unittest.IsolatedAsyncioTestCase):
 
         session_prep = AsyncMock()
         session_prep.get = AsyncMock(side_effect=[payment, notif])
+        session_prep.scalar = AsyncMock(side_effect=[payment, notif])
         session_ack = AsyncMock()
         session_ack.get = AsyncMock(side_effect=[payment, notif, notif])
+        session_ack.scalar = AsyncMock(side_effect=[payment, notif, notif])
 
         from contextlib import asynccontextmanager
         call_count = 0

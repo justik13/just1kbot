@@ -94,7 +94,7 @@ class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
             await manage_device(make_callback(), state, session, db_user)
 
         self.assertEqual(len(rendered_keyboards), 2)
-        
+
         pending_callback_data = {
             button.callback_data
             for row in rendered_keyboards[0].inline_keyboard

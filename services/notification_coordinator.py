@@ -278,7 +278,9 @@ async def execute_notification_presentation(
         )
         try:
             async with session_scope() as session:
-                notif = await session.get(PaymentNotification, claim.notification_id)
+                notif = await session.get(
+                    PaymentNotification, claim.notification_id, with_for_update=True
+                )
                 if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
                     notif.state = "pending"
                     notif.last_error = telegram_error[:250]
@@ -304,8 +306,8 @@ async def execute_notification_presentation(
                         await lock_checkout_user(session, claim.user_id)
                     except Exception:
                         pass
-                p = await session.get(Payment, claim.payment_id)
-                notif = await session.get(PaymentNotification, claim.notification_id)
+                p = await session.get(Payment, claim.payment_id, with_for_update=True) if claim.payment_id else None
+                notif = await session.get(PaymentNotification, claim.notification_id, with_for_update=True)
 
                 if isinstance(notif, PaymentNotification) and notif.claim_token != claim.claim_token:
                     # Lease expired and stolen by another worker
@@ -335,9 +337,7 @@ async def execute_notification_presentation(
                         quote_public_id = (p.topup_context or {}).get("quote_public_id")
                         if quote_public_id:
                             from database.models import TariffQuote
-                            from sqlalchemy import select
                             try:
-                                import uuid
                                 q_uid = uuid.UUID(str(quote_public_id))
                                 q = await session.scalar(select(TariffQuote).where(TariffQuote.public_id == q_uid))
                                 if q and q.purchase_notified_at is None:
@@ -358,6 +358,7 @@ async def execute_notification_presentation(
                             q.purchase_notified_at = now_utc()
         except Exception as phase3_exc:
             logger.warning("Phase 3 ack error: %s", phase3_exc)
+            needs_compensation = True
 
         # Phase 4: Lock-Free Compensation I/O
         if needs_compensation and msg_ids:
@@ -372,7 +373,9 @@ async def execute_notification_presentation(
 
             try:
                 async with session_scope() as session:
-                    notif = await session.get(PaymentNotification, claim.notification_id)
+                    notif = await session.get(
+                        PaymentNotification, claim.notification_id, with_for_update=True
+                    )
                     if isinstance(notif, PaymentNotification) and notif.claim_token == claim.claim_token:
                         notif.state = "compensated" if del_ok else "compensation_retryable"
                         if not del_ok:

@@ -280,7 +280,7 @@ class TariffChangeQuotePostgresTests(unittest.IsolatedAsyncioTestCase):
                 session, user_id=user, target_tariff_id=different, as_of=as_of
             )
             self.assertTrue(conflict.created)
-            
+
             # The first quote should now be cancelled
             first_reloaded = await session.get(TariffQuote, first.quote.id)
             self.assertEqual(first_reloaded.status, "cancelled")

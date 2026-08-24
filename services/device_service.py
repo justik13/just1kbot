@@ -370,7 +370,7 @@ class DeviceService:
                 create_operation.locked_by = None
                 create_operation.last_error_code = "device_delete_force_revive"
                 create_operation.last_error = "Revived by force delete for orphan cleanup"
-            
+
             await session.delete(profile)
         else:
             await session.delete(profile)

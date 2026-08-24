@@ -109,7 +109,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             session.add(version)
             await session.commit()
-            
+
         # Patch config
         self.env_patcher = patch.dict(os.environ, {
             "BOT_TOKEN": "123:test",
@@ -129,23 +129,23 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         })
 
         self.env_patcher.start()
-        
+
         async def mock_throttle(handler, event, data):
             return await handler(event, data)
-            
+
         self.throttle_patcher = patch(
             "bot.middlewares.throttling.ThrottlingMiddleware.__call__",
             side_effect=mock_throttle
         )
         self.throttle_patcher.start()
-        
+
         # Clear the lru_cache of get_settings to force it to re-read env vars
         from config.settings import get_settings
         get_settings.cache_clear()
-        
+
         self.session = MockedSession()
         self.bot = Bot(token="123:test", session=self.session)
-        
+
         # We need a dispatcher but without setup_bot starting everything.
         # Actually, setup_bot just returns bot, dp.
         from aiogram.fsm.storage.memory import MemoryStorage
@@ -216,7 +216,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         # 1. User sends /start
         update = self._create_message_update("/start")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
+
         # Verify response
         req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ == "SendMessage")
         self.assertIn("Добро пожаловать", req.text)
@@ -224,7 +224,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         # 2. User checks balance
         update = self._create_callback_update("menu_balance")
         await self.dp.feed_update(bot=self.bot, update=update)
-        
+
         req = next(
             r
             for r in reversed(self.session.requests)
@@ -232,7 +232,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(req.__class__.__name__, "EditMessageText")
         self.assertIn("Баланс:", req.text)
-        
+
         # 3. User tries to buy tariff from showcase
         update = self._create_callback_update("payment_showcase")
         await self.dp.feed_update(bot=self.bot, update=update)
@@ -242,7 +242,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
             if r.__class__.__name__ == "EditMessageText"
         )
         self.assertIn("Базовый", str(req.reply_markup))
-        
+
         # Emulate clicking on the tariff to quote
         update = self._create_callback_update(f"select_tariff:{self.tariff.id}:showcase")
         await self.dp.feed_update(bot=self.bot, update=update)

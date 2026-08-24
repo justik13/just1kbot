@@ -168,7 +168,7 @@ class TestLivePgConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
         async with self.session_factory() as session:
             p = await session.get(Payment, payment_id)
             bal = await get_account_balance(session, user_id=user_id)
-            
+
             # Succeeded payment must always be safely settled and credited, never corrupted by cancel
             self.assertEqual(p.provider_status, "succeeded")
             self.assertIsNotNone(p.credited_at)

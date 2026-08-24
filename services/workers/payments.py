@@ -161,7 +161,7 @@ async def _recover_stale_topups(bot: Bot | None = None):
                         continue
 
                     ctx = payment.topup_context or {}
-                    
+
                     if payment.external_id and payment.provider_status in {
                         "creating",
                         "pending",

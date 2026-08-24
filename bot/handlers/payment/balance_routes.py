@@ -224,8 +224,8 @@ async def _create_and_render_topup(
     except AccountTopupError as exc:
         from bot.keyboards.payment import get_back_or_cancel_topups_keyboard
         keyboard = (
-            get_back_or_cancel_topups_keyboard() 
-            if exc.code == "too_many_unfinished_topups" 
+            get_back_or_cancel_topups_keyboard()
+            if exc.code == "too_many_unfinished_topups"
             else get_back_button("menu_balance")
         )
         await render_hub(

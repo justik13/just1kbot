@@ -240,7 +240,7 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
 
         from database.models import Payment
         from services.payment_provider_state import apply_provider_transition
-        
+
         payment = Payment(
             id=1,
             user_id=1,
@@ -251,20 +251,20 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
             provider_status="canceled",
             checkout_status="abandoned",
         )
-        
+
         # We need a mock session that can capture session.add() calls
         class MockSession:
             def __init__(self):
                 self.added = []
             def add(self, obj):
                 self.added.append(obj)
-                
+
         session = MockSession()
         transition = await apply_provider_transition(
             session,
             payment=payment,
             data={
-                "status": "succeeded", 
+                "status": "succeeded",
                 "captured_at": "2026-07-29T12:34:56.123+03:00",
                 "id": "p",
                 "amount": {"value": "100.00", "currency": "RUB"},
@@ -272,7 +272,7 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
             },
             source="webhook"
         )
-        
+
         self.assertEqual(transition.outcome, "conflict")
         self.assertEqual(transition.reason, "canceled_to_succeeded")
         self.assertEqual(payment.provider_status, "succeeded")
@@ -286,7 +286,7 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
 
         from database.models import Payment
         from services.payment_provider_state import apply_provider_transition
-        
+
         payment = Payment(
             id=1,
             user_id=1,
@@ -297,13 +297,13 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
             provider_status="succeeded",
             fulfillment_status="succeeded"
         )
-        
+
         class MockSession:
             def __init__(self):
                 self.added = []
             def add(self, obj):
                 self.added.append(obj)
-                
+
         session = MockSession()
         transition = await apply_provider_transition(
             session,
@@ -316,7 +316,7 @@ class LateWebhookTests(unittest.IsolatedAsyncioTestCase):
             },
             source="webhook"
         )
-        
+
         self.assertEqual(transition.outcome, "conflict")
         self.assertEqual(transition.reason, "terminal_regression")
         self.assertEqual(payment.fulfillment_status, "manual_review")

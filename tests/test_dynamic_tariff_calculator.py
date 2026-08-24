@@ -54,7 +54,7 @@ class TestDynamicTariffCalculator(unittest.TestCase):
         tariffs = [self.t7, self.t30, self.t90, self.t365]
         kb = get_tariff_duration_keyboard(tariffs)
         texts_in_kb = [btn.text for row in kb.inline_keyboard for btn in row]
-        
+
         self.assertIn('⏱ 7 дн. — 90 ₽', texts_in_kb)
         self.assertIn('⏱ 30 дн. — 150 ₽', texts_in_kb)
         self.assertIn('⏱ 90 дн. — 400 ₽ (133 ₽/мес • -11%) 🔥', texts_in_kb)

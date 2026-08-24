@@ -40,11 +40,11 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             referrer = User(telegram_id=100)
             session.add(referrer)
             await session.flush()
-            
+
             purchaser = User(telegram_id=200, referred_by=100)
             session.add(purchaser)
             await session.commit()
-            
+
             p_id = purchaser.id
 
         # Setup P1 and P2
@@ -87,7 +87,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
         async with self.session_factory() as session:
             payments = (await session.scalars(select(Payment).where(Payment.id == p1_id, _needs_recovery()))).all()
             self.assertTrue(len(payments) > 0, "P1 should be selected for recovery")
-            
+
             res1 = await grant_referral_bonus_for_topup(session, purchaser_user_id=p_id, payment_id=p1_id, topup_amount=Decimal(100))
             # simulate worker updating the flag
             p1_model = await session.get(Payment, p1_id)
@@ -115,11 +115,11 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             referrer = User(telegram_id=300)
             session.add(referrer)
             await session.flush()
-            
+
             purchaser = User(telegram_id=400, referred_by=300)
             session.add(purchaser)
             await session.commit()
-            
+
             p_id = purchaser.id
 
         from datetime import timedelta
@@ -166,7 +166,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
                 _recover_stale_topups(None),
                 _recover_stale_topups(None),
             )
-            
+
         # Verify exactly one welcome bonus ledger entry was created
         async with self.session_factory() as session:
             entries = (await session.scalars(
@@ -176,7 +176,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
                     AccountLedgerEntry.metadata_["reason"].as_string() == "first_topup_welcome"
                 )
             )).all()
-    
+
             self.assertEqual(len(entries), 1, "Only one welcome bonus should be granted despite 5 concurrent workers")
 
     async def test_needs_recovery_uses_partial_index(self):
@@ -185,7 +185,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             # Create user 1 first to satisfy foreign key constraints
             await session.merge(User(id=1, telegram_id=1))
             await session.commit()
-            
+
             # Insert 50000 irrelevant rows so the planner naturally prefers an Index Scan
             # over a full Seq Scan without artificial settings.
             await session.execute(
@@ -201,7 +201,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
                 )
             )
             await session.commit()
-            
+
         # Now run ANALYZE explicitly outside transaction to update table statistics
         async with self.engine.connect() as conn:
             autocommit_conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
@@ -214,14 +214,14 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             stmt = select(Payment).where(_needs_recovery(), Payment.created_at < threshold)
             compiled = stmt.compile(dialect=session.bind.dialect, compile_kwargs={"literal_binds": True})
             explain_query = f"EXPLAIN {compiled!s}"
-            
+
             result = await session.execute(text(explain_query))
             explain_plan = "\n".join([row[0] for row in result.fetchall()])
-            
+
             index_name1 = "ix_payments_referral_bonus_unprocessed"
             index_name2 = "ix_payments_recovery_pending"
             index_name3 = "ix_payments_recovery_unfulfilled"
-            
+
             # The query planner should use a BitmapOr to combine the partial indexes on real data distribution
             self.assertTrue(
                 index_name1 in explain_plan or index_name2 in explain_plan or index_name3 in explain_plan,
@@ -261,7 +261,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             )
             session.add(p1)
             await session.flush()
-            
+
             op = PaymentProviderOperation(
                 payment_id=p1.id,
                 operation_type="reconcile_payment",
@@ -275,7 +275,7 @@ class TestReferralBonusRecoveryPostgres(unittest.IsolatedAsyncioTestCase):
             )
             session.add(op)
             await session.commit()
-            
+
             pid = p1.id
             opid = op.id
 

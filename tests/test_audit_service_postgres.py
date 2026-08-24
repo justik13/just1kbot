@@ -28,7 +28,7 @@ class TestAuditServicePostgres(unittest.IsolatedAsyncioTestCase):
             # 1. Do some business logic
             user = User(telegram_id=999)
             session.add(user)
-            
+
             # 2. Trigger AuditService but pass an invalid target_type that exceeds varchar limit
             # This causes an actual DB level DataError when create_audit_log tries to flush its insert!
             # The begin_nested() should catch it, rollback its savepoint, and outer transaction lives.
@@ -39,10 +39,10 @@ class TestAuditServicePostgres(unittest.IsolatedAsyncioTestCase):
                 target_type="x" * 200, # Assuming limit is 50
                 target_id=1,
             )
-            
+
             # 3. Outer transaction should still commit!
             await session.commit()
-            
+
             # Verify user was saved
             u = await session.get(User, user.id)
             self.assertIsNotNone(u)
@@ -59,7 +59,7 @@ class TestAuditServicePostgres(unittest.IsolatedAsyncioTestCase):
             user2 = User(telegram_id=888)
             session.add(user2)
             # We DO NOT flush here intentionally
-            
+
             # 2. AuditService should flush first and raise the IntegrityError!
             with self.assertRaises(IntegrityError):
                 await AuditService.log_action(session, admin_id=0, action="test")

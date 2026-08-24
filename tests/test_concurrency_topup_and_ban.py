@@ -11,7 +11,7 @@ from database.models import Payment
 class TestConcurrencyTopupAndBan(unittest.IsolatedAsyncioTestCase):
     async def test_cancel_all_unfinished_topups_locks_payments_before_advisory_lock(self):
         session = MagicMock(spec=AsyncSession)
-        
+
         p1 = Payment(id=1, user_id=10, provider_status='creating', checkout_status='active', ui_visible=True)
         p2 = Payment(id=2, user_id=10, provider_status='pending', checkout_status='active', ui_visible=True)
 

@@ -222,7 +222,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 break
             except StopIteration:
                 await asyncio.sleep(0.05)
-                
+
         if send_req is None:
             self.fail("No outgoing Telegram request produced by admin flow — check bot send path and test mocks")
         self.assertIn("Hello from Admin!", send_req.text)

@@ -296,9 +296,9 @@ def customize_vpn_config_dict(
                                 interface_section = re.sub(r'^(MTU\s*=.*)$', '', interface_section, flags=re.MULTILINE | re.IGNORECASE)
                                 interface_section = re.sub(r'\n{2,}', '\n', interface_section)
                                 new_interface = re.sub(
-                                    r'(\[Interface\])', 
-                                    f'\\1\nDNS = {dns1}, {dns2}\nMTU = {mtu}', 
-                                    interface_section, 
+                                    r'(\[Interface\])',
+                                    f'\\1\nDNS = {dns1}, {dns2}\nMTU = {mtu}',
+                                    interface_section,
                                     flags=re.IGNORECASE
                                 )
                                 last_config["config"] = config_str.replace(match.group(1), new_interface)

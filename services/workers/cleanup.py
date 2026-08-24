@@ -510,7 +510,7 @@ async def _batch_delete_matching(
     max_rounds: int = MAX_BATCH_DELETE_ROUNDS,
 ) -> int:
     """Delete rows matching where_clauses in bounded primary-key batches with skip_locked.
-    
+
     When session is None, each batch executes and commits in its own short-lived session_scope() transaction,
     immediately releasing row-level locks in PostgreSQL.
     """
