@@ -1119,6 +1119,11 @@ class HubMessage(Base):
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # Durable marker for Telegram message-effect screens: lets render_hub
+    # restore the "clean hub on next navigation" invariant after restart.
+    is_effect_message: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false"), default=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 

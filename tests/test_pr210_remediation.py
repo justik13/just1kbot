@@ -50,7 +50,7 @@ class TestHubResilience(unittest.IsolatedAsyncioTestCase):
                 await render_hub(bot, chat_id=1, text=long_text)
 
         self.assertEqual(mock_store.await_count, 1)
-        mock_store.assert_awaited_with(1, 11)
+        mock_store.assert_awaited_once_with(1, 11, is_effect=False)
         mock_del.assert_awaited_once()
         deleted_ids = mock_del.call_args[0][2]
         self.assertEqual(deleted_ids, [11])
@@ -412,7 +412,7 @@ class TestStoreFailureCleanup(unittest.IsolatedAsyncioTestCase):
 
         store_calls = []
 
-        async def fake_store(chat_id, message_id):
+        async def fake_store(chat_id, message_id, **kwargs):
             store_calls.append(message_id)
             if message_id == 12:
                 raise RuntimeError("db down")
@@ -513,6 +513,133 @@ class TestStoreFailureCleanup(unittest.IsolatedAsyncioTestCase):
 
         self.assertLessEqual(active["max"], 1)  # strict serialization: no overlap
         self.assertEqual(len(tg._hub_cache[12]["ids"]), 1)
+
+
+class TestDocumentOrdering(unittest.IsolatedAsyncioTestCase):
+    """P1: send -> durable store -> THEN delete old hub (never leave chat without a hub)."""
+
+    async def test_document_preserves_old_hub_when_store_fails(self):
+        from utils.telegram import send_hub_document
+
+        bot = MagicMock()
+        msg = MagicMock(message_id=200)
+        bot.send_document = AsyncMock(return_value=msg)
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await asyncio.wait_for(
+                    send_hub_document(bot, chat_id=4, document=MagicMock()),
+                    timeout=2,
+                )
+
+        deleted = [c.kwargs.get("message_id") for c in bot.delete_message.await_args_list]
+        self.assertIn(200, deleted)        # NEW message cleaned up
+        self.assertNotIn(100, deleted)     # OLD hub left intact
+
+    async def test_photo_preserves_old_hub_when_store_fails(self):
+        from utils.telegram import send_hub_photo
+
+        bot = MagicMock()
+        msg = MagicMock(message_id=210)
+        bot.send_photo = AsyncMock(return_value=msg)
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await asyncio.wait_for(
+                    send_hub_photo(bot, chat_id=4, photo=MagicMock()),
+                    timeout=2,
+                )
+
+        deleted = [c.kwargs.get("message_id") for c in bot.delete_message.await_args_list]
+        self.assertIn(210, deleted)
+        self.assertNotIn(100, deleted)
+
+
+class TestEffectDurability(unittest.IsolatedAsyncioTestCase):
+    """P2: clean-hub-after-effect invariant must survive process restarts."""
+
+    async def test_cold_start_effect_message_gets_clean_replacement(self):
+        import utils.telegram as tg
+        from contextlib import asynccontextmanager
+
+        tg._hub_cache.pop(31, None)  # simulate restart: empty RAM cache
+
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=501))
+        bot.delete_message = AsyncMock()
+
+        fake_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_scope():
+            yield fake_session
+
+        with patch.object(tg, "session_scope", fake_scope), \
+             patch.object(tg.hub_repo, "get_hub_message_ids", AsyncMock(return_value=[500])), \
+             patch.object(tg.hub_repo, "get_latest_effect_message_id", AsyncMock(return_value=500)), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._remove_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()) as mock_del:
+            await render_hub(bot, chat_id=31, text="Balance menu")
+
+        # Effect-carrying message 500 must be REPLACED, not edited in place.
+        bot.edit_message_text.assert_not_awaited()
+        bot.send_message.assert_awaited_once()
+        self.assertIsNone(bot.send_message.call_args.kwargs.get("message_effect_id"))
+        self.assertEqual(mock_del.call_args[0][2], [500])
+
+    async def test_store_persists_effect_flag_for_first_part(self):
+        bot = MagicMock()
+        bot.send_message = AsyncMock(side_effect=lambda **kw: MagicMock(message_id=601))
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()) as mock_store, \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+            await render_hub(
+                bot, chat_id=41, text="Success!",
+                message_effect_id="5046509860389126442",
+            )
+
+        mock_store.assert_awaited_once()
+        self.assertTrue(mock_store.call_args.kwargs.get("is_effect"))
+
+    async def test_store_without_effect_writes_false_flag(self):
+        bot = MagicMock()
+        bot.send_message = AsyncMock(side_effect=lambda **kw: MagicMock(message_id=602))
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()) as mock_store, \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+            await render_hub(bot, chat_id=41, text="Plain menu")
+
+        self.assertFalse(mock_store.call_args.kwargs.get("is_effect"))
+
+
+class TestRemoveFailureConsistency(unittest.IsolatedAsyncioTestCase):
+    """P2: DB removal failure must invalidate cache instead of hiding DB rows."""
+
+    async def test_remove_failure_invalidates_cache_and_raises(self):
+        import utils.telegram as tg
+
+        tg._hub_cache[15] = {"ids": [300], "effect_msg_id": None}
+        bot = MagicMock()
+        bot.delete_message = AsyncMock()  # telegram-side deletion succeeds
+
+        with patch("utils.telegram.session_scope") as bad_scope, \
+             patch("utils.telegram.logger.warning"):
+            bad_scope.side_effect = RuntimeError("remove failed")
+            with self.assertRaises(RuntimeError):
+                await asyncio.wait_for(
+                    tg._delete_hub_messages(bot, chat_id=15, msg_ids=[300]),
+                    timeout=2,
+                )
+
+        self.assertNotIn(15, tg._hub_cache)  # cache invalidated -> next load reads DB
+        tg._hub_cache.pop(15, None)
 
 
 if __name__ == "__main__":

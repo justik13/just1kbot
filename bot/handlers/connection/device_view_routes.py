@@ -601,6 +601,9 @@ async def alt_connection(
                     try:
                         failed_old = await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids))
                     except Exception as e:
+                        # Durable cleanup uncertain: invalidate cache so the next
+                        # render re-reads DB truth instead of hiding stale rows.
+                        _hub_cache.pop(callback.message.chat.id, None)
                         failed_old = list(old_hub_ids)
                         logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
                     if failed_old:

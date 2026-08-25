@@ -199,29 +199,38 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
 
     if session is not None:
         ids = await hub_repo.get_hub_message_ids(session, chat_id)
-        _hub_cache[chat_id] = {"ids": list(ids)}
+        effect_id = await hub_repo.get_latest_effect_message_id(session, chat_id)
+        _hub_cache[chat_id] = {"ids": list(ids), "effect_msg_id": effect_id}
         return list(ids)
 
     async with session_scope() as sess:
         ids = await hub_repo.get_hub_message_ids(sess, chat_id)
-    _hub_cache[chat_id] = {"ids": list(ids)}
+        effect_id = await hub_repo.get_latest_effect_message_id(sess, chat_id)
+    _hub_cache[chat_id] = {"ids": list(ids), "effect_msg_id": effect_id}
     return list(ids)
 
 
-async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
+async def _store_hub_id_in_db(
+    chat_id: int, message_id: int, *, is_effect: bool = False
+) -> None:
     """
     Persist a delivered hub message id. Raises on DB failure so callers can
     abort the current render and clean up already-sent messages — otherwise a
     delivered-but-untracked message becomes an uncleanable orphan.
     """
     async with session_scope() as sess:
-        await hub_repo.add_hub_message_id(sess, chat_id, message_id)
+        await hub_repo.add_hub_message_id(
+            sess, chat_id, message_id, is_effect=is_effect
+        )
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         if message_id not in cached["ids"]:
             cached["ids"].append(message_id)
     else:
-        _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
+        _hub_cache[chat_id] = {
+            "ids": [message_id],
+            "effect_msg_id": message_id if is_effect else None,
+        }
 
 
 async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
@@ -231,14 +240,23 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
     try:
         async with session_scope() as sess:
             await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
-        cached = _hub_cache.get(chat_id)
-        if cached and "ids" in cached:
-            old_set = set(message_ids)
-            cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
-            if cached.get("effect_msg_id") in old_set:
-                cached["effect_msg_id"] = None
     except Exception as e:
-        logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
+        # Telegram-side deletion may have succeeded while the durable cleanup
+        # did not. Invalidate the cache so the next load re-reads DB truth —
+        # otherwise the cache would hide stale rows from retry until TTL expiry.
+        _hub_cache.pop(chat_id, None)
+        logger.warning(
+            "Failed to remove hub ids %s in DB for chat %s: %s",
+            message_ids, chat_id, e,
+        )
+        raise
+
+    cached = _hub_cache.get(chat_id)
+    if cached and "ids" in cached:
+        old_set = set(message_ids)
+        cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+        if cached.get("effect_msg_id") in old_set:
+            cached["effect_msg_id"] = None
 
 
 async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:
@@ -342,7 +360,19 @@ async def render_hub(
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                 stale_failed: list[int] = []
                 if stale_ids:
-                    stale_failed = await _delete_hub_messages(bot, chat_id, stale_ids)
+                    try:
+                        stale_failed = await _delete_hub_messages(bot, chat_id, stale_ids)
+                    except Exception:
+                        # Durable cleanup of stale ids failed; an ADOPTED trigger
+                        # was never persisted -> remove it before escaping.
+                        if target_edit_id not in old_ids:
+                            try:
+                                await asyncio.shield(
+                                    bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
+                                )
+                            except Exception:
+                                pass
+                        raise
                 try:
                     await _store_hub_id_in_db(chat_id, target_edit_id)
                 except Exception:
@@ -369,7 +399,17 @@ async def render_hub(
                     stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                     stale_failed_nm: list[int] = []
                     if stale_ids:
-                        stale_failed_nm = await _delete_hub_messages(bot, chat_id, stale_ids)
+                        try:
+                            stale_failed_nm = await _delete_hub_messages(bot, chat_id, stale_ids)
+                        except Exception:
+                            if target_edit_id not in old_ids:
+                                try:
+                                    await asyncio.shield(
+                                        bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
+                                    )
+                                except Exception:
+                                    pass
+                            raise
                     try:
                         await _store_hub_id_in_db(chat_id, target_edit_id)
                     except Exception:
@@ -494,8 +534,13 @@ async def render_hub(
                 sent_ids.append(message.message_id)
                 # Append BEFORE storing: if the store raises, the id is already
                 # in sent_ids so the BaseException cleanup deletes the delivered
-                # message instead of orphaning it.
-                await _store_hub_id_in_db(chat_id, message.message_id)
+                # message instead of orphaning it. The first part carries the
+                # durable effect marker (if any).
+                await _store_hub_id_in_db(
+                    chat_id,
+                    message.message_id,
+                    is_effect=bool(effect),
+                )
         except BaseException:
             if sent_ids:
                 try:
@@ -566,12 +611,12 @@ async def send_hub_photo(
             else:
                 raise
 
-        if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
-
         try:
             await _store_hub_id_in_db(chat_id, msg.message_id)
         except Exception:
+            # Store BEFORE deleting the old hub: on failure we remove only the
+            # NEW message and leave the OLD hub fully intact (no user-visible
+            # gap). Deleting old first would wipe the chat if persistence fails.
             try:
                 await asyncio.shield(
                     bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
@@ -579,6 +624,9 @@ async def send_hub_photo(
             except Exception:
                 pass
             raise
+
+        if old_ids:
+            await _delete_hub_messages(bot, chat_id, old_ids)
 
         return msg.message_id
 
@@ -634,14 +682,12 @@ async def send_hub_document(
             else:
                 raise
 
-        if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
-
         try:
             await _store_hub_id_in_db(chat_id, msg.message_id)
         except Exception:
-            # Delivered but not durably tracked -> delete before escaping,
-            # otherwise the message becomes an uncleanable orphan.
+            # Store BEFORE deleting the old hub (see send_hub_photo): on
+            # persistence failure we remove only the NEW document and keep the
+            # old hub intact, so the user is never left without a hub screen.
             try:
                 await asyncio.shield(
                     bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
@@ -649,6 +695,9 @@ async def send_hub_document(
             except Exception:
                 pass
             raise
+
+        if old_ids:
+            await _delete_hub_messages(bot, chat_id, old_ids)
 
         return msg.message_id
 

@@ -15,7 +15,7 @@ from services.workers.traffic import traffic_sync_loop
 class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
     def test_alembic_head_is_0009_payments_referral_bonus_idx(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        self.assertEqual(scripts.get_heads(), ["c20a97270920"])
+        self.assertEqual(scripts.get_heads(), ["0011_hub_effect_flag"])
         rev_0009 = scripts.get_revision("c20a97270920")
         self.assertEqual(rev_0009.down_revision, "0007_webhook_retention")
 
