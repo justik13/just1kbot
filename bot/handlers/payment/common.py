@@ -12,9 +12,9 @@ from database.repositories.profiles_repo import (
 )
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
-    get_tariff_by_id,
 )
 from services.maintenance_service import MaintenanceService
+from services.subscription import SubscriptionService
 from utils.datetime_helpers import is_expired
 from utils.formatters import format_datetime, format_days_left
 from utils.tariff_names import get_tariff_display_name
@@ -32,14 +32,7 @@ async def _is_subscription_active(user) -> bool:
 async def _get_effective_device_limit(
     session: AsyncSession, user
 ) -> int:
-    if user is None:
-        return 0
-    current_tariff_id = getattr(user, "current_tariff_id", None)
-    if current_tariff_id:
-        tariff = await get_tariff_by_id(session, current_tariff_id)
-        if tariff:
-            return getattr(tariff, "device_limit", 0) or 0
-    return getattr(user, "device_limit", 0) or 0
+    return await SubscriptionService.get_effective_device_limit(session, user)
 
 
 async def _render_maintenance(

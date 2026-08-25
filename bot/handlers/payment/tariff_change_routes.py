@@ -23,11 +23,13 @@ from services.account_tariff_change import (
     get_account_tariff_change_intent,
     settle_account_tariff_change,
 )
+from services.maintenance_service import MaintenanceService
 from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
-from utils.telegram import render_hub
+from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .balance_routes import _create_and_render_topup
+from .common import _render_maintenance
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -160,6 +162,11 @@ async def review_tariff_change(
             show_alert=True,
         )
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_change_tariff")
+        return
     await render_tariff_change_review(callback, session, db_user, quote_id)
 
 
@@ -177,6 +184,11 @@ async def confirm_tariff_change(
     await state.clear()
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_change_tariff")
         return
     try:
         result = await settle_account_tariff_change(
@@ -240,8 +252,9 @@ async def confirm_tariff_change(
             value_3=int(result.balance_after.real_available),
             value_4=int(result.balance_after.bonus_available),
         ),
-
         get_payment_success_keyboard(),
+        message_effect_id=EFFECT_CONFETTI,
+        force_new=True,
     )
     result.quote.purchase_notified_at = (
         result.quote.purchase_notified_at or now_utc()
@@ -309,6 +322,12 @@ async def topup_custom_change_shortage(
     await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await state.clear()
+        await _render_maintenance(callback, session, back_to="payment_change_tariff")
         return
     try:
         intent, context = await _shortage_context(

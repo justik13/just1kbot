@@ -15,6 +15,7 @@ from database.repositories.profiles_repo import (
     get_user_profiles,
     get_user_profiles_count,
 )
+from database.repositories.tariffs_repo import get_tariff_by_id
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id,
@@ -35,6 +36,22 @@ MAX_REFERRAL_CHAIN_DEPTH = 50
 
 
 class SubscriptionService:
+    @staticmethod
+    async def get_effective_device_limit(session: AsyncSession, user: User | None) -> int:
+        """Canonical device-limit resolution: current tariff first, then user override, else 0.
+
+        Single source of truth used by both the payment and connection UI layers
+        (and safe to reuse by domain services).
+        """
+        if user is None:
+            return 0
+        current_tariff_id = getattr(user, "current_tariff_id", None)
+        if current_tariff_id:
+            tariff = await get_tariff_by_id(session, current_tariff_id)
+            if tariff:
+                return getattr(tariff, "device_limit", 0) or 0
+        return getattr(user, "device_limit", 0) or 0
+
     @staticmethod
     async def sync_access_state(session: AsyncSession, user: User) -> None:
         await SubscriptionService._sync_access_state(session, user)

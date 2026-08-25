@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -9,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
-from bot.keyboards import get_back_button, get_device_keyboard
+from bot.keyboards import (
+    get_alt_connection_keyboard,
+    get_back_button,
+    get_device_keyboard,
+)
 from config.settings import get_settings
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -22,9 +28,11 @@ from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import (
-    append_hub_document,
-    append_hub_message,
-    delete_hub_ids,
+    _append_hub_document_unlocked,
+    _append_hub_message_unlocked,
+    _delete_hub_messages,
+    _get_hub_render_lock,
+    _hub_cache,
     get_hub_ids,
     render_hub,
     safe,
@@ -100,23 +108,53 @@ def can_show_delete_action(profile) -> bool:
     return getattr(profile, "provisioning_status", "") in ALLOWED_DELETE_STATES
 
 
+_SLOT_SUFFIX_RE = re.compile(r'#(\d+)$')
+
+
+def _client_description(profile, server) -> str:
+    """Stable per-client description: '<ServerName> #<slot>' used in VPN configs."""
+    server_name = getattr(server, "name", None) or "server"
+    device_name = getattr(profile, "device_name", "") or ""
+    m = _SLOT_SUFFIX_RE.search(device_name)
+    slot_suffix = f" #{m.group(1)}" if m else ""
+    return f"{server_name}{slot_suffix}"
+
+
+def build_display_vpn_key(raw_config: str | None, profile, server) -> str | None:
+    """Build standardized display VPN URI with server name, slot suffix, DNS, and MTU."""
+    if not raw_config:
+        return None
+    try:
+        return customize_vpn_uri(
+            raw_config,
+            description=_client_description(profile, server),
+            dns1="8.8.8.8",
+            dns2="8.8.4.4",
+            mtu="1280",
+        )
+    except Exception as exc:
+        logger.warning("Failed to format vpn uri for profile %s: %s", getattr(profile, "id", None), exc)
+        return raw_config
+
+
 async def render_device_screen(
     bot,
     chat_id: int,
     profile,
     user: User,
     session: AsyncSession,
+    message_effect_id: str | None = None,
 ):
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
     server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
     protocol = _format_protocol(server.protocol if server else None)
 
+    country_display = f"{flag} {server_name}".strip() if flag else server_name
+
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
-        flag=flag,
-        country_display=server_name,
-        server_name=flag,
+        country_display=safe(country_display),
         protocol=protocol,
         traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
         last_connected=(
@@ -147,20 +185,67 @@ async def render_device_screen(
 
     if has_access:
         config_ready = can_show_config_actions(profile)
-        amnezia_bridge_url = None
-        if can_show_amnezia_bridge(profile, server):
-            settings = get_settings()
-            amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
-                domain=settings.DOMAIN,
-                profile_id=profile.id,
-                user_id=user.id,
+        display_key = None
+        raw_cfg = getattr(profile, "raw_config", None)
+        if config_ready and raw_cfg:
+            display_key = build_display_vpn_key(raw_cfg, profile, server)
+
+        if display_key:
+            copy_hint = "<i>👆 Нажмите на моноширинный ключ выше, чтобы скопировать его.</i>"
+            key_block = (
+                f"\n\n🔑 <b>Ключ подключения:</b>\n"
+                f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
+                f"{copy_hint}"
             )
+            if len(rendered) + len(key_block) <= 4000:
+                rendered += key_block
+            else:
+                rendered += (
+                    "\n\n🔑 <b>Ключ подключения:</b>\n"
+                    "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
+                )
+
+        if display_key:
+            amnezia_howto = (
+                "• <b>AmneziaVPN / DefaultVPN</b>: скопируйте ключ выше → "
+                "откройте приложение → нажмите «Вставить» → «Подключиться»."
+            )
+        else:
+            amnezia_howto = (
+                "• <b>AmneziaVPN / DefaultVPN</b>: нажмите «🔄 Другой способ подключения» ниже, "
+                "чтобы получить файл конфигурации или ключ."
+            )
+        guide_block = (
+            "\n\n<blockquote expandable>🚀 <b>Как подключиться и проверить работу:</b>\n"
+            f"{amnezia_howto}\n"
+            "• <b>INCY (iOS / Android)</b>: откройте «🔌 Подключения» → «🔗 Добавить в INCY» для добавления всех серверов сразу.\n\n"
+            "✅ <b>Как понять, что всё работает:</b>\n"
+            "1. В приложении статус сменится на <b>«Подключено»</b>;\n"
+            "2. В строке состояния появится значок подключения (или 🔑);\n"
+            "3. На сайте <code>2ip.ru</code> страна сменится на локацию сервера;\n"
+            "4. Популярные сервисы и зарубежные сайты открываются быстро и стабильно.</blockquote>"
+        )
+        if len(rendered) + len(guide_block) <= 4000:
+            rendered += guide_block
+
+        btn_info_lines = [
+            "\n\n💡 <b>Кнопки управления:</b>",
+        ]
+        if config_ready:
+            btn_info_lines.append("• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик")
+        btn_info_lines.append("• <b>✏️ Переименовать</b> — изменить название устройства")
+        btn_info_lines.append("• <b>📖 Инструкция</b> — пошаговое руководство по настройке")
+        if show_delete:
+            btn_info_lines.append("• <b>🗑 Удалить</b> — отозвать ключ и освободить слот")
+
+        btn_info = "\n".join(btn_info_lines)
+        if len(rendered) + len(btn_info) <= 4000:
+            rendered += btn_info
 
         keyboard = get_device_keyboard(
             profile.id,
             config_ready=config_ready,
             show_delete=show_delete,
-            amnezia_bridge_url=amnezia_bridge_url,
         )
     else:
         rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
@@ -178,6 +263,8 @@ async def render_device_screen(
         chat_id,
         rendered,
         keyboard,
+        message_effect_id=message_effect_id,
+        force_new=bool(message_effect_id),
     )
 
 
@@ -220,7 +307,7 @@ def _get_device_config_keyboard(profile_id: int):
     #   DO NOT use texts.UI_BOT_KEYBOARDS_COMMON_L7_1 — that key does not exist in ui_texts.py.
     builder = InlineKeyboardBuilder()
     builder.button(text="📖 Инструкция и помощь", callback_data=f"device_help:{profile_id}")
-    builder.button(text="← К устройству", callback_data=f"manage_device:{profile_id}")
+    builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -251,9 +338,10 @@ async def device_help(
         "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
         "В этом разделе вы найдёте руководства по подключению, "
         "скачиванию клиента и настройке сервиса.\n\n"
-        "⚠️ <b>Правила и особенности работы:</b>\n"
+        "<blockquote expandable>⚠️ <b>Правила и особенности работы:</b>\n"
         "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n\n"
+        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n"
+        "• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b></blockquote>\n\n"
         "Выберите нужную тему ниже:"
     )
 
@@ -264,7 +352,7 @@ async def device_help(
     builder.button(text="💻 Инструкции Windows", callback_data=f"help_windows{suffix}")
     builder.button(text="🔀 Раздельное Туннелирование", callback_data=f"help_split{suffix}")
     builder.button(text="📚 Документация Amnezia", url=_AMNEZIA_DOCS)
-    builder.button(text="← К устройству", callback_data=f"manage_device:{profile_id}")
+    builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
 
     await render_hub(
@@ -307,18 +395,7 @@ async def show_config(
         return
 
     server = await get_server_by_id(session, profile.server_id)
-    server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    client_description = f"{server_name}{slot_suffix}"
-
-    display_key = customize_vpn_uri(
-        raw_config,
-        description=client_description,
-        dns1="8.8.8.8",
-        dns2="8.8.4.4",
-        mtu="1280",
-    )
+    display_key = build_display_vpn_key(raw_config, profile, server) or raw_config
 
     if len(display_key) > TELEGRAM_MESSAGE_LIMIT - 300:
         safe_device_name = await _get_safe_device_name(session, profile)
@@ -354,8 +431,8 @@ async def show_config(
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data.startswith("download_conf:"))
-async def download_conf(
+@router.callback_query(F.data.startswith("alt_connection:") | F.data.startswith("download_conf:"))
+async def alt_connection(
     callback: CallbackQuery,
     state: FSMContext,
     session: AsyncSession,
@@ -379,6 +456,10 @@ async def download_conf(
         return
 
     await callback.answer(texts.DEVICE_CONFIG_GENERATING, show_alert=False)
+    try:
+        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action="upload_document")
+    except Exception:
+        pass
 
     safe_device_name = await _get_safe_device_name(session, profile)
 
@@ -392,8 +473,29 @@ async def download_conf(
         )
         return
 
-    decoded = decode_vpn_uri_to_json(raw_config)
-    if decoded is None:
+    try:
+        decoded = decode_vpn_uri_to_json(raw_config)
+        if decoded is None:
+            raise ValueError("Failed to decode raw_config to JSON")
+
+        server = await get_server_by_id(session, profile.server_id)
+        client_description = _client_description(profile, server)
+
+        customized_data = customize_vpn_config_dict(
+            decoded,
+            description=client_description,
+            dns1="8.8.8.8",
+            dns2="8.8.4.4",
+            mtu="1280",
+        )
+
+        vpn_content = build_vpn_file_from_dict(customized_data)
+        conf_content = build_conf_file_from_dict(customized_data)
+
+        if not vpn_content or not conf_content:
+            raise ValueError("Empty vpn or conf file content")
+    except Exception as exc:
+        logger.warning("Failed to prepare alt connection files for profile %s: %s", profile.id, exc)
         await render_hub(
             callback.bot, callback.message.chat.id,
             texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
@@ -402,68 +504,142 @@ async def download_conf(
         )
         return
 
-    server = await get_server_by_id(session, profile.server_id)
-    server_name = server.name if server else "server"
-    m = re.search(r'#(\d+)$', profile.device_name)
-    slot_suffix = f" #{m.group(1)}" if m else ""
-    client_description = f"{server_name}{slot_suffix}"
-
-    customized_data = customize_vpn_config_dict(
-        decoded,
-        description=client_description,
-        dns1="8.8.8.8",
-        dns2="8.8.4.4",
-        mtu="1280",
-    )
-
-    vpn_content = build_vpn_file_from_dict(customized_data)
-    conf_content = build_conf_file_from_dict(customized_data)
-
-    if not vpn_content or not conf_content:
-        await render_hub(
-            callback.bot, callback.message.chat.id,
-            texts.DOWNLOAD_CONF_FALLBACK.format(device_name=safe(profile.device_name)),
-            get_back_button(f"manage_device:{profile.id}"),
-            trigger_message_id=callback.message.message_id,
+    amnezia_bridge_url = None
+    if can_show_amnezia_bridge(profile, server):
+        settings = get_settings()
+        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
+            domain=settings.DOMAIN,
+            profile_id=profile.id,
+            user_id=db_user.id,
         )
-        return
 
     vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
     conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
 
-    old_hub_ids = await get_hub_ids(callback.message.chat.id)
+    chat_lock = _get_hub_render_lock(callback.message.chat.id)
 
-    try:
-        await append_hub_document(
-            callback.bot, callback.message.chat.id,
-            document=vpn_file,
-            caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
+    async with chat_lock:
+        old_hub_ids = await get_hub_ids(callback.message.chat.id, session=session)
 
-    try:
-        await append_hub_document(
-            callback.bot, callback.message.chat.id,
-            document=conf_file,
-            caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
+        sent_doc_ids = []
+        vpn_sent = False
+        conf_sent = False
+        guide_sent = False
 
-    try:
-        await append_hub_message(
-            callback.bot, callback.message.chat.id,
-            text=texts.DEVICE_CONFIG_INSTRUCTION,
-            reply_markup=_get_device_config_keyboard(profile.id),
-            parse_mode="HTML",
-        )
-    except Exception as e:
-        logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
-    finally:
         try:
-            await delete_hub_ids(callback.bot, callback.message.chat.id, old_hub_ids)
-        except Exception as e:
-            logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
+            try:
+                doc_msg_1 = await _append_hub_document_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    document=vpn_file,
+                    caption=texts.DEVICE_CONFIG_VPN_CAPTION.format(device_name=safe(profile.device_name)),
+                    parse_mode="HTML",
+                )
+                sent_doc_ids.append(doc_msg_1)
+                vpn_sent = True
+            except (TelegramNetworkError, asyncio.TimeoutError) as e:
+                # Ambiguous delivery: the .vpn may exist in Telegram without a
+                # known message_id. Fail-closed — abort the whole operation and
+                # keep the old hub instead of continuing with unknown state.
+                logger.warning(
+                    "hub_orphan_suspected profile=%s context=alt_vpn: %s", profile.id, e,
+                )
+                raise
+            except Exception as e:
+                logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
+                raise
+
+            try:
+                doc_msg_2 = await _append_hub_document_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    document=conf_file,
+                    caption=texts.DEVICE_CONFIG_CONF_CAPTION.format(device_name=safe(profile.device_name)),
+                    parse_mode="HTML",
+                )
+                sent_doc_ids.append(doc_msg_2)
+                conf_sent = True
+            except (TelegramNetworkError, asyncio.TimeoutError) as e:
+                logger.warning(
+                    "hub_orphan_suspected profile=%s context=alt_conf: %s", profile.id, e,
+                )
+                raise
+            except Exception as e:
+                logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
+                raise
+
+            if vpn_sent and conf_sent:
+                files_info = (
+                    "1. Сохраните один из прикреплённых файлов конфигурации:\n"
+                    "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
+                    "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)\n"
+                )
+            elif vpn_sent:
+                files_info = (
+                    "1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).\n"
+                )
+            elif conf_sent:
+                files_info = (
+                    "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG — Keenetic AWG).\n"
+                )
+            else:
+                escaped_key = safe(profile.raw_config or "")
+                key_block = (
+                    f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{escaped_key}</code></blockquote>\n"
+                    if len(escaped_key) <= 3500
+                    else "🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.\n"
+                )
+                files_info = (
+                    "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
+                    f"{key_block}"
+                )
+
+            bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""
+            alt_guide_text = (
+                f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
+                "Если прямая вставка ключа не сработала или ваше приложение требует файл:\n\n"
+                f"{files_info}"
+                "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
+                f"{bridge_hint}"
+            )
+
+            try:
+                await _append_hub_message_unlocked(
+                    callback.bot, callback.message.chat.id,
+                    text=alt_guide_text,
+                    reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
+                    parse_mode="HTML",
+                )
+                guide_sent = True
+            except Exception as e:
+                logger.error("Failed to send instruction message for profile %s: %s", profile.id, e)
+
+            if guide_sent:
+                if old_hub_ids:
+                    try:
+                        failed_old = await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids))
+                    except Exception as e:
+                        # Durable cleanup uncertain: invalidate cache so the next
+                        # render re-reads DB truth instead of hiding stale rows.
+                        _hub_cache.pop(callback.message.chat.id, None)
+                        failed_old = list(old_hub_ids)
+                        logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
+                    if failed_old:
+                        # Keep undeletable ids visible to the next render (cache mirrors DB truth).
+                        entry = _hub_cache.setdefault(
+                            callback.message.chat.id, {"ids": [], "effect_msg_id": None}
+                        )
+                        for fid in failed_old:
+                            if fid not in entry["ids"]:
+                                entry["ids"].append(fid)
+            else:
+                if sent_doc_ids:
+                    try:
+                        await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids))
+                    except Exception as clean_exc:
+                        logger.error("Failed to cleanup partial documents for profile %s: %s", profile.id, clean_exc)
+        except BaseException as root_exc:
+            if sent_doc_ids and not guide_sent:
+                try:
+                    await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, sent_doc_ids))
+                except Exception:
+                    pass
+            raise root_exc

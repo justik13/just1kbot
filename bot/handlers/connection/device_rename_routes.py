@@ -15,12 +15,12 @@ from database.repositories.profiles_repo import (
     get_user_profiles,
     update_profile,
 )
-from database.repositories.servers_repo import get_server_by_id
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub, safe
+from utils.telegram import EFFECT_LIKE, render_hub, safe
 
 from .common import DEVICE_NAME_REGEX
+from .device_view_routes import can_show_config_actions, can_show_delete_action
 
 router = Router()
 
@@ -263,26 +263,8 @@ async def rename_device_process(
         },
     )
 
-    server = await get_server_by_id(session, profile.server_id)
-    from config.settings import get_settings
-    from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
-
-    from .device_view_routes import (
-        can_show_amnezia_bridge,
-        can_show_config_actions,
-        can_show_delete_action,
-    )
-
     config_ready = can_show_config_actions(profile)
     show_delete = can_show_delete_action(profile)
-    amnezia_bridge_url = None
-    if can_show_amnezia_bridge(profile, server):
-        settings = get_settings()
-        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
-            domain=settings.DOMAIN,
-            profile_id=profile.id,
-            user_id=db_user.id,
-        )
 
     await render_hub(
         message.bot,
@@ -294,8 +276,9 @@ async def rename_device_process(
             profile.id,
             config_ready=config_ready,
             show_delete=show_delete,
-            amnezia_bridge_url=amnezia_bridge_url,
         ),
+        message_effect_id=EFFECT_LIKE,
+        force_new=True,
     )
 
     await state.clear()

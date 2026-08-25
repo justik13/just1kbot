@@ -15,11 +15,13 @@ def get_hub_keyboard(
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_COMMON_L13_1,
             callback_data="menu_subscription",
+            style="success",
         )
     else:
         builder.button(
             text=texts.UI_BOT_KEYBOARDS_COMMON_L18_1,
             callback_data="menu_buy",
+            style="success",
         )
 
     builder.button(

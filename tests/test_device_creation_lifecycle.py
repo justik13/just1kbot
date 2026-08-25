@@ -71,7 +71,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         created_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -113,8 +113,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_render_hub.called)
             rendered_keyboard = mock_render_hub.call_args[0][3]
             buttons = [b.callback_data for row in rendered_keyboard.inline_keyboard for b in row if b.callback_data]
-            self.assertIn("show_config:42", buttons)
-            self.assertIn("download_conf:42", buttons)
+            self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_2_create_timeout_renders_connections_list(self):
@@ -156,11 +155,11 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_render_connections.called)
 
     async def test_3_worker_finishes_after_timeout_restores_actions(self):
-        """When worker finishes after timeout, subsequent entry to device card shows full actions."""
+        """When user manually opens device after background worker finished -> card renders with actions."""
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         ready_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -198,15 +197,14 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("keyboard", captured)
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertIn("show_config:42", buttons)
-            self.assertIn("download_conf:42", buttons)
+            self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_4_worker_create_failed_shows_error_state(self):
         """When worker marks create_failed -> error banner rendered, config actions hidden, delete allowed."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         failed_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -242,8 +240,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("❌ <b>Не удалось создать устройство на сервере.</b>", captured["text"])
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertNotIn("show_config:42", buttons)
-            self.assertNotIn("download_conf:42", buttons)
+            self.assertNotIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_5_pending_update_preserves_valid_config_actions(self):
@@ -251,7 +248,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         updating_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -281,8 +278,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("🔄 <b>Конфигурация устройства обновляется...</b>", captured["text"])
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertIn("show_config:42", buttons)
-            self.assertIn("download_conf:42", buttons)
+            self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_6_update_failed_preserves_valid_config_actions(self):
@@ -290,7 +286,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         valid_uri = _make_valid_vpn_uri()
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         update_failed_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -320,8 +316,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("⚠️ <b>Не удалось обновить конфигурацию на сервере", captured["text"])
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertIn("show_config:42", buttons)
-            self.assertIn("download_conf:42", buttons)
+            self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_7_duplicate_create_click_blocked_by_cache(self):
@@ -343,7 +338,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         """Canceling deletion when device is in pending_create builds fresh keyboard with hidden Delete button."""
         db_user = SimpleNamespace(id=1, telegram_id=100)
         server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
-        
+
         pending_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -380,8 +375,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("keyboard", captured)
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertNotIn("show_config:42", buttons)
-            self.assertNotIn("download_conf:42", buttons)
+            self.assertNotIn("alt_connection:42", buttons)
             self.assertNotIn("request_delete_device:42", buttons)
             self.assertIn("rename_device:42", buttons)
 
@@ -544,7 +538,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -564,7 +558,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
@@ -581,7 +575,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
@@ -592,8 +585,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("keyboard", captured)
             buttons = [b.callback_data for row in captured["keyboard"].inline_keyboard for b in row if b.callback_data]
-            self.assertIn("show_config:42", buttons)
-            self.assertIn("download_conf:42", buttons)
+            self.assertIn("alt_connection:42", buttons)
             self.assertIn("request_delete_device:42", buttons)
 
     async def test_16_b_rename_device_accepts_hash_and_custom_number(self):
@@ -601,7 +593,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -625,7 +617,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
@@ -639,7 +631,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=mock_update),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
@@ -657,7 +648,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -678,7 +669,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         state = AsyncMock()
         state.get_data = AsyncMock(return_value={"profile_id": 42})
-        
+
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = active_profile
         session = AsyncMock()
@@ -690,7 +681,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
             patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
         ):

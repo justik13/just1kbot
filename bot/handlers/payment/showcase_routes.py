@@ -162,7 +162,17 @@ async def select_tariff(
         )
         return
 
-    if source == "change" and db_user.current_tariff_id == tariff.id:
+    if not tariff.is_active:
+        await callback.answer(
+            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
+        )
+        return
+
+    current_limit = await _get_effective_device_limit(session, db_user)
+    if source == "change" and (
+        db_user.current_tariff_id == tariff.id
+        or getattr(tariff, "device_limit", None) == current_limit
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,
@@ -170,12 +180,6 @@ async def select_tariff(
             get_same_tariff_keyboard(),
         )
         await callback.answer(show_alert=False)
-        return
-
-    if not tariff.is_active:
-        await callback.answer(
-            texts.ERROR_TARIFF_UNAVAILABLE, show_alert=True
-        )
         return
 
     device_limit = getattr(tariff, "device_limit", 2)

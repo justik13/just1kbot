@@ -15,6 +15,7 @@ async def request_topup_status_refresh(
     *,
     payment_id: int,
     source: str = "user_refresh",
+    bot=None,
 ) -> Payment:
     """Queue provider reconciliation and recover a verified but uncredited top-up."""
     payment = await session.scalar(
@@ -59,6 +60,7 @@ async def request_topup_status_refresh(
             session,
             payment=payment,
             source=f"{source}_recovery",
+            bot=bot,
         )
 
     return payment

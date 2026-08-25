@@ -14,7 +14,6 @@ from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
-from database.repositories.tariffs_repo import get_tariff_by_id
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from services.subscription_token_service import SubscriptionTokenService
@@ -48,14 +47,7 @@ async def _get_effective_device_limit(
     user: User,
     session: AsyncSession,
 ) -> int:
-    if user.current_tariff_id:
-        tariff = await get_tariff_by_id(
-            session,
-            user.current_tariff_id,
-        )
-        if tariff:
-            return tariff.device_limit
-    return user.device_limit or 0
+    return await SubscriptionService.get_effective_device_limit(session, user)
 
 
 def _get_grace_deletion_time(user: User):
@@ -191,6 +183,7 @@ async def _build_connections_screen(
         builder.button(
             text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
             callback_data="add_device",
+            style="success",
         )
 
     if can_show_incy_subscription(read_only=read_only):

@@ -418,8 +418,14 @@ async def settle_succeeded_topup(
 
                     async def _send_ref_push():
                         try:
-                            from utils.telegram import render_hub
-                            await render_hub(bot, ref_target, ref_text, ref_markup)
+                            from utils.telegram import EFFECT_FIRE, render_hub
+                            await render_hub(
+                                bot,
+                                ref_target,
+                                ref_text,
+                                ref_markup,
+                                message_effect_id=EFFECT_FIRE,
+                            )
                             from database.connection import session_scope
                             async with session_scope() as notify_session:
                                 p = await notify_session.get(Payment, target_payment_id)
@@ -567,10 +573,18 @@ async def settle_succeeded_topup(
                 target_payment_id = payment.id
                 target_quote_uuid = quote_uuid if auto_fulfilled_action else None
 
+                from utils.telegram import EFFECT_CONFETTI
+
                 async def _send_topup_push():
                     try:
                         from utils.telegram import render_hub
-                        await render_hub(bot, target_user_id, push_text, push_markup)
+                        await render_hub(
+                            bot,
+                            target_user_id,
+                            push_text,
+                            push_markup,
+                            message_effect_id=EFFECT_CONFETTI,
+                        )
                         from database.connection import session_scope
                         async with session_scope() as notify_session:
                             p = await notify_session.get(Payment, target_payment_id)
@@ -590,7 +604,19 @@ async def settle_succeeded_topup(
                         logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
 
                 from database.connection import queue_post_commit_task
-                queue_post_commit_task(session, _send_topup_push)
+
+                # When the user manually triggers reconciliation (balance_check),
+                # the handler renders the balance screen itself; queuing the push
+                # here too would double-render the same chat (flicker + extra API calls).
+                if source.startswith("user_refresh"):
+                    import logging
+
+                    logging.getLogger(__name__).info(
+                        "Skip topup self-push for user %s: manual refresh renders balance screen",
+                        user.telegram_id,
+                    )
+                else:
+                    queue_post_commit_task(session, _send_topup_push)
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)

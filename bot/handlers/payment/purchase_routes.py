@@ -14,6 +14,7 @@ from bot.keyboards import (
     get_balance_purchase_confirm_keyboard,
     get_balance_shortage_keyboard,
     get_payment_success_keyboard,
+    get_same_tariff_keyboard,
 )
 from bot.states import BalanceStates
 from config.settings import get_settings
@@ -25,12 +26,14 @@ from services.account_purchase import (
     prepare_account_purchase,
     settle_account_purchase,
 )
+from services.maintenance_service import MaintenanceService
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
-from utils.telegram import render_hub
+from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .balance_routes import _create_and_render_topup
+from .common import _render_maintenance
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -140,6 +143,11 @@ async def review_purchase(
     if db_user is None or quote_id is None:
         await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
     await _render_purchase_review(callback, session, db_user, quote_id)
 
 
@@ -217,6 +225,11 @@ async def confirm_purchase(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
     try:
         result = await settle_account_purchase(
             session,
@@ -276,6 +289,8 @@ async def confirm_purchase(
             value_5=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
+        message_effect_id=EFFECT_CONFETTI,
+        force_new=True,
     )
 
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()
@@ -342,6 +357,12 @@ async def topup_custom_shortage(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await state.clear()
+        await _render_maintenance(callback, session, back_to="menu_balance")
+        return
     try:
         intent, context = await _shortage_context(
             session, db_user, quote_id
@@ -382,6 +403,12 @@ async def resume_purchase_after_topup(
         or source not in {"showcase", "renew", "change"}
     ):
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        back_to = "payment_change_tariff" if source == "change" else "payment_showcase"
+        await _render_maintenance(callback, session, back_to=back_to)
+        return
     if source == "change":
         from services.tariff_change_quote import create_tariff_change_quote
 
@@ -394,6 +421,14 @@ async def resume_purchase_after_topup(
             as_of=now_utc(),
         )
         if quote_result.failure_code:
+            if quote_result.failure_code == "same_tariff_requires_renew":
+                await render_hub(
+                    callback.bot,
+                    callback.message.chat.id,
+                    texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1,
+                    get_same_tariff_keyboard(),
+                )
+                return
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,

@@ -14,11 +14,19 @@ from services.subscription import SubscriptionService
 
 
 class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.maint_patch = patch("bot.handlers.payment.balance_routes.MaintenanceService.can_user_perform_action", new=AsyncMock(return_value=True))
+        self.maint_patch.start()
+
+    async def asyncTearDown(self):
+        self.maint_patch.stop()
+
     async def test_accept_custom_amount_deletes_invalid_text_input(self):
         message = MagicMock(spec=Message)
         message.text = "abc"
         message.bot = MagicMock()
         message.chat = MagicMock(id=123)
+        message.from_user = MagicMock(id=123)
         message.message_id = 999
         message.delete = AsyncMock()
 
@@ -37,6 +45,7 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         message.text = "5"
         message.bot = MagicMock()
         message.chat = MagicMock(id=123)
+        message.from_user = MagicMock(id=123)
         message.message_id = 999
         message.delete = AsyncMock()
 
@@ -56,6 +65,7 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
         message.text = "500"
         message.bot = MagicMock()
         message.chat = MagicMock(id=123)
+        message.from_user = MagicMock(id=123)
         message.message_id = 999
         message.delete = AsyncMock()
 

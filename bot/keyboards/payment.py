@@ -1,8 +1,15 @@
+from decimal import Decimal, ROUND_HALF_UP
+
 from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
 from utils.tariff_names import get_tariff_group_name
+
+
+def _round_half_up(val: Decimal | float | int) -> int:
+    d = Decimal(str(val))
+    return int(d.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
 def get_tariff_showcase_keyboard(
@@ -22,6 +29,45 @@ def get_tariff_showcase_keyboard(
     return builder.as_markup()
 
 
+def format_dynamic_tariff_button(t, base_tariff=None) -> str:
+    """Dynamically calculates discount percent relative to base duration."""
+    days = getattr(t, "duration_days", 0)
+    price = getattr(t, "price_rub", 0)
+
+    curr_price = Decimal(str(price))
+    display_price = int(curr_price) if int(curr_price) == curr_price else curr_price
+
+    if (
+        not base_tariff
+        or getattr(base_tariff, "id", None) == getattr(t, "id", None)
+        or getattr(base_tariff, "duration_days", 0) <= 0
+        or days <= getattr(base_tariff, "duration_days", 0)
+    ):
+        return f"⏱ {days} дн. — {display_price} ₽"
+
+    base_days = Decimal(str(base_tariff.duration_days))
+    base_price = Decimal(str(base_tariff.price_rub))
+    curr_days = Decimal(str(days))
+
+    base_daily_rate = base_price / base_days
+    undiscounted_price = base_daily_rate * curr_days
+    if undiscounted_price > 0 and undiscounted_price > curr_price:
+        discount_pct = _round_half_up(((undiscounted_price - curr_price) / undiscounted_price) * Decimal("100"))
+        savings_rub = _round_half_up(undiscounted_price - curr_price)
+    else:
+        discount_pct = 0
+        savings_rub = 0
+
+    if savings_rub <= 0 or discount_pct <= 0:
+        return f"⏱ {days} дн. — {display_price} ₽"
+
+    if days >= 360:
+        return f"💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+    elif days >= 180:
+        return f"⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+    return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
+
+
 def get_tariff_duration_keyboard(
     tariffs: list,
     *,
@@ -29,12 +75,14 @@ def get_tariff_duration_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
+    # Prefer standard 30-day tariff as baseline if available, otherwise shortest duration
+    base_tariff = next(
+        (t for t in tariffs_sorted if getattr(t, "duration_days", 0) == 30),
+        tariffs_sorted[0] if tariffs_sorted else None,
+    )
+
     for t in tariffs_sorted:
-        text = texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L34_1.format(value_0=t.duration_days, value_1=t.price_rub)
-        if t.duration_days >= 90:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L36_1
-        elif t.duration_days >= 30:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L38_1
+        text = format_dynamic_tariff_button(t, base_tariff)
         builder.button(
             text=text, callback_data=f"select_tariff:{t.id}:{source}"
         )
@@ -57,12 +105,14 @@ def get_tariff_duration_keyboard(
 def get_renew_keyboard(tariffs: list) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     tariffs_sorted = sorted(tariffs, key=lambda t: t.duration_days)
+    # Prefer standard 30-day tariff as baseline if available, otherwise shortest duration
+    base_tariff = next(
+        (t for t in tariffs_sorted if getattr(t, "duration_days", 0) == 30),
+        tariffs_sorted[0] if tariffs_sorted else None,
+    )
+
     for t in tariffs_sorted:
-        text = texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L62_1.format(value_0=t.duration_days, value_1=t.price_rub)
-        if t.duration_days >= 90:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L64_1
-        elif t.duration_days >= 30:
-            text += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L66_1
+        text = format_dynamic_tariff_button(t, base_tariff)
         builder.button(
             text=text, callback_data=f"select_tariff:{t.id}:renew"
         )
@@ -134,11 +184,13 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         builder.button(
             text=texts.BUTTON_RESUME_TOPUP,
             callback_data="balance_resume_topup",
+            style="primary",
         )
     else:
         builder.button(
             text=texts.BUTTON_TOPUP,
             callback_data="balance_topup",
+            style="success",
         )
     builder.button(
         text="🧾 История пополнений",
@@ -204,6 +256,7 @@ def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text="❌ Закрыть незавершённые ссылки",
         callback_data="balance_cancel_all",
+        style="danger",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
     builder.adjust(1)
@@ -215,10 +268,12 @@ def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=texts.BUTTON_CHECK_TOPUP,
         callback_data=f"balance_check:{payment_id}",
+        style="primary",
     )
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
+        style="danger",
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -228,14 +283,16 @@ def get_topup_payment_keyboard(
     payment_url: str, payment_id: int
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BUTTON_OPEN_PAYMENT, url=payment_url)
+    builder.button(text=texts.BUTTON_OPEN_PAYMENT, url=payment_url, style="success")
     builder.button(
         text=texts.BUTTON_CHECK_TOPUP,
         callback_data=f"balance_check:{payment_id}",
+        style="primary",
     )
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
         callback_data=f"balance_cancel:{payment_id}",
+        style="danger",
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -248,6 +305,7 @@ def get_balance_purchase_start_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L206_1,
         callback_data=f"balance_purchase_review:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.BUTTON_BACK,
@@ -264,6 +322,7 @@ def get_balance_purchase_confirm_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L219_1,
         callback_data=f"balance_purchase_confirm:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.BUTTON_BACK,
@@ -280,6 +339,7 @@ def get_balance_change_start_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L232_1,
         callback_data=f"balance_change_review:{quote_public_id}",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
@@ -293,6 +353,7 @@ def get_balance_change_confirm_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L245_1,
         callback_data=f"balance_change_confirm:{quote_public_id}",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
@@ -304,6 +365,7 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L256_1,
         callback_data="payment_quick_renew",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="payment_change_tariff")
     builder.adjust(1)
@@ -317,6 +379,7 @@ def get_balance_shortage_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L269_1.format(value_0=exact_amount),
         callback_data=f"bal_short_exact:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L273_1,
@@ -337,6 +400,7 @@ def get_balance_change_shortage_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L286_1.format(value_0=exact_amount),
         callback_data=f"bal_chg_short_exact:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L290_1,
