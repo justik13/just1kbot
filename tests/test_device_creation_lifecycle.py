@@ -538,7 +538,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -575,7 +575,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
@@ -594,7 +593,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -632,7 +631,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=mock_update),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
@@ -650,7 +648,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         from bot.handlers.connection.device_rename_routes import rename_device_process
 
         db_user = SimpleNamespace(id=1, telegram_id=100)
-        server = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
+        _server_unused = SimpleNamespace(id=10, country_flag="🇩🇪", name="Germany", protocol="amneziawg2", is_active=True)
         active_profile = SimpleNamespace(
             id=42,
             user_id=1,
@@ -683,7 +681,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.handlers.connection.device_rename_routes.get_profile_by_id", new=AsyncMock(return_value=active_profile)),
-            patch("bot.handlers.connection.device_rename_routes.get_server_by_id", new=AsyncMock(return_value=server)),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
             patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
         ):
@@ -1060,7 +1057,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await confirm_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_ALERT, show_alert=True)
+            callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
             self.assertNotIn(42, _deleting_devices)
 
     def test_27_ui_visibility_separated_from_quota_exclusion_policy(self):

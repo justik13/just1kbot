@@ -1,0 +1,9 @@
+# Development / testing dependencies.
+# Runtime dependencies live in requirements.txt (locked in requirements.lock).
+-r requirements.txt
+
+# SQLite async driver used by scripts/simulate_bot.py standalone testbed.
+aiosqlite>=0.21.0,<1.0.0
+
+# Static analysis (same pin as .github/workflows/tests.yml).
+ruff==0.16.1
