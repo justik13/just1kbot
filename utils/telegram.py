@@ -4,7 +4,7 @@ import logging
 import re
 import time
 
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
 from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Premium Message Effect IDs (Telegram Bot API 7.4+)
 EFFECT_CONFETTI = "5046509860389126442"  # 🎉 Confetti on topup, purchase, renewal, tariff change
-EFFECT_LIKE = "5107584321108051014"      # 👍 Like effect
+EFFECT_LIKE = "5107584321108051014"      # 👍 Like on system confirmations (e.g. device renamed)
 EFFECT_FIRE = "5104841245755180586"      # 🔥 Fire on referral reward
+EFFECT_LIGHTNING = "5104841245755180585"  # ⚡ Lightning on VPN device creation
 
 _hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
 
@@ -77,7 +78,9 @@ async def _safe_delete_batch(
 
     for msg_id in msg_ids:
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            await _retry_flood(
+                lambda mid=msg_id: bot.delete_message(chat_id=chat_id, message_id=mid)
+            )
             deleted_ids.append(msg_id)
         except TelegramBadRequest as e:
             err_str = str(e).lower()
@@ -112,6 +115,59 @@ def safe(value: str | None) -> str:
     if value is None:
         return "—"
     return html.escape(str(value))
+
+
+async def _retry_flood(op):
+    """Retry an operation on Telegram flood-control (always safe to retry)."""
+    try:
+        return await op()
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(float(e.retry_after) + 0.5)
+        return await op()
+
+
+async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
+    """
+    Execute a Telegram send operation with a conservative retry policy.
+
+    - TelegramRetryAfter: wait and retry (server told us exactly when).
+    - Connection-phase TelegramNetworkError: single immediate retry.
+    - Ambiguous timeout (request may have been delivered): NEVER resend;
+      log a suspected-orphan marker so chat hygiene can be audited.
+    """
+    try:
+        return await op()
+    except TelegramRetryAfter as e:
+        await asyncio.sleep(float(e.retry_after) + 0.5)
+        try:
+            return await op()
+        except TelegramNetworkError as exc:
+            logger.warning(
+                "hub_orphan_suspected chat=%s context=%s: network error after flood retry: %s",
+                chat_id, context, exc,
+            )
+            raise
+    except TelegramNetworkError:
+        await asyncio.sleep(0.5)
+        try:
+            return await op()
+        except TelegramNetworkError as nested:
+            logger.warning(
+                "hub_orphan_suspected chat=%s context=%s: repeated network error: %s",
+                chat_id, context, nested,
+            )
+            raise
+        except asyncio.TimeoutError:
+            logger.warning(
+                "hub_orphan_suspected chat=%s context=%s: timeout on retry", chat_id, context,
+            )
+            raise
+    except asyncio.TimeoutError:
+        logger.warning(
+            "hub_orphan_suspected chat=%s context=%s: ambiguous timeout, not resending",
+            chat_id, context,
+        )
+        raise
 
 
 def _maybe_cleanup_cache() -> None:
@@ -168,91 +224,49 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
         return []
 
 
-async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSession | None = None) -> None:
-    if session is not None:
-        try:
-            await hub_repo.add_hub_message_id(session, chat_id, message_id)
-            from database.connection import queue_post_commit_task, queue_rollback_task
-
-            async def _update_cache_post_commit():
-                cached = _hub_cache.get(chat_id)
-                if cached and "ids" in cached:
-                    if message_id not in cached["ids"]:
-                        cached["ids"].append(message_id)
-                else:
-                    _hub_cache[chat_id] = {"ids": [message_id]}
-
-            async def _invalidate_cache_on_rollback():
-                _hub_cache.pop(chat_id, None)
-
-            queue_post_commit_task(session, _update_cache_post_commit)
-            queue_rollback_task(session, _invalidate_cache_on_rollback)
-        except Exception as e:
-            logger.warning("Failed to store hub id in DB (with session) for chat %s: %s", chat_id, e)
-    else:
-        try:
-            async with session_scope() as sess:
-                await hub_repo.add_hub_message_id(sess, chat_id, message_id)
-            cached = _hub_cache.get(chat_id)
-            if cached and "ids" in cached:
-                if message_id not in cached["ids"]:
-                    cached["ids"].append(message_id)
-            else:
-                _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
-        except Exception as e:
-            logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
+async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
+    try:
+        async with session_scope() as sess:
+            await hub_repo.add_hub_message_id(sess, chat_id, message_id)
+        cached = _hub_cache.get(chat_id)
+        if cached and "ids" in cached:
+            if message_id not in cached["ids"]:
+                cached["ids"].append(message_id)
+        else:
+            _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
+    except Exception as e:
+        logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
 
 
-async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session: AsyncSession | None = None) -> None:
+async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
     if not message_ids:
         return
 
-    if session is not None:
-        try:
-            await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
-            from database.connection import queue_post_commit_task, queue_rollback_task
-
-            async def _update_cache_post_commit():
-                cached = _hub_cache.get(chat_id)
-                if cached and "ids" in cached:
-                    old_set = set(message_ids)
-                    cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
-                    if cached.get("effect_msg_id") in old_set:
-                        cached["effect_msg_id"] = None
-
-            async def _invalidate_cache_on_rollback():
-                _hub_cache.pop(chat_id, None)
-
-            queue_post_commit_task(session, _update_cache_post_commit)
-            queue_rollback_task(session, _invalidate_cache_on_rollback)
-        except Exception as e:
-            logger.warning("Failed to remove hub ids from DB (with session) for chat %s: %s", chat_id, e)
-    else:
-        try:
-            async with session_scope() as sess:
-                await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
-            cached = _hub_cache.get(chat_id)
-            if cached and "ids" in cached:
-                old_set = set(message_ids)
-                cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
-                if cached.get("effect_msg_id") in old_set:
-                    cached["effect_msg_id"] = None
-        except Exception as e:
-            logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
+    try:
+        async with session_scope() as sess:
+            await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
+        cached = _hub_cache.get(chat_id)
+        if cached and "ids" in cached:
+            old_set = set(message_ids)
+            cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+            if cached.get("effect_msg_id") in old_set:
+                cached["effect_msg_id"] = None
+    except Exception as e:
+        logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
 
 
 async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list[int]:
     return await _load_hub_ids_from_db(chat_id, session=session)
 
 
-async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int], session: AsyncSession | None = None) -> list[int]:
+async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
     if not msg_ids:
         return []
 
     deleted_ids, failed_ids = await _safe_delete_batch(bot, chat_id, msg_ids)
 
     if deleted_ids:
-        await _remove_hub_ids_from_db(chat_id, deleted_ids, session=session)
+        await _remove_hub_ids_from_db(chat_id, deleted_ids)
 
     if failed_ids:
         logger.warning(
@@ -280,11 +294,11 @@ def _is_message_effect_error(exc: Exception) -> bool:
     return any(
         marker in err
         for marker in (
+            "message_effect_id_invalid",
             "effect_id_invalid",
             "effect_chat_invalid",
-            "message_effect_id",
+            "message_effect_invalid",
             "message effect invalid",
-            "message can't be sent with effect",
             "can't be sent with effect",
         )
     )
@@ -295,7 +309,7 @@ async def render_hub(
     chat_id: int,
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
-    parse_mode: str = "HTML",
+    parse_mode: str | None = "HTML",
     force_new: bool = False,
     trigger_message_id: int | None = None,
     disable_web_page_preview: bool = True,
@@ -310,7 +324,6 @@ async def render_hub(
     async with lock:
         old_ids = await _load_hub_ids_from_db(chat_id)
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
-
         cached_effect_id = _hub_cache.get(chat_id, {}).get("effect_msg_id")
 
         target_edit_id = None
@@ -328,16 +341,17 @@ async def render_hub(
             except Exception:
                 pass
 
-
         if target_edit_id is not None:
             try:
-                await bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=target_edit_id,
-                    text=text_parts[0],
-                    reply_markup=reply_markup,
-                    parse_mode=parse_mode,
-                    link_preview_options=link_preview_opts,
+                await _retry_flood(
+                    lambda: bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=target_edit_id,
+                        text=text_parts[0],
+                        reply_markup=reply_markup,
+                        parse_mode=parse_mode,
+                        link_preview_options=link_preview_opts,
+                    )
                 )
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                 if stale_ids:
@@ -352,6 +366,7 @@ async def render_hub(
                     if stale_ids:
                         await _delete_hub_messages(bot, chat_id, stale_ids)
                     _hub_cache[chat_id] = {"ids": [target_edit_id], "effect_msg_id": None}
+                    await _store_hub_id_in_db(chat_id, target_edit_id)
                     return target_edit_id
 
                 logger.debug(
@@ -374,24 +389,32 @@ async def render_hub(
                 markup = reply_markup if is_last else None
                 effect = message_effect_id if index == 0 else None
                 try:
-                    message = await bot.send_message(
+                    message = await _send_with_resilience(
+                        lambda p=part, m=markup, eff=effect: bot.send_message(
+                            chat_id=chat_id,
+                            text=p,
+                            reply_markup=m,
+                            parse_mode=parse_mode,
+                            link_preview_options=link_preview_opts,
+                            message_effect_id=eff,
+                        ),
                         chat_id=chat_id,
-                        text=part,
-                        reply_markup=markup,
-                        parse_mode=parse_mode,
-                        link_preview_options=link_preview_opts,
-                        message_effect_id=effect,
+                        context="render_hub",
                     )
                 except TelegramBadRequest as exc:
                     error = str(exc).lower()
                     if effect and _is_message_effect_error(exc):
                         try:
-                            message = await bot.send_message(
+                            message = await _send_with_resilience(
+                                lambda p=part, m=markup: bot.send_message(
+                                    chat_id=chat_id,
+                                    text=p,
+                                    reply_markup=m,
+                                    parse_mode=parse_mode,
+                                    link_preview_options=link_preview_opts,
+                                ),
                                 chat_id=chat_id,
-                                text=part,
-                                reply_markup=markup,
-                                parse_mode=parse_mode,
-                                link_preview_options=link_preview_opts,
+                                context="render_hub_no_effect",
                             )
                         except TelegramBadRequest as inner_exc:
                             inner_error = str(inner_exc).lower()
@@ -401,12 +424,16 @@ async def render_hub(
                                     chat_id,
                                 )
                                 plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                                message = await bot.send_message(
+                                message = await _send_with_resilience(
+                                    lambda p=plain, m=markup: bot.send_message(
+                                        chat_id=chat_id,
+                                        text=p,
+                                        reply_markup=m,
+                                        link_preview_options=link_preview_opts,
+                                        parse_mode=None,
+                                    ),
                                     chat_id=chat_id,
-                                    text=plain,
-                                    reply_markup=markup,
-                                    link_preview_options=link_preview_opts,
-                                    parse_mode=None,
+                                    context="render_hub_plain_retry",
                                 )
                             else:
                                 raise
@@ -417,28 +444,37 @@ async def render_hub(
                         )
                         plain = html.unescape(re.sub(r"<[^>]+>", "", part))
                         try:
-                            message = await bot.send_message(
+                            message = await _send_with_resilience(
+                                lambda p=plain, m=markup, eff=effect: bot.send_message(
+                                    chat_id=chat_id,
+                                    text=p,
+                                    reply_markup=m,
+                                    link_preview_options=link_preview_opts,
+                                    parse_mode=None,
+                                    message_effect_id=eff,
+                                ),
                                 chat_id=chat_id,
-                                text=plain,
-                                reply_markup=markup,
-                                link_preview_options=link_preview_opts,
-                                parse_mode=None,
-                                message_effect_id=effect,
+                                context="render_hub_plain",
                             )
                         except TelegramBadRequest as effect_exc:
                             if effect and _is_message_effect_error(effect_exc):
-                                message = await bot.send_message(
+                                message = await _send_with_resilience(
+                                    lambda p=plain, m=markup: bot.send_message(
+                                        chat_id=chat_id,
+                                        text=p,
+                                        reply_markup=m,
+                                        link_preview_options=link_preview_opts,
+                                        parse_mode=None,
+                                    ),
                                     chat_id=chat_id,
-                                    text=plain,
-                                    reply_markup=markup,
-                                    link_preview_options=link_preview_opts,
-                                    parse_mode=None,
+                                    context="render_hub_plain_no_effect",
                                 )
                             else:
                                 raise
                     else:
                         raise
                 sent_ids.append(message.message_id)
+                await _store_hub_id_in_db(chat_id, message.message_id)
         except BaseException:
             if sent_ids:
                 try:
@@ -449,16 +485,6 @@ async def render_hub(
 
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
-        for message_id in sent_ids:
-            try:
-                await _store_hub_id_in_db(chat_id, message_id)
-            except Exception as db_exc:
-                logger.error(
-                    "Failed to persist hub message ID %s in DB for chat %s: %s",
-                    message_id,
-                    chat_id,
-                    db_exc,
-                )
         _hub_cache[chat_id] = {
             "ids": sent_ids,
             "effect_msg_id": sent_ids[0] if message_effect_id and sent_ids else None,
@@ -485,12 +511,16 @@ async def send_hub_photo(
             caption = caption[:1024]
 
         try:
-            msg = await bot.send_photo(
+            msg = await _send_with_resilience(
+                lambda: bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                ),
                 chat_id=chat_id,
-                photo=photo,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
+                context="send_hub_photo",
             )
         except TelegramBadRequest as exc:
             error = str(exc).lower()
@@ -500,12 +530,16 @@ async def send_hub_photo(
                     chat_id,
                 )
                 plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-                msg = await bot.send_photo(
+                msg = await _send_with_resilience(
+                    lambda: bot.send_photo(
+                        chat_id=chat_id,
+                        photo=photo,
+                        caption=plain,
+                        reply_markup=reply_markup,
+                        parse_mode=None,
+                    ),
                     chat_id=chat_id,
-                    photo=photo,
-                    caption=plain,
-                    reply_markup=reply_markup,
-                    parse_mode=None,
+                    context="send_hub_photo_plain",
                 )
             else:
                 raise
@@ -536,12 +570,16 @@ async def send_hub_document(
             caption = caption[:1024]
 
         try:
-            msg = await bot.send_document(
+            msg = await _send_with_resilience(
+                lambda: bot.send_document(
+                    chat_id=chat_id,
+                    document=document,
+                    caption=caption,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                ),
                 chat_id=chat_id,
-                document=document,
-                caption=caption,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode,
+                context="send_hub_document",
             )
         except TelegramBadRequest as exc:
             error = str(exc).lower()
@@ -551,12 +589,16 @@ async def send_hub_document(
                     chat_id,
                 )
                 plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-                msg = await bot.send_document(
+                msg = await _send_with_resilience(
+                    lambda: bot.send_document(
+                        chat_id=chat_id,
+                        document=document,
+                        caption=plain,
+                        reply_markup=reply_markup,
+                        parse_mode=None,
+                    ),
                     chat_id=chat_id,
-                    document=document,
-                    caption=plain,
-                    reply_markup=reply_markup,
-                    parse_mode=None,
+                    context="send_hub_document_plain",
                 )
             else:
                 raise
@@ -576,18 +618,21 @@ async def _append_hub_document_unlocked(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
 ) -> int:
     if caption:
         caption = caption[:1024]
 
     try:
-        msg = await bot.send_document(
+        msg = await _send_with_resilience(
+            lambda: bot.send_document(
+                chat_id=chat_id,
+                document=document,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            ),
             chat_id=chat_id,
-            document=document,
-            caption=caption,
-            reply_markup=reply_markup,
-            parse_mode=parse_mode,
+            context="append_hub_document",
         )
     except TelegramBadRequest as exc:
         error = str(exc).lower()
@@ -597,25 +642,21 @@ async def _append_hub_document_unlocked(
                 chat_id,
             )
             plain = html.unescape(re.sub(r"<[^>]+>", "", caption or ""))[:1024]
-            msg = await bot.send_document(
+            msg = await _send_with_resilience(
+                lambda: bot.send_document(
+                    chat_id=chat_id,
+                    document=document,
+                    caption=plain,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                ),
                 chat_id=chat_id,
-                document=document,
-                caption=plain,
-                reply_markup=reply_markup,
-                parse_mode=None,
+                context="append_hub_document_plain",
             )
         else:
             raise
 
-    try:
-        await _store_hub_id_in_db(chat_id, msg.message_id, session=session)
-    except Exception as db_exc:
-        logger.error(
-            "Failed to persist hub document ID %s in DB for chat %s: %s",
-            msg.message_id,
-            chat_id,
-            db_exc,
-        )
+    await _store_hub_id_in_db(chat_id, msg.message_id)
 
     return msg.message_id
 
@@ -627,7 +668,6 @@ async def append_hub_document(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
-    session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()
     lock = _get_hub_render_lock(chat_id)
@@ -639,7 +679,6 @@ async def append_hub_document(
             caption=caption,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
-            session=session,
         )
 
 
@@ -647,9 +686,8 @@ async def _append_hub_message_unlocked(
     bot,
     chat_id: int,
     text: str,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
-    session: AsyncSession | None = None,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
 ) -> int:
     text_parts = split_text_by_lines(text, limit=4096)
 
@@ -663,11 +701,15 @@ async def _append_hub_message_unlocked(
             kb = reply_markup if is_last else None
 
             try:
-                msg = await bot.send_message(
+                msg = await _send_with_resilience(
+                    lambda p=part, k=kb: bot.send_message(
+                        chat_id=chat_id,
+                        text=p,
+                        reply_markup=k,
+                        parse_mode=parse_mode,
+                    ),
                     chat_id=chat_id,
-                    text=part,
-                    reply_markup=kb,
-                    parse_mode=parse_mode,
+                    context="append_hub_message",
                 )
             except TelegramBadRequest as e:
                 err_str = str(e).lower()
@@ -678,16 +720,21 @@ async def _append_hub_message_unlocked(
                         e,
                     )
                     plain = html.unescape(re.sub(r"<[^>]+>", "", part))
-                    msg = await bot.send_message(
+                    msg = await _send_with_resilience(
+                        lambda p=plain, k=kb: bot.send_message(
+                            chat_id=chat_id,
+                            text=p,
+                            reply_markup=k,
+                            parse_mode=None,
+                        ),
                         chat_id=chat_id,
-                        text=plain,
-                        reply_markup=kb,
-                        parse_mode=None,
+                        context="append_hub_message_plain",
                     )
                 else:
                     raise
 
             sent_ids.append(msg.message_id)
+            await _store_hub_id_in_db(chat_id, msg.message_id)
     except BaseException:
         if sent_ids:
             try:
@@ -696,17 +743,6 @@ async def _append_hub_message_unlocked(
                 pass
         raise
 
-    for mid in sent_ids:
-        try:
-            await _store_hub_id_in_db(chat_id, mid, session=session)
-        except Exception as db_exc:
-            logger.error(
-                "Failed to persist hub message ID %s in DB for chat %s: %s",
-                mid,
-                chat_id,
-                db_exc,
-            )
-
     return sent_ids[-1]
 
 
@@ -714,8 +750,8 @@ async def append_hub_message(
     bot,
     chat_id: int,
     text: str,
-    reply_markup: InlineKeyboardMarkup = None,
-    parse_mode: str = "HTML",
+    reply_markup: InlineKeyboardMarkup | None = None,
+    parse_mode: str | None = "HTML",
 ) -> int:
     _maybe_cleanup_cache()
     lock = _get_hub_render_lock(chat_id)
