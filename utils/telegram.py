@@ -187,27 +187,25 @@ def _maybe_cleanup_cache() -> None:
 
 
 async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = None) -> list[int]:
+    """Load tracked hub ids for a chat.
+
+    Fail-closed: a DB read failure PROPAGATES. Returning [] here would make
+    render_hub treat an infrastructure outage as "no hub exists", causing
+    duplicate hubs and deletion of live user messages based on fake state.
+    """
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         return list(cached["ids"])
 
     if session is not None:
-        try:
-            ids = await hub_repo.get_hub_message_ids(session, chat_id)
-            _hub_cache[chat_id] = {"ids": list(ids)}
-            return list(ids)
-        except Exception as e:
-            logger.warning("Failed to load hub ids from DB (with session) for chat %s: %s", chat_id, e)
-            return []
-
-    try:
-        async with session_scope() as sess:
-            ids = await hub_repo.get_hub_message_ids(sess, chat_id)
+        ids = await hub_repo.get_hub_message_ids(session, chat_id)
         _hub_cache[chat_id] = {"ids": list(ids)}
         return list(ids)
-    except Exception as e:
-        logger.warning("Failed to load hub ids from DB for chat %s: %s", chat_id, e)
-        return []
+
+    async with session_scope() as sess:
+        ids = await hub_repo.get_hub_message_ids(sess, chat_id)
+    _hub_cache[chat_id] = {"ids": list(ids)}
+    return list(ids)
 
 
 async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
@@ -345,7 +343,19 @@ async def render_hub(
                 stale_failed: list[int] = []
                 if stale_ids:
                     stale_failed = await _delete_hub_messages(bot, chat_id, stale_ids)
-                await _store_hub_id_in_db(chat_id, target_edit_id)
+                try:
+                    await _store_hub_id_in_db(chat_id, target_edit_id)
+                except Exception:
+                    if target_edit_id not in old_ids:
+                        # Adopted an untracked trigger message as the hub; its id
+                        # was never durably stored -> clean it up before escaping.
+                        try:
+                            await asyncio.shield(
+                                bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
+                            )
+                        except Exception:
+                            pass
+                    raise
                 # Cache mirrors DB truth INCLUDING ids whose deletion failed,
                 # otherwise the next render would not retry them until TTL expiry.
                 _hub_cache[chat_id] = {
@@ -360,7 +370,17 @@ async def render_hub(
                     stale_failed_nm: list[int] = []
                     if stale_ids:
                         stale_failed_nm = await _delete_hub_messages(bot, chat_id, stale_ids)
-                    await _store_hub_id_in_db(chat_id, target_edit_id)
+                    try:
+                        await _store_hub_id_in_db(chat_id, target_edit_id)
+                    except Exception:
+                        if target_edit_id not in old_ids:
+                            try:
+                                await asyncio.shield(
+                                    bot.delete_message(chat_id=chat_id, message_id=target_edit_id)
+                                )
+                            except Exception:
+                                pass
+                        raise
                     _hub_cache[chat_id] = {
                         "ids": [target_edit_id] + stale_failed_nm,
                         "effect_msg_id": None,
@@ -472,6 +492,9 @@ async def render_hub(
                     else:
                         raise
                 sent_ids.append(message.message_id)
+                # Append BEFORE storing: if the store raises, the id is already
+                # in sent_ids so the BaseException cleanup deletes the delivered
+                # message instead of orphaning it.
                 await _store_hub_id_in_db(chat_id, message.message_id)
         except BaseException:
             if sent_ids:
@@ -546,7 +569,16 @@ async def send_hub_photo(
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
 
-        await _store_hub_id_in_db(chat_id, msg.message_id)
+        try:
+            await _store_hub_id_in_db(chat_id, msg.message_id)
+        except Exception:
+            try:
+                await asyncio.shield(
+                    bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+                )
+            except Exception:
+                pass
+            raise
 
         return msg.message_id
 
@@ -605,7 +637,18 @@ async def send_hub_document(
         if old_ids:
             await _delete_hub_messages(bot, chat_id, old_ids)
 
-        await _store_hub_id_in_db(chat_id, msg.message_id)
+        try:
+            await _store_hub_id_in_db(chat_id, msg.message_id)
+        except Exception:
+            # Delivered but not durably tracked -> delete before escaping,
+            # otherwise the message becomes an uncleanable orphan.
+            try:
+                await asyncio.shield(
+                    bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+                )
+            except Exception:
+                pass
+            raise
 
         return msg.message_id
 
@@ -655,7 +698,16 @@ async def _append_hub_document_unlocked(
         else:
             raise
 
-    await _store_hub_id_in_db(chat_id, msg.message_id)
+    try:
+        await _store_hub_id_in_db(chat_id, msg.message_id)
+    except Exception:
+        try:
+            await asyncio.shield(
+                bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+            )
+        except Exception:
+            pass
+        raise
 
     return msg.message_id
 
@@ -733,6 +785,8 @@ async def _append_hub_message_unlocked(
                     raise
 
             sent_ids.append(msg.message_id)
+            # Same ordering contract as render_hub: id must be in sent_ids
+            # before the store attempt, so failure cleanup covers it.
             await _store_hub_id_in_db(chat_id, msg.message_id)
     except BaseException:
         if sent_ids:

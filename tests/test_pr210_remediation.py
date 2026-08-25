@@ -327,5 +327,193 @@ class TestKeyboardSerialization(unittest.IsolatedAsyncioTestCase):
         self.assertIn("payment_quick_renew", _kb_callbacks(same))
 
 
+class TestDbReadFailureSemantics(unittest.IsolatedAsyncioTestCase):
+    """P1#1: DB READ FAILURE != EMPTY HUB."""
+
+    async def test_read_failure_does_not_create_replacement_hub(self):
+        bot = MagicMock()
+        bot.send_message = AsyncMock()
+        bot.edit_message_text = AsyncMock()
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(side_effect=RuntimeError("db down"))), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()):
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=1, text="Menu", trigger_message_id=42)
+
+        bot.send_message.assert_not_awaited()
+        bot.edit_message_text.assert_not_awaited()
+        bot.delete_message.assert_not_awaited()  # trigger must NOT be deleted on fake empty state
+
+    async def test_read_failure_recovers_when_db_available(self):
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+
+        load = AsyncMock(side_effect=[RuntimeError("db down"), [55]])
+        with patch("utils.telegram._load_hub_ids_from_db", new=load), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=1, text="Menu")
+            mid = await render_hub(bot, chat_id=1, text="Menu")
+
+        self.assertEqual(mid, 55)
+        bot.edit_message_text.assert_awaited_once()
+
+
+class TestStoreFailureCleanup(unittest.IsolatedAsyncioTestCase):
+    """P1#2: delivered-but-unstored messages must be cleaned before failure escapes."""
+
+    async def test_document_store_failure_self_cleans(self):
+        from utils.telegram import _append_hub_document_unlocked
+
+        bot = MagicMock()
+        msg = MagicMock(message_id=77)
+        bot.send_document = AsyncMock(return_value=msg)
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await asyncio.wait_for(
+                    _append_hub_document_unlocked(bot, chat_id=4, document=MagicMock()),
+                    timeout=2,
+                )
+
+        bot.delete_message.assert_awaited_with(chat_id=4, message_id=77)
+
+    async def test_photo_store_failure_self_cleans(self):
+        from utils.telegram import send_hub_photo
+
+        bot = MagicMock()
+        msg = MagicMock(message_id=88)
+        bot.send_photo = AsyncMock(return_value=msg)
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await asyncio.wait_for(
+                    send_hub_photo(bot, chat_id=4, photo=MagicMock()),
+                    timeout=2,
+                )
+
+        bot.delete_message.assert_awaited_with(chat_id=4, message_id=88)
+
+    async def test_multi_part_store_failure_cleans_current_part_too(self):
+        bot = MagicMock()
+        responses = [MagicMock(message_id=11), MagicMock(message_id=12)]
+
+        async def fake_send(**kwargs):
+            if len(responses) == 0:
+                raise RuntimeError("telegram dropped")
+            return responses.pop(0)
+
+        bot.send_message = AsyncMock(side_effect=fake_send)
+
+        store_calls = []
+
+        async def fake_store(chat_id, message_id):
+            store_calls.append(message_id)
+            if message_id == 12:
+                raise RuntimeError("db down")
+
+        long_text = "\n".join(f"row {i}" for i in range(600))
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=fake_store)), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()) as mock_del:
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=6, text=long_text)
+
+        self.assertEqual(store_calls, [11, 12])          # both stores attempted
+        deleted = mock_del.call_args[0][2]
+        self.assertEqual(sorted(deleted), [11, 12])      # BOTH cleaned (append-before-store ordering)
+
+    async def test_edit_adopted_trigger_store_failure_deletes_adopted(self):
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=7, text="X", trigger_message_id=9)
+
+        bot.delete_message.assert_awaited_with(chat_id=7, message_id=9)
+
+    async def test_edit_tracked_target_store_failure_keeps_message(self):
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+        bot.delete_message = AsyncMock()
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))):
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=7, text="X", trigger_message_id=100)
+
+        # Target is already durable+visible; deleting it would destroy user's screen.
+        for call in bot.delete_message.await_args_list:
+            self.assertNotEqual(call.kwargs.get("message_id"), 100)
+
+    async def test_cancellation_after_send_still_cleans(self):
+        bot = MagicMock()
+        responses = [MagicMock(message_id=21), None]
+
+        async def fake_send(**kwargs):
+            if len(responses) == 1:
+                raise asyncio.CancelledError()
+            return responses.pop(0)
+
+        bot.send_message = AsyncMock(side_effect=fake_send)
+        long_text = "\n".join(f"row {i} padding padding" for i in range(600))
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()) as mock_del:
+            with self.assertRaises(asyncio.CancelledError):
+                await render_hub(bot, chat_id=8, text=long_text)
+
+        mock_del.assert_awaited_once()
+        self.assertIn(21, mock_del.call_args[0][2])
+
+    async def test_concurrent_renders_same_chat_serialize(self):
+        import utils.telegram as tg
+
+        tg._hub_cache.pop(12, None)
+        active = {"n": 0, "max": 0}
+
+        async def fake_load(chat_id, session=None):
+            # Simulates DB latency inside the critical section so overlapping
+            # renders WOULD interleave if the per-chat lock were missing.
+            active["n"] += 1
+            active["max"] = max(active["max"], active["n"])
+            await asyncio.sleep(0.03)
+            active["n"] -= 1
+            return []
+
+        bot = MagicMock()
+        seq = iter(range(100, 200))
+
+        def make_msg():
+            m = MagicMock()
+            m.message_id = next(seq)
+            return m
+
+        bot.send_message = AsyncMock(side_effect=lambda **kw: make_msg())
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(side_effect=fake_load)), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()):
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *[render_hub(bot, chat_id=12, text=f"menu {i}") for i in range(3)]
+                ),
+                timeout=5,
+            )
+
+        self.assertLessEqual(active["max"], 1)  # strict serialization: no overlap
+        self.assertEqual(len(tg._hub_cache[12]["ids"]), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

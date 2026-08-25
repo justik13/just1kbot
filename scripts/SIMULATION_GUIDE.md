@@ -70,6 +70,14 @@ python scripts/simulate_bot.py
 - Поддержка `<blockquote expandable><code>...</code></blockquote>` для ключей подключения.
 - Защита длины `CopyTextButton` (<= 256 символов).
 
+### ⚠️ Границы эмуляции (честные ограничения)
+Симулятор покрывает бизнес-логику и UI-контракты, но **не является полной заменой PostgreSQL-окружения**:
+- advisory locks (`pg_advisory_xact_lock`) не эмулируются — конкурентные financial-сценарии тестируйте на Postgres (см. `tests/*_postgres.py`);
+- диалект-специфика (`ON CONFLICT`, JSONB/ARRAY, partial unique indexes) имитируется частично;
+- транзакционные таймауты/изоляция отличаются от продакшн-настройок.
+
+Для release-gate используйте CI-джобу с реальным PostgreSQL + этот стенд как быстрый UX-прогон.
+
 ---
 
 ## 🧑‍💻 Динамический автосидинг
