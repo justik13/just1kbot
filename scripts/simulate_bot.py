@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Just1kBot — Self-Contained Enterprise Simulation Testbed
 =========================================================
@@ -36,29 +37,19 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import aiosqlite
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BotCommand,
     BotCommandScopeDefault,
-    CallbackQuery,
     MenuButtonCommands,
-    Message,
     Update,
 )
 from aiogram.utils.chat_action import ChatActionMiddleware
 from cryptography.fernet import Fernet
 from sqlalchemy import (
-    BigInteger,
     DateTime,
-    ForeignKey,
-    Index,
     Integer,
-    Numeric,
-    String,
-    Text,
-    event,
-    func,
     select,
     text,
 )
@@ -72,6 +63,40 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.schema import CheckConstraint
 from sqlalchemy.types import TypeDecorator
+
+from bot import texts
+from bot.middlewares.action_lock import ActionLockMiddleware
+from bot.middlewares.ban_check import BanCheckMiddleware
+from bot.middlewares.correlation import CorrelationMiddleware
+from bot.middlewares.throttling import ThrottlingMiddleware
+from bot.middlewares.user_context import UserContextMiddleware
+from config.settings import Settings, get_settings
+import database.connection as db_conn
+from database.connection import DEFAULT_TARIFFS, session_scope
+from database.models import (
+    AccountLedgerEntry,
+    Base,
+    EntitlementEntry,
+    PaidValueLedgerEntry,
+    Payment,
+    Server,
+    Tariff,
+    TariffQuote,
+    TariffVersion,
+    User,
+    VPNProfile,
+)
+from services.account_topup import AccountTopupError, settle_succeeded_topup
+import services.account_topup_refresh as topup_refresh
+from services.amnezia_client import (
+    AmneziaAPIResult,
+    AmneziaClient,
+    AmneziaClientCreateResponse,
+    AmneziaClientListItem,
+)
+from services.yookassa_service import YooKassaResult, YooKassaService
+from utils.datetime_helpers import now_utc
+from utils.vpn_parser import encode_json_to_vpn_uri
 
 # --- 1. SQLITE COMPILER & POSTGRESQL EMULATION SHIMS ---
 
@@ -136,44 +161,6 @@ class UTCDateTime(TypeDecorator):
             if isinstance(value, datetime) and value.tzinfo is None:
                 value = value.replace(tzinfo=timezone.utc)
         return value
-
-
-# --- 2. IMPORT PROJECT MODULES ---
-
-import bot.middlewares.action_lock as action_lock_mod
-from bot.middlewares.action_lock import ActionLockMiddleware
-from bot.middlewares.ban_check import BanCheckMiddleware
-from bot.middlewares.correlation import CorrelationMiddleware
-from bot.middlewares.throttling import ThrottlingMiddleware
-from bot.middlewares.user_context import UserContextMiddleware
-from bot import texts
-from config.settings import Settings, get_settings
-import database.connection as db_conn
-from database.connection import DEFAULT_TARIFFS, session_scope
-from database.models import (
-    AccountLedgerEntry,
-    Base,
-    EntitlementEntry,
-    PaidValueLedgerEntry,
-    Payment,
-    Server,
-    Tariff,
-    TariffQuote,
-    TariffVersion,
-    User,
-    VPNProfile,
-)
-from services.account_topup import AccountTopupError, settle_succeeded_topup
-import services.account_topup_refresh as topup_refresh
-from services.amnezia_client import (
-    AmneziaAPIResult,
-    AmneziaClient,
-    AmneziaClientCreateResponse,
-    AmneziaClientListItem,
-)
-from services.yookassa_service import YooKassaResult, YooKassaService
-from utils.datetime_helpers import now_utc
-from utils.vpn_parser import encode_json_to_vpn_uri
 
 
 # --- 3. AMNEZIA VPN & YOOKASSA MOCK GENERATORS ---
@@ -541,8 +528,8 @@ async def run_simulation(args: argparse.Namespace):
     # Parse admin IDs
     admin_ids = []
     if args.admin_id:
-        for aid in args.admin_id.split(","):
-            aid = aid.strip()
+        for aid_raw in args.admin_id.split(","):
+            aid = aid_raw.strip()
             if aid.isdigit():
                 admin_ids.append(int(aid))
     if not admin_ids:

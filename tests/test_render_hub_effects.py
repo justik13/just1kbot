@@ -172,7 +172,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         kb = InlineKeyboardBuilder().as_markup()
 
         with patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()):
-            mid = await append_hub_message(
+            await append_hub_message(
                 bot,
                 chat_id=12345,
                 text='<b>Instruction</b> <invalid_tag>',
@@ -213,7 +213,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
         from services.account_topup import settle_succeeded_topup
         from services.referral_bonus import ReferralBonusGrantResult
         from utils.datetime_helpers import now_utc
-        from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE, EFFECT_LIKE
+        from utils.telegram import EFFECT_CONFETTI, EFFECT_FIRE
 
         session = AsyncMock()
         session.add = MagicMock()

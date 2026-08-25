@@ -17,7 +17,7 @@ from bot.handlers.payment.tariff_change_routes import (
     confirm_tariff_change,
     review_tariff_change,
 )
-from database.models import MaintenanceMode, Payment, User
+from database.models import Payment, User
 from services.account_topup import settle_succeeded_topup
 from services.maintenance_service import MaintenanceService
 from utils.datetime_helpers import now_utc
