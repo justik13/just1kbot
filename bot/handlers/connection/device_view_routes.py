@@ -3,6 +3,7 @@ import logging
 import re
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramNetworkError
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -535,8 +536,17 @@ async def alt_connection(
                 )
                 sent_doc_ids.append(doc_msg_1)
                 vpn_sent = True
+            except (TelegramNetworkError, asyncio.TimeoutError) as e:
+                # Ambiguous delivery: the .vpn may exist in Telegram without a
+                # known message_id. Fail-closed — abort the whole operation and
+                # keep the old hub instead of continuing with unknown state.
+                logger.warning(
+                    "hub_orphan_suspected profile=%s context=alt_vpn: %s", profile.id, e,
+                )
+                raise
             except Exception as e:
                 logger.error("Failed to send .vpn file for profile %s: %s", profile.id, e)
+                raise
 
             try:
                 doc_msg_2 = await _append_hub_document_unlocked(
@@ -547,8 +557,14 @@ async def alt_connection(
                 )
                 sent_doc_ids.append(doc_msg_2)
                 conf_sent = True
+            except (TelegramNetworkError, asyncio.TimeoutError) as e:
+                logger.warning(
+                    "hub_orphan_suspected profile=%s context=alt_conf: %s", profile.id, e,
+                )
+                raise
             except Exception as e:
                 logger.error("Failed to send .conf file for profile %s: %s", profile.id, e)
+                raise
 
             if vpn_sent and conf_sent:
                 files_info = (

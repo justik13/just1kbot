@@ -642,5 +642,68 @@ class TestRemoveFailureConsistency(unittest.IsolatedAsyncioTestCase):
         tg._hub_cache.pop(15, None)
 
 
+class TestAltConnectionFailClosed(unittest.IsolatedAsyncioTestCase):
+    async def test_ambiguous_vpn_delivery_aborts_and_preserves_old_hub(self):
+        """P1: unknown-delivery .vpn must abort alt_connection, keep old hub intact."""
+        import asyncio as aio
+
+        from aiogram.exceptions import TelegramNetworkError
+
+        from bot.handlers.connection.device_view_routes import alt_connection
+
+        bot = MagicMock()
+        bot.send_document = AsyncMock(
+            side_effect=TelegramNetworkError(MagicMock(), "HTTP Client says - Request timeout error")
+        )
+        bot.send_message = AsyncMock()
+        bot.delete_message = AsyncMock()
+
+        callback = MagicMock()
+        callback.data = "alt_connection:42"
+        callback.bot = bot
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=100)
+        callback.message.message_id = 9
+        callback.from_user = MagicMock(id=10)
+        callback.answer = AsyncMock()
+
+        profile = SimpleNamespace(
+            id=42, user_id=10, server_id=1, device_name="Dev #1",
+            provisioning_status="active", peer_id="p1",
+            raw_config="vpn://valid", traffic_down=0, traffic_up=0,
+            last_connected=None, is_active=True,
+        )
+        db_user = SimpleNamespace(id=10, telegram_id=100)
+        server = SimpleNamespace(id=1, country_flag="🇩🇪", name="Germany", protocol="amneziawg2")
+
+        session = AsyncMock()
+
+        async def _ok(*a, **k):
+            return None
+
+        with patch("bot.handlers.connection.device_view_routes.get_profile_by_id", AsyncMock(return_value=profile)), \
+             patch("bot.handlers.connection.device_view_routes.SubscriptionService.check_access", AsyncMock(return_value=True)), \
+             patch("bot.handlers.connection.device_view_routes.can_show_config_actions", return_value=True), \
+             patch("bot.handlers.connection.device_view_routes.get_server_by_id", AsyncMock(return_value=server)), \
+             patch("bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json", return_value={"h": "1"}), \
+             patch("bot.handlers.connection.device_view_routes.customize_vpn_config_dict", return_value={}), \
+             patch("bot.handlers.connection.device_view_routes.build_vpn_file_from_dict", return_value="V"), \
+             patch("bot.handlers.connection.device_view_routes.build_conf_file_from_dict", return_value="C"), \
+             patch("bot.handlers.connection.device_view_routes.can_show_amnezia_bridge", return_value=False), \
+             patch("utils.telegram._load_hub_ids_from_db", AsyncMock(return_value=[700])), \
+             patch("utils.telegram._store_hub_id_in_db", AsyncMock()), \
+             patch("utils.telegram._remove_hub_ids_from_db", AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()) as mock_del:
+            with self.assertRaises(TelegramNetworkError):
+                await aio.wait_for(
+                    alt_connection(callback, AsyncMock(), session, db_user),
+                    timeout=2,
+                )
+
+        self.assertEqual(bot.send_document.await_count, 1)   # aborted after FIRST doc
+        bot.send_message.assert_not_awaited()                 # no guide attempt
+        mock_del.assert_not_awaited()                         # old hub [700] preserved
+
+
 if __name__ == "__main__":
     unittest.main()

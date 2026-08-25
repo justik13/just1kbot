@@ -4,7 +4,7 @@ Adds `is_effect_message` to `hub_messages` so render_hub can restore the
 "clean hub after an effect success screen" invariant after a process restart.
 
 Revision ID: 0011_hub_effect_flag
-Revises: 324caec3cc61
+Revises: c20a97270920
 Create Date: 2026-08-25
 """
 from alembic import op
