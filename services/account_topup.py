@@ -604,7 +604,19 @@ async def settle_succeeded_topup(
                         logging.getLogger(__name__).warning("Failed to send push notification via render_hub to user %s: %s", target_user_id, exc)
 
                 from database.connection import queue_post_commit_task
-                queue_post_commit_task(session, _send_topup_push)
+
+                # When the user manually triggers reconciliation (balance_check),
+                # the handler renders the balance screen itself; queuing the push
+                # here too would double-render the same chat (flicker + extra API calls).
+                if source.startswith("user_refresh"):
+                    import logging
+
+                    logging.getLogger(__name__).info(
+                        "Skip topup self-push for user %s: manual refresh renders balance screen",
+                        user.telegram_id,
+                    )
+                else:
+                    queue_post_commit_task(session, _send_topup_push)
             except Exception as exc:
                 import logging
                 logging.getLogger(__name__).warning("Failed to queue push notification for user %s: %s", user.telegram_id, exc)

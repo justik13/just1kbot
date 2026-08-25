@@ -27,7 +27,7 @@ class DBSessionMiddleware(BaseMiddleware):
             try:
                 if isinstance(event, CallbackQuery):
                     await event.answer(
-                        texts.ERROR_TECHNICAL_ALERT,
+                        texts.ERROR_TECHNICAL_MESSAGE,
                         show_alert=True,
                     )
                 elif isinstance(event, Message):

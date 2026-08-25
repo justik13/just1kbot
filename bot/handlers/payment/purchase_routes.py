@@ -14,6 +14,7 @@ from bot.keyboards import (
     get_balance_purchase_confirm_keyboard,
     get_balance_shortage_keyboard,
     get_payment_success_keyboard,
+    get_same_tariff_keyboard,
 )
 from bot.states import BalanceStates
 from config.settings import get_settings
@@ -408,6 +409,14 @@ async def resume_purchase_after_topup(
             as_of=now_utc(),
         )
         if quote_result.failure_code:
+            if quote_result.failure_code == "same_tariff_requires_renew":
+                await render_hub(
+                    callback.bot,
+                    callback.message.chat.id,
+                    texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1,
+                    get_same_tariff_keyboard(),
+                )
+                return
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
