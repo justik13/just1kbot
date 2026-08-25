@@ -542,10 +542,10 @@ TEXTS = {
     'UI_BOT_KEYBOARDS_COMMON_L44_1': '🛠 Админка',
     # bot/keyboards/device.py:9
     'UI_BOT_KEYBOARDS_DEVICE_L9_1': '✏️ Изменить имя',
-    # bot/keyboards/device.py:14
-    'UI_BOT_KEYBOARDS_DEVICE_L14_1': '🔑 Показать ключ',
-    # bot/keyboards/device.py:15
-    'UI_BOT_KEYBOARDS_DEVICE_L15_1': '📥 Скачать файлом',
+    # bot/keyboards/device.py (alt connection screen)
+    'UI_BOT_KEYBOARDS_DEVICE_ALT_CONNECTION': '🔄 Другой способ подключения',
+    'UI_BOT_KEYBOARDS_DEVICE_OPEN_IN_AMNEZIA': '🚀 Открыть в Amnezia',
+    'UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE': '← К устройству',
     # bot/keyboards/device.py:18
     'UI_BOT_KEYBOARDS_DEVICE_L18_1': '🗑 Удалить устройство',
     # bot/keyboards/device.py:23

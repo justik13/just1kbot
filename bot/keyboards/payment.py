@@ -34,18 +34,20 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
     days = getattr(t, "duration_days", 0)
     price = getattr(t, "price_rub", 0)
 
+    curr_price = Decimal(str(price))
+    display_price = int(curr_price) if int(curr_price) == curr_price else curr_price
+
     if (
         not base_tariff
         or getattr(base_tariff, "id", None) == getattr(t, "id", None)
         or getattr(base_tariff, "duration_days", 0) <= 0
         or days <= getattr(base_tariff, "duration_days", 0)
     ):
-        return f"⏱ {days} дн. — {price} ₽"
+        return f"⏱ {days} дн. — {display_price} ₽"
 
     base_days = Decimal(str(base_tariff.duration_days))
     base_price = Decimal(str(base_tariff.price_rub))
     curr_days = Decimal(str(days))
-    curr_price = Decimal(str(price))
 
     base_daily_rate = base_price / base_days
     undiscounted_price = base_daily_rate * curr_days
@@ -56,8 +58,6 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         discount_pct = 0
         savings_rub = 0
 
-    display_price = int(curr_price) if int(curr_price) == curr_price else curr_price
-
     if savings_rub <= 0 or discount_pct <= 0:
         return f"⏱ {days} дн. — {display_price} ₽"
 
@@ -65,9 +65,6 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         return f"💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
     elif days >= 180:
         return f"⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
-    elif days >= 90:
-        return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
-
     return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 

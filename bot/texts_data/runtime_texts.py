@@ -276,6 +276,13 @@ TEXTS = {
     'RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1': '\n⏳ Статус: {value_0}\n',
     # bot/handlers/connection/device_create_routes.py:148
     'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L148_1': '🌍',
+    # bot/handlers/connection/device_create_routes.py (creating screen)
+    'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_CREATING_SCREEN': (
+        '⏳ <b>Настраиваем подключение...</b>\n\n'
+        '🌍 Сервер: <b>{value_0}</b>\n\n'
+        '<i>Подготавливаем защищенный доступ...</i>'
+    ),
+    'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME': 'VPN Сервер',
     # bot/handlers/connection/device_create_routes.py:234
     'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L234_1': '🌍',
     # bot/handlers/connection/device_view_routes.py:60

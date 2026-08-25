@@ -9,7 +9,6 @@ def get_device_keyboard(
     *,
     config_ready: bool = True,
     show_delete: bool = True,
-    amnezia_bridge_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -17,7 +16,7 @@ def get_device_keyboard(
 
     if config_ready:
         builder.button(
-            text="🔄 Другой способ подключения",
+            text=texts.UI_BOT_KEYBOARDS_DEVICE_ALT_CONNECTION,
             callback_data=f"alt_connection:{profile_id}",
             style="primary",
         )
@@ -63,13 +62,13 @@ def get_alt_connection_keyboard(
 
     if amnezia_bridge_url:
         builder.button(
-            text="🚀 Открыть в Amnezia",
+            text=texts.UI_BOT_KEYBOARDS_DEVICE_OPEN_IN_AMNEZIA,
             url=amnezia_bridge_url,
             style="primary",
         )
 
     builder.button(
-        text="« К устройству",
+        text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE,
         callback_data=f"manage_device:{profile_id}",
     )
     builder.adjust(1)
