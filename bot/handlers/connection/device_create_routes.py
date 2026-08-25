@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import render_hub, safe
+from utils.telegram import EFFECT_LIGHTNING, render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
@@ -303,14 +303,16 @@ async def _process_server_selection(
         return
 
     try:
-        server_name = server.name if server else "VPN Сервер"
+        server_name = (
+            server.name
+            if server
+            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME
+        )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            (
-                "⏳ <b>Настраиваем подключение...</b>\n\n"
-                f"🌍 Сервер: <b>{safe(server_name)}</b>\n\n"
-                "<i>Подготавливаем защищенный доступ...</i>"
+            texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_CREATING_SCREEN.format(
+                value_0=safe(server_name)
             ),
             get_back_button("add_device"),
             parse_mode="HTML",
@@ -469,7 +471,14 @@ async def _process_server_selection(
             if ready_profile and ready_profile.provisioning_status in ("active", "create_failed", "create_cleanup_pending"):
                 from .device_view_routes import render_device_screen
                 await session.refresh(user)
-                await render_device_screen(callback.bot, callback.message.chat.id, ready_profile, user, session)
+                await render_device_screen(
+                    callback.bot,
+                    callback.message.chat.id,
+                    ready_profile,
+                    user,
+                    session,
+                    message_effect_id=EFFECT_LIGHTNING if ready_profile.provisioning_status == "active" else None,
+                )
             else:
                 # Timeout reached or creation still pending -> render connections
                 await session.refresh(user)
