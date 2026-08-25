@@ -1060,7 +1060,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         ):
             await confirm_delete_device(callback, state, session, db_user)
 
-            callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+            callback.answer.assert_called_once_with(texts.ERROR_TECHNICAL_ALERT, show_alert=True)
             self.assertNotIn(42, _deleting_devices)
 
     def test_27_ui_visibility_separated_from_quota_exclusion_policy(self):

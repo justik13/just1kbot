@@ -32,10 +32,13 @@ from services.account_topup import (
     hide_balance_topup,
     request_topup_status_refresh,
 )
+from services.maintenance_service import MaintenanceService
 from utils.callbacks import parse_callback_id
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
-from utils.telegram import render_hub
+from utils.telegram import EFFECT_CONFETTI, render_hub
+
+from .common import _render_maintenance
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -97,6 +100,8 @@ async def _render_balance(
     *,
     notice: str | None = None,
     trigger_message_id: int | None = None,
+    message_effect_id: str | None = None,
+    force_new: bool = False,
 ) -> None:
     snapshot = await get_account_balance(session, user_id=user.id)
     history = await get_account_history(session, user_id=user.id, limit=5)
@@ -126,6 +131,8 @@ async def _render_balance(
         text,
         get_balance_keyboard(has_visible_topup=visible is not None),
         trigger_message_id=trigger_message_id,
+        message_effect_id=message_effect_id,
+        force_new=force_new,
     )
 
 
@@ -209,6 +216,12 @@ async def _create_and_render_topup(
         chat_id = target.message.chat.id if target.message else None
 
     if bot is None or chat_id is None:
+        return
+
+    if not await MaintenanceService.can_user_perform_action(
+        session, user.telegram_id
+    ):
+        await _render_maintenance(target, session, back_to="menu_balance")
         return
 
     bot_info = await bot.get_me()
@@ -313,6 +326,11 @@ async def choose_topup_amount(
     await state.clear()
     if db_user is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="menu_balance")
+        return
     if db_user.topup_blocked:
         await render_hub(
             callback.bot,
@@ -381,6 +399,11 @@ async def create_preset_topup(
     amount = parse_callback_id(callback.data, 1)
     if db_user is None or amount is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="menu_balance")
+        return
     await _create_and_render_topup(callback, session, db_user, amount)
 
 
@@ -388,8 +411,14 @@ async def create_preset_topup(
 async def request_custom_amount(
     callback: CallbackQuery,
     state: FSMContext,
+    session: AsyncSession,
 ) -> None:
     await callback.answer(show_alert=False)
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="menu_balance")
+        return
     await state.set_state(BalanceStates.enter_custom_amount)
     await state.set_data({})
     await render_hub(
@@ -414,6 +443,13 @@ async def accept_custom_amount(
         await message.delete()
     except Exception:
         pass
+
+    if not await MaintenanceService.can_user_perform_action(
+        session, message.from_user.id
+    ):
+        await state.clear()
+        await _render_maintenance(message, session, back_to="menu_balance")
+        return
 
     raw = (message.text or "").strip()
     if not raw.isascii() or not raw.isdigit():
@@ -504,7 +540,7 @@ async def check_topup(
         return
     try:
         payment = await request_topup_status_refresh(
-            session, payment_id=payment.id
+            session, payment_id=payment.id, bot=callback.bot
         )
     except AccountTopupError:
         await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
@@ -516,6 +552,8 @@ async def check_topup(
             session,
             db_user,
             notice=texts.TOPUP_CREDITED_NOTICE,
+            message_effect_id=EFFECT_CONFETTI,
+            force_new=True,
         )
     elif payment.provider_status == "succeeded":
         await render_hub(

@@ -271,6 +271,7 @@ def get_topup_waiting_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     builder.button(
         text=texts.BUTTON_CHECK_TOPUP,
         callback_data=f"balance_check:{payment_id}",
+        style="primary",
     )
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
@@ -289,6 +290,7 @@ def get_topup_payment_keyboard(
     builder.button(
         text=texts.BUTTON_CHECK_TOPUP,
         callback_data=f"balance_check:{payment_id}",
+        style="primary",
     )
     builder.button(
         text=texts.BUTTON_CLOSE_TOPUP,
@@ -306,6 +308,7 @@ def get_balance_purchase_start_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L206_1,
         callback_data=f"balance_purchase_review:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.BUTTON_BACK,
@@ -339,6 +342,7 @@ def get_balance_change_start_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L232_1,
         callback_data=f"balance_change_review:{quote_public_id}",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
     builder.adjust(1)
@@ -364,6 +368,7 @@ def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L256_1,
         callback_data="payment_quick_renew",
+        style="success",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="payment_change_tariff")
     builder.adjust(1)
@@ -377,6 +382,7 @@ def get_balance_shortage_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L269_1.format(value_0=exact_amount),
         callback_data=f"bal_short_exact:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L273_1,
@@ -397,6 +403,7 @@ def get_balance_change_shortage_keyboard(
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L286_1.format(value_0=exact_amount),
         callback_data=f"bal_chg_short_exact:{quote_public_id}",
+        style="success",
     )
     builder.button(
         text=texts.UI_BOT_KEYBOARDS_PAYMENT_L290_1,

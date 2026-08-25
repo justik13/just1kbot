@@ -19,6 +19,7 @@ def get_device_keyboard(
         builder.button(
             text="🔄 Другой способ подключения",
             callback_data=f"alt_connection:{profile_id}",
+            style="primary",
         )
         adjustments.append(1)
 

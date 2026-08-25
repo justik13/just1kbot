@@ -16,6 +16,11 @@ from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
 
+# Premium Message Effect IDs (Telegram Bot API 7.4+)
+EFFECT_CONFETTI = "5046509860389126442"  # 🎉 Confetti on topup, purchase, renewal, tariff change
+EFFECT_LIKE = "5107584321108051014"      # 👍 Like effect
+EFFECT_FIRE = "5104841245755180586"      # 🔥 Fire on referral reward
+
 _hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
 
 _last_cleanup_time: float = 0.0
@@ -193,7 +198,7 @@ async def _store_hub_id_in_db(chat_id: int, message_id: int, session: AsyncSessi
                 if message_id not in cached["ids"]:
                     cached["ids"].append(message_id)
             else:
-                _hub_cache[chat_id] = {"ids": [message_id]}
+                _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
         except Exception as e:
             logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
 
@@ -212,6 +217,8 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
                 if cached and "ids" in cached:
                     old_set = set(message_ids)
                     cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+                    if cached.get("effect_msg_id") in old_set:
+                        cached["effect_msg_id"] = None
 
             async def _invalidate_cache_on_rollback():
                 _hub_cache.pop(chat_id, None)
@@ -228,6 +235,8 @@ async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int], session:
             if cached and "ids" in cached:
                 old_set = set(message_ids)
                 cached["ids"] = [mid for mid in cached["ids"] if mid not in old_set]
+                if cached.get("effect_msg_id") in old_set:
+                    cached["effect_msg_id"] = None
         except Exception as e:
             logger.warning("Failed to remove hub ids from DB for chat %s: %s", chat_id, e)
 
@@ -302,13 +311,15 @@ async def render_hub(
         old_ids = await _load_hub_ids_from_db(chat_id)
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
 
+        cached_effect_id = _hub_cache.get(chat_id, {}).get("effect_msg_id")
+
         target_edit_id = None
         if not force_new and not message_effect_id and len(text_parts) == 1:
-            if trigger_message_id and trigger_message_id in old_ids:
+            if trigger_message_id and trigger_message_id in old_ids and trigger_message_id != cached_effect_id:
                 target_edit_id = trigger_message_id
-            elif old_ids:
+            elif old_ids and old_ids[-1] != cached_effect_id:
                 target_edit_id = old_ids[-1]
-            elif trigger_message_id:
+            elif trigger_message_id and trigger_message_id != cached_effect_id:
                 target_edit_id = trigger_message_id
 
         if trigger_message_id and trigger_message_id != target_edit_id and trigger_message_id not in old_ids:
@@ -331,7 +342,7 @@ async def render_hub(
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                 if stale_ids:
                     await _delete_hub_messages(bot, chat_id, stale_ids)
-                _hub_cache[chat_id] = {"ids": [target_edit_id]}
+                _hub_cache[chat_id] = {"ids": [target_edit_id], "effect_msg_id": None}
                 await _store_hub_id_in_db(chat_id, target_edit_id)
                 return target_edit_id
             except TelegramBadRequest as e:
@@ -340,7 +351,7 @@ async def render_hub(
                     stale_ids = [mid for mid in old_ids if mid != target_edit_id]
                     if stale_ids:
                         await _delete_hub_messages(bot, chat_id, stale_ids)
-                    _hub_cache[chat_id] = {"ids": [target_edit_id]}
+                    _hub_cache[chat_id] = {"ids": [target_edit_id], "effect_msg_id": None}
                     return target_edit_id
 
                 logger.debug(
@@ -448,6 +459,10 @@ async def render_hub(
                     chat_id,
                     db_exc,
                 )
+        _hub_cache[chat_id] = {
+            "ids": sent_ids,
+            "effect_msg_id": sent_ids[0] if message_effect_id and sent_ids else None,
+        }
         return sent_ids[-1]
 
 

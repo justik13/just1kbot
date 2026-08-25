@@ -190,7 +190,7 @@ async def confirm_delete_device(
         logger.exception("Unexpected error in confirm_delete_device for profile_id=%s", profile_id)
         if not answered:
             try:
-                await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
+                await callback.answer(texts.ERROR_TECHNICAL_ALERT, show_alert=True)
             except Exception:
                 pass
     finally:

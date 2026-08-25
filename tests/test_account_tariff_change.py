@@ -23,7 +23,7 @@ def callbacks(markup):
     ]
 
 
-class AccountTariffChangeContractTests(unittest.TestCase):
+class AccountTariffChangeContractTests(unittest.IsolatedAsyncioTestCase):
     def test_change_requires_two_distinct_actions(self):
         quote_id = str(uuid.uuid4())
         start = callbacks(
@@ -99,6 +99,44 @@ class AccountTariffChangeContractTests(unittest.TestCase):
         self.assertIn("tariff_change", str(constraint.sqltext))
         self.assertIn("hours_delta", EntitlementEntry.__table__.c)
 
+    async def test_same_device_limit_tariff_change_rejected(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from datetime import datetime, timezone
+        from database.models import User, Tariff
+        from services.tariff_change_quote import create_tariff_change_quote
+
+        user = User(
+            id=1,
+            telegram_id=123,
+            device_limit=2,
+            current_tariff_id=1,
+            subscription_end=datetime(2027, 1, 1, tzinfo=timezone.utc),
+            financial_hold=False,
+            is_deleted=False,
+            is_banned=False,
+            is_bot_blocked=False,
+        )
+        source_tariff = Tariff(id=1, name="Базовый 7d", device_limit=2, duration_days=7, price_rub=35, is_active=True)
+        target_tariff = Tariff(id=3, name="Базовый 90d", device_limit=2, duration_days=90, price_rub=240, is_active=True)
+
+        session = AsyncMock()
+        mock_scalars = MagicMock()
+        mock_scalars.all.return_value = [source_tariff, target_tariff]
+        session.scalars = AsyncMock(return_value=mock_scalars)
+
+        with patch("services.tariff_change_quote.lock_checkout_user", AsyncMock(return_value=user)), \
+             patch("services.tariff_change_quote.get_account_balance", AsyncMock(return_value=SimpleNamespace(debt=0))), \
+             patch("services.tariff_change_quote.get_active_financial_quotes_for_update", AsyncMock(return_value=[])):
+
+            res = await create_tariff_change_quote(
+                session,
+                user_id=1,
+                target_tariff_id=3,
+                as_of=datetime(2026, 8, 25, tzinfo=timezone.utc),
+            )
+            self.assertEqual(res.failure_code, "same_tariff_requires_renew")
+
 
 if __name__ == "__main__":
     unittest.main()
+

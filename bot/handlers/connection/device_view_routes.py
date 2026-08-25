@@ -444,6 +444,10 @@ async def alt_connection(
         return
 
     await callback.answer(texts.DEVICE_CONFIG_GENERATING, show_alert=False)
+    try:
+        await callback.bot.send_chat_action(chat_id=callback.message.chat.id, action="upload_document")
+    except Exception:
+        pass
 
     safe_device_name = await _get_safe_device_name(session, profile)
 
@@ -544,7 +548,7 @@ async def alt_connection(
                 files_info = (
                     "1. Сохраните один из прикреплённых файлов конфигурации:\n"
                     "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
-                    "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров\n"
+                    "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)\n"
                 )
             elif vpn_sent:
                 files_info = (
@@ -552,7 +556,7 @@ async def alt_connection(
                 )
             elif conf_sent:
                 files_info = (
-                    "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров).\n"
+                    "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG — Keenetic AWG).\n"
                 )
             else:
                 escaped_key = safe(profile.raw_config or "")

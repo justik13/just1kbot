@@ -159,7 +159,7 @@ async def create_tariff_change_quote(session, *, user_id: int, target_tariff_id:
         return TariffChangeQuoteResult(failure_code="target_tariff_not_found")
     if not target.is_active:
         return TariffChangeQuoteResult(failure_code="target_tariff_inactive")
-    if target.id == user.current_tariff_id:
+    if target.id == user.current_tariff_id or target.device_limit == source.device_limit:
         return TariffChangeQuoteResult(failure_code="same_tariff_requires_renew")
     if source.duration_days <= 0 or source.price_rub <= 0 or source.device_limit <= 0 \
             or target.duration_days <= 0 or target.price_rub <= 0 or target.device_limit <= 0:

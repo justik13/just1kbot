@@ -25,12 +25,14 @@ from services.account_purchase import (
     prepare_account_purchase,
     settle_account_purchase,
 )
+from services.maintenance_service import MaintenanceService
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from utils.tariff_names import get_tariff_display_name
-from utils.telegram import render_hub
+from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .balance_routes import _create_and_render_topup
+from .common import _render_maintenance
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -140,6 +142,11 @@ async def review_purchase(
     if db_user is None or quote_id is None:
         await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
     await _render_purchase_review(callback, session, db_user, quote_id)
 
 
@@ -217,6 +224,11 @@ async def confirm_purchase(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await _render_maintenance(callback, session, back_to="payment_showcase")
+        return
     try:
         result = await settle_account_purchase(
             session,
@@ -276,6 +288,8 @@ async def confirm_purchase(
             value_5=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
+        message_effect_id=EFFECT_CONFETTI,
+        force_new=True,
     )
 
     result.quote.purchase_notified_at = result.quote.purchase_notified_at or now_utc()

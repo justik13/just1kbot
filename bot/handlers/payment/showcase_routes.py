@@ -162,7 +162,11 @@ async def select_tariff(
         )
         return
 
-    if source == "change" and db_user.current_tariff_id == tariff.id:
+    current_limit = await _get_effective_device_limit(session, db_user)
+    if source == "change" and (
+        db_user.current_tariff_id == tariff.id
+        or getattr(tariff, "device_limit", None) == current_limit
+    ):
         await render_hub(
             callback.bot,
             callback.message.chat.id,

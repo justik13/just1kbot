@@ -418,8 +418,14 @@ async def settle_succeeded_topup(
 
                     async def _send_ref_push():
                         try:
-                            from utils.telegram import render_hub
-                            await render_hub(bot, ref_target, ref_text, ref_markup)
+                            from utils.telegram import EFFECT_FIRE, render_hub
+                            await render_hub(
+                                bot,
+                                ref_target,
+                                ref_text,
+                                ref_markup,
+                                message_effect_id=EFFECT_FIRE,
+                            )
                             from database.connection import session_scope
                             async with session_scope() as notify_session:
                                 p = await notify_session.get(Payment, target_payment_id)
@@ -567,10 +573,18 @@ async def settle_succeeded_topup(
                 target_payment_id = payment.id
                 target_quote_uuid = quote_uuid if auto_fulfilled_action else None
 
+                from utils.telegram import EFFECT_CONFETTI
+
                 async def _send_topup_push():
                     try:
                         from utils.telegram import render_hub
-                        await render_hub(bot, target_user_id, push_text, push_markup)
+                        await render_hub(
+                            bot,
+                            target_user_id,
+                            push_text,
+                            push_markup,
+                            message_effect_id=EFFECT_CONFETTI,
+                        )
                         from database.connection import session_scope
                         async with session_scope() as notify_session:
                             p = await notify_session.get(Payment, target_payment_id)
