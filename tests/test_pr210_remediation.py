@@ -4,7 +4,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+)
 from aiogram.types import InlineKeyboardMarkup
 
 from utils.telegram import (
@@ -85,6 +89,120 @@ class TestHubResilience(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(calls["n"], 2)
 
+    async def test_resilience_never_retries_network_error(self):
+        """P1 fix: TelegramNetworkError wraps ambiguous timeouts (may be delivered) -> no resend."""
+        op = AsyncMock(
+            side_effect=TelegramNetworkError(MagicMock(), "HTTP Client says - Request timeout error")
+        )
+        with self.assertRaises(TelegramNetworkError):
+            await _send_with_resilience(op, chat_id=9, context="test")
+        self.assertEqual(op.await_count, 1)
+
+    async def test_store_failure_aborts_render_and_cleans_sent(self):
+        """P1 fix: DB store failure must abort the render, not orphan the message."""
+        bot = MagicMock()
+        bot.send_message = AsyncMock(return_value=MagicMock(message_id=31))
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock(side_effect=RuntimeError("db down"))), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock()) as mock_del:
+            with self.assertRaises(RuntimeError):
+                await render_hub(bot, chat_id=3, text="hello")
+
+        mock_del.assert_awaited_once()
+        self.assertEqual(mock_del.call_args[0][2], [31])
+
+    async def test_failed_deletions_stay_visible_in_cache(self):
+        """P1 fix: partially failed stale deletions must remain in cache for retry."""
+        import utils.telegram as tg
+
+        bot = MagicMock()
+        bot.edit_message_text = AsyncMock()
+        tg._hub_cache.pop(5, None)
+
+        async def fake_delete(_bot, _chat, ids):
+            return [i for i in ids if i == 101]  # 101 failed to delete
+
+        with patch("utils.telegram._load_hub_ids_from_db", new=AsyncMock(return_value=[100, 101, 102])), \
+             patch("utils.telegram._store_hub_id_in_db", new=AsyncMock()), \
+             patch("utils.telegram._delete_hub_messages", new=AsyncMock(side_effect=fake_delete)):
+            mid = await render_hub(bot, chat_id=5, text="Next", trigger_message_id=102)
+
+        self.assertEqual(mid, 102)
+        cached_ids = tg._hub_cache[5]["ids"]
+        self.assertIn(102, cached_ids)
+        self.assertIn(101, cached_ids)
+        self.assertNotIn(100, cached_ids)
+
+
+class TestMaintenanceGates(unittest.IsolatedAsyncioTestCase):
+    async def test_bal_short_custom_blocked_during_maintenance(self):
+        from bot.handlers.payment import purchase_routes as pr
+        import uuid
+
+        callback = MagicMock()
+        callback.data = f"bal_short_custom:{uuid.uuid4()}"
+        callback.from_user = MagicMock(id=555)
+        callback.answer = AsyncMock()
+        state = MagicMock()
+        state.clear = AsyncMock()
+
+        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
+             patch("bot.handlers.payment.purchase_routes._render_maintenance", new=AsyncMock()) as mock_maint:
+            await pr.topup_custom_shortage(callback, state, AsyncMock(), db_user=SimpleNamespace(id=1))
+
+        state.clear.assert_awaited_once()
+        mock_maint.assert_awaited_once()
+        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "menu_balance")
+
+    async def test_bal_chg_short_custom_blocked_during_maintenance(self):
+        from bot.handlers.payment import tariff_change_routes as tcr
+        import uuid
+
+        callback = MagicMock()
+        callback.data = f"bal_chg_short_custom:{uuid.uuid4()}"
+        callback.from_user = MagicMock(id=555)
+        callback.answer = AsyncMock()
+        state = MagicMock()
+        state.clear = AsyncMock()
+
+        with patch.object(tcr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
+             patch("bot.handlers.payment.tariff_change_routes._render_maintenance", new=AsyncMock()) as mock_maint:
+            await tcr.topup_custom_change_shortage(callback, state, AsyncMock(), db_user=SimpleNamespace(id=1))
+
+        state.clear.assert_awaited_once()
+        mock_maint.assert_awaited_once()
+        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "payment_change_tariff")
+
+    async def test_resume_purchase_blocked_during_maintenance(self):
+        from bot.handlers.payment import purchase_routes as pr
+
+        callback = MagicMock()
+        callback.data = "balance_resume_purchase:5:change"
+        callback.from_user = MagicMock(id=555)
+        callback.answer = AsyncMock()
+
+        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=False)), \
+             patch("bot.handlers.payment.purchase_routes._render_maintenance", new=AsyncMock()) as mock_maint, \
+             patch("services.tariff_change_quote.create_tariff_change_quote", new=AsyncMock()) as mock_quote:
+            await pr.resume_purchase_after_topup(callback, AsyncMock(), db_user=SimpleNamespace(id=1))
+
+        mock_maint.assert_awaited_once()
+        self.assertEqual(mock_maint.call_args.kwargs.get("back_to"), "payment_change_tariff")
+        mock_quote.assert_not_awaited()
+
+
+class TestSimulationContract(unittest.IsolatedAsyncioTestCase):
+    def test_simulate_bot_passes_required_source(self):
+        """simulate_bot must satisfy settle_succeeded_topup's keyword-only `source`."""
+        import re
+
+        src = open("scripts/simulate_bot.py", encoding="utf-8").read()
+        calls = re.findall(r"settle_succeeded_topup\(([^)]*)\)", src)
+        self.assertTrue(calls, "expected at least one call in simulate_bot")
+        for args in calls:
+            self.assertIn("source=", args)
+
 
 class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
     def test_effect_constants_match_bot_api_ids(self):
@@ -135,7 +253,8 @@ class TestPaymentFixes(unittest.IsolatedAsyncioTestCase):
 
         quote_result = SimpleNamespace(failure_code="same_tariff_requires_renew")
 
-        with patch("services.tariff_change_quote.create_tariff_change_quote", AsyncMock(return_value=quote_result)), \
+        with patch.object(pr.MaintenanceService, "can_user_perform_action", AsyncMock(return_value=True)), \
+             patch("services.tariff_change_quote.create_tariff_change_quote", AsyncMock(return_value=quote_result)), \
              patch("bot.handlers.payment.purchase_routes.render_hub", new=AsyncMock()) as mock_hub:
             await pr.resume_purchase_after_topup(callback, AsyncMock(), db_user=db_user)
 

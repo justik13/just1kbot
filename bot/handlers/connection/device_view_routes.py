@@ -31,6 +31,7 @@ from utils.telegram import (
     _append_hub_message_unlocked,
     _delete_hub_messages,
     _get_hub_render_lock,
+    _hub_cache,
     get_hub_ids,
     render_hub,
     safe,
@@ -598,9 +599,18 @@ async def alt_connection(
             if guide_sent:
                 if old_hub_ids:
                     try:
-                        await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids))
+                        failed_old = await asyncio.shield(_delete_hub_messages(callback.bot, callback.message.chat.id, old_hub_ids))
                     except Exception as e:
+                        failed_old = list(old_hub_ids)
                         logger.error("Failed to delete old hub messages for profile %s: %s", profile.id, e)
+                    if failed_old:
+                        # Keep undeletable ids visible to the next render (cache mirrors DB truth).
+                        entry = _hub_cache.setdefault(
+                            callback.message.chat.id, {"ids": [], "effect_msg_id": None}
+                        )
+                        for fid in failed_old:
+                            if fid not in entry["ids"]:
+                                entry["ids"].append(fid)
             else:
                 if sent_doc_ids:
                     try:

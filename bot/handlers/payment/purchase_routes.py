@@ -357,6 +357,12 @@ async def topup_custom_shortage(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await state.clear()
+        await _render_maintenance(callback, session, back_to="menu_balance")
+        return
     try:
         intent, context = await _shortage_context(
             session, db_user, quote_id
@@ -396,6 +402,12 @@ async def resume_purchase_after_topup(
         or tariff_id is None
         or source not in {"showcase", "renew", "change"}
     ):
+        return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        back_to = "payment_change_tariff" if source == "change" else "payment_showcase"
+        await _render_maintenance(callback, session, back_to=back_to)
         return
     if source == "change":
         from services.tariff_change_quote import create_tariff_change_quote

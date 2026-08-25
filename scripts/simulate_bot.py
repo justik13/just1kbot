@@ -307,7 +307,7 @@ async def mock_request_topup_status_refresh(
     payment.paid_at = now_utc()
     payment.checkout_status = "completed"
     if payment.fulfillment_status not in {"succeeded", "reversed", "manual_review"}:
-        await settle_succeeded_topup(session, payment=payment, bot=bot)
+        await settle_succeeded_topup(session, payment=payment, source="simulation_refresh", bot=bot)
     logging.getLogger("simulation.topup").info(
         "💰 [TOPUP REFRESH] Succeeded and credited %s RUB to user %s",
         payment.amount,

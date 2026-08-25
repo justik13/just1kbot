@@ -323,6 +323,12 @@ async def topup_custom_change_shortage(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         return
+    if not await MaintenanceService.can_user_perform_action(
+        session, callback.from_user.id
+    ):
+        await state.clear()
+        await _render_maintenance(callback, session, back_to="payment_change_tariff")
+        return
     try:
         intent, context = await _shortage_context(
             session, db_user, quote_id

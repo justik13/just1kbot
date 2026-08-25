@@ -128,40 +128,26 @@ async def _retry_flood(op):
 
 async def _send_with_resilience(op, *, chat_id: int, context: str = "send"):
     """
-    Execute a Telegram send operation with a conservative retry policy.
+    Execute a Telegram send operation with duplicate-safe retry semantics.
 
-    - TelegramRetryAfter: wait and retry (server told us exactly when).
-    - Connection-phase TelegramNetworkError: single immediate retry.
-    - Ambiguous timeout (request may have been delivered): NEVER resend;
-      log a suspected-orphan marker so chat hygiene can be audited.
+    - TelegramRetryAfter: the request was REJECTED (not delivered) and the
+      server told us exactly when to retry -> wait and retry once more.
+    - TelegramNetworkError / ambiguous timeout: delivery state is UNKNOWN
+      (the request may have been processed before the connection broke).
+      Automatic resending would risk duplicate messages, so we log a
+      `hub_orphan_suspected` marker and re-raise without resending.
     """
     try:
         return await op()
     except TelegramRetryAfter as e:
         await asyncio.sleep(float(e.retry_after) + 0.5)
-        try:
-            return await op()
-        except TelegramNetworkError as exc:
-            logger.warning(
-                "hub_orphan_suspected chat=%s context=%s: network error after flood retry: %s",
-                chat_id, context, exc,
-            )
-            raise
-    except TelegramNetworkError:
-        await asyncio.sleep(0.5)
-        try:
-            return await op()
-        except TelegramNetworkError as nested:
-            logger.warning(
-                "hub_orphan_suspected chat=%s context=%s: repeated network error: %s",
-                chat_id, context, nested,
-            )
-            raise
-        except asyncio.TimeoutError:
-            logger.warning(
-                "hub_orphan_suspected chat=%s context=%s: timeout on retry", chat_id, context,
-            )
-            raise
+        return await op()
+    except TelegramNetworkError as exc:
+        logger.warning(
+            "hub_orphan_suspected chat=%s context=%s: network error, not resending: %s",
+            chat_id, context, exc,
+        )
+        raise
     except asyncio.TimeoutError:
         logger.warning(
             "hub_orphan_suspected chat=%s context=%s: ambiguous timeout, not resending",
@@ -225,17 +211,19 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
 
 
 async def _store_hub_id_in_db(chat_id: int, message_id: int) -> None:
-    try:
-        async with session_scope() as sess:
-            await hub_repo.add_hub_message_id(sess, chat_id, message_id)
-        cached = _hub_cache.get(chat_id)
-        if cached and "ids" in cached:
-            if message_id not in cached["ids"]:
-                cached["ids"].append(message_id)
-        else:
-            _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
-    except Exception as e:
-        logger.warning("Failed to store hub id in DB for chat %s: %s", chat_id, e)
+    """
+    Persist a delivered hub message id. Raises on DB failure so callers can
+    abort the current render and clean up already-sent messages — otherwise a
+    delivered-but-untracked message becomes an uncleanable orphan.
+    """
+    async with session_scope() as sess:
+        await hub_repo.add_hub_message_id(sess, chat_id, message_id)
+    cached = _hub_cache.get(chat_id)
+    if cached and "ids" in cached:
+        if message_id not in cached["ids"]:
+            cached["ids"].append(message_id)
+    else:
+        _hub_cache[chat_id] = {"ids": [message_id], "effect_msg_id": None}
 
 
 async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
@@ -354,19 +342,29 @@ async def render_hub(
                     )
                 )
                 stale_ids = [mid for mid in old_ids if mid != target_edit_id]
+                stale_failed: list[int] = []
                 if stale_ids:
-                    await _delete_hub_messages(bot, chat_id, stale_ids)
-                _hub_cache[chat_id] = {"ids": [target_edit_id], "effect_msg_id": None}
+                    stale_failed = await _delete_hub_messages(bot, chat_id, stale_ids)
                 await _store_hub_id_in_db(chat_id, target_edit_id)
+                # Cache mirrors DB truth INCLUDING ids whose deletion failed,
+                # otherwise the next render would not retry them until TTL expiry.
+                _hub_cache[chat_id] = {
+                    "ids": [target_edit_id] + stale_failed,
+                    "effect_msg_id": None,
+                }
                 return target_edit_id
             except TelegramBadRequest as e:
                 err_str = str(e).lower()
                 if "message is not modified" in err_str:
                     stale_ids = [mid for mid in old_ids if mid != target_edit_id]
+                    stale_failed_nm: list[int] = []
                     if stale_ids:
-                        await _delete_hub_messages(bot, chat_id, stale_ids)
-                    _hub_cache[chat_id] = {"ids": [target_edit_id], "effect_msg_id": None}
+                        stale_failed_nm = await _delete_hub_messages(bot, chat_id, stale_ids)
                     await _store_hub_id_in_db(chat_id, target_edit_id)
+                    _hub_cache[chat_id] = {
+                        "ids": [target_edit_id] + stale_failed_nm,
+                        "effect_msg_id": None,
+                    }
                     return target_edit_id
 
                 logger.debug(
@@ -483,10 +481,11 @@ async def render_hub(
                     pass
             raise
 
+        old_failed: list[int] = []
         if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
+            old_failed = await _delete_hub_messages(bot, chat_id, old_ids)
         _hub_cache[chat_id] = {
-            "ids": sent_ids,
+            "ids": sent_ids + old_failed,
             "effect_msg_id": sent_ids[0] if message_effect_id and sent_ids else None,
         }
         return sent_ids[-1]
