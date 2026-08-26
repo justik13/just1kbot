@@ -6,7 +6,7 @@ import logging
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import select, or_, text
 
 from bot import texts
 from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
@@ -194,7 +194,10 @@ async def process_balance_notifications(bot: Bot) -> int:
                 .join(User, User.id == Payment.user_id)
                 .where(
                     Payment.credited_at.is_not(None),
-                    Payment.credit_notified_at.is_(None),
+                    or_(
+                        Payment.credit_notified_at.is_(None),
+                        text("topup_context->>'referrer_notified_at' IS NULL AND topup_context->>'referrer_telegram_id' IS NOT NULL")
+                    ),
                 )
                 .order_by(Payment.credited_at, Payment.id)
                 .limit(BALANCE_NOTIFICATION_BATCH)
@@ -209,7 +212,7 @@ async def process_balance_notifications(bot: Bot) -> int:
                 .where(Payment.id == payment_id)
                 .with_for_update()
             )
-            if payment is None or payment.credit_notified_at is not None:
+            if payment is None:
                 continue
 
             # Durable retry for pending referrer bonus notification
@@ -256,6 +259,9 @@ async def process_balance_notifications(bot: Bot) -> int:
                     }
                 except Exception as exc:
                     logger.warning("Failed to deliver durable referrer push to %s: %s", ref_id, exc)
+
+            if payment.credit_notified_at is not None:
+                continue
 
             if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
                 quote_raw = (payment.topup_context or {}).get("quote_public_id")

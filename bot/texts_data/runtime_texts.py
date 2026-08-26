@@ -282,7 +282,7 @@ TEXTS = {
         '🌍 Сервер: <b>{value_0}</b>\n\n'
         '<i>Подготавливаем защищенный доступ...</i>'
     ),
-    'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME': 'VPN Сервер',
+    'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME': 'Сервер подключения',
     # bot/handlers/connection/device_create_routes.py:234
     'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L234_1': '🌍',
     # bot/handlers/connection/device_view_routes.py:60
