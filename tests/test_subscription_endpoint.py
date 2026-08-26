@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import make_mocked_request
 
-from bot.handlers.subscription_feed import (
+from database.models import User
+from integrations.incy.web_routes import (
     subscription_feed_handler,
     subscription_open_handler,
 )
-from database.models import User
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import subscription_feed_rate_limiter
 
@@ -49,9 +49,9 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         subscription_feed_rate_limiter.reset()
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.SubscriptionFeedService.build_feed")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.SubscriptionFeedService.build_feed")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_endpoint_valid_token(
         self, mock_session_scope, mock_build_feed, mock_get_user
     ):
@@ -80,8 +80,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         mock_get_user.assert_awaited_once_with(mock_session, "valid_token_xyz")
         mock_build_feed.assert_awaited_once_with(mock_session, user)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_endpoint_invalid_or_unknown_token(
         self, mock_session_scope, mock_get_user
     ):
@@ -108,8 +108,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         resp_huge = await subscription_feed_handler(req_huge)
         self.assertEqual(resp_huge.status, 404)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_open_endpoint_valid_token(
         self, mock_session_scope, mock_get_user
     ):
@@ -134,8 +134,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Подключение к INCY", response.text)
         mock_get_user.assert_awaited_once_with(mock_session, "valid_token_xyz")
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_open_endpoint_invalid_or_unknown_token(
         self, mock_session_scope, mock_get_user
     ):
@@ -159,7 +159,7 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         resp_65 = await subscription_open_handler(req_65)
         self.assertEqual(resp_65.status, 404)
 
-    @patch("bot.handlers.subscription_feed.subscription_feed_rate_limiter.check")
+    @patch("integrations.incy.web_routes.subscription_feed_rate_limiter.check")
     async def test_open_endpoint_rate_limit_uses_correct_429_page(self, mock_check):
         mock_check.return_value = (False, 12)
 
@@ -175,8 +175,8 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Слишком много запросов", response.text)
         self.assertNotIn("Подписка не активна", response.text)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_open_endpoint_security_headers(
         self, mock_session_scope, mock_get_user
     ):
@@ -201,9 +201,9 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.headers["X-Robots-Tag"], "noindex, nofollow, noarchive")
         self.assertIn("default-src 'none'", response.headers["Content-Security-Policy"])
 
-    @patch("bot.handlers.subscription_feed.SubscriptionService.check_vpn_access")
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionService.check_vpn_access")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_open_endpoint_inactive_subscription(
         self, mock_session_scope, mock_get_user, mock_check_access
     ):
@@ -223,9 +223,9 @@ class SubscriptionEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("https://t.me/test_support", response.text)
         self.assertNotIn("incy://import/", response.text)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionFeedService.build_feed")
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionFeedService.build_feed")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_feed_and_open_endpoints_share_rate_limit_budget(
         self, mock_session_scope, mock_get_user, mock_build_feed
     ):

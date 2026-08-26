@@ -48,8 +48,8 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         setup_webhook_routes(app)
         return app
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_sub_open_router_e2e_active_user(
         self, mock_session_scope, mock_get_user
     ):
@@ -94,9 +94,9 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         text_synonym = await resp_synonym.text()
         self.assertIn(f'href="{expected_deep_link}"', text_synonym)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionService.check_vpn_access")
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionService.check_vpn_access")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_sub_open_router_e2e_inactive_user(
         self, mock_session_scope, mock_get_user, mock_check_access
     ):
@@ -123,8 +123,8 @@ class SubscriptionOpenRouterIntegrationTests(AioHTTPTestCase):
         self.assertIn("https://t.me/support_team", text)
         self.assertNotIn("incy://import/", text)
 
-    @patch("bot.handlers.subscription_feed.SubscriptionTokenService.get_user_by_token")
-    @patch("bot.handlers.subscription_feed.session_scope")
+    @patch("integrations.incy.web_routes.SubscriptionTokenService.get_user_by_token")
+    @patch("integrations.incy.web_routes.session_scope")
     async def test_sub_open_router_404_not_found(
         self, mock_session_scope, mock_get_user
     ):
