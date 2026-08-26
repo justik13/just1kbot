@@ -11,6 +11,7 @@ class BaseIntegration(ABC):
     """Abstract base class for modular bot and web integrations."""
 
     name: ClassVar[str]
+    is_critical: ClassVar[bool] = True
 
     @classmethod
     @abstractmethod

@@ -5,7 +5,6 @@ from typing import ClassVar
 
 from aiohttp import web
 
-from config.settings import get_settings
 from integrations.amnezia_bridge.constants import (
     BRIDGE_TOKEN_MAX_FUTURE_SKEW_SECONDS,
     BRIDGE_TOKEN_TTL_SECONDS,
@@ -37,13 +36,7 @@ class AmneziaBridgeIntegration(BaseIntegration):
     @classmethod
     def is_enabled(cls) -> bool:
         """Check if Amnezia bridge is enabled via HMAC secret and domain."""
-        try:
-            settings = get_settings()
-            secret = getattr(settings, "AMNEZIA_BRIDGE_HMAC_SECRET", None)
-            domain = getattr(settings, "DOMAIN", "")
-            return bool(secret and str(secret).strip() and domain and str(domain).strip())
-        except Exception:
-            return False
+        return AmneziaBridgeTokenService.is_enabled()
 
     @classmethod
     def register_web_routes(cls, app: web.Application) -> None:

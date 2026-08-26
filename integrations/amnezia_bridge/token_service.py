@@ -29,7 +29,14 @@ class AmneziaBridgeTokenService:
 
     @classmethod
     def is_enabled(cls) -> bool:
-        return bool(get_settings().AMNEZIA_BRIDGE_HMAC_SECRET)
+        """Check if Amnezia bridge is enabled via HMAC secret and domain."""
+        try:
+            settings = get_settings()
+            secret = getattr(settings, "AMNEZIA_BRIDGE_HMAC_SECRET", None)
+            domain = getattr(settings, "DOMAIN", "")
+            return bool(secret and str(secret).strip() and domain and str(domain).strip())
+        except Exception:
+            return False
 
     @classmethod
     def sign(
