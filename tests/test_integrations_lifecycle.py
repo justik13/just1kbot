@@ -210,6 +210,66 @@ class IntegrationsLifecycleTests(unittest.IsolatedAsyncioTestCase):
             routers = get_all_bot_routers()
             self.assertEqual(len(routers), 0)
 
+    def test_optional_integration_failure_rolls_back_partial_routes(self):
+        async def dummy_handler(request):
+            return web.Response(text="dummy")
+
+        class HalfFailingOptionalIntegration(BaseIntegration):
+            name = "half_failing"
+            is_critical = False
+
+            @classmethod
+            def is_enabled(cls) -> bool:
+                return True
+
+            @classmethod
+            def register_web_routes(cls, app: web.Application) -> None:
+                # Adds a route, then crashes
+                app.router.add_get("/half_failing/route", dummy_handler)
+                raise RuntimeError("Failed after adding one route")
+
+        app = web.Application()
+        app.router.add_get("/preexisting/route", dummy_handler)
+        self.assertEqual(len(app.router.resources()), 1)
+        self.assertEqual(len(app.router.routes()), 2)
+
+        with patch("integrations.ALL_INTEGRATIONS", (HalfFailingOptionalIntegration,)):
+            # Does not crash startup
+            register_all_web_routes(app)
+            # Partial route /half_failing/route was rolled back
+            self.assertEqual(len(app.router.resources()), 1)
+            self.assertEqual(len(app.router.routes()), 2)
+            self.assertEqual(list(app.router.routes())[0].resource.canonical, "/preexisting/route")
+
+    def test_is_enabled_exception_handling(self):
+        class BrokenEnabledOptional(BaseIntegration):
+            name = "broken_optional"
+            is_critical = False
+
+            @classmethod
+            def is_enabled(cls) -> bool:
+                raise ValueError("Bad config parse")
+
+        class BrokenEnabledCritical(BaseIntegration):
+            name = "broken_critical"
+            is_critical = True
+
+            @classmethod
+            def is_enabled(cls) -> bool:
+                raise ValueError("Fatal config missing")
+
+        with patch("integrations.ALL_INTEGRATIONS", (BrokenEnabledOptional,)):
+            app = web.Application()
+            register_all_web_routes(app)
+            routers = get_all_bot_routers()
+            self.assertEqual(len(routers), 0)
+
+        with patch("integrations.ALL_INTEGRATIONS", (BrokenEnabledCritical,)):
+            app = web.Application()
+            with self.assertRaises(RuntimeError) as ctx:
+                register_all_web_routes(app)
+            self.assertIn("Critical integration 'broken_critical' failed during is_enabled check", str(ctx.exception))
+
     async def test_full_sequence_enabled_disabled_enabled_idempotency(self):
         from unittest.mock import AsyncMock
         from bot.main import setup_bot

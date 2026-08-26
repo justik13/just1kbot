@@ -19,6 +19,32 @@ ALL_INTEGRATIONS: Sequence[type[BaseIntegration]] = (
 )
 
 
+def _is_integration_enabled(integration: type[BaseIntegration]) -> bool:
+    try:
+        return bool(integration.is_enabled())
+    except Exception as e:
+        name = getattr(integration, "name", type(integration).__name__)
+        logger.exception("Failed to evaluate is_enabled for integration '%s': %s", name, type(e).__name__)
+        if getattr(integration, "is_critical", True):
+            raise RuntimeError(f"Critical integration '{name}' failed during is_enabled check") from e
+        return False
+
+
+def _rollback_new_resources(app: web.Application, resources_before_count: int) -> None:
+    """Safely unindex and remove newly added resources from aiohttp application router."""
+    if not hasattr(app.router, "_resources"):
+        return
+    current_resources = list(app.router._resources)
+    new_resources = current_resources[resources_before_count:]
+    for res in new_resources:
+        if hasattr(app.router, "unindex_resource"):
+            try:
+                app.router.unindex_resource(res)
+            except Exception:
+                pass
+    del app.router._resources[resources_before_count:]
+
+
 def register_all_web_routes(app: web.Application) -> None:
     """Iterate over all integrations and register web endpoints if enabled.
 
@@ -31,8 +57,9 @@ def register_all_web_routes(app: web.Application) -> None:
     }
 
     for integration in ALL_INTEGRATIONS:
-        if integration.is_enabled():
+        if _is_integration_enabled(integration):
             routes_before_len = len(app.router.routes())
+            resources_before_count = len(app.router._resources) if hasattr(app.router, "_resources") else 0
             try:
                 integration.register_web_routes(app)
                 all_routes = list(app.router.routes())
@@ -52,6 +79,7 @@ def register_all_web_routes(app: web.Application) -> None:
                     integration.name,
                     type(e).__name__,
                 )
+                _rollback_new_resources(app, resources_before_count)
                 if getattr(integration, "is_critical", True):
                     raise RuntimeError(
                         f"Failed to register web routes for critical integration '{integration.name}'"
@@ -67,7 +95,7 @@ def get_all_bot_routers() -> list[Router]:
     """
     routers = []
     for integration in ALL_INTEGRATIONS:
-        if integration.is_enabled():
+        if _is_integration_enabled(integration):
             try:
                 router = integration.get_bot_router()
                 if router:
