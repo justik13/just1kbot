@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from bot import texts
+from bot.texts import _ALL_MODULES
 
 
 class TextsConsistencyTests(unittest.TestCase):
@@ -14,6 +15,25 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertGreater(len(keys), 100, "Text catalogue must contain loaded keys.")
         for key in keys:
             self.assertTrue(key.isidentifier(), f"Key {key!r} is not a valid Python identifier.")
+
+    def test_strict_no_duplicate_keys_across_domain_modules(self):
+        """Verify absolute SSOT: each text key exists in exactly ONE domain file."""
+        seen_keys = {}
+        duplicates = []
+
+        for mod_name, mod in _ALL_MODULES:
+            mod_texts = getattr(mod, "TEXTS", {})
+            for key in mod_texts.keys():
+                if key in seen_keys:
+                    duplicates.append((key, seen_keys[key], mod_name))
+                else:
+                    seen_keys[key] = mod_name
+
+        self.assertEqual(
+            duplicates,
+            [],
+            f"SSOT Violation: Duplicate text keys found across domain modules:\n{duplicates}",
+        )
 
     def test_all_text_placeholders_syntax_is_valid(self):
         """Verify that any text containing {placeholders} does not have broken braces or syntax errors."""
@@ -45,15 +65,11 @@ class TextsConsistencyTests(unittest.TestCase):
                     f"Invalid placeholder name {placeholder!r} in text key {key!r}:\n{val}",
                 )
 
-    def test_html_markup_validity(self):
-        """Verify that basic HTML tags used in Telegram messages are balanced and valid."""
+    def test_html_markup_nesting_and_validity(self):
+        """Verify that HTML tags used in Telegram messages are balanced and properly nested."""
         allowed_tags = {
-            "b", "/b", "strong", "/strong",
-            "i", "/i", "em", "/em",
-            "code", "/code", "pre", "/pre",
-            "a", "/a", "u", "/u", "s", "/s",
-            "tg-spoiler", "/tg-spoiler",
-            "blockquote", "/blockquote",
+            "b", "strong", "i", "em", "code", "pre",
+            "a", "u", "s", "tg-spoiler", "blockquote",
         }
         
         tag_pattern = re.compile(r"<(/?[a-zA-Z0-9_-]+)(?:\s+[^>]*)?>")
@@ -63,21 +79,43 @@ class TextsConsistencyTests(unittest.TestCase):
             if not isinstance(val, str):
                 continue
             
+            # Skip checking templates that use placeholders as whole tags if any
             tags = tag_pattern.findall(val)
-            for t in tags:
-                tag_name = t.strip()
+            tag_stack = []
+            
+            for raw_tag in tags:
+                is_closing = raw_tag.startswith("/")
+                tag_name = raw_tag[1:] if is_closing else raw_tag
+                tag_name = tag_name.lower()
+                
                 self.assertIn(
                     tag_name,
                     allowed_tags,
-                    f"Unsupported HTML tag <{tag_name}> in text key {key!r}:\n{val}",
+                    f"Unsupported HTML tag <{raw_tag}> in text key {key!r}:\n{val}",
                 )
+                
+                if not is_closing:
+                    tag_stack.append(tag_name)
+                else:
+                    if not tag_stack:
+                        self.fail(f"Unmatched closing tag </{tag_name}> in text key {key!r}:\n{val}")
+                    last_opened = tag_stack.pop()
+                    self.assertEqual(
+                        last_opened,
+                        tag_name,
+                        f"Improperly nested HTML tags in key {key!r}: opened <{last_opened}> but closed </{tag_name}>\n{val}",
+                    )
+            
+            self.assertEqual(
+                tag_stack,
+                [],
+                f"Unclosed HTML tags {tag_stack} in text key {key!r}:\n{val}",
+            )
 
     def test_no_call_site_missing_placeholders(self):
         """Statically inspect all texts.<KEY>.format(...) calls across the codebase to ensure no missing kwargs."""
         project_root = Path(__file__).resolve().parent.parent
-        
         placeholder_regex = re.compile(r"\{([a-zA-Z0-9_]+)(?:[^}]*)\}")
-        
         missing_kwargs_failures = []
         
         for py_file in project_root.rglob("*.py"):

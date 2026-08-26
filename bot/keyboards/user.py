@@ -32,7 +32,7 @@ def get_referral_keyboard(
     share_text = getattr(texts, "REFERRAL_SHARE_TEXT", "🎁 Приглашаю в just1kbot! При первом пополнении получишь +10% бонуса на баланс:")
     share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
     builder.button(
-        text="↗️ Поделиться",
+        text=texts.BTN_SHARE_REFERRAL,
         url=share_url,
     )
     builder.button(
@@ -57,14 +57,14 @@ def get_referrals_list_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text="◀️ Назад", callback_data=f"referrals_list:{page - 1}")
+            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
         builder.button(text=f"📄 {page}/{total_pages}", callback_data="ignore")
 
         if page < total_pages:
-            builder.button(text="Вперед ▶️", callback_data=f"referrals_list:{page + 1}")
+            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"referrals_list:{page + 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 

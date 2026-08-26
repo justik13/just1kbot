@@ -52,13 +52,13 @@ async def request_delete_device(
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif status == "create_cleanup_pending":
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+            msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
         await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
         return
@@ -130,13 +130,13 @@ async def confirm_delete_device(
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif status == "create_cleanup_pending":
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+            msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
         await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
         return

@@ -11,7 +11,7 @@ def get_admin_server_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="⚡ Проверить доступность (Ping)",
+        text=texts.BTN_ADMIN_SERVER_PING,
         callback_data=f"admin_server_ping:{server_id}",
     )
     builder.button(

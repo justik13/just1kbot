@@ -40,14 +40,12 @@ async def fsm_media_guard(message: Message, state: FSMContext):
         pass
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
     builder.adjust(1)
 
     try:
         temp_msg = await message.answer(
-            "🤖 <b>Неподдерживаемый тип сообщения.</b>\n\n"
-            "Пожалуйста, используйте кнопки управления или текстовые команды.\n\n"
-            "⏱ <i>Сообщение удалится автоматически через 5 сек.</i>",
+            texts.FALLBACK_UNSUPPORTED_TYPE,
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
@@ -80,14 +78,12 @@ async def handle_unknown_text(message: Message, state: FSMContext):
         pass
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🏠 В главное меню", callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
     builder.adjust(1)
 
     try:
         temp_msg = await message.answer(
-            "🤖 <b>Я не понимаю произвольный текст.</b>\n\n"
-            "Пожалуйста, используйте кнопки управления ниже или команду /start.\n\n"
-            "⏱ <i>Сообщение удалится автоматически через 5 сек.</i>",
+            texts.FALLBACK_UNKNOWN_TEXT,
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
@@ -151,7 +147,7 @@ async def legacy_profile_callback(
 
 @router.callback_query(F.data == "white_internet")
 async def white_internet_callback(callback: CallbackQuery):
-    await callback.answer("🔨 Раздел находится в разработке", show_alert=True)
+    await callback.answer(texts.FALLBACK_SECTION_IN_DEVELOPMENT, show_alert=True)
 
 
 @router.callback_query()

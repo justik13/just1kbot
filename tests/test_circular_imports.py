@@ -122,24 +122,14 @@ class CircularImportRegressionTests(unittest.TestCase):
         """Verify statically via AST that lower architectural layers do not import forbidden upward modules."""
         project_root = Path(__file__).resolve().parent.parent
 
-        forbidden_prefixes_for_lower_layers = (
-            "bot.constants",
-            "bot.middlewares",
-            "bot.states",
-            "bot.filters",
-        )
-
-        checked_dirs = ["config", "utils", "database", "services"]
-
-        violations = []
-
-        for dir_name in checked_dirs:
+        # Tier 1: config and database must NEVER import ANY bot modules
+        tier_1_dirs = ["config", "database"]
+        tier_1_violations = []
+        for dir_name in tier_1_dirs:
             target_dir = project_root / dir_name
             if not target_dir.exists():
                 continue
-
             for py_file in target_dir.rglob("*.py"):
-                # Skip backward compat shims or tests if any in subdirs
                 try:
                     with open(py_file, "r", encoding="utf-8") as f:
                         tree = ast.parse(f.read(), filename=str(py_file))
@@ -149,18 +139,56 @@ class CircularImportRegressionTests(unittest.TestCase):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
-                            for forbidden in forbidden_prefixes_for_lower_layers:
-                                if alias.name == forbidden or alias.name.startswith(forbidden + "."):
-                                    violations.append((str(py_file.relative_to(project_root)), node.lineno, alias.name))
+                            if alias.name == "bot" or alias.name.startswith("bot."):
+                                tier_1_violations.append((str(py_file.relative_to(project_root)), node.lineno, alias.name))
                     elif isinstance(node, ast.ImportFrom):
                         module_name = node.module or ""
-                        for forbidden in forbidden_prefixes_for_lower_layers:
-                            if module_name == forbidden or module_name.startswith(forbidden + "."):
-                                violations.append((str(py_file.relative_to(project_root)), node.lineno, module_name))
+                        if module_name == "bot" or module_name.startswith("bot."):
+                            tier_1_violations.append((str(py_file.relative_to(project_root)), node.lineno, module_name))
 
         self.assertEqual(
-            violations,
+            tier_1_violations,
             [],
-            f"Found forbidden upward imports violating clean layer SSOT:\n{violations}",
+            f"Found Tier 1 (config/database) upward imports to bot.*:\n{tier_1_violations}",
+        )
+
+        # Tier 2: Core services and utils must NEVER import UI state, filters, handlers, or middlewares
+        tier_2_forbidden = (
+            "bot.middlewares",
+            "bot.states",
+            "bot.filters",
+            "bot.handlers",
+            "bot.constants",
+        )
+        tier_2_dirs = ["utils", "services"]
+        tier_2_violations = []
+
+        for dir_name in tier_2_dirs:
+            target_dir = project_root / dir_name
+            if not target_dir.exists():
+                continue
+            for py_file in target_dir.rglob("*.py"):
+                try:
+                    with open(py_file, "r", encoding="utf-8") as f:
+                        tree = ast.parse(f.read(), filename=str(py_file))
+                except Exception as exc:
+                    self.fail(f"Failed to parse {py_file}: {exc}")
+
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            for forbidden in tier_2_forbidden:
+                                if alias.name == forbidden or alias.name.startswith(forbidden + "."):
+                                    tier_2_violations.append((str(py_file.relative_to(project_root)), node.lineno, alias.name))
+                    elif isinstance(node, ast.ImportFrom):
+                        module_name = node.module or ""
+                        for forbidden in tier_2_forbidden:
+                            if module_name == forbidden or module_name.startswith(forbidden + "."):
+                                tier_2_violations.append((str(py_file.relative_to(project_root)), node.lineno, module_name))
+
+        self.assertEqual(
+            tier_2_violations,
+            [],
+            f"Found Tier 2 (services/utils) upward imports violating clean layer decoupling:\n{tier_2_violations}",
         )
 

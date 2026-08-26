@@ -8,27 +8,27 @@ def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="📢 Всем пользователям",
+        text=texts.BTN_BROADCAST_ALL,
         callback_data="broadcast_aud:all",
     )
     builder.button(
-        text="🟢 Активным подпискам",
+        text=texts.BTN_BROADCAST_ACTIVE,
         callback_data="broadcast_aud:active",
     )
     builder.button(
-        text="⏳ Истекают < 3 дней",
+        text=texts.BTN_BROADCAST_EXPIRING,
         callback_data="broadcast_aud:expiring_3d",
     )
     builder.button(
-        text="🔴 Истекшим подпискам",
+        text=texts.BTN_BROADCAST_EXPIRED,
         callback_data="broadcast_aud:expired",
     )
     builder.button(
-        text="🆕 Без подписок",
+        text=texts.BTN_BROADCAST_NO_SUB,
         callback_data="broadcast_aud:never",
     )
     builder.button(
-        text="🧪 Тест админу",
+        text=texts.BTN_BROADCAST_TEST_ADMIN,
         callback_data="broadcast_aud:test",
     )
     builder.button(
@@ -47,11 +47,11 @@ def get_broadcast_launch_keyboard(total_count: int) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=f"🚀 Запустить рассылку ({total_count})",
+        text=texts.BTN_BROADCAST_START.format(count=total_count),
         callback_data="broadcast_confirm_launch",
     )
     builder.button(
-        text="❌ Отмена",
+        text=texts.BTN_CANCEL,
         callback_data="admin_menu",
     )
 

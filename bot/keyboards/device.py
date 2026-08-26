@@ -27,7 +27,7 @@ def get_device_keyboard(
         callback_data=f"rename_device:{profile_id}",
     )
     builder.button(
-        text="📖 Инструкция и помощь",
+        text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data=f"support_help:device_{profile_id}",
     )
     adjustments.append(2)

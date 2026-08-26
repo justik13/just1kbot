@@ -556,10 +556,10 @@ async def process_edit_server_url(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.\n\n"
-                f"• Связанных устройств: {profiles_count}\n"
-                f"• Операций в обработке: {active_ops_count}\n\n"
-                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
+                    devices_count=profiles_count,
+                    operations_count=active_ops_count,
+                ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
             )
@@ -807,10 +807,10 @@ async def process_edit_server_key(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.\n\n"
-                f"• Связанных устройств: {profiles_count}\n"
-                f"• Операций в обработке: {active_ops_count}\n\n"
-                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
+                    devices_count=profiles_count,
+                    operations_count=active_ops_count,
+                ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
             )

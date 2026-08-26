@@ -131,8 +131,7 @@ async def show_disputes(
         ).all()
     )
     lines = [
-        "⚖️ <b>Управление платежными спорами (Disputes)</b>\n",
-        "ℹ️ <i>Диспуты возникают при обращении клиентов в банк или платёжный провайдер (чарджбэк). Здесь вы можете просмотреть детали спора и урегулировать вопрос.</i>\n",
+        texts.ADMIN_DISPUTES_HEADER + "\n",
     ]
     builder = _list_keyboard()
     for dispute in rows:
@@ -163,7 +162,7 @@ async def start_dispute_entry(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(DisputeEntry.details)
     builder = InlineKeyboardBuilder()
-    builder.button(text="❌ Отмена", callback_data="admin_dispute_cancel")
+    builder.button(text=texts.BTN_CANCEL, callback_data="admin_dispute_cancel")
     await callback.message.answer(
         texts.UI_BOT_HANDLERS_ADMIN_DISPUTES_L175_1,
         reply_markup=builder.as_markup(),
@@ -178,7 +177,7 @@ async def cancel_dispute_entry(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    await callback.message.edit_text("❌ Ввод спора отменён.")
+    await callback.message.edit_text(texts.ADMIN_DISPUTES_INPUT_CANCELLED)
     await callback.answer()
 
 

@@ -35,7 +35,7 @@ def get_hub_keyboard(
     )
 
     builder.button(
-        text="🤝 Пригласить друга",
+        text=texts.BTN_INVITE_FRIEND,
         callback_data="menu_referral",
     )
 

@@ -234,7 +234,7 @@ async def ping_server(
 
     server_id = parse_callback_id(callback.data, 1)
     if server_id is None:
-        await callback.answer("Ошибка: ID сервера не указан", show_alert=True)
+        await callback.answer(texts.ERROR_SERVER_ID_REQUIRED, show_alert=True)
         return
 
     server = await get_server_by_id(session, server_id)
@@ -242,7 +242,7 @@ async def ping_server(
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
 
-    await callback.answer("⚡ Проверка связи...", show_alert=False)
+    await callback.answer(texts.ADMIN_SERVER_PING_CHECKING, show_alert=False)
 
     import time
 
@@ -254,11 +254,11 @@ async def ping_server(
         is_healthy = await client.healthcheck()
         duration_ms = int((time.monotonic() - start_t) * 1000)
         if is_healthy:
-            ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
+            ping_res = texts.ADMIN_SERVER_PING_ONLINE.format(latency_ms=duration_ms)
         else:
-            ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
+            ping_res = texts.ADMIN_SERVER_PING_NO_HEALTHZ
     except Exception as exc:
-        ping_res = f"🔴 <b>API недоступен / ошибка соединения</b> ({type(exc).__name__})"
+        ping_res = texts.ADMIN_SERVER_PING_ERROR.format(error=type(exc).__name__)
 
     await _show_server_card(callback, session, server, ping_result=ping_res)
 
@@ -268,7 +268,7 @@ async def dismiss_admin_alert(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-    await callback.answer("Удалено", show_alert=False)
+    await callback.answer(texts.ADMIN_SERVER_DELETED_BADGE, show_alert=False)
     try:
         await callback.message.delete()
     except Exception as e:

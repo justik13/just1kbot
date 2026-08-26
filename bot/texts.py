@@ -1,27 +1,71 @@
 # bot/texts.py
 #
-# Единый загрузчик текстов.
+# Единый реестр и загрузчик текстов приложения (SSOT Text Registry).
 #
-# Все тексты хранятся в:
-# - bot/texts_data/user_texts.py
-# - bot/texts_data/referral_texts.py
-# - bot/texts_data/admin_texts.py
-# - bot/texts_data/ui_texts.py
-# - bot/texts_data/runtime_texts.py
-# - bot/texts_data/overrides.py
+# Строгие правила Single Source of Truth:
+# 1. Один ключ = Один канонический файл = Один источник истины.
+# 2. Никаких неявных переопределений (overrides) или дубликатов.
+#    Если ключ встречается в двух разных файлах, загрузчик немедленно выбрасывает RuntimeError.
 
 import logging
 from importlib import reload
 from typing import Any
 
-from bot.texts_data import admin_texts as _admin_texts_module
-from bot.texts_data import overrides as _overrides_module
-from bot.texts_data import referral_texts as _referral_texts_module
-from bot.texts_data import runtime_texts as _runtime_texts_module
-from bot.texts_data import ui_texts as _ui_texts_module
-from bot.texts_data import user_texts as _user_texts_module
+from bot.texts_data.admin import (
+    broadcast as _admin_broadcast,
+    dashboard as _admin_dashboard,
+    disputes as _admin_disputes,
+    payments as _admin_payments,
+    queues as _admin_queues,
+    servers as _admin_servers,
+    subscriptions as _admin_subscriptions,
+    tariffs as _admin_tariffs,
+    users as _admin_users,
+)
+from bot.texts_data.common import (
+    buttons as _common_buttons,
+    errors as _common_errors,
+    status as _common_status,
+)
+from bot.texts_data.runtime import (
+    alerts as _runtime_alerts,
+    workers as _runtime_workers,
+)
+from bot.texts_data.user import (
+    connection as _user_connection,
+    devices as _user_devices,
+    hub as _user_hub,
+    payments as _user_payments,
+    referral as _user_referral,
+    subscription as _user_subscription,
+    support as _user_support,
+)
 
 logger = logging.getLogger(__name__)
+
+_ALL_MODULES = [
+    ("common.buttons", _common_buttons),
+    ("common.errors", _common_errors),
+    ("common.status", _common_status),
+    ("user.hub", _user_hub),
+    ("user.connection", _user_connection),
+    ("user.devices", _user_devices),
+    ("user.payments", _user_payments),
+    ("user.subscription", _user_subscription),
+    ("user.referral", _user_referral),
+    ("user.support", _user_support),
+    ("admin.broadcast", _admin_broadcast),
+    ("admin.dashboard", _admin_dashboard),
+    ("admin.disputes", _admin_disputes),
+    ("admin.payments", _admin_payments),
+    ("admin.queues", _admin_queues),
+    ("admin.servers", _admin_servers),
+    ("admin.subscriptions", _admin_subscriptions),
+    ("admin.tariffs", _admin_tariffs),
+    ("admin.users", _admin_users),
+    ("runtime.alerts", _runtime_alerts),
+    ("runtime.workers", _runtime_workers),
+]
 
 
 def _validate_key(key: Any) -> None:
@@ -37,29 +81,23 @@ def _validate_key(key: Any) -> None:
 
 
 def _merge_texts() -> dict[str, Any]:
-    sources = (
-        ("user_texts", dict(_user_texts_module.TEXTS)),
-        ("referral_texts", dict(_referral_texts_module.REFERRAL_TEXTS)),
-        ("admin_texts", dict(_admin_texts_module.TEXTS)),
-        ("ui_texts", dict(_ui_texts_module.TEXTS)),
-        ("runtime_texts", dict(_runtime_texts_module.TEXTS)),
-    )
     merged: dict[str, Any] = {}
+    key_sources: dict[str, str] = {}
 
-    for source_name, source in sources:
-        for key, value in source.items():
+    for source_name, module in _ALL_MODULES:
+        source_texts = getattr(module, "TEXTS", {})
+        for key, value in source_texts.items():
             _validate_key(key)
 
             if key in merged:
+                first_source = key_sources[key]
                 raise RuntimeError(
-                    f"Duplicate text key {key!r} in {source_name}"
+                    f"SSOT Violation: Duplicate text key {key!r} found in {source_name!r} "
+                    f"(already defined in {first_source!r}). Each text key must have exactly ONE canonical location."
                 )
 
             merged[key] = value
-
-    for key, value in dict(_overrides_module.OVERRIDES).items():
-        _validate_key(key)
-        merged[key] = value
+            key_sources[key] = source_name
 
     return merged
 
@@ -92,17 +130,14 @@ def reload_texts() -> None:
     """
     global _TEXTS
 
-    reload(_user_texts_module)
-    reload(_referral_texts_module)
-    reload(_admin_texts_module)
-    reload(_ui_texts_module)
-    reload(_runtime_texts_module)
-    reload(_overrides_module)
+    for _, module in _ALL_MODULES:
+        reload(module)
 
     _TEXTS = _merge_texts()
     globals().update(_TEXTS)
 
     logger.info(
-        "Texts reloaded successfully: %s keys",
+        "Texts reloaded successfully: %s keys from %s domain modules.",
         len(_TEXTS),
+        len(_ALL_MODULES),
     )

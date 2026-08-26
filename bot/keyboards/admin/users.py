@@ -18,7 +18,7 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
-        text="💳 Баланс пользователя",
+        text=texts.BTN_ADMIN_USER_BALANCE,
         callback_data=f"admin_user_balance:{user_id}",
     )
 
@@ -28,12 +28,12 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
-        text="📜 История действий (Логи)",
+        text=texts.BTN_ADMIN_USER_LOGS,
         callback_data=f"admin_user_audit:{user_id}",
     )
 
     builder.button(
-        text="✉️ Написать пользователю",
+        text=texts.BTN_ADMIN_USER_MESSAGE,
         callback_data=f"admin_send_msg:{user_id}",
     )
 
@@ -64,11 +64,11 @@ def get_admin_user_balance_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="➕ Начислить баланс (Бонус)",
+        text=texts.BTN_ADMIN_USER_ADD_BALANCE,
         callback_data=f"admin_balance_topup:{user_id}",
     )
     builder.button(
-        text="➖ Списать баланс",
+        text=texts.BTN_ADMIN_USER_DEDUCT_BALANCE,
         callback_data=f"admin_balance_deduct:{user_id}",
     )
     builder.button(

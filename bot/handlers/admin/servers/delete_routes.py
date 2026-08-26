@@ -182,7 +182,7 @@ async def confirm_delete_server(
         )
         try:
             await callback.message.edit_text(
-                "⚠️ <b>Удаление сервера отменено:</b>\n\nНа сервере присутствуют незавершенные операции создания или фоновые обновления. Дождитесь их завершения.",
+                texts.ADMIN_SERVER_DELETE_BLOCKED_PENDING,
                 reply_markup=get_back_button(f"admin_server_card:{server.id}"),
                 parse_mode="HTML",
             )

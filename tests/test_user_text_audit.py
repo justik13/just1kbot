@@ -2,7 +2,7 @@ import unittest
 import re
 
 from bot import texts
-from bot.texts_data.referral_texts import REFERRAL_TEXTS
+from bot.texts_data.user.referral import TEXTS as REFERRAL_TEXTS
 
 FORBIDDEN_USER_WORDING = (
     "Что делать, если VPN не подключается или медленно работает?",

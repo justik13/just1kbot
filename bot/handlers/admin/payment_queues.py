@@ -87,8 +87,7 @@ async def _edit(callback: CallbackQuery, text: str, markup) -> None:
 async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
     snapshot = await get_payment_queue_health_snapshot(session)
     lines = [
-        "🔄 <b>Диагностика очередей платежей и задач</b>\n",
-        "ℹ️ <i>Очереди обеспечивают фоновую обработку чеков ЮKassa, автопродлений и синхронизации с серверами. Если транзакция задерживается, она переводится в статус повтора.</i>\n",
+        texts.ADMIN_QUEUES_HEADER + "\n",
     ]
     names = {
         "provider_operations": texts.ADMIN_QUEUE_PROVIDER_SHORT,

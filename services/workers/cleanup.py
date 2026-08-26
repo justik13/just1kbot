@@ -199,11 +199,11 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         try:
                             builder = InlineKeyboardBuilder()
                             builder.button(
-                                text="🛒 Купить подписку",
+                                text=texts.BTN_BUY_SUBSCRIPTION,
                                 callback_data="menu_buy",
                             )
                             builder.button(
-                                text="✅ Прочитано",
+                                text=texts.BTN_READ_DISMISS,
                                 callback_data="dismiss_notification",
                             )
                             builder.adjust(1)

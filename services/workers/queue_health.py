@@ -196,7 +196,7 @@ class QueueHealthMonitor:
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
-        builder.button(text="✖ Скрыть", callback_data="dismiss_notification")
+        builder.button(text=texts.BTN_HIDE, callback_data="dismiss_notification")
         reply_markup = builder.as_markup()
 
         async def send_one(admin_id: int) -> bool:

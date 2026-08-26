@@ -59,7 +59,7 @@ CHANGE_ERRORS = {
     "active_quote_has_existing_debit": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
     "paid_value_ledger_conflict": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L44_1,
     "active_quote_has_existing_entitlement": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
-    "change_cooldown_active": "Смена тарифа на меньший доступна не чаще одного раза в 24 часа. Попробуйте позже.",
+    "change_cooldown_active": texts.PAYMENT_DOWNGRADE_COOLDOWN_ALERT,
 }
 
 

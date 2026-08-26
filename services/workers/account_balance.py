@@ -288,11 +288,8 @@ async def process_balance_notifications(bot: Bot) -> int:
                 try:
                     await global_send_limiter.acquire()
                     b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = (
-                        f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\n"
-                        f"Вам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
-                    )
+                    b_builder.button(text=texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L287_1, callback_data="menu_balance")
+                    ref_text = texts.NOTIF_REFERRAL_BONUS_GRANTED.format(bonus_amount=ref_bonus)
                     await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
                     ref_sent = True
                 except TelegramForbiddenError:
@@ -339,10 +336,7 @@ async def process_balance_notifications(bot: Bot) -> int:
             )
             if ctx.get("purchaser_welcome_bonus", 0) > 0:
                 wb = ctx["purchaser_welcome_bonus"]
-                message += (
-                    f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
-                    f"за первое пополнение по приглашению!</b>"
-                )
+                message += "\n\n" + texts.NOTIF_WELCOME_BONUS_GRANTED.format(bonus_amount=wb)
 
             user_sent = False
             user_blocked = False
