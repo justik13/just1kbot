@@ -4,11 +4,7 @@ Single source of truth for the full-table TRUNCATE used to isolate suites.
 The table list is derived from SQLAlchemy metadata so new tables are picked
 up automatically; CASCADE handles FK ordering in one statement.
 """
-import os
-
 from sqlalchemy import text
-
-DB = os.getenv("TEST_DATABASE_URL")
 
 _EXCLUDED_TABLES = {"alembic_version"}
 

@@ -169,7 +169,7 @@ async def stale_callback_fallback(
         # Unknown callback while a flow may be active: keep FSM progress so a
         # stray tap on an unrelated inline button cannot wipe the wizard.
         try:
-            await callback.answer(texts.FALLBACK_STALE_CALLBACK, show_alert=False)
+            await callback.answer()
         except Exception:
             pass
         return

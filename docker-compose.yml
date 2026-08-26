@@ -51,8 +51,7 @@ services:
     networks:
       - backend_net
     command: >
-      /bin/sh -c 'exec redis-server
-      --requirepass "$$REDIS_PASSWORD"
+      /bin/sh -c 'printf "requirepass %s\n" "$$REDIS_PASSWORD" | redis-server -
       --maxmemory 384mb
       --maxmemory-policy noeviction'
     environment:

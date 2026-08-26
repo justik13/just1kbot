@@ -37,6 +37,7 @@ from bot.middlewares import (
     PrivateChatMiddleware,
     ThrottlingMiddleware,
     UserContextMiddleware,
+    set_request_id,
 )
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import stop_clean_chat_worker
@@ -55,8 +56,23 @@ from utils.logging_security import (
     sanitize_text,
 )
 
+def _resolve_log_level() -> str:
+    """LOG_LEVEL from env first, then Settings (picks up .env), then INFO.
+
+    Kept exception-safe: bot.main is imported by tooling/tests whose
+    environment may lack required Settings fields.
+    """
+    raw = os.getenv("LOG_LEVEL")
+    if raw:
+        return raw.strip().upper()
+    try:
+        return get_settings().LOG_LEVEL
+    except Exception:
+        return "INFO"
+
+
 logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    level=_resolve_log_level(),
     format=(
         "%(asctime)s - %(levelname)s - "
         "[%(request_id)s] %(name)s: %(message)s"
@@ -250,8 +266,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 @web.middleware
 async def _http_correlation_middleware(request: web.Request, handler):
     """Give every public HTTP request the same request_id as Telegram updates."""
-    from bot.middlewares.correlation import set_request_id
-
     try:
         set_request_id(uuid.uuid4().hex[:8])
         return await handler(request)

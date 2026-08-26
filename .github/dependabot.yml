@@ -1,9 +1,7 @@
 version: 2
 updates:
-  - package-ecosystem: pip
-    directory: "/"
-    schedule:
-      interval: weekly
+  # Python deps are managed by the pip-tools lock job (requirements-lock.yml):
+  # dependabot pip PRs cannot regenerate requirements.lock and would fail CI.
   - package-ecosystem: docker
     directory: "/"
     schedule:
