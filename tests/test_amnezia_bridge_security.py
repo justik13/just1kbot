@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from integrations.amnezia_bridge.web_routes import amnezia_bridge_handler
 from database.models import Server, User, VPNProfile
+from integrations.amnezia_bridge.web_routes import amnezia_bridge_handler
 from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import amnezia_bridge_rate_limiter

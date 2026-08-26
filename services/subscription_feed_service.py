@@ -10,10 +10,10 @@ from utils.datetime_helpers import now_utc
 from utils.vpn_parser import build_conf_file
 
 __all__ = [
-    "SubscriptionFeedService",
     "SUPPORTED_SUBSCRIPTION_PROTOCOLS",
-    "get_user_profiles",
+    "SubscriptionFeedService",
     "SubscriptionService",
-    "now_utc",
     "build_conf_file",
+    "get_user_profiles",
+    "now_utc",
 ]

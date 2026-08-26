@@ -5,11 +5,11 @@ from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import make_mocked_request
 
+from database.models import User
 from integrations.incy.web_routes import (
     subscription_feed_handler,
     subscription_open_handler,
 )
-from database.models import User
 from utils.datetime_helpers import now_utc
 from utils.http_rate_limiter import subscription_feed_rate_limiter
 

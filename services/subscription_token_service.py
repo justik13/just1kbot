@@ -7,7 +7,7 @@ from integrations.incy.token_service import (
 )
 
 __all__ = [
-    "SubscriptionTokenService",
     "MAX_SUBSCRIPTION_TOKEN_LENGTH",
+    "SubscriptionTokenService",
     "get_user_by_subscription_token",
 ]
