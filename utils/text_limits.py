@@ -17,9 +17,9 @@ def split_text_by_lines(
     if len(text) <= limit:
         return [text]
 
-    # If limit cannot fit <blockquote expandable>x</blockquote> (needs at least 38 chars),
+    # If limit cannot fit <blockquote expandable>x</blockquote> (needs at least 37 chars),
     # strip blockquote tags to plain text so we never emit broken unclosed HTML tag fragments.
-    if limit < 38 and "<blockquote" in text:
+    if limit < 37 and "<blockquote" in text:
         text = re.sub(r"</?blockquote(?:\s+[^>]*)?>", "", text)
         if len(text) <= limit:
             return [text]
@@ -39,7 +39,7 @@ def split_text_by_lines(
 
         will_be_in_bq = (in_blockquote or line_has_open) and not line_has_close
         min_wrapper = len(current_open_tag) + len(close_tag) if will_be_in_bq else 0
-        tag_enabled = limit > max(36, min_wrapper + 2)
+        tag_enabled = limit >= min_wrapper + 1
 
         needed_close = close_tag if (tag_enabled and will_be_in_bq and not line.endswith(close_tag)) else ""
         test_candidate = f"{current}\n{line}" if current else line
@@ -73,7 +73,7 @@ def split_text_by_lines(
 
             will_be_in_bq = in_blockquote and not actual_line.endswith(close_tag)
             min_wrapper = len(bq_open_tag) + len(close_tag) if will_be_in_bq else 0
-            tag_enabled = limit > max(36, min_wrapper + 2)
+            tag_enabled = limit >= min_wrapper + 1
             needed_close = close_tag if (tag_enabled and will_be_in_bq) else ""
 
             if len(actual_line) + len(needed_close) > limit:
@@ -101,7 +101,7 @@ def split_text_by_lines(
 
     if current:
         min_wrapper = len(bq_open_tag) + len(close_tag) if in_blockquote else 0
-        tag_enabled = limit > max(36, min_wrapper + 2)
+        tag_enabled = limit >= min_wrapper + 1
         if tag_enabled and in_blockquote and not current.endswith(close_tag):
             if len(current) + len(close_tag) <= limit:
                 current += close_tag

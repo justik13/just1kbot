@@ -295,9 +295,31 @@ class TestUtilsTextLimits(unittest.TestCase):
                 if "<blockquote" in c:
                     self.assertIn("</blockquote>", c)
 
+    def test_split_text_by_lines_boundary_limits(self):
+        text = "<blockquote expandable>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ny</blockquote>"
+        for lim in [1, 2, 5, 10, 20, 35, 36, 37, 38, 39, 40, 45, 50, 100, 4096]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertTrue(len(chunks) >= 1)
+            for idx, c in enumerate(chunks):
+                self.assertLessEqual(len(c), lim, f"Limit {lim} exceeded on chunk {idx}: {c}")
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+                    self.assertTrue(c.startswith("<blockquote expandable>"))
+                    self.assertTrue(c.endswith("</blockquote>"))
+
+    def test_split_text_by_lines_transitions_outside_inside_outside(self):
+        text = "outside line 1\n<blockquote expandable>inside line</blockquote>\noutside line 2"
+        for lim in [40, 50, 60, 100, 4096]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertTrue(len(chunks) >= 1)
+            for c in chunks:
+                self.assertLessEqual(len(c), lim)
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+
     def test_split_text_by_lines_fuzzed_invariant(self):
         import random
-        for limit in [5, 10, 20, 35, 37, 40, 50, 75, 100, 200, 500, 4096]:
+        for limit in [1, 5, 10, 20, 35, 36, 37, 38, 39, 40, 50, 75, 100, 200, 500, 4096]:
             for _ in range(15):
                 lines_count = random.randint(1, 10)
                 test_lines = []
