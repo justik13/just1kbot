@@ -5,10 +5,7 @@ import time
 
 from aiohttp import web
 
-from services.amnezia_bridge_constants import (
-    RATE_LIMIT_BURST,
-    RATE_LIMIT_REQUESTS_PER_MINUTE,
-)
+from config.constants import RATE_LIMIT_BURST, RATE_LIMIT_REQUESTS_PER_MINUTE
 
 
 class HttpRateLimiter:
@@ -79,8 +76,8 @@ class HttpRateLimiter:
 
 amnezia_bridge_rate_limiter = HttpRateLimiter()
 subscription_feed_rate_limiter = HttpRateLimiter(
-    rate_per_minute=30.0,
-    burst=10,
+    rate_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE,
+    burst=RATE_LIMIT_BURST,
     max_entries=10000,
 )
 

@@ -1,9 +1,8 @@
 import json
 import re
 
-from bot.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL, MAX_RAW_CONFIG_BYTES
 from database.models import VPNProfile
-from services.amnezia_bridge_constants import MAX_RAW_CONFIG_BYTES
 from utils.vpn_parser import (
     customize_vpn_uri,
     decode_vpn_uri_to_json,

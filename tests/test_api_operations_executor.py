@@ -199,7 +199,7 @@ class ExecutorPostgresTests(unittest.IsolatedAsyncioTestCase):
     def valid_config(self):
         conf = "[Interface]\nPrivateKey = private\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = public\nAllowedIPs = 0.0.0.0/0\nEndpoint = vpn.test:51820\n"
         content = json.dumps(
-            {"containers": [{"awg": {"last_config": json.dumps({"config": conf})}}]}
+            {"containers": [{"awg": {"protocol_version": "2", "last_config": json.dumps({"config": conf})}}]}
         ).encode()
         uri = "vpn://" + base64.urlsafe_b64encode(
             struct.pack(">I", len(content)) + zlib.compress(content)

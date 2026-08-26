@@ -3,7 +3,7 @@ import re
 
 from aiohttp import web
 
-from bot.constants import AMNEZIA_PROTOCOL
+from config.constants import AMNEZIA_PROTOCOL
 from database.connection import session_scope
 from database.repositories.profiles_repo import get_profile_by_id
 from database.repositories.users_repo import get_user_by_id
