@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -663,6 +664,13 @@ class AccountLedgerEntry(Base):
             unique=True,
             postgresql_where=text("entry_type='purchase_reversal'"),
         ),
+        Index(
+            "ix_account_ledger_payment_debits",
+            "payment_id",
+            postgresql_where=text(
+                "entry_type IN ('refund_debit','chargeback_debit')"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -945,6 +953,12 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_logs_created_at", "created_at"),
         Index("ix_audit_logs_created_at_desc", "created_at", postgresql_ops={"created_at": "DESC"}),
+        Index(
+            "ix_audit_logs_target",
+            func.lower(text("target_type")),
+            text("target_id"),
+            text("created_at DESC"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

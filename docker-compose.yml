@@ -46,7 +46,11 @@ services:
     logging: *default-logging
     networks:
       - backend_net
-    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf --maxmemory 384mb --maxmemory-policy noeviction'
+    command: >
+      /bin/sh -c 'exec redis-server
+      --requirepass "$$REDIS_PASSWORD"
+      --maxmemory 384mb
+      --maxmemory-policy noeviction'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     deploy:

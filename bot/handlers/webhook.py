@@ -15,6 +15,7 @@ from bot.middlewares.correlation import set_request_id
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import WebhookInbox
+from utils.http_rate_limiter import get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 _healthcheck_redis = None
@@ -78,24 +79,14 @@ def _is_yookassa_ip(ip: str) -> bool:
         return False
 
 
-def _is_private_ip(ip: str) -> bool:
-    try:
-        addr = ipaddress.ip_address(ip)
-        return addr.is_private or addr.is_loopback
-    except ValueError:
-        return False
-
-
 def _get_real_ip(request: web.Request) -> str:
-    remote = (request.remote or "").strip()
-    if _is_private_ip(remote):
-        real_ip = request.headers.get("X-Real-IP", "").strip()
-        if real_ip:
-            return real_ip
-        forwarded = request.headers.get("X-Forwarded-For", "").strip()
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-    return remote
+    """Resolve the client IP honouring TRUSTED_PROXIES.
+
+    X-Real-IP / X-Forwarded-For are only trusted when the direct peer is an
+    explicitly configured reverse proxy; every other peer is taken verbatim
+    from the socket so private networks cannot spoof the YooKassa allowlist.
+    """
+    return get_trusted_client_ip(request)
 
 
 async def yookassa_webhook_handler(request: web.Request) -> web.Response:

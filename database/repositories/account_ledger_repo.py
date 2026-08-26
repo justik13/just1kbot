@@ -707,13 +707,15 @@ async def create_payment_debit(
     if entry_type not in {"refund_debit", "chargeback_debit"}:
         raise ValueError("invalid payment debit type")
     amount = whole_rubles(amount)
-    payment = await session.scalar(select(Payment).where(Payment.id == payment_id))
-    if payment is None:
-        raise LookupError("topup_payment_not_found")
-    await lock_account_user(session, payment.user_id)
+    # Global lock hierarchy is Payment -> User: acquire the Payment row lock
+    # BEFORE the per-user advisory/user lock so this function stays
+    # deadlock-free even when called without a pre-held Payment lock.
     payment = await session.scalar(
         select(Payment).where(Payment.id == payment_id).with_for_update()
     )
+    if payment is None:
+        raise LookupError("topup_payment_not_found")
+    await lock_account_user(session, payment.user_id)
     if payment.currency != "RUB":
         raise AccountLedgerConflictError("payment_is_not_refundable_topup")
     existing = await session.scalar(

@@ -143,11 +143,11 @@ jobs:
           RUN_BACKUP_INTEGRATION: "1"
           BACKUP_TEST_DATABASE_URL: postgresql://projectx:projectx@localhost:5432/projectx_test
 
-      - name: Run pytest fallback
-        if: always()
+      - name: Audit locked dependencies for known CVEs
+        continue-on-error: true
         run: |
-          python -m pip install pytest==8.1.1
-          python -m pytest tests/ -v
+          python -m pip install pip-audit
+          python -m pip_audit --no-deps -r requirements.lock
 
       - name: Upload failing unittest log
         if: failure()

@@ -197,6 +197,9 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     dp.message.middleware(PrivateChatMiddleware())
     dp.callback_query.middleware(PrivateChatMiddleware())
 
+    dp.message.middleware(ThrottlingMiddleware())
+    dp.callback_query.middleware(ThrottlingMiddleware())
+
     dp.message.middleware(DBSessionMiddleware())
     dp.callback_query.middleware(DBSessionMiddleware())
 
@@ -207,9 +210,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
-
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
 
     dp.callback_query.middleware(ActionLockMiddleware())
 
@@ -250,6 +250,7 @@ async def start_webhook_server(port: int):
     # YooKassa payloads are small. Reject unexpectedly large request bodies
     # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
+    app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
     setup_webhook_routes(app)
 
     runner = web.AppRunner(app)

@@ -40,6 +40,16 @@ DEFAULT_TARIFFS = [
 ]
 
 
+def _asyncpg_connect_args() -> dict:
+    return {
+        "timeout": 15,
+        "server_settings": {
+            "statement_timeout": "60000",
+            "idle_in_transaction_session_timeout": "120000",
+        },
+    }
+
+
 async def init_db():
     global _engine, _sessionmaker
     lock = _get_db_lock()
@@ -50,6 +60,10 @@ async def init_db():
         settings = get_settings()
         # P1 #8: Reduced pool_size from 50 to 10 for single-process deployment
         # 50 connections was excessive for a single bot process
+        #
+        # P2 #6 (audit): pool_recycle bounds connection lifetime so a silently
+        # dropped TCP peer cannot pin a pooled slot forever; statement_timeout
+        # guarantees no runaway query holds row/advisory locks indefinitely.
         _engine = create_async_engine(
             settings.DATABASE_URL,
             echo=False,
@@ -57,6 +71,8 @@ async def init_db():
             max_overflow=10,
             pool_timeout=30,
             pool_pre_ping=True,
+            pool_recycle=1800,
+            connect_args=_asyncpg_connect_args(),
         )
         _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
