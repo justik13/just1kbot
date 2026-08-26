@@ -38,7 +38,6 @@ from database.repositories.tariff_quotes_repo import (
     lock_checkout_user,
 )
 from services.audit_service import AuditService
-from services.referral_bonus import grant_referral_bonus_for_purchase
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 
@@ -401,12 +400,6 @@ async def _settle_account_purchase(
     quote.status = "consumed"
     quote.consumed_at = now
     user.last_payment_at = now
-    await grant_referral_bonus_for_purchase(
-        session,
-        purchaser_user_id=user.id,
-        quote_id=quote.id,
-        purchase_amount=amount,
-    )
     await AuditService.log_action(
         session,
         admin_id=0,

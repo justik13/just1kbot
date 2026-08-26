@@ -8,7 +8,7 @@ from bot import texts
 
 logger = logging.getLogger(__name__)
 
-_MAX_CACHE_SIZE = 5000
+_MAX_CACHE_SIZE = 20000
 _DEFAULT_TTL = 2.0
 _GLOBAL_THROTTLE_TTL = 0.3
 

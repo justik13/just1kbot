@@ -31,14 +31,13 @@ from services.payment_disputes import (
 from services.provider_refunds import BalanceRefundError, request_balance_topup_refund
 from utils.datetime_helpers import now_utc
 
+try:
+    from tests.db_utils import TRUNCATE_SQL
+except ImportError:  # direct unittest discover run
+    from db_utils import TRUNCATE_SQL
+
+
 DB = os.getenv("TEST_DATABASE_URL")
-TRUNCATE_SQL = (
-    "TRUNCATE payment_disputes, provider_refund_operations, webhook_inbox, "
-    "payment_refunds, payment_provider_operations, "
-    "account_balance_reservations, account_ledger_allocations, "
-    "account_ledger_entries, payment_events, audit_logs, payments, users "
-    "RESTART IDENTITY CASCADE"
-)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")

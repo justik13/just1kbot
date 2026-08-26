@@ -229,7 +229,7 @@ class Settings(BaseSettings):
         email = value.strip().lower()
         if (
             not email
-            or email in {"admin@example.com", "change_me@example.com"}
+            or email in {"admin@example.com", "owner@example.com", "change_me@example.com"}
             or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
             is None
         ):

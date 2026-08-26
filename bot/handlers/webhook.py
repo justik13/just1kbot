@@ -175,8 +175,8 @@ async def healthcheck_handler(
                 await session.execute(text("SELECT 1"))
         except Exception as e:
             logger.warning("Healthcheck DB failed: %s", e)
-            _healthcheck_cache = (now, 503, "DB unavailable")
-            return web.Response(status=503, text="DB unavailable")
+            _healthcheck_cache = (now, 503, "Unhealthy")
+            return web.Response(status=503, text="Unhealthy")
 
         # Проверка Redis
         try:
@@ -184,8 +184,8 @@ async def healthcheck_handler(
             await r.ping()
         except Exception as e:
             logger.warning("Healthcheck Redis failed: %s", e)
-            _healthcheck_cache = (now, 503, "Redis unavailable")
-            return web.Response(status=503, text="Redis unavailable")
+            _healthcheck_cache = (now, 503, "Unhealthy")
+            return web.Response(status=503, text="Unhealthy")
 
         _healthcheck_cache = (now, 200, "OK")
         return web.Response(status=200, text="OK")

@@ -1,6 +1,7 @@
 import asyncio
 import html
 import logging
+from datetime import timedelta
 
 from aiogram import F, Router
 from aiogram.exceptions import (
@@ -189,29 +190,11 @@ async def process_broadcast_message(
         logger.warning(f"Failed to send test preview to admin: {e}")
 
     # Count recipients
-    from datetime import timedelta
-    count_stmt = select(func.count(User.id)).where(
-        User.is_deleted.is_(False),
-        User.is_bot_blocked.is_(False),
-        User.is_banned.is_(False),
+    count_stmt = _apply_audience_filters(
+        select(func.count(User.id)),
+        target_audience,
+        admin_tg_id=message.from_user.id,
     )
-    current_time = now_utc()
-    if target_audience == "active":
-        count_stmt = count_stmt.where(User.subscription_end > current_time)
-    elif target_audience == "expiring_3d":
-        count_stmt = count_stmt.where(
-            User.subscription_end > current_time,
-            User.subscription_end <= current_time + timedelta(days=3),
-        )
-    elif target_audience == "expired":
-        count_stmt = count_stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end <= current_time,
-        )
-    elif target_audience == "never":
-        count_stmt = count_stmt.where(User.subscription_end.is_(None))
-    elif target_audience == "test" or target_audience.startswith("test_"):
-        count_stmt = count_stmt.where(User.telegram_id == message.from_user.id)
 
     total_count = 1
     if session:
@@ -263,46 +246,71 @@ async def process_broadcast_message(
         )
 
 
-async def _send_with_html(bot, uid, text, media_id, content_type, kb):
+def _apply_audience_filters(stmt, audience: str, *, admin_tg_id: int | None = None):
+    """Single source of truth for broadcast audience predicates.
+
+    Used by preview-count, launch-count and batch-select so the three
+    previously hand-copied WHERE chains can never diverge.
+    """
+    stmt = stmt.where(
+        User.is_deleted.is_(False),
+        User.is_bot_blocked.is_(False),
+        User.is_banned.is_(False),
+    )
+    current_time = now_utc()
+    if audience == "active":
+        stmt = stmt.where(User.subscription_end > current_time)
+    elif audience == "expiring_3d":
+        stmt = stmt.where(
+            User.subscription_end > current_time,
+            User.subscription_end <= current_time + timedelta(days=3),
+        )
+    elif audience == "expired":
+        stmt = stmt.where(
+            User.subscription_end.is_not(None),
+            User.subscription_end <= current_time,
+        )
+    elif audience == "never":
+        stmt = stmt.where(User.subscription_end.is_(None))
+    elif audience == "test" or audience.startswith("test_"):
+        tg_id = admin_tg_id
+        if tg_id is None and audience.startswith("test_"):
+            try:
+                tg_id = int(audience.split("_", 1)[1])
+            except (IndexError, ValueError):
+                tg_id = None
+        if tg_id is not None:
+            stmt = stmt.where(User.telegram_id == tg_id)
+    return stmt
+
+
+async def _send_content(bot, uid, text, media_id, content_type, kb, parse_mode):
     if content_type == "photo" and media_id:
-        await bot.send_photo(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_photo(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "document" and media_id:
-        await bot.send_document(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_document(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "video" and media_id:
-        await bot.send_video(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_video(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "voice" and media_id:
-        await bot.send_voice(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_voice(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "audio" and media_id:
-        await bot.send_audio(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_audio(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "video_note" and media_id:
         await bot.send_video_note(uid, media_id, reply_markup=kb)
     elif content_type == "animation" and media_id:
-        await bot.send_animation(uid, media_id, caption=text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_animation(uid, media_id, caption=text, parse_mode=parse_mode, reply_markup=kb)
     elif content_type == "sticker" and media_id:
         await bot.send_sticker(uid, media_id, reply_markup=kb)
     else:
-        await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
+        await bot.send_message(uid, text, parse_mode=parse_mode, reply_markup=kb)
+
+
+async def _send_with_html(bot, uid, text, media_id, content_type, kb):
+    await _send_content(bot, uid, text, media_id, content_type, kb, "HTML")
 
 
 async def _send_plain(bot, uid, text, media_id, content_type, kb):
-    if content_type == "photo" and media_id:
-        await bot.send_photo(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "document" and media_id:
-        await bot.send_document(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "video" and media_id:
-        await bot.send_video(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "voice" and media_id:
-        await bot.send_voice(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "audio" and media_id:
-        await bot.send_audio(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "video_note" and media_id:
-        await bot.send_video_note(uid, media_id, reply_markup=kb)
-    elif content_type == "animation" and media_id:
-        await bot.send_animation(uid, media_id, caption=text, reply_markup=kb)
-    elif content_type == "sticker" and media_id:
-        await bot.send_sticker(uid, media_id, reply_markup=kb)
-    else:
-        await bot.send_message(uid, text, reply_markup=kb)
+    await _send_content(bot, uid, text, media_id, content_type, kb, None)
 
 
 async def _dispatch_message(bot, uid, text, media_id, content_type):
@@ -326,34 +334,8 @@ async def _get_next_batch(
     last_id: int,
     limit: int = 50,
 ):
-    stmt = select(User.id, User.telegram_id).where(
-        User.id > last_id,
-        User.is_deleted.is_(False),
-        User.is_bot_blocked.is_(False),
-        User.is_banned.is_(False),
-    )
-    current_time = now_utc()
-    if audience == "active":
-        stmt = stmt.where(User.subscription_end > current_time)
-    elif audience == "expiring_3d":
-        from datetime import timedelta
-        stmt = stmt.where(
-            User.subscription_end > current_time,
-            User.subscription_end <= current_time + timedelta(days=3),
-        )
-    elif audience == "expired":
-        stmt = stmt.where(
-            User.subscription_end.is_not(None),
-            User.subscription_end <= current_time,
-        )
-    elif audience == "never":
-        stmt = stmt.where(User.subscription_end.is_(None))
-    elif audience.startswith("test_"):
-        try:
-            admin_tg_id = int(audience.split("_", 1)[1])
-            stmt = stmt.where(User.telegram_id == admin_tg_id)
-        except (IndexError, ValueError):
-            pass
+    stmt = select(User.id, User.telegram_id).where(User.id > last_id)
+    stmt = _apply_audience_filters(stmt, audience)
     stmt = stmt.order_by(User.id).limit(limit)
     result = await session.execute(stmt)
     return [(row[0], row[1]) for row in result.all()]
@@ -386,7 +368,6 @@ async def _send_broadcast_to_users_with_resume(
     last_id = None
     final_progress = None
     should_finalize = False
-    blocked_user_ids = []
 
     if progress_id in _active_broadcast_progress_ids:
         logger.warning(
@@ -575,25 +556,6 @@ async def _send_broadcast_to_users_with_resume(
         _broadcast_in_progress.discard(admin_id)
         _cleanup_stop_event(admin_id)
 
-        if blocked_user_ids:
-            logger.info(
-                "Marking %d users as bot_blocked (bulk)",
-                len(blocked_user_ids),
-            )
-            try:
-                async with session_scope() as session:
-                    await session.execute(
-                        update(User)
-                        .where(User.telegram_id.in_(blocked_user_ids))
-                        .values(is_bot_blocked=True)
-                    )
-            except Exception as bulk_err:
-                logger.warning(
-                    "Failed to bulk mark users as bot_blocked: %s",
-                    bulk_err,
-                    exc_info=True,
-                )
-
         if final_progress and admin_id:
             try:
                 await bot.send_message(
@@ -764,37 +726,7 @@ async def _start_broadcast_process(
         media_id = data.get("media_id")
         content_type = data.get("content_type")
 
-        count_stmt = select(func.count(User.id)).where(
-            User.is_deleted.is_(False),
-            User.is_bot_blocked.is_(False),
-            User.is_banned.is_(False),
-        )
-        current_time = now_utc()
-        if audience == "active":
-            count_stmt = count_stmt.where(
-                User.subscription_end > current_time,
-            )
-        elif audience == "expiring_3d":
-            from datetime import timedelta
-            count_stmt = count_stmt.where(
-                User.subscription_end > current_time,
-                User.subscription_end <= current_time + timedelta(days=3),
-            )
-        elif audience == "expired":
-            count_stmt = count_stmt.where(
-                User.subscription_end.is_not(None),
-                User.subscription_end <= current_time,
-            )
-        elif audience == "never":
-            count_stmt = count_stmt.where(
-                User.subscription_end.is_(None),
-            )
-        elif audience.startswith("test_"):
-            try:
-                admin_tg_id = int(audience.split("_", 1)[1])
-                count_stmt = count_stmt.where(User.telegram_id == admin_tg_id)
-            except (IndexError, ValueError):
-                pass
+        count_stmt = _apply_audience_filters(select(func.count(User.id)), audience)
 
         result = await session.execute(count_stmt)
         total_count = result.scalar_one()

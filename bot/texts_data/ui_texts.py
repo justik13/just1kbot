@@ -216,13 +216,9 @@ TEXTS = {
     # bot/handlers/admin/users/ban_routes.py:181
     'UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L181_1': 'Некорректный запрос',
     # bot/handlers/admin/users/common.py:175
-    'UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L175_1': '⬅️',
     # bot/handlers/admin/users/common.py:181
-    'UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L181_1': '➡️',
     # bot/handlers/admin/users/common.py:186
-    'UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L186_1': '🔍 Поиск по ID',
     # bot/handlers/admin/users/common.py:191
-    'UI_BOT_HANDLERS_ADMIN_USERS_COMMON_L191_1': '← В админку',
     # bot/handlers/admin/users/device_routes.py:46
     'UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L46_1': 'Некорректный запрос',
     # bot/handlers/admin/users/device_routes.py:109
@@ -234,9 +230,7 @@ TEXTS = {
     # bot/handlers/admin/users/device_routes.py:190
     'UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L190_1': 'Некорректный запрос',
     # bot/handlers/admin/users/list_routes.py:97
-    'UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L97_1': 'Некорректный запрос',
     # bot/handlers/admin/users/list_routes.py:204
-    'UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L204_1': '❌ Пользователь с ID {value_0} не найден.',
     # bot/handlers/admin/users/list_routes.py:234
     'UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L234_1': 'Некорректный запрос',
     # bot/handlers/admin/users/subscription_change_routes.py:53
@@ -288,21 +282,17 @@ TEXTS = {
     # bot/handlers/admin/users/subscription_reduce_routes.py:190
     'UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_REDUCE_ROUTES_L190_1': 'Некорректное количество дней',
     # bot/handlers/connection/common.py:145
-    'UI_BOT_HANDLERS_CONNECTION_COMMON_L145_1': '🔒 {value_0}',
     # bot/handlers/connection/common.py:150
-    'UI_BOT_HANDLERS_CONNECTION_COMMON_L150_1': '⚙️ {value_0}',
     # bot/handlers/connection/common.py:181
     'UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1': '➕ Добавить устройство',
     # bot/handlers/connection/common.py:223
     'UI_BOT_HANDLERS_CONNECTION_COMMON_L223_1': '🚀 Купить доступ',
     # bot/handlers/connection/common.py:227
-    'UI_BOT_HANDLERS_CONNECTION_COMMON_L227_1': '🏠 В главное меню',
     # bot/handlers/connection/common.py:242
     'UI_BOT_HANDLERS_CONNECTION_COMMON_L242_1': '🚀 Купить доступ',
     # bot/handlers/connection/common.py:246
     'UI_BOT_HANDLERS_CONNECTION_COMMON_L246_1': '🏠 В главное меню',
     # bot/handlers/connection/common.py:266
-    'UI_BOT_HANDLERS_CONNECTION_COMMON_L266_1': '🏠 В главное меню',
     # bot/handlers/connection/device_create_routes.py:51
     'UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L51_1': '🚀 Купить доступ',
     # bot/handlers/connection/device_create_routes.py:52
@@ -316,9 +306,7 @@ TEXTS = {
     # bot/handlers/connection/device_create_routes.py:154
     'UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L154_1': '← Назад',
     # bot/handlers/connection/device_create_routes.py:207
-    'UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L207_1': 'Некорректный запрос',
     # bot/handlers/connection/device_create_routes.py:418
-    'UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L418_1': '⏳ Устройство создаётся.\nОбновите список через несколько секунд.',
     # bot/handlers/connection/device_delete_routes.py:42
     'UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L42_1': 'Некорректный запрос',
     # bot/handlers/connection/device_delete_routes.py:71
@@ -340,11 +328,9 @@ TEXTS = {
     # bot/handlers/connection/device_view_routes.py:176
     'UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L176_1': 'Некорректный запрос',
     # bot/handlers/payment/balance_routes.py:205
-    'UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L205_1': 'Сервис пополнения временно недоступен.',
     # bot/handlers/payment/balance_routes.py:246
     'UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L246_1': 'Аккаунт не найден',
     # bot/handlers/payment/balance_routes.py:304
-    'UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L304_1': '➕ <b>Пополнение баланса</b>\n\nТекущий баланс: <b>{value_0} ₽</b>\nВыберите сумму или укажите другую целую сумму в рублях.',
     # bot/handlers/payment/common.py:125
     'UI_BOT_HANDLERS_PAYMENT_COMMON_L125_1': '🔄 Продлить подписку',
     # bot/handlers/payment/common.py:128
@@ -397,17 +383,11 @@ TEXTS = {
     # bot/handlers/payment/tariff_change_routes.py:264
     'UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L264_1': 'Введите целую сумму от <b>{value_0} ₽</b> до 5000 ₽.',
     # bot/handlers/profile.py:103
-    'UI_BOT_HANDLERS_PROFILE_L103_1': '🚀 Купить доступ',
     # bot/handlers/profile.py:107
-    'UI_BOT_HANDLERS_PROFILE_L107_1': '💰 Баланс',
     # bot/handlers/profile.py:111
-    'UI_BOT_HANDLERS_PROFILE_L111_1': '🎁 Пригласить друга',
     # bot/handlers/profile.py:115
-    'UI_BOT_HANDLERS_PROFILE_L115_1': '🧾 История оплат',
     # bot/handlers/profile.py:119
-    'UI_BOT_HANDLERS_PROFILE_L119_1': '🏠 В главное меню',
     # bot/handlers/support.py:18
-    'UI_BOT_HANDLERS_SUPPORT_L18_1': '💬 Написать @{value_0}',
     # bot/handlers/support.py:23
     'UI_BOT_HANDLERS_SUPPORT_L23_1': '❓ Частые вопросы',
     # bot/handlers/support.py:28
@@ -417,9 +397,7 @@ TEXTS = {
     # bot/handlers/support.py:38
     'UI_BOT_HANDLERS_SUPPORT_L38_1': '← В главное меню',
     # bot/keyboards/admin/broadcast.py:9
-    'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L9_1': '✅ Отправить всем',
     # bot/keyboards/admin/broadcast.py:14
-    'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L14_1': '✅ Только активным',
     # bot/keyboards/admin/broadcast.py:19
     'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L19_1': '❌ Отмена',
     # bot/keyboards/admin/broadcast.py:32
@@ -427,31 +405,18 @@ TEXTS = {
     # bot/keyboards/admin/broadcast.py:45
     'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L45_1': '✅ Прочитано (убрать)',
     # bot/keyboards/admin/dashboard.py:11
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L11_1': '👥 Пользователи',
     # bot/keyboards/admin/dashboard.py:15
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L15_1': '📢 Рассылка',
     # bot/keyboards/admin/dashboard.py:19
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L19_1': '🌐 Серверы',
     # bot/keyboards/admin/dashboard.py:23
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L23_1': '💰 Тарифы',
     # bot/keyboards/admin/dashboard.py:27
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L27_1': '💳 Платежи',
     # bot/keyboards/admin/dashboard.py:31
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L31_1': '⚠️ Споры',
     # bot/keyboards/admin/dashboard.py:35
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L35_1': '🧰 Платёжные очереди',
     # bot/keyboards/admin/dashboard.py:39
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L39_1': '📜 Аудит-лог',
     # bot/keyboards/admin/dashboard.py:45
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L45_1': '🛠 Техработы: ВКЛ',
     # bot/keyboards/admin/dashboard.py:50
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L50_1': '🛠 Техработы: ВЫКЛ',
     # bot/keyboards/admin/dashboard.py:55
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L55_1': '← В главное меню',
     # bot/keyboards/admin/dashboard.py:66
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L66_1': '🔄 Обновить',
     # bot/keyboards/admin/dashboard.py:70
-    'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L70_1': '← В админку',
     # bot/keyboards/admin/dashboard.py:80
     'UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L80_1': '✅ Подтвердить',
     # bot/keyboards/admin/dashboard.py:84
@@ -591,9 +556,7 @@ TEXTS = {
     # bot/middlewares/action_lock.py:217
     'UI_BOT_MIDDLEWARES_ACTION_LOCK_L217_1': 'Сессия подтверждения истекла',
     # bot/middlewares/action_lock.py:237
-    'UI_BOT_MIDDLEWARES_ACTION_LOCK_L237_1': 'Некорректный запрос',
     # bot/middlewares/action_lock.py:276
-    'UI_BOT_MIDDLEWARES_ACTION_LOCK_L276_1': 'Некорректный запрос',
     # services/workers/account_balance.py:232
     'UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1': '✅ <b>{value_0}</b>\nСрок: <b>{value_1}</b>\nУстройства: <b>до {value_2}</b>',
     # services/workers/account_balance.py:295

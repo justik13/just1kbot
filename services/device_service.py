@@ -68,10 +68,6 @@ class DuplicateDeviceName(DeviceCreationError):
     pass
 
 
-async def close_redis() -> None:
-    return None
-
-
 def _is_same_day_msk(stored_date: date | None, today: date) -> bool:
     return stored_date == today if stored_date else False
 

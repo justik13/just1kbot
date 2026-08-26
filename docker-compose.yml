@@ -19,6 +19,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     shm_size: "256m"
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - backend_net
@@ -43,6 +45,8 @@ services:
     image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     container_name: just1kbot_redis
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - backend_net
@@ -139,6 +143,8 @@ services:
     image: just1kbot_caddy:latest
     container_name: just1kbot_caddy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - frontend_net

@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import uuid
 import signal
 import traceback
 
@@ -55,7 +56,7 @@ from utils.logging_security import (
 )
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
     format=(
         "%(asctime)s - %(levelname)s - "
         "[%(request_id)s] %(name)s: %(message)s"
@@ -246,11 +247,26 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     return bot, dp
 
 
+@web.middleware
+async def _http_correlation_middleware(request: web.Request, handler):
+    """Give every public HTTP request the same request_id as Telegram updates."""
+    from bot.middlewares.correlation import set_request_id
+
+    try:
+        set_request_id(uuid.uuid4().hex[:8])
+        return await handler(request)
+    finally:
+        # aiohttp serves each request in its own task; resetting is a
+        # belt-and-braces guard for reused contexts.
+        set_request_id("system")
+
+
 async def start_webhook_server(port: int):
     # YooKassa payloads are small. Reject unexpectedly large request bodies
     # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
     app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
+    app.middlewares.append(_http_correlation_middleware)
     setup_webhook_routes(app)
 
     runner = web.AppRunner(app)
@@ -407,8 +423,6 @@ async def main():
         except Exception as e:
             logger.error("Error stopping CleanChat worker: %s", e)
 
-        await asyncio.sleep(0.5)  # Allow background worker loops to completely exit before closing DB pool
-
         logger.info("Cleaning up resources...")
 
         if webhook_runner is not None:
@@ -438,14 +452,6 @@ async def main():
             await close_yookassa_client()
         except Exception as e:
             logger.error("Failed to close YooKassa client: %s", e)
-
-        try:
-            from services.device_service import (
-                close_redis as close_device_redis,
-            )
-            await close_device_redis()
-        except Exception as e:
-            logger.error("Failed to close device Redis: %s", e)
 
         try:
             await close_db()

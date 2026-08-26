@@ -46,8 +46,8 @@
 |---|---|---|
 | **Notifications** | `services/workers/notifications.py` | Оповещения об окончании подписки (3 дня, 1 день, истекла). Построчная блокировка `FOR UPDATE SKIP LOCKED` с мгновенным коммитом флагов до отправки в Telegram (zero-double-send). |
 | **Webhook Inbox** | `services/workers/webhook_inbox.py` | Обработка входящих платежных вебхуков из очереди с проверкой идемпотентности. |
-| **Backup** | `services/workers/backup.py` | Автоматический шифрованный дамп базы данных через `age` с ротацией и отправкой в S3/Telegram. |
-| **Supervisor** | `services/workers/supervisor.py` | Мониторинг жизненного цикла всех фоновых задач с автоперезапуском при сбоях. |
+| **Backup** | `scripts/docker/backup.sh` (cron + compose profile `tools`) | Шифрованный `age` дамп PostgreSQL по расписанию; опциональная выгрузка артефакта в удалённое HTTPS-хранилище. |
+| **Supervisor** | `services/workers/__init__.py` | Супервизия фоновых воркеров: экспоненциальный backoff, stability window, cooldown и fatal-shutdown для критичных задач. |
 
 ---
 

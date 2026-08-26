@@ -7,7 +7,6 @@ TEXTS = {
     # bot/handlers/admin/broadcast.py:628
     'RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1': 'Всего',
     # bot/handlers/admin/dashboard.py:111
-    'RUNTIME_BOT_HANDLERS_ADMIN_DASHBOARD_L111_1': ' · {value_0}',
     # bot/handlers/admin/disputes.py:35
     'RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L35_1': 'открыт',
     # bot/handlers/admin/disputes.py:36
@@ -49,7 +48,6 @@ TEXTS = {
     # bot/handlers/admin/disputes.py:109
     'RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L109_1': '⚠️ <b>Спор #{value_0}</b>\nСтатус: <b>{value_1}</b>\nCase ID: <code>{value_2}</code>\nYooKassa payment: <code>{value_3}</code>\nСумма: <b>{value_4} RUB</b>\nДата спора: <code>{value_5}</code>\nReservation: <code>{value_6}</code> ({value_7})\nChargeback entry: <code>{value_8}</code>\nЗаметка: {value_9}',
     # bot/handlers/admin/disputes.py:143
-    'RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L143_1': '🛠 Админка › ⚠️ <b>Платёжные споры</b>',
     # bot/handlers/admin/disputes.py:147
     'RUNTIME_BOT_HANDLERS_ADMIN_DISPUTES_L147_1': '#{value_0} · {value_1} · {value_2} ₽ · case={value_3}',
     # bot/handlers/admin/disputes.py:157
@@ -69,7 +67,6 @@ TEXTS = {
     # bot/handlers/admin/payment_queues.py:64
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L64_1': '{value_0}с',
     # bot/handlers/admin/payment_queues.py:89
-    'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L89_1': '🛠 Админка › 🧰 <b>Платёжные очереди</b>',
     # bot/handlers/admin/payment_queues.py:105
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L105_1': 'pending={value_0} · retry={value_1} · due={value_2} · overdue={value_3}',
     # bot/handlers/admin/payment_queues.py:106
@@ -89,7 +86,6 @@ TEXTS = {
     # bot/handlers/admin/payment_queues.py:155
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L155_1': '🧰 <b>{value_0}</b>',
     # bot/handlers/admin/payment_queues.py:157
-    'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L157_1': '—',
     # bot/handlers/admin/payment_queues.py:158
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L158_1': 'Тип: {value_0}',
     # bot/handlers/admin/payment_queues.py:159
@@ -97,7 +93,6 @@ TEXTS = {
     # bot/handlers/admin/payment_queues.py:160
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L160_1': 'Попытки: {value_0}/{value_1}',
     # bot/handlers/admin/payment_queues.py:161
-    'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L161_1': '—',
     # bot/handlers/admin/payment_queues.py:162
     'RUNTIME_BOT_HANDLERS_ADMIN_PAYMENT_QUEUES_L162_1': 'Создано: {value_0}',
     # bot/handlers/admin/payment_queues.py:163
@@ -173,9 +168,7 @@ TEXTS = {
     # bot/handlers/admin/servers/common.py:59
     'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L59_1': '{value_0} {value_1} {value_2} · {value_3}',
     # bot/handlers/admin/servers/common.py:105
-    'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L105_1': '🌍',
     # bot/handlers/admin/servers/common.py:106
-    'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L106_1': '🟢 Активен',
     # bot/handlers/admin/servers/delete_routes.py:92
     'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L92_1': '🌍',
     # bot/handlers/admin/servers/edit_routes.py:199
@@ -183,7 +176,6 @@ TEXTS = {
     # bot/handlers/admin/servers/edit_routes.py:476
     'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1': 'неизвестно',
     # bot/handlers/admin/servers/edit_routes.py:652
-    'RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L652_1': 'неизвестно',
     # bot/handlers/admin/tariffs.py:45
     'RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L45_1': '🛠 Админка › 💰 <b>Тарифы</b>\n(стр. {value_0}/{value_1}) · Всего: {value_2}\n',
     # bot/handlers/admin/tariffs.py:52
@@ -211,17 +203,11 @@ TEXTS = {
     # bot/handlers/admin/users/common.py:77
     'RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L77_1': '{value_0} ч. {value_1} мин.',
     # bot/handlers/admin/users/common.py:149
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L149_1': '🟢',
     # bot/handlers/admin/users/common.py:151
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L151_1': '🔴',
     # bot/handlers/admin/users/common.py:154
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L154_1': '🚫',
     # bot/handlers/admin/users/common.py:165
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L165_1': '{value_0}{value_1} {value_2} · {value_3} · {value_4} устр.',
     # bot/handlers/admin/users/device_routes.py:77
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L77_1': 'Устройство #{value_0}',
     # bot/handlers/admin/users/device_routes.py:79
-    'RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L79_1': '\n• {value_0}',
     # bot/handlers/admin/users/device_routes.py:135
     'RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L135_1': '🌍',
     # bot/handlers/admin/users/device_routes.py:136
@@ -284,7 +270,6 @@ TEXTS = {
     ),
     'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME': 'Сервер подключения',
     # bot/handlers/connection/device_create_routes.py:234
-    'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L234_1': '🌍',
     # bot/handlers/connection/device_view_routes.py:60
     'RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1': '🌍',
     # bot/handlers/connection/device_view_routes.py:61
@@ -300,7 +285,6 @@ TEXTS = {
     # bot/handlers/payment/balance_routes.py:87
     'RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L87_1': '• {value_0} · {value_1}: <b>{value_2}{value_3} ₽</b>',
     # bot/handlers/payment/balance_routes.py:104
-    'RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L104_1': 'Доступно: <b>{value_0} ₽</b>',
     # bot/handlers/payment/balance_routes.py:106
     'RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L106_1': 'Зарезервировано: <b>{value_0} ₽</b>',
     # bot/handlers/payment/balance_routes.py:108
@@ -422,25 +406,17 @@ TEXTS = {
     # bot/handlers/payment/tariff_change_routes.py:167
     'RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L167_1': 'Смена тарифа не выполнена. Деньги не списаны.',
     # bot/handlers/profile.py:63
-    'RUNTIME_BOT_HANDLERS_PROFILE_L63_1': '{value_0} ({value_1} устр.)',
     # bot/handlers/profile.py:65
-    'RUNTIME_BOT_HANDLERS_PROFILE_L65_1': '—',
     # bot/handlers/profile.py:75
-    'RUNTIME_BOT_HANDLERS_PROFILE_L75_1': '{value_0} ({value_1} устр.)',
     # bot/handlers/profile.py:80
-    'RUNTIME_BOT_HANDLERS_PROFILE_L80_1': 'Пользователь',
     # bot/handlers/profile.py:93
-    'RUNTIME_BOT_HANDLERS_PROFILE_L93_1': 'Пользователь',
     # bot/handlers/profile.py:208
     'RUNTIME_BOT_HANDLERS_PROFILE_L208_1': '⏳',
     # bot/handlers/profile.py:213
     'RUNTIME_BOT_HANDLERS_PROFILE_L213_1': '₽',
     # bot/handlers/profile.py:306
-    'RUNTIME_BOT_HANDLERS_PROFILE_L306_1': '• {value_0}\n',
     # bot/handlers/profile.py:310
-    'RUNTIME_BOT_HANDLERS_PROFILE_L310_1': '\n<i>... и ещё {value_0} рефералов</i>',
     # bot/handlers/start.py:140
-    'RUNTIME_BOT_HANDLERS_START_L140_1': 'Пользователь',
     # bot/handlers/start.py:206
     'RUNTIME_BOT_HANDLERS_START_L206_1': 'Пользователь',
     # bot/keyboards/admin/servers.py:34
@@ -462,17 +438,11 @@ TEXTS = {
     # bot/keyboards/common.py:65
     'RUNTIME_BOT_KEYBOARDS_COMMON_L65_1': '← Назад',
     # bot/keyboards/payment.py:34
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L34_1': '⏱ {value_0} дн. — {value_1}₽',
     # bot/keyboards/payment.py:36
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L36_1': ' 🔥',
     # bot/keyboards/payment.py:38
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L38_1': ' 🌟',
     # bot/keyboards/payment.py:62
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L62_1': '⏱ {value_0} дн. — {value_1}₽',
     # bot/keyboards/payment.py:64
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L64_1': ' 🔥',
     # bot/keyboards/payment.py:66
-    'RUNTIME_BOT_KEYBOARDS_PAYMENT_L66_1': ' 🌟',
     # bot/keyboards/payment.py:94
     'RUNTIME_BOT_KEYBOARDS_PAYMENT_L94_1': ' 🔽',
     # bot/keyboards/payment.py:96
@@ -505,7 +475,6 @@ TEXTS = {
     # services/workers/cleanup.py:255
     'RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1': 'Ошибка получения списка пиров на %s: %s',
     # services/workers/heartbeat.py:99
-    'RUNTIME_SERVICES_WORKERS_HEARTBEAT_L99_1': '⚠️ <b>Сервер Amnezia недоступен!</b>\n🌍 <b>{value_0}</b>\n🔗 <code>{value_1}</code>\n❌ CircuitBreaker перешёл в OPEN\n🔄 Попытки восстановления каждые {value_2:.0f}с\n💡 Проверьте сервер вручную',
     # services/workers/notifications.py:43
     'RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L43_1': 'в ближайшее время',
     # services/workers/notifications.py:49
@@ -549,7 +518,6 @@ TEXTS.update({
     "QUEUE_RETRY_AVAILABLE": "доступен",
     "QUEUE_RETRY_UNAVAILABLE": "недоступен",
     "DISPUTE_RESERVATION_MISSING": "нет",
-    "SERVER_DISABLED_LABEL": "🔴 Отключен",
     "SEPARATOR_LINE": "─",
 })
 

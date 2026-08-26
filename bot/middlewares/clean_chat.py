@@ -7,6 +7,7 @@ from aiogram.types import Message
 logger = logging.getLogger(__name__)
 
 _delete_queue: asyncio.Queue | None = None
+_direct_delete_tasks: set[asyncio.Task] = set()
 _delete_worker_task: asyncio.Task | None = None
 _DELETE_RATE = 10
 _DELETE_BATCH_SIZE = 5
@@ -113,9 +114,11 @@ class CleanChatMiddleware(BaseMiddleware):
                     f"CleanChat queue full, deleting message "
                     f"{event.message_id} in {event.chat.id} without queue"
                 )
-                asyncio.create_task(
+                task = asyncio.create_task(
                     _delete_message(event.bot, event.chat.id, event.message_id)
                 )
+                _direct_delete_tasks.add(task)
+                task.add_done_callback(_direct_delete_tasks.discard)
             except Exception as e:
                 logger.debug(f"Failed to enqueue message deletion: {e}")
 

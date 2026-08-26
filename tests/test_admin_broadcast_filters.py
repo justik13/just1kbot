@@ -336,7 +336,10 @@ class TestAdminBroadcastFilters(unittest.TestCase):
 
                 # Launch Worker 1 and Worker 2 concurrently
                 task1 = asyncio.create_task(_send_broadcast_to_users_with_resume(mock_bot, progress_id, admin_id))
-                await asyncio.sleep(0.01) # ensure task1 starts first
+                for _ in range(200):
+                    if progress_id in _active_broadcast_progress_ids:
+                        break
+                    await asyncio.sleep(0)
                 task2 = asyncio.create_task(_send_broadcast_to_users_with_resume(mock_bot, progress_id, admin_id))
 
                 await asyncio.gather(task1, task2)

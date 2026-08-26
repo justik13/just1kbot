@@ -450,8 +450,13 @@ async def _allocate_fifo(
     ).all()
     remaining = amount
     created: list[AccountLedgerAllocation] = []
+    # Single batched capacity lookup for every candidate credit instead of
+    # one query per lot (N+1). Capacities are computed from pre-existing
+    # allocations; allocations created below belong to this debit only and
+    # never affect an earlier lot's capacity, so precomputation is exact.
+    capacities = await _batch_credit_capacities(session, list(credits))
     for credit in credits:
-        capacity = await _credit_capacity(session, credit)
+        capacity = max(ZERO, capacities.get(credit.id, ZERO))
         chunk = min(capacity, remaining)
         if chunk <= 0:
             continue

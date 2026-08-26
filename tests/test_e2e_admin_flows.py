@@ -181,7 +181,8 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # Admin clicks on user card
         import asyncio
-        await asyncio.sleep(0.35)
+        for _ in range(20):
+            await asyncio.sleep(0)
         update = self._create_callback_update("admin_user_card:987654321")
         await self.dp.feed_update(bot=self.bot, update=update)
 
@@ -204,7 +205,8 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Отправка сообщения пользователю", req.text)
 
-        await asyncio.sleep(0.35)
+        for _ in range(20):
+            await asyncio.sleep(0)
         update = self._create_message_update("Hello from Admin!")
         await self.dp.feed_update(bot=self.bot, update=update)
 

@@ -24,7 +24,6 @@ OVERRIDES['ADMIN_DELETE_DEVICE_SUCCESS'] = '✅ Устройство успеш�
 OVERRIDES['ADMIN_MANUAL_GRANT_USER_BANNED'] = '❌ Невозможно выдать подписку: пользователь забанен.'
 OVERRIDES['ADMIN_MANUAL_GRANT_USER_DELETED'] = '❌ Невозможно выдать подписку: пользователь удален.'
 OVERRIDES['ADMIN_SERVER_ADDED'] = '✅ Сервер успешно добавлен.'
-OVERRIDES['ADMIN_SERVER_CARD'] = '{flag} <b>Сервер:</b> {name} (ID: {id})\nСтатус: {status}\nПротокол: {protocol}\nURL: {api_url}\nМакс. клиентов: {max_clients}'
 OVERRIDES['ADMIN_SERVER_CHECKING'] = '🔄 Проверка сервера...'
 OVERRIDES['ADMIN_SERVER_DELETE_CONFIRM'] = 'Вы уверены, что хотите удалить этот сервер?'
 OVERRIDES['ADMIN_SERVER_EDIT_KEY_PROMPT'] = 'Введите новый ключ для сервера:'
@@ -81,12 +80,9 @@ OVERRIDES['ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING'] = '❌ Нельзя отклю�
 OVERRIDES['ADMIN_TARIFF_TOGGLE_SUCCESS_DISABLED'] = '✅ Тариф отключен.'
 OVERRIDES['ADMIN_TARIFF_TOGGLE_SUCCESS_ENABLED'] = '✅ Тариф включен.'
 OVERRIDES['ADMIN_UNBAN_CONFIRM'] = 'Вы уверены, что хотите разбанить пользователя?'
-OVERRIDES['ADMIN_USER_DEVICES_EMPTY'] = 'Нет подключенных устройств.'
-OVERRIDES['ADMIN_USER_DEVICES_HEADER'] = '📱 Устройства пользователя'
 OVERRIDES['ALERT_CRITICAL_BOT_ERROR'] = '❌ Произошла критическая ошибка бота.'
 OVERRIDES['ERROR_SERVER_DUPLICATE_URL'] = '❌ Сервер с таким URL уже существует.'
 OVERRIDES['PAYMENT_STATUS_NAMES'] = {'completed': 'Выполнен', 'cancelled': 'Отменен', 'failed': 'Ошибка', 'refunded': 'Возврат', 'requires_manual_review': 'Ручная проверка', 'pending': 'Ожидание', 'paid_processing': 'Обработка'}
-OVERRIDES['ADMIN_PAYMENT_USER_WITH_USERNAME'] = '@{username}'
 OVERRIDES['ADMIN_PAYMENT_USER_WITH_ID'] = 'ID: {user_id}'
 OVERRIDES['PAYMENT_SUBSCRIPTION_INACTIVE'] = (
     "⚠️ Смена тарифа с перерасчётом остатка возможна только при действующей подписке.\n\n"
@@ -138,11 +134,6 @@ OVERRIDES["DEVICE_SHOW_KEY"] = """🔑 <b>Ключ подключения для
 
 <i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 
-OVERRIDES["DEVICE_ADDED_SUCCESS"] = """✅ <b>Устройство добавлено!</b>
-
-📱 {device_name} ({flag} {server_name})
-
-💡 Скопируйте ключ в карточке устройства или используйте «🔄 Другой способ подключения»."""
 
 OVERRIDES["DEVICE_CONFIG_VPN_CAPTION"] = """📁 <b>Файл для AmneziaVPN</b>
 
@@ -156,14 +147,6 @@ OVERRIDES["DEVICE_CONFIG_CONF_CAPTION"] = """📁 <b>Файл для AmneziaWG</
 
 <i>Файл конфигурации (.conf) — дополнительный способ подключения, если ключ не подходит.</i>"""
 
-OVERRIDES["DEVICE_CONFIG_INSTRUCTION"] = """✅ <b>Файлы конфигурации отправлены!</b>
-
-📥 <b>Резервный способ подключения:</b>
-
-1️⃣ <b>.vpn</b> — импортируйте в приложение <b>AmneziaVPN</b>.
-2️⃣ <b>.conf</b> — импортируйте в приложение <b>AmneziaWG</b> или <b>DefaultVPN</b>.
-
-<i>Нажмите на прикреплённый файл выше, чтобы открыть его в приложении.</i>"""
 
 OVERRIDES["DOWNLOAD_CONF_FALLBACK"] = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 
