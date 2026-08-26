@@ -193,11 +193,11 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
             style="success",
         )
     builder.button(
-        text="🧾 История пополнений",
+        text=texts.BTN_ISTORIYA_POPOLNENIJ,
         callback_data="user_history",
     )
     builder.button(
-        text="📊 История операций",
+        text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
     builder.button(text=texts.BUTTON_BACK, callback_data="back_to_main_menu")
@@ -214,14 +214,14 @@ def get_balance_history_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text="◀️ Назад", callback_data=f"balance_history:{page - 1}")
+            builder.button(text=texts.BTN_NAZAD, callback_data=f"balance_history:{page - 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
         builder.button(text=f"📄 {page}/{total_pages}", callback_data="ignore")
 
         if page < total_pages:
-            builder.button(text="Вперед ▶️", callback_data=f"balance_history:{page + 1}")
+            builder.button(text=texts.BTN_VPERED, callback_data=f"balance_history:{page + 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
@@ -254,7 +254,7 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
 def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="❌ Закрыть незавершённые ссылки",
+        text=texts.BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI,
         callback_data="balance_cancel_all",
         style="danger",
     )
@@ -421,6 +421,6 @@ def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
     builder.button(text=texts.UI_BOT_KEYBOARDS_PAYMENT_L307_1, callback_data="menu_balance")
-    builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+    builder.button(text=texts.BTN_PROCHITANO, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()

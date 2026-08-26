@@ -313,7 +313,7 @@ def _get_device_config_keyboard(profile_id: int):
     #   so the user stays in the device flow with a contextual back button to manage_device.
     # - Back button returns directly to the device card.
     builder = InlineKeyboardBuilder()
-    builder.button(text="📖 Инструкция и помощь", callback_data=f"device_help:{profile_id}")
+    builder.button(text=texts.BTN_INSTRUKTSIYA_I_POMOSCH, callback_data=f"device_help:{profile_id}")
     builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
     return builder.as_markup()
@@ -354,11 +354,11 @@ async def device_help(
 
     builder = InlineKeyboardBuilder()
     suffix = f":device_{profile_id}"
-    builder.button(text="📥 Скачать клиент Amnezia", callback_data=f"help_download{suffix}")
-    builder.button(text="🍏 Инструкция iOS (для РФ)", callback_data=f"help_ios{suffix}")
-    builder.button(text="💻 Инструкции Windows", callback_data=f"help_windows{suffix}")
-    builder.button(text="🔀 Раздельное Туннелирование", callback_data=f"help_split{suffix}")
-    builder.button(text="📚 Документация Amnezia", url=_AMNEZIA_DOCS)
+    builder.button(text=texts.BTN_SKACHAT_KLIENT_AMNEZIA, callback_data=f"help_download{suffix}")
+    builder.button(text=texts.BTN_INSTRUKTSIYA_IOS_DLYA_RF, callback_data=f"help_ios{suffix}")
+    builder.button(text=texts.BTN_INSTRUKTSII_WINDOWS, callback_data=f"help_windows{suffix}")
+    builder.button(text=texts.BTN_RAZDELNOE_TUNNELIROVANIE, callback_data=f"help_split{suffix}")
+    builder.button(text=texts.BTN_DOKUMENTATSIYA_AMNEZIA, url=_AMNEZIA_DOCS)
     builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
 

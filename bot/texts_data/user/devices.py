@@ -99,4 +99,10 @@ TEXTS = {
     'UI_BOT_KEYBOARDS_DEVICE_L48_1': '❌ Отмена',
     'UI_BOT_KEYBOARDS_DEVICE_L9_1': '✏️ Изменить имя',
     'UI_BOT_KEYBOARDS_DEVICE_OPEN_IN_AMNEZIA': '🚀 Открыть в Amnezia',
+    'BTN_INSTRUKTSIYA_I_POMOSCH': '📖 Инструкция и помощь',
+    'BTN_SKACHAT_KLIENT_AMNEZIA': '📥 Скачать клиент Amnezia',
+    'BTN_INSTRUKTSIYA_IOS_DLYA_RF': '🍏 Инструкция iOS (для РФ)',
+    'BTN_INSTRUKTSII_WINDOWS': '💻 Инструкции Windows',
+    'BTN_RAZDELNOE_TUNNELIROVANIE': '🔀 Раздельное Туннелирование',
+    'BTN_DOKUMENTATSIYA_AMNEZIA': '📚 Документация Amnezia',
 }

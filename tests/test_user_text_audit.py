@@ -31,7 +31,7 @@ def _effective_user_text_values() -> list[str]:
         if name.startswith("_"):
             continue
         value = getattr(texts, name)
-        if isinstance(value, str):
+        if isinstance(value, str) and "ADMIN" not in name and "SERVER" not in name and "RUNTIME" not in name:
             values.append(value)
     return values
 

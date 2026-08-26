@@ -303,4 +303,10 @@ TEXTS = {
     'UI_BOT_KEYBOARDS_PAYMENT_L307_1': '💰 К балансу',
     'UI_BOT_KEYBOARDS_PAYMENT_L52_1': '← К выбору тарифа',
     'WORD_PURCHASE': 'Покупка',
+    'BTN_ISTORIYA_POPOLNENIJ': '🧾 История пополнений',
+    'BTN_ISTORIYA_OPERATSIJ': '📊 История операций',
+    'BTN_NAZAD': '◀️ Назад',
+    'BTN_VPERED': 'Вперед ▶️',
+    'BTN_ZAKRYT_NEZAVERSHYONNYE_SSYLKI': '❌ Закрыть незавершённые ссылки',
+    'BTN_PROCHITANO': '✅ Прочитано',
 }
