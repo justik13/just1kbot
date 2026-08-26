@@ -2,7 +2,7 @@
 
 import os
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request

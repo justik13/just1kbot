@@ -14,7 +14,7 @@ from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
-from integrations.incy import IncyIntegration, SubscriptionTokenService
+from integrations.incy import SubscriptionTokenService
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc

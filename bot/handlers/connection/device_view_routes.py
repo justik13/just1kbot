@@ -30,7 +30,6 @@ from database.repositories.profiles_repo import (
 )
 from database.repositories.servers_repo import get_server_by_id
 from integrations.amnezia_bridge import (
-    AmneziaBridgeIntegration,
     AmneziaBridgeTokenService,
 )
 from services.subscription import SubscriptionService
