@@ -5,7 +5,8 @@ def split_text_by_lines(
     limit: int = 4096,
 ) -> list[str]:
     """
-    Разбивает длинный текст на части по строкам.
+    Разбивает длинный текст на части по строкам с сохранением целостности <blockquote>.
+    Гарантирует, что каждая часть строго <= limit символов.
     """
     if text is None:
         return []
@@ -18,28 +19,35 @@ def split_text_by_lines(
     in_blockquote = False
 
     for line in text.split("\n"):
-        current_line = line
-        if "<blockquote" in current_line:
-            in_blockquote = True
+        candidate = f"{current}\n{line}" if current else line
 
-        candidate = f"{current}\n{current_line}" if current else current_line
+        # Check if candidate would leave an unclosed blockquote
+        will_be_in_bq = (in_blockquote or "<blockquote" in line) and ("</blockquote>" not in line)
+        reserve = 13 if (will_be_in_bq and limit > 25) else 0
 
-        if len(candidate) > limit:
+        if len(candidate) + reserve > limit:
             if current:
-                if in_blockquote and "</blockquote>" not in current:
+                if in_blockquote and not current.endswith("</blockquote>"):
                     current += "</blockquote>"
-                    parts.append(current)
-                    current_line = "<blockquote>" + current_line
+                parts.append(current)
+
+                if in_blockquote and not line.startswith("<blockquote"):
+                    current_line = "<blockquote>" + line
                 else:
-                    parts.append(current)
+                    current_line = line
+            else:
+                current_line = line
+
+            if "<blockquote" in current_line:
+                in_blockquote = True
 
             if len(current_line) > limit:
                 remaining_line = current_line
                 while len(remaining_line) > limit:
-                    if in_blockquote:
-                        chunk = remaining_line[:limit-13] + "</blockquote>"
+                    if in_blockquote and limit > 25:
+                        chunk = remaining_line[:limit - 13] + "</blockquote>"
                         parts.append(chunk)
-                        remaining_line = "<blockquote>" + remaining_line[limit-13:]
+                        remaining_line = "<blockquote>" + remaining_line[limit - 13:]
                     else:
                         parts.append(remaining_line[:limit])
                         remaining_line = remaining_line[limit:]
@@ -49,12 +57,14 @@ def split_text_by_lines(
                 current = current_line
         else:
             current = candidate
+            if "<blockquote" in line:
+                in_blockquote = True
 
-        if "</blockquote>" in current_line:
+        if "</blockquote>" in line:
             in_blockquote = False
 
     if current:
-        if in_blockquote and "</blockquote>" not in current:
+        if in_blockquote and not current.endswith("</blockquote>"):
             current += "</blockquote>"
         parts.append(current)
 

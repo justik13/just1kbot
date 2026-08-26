@@ -215,6 +215,45 @@ class TestUtilsTextLimits(unittest.TestCase):
         text = "Line 1\nLine 2\nLine 3\nLine 4"
         chunks = split_text_by_lines(text, limit=15)
         self.assertTrue(len(chunks) > 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 15)
+
+    def test_split_text_by_lines_with_blockquote_transition(self):
+        text = "Hello world\n<blockquote expandable>Secret key</blockquote>"
+        chunks = split_text_by_lines(text, limit=50)
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0], "Hello world")
+        self.assertEqual(chunks[1], "<blockquote expandable>Secret key</blockquote>")
+        self.assertNotIn("</blockquote>", chunks[0])
+
+    def test_split_text_by_lines_long_single_line_blockquote(self):
+        text = "<blockquote expandable>Secret key is 1234567890abcdefghijklmnopqrstuvwxyz</blockquote>"
+        chunks = split_text_by_lines(text, limit=40)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 40)
+            self.assertTrue(chunk.startswith("<blockquote"))
+            self.assertTrue(chunk.endswith("</blockquote>"))
+
+    def test_split_text_by_lines_multiline_blockquote(self):
+        text = "Header\n<blockquote expandable>\nKey line 1\nKey line 2\nKey line 3\n</blockquote>\nFooter"
+        chunks = split_text_by_lines(text, limit=50)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 50)
+            if "<blockquote" in chunk:
+                self.assertIn("</blockquote>", chunk)
+
+    def test_split_text_by_lines_small_limit_no_infinite_loop(self):
+        text = "A" * 50
+        chunks = split_text_by_lines(text, limit=10)
+        self.assertEqual(len(chunks), 5)
+        for chunk in chunks:
+            self.assertEqual(len(chunk), 10)
+
+    def test_split_text_by_lines_none_or_empty(self):
+        self.assertEqual(split_text_by_lines(None), [])
+        self.assertEqual(split_text_by_lines("Short"), ["Short"])
 
     def test_truncate_text(self):
         res = truncate_details("Hello World", limit=5)

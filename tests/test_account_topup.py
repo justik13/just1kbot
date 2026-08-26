@@ -660,6 +660,90 @@ class AccountTopupProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Баланс: <b>500 ₽</b>", message_text)
             self.assertIn("Бонусный баланс: <b>50 ₽</b>", message_text)
 
+    async def test_worker_referrer_push_exhausts_retries_and_marks_dead_letter(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from services.workers.account_balance import process_balance_notifications
+        from utils.datetime_helpers import now_utc
+
+        p = topup()
+        p.id = 7777
+        p.user_id = 99
+        p.credit_notified_at = now_utc()
+        p.topup_context = {
+            "referrer_telegram_id": 88888,
+            "referrer_bonus": 35,
+            "referrer_notified_at": None,
+            "referrer_notify_attempts": 5,  # Already failed 5 times
+        }
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(all=MagicMock(return_value=[(7777, 777)]))
+        mock_session.scalar.return_value = p
+
+        class DummyContext:
+            async def __aenter__(self):
+                return mock_session
+            async def __aexit__(self, *args):
+                pass
+
+        bot = MagicMock()
+        with (
+            patch("services.workers.account_balance.session_scope", return_value=DummyContext()),
+            patch("services.workers.account_balance.render_hub", new=AsyncMock()) as mock_hub,
+        ):
+            await process_balance_notifications(bot)
+            self.assertIsNotNone(p.topup_context.get("referrer_notified_at"))
+            self.assertTrue(p.topup_context.get("referrer_notify_failed"))
+            self.assertEqual(p.topup_context.get("referrer_notify_attempts"), 6)
+            self.assertEqual(mock_hub.await_count, 0)
+
+    async def test_check_topup_auto_fulfilled_sets_ui_confetti_shown(self):
+        from bot.handlers.payment.balance_routes import check_topup
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        p = topup()
+        p.id = 8888
+        p.user_id = 42
+        p.fulfillment_status = "succeeded"
+        p.credit_notified_at = None
+        p.topup_context = {
+            "auto_fulfill_status": "succeeded",
+            "quote_public_id": "00000000-0000-0000-0000-000000000000",
+        }
+
+        db_user = MagicMock()
+        db_user.id = 42
+
+        callback = MagicMock()
+        callback.data = "balance_check:8888"
+        callback.from_user.id = 12345
+        callback.message.chat.id = 12345
+        callback.message.message_id = 100
+        callback.answer = AsyncMock()
+        callback.bot = MagicMock()
+
+        session = AsyncMock()
+
+        with (
+            patch("bot.handlers.payment.balance_routes._owned_topup", new=AsyncMock(return_value=p)),
+            patch("bot.handlers.payment.balance_routes.request_topup_status_refresh", new=AsyncMock(return_value=p)),
+            patch("bot.handlers.payment.balance_routes._render_balance", new=AsyncMock()) as mock_render,
+        ):
+            # First check -> renders confetti and sets ui_confetti_shown
+            await check_topup(callback, session, db_user)
+            self.assertTrue(p.topup_context.get("ui_confetti_shown"))
+            self.assertIsNone(p.credit_notified_at)  # Must NOT mutate credit_notified_at!
+            self.assertEqual(mock_render.call_count, 1)
+            self.assertTrue(mock_render.call_args[1].get("force_new"))
+
+            # Second check -> renders quiet balance without confetti
+            mock_render.reset_mock()
+            await check_topup(callback, session, db_user)
+            self.assertEqual(mock_render.call_count, 1)
+            self.assertIsNone(mock_render.call_args[1].get("message_effect_id"))
+            self.assertIsNone(mock_render.call_args[1].get("force_new"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

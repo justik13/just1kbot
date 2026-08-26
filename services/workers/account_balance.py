@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import uuid
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
@@ -196,7 +197,7 @@ async def process_balance_notifications(bot: Bot) -> int:
                     Payment.credited_at.is_not(None),
                     or_(
                         Payment.credit_notified_at.is_(None),
-                        text("topup_context->>'referrer_notified_at' IS NULL AND topup_context->>'referrer_telegram_id' IS NOT NULL")
+                        text("payments.topup_context->>'referrer_notified_at' IS NULL AND payments.topup_context->>'referrer_telegram_id' IS NOT NULL")
                     ),
                 )
                 .order_by(Payment.credited_at, Payment.id)
@@ -240,25 +241,50 @@ async def process_balance_notifications(bot: Bot) -> int:
                 ref_bonus = 0
 
             if ref_id and ref_bonus > 0 and ctx.get("referrer_notified_at") is None:
-                try:
-                    await global_send_limiter.acquire()
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
-                    b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
-                    await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
+                attempts = int(ctx.get("referrer_notify_attempts") or 0) + 1
+                if attempts > 5:
+                    logger.error(
+                        "Referrer push exhausted max attempts (5) for payment %s, ref_id %s",
+                        payment.id,
+                        ref_id,
+                    )
                     payment.topup_context = {
                         **ctx,
                         "referrer_notified_at": now_utc().isoformat(),
+                        "referrer_notify_failed": True,
+                        "referrer_notify_attempts": attempts,
                     }
-                except TelegramForbiddenError:
-                    payment.topup_context = {
-                        **ctx,
-                        "referrer_notified_at": now_utc().isoformat(),
-                        "referrer_bot_blocked": True,
-                    }
-                except Exception as exc:
-                    logger.warning("Failed to deliver durable referrer push to %s: %s", ref_id, exc)
+                else:
+                    try:
+                        await global_send_limiter.acquire()
+                        from aiogram.utils.keyboard import InlineKeyboardBuilder
+                        b_builder = InlineKeyboardBuilder()
+                        b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                        ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
+                        await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
+                        payment.topup_context = {
+                            **ctx,
+                            "referrer_notified_at": now_utc().isoformat(),
+                            "referrer_notify_attempts": attempts,
+                        }
+                    except TelegramForbiddenError:
+                        payment.topup_context = {
+                            **ctx,
+                            "referrer_notified_at": now_utc().isoformat(),
+                            "referrer_bot_blocked": True,
+                            "referrer_notify_attempts": attempts,
+                        }
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to deliver durable referrer push to %s (attempt %s/5): %s",
+                            ref_id,
+                            attempts,
+                            exc,
+                        )
+                        payment.topup_context = {
+                            **ctx,
+                            "referrer_notify_attempts": attempts,
+                        }
 
             if payment.credit_notified_at is not None:
                 continue
@@ -266,9 +292,6 @@ async def process_balance_notifications(bot: Bot) -> int:
             if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
                 quote_raw = (payment.topup_context or {}).get("quote_public_id")
                 if quote_raw:
-                    import uuid
-
-                    from database.models import TariffQuote
                     try:
                         quote_uuid = uuid.UUID(str(quote_raw))
                         quote = await session.scalar(
