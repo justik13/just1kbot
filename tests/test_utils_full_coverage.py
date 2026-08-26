@@ -285,10 +285,20 @@ class TestUtilsTextLimits(unittest.TestCase):
             self.assertTrue(c.startswith("<blockquote expandable>"))
             self.assertTrue(c.endswith("</blockquote>"))
 
+    def test_split_text_by_lines_small_limits_strip_tags_cleanly(self):
+        text = "<blockquote expandable>Hello world this is a test of blockquote splitting with small limits</blockquote>"
+        for lim in [5, 10, 15, 20, 30, 35, 36, 37]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertGreater(len(chunks), 1)
+            for c in chunks:
+                self.assertLessEqual(len(c), lim, f"Limit {lim} exceeded: len={len(c)}: {c}")
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+
     def test_split_text_by_lines_fuzzed_invariant(self):
         import random
-        for limit in [40, 50, 75, 100, 200, 500, 4096]:
-            for _ in range(20):
+        for limit in [5, 10, 20, 35, 37, 40, 50, 75, 100, 200, 500, 4096]:
+            for _ in range(15):
                 lines_count = random.randint(1, 10)
                 test_lines = []
                 in_bq = False

@@ -17,6 +17,13 @@ def split_text_by_lines(
     if len(text) <= limit:
         return [text]
 
+    # If limit cannot fit <blockquote expandable>x</blockquote> (needs at least 38 chars),
+    # strip blockquote tags to plain text so we never emit broken unclosed HTML tag fragments.
+    if limit < 38 and "<blockquote" in text:
+        text = re.sub(r"</?blockquote(?:\s+[^>]*)?>", "", text)
+        if len(text) <= limit:
+            return [text]
+
     parts: list[str] = []
     current = ""
     in_blockquote = False

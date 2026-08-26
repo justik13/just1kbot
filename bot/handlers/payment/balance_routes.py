@@ -562,6 +562,16 @@ async def check_topup(
                 notice=texts.TOPUP_CREDITED_NOTICE,
             )
         else:
+            # Mark notified state immediately before network render to prevent concurrent duplicates
+            if not is_auto_fulfilled and not payment.credit_notified_at:
+                payment.credit_notified_at = now_utc()
+            if is_auto_fulfilled and not ui_notified:
+                payment.topup_context = {
+                    **ctx,
+                    "ui_confetti_shown": True,
+                }
+            await session.flush()
+
             await _render_balance(
                 callback.bot,
                 callback.message.chat.id,
@@ -571,13 +581,6 @@ async def check_topup(
                 message_effect_id=EFFECT_CONFETTI,
                 force_new=True,
             )
-            if not is_auto_fulfilled and not payment.credit_notified_at:
-                payment.credit_notified_at = now_utc()
-            if is_auto_fulfilled and not ui_notified:
-                payment.topup_context = {
-                    **ctx,
-                    "ui_confetti_shown": True,
-                }
     elif payment.provider_status == "succeeded":
         await render_hub(
             callback.bot,
