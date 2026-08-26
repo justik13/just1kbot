@@ -62,13 +62,19 @@ def _resolve_log_level() -> str:
     Kept exception-safe: bot.main is imported by tooling/tests whose
     environment may lack required Settings fields.
     """
+    allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
     raw = os.getenv("LOG_LEVEL")
     if raw:
-        return raw.strip().upper()
+        normalized = raw.strip().upper()
+        if normalized in allowed:
+            return normalized
     try:
-        return get_settings().LOG_LEVEL
+        level = get_settings().LOG_LEVEL.strip().upper()
+        if level in allowed:
+            return level
     except Exception:
-        return "INFO"
+        pass
+    return "INFO"
 
 
 logging.basicConfig(
