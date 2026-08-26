@@ -149,3 +149,46 @@ class IntegrationsLifecycleTests(unittest.IsolatedAsyncioTestCase):
     def test_get_all_bot_routers(self):
         routers = get_all_bot_routers()
         self.assertIsInstance(routers, list)
+
+    def test_register_all_web_routes_fails_fast_on_error(self):
+        app = web.Application()
+        with patch.object(IncyIntegration, "is_enabled", return_value=True), \
+             patch.object(IncyIntegration, "register_web_routes", side_effect=RuntimeError("Web route bind error")):
+            with self.assertRaises(RuntimeError) as ctx:
+                register_all_web_routes(app)
+            self.assertIn("Failed to register web routes for critical integration 'incy'", str(ctx.exception))
+
+    def test_get_all_bot_routers_fails_fast_on_error(self):
+        with patch.object(IncyIntegration, "is_enabled", return_value=True), \
+             patch.object(IncyIntegration, "get_bot_router", side_effect=ValueError("Router build error")):
+            with self.assertRaises(RuntimeError) as ctx:
+                get_all_bot_routers()
+            self.assertIn("Failed to get bot router for critical integration 'incy'", str(ctx.exception))
+
+    def test_get_all_bot_routers_enabled_vs_disabled(self):
+        with patch.dict(os.environ, {"INCY_SUBSCRIPTION_ENABLED": "true", "DOMAIN": "test.domain.com"}):
+            get_settings.cache_clear()
+            routers = get_all_bot_routers()
+            self.assertEqual(len(routers), 1)
+
+        with patch.dict(os.environ, {"INCY_SUBSCRIPTION_ENABLED": "false"}):
+            get_settings.cache_clear()
+            routers = get_all_bot_routers()
+            self.assertEqual(len(routers), 0)
+
+    async def test_setup_bot_dynamic_integration_inclusion(self):
+        from unittest.mock import AsyncMock
+        from bot.main import setup_bot
+        from integrations.incy import incy_router
+
+        with patch.dict(os.environ, {"INCY_SUBSCRIPTION_ENABLED": "true", "DOMAIN": "test.domain.com"}), \
+             patch("bot.main.setup_bot_commands", new_callable=AsyncMock):
+            get_settings.cache_clear()
+            _, dp = await setup_bot()
+            self.assertIn(incy_router, dp.sub_routers)
+
+        with patch.dict(os.environ, {"INCY_SUBSCRIPTION_ENABLED": "false"}), \
+             patch("bot.main.setup_bot_commands", new_callable=AsyncMock):
+            get_settings.cache_clear()
+            _, dp = await setup_bot()
+            self.assertNotIn(incy_router, dp.sub_routers)

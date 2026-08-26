@@ -20,29 +20,37 @@ ALL_INTEGRATIONS: Sequence[type[BaseIntegration]] = (
 
 
 def register_all_web_routes(app: web.Application) -> None:
-    """Iterate over all integrations and register web endpoints if enabled."""
+    """Iterate over all integrations and register web endpoints if enabled.
+
+    Fail-Fast: raises RuntimeError if an enabled integration fails to register its routes.
+    """
     for integration in ALL_INTEGRATIONS:
-        try:
-            if integration.is_enabled():
+        if integration.is_enabled():
+            try:
                 integration.register_web_routes(app)
                 logger.info("Integration '%s' registered web routes", integration.name)
-            else:
-                logger.debug("Integration '%s' is disabled, skipping web routes", integration.name)
-        except Exception as e:
-            logger.exception("Failed to register web routes for integration '%s': %s", integration.name, type(e).__name__)
+            except Exception as e:
+                logger.exception("Failed to register web routes for integration '%s': %s", integration.name, type(e).__name__)
+                raise RuntimeError(f"Failed to register web routes for critical integration '{integration.name}'") from e
+        else:
+            logger.debug("Integration '%s' is disabled, skipping web routes", integration.name)
 
 
 def get_all_bot_routers() -> list[Router]:
-    """Return all active aiogram Routers from enabled integrations."""
+    """Return all active aiogram Routers from enabled integrations.
+
+    Fail-Fast: raises RuntimeError if an enabled integration fails to construct its bot router.
+    """
     routers = []
     for integration in ALL_INTEGRATIONS:
-        try:
-            if integration.is_enabled():
+        if integration.is_enabled():
+            try:
                 router = integration.get_bot_router()
                 if router:
                     routers.append(router)
-        except Exception as e:
-            logger.exception("Failed to get bot router for integration '%s': %s", integration.name, type(e).__name__)
+            except Exception as e:
+                logger.exception("Failed to get bot router for integration '%s': %s", integration.name, type(e).__name__)
+                raise RuntimeError(f"Failed to get bot router for critical integration '{integration.name}'") from e
     return routers
 
 

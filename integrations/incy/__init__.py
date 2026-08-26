@@ -58,7 +58,9 @@ class IncyIntegration(BaseIntegration):
 
     @classmethod
     def get_bot_router(cls) -> Router | None:
-        """Return aiogram Router for INCY."""
+        """Return aiogram Router for INCY if enabled, or None."""
+        if not cls.is_enabled():
+            return None
         return incy_router
 
 

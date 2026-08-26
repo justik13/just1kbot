@@ -222,11 +222,15 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     from bot.handlers.profile import router as profile_router
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
+    from integrations import get_all_bot_routers
+
+    integration_routers = get_all_bot_routers()
 
     for r in [
         start_router,
         profile_router,
         connection_router,
+        *integration_routers,
         support_router,
         payment_router,
         admin_router,
