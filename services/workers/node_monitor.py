@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from aiogram import Bot
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from config.constants import ServerHealthState
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -32,14 +33,6 @@ PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения з
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
-
-
-class ServerHealthState:
-    ONLINE = "ONLINE"
-    WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
-    PROBLEM = "PROBLEM"
-    AUTO_DISABLED = "AUTO_DISABLED"
-    MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
 class ServerMonitorState:

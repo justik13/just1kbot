@@ -10,8 +10,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy import select, or_, text
 
 from bot import texts
-from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
 from bot.keyboards import get_topup_credit_keyboard, get_topup_payment_keyboard
+from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, TariffQuote, TariffVersion, User

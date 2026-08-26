@@ -158,11 +158,9 @@ async def toggle_server_apply(
 
     new_status = not server.is_active
 
+    from config.constants import ServerHealthState
     from services.amnezia_client import cleanup_server_circuit_breakers
-    from services.workers.node_monitor import (
-        ServerHealthState,
-        reset_server_monitor_state,
-    )
+    from services.workers.node_monitor import reset_server_monitor_state
     from utils.datetime_helpers import now_utc
 
     if new_status:

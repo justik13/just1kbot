@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
+from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (

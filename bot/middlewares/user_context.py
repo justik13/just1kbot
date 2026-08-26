@@ -6,35 +6,25 @@ from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
-from cachetools import TTLCache
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import USER_CONTEXT_CACHE_MAX_SIZE, USER_CONTEXT_CACHE_TTL
 from database.models import User
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id_any,
 )
+from services.user_cache import (
+    _user_cache,
+    clear_user_cache,
+    invalidate_user_cache,
+)
 
 logger = logging.getLogger(__name__)
 
-_user_cache: TTLCache[int, int | None] = TTLCache(
-    maxsize=USER_CONTEXT_CACHE_MAX_SIZE,
-    ttl=USER_CONTEXT_CACHE_TTL,
-)
-
 _SENTINEL = object()
 
-
-def invalidate_user_cache(telegram_id: int) -> None:
-    _user_cache.pop(telegram_id, None)
-
-
-def clear_user_cache() -> None:
-    """Полная очистка кэша пользователей."""
-    _user_cache.clear()
 
 
 class UserContextMiddleware(BaseMiddleware):

@@ -9,7 +9,7 @@ from cachetools import TTLCache
 from sqlalchemy import or_, select
 
 from bot import texts
-from bot.constants import (
+from config.constants import (
     GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,

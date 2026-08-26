@@ -7,7 +7,7 @@ from cachetools import TTLCache
 from sqlalchemy import select, update
 
 from bot import texts
-from bot.constants import (
+from config.constants import (
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )

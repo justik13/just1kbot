@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import APIOperation, VPNProfile
 from database.repositories.servers_repo import (
     get_server_by_api_url,
@@ -467,7 +468,7 @@ async def process_edit_server_url(
 
         return
 
-    if "amneziawg2" not in server_info.protocols:
+    if AMNEZIA_PROTOCOL not in server_info.protocols:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -730,7 +731,7 @@ async def process_edit_server_key(
 
         return
 
-    if "amneziawg2" not in server_info.protocols:
+    if AMNEZIA_PROTOCOL not in server_info.protocols:
         await render_hub(
             message.bot,
             message.chat.id,

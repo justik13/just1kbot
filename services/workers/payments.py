@@ -9,7 +9,7 @@ from cachetools import TTLCache
 from sqlalchemy import and_, or_, select
 
 from bot import texts
-from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
+from config.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User

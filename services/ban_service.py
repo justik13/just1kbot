@@ -3,7 +3,7 @@ import logging
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.middlewares.user_context import invalidate_user_cache
+from services.user_cache import invalidate_user_cache
 from database.models import Payment, User
 from database.repositories.users_repo import (
     get_user_by_telegram_id,

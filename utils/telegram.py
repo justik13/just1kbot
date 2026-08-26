@@ -9,7 +9,7 @@ from aiogram.types import InlineKeyboardMarkup, InputFile, LinkPreviewOptions
 from cachetools import TTLCache
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
+from config.constants import HUB_CACHE_MAX_SIZE, HUB_CACHE_TTL
 from database.connection import session_scope
 from database.repositories import hub_repo
 from utils.text_limits import split_text_by_lines

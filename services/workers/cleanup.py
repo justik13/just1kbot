@@ -11,7 +11,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import GRACE_PERIOD_HOURS
+from config.constants import GRACE_PERIOD_HOURS
 from database.connection import session_scope
 from database.models import (
     APIOperation,
