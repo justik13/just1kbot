@@ -18,22 +18,23 @@ def split_text_by_lines(
     in_blockquote = False
 
     for line in text.split("\n"):
-        if "<blockquote" in line:
+        current_line = line
+        if "<blockquote" in current_line:
             in_blockquote = True
 
-        candidate = f"{current}\n{line}" if current else line
+        candidate = f"{current}\n{current_line}" if current else current_line
 
         if len(candidate) > limit:
             if current:
                 if in_blockquote and "</blockquote>" not in current:
                     current += "</blockquote>"
                     parts.append(current)
-                    line = "<blockquote>" + line
+                    current_line = "<blockquote>" + current_line
                 else:
                     parts.append(current)
 
-            if len(line) > limit:
-                remaining_line = line
+            if len(current_line) > limit:
+                remaining_line = current_line
                 while len(remaining_line) > limit:
                     if in_blockquote:
                         chunk = remaining_line[:limit-13] + "</blockquote>"
@@ -45,11 +46,11 @@ def split_text_by_lines(
 
                 current = remaining_line
             else:
-                current = line
+                current = current_line
         else:
             current = candidate
 
-        if "</blockquote>" in line:
+        if "</blockquote>" in current_line:
             in_blockquote = False
 
     if current:

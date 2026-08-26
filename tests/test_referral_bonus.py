@@ -168,7 +168,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
 
 
 
-class TestReferralBonusCalculation(unittest.TestCase):
+class TestGrantReferralBonusForTopup(unittest.TestCase):
     def test_first_topup_bonus_credits_both_purchaser_and_referrer(self):
         import asyncio
 

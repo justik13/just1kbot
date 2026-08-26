@@ -12,7 +12,7 @@ class TestNoBareTestsGuard(unittest.TestCase):
         """
         tests_dir = os.path.dirname(__file__)
         bare_tests = []
-        for root, dirs, files in os.walk(tests_dir):
+        for root, _, files in os.walk(tests_dir):
             for file in files:
                 if file.startswith("test_") and file.endswith(".py"):
                     file_path = os.path.join(root, file)
