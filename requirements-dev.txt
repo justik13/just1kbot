@@ -5,7 +5,8 @@
 # SQLite async driver used by scripts/simulate_bot.py standalone testbed.
 aiosqlite>=0.21.0,<1.0.0
 
-# Static analysis and test runners (same pin as .github/workflows/tests.yml).
+# Static analysis and local test runner.
+# ruff pin matches .github/workflows/tests.yml; CI itself runs the suite
+# via unittest discover, pytest is for local use only.
 ruff==0.16.1
-pytest==8.1.1
-
+pytest==9.1.1

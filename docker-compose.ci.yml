@@ -1,14 +1,15 @@
 services:
   db:
     ports:
-      # CI-only compatibility for host-side smoke-test tooling. Production
-      # compose intentionally does not publish PostgreSQL.
-      - "5432:5432"
+      # CI-only compatibility for host-side smoke-test tooling. Bound to
+      # loopback so sibling CI jobs/processes cannot reach the database.
+      # Production compose intentionally does not publish PostgreSQL.
+      - "127.0.0.1:5432:5432"
   redis:
     ports:
-      # CI-only compatibility for host-side smoke-test tooling. Production
-      # compose intentionally does not publish Redis.
-      - "6379:6379"
+      # CI-only compatibility for host-side smoke-test tooling. Bound to
+      # loopback; production compose intentionally does not publish Redis.
+      - "127.0.0.1:6379:6379"
   bot:
     environment:
       # Run the application startup path without making real Telegram API
@@ -20,4 +21,4 @@ services:
       # Expose on 8081 for CI testing
       - "8081:80"
     volumes:
-      - ./Caddyfile.ci:/etc/caddy/Caddyfile
+      - ./Caddyfile.ci:/etc/caddy/Caddyfile:ro

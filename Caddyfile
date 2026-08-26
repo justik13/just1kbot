@@ -7,6 +7,7 @@
 
 {$DOMAIN} {
     header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
@@ -16,8 +17,8 @@
         Cross-Origin-Opener-Policy "same-origin"
         -Server
     }
-    @rate_limited_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/* /health
-    handle @rate_limited_paths {
+    @limited_body_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/* /health
+    handle @limited_body_paths {
         request_body {
             max_size 2KB
         }
@@ -37,6 +38,7 @@
             Content-Type "text/html; charset=utf-8"
             Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
             Pragma "no-cache"
+            Strict-Transport-Security "max-age=31536000; includeSubDomains"
             Referrer-Policy "no-referrer"
             X-Content-Type-Options "nosniff"
             X-Frame-Options "DENY"

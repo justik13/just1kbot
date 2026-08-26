@@ -26,6 +26,8 @@ PG_DB="${POSTGRES_DB:-just1kbot_bot}"
 
 pg_dump -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" | gzip > "$BACKUP_FILE"
 
+unset PGPASSWORD
+
 echo "Шифрование backup..."
 age -r "$BACKUP_AGE_RECIPIENT" -o "$ENCRYPTED_FILE" "$BACKUP_FILE"
 rm "$BACKUP_FILE"

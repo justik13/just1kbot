@@ -203,9 +203,6 @@ async def process_add_server(
             )
             return
 
-        await state.update_data(api_key=api_key)
-
-
         all_data = await state.get_data()
 
         await render_hub(
@@ -218,7 +215,7 @@ async def process_add_server(
 
         client = AmneziaClient(
             all_data["api_url"],
-            all_data["api_key"],
+            api_key,
         )
 
         if not await client.healthcheck():
@@ -308,7 +305,7 @@ async def process_add_server(
             name=api_server_name,
             country_flag=all_data["country_flag"],
             api_url=all_data["api_url"],
-            api_key=all_data["api_key"],
+            api_key=api_key,
             protocol="amneziawg2",
             max_clients=api_max_peers,
         )

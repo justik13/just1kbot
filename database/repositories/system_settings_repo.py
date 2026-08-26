@@ -50,6 +50,8 @@ async def set_system_setting(
         setting.updated_at = now_utc()
 
     await session.flush()
-    _SETTINGS_CACHE[key] = (value, time.monotonic())
+    # Invalidate instead of caching the pending value: a later rollback must
+    # never leave an uncommitted "future" value in the shared TTL cache. The
+    # first post-commit reader repopulates it from committed data.
+    _SETTINGS_CACHE.pop(key, None)
     return setting
-

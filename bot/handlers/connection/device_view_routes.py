@@ -312,7 +312,6 @@ def _get_device_config_keyboard(profile_id: int):
     # - "Инструкция и помощь" uses device_help:{profile_id} (NOT support_help/menu_support)
     #   so the user stays in the device flow with a contextual back button to manage_device.
     # - Back button returns directly to the device card.
-    #   DO NOT use texts.UI_BOT_KEYBOARDS_COMMON_L7_1 — that key does not exist in ui_texts.py.
     builder = InlineKeyboardBuilder()
     builder.button(text="📖 Инструкция и помощь", callback_data=f"device_help:{profile_id}")
     builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")

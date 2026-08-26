@@ -75,7 +75,7 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("admin_servers", callbacks)
 
     def test_get_real_ip_forwarded_for(self):
-        # Loopback remote -> reads X-Forwarded-For first element
+        # Loopback remote -> trusted by default -> reads X-Forwarded-For first element
         request_mock = MagicMock(spec=web.Request)
         request_mock.remote = "127.0.0.1"
         request_mock.headers = {
@@ -83,14 +83,26 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         }
         self.assertEqual(_get_real_ip(request_mock), "185.71.76.10")
 
-        # Private IP remote with X-Real-IP
+        # Trusted proxy peer (declared via app config) with X-Real-IP
         request_mock_real = MagicMock(spec=web.Request)
         request_mock_real.remote = "10.0.0.5"
+        request_mock_real.app = {"trusted_proxies": "10.0.0.0/8"}
         request_mock_real.headers = {
             "X-Real-IP": "185.71.76.15",
             "X-Forwarded-For": "185.71.76.10, 10.0.0.2",
         }
         self.assertEqual(_get_real_ip(request_mock_real), "185.71.76.15")
+
+        # Private peer NOT declared as trusted proxy -> forwarded headers are
+        # ignored so private networks cannot spoof the YooKassa allowlist
+        request_untrusted = MagicMock(spec=web.Request)
+        request_untrusted.remote = "10.0.0.5"
+        request_untrusted.app = {"trusted_proxies": "127.0.0.1,::1,172.16.0.0/12"}
+        request_untrusted.headers = {
+            "X-Real-IP": "185.71.76.15",
+            "X-Forwarded-For": "185.71.76.10, 10.0.0.2",
+        }
+        self.assertEqual(_get_real_ip(request_untrusted), "10.0.0.5")
 
         # Public remote -> ignores forwarded headers
         request_public = MagicMock(spec=web.Request)

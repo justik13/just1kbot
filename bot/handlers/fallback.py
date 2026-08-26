@@ -1,3 +1,5 @@
+import asyncio
+
 from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.filters import StateFilter
@@ -6,9 +8,20 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.middlewares.action_lock import STALE_ACTION_PREFIXES
 from database.models import User
 
 router = Router()
+
+_auto_delete_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_auto_delete(bot, chat_id: int, msg_id: int, delay: float = 5.0) -> None:
+    task = asyncio.create_task(
+        _auto_delete_delay(bot, chat_id, msg_id, delay=delay)
+    )
+    _auto_delete_tasks.add(task)
+    task.add_done_callback(_auto_delete_tasks.discard)
 
 
 @router.message(
@@ -18,8 +31,6 @@ router = Router()
     StateFilter("*"),
 )
 async def fsm_media_guard(message: Message, state: FSMContext):
-    import asyncio
-
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     await state.clear()
@@ -40,9 +51,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        asyncio.create_task(
-            _auto_delete_delay(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
-        )
+        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
@@ -62,8 +71,6 @@ async def _auto_delete_delay(bot, chat_id: int, msg_id: int, delay: float = 5.0)
 
 @router.message()
 async def handle_unknown_text(message: Message, state: FSMContext):
-    import asyncio
-
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     await state.clear()
@@ -84,9 +91,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(),
             parse_mode="HTML",
         )
-        asyncio.create_task(
-            _auto_delete_delay(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
-        )
+        _spawn_auto_delete(message.bot, message.chat.id, temp_msg.message_id, delay=5.0)
     except Exception:
         pass
 
@@ -154,6 +159,21 @@ async def stale_callback_fallback(
     callback: CallbackQuery,
     state: FSMContext,
 ):
+    data = callback.data or ""
+    is_stale_action = any(
+        data == prefix or data.startswith(prefix)
+        for prefix in STALE_ACTION_PREFIXES
+    )
+
+    if not is_stale_action:
+        # Unknown callback while a flow may be active: keep FSM progress so a
+        # stray tap on an unrelated inline button cannot wipe the wizard.
+        try:
+            await callback.answer()
+        except Exception:
+            pass
+        return
+
     await state.clear()
 
     try:

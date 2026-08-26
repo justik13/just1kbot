@@ -269,7 +269,7 @@ run_interactive_wizard() {
         read -r -p "Введите ваш Email для сертификатов Let's Encrypt: " SSL_EMAIL
         SSL_EMAIL="$(echo "$SSL_EMAIL" | tr -d " '\"" | tr '[:upper:]' '[:lower:]')"
 
-        if [[ "$SSL_EMAIL" =~ ^[^@\s]+@[^@\s]+\.[^@\s]+$ ]] && [[ "$SSL_EMAIL" != "owner@example.com" ]] && [[ "$SSL_EMAIL" != "admin@example.com" ]]; then
+        if [[ "$SSL_EMAIL" =~ ^[^@\s]+@[^@\s]+\.[^@\s]+$ ]] && [[ "$SSL_EMAIL" != "owner@example.com" ]] && [[ "$SSL_EMAIL" != "admin@example.com" ]] && [[ "$SSL_EMAIL" != "change_me@example.com" ]]; then
             log "Email для SSL: $SSL_EMAIL"
             break
         else

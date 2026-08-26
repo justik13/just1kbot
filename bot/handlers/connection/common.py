@@ -2,7 +2,6 @@ import logging
 import re
 from datetime import timedelta
 
-from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +14,6 @@ from database.repositories.profiles_repo import (
     get_user_profiles,
 )
 from integrations.incy import SubscriptionTokenService
-from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
@@ -46,8 +44,8 @@ def _format_protocol(raw_protocol: str | None) -> str:
 
 
 async def _get_effective_device_limit(
-    user: User,
     session: AsyncSession,
+    user: User,
 ) -> int:
     return await SubscriptionService.get_effective_device_limit(session, user)
 
@@ -91,23 +89,9 @@ async def _render_maintenance(
     *,
     back_to: str = "back_to_connections",
 ) -> None:
-    if target is None:
-        return
-    bot = getattr(target, "bot", None)
-    chat = getattr(target, "chat", None)
-    chat_id = chat.id if chat else None
-    if (bot is None or chat_id is None) and isinstance(target, CallbackQuery):
-        bot = target.bot
-        chat_id = target.message.chat.id if target.message else None
-    if bot is None or chat_id is None:
-        return
-    message = await MaintenanceService.get_message(session)
-    await render_hub(
-        bot,
-        chat_id,
-        message,
-        get_back_button(back_to),
-    )
+    from bot.handlers.shared_common import render_maintenance
+
+    await render_maintenance(target, session, back_to=back_to)
 
 
 async def _build_connections_screen(
@@ -125,8 +109,8 @@ async def _build_connections_screen(
     ])
 
     device_limit = await _get_effective_device_limit(
-        user,
         session,
+        user,
     )
 
     rendered = texts.CONNECTION_LIST_HEADER.format(

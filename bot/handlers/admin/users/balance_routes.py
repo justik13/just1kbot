@@ -13,6 +13,7 @@ from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_user_balance_keyboard
 from bot.states import AdminStates
 from database.repositories.account_ledger_repo import (
+    AccountLedgerInvariantError,
     create_admin_adjustment,
     get_account_balance,
 )
@@ -385,17 +386,32 @@ async def apply_user_balance_change(
 
     signed_amount = amount if action_type == "topup" else -amount
     idempotency_key = f"admin_adj:{adjustment_id}"
+    # Captured before the call: rollback() below expires ORM instances, so
+    # touching user.id inside an except block would trigger a sync load
+    # (MissingGreenlet) in async context.
+    target_user_id = user.id
 
     try:
         await create_admin_adjustment(
             session,
-            user_id=user.id,
+            user_id=target_user_id,
             signed_amount=signed_amount,
             idempotency_key=idempotency_key,
             metadata={"admin_id": callback.from_user.id, "reason": reason},
         )
+    except AccountLedgerInvariantError:
+        # Authoritative under-lock rejection (TOCTOU-safe): the step-one
+        # preview may have gone stale while the admin was typing the reason.
+        await session.rollback()
+        fresh = await get_account_balance(session, user_id=target_user_id)
+        await callback.answer(
+            f"⚠️ Недостаточно бонусных средств. Доступно: {int(fresh.bonus_available)} ₽",
+            show_alert=True,
+        )
+        await state.clear()
+        return
     except Exception as exc:
-        logger.error("Failed to apply admin balance adjustment for user %s: %s", user.id, exc)
+        logger.error("Failed to apply admin balance adjustment for user %s: %s", target_user_id, exc)
         await callback.answer("⚠️ Ошибка применения баланса.", show_alert=True)
         await state.clear()
         return

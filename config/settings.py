@@ -92,6 +92,19 @@ class Settings(BaseSettings):
     ALLOW_LOCAL_HTTPS: bool = False
     TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
 
+    LOG_LEVEL: str = "INFO"
+
+    @field_validator("LOG_LEVEL")
+    @classmethod
+    def validate_log_level(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if normalized not in allowed:
+            raise ValueError(
+                f"LOG_LEVEL must be one of {sorted(allowed)}, got {value!r}"
+            )
+        return normalized
+
     @model_validator(mode="after")
     def reject_removed_settings(self):
         removed = {
@@ -229,7 +242,7 @@ class Settings(BaseSettings):
         email = value.strip().lower()
         if (
             not email
-            or email in {"admin@example.com", "change_me@example.com"}
+            or email in {"admin@example.com", "owner@example.com", "change_me@example.com"}
             or re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email)
             is None
         ):

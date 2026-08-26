@@ -223,11 +223,12 @@ cmd_backup() {
             ts=$(date +%Y%m%d_%H%M%S)
             local backup_file="backups/just1kbot_${ts}.sql.gz.age"
             local tmp_gz="/tmp/backup_${ts}.sql.gz"
+            local dump_err="/tmp/backup_${ts}.err"
 
-            if docker compose exec -T db sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null | gzip > "$tmp_gz"; then
+            if docker compose exec -T db sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>"$dump_err" | gzip > "$tmp_gz"; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
-                        rm -f "$tmp_gz"
+                        rm -f "$tmp_gz" "$dump_err"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
                         ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
                         return 0
@@ -236,7 +237,11 @@ cmd_backup() {
                     warn "Дамп PostgreSQL пуст или поврежден (gzip integrity check failed)."
                 fi
             fi
-            rm -f "$tmp_gz"
+
+            if [[ -s "$dump_err" ]]; then
+                warn "pg_dump stderr: $(tail -n 3 "$dump_err")"
+            fi
+            rm -f "$tmp_gz" "$dump_err"
         fi
     fi
 
@@ -288,7 +293,7 @@ cmd_restore() {
         local sz
         sz=$(ls -lh "$b" | awk '{print $5}')
         echo -e "  [${BOLD}$i${NC}] $b ($sz)"
-        ((i++))
+        i=$((i+1))
     done
 
     echo ""

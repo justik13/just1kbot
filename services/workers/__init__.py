@@ -72,6 +72,7 @@ class WorkerHealth:
     last_error_type: str | None
     critical: bool
     cooldown_until: float | None = None
+    next_restart_at: float | None = None
 
 
 _worker_tasks: dict[str, asyncio.Task] = {}
@@ -225,6 +226,15 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 _spawn(definition, bot, clock())
                 continue
 
+            if health.state == "backoff":
+                # P2 #9 (audit): backoff is a timestamp, never an inline await,
+                # so one flapping worker cannot delay supervision of the rest.
+                if health.next_restart_at is not None and now < health.next_restart_at:
+                    continue
+                health.next_restart_at = None
+                _spawn(definition, bot, clock())
+                continue
+
             if not task.done():
                 if (health.consecutive_failures and health.last_started_at is not None
                         and now - health.last_started_at >= definition.stability_window):
@@ -265,13 +275,8 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
                 continue
 
             backoff = (backoff_delay(count) if backoff_delay is not None else min(30.0, 2.0 ** count))
-            try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=backoff)
-                break
-            except asyncio.TimeoutError:
-                pass
-            if not shutdown_event.is_set():
-                _spawn(definition, bot, clock())
+            health.state = "backoff"
+            health.next_restart_at = now + max(0.0, backoff)
     _supervisor_healthy = False
     logger.info("Worker supervisor stopped")
 

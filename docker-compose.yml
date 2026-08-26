@@ -19,6 +19,8 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     shm_size: "256m"
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - backend_net
@@ -43,10 +45,15 @@ services:
     image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     container_name: just1kbot_redis
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - backend_net
-    command: /bin/sh -c 'echo "requirepass $$REDIS_PASSWORD" > /data/redis.conf && redis-server /data/redis.conf --maxmemory 384mb --maxmemory-policy noeviction'
+    command: >
+      /bin/sh -c 'umask 077 && printf "requirepass \"%s\"\n" "$$REDIS_PASSWORD" > /tmp/redis.conf && exec redis-server /tmp/redis.conf
+      --maxmemory 384mb
+      --maxmemory-policy noeviction'
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     deploy:
@@ -135,6 +142,8 @@ services:
     image: just1kbot_caddy:latest
     container_name: just1kbot_caddy
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     logging: *default-logging
     networks:
       - frontend_net

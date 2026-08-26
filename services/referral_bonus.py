@@ -268,17 +268,6 @@ async def grant_referral_bonus_for_topup(
     )
 
 
-async def grant_referral_bonus_for_purchase(
-    session: AsyncSession,
-    *,
-    purchaser_user_id: int,
-    quote_id: int,
-    purchase_amount: object,
-) -> Decimal:
-    """Legacy alias for backward compatibility."""
-    return Decimal(0)
-
-
 async def reverse_referral_bonus_for_topup(
     session: AsyncSession,
     *,

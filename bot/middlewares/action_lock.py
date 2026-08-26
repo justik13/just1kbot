@@ -245,26 +245,7 @@ class ActionLockMiddleware(BaseMiddleware):
             return None
 
         if not _is_locked_action(callback_data):
-            try:
-                return await handler(event, data)
-            except (ValueError, IndexError, TypeError) as exc:
-                logger.warning(
-                    "Invalid callback data or parse error: user=%s, data=%s: %s",
-                    user_id,
-                    callback_data[:80],
-                    exc,
-                    exc_info=True,
-                )
-
-                try:
-                    await event.answer(
-                        texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L237_1,
-                        show_alert=True,
-                    )
-                except Exception:
-                    pass
-
-                return None
+            return await handler(event, data)
 
         lock = get_user_action_lock(user_id)
 
@@ -286,23 +267,4 @@ class ActionLockMiddleware(BaseMiddleware):
             return None
 
         async with lock:
-            try:
-                return await handler(event, data)
-            except (ValueError, IndexError, TypeError) as exc:
-                logger.warning(
-                    "Invalid callback data or parse error: user=%s, data=%s: %s",
-                    user_id,
-                    callback_data[:80],
-                    exc,
-                    exc_info=True,
-                )
-
-                try:
-                    await event.answer(
-                        texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L276_1,
-                        show_alert=True,
-                    )
-                except Exception:
-                    pass
-
-                return None
+            return await handler(event, data)

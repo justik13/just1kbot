@@ -2,6 +2,7 @@ import asyncio
 import html
 import logging
 import os
+import uuid
 import signal
 import traceback
 
@@ -36,6 +37,7 @@ from bot.middlewares import (
     PrivateChatMiddleware,
     ThrottlingMiddleware,
     UserContextMiddleware,
+    set_request_id,
 )
 from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.clean_chat import stop_clean_chat_worker
@@ -54,8 +56,29 @@ from utils.logging_security import (
     sanitize_text,
 )
 
+def _resolve_log_level() -> str:
+    """LOG_LEVEL from env first, then Settings (picks up .env), then INFO.
+
+    Kept exception-safe: bot.main is imported by tooling/tests whose
+    environment may lack required Settings fields.
+    """
+    allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    raw = os.getenv("LOG_LEVEL")
+    if raw:
+        normalized = raw.strip().upper()
+        if normalized in allowed:
+            return normalized
+    try:
+        level = get_settings().LOG_LEVEL.strip().upper()
+        if level in allowed:
+            return level
+    except Exception:
+        pass
+    return "INFO"
+
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=_resolve_log_level(),
     format=(
         "%(asctime)s - %(levelname)s - "
         "[%(request_id)s] %(name)s: %(message)s"
@@ -197,6 +220,9 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     dp.message.middleware(PrivateChatMiddleware())
     dp.callback_query.middleware(PrivateChatMiddleware())
 
+    dp.message.middleware(ThrottlingMiddleware())
+    dp.callback_query.middleware(ThrottlingMiddleware())
+
     dp.message.middleware(DBSessionMiddleware())
     dp.callback_query.middleware(DBSessionMiddleware())
 
@@ -207,9 +233,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
 
     dp.message.middleware(BanCheckMiddleware())
     dp.callback_query.middleware(BanCheckMiddleware())
-
-    dp.message.middleware(ThrottlingMiddleware())
-    dp.callback_query.middleware(ThrottlingMiddleware())
 
     dp.callback_query.middleware(ActionLockMiddleware())
 
@@ -260,10 +283,24 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     return bot, dp
 
 
+@web.middleware
+async def _http_correlation_middleware(request: web.Request, handler):
+    """Give every public HTTP request the same request_id as Telegram updates."""
+    try:
+        set_request_id(uuid.uuid4().hex[:8])
+        return await handler(request)
+    finally:
+        # aiohttp serves each request in its own task; resetting is a
+        # belt-and-braces guard for reused contexts.
+        set_request_id("system")
+
+
 async def start_webhook_server(port: int):
     # YooKassa payloads are small. Reject unexpectedly large request bodies
     # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
+    app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
+    app.middlewares.append(_http_correlation_middleware)
     setup_webhook_routes(app)
 
     runner = web.AppRunner(app)
@@ -420,8 +457,6 @@ async def main():
         except Exception as e:
             logger.error("Error stopping CleanChat worker: %s", e)
 
-        await asyncio.sleep(0.5)  # Allow background worker loops to completely exit before closing DB pool
-
         logger.info("Cleaning up resources...")
 
         if webhook_runner is not None:
@@ -451,14 +486,6 @@ async def main():
             await close_yookassa_client()
         except Exception as e:
             logger.error("Failed to close YooKassa client: %s", e)
-
-        try:
-            from services.device_service import (
-                close_redis as close_device_redis,
-            )
-            await close_device_redis()
-        except Exception as e:
-            logger.error("Failed to close device Redis: %s", e)
 
         try:
             await close_db()

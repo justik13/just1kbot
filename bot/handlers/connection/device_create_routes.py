@@ -366,7 +366,7 @@ async def _process_server_selection(
                 await session.rollback()
             except Exception:
                 pass
-            limit = await _get_effective_device_limit(user, session)
+            limit = await _get_effective_device_limit(session, user)
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,

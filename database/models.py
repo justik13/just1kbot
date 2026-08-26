@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -107,6 +108,12 @@ class User(Base):
             "id",
             postgresql_where=text("is_deleted = false"),
             postgresql_ops={"created_at": "DESC", "id": "DESC"},
+        ),
+        Index(
+            "ix_users_username_trgm",
+            "username",
+            postgresql_using="gin",
+            postgresql_ops={"username": "gin_trgm_ops"},
         ),
     )
 
@@ -349,6 +356,12 @@ class TariffQuote(Base):
         CheckConstraint("(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)", name="ck_tariff_quotes_lifecycle_timestamps"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
         Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+        Index(
+            "ix_tariff_quotes_consumed_journal",
+            text("consumed_at DESC NULLS LAST"),
+            text("created_at DESC"),
+            postgresql_where=text("status = 'consumed'"),
+        ),
     )
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     public_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
@@ -663,6 +676,13 @@ class AccountLedgerEntry(Base):
             unique=True,
             postgresql_where=text("entry_type='purchase_reversal'"),
         ),
+        Index(
+            "ix_account_ledger_payment_debits",
+            "payment_id",
+            postgresql_where=text(
+                "entry_type IN ('refund_debit','chargeback_debit')"
+            ),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
@@ -925,7 +945,6 @@ class PaymentEvent(Base):
         Integer,
         ForeignKey("payments.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
 
     event_type: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -943,8 +962,13 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     __table_args__ = (
-        Index("ix_audit_logs_created_at", "created_at"),
         Index("ix_audit_logs_created_at_desc", "created_at", postgresql_ops={"created_at": "DESC"}),
+        Index(
+            "ix_audit_logs_target",
+            func.lower(text("target_type")),
+            text("target_id"),
+            text("created_at DESC"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -1112,10 +1136,6 @@ class MaintenanceMode(Base):
 
 class HubMessage(Base):
     __tablename__ = "hub_messages"
-
-    __table_args__ = (
-        Index("ix_hub_messages_chat_id", "chat_id"),
-    )
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     message_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

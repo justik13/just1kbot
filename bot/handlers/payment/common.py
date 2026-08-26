@@ -13,8 +13,6 @@ from database.repositories.profiles_repo import (
 from database.repositories.tariffs_repo import (
     get_active_tariffs,
 )
-from services.maintenance_service import MaintenanceService
-from services.subscription import SubscriptionService
 from utils.datetime_helpers import is_expired
 from utils.formatters import format_datetime, format_days_left
 from utils.tariff_names import get_tariff_display_name
@@ -29,10 +27,12 @@ async def _is_subscription_active(user) -> bool:
     return not is_expired(user.subscription_end)
 
 
-async def _get_effective_device_limit(
-    session: AsyncSession, user
-) -> int:
-    return await SubscriptionService.get_effective_device_limit(session, user)
+# Shared helpers live in bot.handlers.shared_common; re-exported under the
+# historical private names so existing relative imports keep working.
+from bot.handlers.shared_common import (  # noqa: E402
+    get_effective_device_limit as _get_effective_device_limit,
+    render_maintenance as _render_maintenance_payment,
+)
 
 
 async def _render_maintenance(
@@ -41,23 +41,7 @@ async def _render_maintenance(
     *,
     back_to: str = "back_to_main_menu",
 ) -> None:
-    if target is None:
-        return
-    bot = getattr(target, "bot", None)
-    chat = getattr(target, "chat", None)
-    chat_id = chat.id if chat else None
-    if (bot is None or chat_id is None) and isinstance(target, CallbackQuery):
-        bot = target.bot
-        chat_id = target.message.chat.id if target.message else None
-    if bot is None or chat_id is None:
-        return
-    message = await MaintenanceService.get_message(session)
-    await render_hub(
-        bot,
-        chat_id,
-        message,
-        get_back_button(back_to),
-    )
+    await _render_maintenance_payment(target, session, back_to=back_to)
 
 
 async def _check_tariff_change_allowed(

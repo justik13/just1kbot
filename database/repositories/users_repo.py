@@ -93,6 +93,9 @@ async def update_user(session: AsyncSession, user: User, **kwargs) -> User:
 
 
 async def extend_subscription(session: AsyncSession, user: User, days: int) -> User:
+    # Lock the row so concurrent read-modify-write extensions cannot lose
+    # updates. Safe to call with an already-locked user (same transaction).
+    await session.scalar(select(User).where(User.id == user.id).with_for_update())
     now = now_utc()
     if user.subscription_end and user.subscription_end > now:
         current_end = user.subscription_end

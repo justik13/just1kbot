@@ -17,11 +17,8 @@ from database.models import (
 from services.workers.cleanup import _cleanup_old_records
 from utils.datetime_helpers import now_utc
 
+
 DB = os.getenv("TEST_DATABASE_URL")
-TRUNCATE_SQL = (
-    "TRUNCATE webhook_inbox, tariff_quotes, users "
-    "RESTART IDENTITY CASCADE"
-)
 
 
 @unittest.skipUnless(DB, "TEST_DATABASE_URL is not set")
