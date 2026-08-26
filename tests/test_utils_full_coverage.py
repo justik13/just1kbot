@@ -215,6 +215,136 @@ class TestUtilsTextLimits(unittest.TestCase):
         text = "Line 1\nLine 2\nLine 3\nLine 4"
         chunks = split_text_by_lines(text, limit=15)
         self.assertTrue(len(chunks) > 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 15)
+
+    def test_split_text_by_lines_with_blockquote_transition(self):
+        text = "Hello world\n<blockquote expandable>Secret key</blockquote>"
+        chunks = split_text_by_lines(text, limit=50)
+        self.assertEqual(len(chunks), 2)
+        self.assertEqual(chunks[0], "Hello world")
+        self.assertEqual(chunks[1], "<blockquote expandable>Secret key</blockquote>")
+        self.assertNotIn("</blockquote>", chunks[0])
+
+    def test_split_text_by_lines_long_single_line_blockquote(self):
+        text = "<blockquote expandable>Secret key is 1234567890abcdefghijklmnopqrstuvwxyz</blockquote>"
+        chunks = split_text_by_lines(text, limit=40)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 40)
+            self.assertTrue(chunk.startswith("<blockquote"))
+            self.assertTrue(chunk.endswith("</blockquote>"))
+
+    def test_split_text_by_lines_multiline_blockquote(self):
+        text = "Header\n<blockquote expandable>\nKey line 1\nKey line 2\nKey line 3\n</blockquote>\nFooter"
+        chunks = split_text_by_lines(text, limit=50)
+        self.assertGreater(len(chunks), 1)
+        for chunk in chunks:
+            self.assertLessEqual(len(chunk), 50)
+            if "<blockquote" in chunk:
+                self.assertIn("</blockquote>", chunk)
+
+    def test_split_text_by_lines_small_limit_no_infinite_loop(self):
+        text = "A" * 50
+        chunks = split_text_by_lines(text, limit=10)
+        self.assertEqual(len(chunks), 5)
+        for chunk in chunks:
+            self.assertEqual(len(chunk), 10)
+
+    def test_split_text_by_lines_none_or_empty(self):
+        self.assertEqual(split_text_by_lines(None), [])
+        self.assertEqual(split_text_by_lines("Short"), ["Short"])
+
+    def test_split_text_by_lines_blockquote_almost_fills_limit_and_next_line(self):
+        # Regression test for W8 chunk length overflow
+        text = "<blockquote expandable>123456789012345\nnext line"
+        chunks = split_text_by_lines(text, limit=40)
+        self.assertGreater(len(chunks), 1)
+        for c in chunks:
+            self.assertLessEqual(len(c), 40, f"Chunk exceeded limit 40: len={len(c)}: {c}")
+            if "<blockquote" in c:
+                self.assertIn("</blockquote>", c)
+
+        text2 = "<blockquote expandable>" + "A" * 30 + "\n" + "B" * 30
+        for limit in [40, 50, 60]:
+            chunks = split_text_by_lines(text2, limit=limit)
+            self.assertGreater(len(chunks), 1)
+            for c in chunks:
+                self.assertLessEqual(
+                    len(c), limit, f"Chunk exceeded limit {limit}: len={len(c)}: {c}"
+                )
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+
+    def test_split_text_by_lines_preserves_expandable_attribute(self):
+        text = "<blockquote expandable>Very long line that will split into multiple chunks because it exceeds the limit</blockquote>"
+        chunks = split_text_by_lines(text, limit=45)
+        self.assertGreater(len(chunks), 1)
+        for c in chunks:
+            self.assertLessEqual(len(c), 45)
+            self.assertTrue(c.startswith("<blockquote expandable>"))
+            self.assertTrue(c.endswith("</blockquote>"))
+
+    def test_split_text_by_lines_small_limits_strip_tags_cleanly(self):
+        text = "<blockquote expandable>Hello world this is a test of blockquote splitting with small limits</blockquote>"
+        for lim in [5, 10, 15, 20, 30, 35, 36, 37]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertGreater(len(chunks), 1)
+            for c in chunks:
+                self.assertLessEqual(len(c), lim, f"Limit {lim} exceeded: len={len(c)}: {c}")
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+
+    def test_split_text_by_lines_boundary_limits(self):
+        text = "<blockquote expandable>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ny</blockquote>"
+        for lim in [1, 2, 5, 10, 20, 35, 36, 37, 38, 39, 40, 45, 50, 100, 4096]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertTrue(len(chunks) >= 1)
+            for idx, c in enumerate(chunks):
+                self.assertLessEqual(len(c), lim, f"Limit {lim} exceeded on chunk {idx}: {c}")
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+                    self.assertTrue(c.startswith("<blockquote expandable>"))
+                    self.assertTrue(c.endswith("</blockquote>"))
+
+    def test_split_text_by_lines_transitions_outside_inside_outside(self):
+        text = "outside line 1\n<blockquote expandable>inside line</blockquote>\noutside line 2"
+        for lim in [40, 50, 60, 100, 4096]:
+            chunks = split_text_by_lines(text, limit=lim)
+            self.assertTrue(len(chunks) >= 1)
+            for c in chunks:
+                self.assertLessEqual(len(c), lim)
+                if "<blockquote" in c:
+                    self.assertIn("</blockquote>", c)
+
+    def test_split_text_by_lines_fuzzed_invariant(self):
+        import random
+        for limit in [1, 5, 10, 20, 35, 36, 37, 38, 39, 40, 50, 75, 100, 200, 500, 4096]:
+            for _ in range(15):
+                lines_count = random.randint(1, 10)
+                test_lines = []
+                in_bq = False
+                for _ in range(lines_count):
+                    l_len = random.randint(5, 300)
+                    if not in_bq and random.random() < 0.3:
+                        in_bq = True
+                        test_lines.append(f'<blockquote expandable>line_{"x" * l_len}')
+                    elif in_bq and random.random() < 0.3:
+                        in_bq = False
+                        test_lines.append(f'line_{"x" * l_len}</blockquote>')
+                    else:
+                        test_lines.append(f'line_{"x" * l_len}')
+                if in_bq:
+                    test_lines.append('</blockquote>')
+
+                sample_text = "\n".join(test_lines)
+                chunks = split_text_by_lines(sample_text, limit=limit)
+                for idx, ch in enumerate(chunks):
+                    self.assertLessEqual(
+                        len(ch), limit, f"Limit {limit} violated by chunk {idx}: {ch}"
+                    )
+                    if "<blockquote" in ch:
+                        self.assertIn("</blockquote>", ch)
 
     def test_truncate_text(self):
         res = truncate_details("Hello World", limit=5)

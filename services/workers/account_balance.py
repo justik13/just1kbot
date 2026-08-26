@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
+import uuid
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
+from sqlalchemy import select, or_, text
 
 from bot import texts
 from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
@@ -194,7 +195,12 @@ async def process_balance_notifications(bot: Bot) -> int:
                 .join(User, User.id == Payment.user_id)
                 .where(
                     Payment.credited_at.is_not(None),
-                    Payment.credit_notified_at.is_(None),
+                    or_(
+                        Payment.credit_notified_at.is_(None),
+                        text(
+                            "payments.topup_context->>'referrer_notified_at' IS NULL AND payments.topup_context->>'referrer_telegram_id' IS NOT NULL"
+                        ),
+                    ),
                 )
                 .order_by(Payment.credited_at, Payment.id)
                 .limit(BALANCE_NOTIFICATION_BATCH)
@@ -203,137 +209,176 @@ async def process_balance_notifications(bot: Bot) -> int:
 
     delivered = 0
     for payment_id, telegram_id in rows:
+        # Phase 1: Read payment details and check work needed within a short DB transaction
         async with session_scope() as session:
             payment = await session.scalar(
-                select(Payment)
-                .where(Payment.id == payment_id)
-                .with_for_update()
+                select(Payment).where(Payment.id == payment_id)
             )
-            if payment is None or payment.credit_notified_at is not None:
+            if payment is None:
                 continue
 
-            # Durable retry for pending referrer bonus notification
-            ctx = payment.topup_context if isinstance(payment.topup_context, dict) else {}
-            ref_id_raw = ctx.get("referrer_telegram_id")
-            ref_bonus_raw = ctx.get("referrer_bonus", 0)
+            ctx = dict(payment.topup_context or {})
+            credit_already_notified = payment.credit_notified_at is not None
+            is_auto_fulfilled = ctx.get("auto_fulfill_status") == "succeeded"
+            quote_public_id = ctx.get("quote_public_id")
+            payment_amount = payment.amount
+            payment_user_id = payment.user_id
 
+            # Referrer push analysis
             ref_id: int | None = None
             ref_bonus: int = 0
+            ref_needed: bool = False
+            ref_id_raw = ctx.get("referrer_telegram_id")
+            ref_bonus_raw = ctx.get("referrer_bonus", 0)
             try:
-                if ref_id_raw is not None:
-                    parsed_id = int(ref_id_raw)
-                    if parsed_id > 0:
-                        ref_id = parsed_id
-                if ref_bonus_raw is not None:
-                    parsed_bonus = int(ref_bonus_raw)
-                    if parsed_bonus > 0:
-                        ref_bonus = parsed_bonus
+                if ref_id_raw is not None and int(ref_id_raw) > 0:
+                    ref_id = int(ref_id_raw)
+                if ref_bonus_raw is not None and int(ref_bonus_raw) > 0:
+                    ref_bonus = int(ref_bonus_raw)
+                if ref_id and ref_bonus > 0 and ctx.get("referrer_notified_at") is None:
+                    ref_needed = True
             except (ValueError, TypeError):
-                logger.warning(
-                    "Malformed referrer info in topup_context for payment %s",
-                    payment.id,
-                )
-                ref_id = None
-                ref_bonus = 0
+                logger.warning("Malformed referrer info in topup_context for payment %s", payment_id)
 
-            if ref_id and ref_bonus > 0 and ctx.get("referrer_notified_at") is None:
+            ref_attempts = 0
+            try:
+                ref_attempts = int(ctx.get("referrer_notify_attempts") or 0)
+            except (TypeError, ValueError):
+                ref_attempts = 0
+
+            # Quote handshake check for auto-fulfilled orders
+            if is_auto_fulfilled and not credit_already_notified and quote_public_id:
+                try:
+                    quote_uuid = uuid.UUID(str(quote_public_id))
+                    quote = await session.scalar(
+                        select(TariffQuote).where(TariffQuote.public_id == quote_uuid)
+                    )
+                    if quote is not None and quote.purchase_notified_at is not None:
+                        payment.credit_notified_at = now_utc()
+                        credit_already_notified = True
+                except Exception as exc:
+                    logger.warning("Error checking quote for auto-fulfilled payment %s: %s", payment_id, exc)
+
+            balance_snapshot = None
+            if not credit_already_notified and not is_auto_fulfilled:
+                balance_snapshot = await get_account_balance(session, user_id=payment_user_id)
+
+        # Phase 2: Execute Referrer Push (outside DB transaction)
+        if ref_needed and ref_id:
+            ref_attempts += 1
+            if ref_attempts > 5:
+                logger.error(
+                    "Referrer push exhausted max attempts (5) for payment %s, ref_id %s",
+                    payment_id,
+                    ref_id,
+                )
+                async with session_scope() as session:
+                    p = await session.scalar(select(Payment).where(Payment.id == payment_id))
+                    if p:
+                        p_ctx = dict(p.topup_context or {})
+                        p.topup_context = {
+                            **p_ctx,
+                            "referrer_notified_at": now_utc().isoformat(),
+                            "referrer_notify_failed": True,
+                            "referrer_notify_attempts": ref_attempts,
+                        }
+            else:
+                ref_sent = False
+                ref_blocked = False
                 try:
                     await global_send_limiter.acquire()
-                    from aiogram.utils.keyboard import InlineKeyboardBuilder
                     b_builder = InlineKeyboardBuilder()
                     b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
+                    ref_text = (
+                        f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\n"
+                        f"Вам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
+                    )
                     await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
-                    payment.topup_context = {
-                        **ctx,
-                        "referrer_notified_at": now_utc().isoformat(),
-                    }
+                    ref_sent = True
                 except TelegramForbiddenError:
-                    payment.topup_context = {
-                        **ctx,
-                        "referrer_notified_at": now_utc().isoformat(),
-                        "referrer_bot_blocked": True,
-                    }
+                    ref_blocked = True
                 except Exception as exc:
-                    logger.warning("Failed to deliver durable referrer push to %s: %s", ref_id, exc)
+                    logger.warning(
+                        "Failed to deliver durable referrer push to %s (attempt %s/5): %s",
+                        ref_id,
+                        ref_attempts,
+                        exc,
+                    )
 
-            if (payment.topup_context or {}).get("auto_fulfill_status") == "succeeded":
-                quote_raw = (payment.topup_context or {}).get("quote_public_id")
-                if quote_raw:
-                    import uuid
+                async with session_scope() as session:
+                    p = await session.scalar(select(Payment).where(Payment.id == payment_id))
+                    if p:
+                        p_ctx = dict(p.topup_context or {})
+                        update_dict = {
+                            **p_ctx,
+                            "referrer_notify_attempts": ref_attempts,
+                        }
+                        if ref_sent:
+                            update_dict["referrer_notified_at"] = now_utc().isoformat()
+                        elif ref_blocked:
+                            update_dict["referrer_notified_at"] = now_utc().isoformat()
+                            update_dict["referrer_bot_blocked"] = True
+                        p.topup_context = update_dict
 
-                    from database.models import TariffQuote
-                    try:
-                        quote_uuid = uuid.UUID(str(quote_raw))
-                        quote = await session.scalar(
-                            select(TariffQuote).where(TariffQuote.public_id == quote_uuid)
-                        )
-                        if quote is None or quote.purchase_notified_at is None:
-                            continue
-                    except Exception as exc:
-                        logger.warning("Error checking quote for auto-fulfilled payment %s: %s", payment.id, exc)
-                        continue
-                payment.credit_notified_at = now_utc()
-                continue
-            balance = await get_account_balance(
-                session, user_id=payment.user_id
-            )
-            resume = bool((payment.topup_context or {}).get("operation"))
+        # Phase 3: Execute User Credit Push (outside DB transaction)
+        if credit_already_notified or is_auto_fulfilled:
+            continue
+
+        if balance_snapshot is not None:
+            resume = bool(ctx.get("operation"))
             suffix = (
                 texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1
                 if resume
                 else ""
             )
             message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
-                value_0=int(payment.amount),
-                value_1=int(balance.real_available),
-                value_2=int(balance.bonus_available),
+                value_0=int(payment_amount),
+                value_1=int(balance_snapshot.real_available),
+                value_2=int(balance_snapshot.bonus_available),
                 value_3=suffix,
             )
-            if (
-                payment.topup_context
-                and isinstance(payment.topup_context, dict)
-                and payment.topup_context.get("purchaser_welcome_bonus", 0) > 0
-            ):
-                wb = payment.topup_context["purchaser_welcome_bonus"]
+            if ctx.get("purchaser_welcome_bonus", 0) > 0:
+                wb = ctx["purchaser_welcome_bonus"]
                 message += (
                     f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
                     f"за первое пополнение по приглашению!</b>"
                 )
 
+            user_sent = False
+            user_blocked = False
             try:
                 await global_send_limiter.acquire()
                 await render_hub(
                     bot,
                     telegram_id,
                     message,
-                    get_topup_credit_keyboard(payment.topup_context or {}),
+                    get_topup_credit_keyboard(ctx),
                 )
-                if (
-                    balance.real_position
-                    > get_settings().BALANCE_MAX_AVAILABLE_RUB
-                ):
+                if balance_snapshot.real_position > get_settings().BALANCE_MAX_AVAILABLE_RUB:
                     diagnostic = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(
-                        value_0=payment.id,
+                        value_0=payment_id,
                         value_1=telegram_id,
-                        value_2=int(balance.real_position),
+                        value_2=int(balance_snapshot.real_position),
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()
-                        await bot.send_message(
-                            admin_id,
-                            diagnostic,
-                            parse_mode="HTML",
-                        )
+                        await bot.send_message(admin_id, diagnostic, parse_mode="HTML")
+                user_sent = True
             except TelegramForbiddenError:
-                await mark_user_bot_blocked(session, telegram_id)
+                user_blocked = True
             except Exception:
-                logger.exception(
-                    "Failed to notify top-up credit payment=%s", payment.id
-                )
-                continue
-            payment.credit_notified_at = now_utc()
-            delivered += 1
+                logger.exception("Failed to notify top-up credit payment=%s", payment_id)
+
+            if user_sent or user_blocked:
+                async with session_scope() as session:
+                    if user_blocked:
+                        await mark_user_bot_blocked(session, telegram_id)
+                    p = await session.scalar(select(Payment).where(Payment.id == payment_id))
+                    if p and p.credit_notified_at is None:
+                        p.credit_notified_at = now_utc()
+                if user_sent:
+                    delivered += 1
+
     return delivered
 
 

@@ -546,15 +546,41 @@ async def check_topup(
         await callback.answer(texts.TOPUP_NOT_FOUND_ALERT, show_alert=True)
         return
     if payment.fulfillment_status == "succeeded":
-        await _render_balance(
-            callback.bot,
-            callback.message.chat.id,
-            session,
-            db_user,
-            notice=texts.TOPUP_CREDITED_NOTICE,
-            message_effect_id=EFFECT_CONFETTI,
-            force_new=True,
-        )
+        ctx = payment.topup_context or {}
+        is_auto_fulfilled = ctx.get("auto_fulfill_status") == "succeeded"
+        ui_notified = bool(ctx.get("ui_confetti_shown"))
+
+        if (payment.credit_notified_at and not is_auto_fulfilled) or (
+            is_auto_fulfilled and ui_notified
+        ):
+            # Already notified, just render without effect/force_new
+            await _render_balance(
+                callback.bot,
+                callback.message.chat.id,
+                session,
+                db_user,
+                notice=texts.TOPUP_CREDITED_NOTICE,
+            )
+        else:
+            # Mark notified state immediately before network render to prevent concurrent duplicates
+            if not is_auto_fulfilled and not payment.credit_notified_at:
+                payment.credit_notified_at = now_utc()
+            if is_auto_fulfilled and not ui_notified:
+                payment.topup_context = {
+                    **ctx,
+                    "ui_confetti_shown": True,
+                }
+            await session.flush()
+
+            await _render_balance(
+                callback.bot,
+                callback.message.chat.id,
+                session,
+                db_user,
+                notice=texts.TOPUP_CREDITED_NOTICE,
+                message_effect_id=EFFECT_CONFETTI,
+                force_new=True,
+            )
     elif payment.provider_status == "succeeded":
         await render_hub(
             callback.bot,
