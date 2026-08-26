@@ -3,7 +3,13 @@ import logging
 import re
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+    TelegramServerError,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -536,16 +542,23 @@ async def alt_connection(
                 )
                 sent_doc_ids.append(doc_msg_1)
                 vpn_sent = True
-            except (TelegramNetworkError, asyncio.TimeoutError) as e:
-                # Ambiguous delivery: the .vpn may exist in Telegram without a
-                # known message_id. Fail-closed — abort the whole operation and
-                # keep the old hub instead of continuing with unknown state.
+            except (
+                TelegramNetworkError,
+                TelegramServerError,
+                TelegramRetryAfter,
+                TelegramForbiddenError,
+                asyncio.TimeoutError,
+            ) as e:
+                # Ambiguous delivery or transient server/network/flood failure:
+                # fail-closed to abort operation and preserve old hub.
                 logger.warning(
                     "hub_orphan_suspected profile=%s context=alt_vpn: %s", profile.id, e,
                 )
                 raise
-            except TelegramAPIError as e:
-                logger.warning("Telegram error sending .vpn file for profile %s: %s", profile.id, e)
+            except TelegramBadRequest as e:
+                # Deterministic format/rejection error from Telegram:
+                # graceful degradation to text/key instructions.
+                logger.warning("Telegram rejected .vpn file for profile %s: %s", profile.id, e)
                 # Continue without setting vpn_sent = True
 
             try:
@@ -557,13 +570,19 @@ async def alt_connection(
                 )
                 sent_doc_ids.append(doc_msg_2)
                 conf_sent = True
-            except (TelegramNetworkError, asyncio.TimeoutError) as e:
+            except (
+                TelegramNetworkError,
+                TelegramServerError,
+                TelegramRetryAfter,
+                TelegramForbiddenError,
+                asyncio.TimeoutError,
+            ) as e:
                 logger.warning(
                     "hub_orphan_suspected profile=%s context=alt_conf: %s", profile.id, e,
                 )
                 raise
-            except TelegramAPIError as e:
-                logger.warning("Telegram error sending .conf file for profile %s: %s", profile.id, e)
+            except TelegramBadRequest as e:
+                logger.warning("Telegram rejected .conf file for profile %s: %s", profile.id, e)
                 # Continue without setting conf_sent = True
 
             if vpn_sent and conf_sent:

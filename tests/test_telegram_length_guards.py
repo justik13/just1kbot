@@ -167,5 +167,87 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('I5 =', conf)
 
 
+    async def test_alt_connection_bad_request_gracefully_degrades(self):
+        from aiogram.exceptions import TelegramBadRequest
+        from bot.handlers.connection.device_view_routes import alt_connection
+
+        callback = MagicMock()
+        callback.data = 'alt_connection:1'
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=999222)
+        callback.message.message_id = 50
+        callback.bot = MagicMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = SimpleNamespace(id=10, telegram_id=999222)
+        profile = SimpleNamespace(id=1, user_id=10, server_id=1, device_name='iPhone', raw_config='vpn://dummy', provisioning_status='active')
+        server = SimpleNamespace(id=1, name='Germany')
+
+        method = MagicMock()
+        bad_req_exc = TelegramBadRequest(method=method, message="Bad Request: document invalid")
+
+        with patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
+             patch('bot.handlers.connection.device_view_routes.get_profile_by_id', new=AsyncMock(return_value=profile)), \
+             patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
+             patch('bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json', return_value={'containers': [{'awg': {'last_config': '{}'}}]}), \
+             patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
+             patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
+             patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
+             patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
+             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
+             patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=bad_req_exc)), \
+             patch('bot.handlers.connection.device_view_routes._append_hub_message_unlocked', new=AsyncMock(return_value=55)) as mock_msg, \
+             patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[50])), \
+             patch('bot.handlers.connection.device_view_routes._delete_hub_messages', new=AsyncMock()):
+
+            await alt_connection(callback, state, session, db_user)
+            self.assertTrue(mock_msg.called)
+            caption = mock_msg.call_args[1]['text']
+            self.assertIn('vpn://dummy', caption)
+            self.assertIn('Не удалось прикрепить файлы конфигурации', caption)
+
+    async def test_alt_connection_server_error_and_retry_after_fail_closed(self):
+        from aiogram.exceptions import TelegramServerError, TelegramRetryAfter
+        from bot.handlers.connection.device_view_routes import alt_connection
+
+        callback = MagicMock()
+        callback.data = 'alt_connection:1'
+        callback.message = MagicMock()
+        callback.message.chat = MagicMock(id=999222)
+        callback.message.message_id = 50
+        callback.bot = MagicMock()
+        callback.answer = AsyncMock()
+
+        state = AsyncMock()
+        session = AsyncMock()
+        db_user = SimpleNamespace(id=10, telegram_id=999222)
+        profile = SimpleNamespace(id=1, user_id=10, server_id=1, device_name='iPhone', raw_config='vpn://dummy', provisioning_status='active')
+        server = SimpleNamespace(id=1, name='Germany')
+
+        method = MagicMock()
+        server_err = TelegramServerError(method=method, message="Internal Server Error")
+        retry_after = TelegramRetryAfter(method=method, message="Flood control", retry_after=5)
+
+        for err in [server_err, retry_after]:
+            with patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
+                 patch('bot.handlers.connection.device_view_routes.get_profile_by_id', new=AsyncMock(return_value=profile)), \
+                 patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
+                 patch('bot.handlers.connection.device_view_routes.decode_vpn_uri_to_json', return_value={'containers': [{'awg': {'last_config': '{}'}}]}), \
+                 patch('bot.handlers.connection.device_view_routes.get_server_by_id', new=AsyncMock(return_value=server)), \
+                 patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
+                 patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
+                 patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
+                 patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
+                 patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=err)), \
+                 patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[50])):
+
+                with self.assertRaises(Exception) as ctx:
+                    await alt_connection(callback, state, session, db_user)
+                self.assertIs(type(ctx.exception), type(err))
+
+
 if __name__ == '__main__':
     unittest.main()
+

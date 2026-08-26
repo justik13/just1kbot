@@ -241,7 +241,10 @@ async def process_balance_notifications(bot: Bot) -> int:
                 ref_bonus = 0
 
             if ref_id and ref_bonus > 0 and ctx.get("referrer_notified_at") is None:
-                attempts = int(ctx.get("referrer_notify_attempts") or 0) + 1
+                try:
+                    attempts = int(ctx.get("referrer_notify_attempts") or 0) + 1
+                except (TypeError, ValueError):
+                    attempts = 1
                 if attempts > 5:
                     logger.error(
                         "Referrer push exhausted max attempts (5) for payment %s, ref_id %s",
