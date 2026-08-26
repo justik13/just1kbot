@@ -29,7 +29,10 @@ from database.repositories.profiles_repo import (
     get_profile_by_id,
 )
 from database.repositories.servers_repo import get_server_by_id
-from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
+from integrations.amnezia_bridge import (
+    AmneziaBridgeIntegration,
+    AmneziaBridgeTokenService,
+)
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic

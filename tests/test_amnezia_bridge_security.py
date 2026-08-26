@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
-from bot.handlers.amnezia_bridge import amnezia_bridge_handler
+from integrations.amnezia_bridge.web_routes import amnezia_bridge_handler
 from database.models import Server, User, VPNProfile
 from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from utils.datetime_helpers import now_utc
@@ -257,10 +257,10 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resp.status, 403)
         self.assertIn("Недействительная подпись", resp.text)
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_successful_delivery_200(
         self,
         mock_session_scope,
@@ -314,9 +314,9 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Автоматическое открытие", resp.text)
         self.assertIn("Скопировать полный ключ", resp.text)
 
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_profile_not_found_returns_404(
         self,
         mock_session_scope,
@@ -334,10 +334,10 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         resp = await amnezia_bridge_handler(req)
         self.assertEqual(resp.status, 404)
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_ownership_mismatch_returns_403(
         self,
         mock_session_scope,
@@ -362,7 +362,7 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         resp = await amnezia_bridge_handler(req)
         self.assertEqual(resp.status, 403)
 
-    @patch("bot.handlers.amnezia_bridge.session_scope", side_effect=RuntimeError("Forced unexpected crash"))
+    @patch("integrations.amnezia_bridge.web_routes.session_scope", side_effect=RuntimeError("Forced unexpected crash"))
     async def test_endpoint_unexpected_exception_returns_controlled_500(self, mock_session_scope):
         exp = int(now_utc().timestamp()) + 300
         sig = AmneziaBridgeTokenService.sign(77, 88, exp, secret=TEST_SECRET)
@@ -376,10 +376,10 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(TEST_SECRET, resp.text)
 
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_acl_user_flags_return_403(
         self,
         mock_session_scope,
@@ -422,10 +422,10 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
                 resp = await amnezia_bridge_handler(req)
                 self.assertEqual(resp.status, 403)
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=False)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=False)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_acl_subscription_access_denied_returns_403(
         self,
         mock_session_scope,
@@ -457,10 +457,10 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
         resp = await amnezia_bridge_handler(req)
         self.assertEqual(resp.status, 403)
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_endpoint_acl_profile_and_server_states_return_403(
         self,
         mock_session_scope,
@@ -506,14 +506,14 @@ class AmneziaBridgeSecurityTests(unittest.IsolatedAsyncioTestCase):
                 resp = await amnezia_bridge_handler(req)
                 self.assertEqual(resp.status, 403)
 
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_unexpected_exception_logs_only_exception_type_without_traceback(self, mock_session_scope):
         mock_session_scope.side_effect = RuntimeError("Sensitive internal secret error details")
         exp = int(now_utc().timestamp()) + 300
         sig = AmneziaBridgeTokenService.sign(1, 1, exp, secret=TEST_SECRET)
         req = self._create_request("1", {"uid": "1", "exp": str(exp), "sig": sig})
 
-        with self.assertLogs("bot.handlers.amnezia_bridge", level="ERROR") as cm:
+        with self.assertLogs("integrations.amnezia_bridge.web_routes", level="ERROR") as cm:
             resp = await amnezia_bridge_handler(req)
 
         self.assertEqual(resp.status, 500)

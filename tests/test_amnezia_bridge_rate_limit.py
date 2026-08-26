@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from aiohttp.test_utils import make_mocked_request
 
-from bot.handlers.amnezia_bridge import amnezia_bridge_handler
+from integrations.amnezia_bridge.web_routes import amnezia_bridge_handler
 from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 
@@ -237,7 +237,7 @@ class AmneziaBridgeRateLimitTests(unittest.IsolatedAsyncioTestCase):
         ip = get_trusted_client_ip(req_172)
         self.assertEqual(ip, "172.18.0.3")
 
-    @patch("bot.handlers.amnezia_bridge.amnezia_bridge_rate_limiter.check", return_value=(False, 15))
+    @patch("integrations.amnezia_bridge.web_routes.amnezia_bridge_rate_limiter.check", return_value=(False, 15))
     async def test_endpoint_returns_429_with_retry_after(self, mock_check):
         query = {"uid": "1", "exp": "1700000000", "sig": "a" * 64}
         req = make_mocked_request(

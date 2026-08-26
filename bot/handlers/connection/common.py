@@ -14,9 +14,9 @@ from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
+from integrations.incy import IncyIntegration, SubscriptionTokenService
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
-from services.subscription_token_service import SubscriptionTokenService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
 from utils.telegram import render_hub, safe
@@ -35,6 +35,8 @@ def can_show_incy_subscription(read_only: bool = False) -> bool:
     if read_only:
         return False
     return SubscriptionTokenService.is_enabled()
+
+
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
