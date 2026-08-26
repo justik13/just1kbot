@@ -19,9 +19,9 @@ class BaseIntegration(ABC):
         ...
 
     @classmethod
-    def register_web_routes(cls, app: web.Application) -> None:  # noqa: B027
+    def register_web_routes(cls, app: web.Application) -> None:
         """Register HTTP endpoints with the aiohttp application if enabled."""
-        pass
+        return None
 
     @classmethod
     def get_bot_router(cls) -> Router | None:

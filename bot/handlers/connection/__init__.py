@@ -1,10 +1,11 @@
 from aiogram import Router
 
+from integrations.incy import incy_router
+
 from .device_create_routes import router as device_create_router
 from .device_delete_routes import router as device_delete_router
 from .device_rename_routes import router as device_rename_router
 from .device_view_routes import router as device_view_router
-from integrations.incy import incy_router
 from .list_routes import router as list_router
 
 router = Router()
