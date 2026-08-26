@@ -19,7 +19,10 @@ class TestNoBareTestsGuard(unittest.TestCase):
                     with open(file_path, "r", encoding="utf-8") as f:
                         tree = ast.parse(f.read(), filename=file)
                         for node in tree.body:
-                            if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
+                            if (
+                                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                                and node.name.startswith("test_")
+                            ):
                                 bare_tests.append(f"{file}:{node.name}")
         
         self.assertEqual(
