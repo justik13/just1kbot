@@ -26,7 +26,7 @@ class SubscriptionTokenService:
                 return False
             domain = getattr(settings, "DOMAIN", "")
             return bool(domain and str(domain).strip())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
     @staticmethod

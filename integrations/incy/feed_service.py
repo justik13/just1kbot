@@ -41,7 +41,7 @@ class SubscriptionFeedService:
                 conf = build_conf_file(p.raw_config)
                 if not conf or not conf.strip():
                     continue
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning(
                     "Profile %s has invalid raw_config, skipping export: %s",
                     p.id,
@@ -129,7 +129,7 @@ class SubscriptionFeedService:
                 fragment = f"{prefix} — {device_name}"
 
                 lines.append(f"amneziawg://{b64_conf}#{fragment}")
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 logger.warning(
                     "Error formatting amneziawg line for profile %s: %s",
                     p.id,

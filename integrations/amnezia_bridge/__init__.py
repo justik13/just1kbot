@@ -42,7 +42,7 @@ class AmneziaBridgeIntegration(BaseIntegration):
             secret = getattr(settings, "AMNEZIA_BRIDGE_HMAC_SECRET", None)
             domain = getattr(settings, "DOMAIN", "")
             return bool(secret and str(secret).strip() and domain and str(domain).strip())
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
 
     @classmethod

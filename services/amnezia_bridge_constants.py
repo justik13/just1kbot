@@ -1,6 +1,5 @@
 """Backward-compatibility shim for Amnezia Bridge constants."""
 
-from integrations.amnezia_bridge.constants import *
 from integrations.amnezia_bridge.constants import (
     BRIDGE_TOKEN_MAX_FUTURE_SKEW_SECONDS,
     BRIDGE_TOKEN_TTL_SECONDS,

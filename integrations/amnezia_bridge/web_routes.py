@@ -258,7 +258,7 @@ async def amnezia_bridge_handler(request: web.Request) -> web.Response:
             status=400,
             headers=AMNEZIA_SECURITY_HEADERS,
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error(
             "Unexpected error in Amnezia bridge handler: %s",
             type(exc).__name__,
