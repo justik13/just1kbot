@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 _SENTINEL = object()
 
+__all__ = [
+    "UserContextMiddleware",
+    "clear_user_cache",
+    "invalidate_user_cache",
+]
+
 
 
 class UserContextMiddleware(BaseMiddleware):

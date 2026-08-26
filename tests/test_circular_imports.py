@@ -1,5 +1,4 @@
 import ast
-import os
 import subprocess
 import sys
 import unittest
