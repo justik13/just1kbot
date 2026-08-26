@@ -117,7 +117,7 @@ jobs:
       - name: Audit Python syntax, imports and common human errors
         run: >-
           ruff check
-          bot config database services utils alembic scripts tests
+          bot config database services utils alembic scripts tests integrations
           --select E4,E7,E9,F,B,ASYNC,PLE,PLW,RUF100
           --ignore PLW0603,PLW0108,ASYNC109
           --output-format full
@@ -176,7 +176,7 @@ jobs:
           fi
       - run: alembic upgrade head
       - name: Compile all tracked Python trees
-        run: python -m compileall -q bot config database services utils alembic scripts tests
+        run: python -m compileall -q bot config database services utils alembic scripts tests integrations
       - run: git diff --check
 
 

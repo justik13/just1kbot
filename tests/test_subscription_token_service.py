@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from database.models import User
-from services.subscription_token_service import (
+from integrations.incy.token_service import (
     MAX_SUBSCRIPTION_TOKEN_LENGTH,
     SubscriptionTokenService,
 )
@@ -94,7 +94,7 @@ class SubscriptionTokenServiceUnitTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(res_huge)
 
-    @patch("services.subscription_token_service.get_user_by_subscription_token")
+    @patch("integrations.incy.token_service.get_user_by_subscription_token")
     async def test_get_user_by_token_delegates(self, mock_get_repo):
         user = User(id=42, telegram_id=999, subscription_token="valid_token")
         mock_get_repo.return_value = user

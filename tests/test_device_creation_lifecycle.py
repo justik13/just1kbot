@@ -1612,7 +1612,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         callback.answer = AsyncMock()
         state = AsyncMock()
         session = AsyncMock()
-        with patch("bot.handlers.connection.incy_routes.render_hub", new=AsyncMock()) as mock_render:
+        with patch("integrations.incy.bot_routes.render_hub", new=AsyncMock()) as mock_render:
             await show_incy_subscription(callback, state, session, db_user=None)
 
             callback.answer.assert_called_once_with(show_alert=False)

@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 from aiohttp.test_utils import make_mocked_request
 
-from bot.handlers.amnezia_bridge import amnezia_bridge_handler
 from database.models import Server, User, VPNProfile
+from integrations.amnezia_bridge.web_routes import amnezia_bridge_handler
 from services.amnezia_bridge_token_service import AmneziaBridgeTokenService
 from utils.datetime_helpers import now_utc
 from utils.vpn_parser import encode_json_to_vpn_uri
@@ -60,10 +60,10 @@ class AmneziaBridgeLeakageTests(unittest.IsolatedAsyncioTestCase):
         req._rel_url = req._rel_url.with_query(query)
         return req
 
-    @patch("bot.handlers.amnezia_bridge.SubscriptionService.check_vpn_access", return_value=True)
-    @patch("bot.handlers.amnezia_bridge.get_user_by_id")
-    @patch("bot.handlers.amnezia_bridge.get_profile_by_id")
-    @patch("bot.handlers.amnezia_bridge.session_scope")
+    @patch("integrations.amnezia_bridge.web_routes.SubscriptionService.check_vpn_access", return_value=True)
+    @patch("integrations.amnezia_bridge.web_routes.get_user_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.get_profile_by_id")
+    @patch("integrations.amnezia_bridge.web_routes.session_scope")
     async def test_zero_leakage_in_logs_and_errors(
         self,
         mock_session_scope,
@@ -115,7 +115,7 @@ class AmneziaBridgeLeakageTests(unittest.IsolatedAsyncioTestCase):
 
         log_stream = io.StringIO()
         handler = logging.StreamHandler(log_stream)
-        bridge_logger = logging.getLogger("bot.handlers.amnezia_bridge")
+        bridge_logger = logging.getLogger("integrations.amnezia_bridge.web_routes")
         bridge_logger.addHandler(handler)
         bridge_logger.setLevel(logging.INFO)
 

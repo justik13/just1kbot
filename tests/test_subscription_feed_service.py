@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 from database.models import Server, User, VPNProfile
-from services.subscription_feed_service import (
+from integrations.incy.feed_service import (
     SubscriptionFeedService,
 )
 from utils.vpn_parser import encode_json_to_vpn_uri
@@ -85,7 +85,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         get_settings.cache_clear()
         cls.env_patcher.stop()
 
-    @patch("services.subscription_feed_service.get_user_profiles")
+    @patch("integrations.incy.feed_service.get_user_profiles")
     async def test_get_exportable_configs_filters_properly(self, mock_get_profiles):
         server_awg2 = Server(id=1, name="Poland #1", country_flag="🇵🇱", protocol="amneziawg2", is_active=True)
         server_awg3 = Server(id=2, name="Germany #1", country_flag="🇩🇪", protocol="amneziawg3", is_active=True)
@@ -133,8 +133,8 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[Interface]", conf_text)
         self.assertIn("PrivateKey = privkey_1", conf_text)
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_active_user_with_profiles(
         self, mock_get_traffic, mock_get_exportable
     ):
@@ -185,8 +185,8 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             sample_config,
         )
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_grace_period_extends_expire_header(
         self, mock_get_traffic, mock_get_exportable
     ):
@@ -221,8 +221,8 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
             headers["subscription-userinfo"],
         )
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_active_user_zero_devices(
         self, mock_get_traffic, mock_get_exportable
     ):
@@ -243,7 +243,7 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         # Real future expiration must be preserved in headers
         self.assertIn(f"expire={int(sub_end.timestamp())}", headers["subscription-userinfo"])
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_expired_or_banned_user(self, mock_get_traffic):
         mock_get_traffic.return_value = (500, 500)
         past_end = datetime.now(timezone.utc) - timedelta(days=5)
@@ -268,8 +268,8 @@ class SubscriptionFeedServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status_banned, 200)
         self.assertEqual(body_banned, "")
 
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_exportable_configs")
-    @patch("services.subscription_feed_service.SubscriptionFeedService.get_user_traffic")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_exportable_configs")
+    @patch("integrations.incy.feed_service.SubscriptionFeedService.get_user_traffic")
     async def test_build_feed_multiple_devices_multi_server(
         self, mock_get_traffic, mock_get_exportable
     ):

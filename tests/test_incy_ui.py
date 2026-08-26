@@ -136,9 +136,9 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertNotIn("menu_incy_subscription", callbacks)
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
-    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.get_or_create_token")
-    @patch("bot.handlers.connection.incy_routes.render_hub")
+    @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
+    @patch("integrations.incy.bot_routes.SubscriptionTokenService.get_or_create_token")
+    @patch("integrations.incy.bot_routes.render_hub")
     async def test_show_incy_subscription_handler(
         self, mock_render_hub, mock_get_token, mock_check_access
     ):
@@ -163,7 +163,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         mock_get_token.assert_awaited_once_with(session, db_user)
         mock_render_hub.assert_awaited_once()
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.is_enabled")
+    @patch("integrations.incy.bot_routes.SubscriptionTokenService.is_enabled")
     async def test_show_incy_subscription_when_disabled(
         self, mock_is_enabled
     ):
@@ -180,7 +180,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             "⚠️ Подписка INCY временно недоступна.", show_alert=True
         )
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
+    @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
     async def test_show_incy_subscription_when_no_access(
         self, mock_check_access
     ):
@@ -197,13 +197,13 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
             "⚠️ Доступ неактивен. Продлите подписку.", show_alert=True
         )
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
-    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
-    @patch("bot.handlers.connection.incy_routes.render_hub")
+    @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
+    @patch("integrations.incy.bot_routes.SubscriptionTokenService.rotate_token")
+    @patch("integrations.incy.bot_routes.render_hub")
     async def test_rotate_incy_subscription_handler(
         self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
-        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+        from integrations.incy.bot_routes import rotate_incy_subscription
 
         mock_check_access.return_value = True
         mock_rotate_token.return_value = "new_rotated_token_456"
@@ -239,13 +239,13 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         btn_urls = [btn.url for row in keyboard_arg.inline_keyboard for btn in row if btn.url]
         self.assertTrue(any("sub/open/new_rotated_token_456" in u for u in btn_urls))
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
-    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
-    @patch("bot.handlers.connection.incy_routes.render_hub")
+    @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
+    @patch("integrations.incy.bot_routes.SubscriptionTokenService.rotate_token")
+    @patch("integrations.incy.bot_routes.render_hub")
     async def test_rotate_incy_subscription_handler_on_error(
         self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
-        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+        from integrations.incy.bot_routes import rotate_incy_subscription
 
         mock_check_access.return_value = True
         mock_rotate_token.side_effect = RuntimeError("DB error")
@@ -267,13 +267,13 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         mock_render_hub.assert_not_awaited()
 
-    @patch("bot.handlers.connection.incy_routes.SubscriptionService.check_access")
-    @patch("bot.handlers.connection.incy_routes.SubscriptionTokenService.rotate_token")
-    @patch("bot.handlers.connection.incy_routes.render_hub")
+    @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
+    @patch("integrations.incy.bot_routes.SubscriptionTokenService.rotate_token")
+    @patch("integrations.incy.bot_routes.render_hub")
     async def test_rotate_incy_subscription_handler_on_commit_failure(
         self, mock_render_hub, mock_rotate_token, mock_check_access
     ):
-        from bot.handlers.connection.incy_routes import rotate_incy_subscription
+        from integrations.incy.bot_routes import rotate_incy_subscription
 
         mock_check_access.return_value = True
         mock_rotate_token.return_value = "uncommitted_token_999"
