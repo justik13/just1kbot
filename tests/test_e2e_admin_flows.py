@@ -181,24 +181,15 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         # Admin clicks on user card
         import asyncio
-        import time
+        await asyncio.sleep(0.35)
         update = self._create_callback_update("admin_user_card:987654321")
         await self.dp.feed_update(bot=self.bot, update=update)
 
-        deadline = time.time() + 2.0
-        req = None
-        while time.time() < deadline:
-            try:
-                req = next(
-                    r
-                    for r in reversed(self.session.requests)
-                    if r.__class__.__name__ == "EditMessageText"
-                    and "987654321" in r.text
-                )
-                break
-            except StopIteration:
-                await asyncio.sleep(0.02)
-        self.assertIsNotNone(req, "user card edit was not rendered in time")
+        req = next(
+            req
+            for req in reversed(self.session.requests)
+            if req.__class__.__name__ == "EditMessageText"
+        )
         self.assertIn("987654321", req.text)
 
     async def test_admin_flow_send_direct_message(self):
@@ -213,8 +204,7 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("Отправка сообщения пользователю", req.text)
 
-        for _ in range(20):
-            await asyncio.sleep(0)
+        await asyncio.sleep(0.35)
         update = self._create_message_update("Hello from Admin!")
         await self.dp.feed_update(bot=self.bot, update=update)
 
