@@ -73,7 +73,7 @@ def decode_vpn_uri_to_json(uri: str) -> dict | None:
     return data
 
 
-def _looks_like_wireguard_conf(conf: str | None) -> bool:
+def _looks_like_awg_conf(conf: str | None) -> bool:
     if not conf or not isinstance(conf, str):
         return False
     return "[Interface]" in conf and "[Peer]" in conf
@@ -188,12 +188,12 @@ def build_conf_file_from_dict(data: dict) -> str | None:
         if not last_config:
             raise VPNConfigParseError("No last_config found")
         config_str = last_config.get("config")
-        if _looks_like_wireguard_conf(config_str):
+        if _looks_like_awg_conf(config_str):
             return config_str
         fallback_conf = _build_conf_fallback(data, last_config)
-        if _looks_like_wireguard_conf(fallback_conf):
+        if _looks_like_awg_conf(fallback_conf):
             return fallback_conf
-        raise VPNConfigParseError("Failed to build wireguard conf")
+        raise VPNConfigParseError("Failed to build AWG conf")
     except VPNConfigParseError:
         raise
     except Exception as e:
@@ -222,8 +222,6 @@ def build_conf_file(uri: str) -> str | None:
             return build_conf_file_from_dict(data)
     except Exception:
         pass
-    if _looks_like_wireguard_conf(uri):
-        return uri
     return None
 
 
@@ -241,11 +239,8 @@ def is_valid_vpn_uri(uri: str) -> bool:
         last_config = _parse_last_config(awg)
         if not last_config:
             return False
-        config_str = last_config.get("config")
-        if _looks_like_wireguard_conf(config_str):
-            return True
         fallback_conf = _build_conf_fallback(data, last_config)
-        if _looks_like_wireguard_conf(fallback_conf):
+        if fallback_conf and _looks_like_awg_conf(fallback_conf):
             return True
         return False
     except Exception:

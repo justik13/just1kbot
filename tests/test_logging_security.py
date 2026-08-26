@@ -401,7 +401,7 @@ class NoDirectSettingsSecretLoggingTests(unittest.TestCase):
     def test_secret_settings_attributes_are_not_logging_arguments(self):
         root = Path(__file__).resolve().parents[1]
         violations = []
-        for package in ("bot", "database", "services", "utils"):
+        for package in ("bot", "database", "integrations", "services", "utils"):
             for path in (root / package).rglob("*.py"):
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
