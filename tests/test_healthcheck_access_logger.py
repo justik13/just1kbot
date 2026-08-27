@@ -62,6 +62,20 @@ class TestGetServerLoadTimeout(unittest.IsolatedAsyncioTestCase):
                 mock_warn.assert_called_once()
                 self.assertIn("TimeoutError", mock_warn.call_args[0][2])
 
+    async def test_get_server_load_actual_wait_for_timeout(self):
+        client = AmneziaClient("http://localhost:3000", "testkey")
+
+        async def slow_internal():
+            await asyncio.sleep(0.5)
+            return {"cpu_percent": 10}
+
+        with patch.object(client, "_get_server_load_internal", side_effect=slow_internal):
+            with patch("services.amnezia_client.logger.warning") as mock_warn:
+                res = await client.get_server_load(timeout=0.01)
+                self.assertIsNone(res)
+                mock_warn.assert_called_once()
+                self.assertIn("TimeoutError", mock_warn.call_args[0][2])
+
 
 class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
