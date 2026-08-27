@@ -47,6 +47,12 @@ EXPECTED_FILES = {
     "runtime/notifications.py",
 }
 
+PRODUCTION_DIRS = (
+    ROOT / "bot",
+    ROOT / "services",
+    ROOT / "integrations",
+)
+
 
 class TestTextsLayout(unittest.TestCase):
     def test_exact_domain_layout(self):
@@ -116,4 +122,63 @@ class TestTextsLayout(unittest.TestCase):
             ui_values,
             [],
             "User-facing string literals must live under bot/texts, not config/constants.py",
+        )
+
+    def test_no_cyrillic_string_literals_outside_texts(self):
+        """Production modules must not own Russian UI text outside bot/texts."""
+        violations = []
+
+        class Visitor(ast.NodeVisitor):
+            def __init__(self, path: Path):
+                self.path = path
+                self.call_stack: list[ast.Call] = []
+
+            def visit_Call(self, node: ast.Call):
+                self.call_stack.append(node)
+                self.generic_visit(node)
+                self.call_stack.pop()
+
+            def visit_Constant(self, node: ast.Constant):
+                if not isinstance(node.value, str) or not any("\u0400" <= ch <= "\u04ff" for ch in node.value):
+                    self.generic_visit(node)
+                    return
+                if self._is_docstring(node) or self._is_logging_argument():
+                    return
+                violations.append(
+                    f"{self.path.relative_to(ROOT)}:{node.lineno}: {node.value[:80]!r}"
+                )
+                self.generic_visit(node)
+
+            def _is_docstring(self, node: ast.Constant) -> bool:
+                return isinstance(getattr(node, "parent", None), (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+
+            def _is_logging_argument(self) -> bool:
+                for call in self.call_stack:
+                    if isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name):
+                        if call.func.value.id in {"logger", "logging", "log", "root_logger"}:
+                            return True
+                return False
+
+        for base_dir in PRODUCTION_DIRS:
+            for path in base_dir.rglob("*.py"):
+                if TEXTS_DIR in path.parents or path == TEXTS_DIR / "__init__.py":
+                    continue
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        docstring = ast.get_docstring(node, clean=False)
+                        if docstring and node.body and isinstance(node.body[0], ast.Expr):
+                            node.body[0].value.parent = node
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                        for parent_node in ast.walk(tree):
+                            if isinstance(parent_node, ast.Expr) and parent_node.value is node:
+                                node.parent = parent_node.parent if hasattr(parent_node, "parent") else None
+                visitor = Visitor(path)
+                visitor.visit(tree)
+
+        self.assertEqual(
+            violations,
+            [],
+            "Cyrillic string literals outside bot/texts detected:\n" + "\n".join(violations),
         )
