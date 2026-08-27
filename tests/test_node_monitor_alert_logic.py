@@ -207,7 +207,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
             text = self.mock_bot.send_message.call_args.kwargs["text"]
-            self.assertIn("VPN-сервер восстановлен", text)
+            self.assertIn("сервер восстановлен", text)
             self.assertEqual(st_rehydrated.health_state, ServerHealthState.ONLINE)
 
     async def test_manual_enable_resets_db_and_allows_subsequent_recovery_notice(self):
@@ -355,7 +355,7 @@ class NodeMonitorAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             await check_node_resources_and_alerts(self.mock_bot)
             self.assertEqual(st.health_state, ServerHealthState.PROBLEM)
             self.assertEqual(self.mock_bot.send_message.call_count, 1)
-            self.assertIn("Проблема с VPN-сервером", self.mock_bot.send_message.call_args.kwargs["text"])
+            self.assertIn("Проблема с сервером", self.mock_bot.send_message.call_args.kwargs["text"])
 
             # 3. Simulate 16 minutes elapsed in PROBLEM -> AUTO_DISABLED (1 alert)
             st.problem_started_at = time.monotonic() - (16 * 60.0)
