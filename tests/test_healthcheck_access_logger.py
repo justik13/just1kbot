@@ -156,6 +156,10 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
         ):
             await common._show_server_card(callback, session, server)
 
+        rendered = callback.message.edit_text.call_args.args[0]
+        self.assertIn("6 / 240", rendered)
+        self.assertNotIn("(в БД:", rendered)
+
     async def test_slots_cache_completion_timestamp_ordering(self):
         from services.slots_cache import get_cached_peer_count, update_cached_peer_count
 
