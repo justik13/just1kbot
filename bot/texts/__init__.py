@@ -12,6 +12,20 @@ from bot.texts.payment import *  # noqa: F403
 from bot.texts.runtime import *  # noqa: F403
 from bot.texts.user import *  # noqa: F403
 
+# Re-export canonical keys introduced in domain modules but not yet present in the
+# package-level domain __all__ lists. Ownership remains in the domain files.
+from bot.texts.admin.broadcast import ADMIN_AUDIT_LOG_DETAILS_BROADCAST
+from bot.texts.admin.queues import QUEUE_HEALTH_DEAD_PROBLEM, QUEUE_HEALTH_OVERDUE_PROBLEM
+from bot.texts.admin.servers import ADMIN_SERVER_API_URL
+from bot.texts.admin.users import (
+    ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS,
+    ADMIN_USER_ID_NO_COLON_FORMAT,
+)
+from bot.texts.connection.config import (
+    CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE,
+    CONNECTION_LIST_DEVICE_ROW_FORMAT,
+)
+
 _TEXT_KEYS = frozenset(name for name in globals() if name.isupper())
 
 
