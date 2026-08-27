@@ -107,11 +107,11 @@ async def _render_balance(
     history = await get_account_history(session, user_id=user.id, limit=5)
     visible = await get_visible_balance_topup(session, user_id=user.id)
     details = [
-        f"💰 Баланс: <b>{int(snapshot.real_available)} ₽</b>",
+        texts.UI_BALANCE_ROUTES_BALANS_110.format(int_snapshot_real_available=int(snapshot.real_available)),
     ]
     if snapshot.bonus_available > 0:
         details.append(
-            f"🎁 Бонусный баланс: <b>{int(snapshot.bonus_available)} ₽</b>"
+            texts.UI_BALANCE_ROUTES_BONUSNYY_BALANS_114.format(int_snapshot_bonus_available=int(snapshot.bonus_available))
         )
     if snapshot.reserved > 0:
         details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L106_1.format(value_0=int(snapshot.reserved)))
@@ -354,9 +354,9 @@ async def choose_topup_amount(
     tariff_amounts = topup_presets(tariffs)
     amounts = sorted(list(set(preset_defaults + tariff_amounts)))
     balance = await get_account_balance(session, user_id=db_user.id)
-    balance_lines = f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
+    balance_lines = texts.UI_BALANCE_ROUTES_BALANS_357.format(int_balance_real_available=int(balance.real_available))
     if balance.bonus_available > 0:
-        balance_lines += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
+        balance_lines += texts.UI_BALANCE_ROUTES_BONUSNYY_BALANS_359.format(int_balance_bonus_available=int(balance.bonus_available))
 
     from services.referral_bonus import is_first_topup_eligible
     is_first_eligible = await is_first_topup_eligible(session, user_id=db_user.id)
@@ -364,21 +364,21 @@ async def choose_topup_amount(
     bonus_notice = ""
     if is_first_eligible:
         bonus_lines = "\n".join(
-            f"• {amt} ₽ ➡️ <b>+{amt // 10} ₽</b> на бонусный баланс"
+            texts.UI_BALANCE_ROUTES_NA_BONUSNYY_BALANS_367.format(amt=amt, amt____10=amt // 10)
             for amt in amounts
         )
         bonus_notice = (
-            f"\n🎁 <b>Бонус на первое пополнение:</b>\n"
-            f"Вы получите <b>+10%</b> от суммы пополнения на бонусный баланс!\n"
-            f"<i>(подробнее в меню «Пригласить друга»)</i>\n\n"
-            f"💡 <b>Расчет бонуса к сумме:</b>\n{bonus_lines}\n"
+            texts.UI_BALANCE_ROUTES_BONUS_NA_PERVOE_POPOLNENIE_371.format()+
+            texts.UI_BALANCE_ROUTES_VY_POLUCHITE_10_OT_SUMMY_POPOL_372.format()+
+            texts.UI_BALANCE_ROUTES_PODROBNEE_V_MENYU_PRIGLASIT_DR_373.format()+
+            texts.UI_BALANCE_ROUTES_RASCHET_BONUSA_K_SUMME_374.format(bonus_lines=bonus_lines)
         )
 
     text = (
-        f"➕ <b>Пополнение баланса</b>\n\n"
-        f"{balance_lines}\n"
-        f"{bonus_notice}\n"
-        f"Выберите сумму или укажите другую целую сумму в рублях."
+        texts.UI_BALANCE_ROUTES_POPOLNENIE_BALANSA_378.format()+
+        f"{balance_lines}\n"+
+        f"{bonus_notice}\n"+
+        texts.UI_BALANCE_ROUTES_VYBERITE_SUMMU_ILI_UKAZHITE_DR_381.format()
     )
     await render_hub(
         callback.bot,
@@ -654,7 +654,7 @@ async def cancel_all_topups_ui(
         callback.message.chat.id,
         session,
         db_user,
-        notice=f"Отменено {count} ссылок." if count > 0 else None,
+        notice=texts.UI_BALANCE_ROUTES_OTMENENO_SSYLOK_657.format(count=count) if count > 0 else None,
     )
 
 

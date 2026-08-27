@@ -35,9 +35,9 @@ async def _get_inviter_line(session: AsyncSession, user: User) -> str:
         name = safe(referrer.first_name) if referrer.first_name else ""
         username_str = f" (@{safe(referrer.username)})" if referrer.username else ""
         if name or username_str:
-            return f"\n🤝 Вас пригласил: {name}{username_str} (ID: <code>{referrer.telegram_id}</code>)"
-        return f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
-    return f"\n🤝 Вас пригласил: ID <code>{user.referred_by}</code>"
+            return texts.UI_U_VAS_PRIGLASIL_ID_38.format(name=name, username_str=username_str, referrer_telegram_id=referrer.telegram_id)
+        return texts.UI_U_VAS_PRIGLASIL_ID_39.format(referrer_telegram_id=referrer.telegram_id)
+    return texts.UI_U_VAS_PRIGLASIL_ID_40.format(user_referred_by=user.referred_by)
 
 
 @router.callback_query(F.data == "user_history")
@@ -72,7 +72,7 @@ async def show_history(
             date = format_datetime(payment.paid_at or payment.created_at)
             currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
             rendered += (
-                f"{status_icon} {date} | "
+                f"{status_icon} {date} | "+
                 f"{payment.amount} {currency}\n"
             )
 

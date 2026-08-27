@@ -90,11 +90,11 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
             )
             builder = InlineKeyboardBuilder()
             builder.button(
-                text="🏠 Главное меню",
+                text=texts.UI_ACCOUNT_BALANCE_GLAVNOE_MENYU_93,
                 callback_data="back_to_main_menu",
             )
             builder.button(
-                text="✅ Прочитано",
+                text=texts.UI_ACCOUNT_BALANCE_PROCHITANO_97,
                 callback_data="dismiss_notification",
             )
             builder.adjust(2)

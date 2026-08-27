@@ -61,26 +61,26 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
-    header = format_admin_breadcrumbs("👥 Пользователи", f"ID {telegram_id}", "📱 Устройства")
+    header = format_admin_breadcrumbs(texts.UI_DEVICE_ROUTES_POLZOVATELI_64, f"ID {telegram_id}", texts.UI_DEVICE_ROUTES_USTROYSTVA_64)
     now = now_utc()
 
     if not profiles:
         text = (
-            f"{header}"
-            f"📱 <b>Устройства пользователя ID {telegram_id}:</b>\n\n"
-            f"<i>У пользователя пока нет созданных устройств.</i>"
+            f"{header}"+
+            texts.UI_DEVICE_ROUTES_USTROYSTVA_POLZOVATELYA_ID_70.format(telegram_id=telegram_id)+
+            texts.UI_DEVICE_ROUTES_U_POLZOVATELYA_POKA_NET_SOZDAN_71.format()
         )
     else:
-        lines = [f"{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>\n"]
+        lines = [texts.UI_DEVICE_ROUTES_USTROYSTVA_POLZOVATELYA_ID_74.format(header=header, telegram_id=telegram_id)]
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
-                or f"Устройство #{profile.id}"
+                or texts.UI_DEVICE_ROUTES_USTROYSTVO_78.format(profile_id=profile.id)
             )
             # get_user_profiles() eagerly loads VPNProfile.server, so this does
             # not add a query per device and keeps the device list efficient.
             server = getattr(profile, "server", None)
-            server_name = safe(server.name) if server else "Неизвестный сервер"
+            server_name = safe(server.name) if server else texts.UI_DEVICE_ROUTES_NEIZVESTNYY_SERVER_83
             server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
 
             # VPNProfile does not have a last_handshake_at column. The traffic
@@ -97,17 +97,17 @@ async def admin_user_devices(
                 if 0 <= delta_sec <= 180:
                     is_online = True
 
-            status_hs = "🟢 <b>В сети (активность ≤ 3 мин)</b>" if is_online else "🔴 <b>Офлайн</b>"
+            status_hs = texts.UI_DEVICE_ROUTES_V_SETI_AKTIVNOST_3_MIN_100 if is_online else texts.UI_DEVICE_ROUTES_OFLAYN_100
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было подключения"
+            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.UI_DEVICE_ROUTES_NE_BYLO_PODKLYUCHENIYA_102
 
             lines.append(
-                f"• 📱 <b>{safe(name)}</b>\n"
-                f"   🆔 ID устройства: <code>{profile.id}</code>\n"
-                f"   🖥 Сервер: {server_flag} <b>{server_name}</b>\n"
-                f"   Состояние: {status_hs}\n"
-                f"   Трафик: <code>{traffic_total}</code>\n"
-                f"   Активность: <i>{last_conn}</i>\n"
+                f"• 📱 <b>{safe(name)}</b>\n"+
+                texts.UI_DEVICE_ROUTES_ID_USTROYSTVA_106.format(profile_id=profile.id)+
+                texts.UI_DEVICE_ROUTES_SERVER_107.format(server_flag=server_flag, server_name=server_name)+
+                texts.UI_DEVICE_ROUTES_SOSTOYANIE_108.format(status_hs=status_hs)+
+                texts.UI_DEVICE_ROUTES_TRAFIK_109.format(traffic_total=traffic_total)+
+                texts.UI_DEVICE_ROUTES_AKTIVNOST_110.format(last_conn=last_conn)
             )
         text = "\n".join(lines)
 
@@ -191,7 +191,7 @@ async def admin_delete_device_confirm(
             text,
             reply_markup=get_admin_confirm_action_keyboard(
                 confirm_callback=(
-                    f"admin_delete_device_apply:"
+                    f"admin_delete_device_apply:"+
                     f"{telegram_id}:{profile_id}"
                 ),
                 cancel_callback=(

@@ -1,3 +1,4 @@
+from bot import texts
 import logging
 
 from sqlalchemy import select, text
@@ -37,9 +38,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, "Пользователь не найден"
+            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_40
         if user.is_banned:
-            return True, "уже забанен"
+            return True, texts.UI_BAN_SERVICE_UZHE_ZABANEN_42
         return await BanService._ban_user(
             session=session,
             admin_id=admin_id,
@@ -55,9 +56,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, "Пользователь не найден"
+            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_58
         if not user.is_banned:
-            return True, "уже разбанен"
+            return True, texts.UI_BAN_SERVICE_UZHE_RAZBANEN_60
         return await BanService._unban_user(
             session=session,
             admin_id=admin_id,
@@ -74,7 +75,7 @@ class BanService:
         user = await get_user_by_telegram_id(session, telegram_id)
 
         if not user:
-            return False, "Пользователь не найден"
+            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_77
 
         new_status = not user.is_banned
 
@@ -127,7 +128,7 @@ class BanService:
             .with_for_update()
         )
         if locked_user is None or locked_user.is_deleted:
-            return False, "Пользователь не найден"
+            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_130
 
         payments_closed = 0
         reconciliations_queued = 0
@@ -185,8 +186,8 @@ class BanService:
         invalidate_user_cache(telegram_id)
 
         logger.info(
-            "User %s banned by admin %s. "
-            "Deleted profiles: %s, closed top-ups: %s, "
+            "User %s banned by admin %s. "+
+            "Deleted profiles: %s, closed top-ups: %s, "+
             "queued reconciliations: %s",
             telegram_id,
             admin_id,
@@ -195,7 +196,7 @@ class BanService:
             reconciliations_queued,
         )
 
-        return True, "забанен"
+        return True, texts.UI_BAN_SERVICE_ZABANEN_198
 
     @staticmethod
     async def _unban_user(
@@ -226,4 +227,4 @@ class BanService:
             admin_id,
         )
 
-        return True, "разбанен"
+        return True, texts.UI_BAN_SERVICE_RAZBANEN_229

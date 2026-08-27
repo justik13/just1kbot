@@ -52,8 +52,8 @@ def format_user_card_text(
         telegram_id=user.telegram_id,
         username=safe(user.username),
         first_name=safe(user.first_name),
-        status=("🟢 Активен" if has_access else "🔴 Неактивен"),
-        ban=("🚫 ЗАБАНЕН" if user.is_banned else "✅ Не забанен"),
+        status=(texts.UI_FORMATTERS_AKTIVEN_55 if has_access else texts.UI_FORMATTERS_NEAKTIVEN_55),
+        ban=(texts.UI_FORMATTERS_ZABANEN_56 if user.is_banned else texts.UI_FORMATTERS_NE_ZABANEN_56),
         tariff_info=safe(tariff_info),
         referrer_info=safe(referrer_info),
         real_balance=real_balance,
@@ -152,9 +152,9 @@ def format_audit_details(details: str | None) -> str:
         if k in ("debit", "credit", "amount") and str(v).isdigit():
             val = f"{v} ₽"
         elif k == "days" and str(v).isdigit():
-            val = f"{v} дн."
+            val = texts.UI_FORMATTERS_DN_155.format(v=v)
         elif k in ("conversion", "force", "devices_restored"):
-            val = "Да" if str(v).lower() in ("true", "1") else "Нет"
+            val = texts.UI_FORMATTERS_DA_157 if str(v).lower() in ("true", "1") else texts.UI_FORMATTERS_NET_157
         elif k == "text":
             text_str = str(v)
             val = f'"{text_str[:40]}..."' if len(text_str) > 40 else f'"{text_str}"'
@@ -199,5 +199,5 @@ def format_admin_breadcrumbs(*crumbs: str) -> str:
     Пример: format_admin_breadcrumbs("🖥 Серверы", "Node #1")
     -> "📌 <b>🏠 Админка ➔ 🖥 Серверы ➔ Node #1</b>\n\n"
     """
-    items = ["🏠 Админка"] + [c for c in crumbs if c]
+    items = [texts.UI_FORMATTERS_ADMINKA_202] + [c for c in crumbs if c]
     return f"📌 <b>{' ➔ '.join(items)}</b>\n\n"

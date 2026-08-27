@@ -80,7 +80,7 @@ def _resolve_log_level() -> str:
 logging.basicConfig(
     level=_resolve_log_level(),
     format=(
-        "%(asctime)s - %(levelname)s - "
+        "%(asctime)s - %(levelname)s - "+
         "[%(request_id)s] %(name)s: %(message)s"
     ),
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -350,7 +350,7 @@ async def main():
             str(backup_key_path)
         ):
             logger.critical(
-                "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "
+                "CRITICAL WARNING: DB_ENCRYPTION_KEY is present but "+
                 f"{backup_key_path} is missing!"
             )
             raise RuntimeError(f"Startup aborted: {backup_key_path} is missing. Backups would be irrecoverable.")
@@ -362,11 +362,11 @@ async def main():
                 "DB_ENCRYPTION_KEY is not a valid Fernet key"
             ) from exc
 
-        logger.info("Инициализация БД...")
+        logger.info(texts.UI_MAIN_INITSIALIZATSIYA_BD_365)
         await init_db()
 
         logger.info(
-            "🔄 Bot started — all in-memory operation locks "
+            "🔄 Bot started — all in-memory operation locks "+
             "cleared (restart)."
         )
 
@@ -378,7 +378,7 @@ async def main():
 
         if ci_test_mode:
             logger.info(
-                "CI_TEST_MODE enabled; skipping Telegram polling, "
+                "CI_TEST_MODE enabled; skipping Telegram polling, "+
                 "pending broadcast resume and background workers"
             )
         else:
@@ -399,7 +399,7 @@ async def main():
 
         if ci_test_mode:
             logger.info(
-                "CI_TEST_MODE ready: HTTP health endpoint is available; "
+                "CI_TEST_MODE ready: HTTP health endpoint is available; "+
                 "waiting for test container shutdown"
             )
             await shutdown_event.wait()
@@ -407,7 +407,7 @@ async def main():
 
         await start_background_workers(bot)
 
-        logger.info("Запуск polling...")
+        logger.info(texts.UI_MAIN_ZAPUSK_POLLING_410)
         polling_task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
         shutdown_task = asyncio.create_task(shutdown_event.wait())
 
@@ -492,7 +492,7 @@ async def main():
         except Exception as e:
             logger.error("Failed to close database: %s", e)
 
-        logger.info("Работа бота завершена")
+        logger.info(texts.UI_MAIN_RABOTA_BOTA_ZAVERSHENA_495)
 
 
 if __name__ == "__main__":

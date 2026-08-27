@@ -1,0 +1,9 @@
+
+UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_40 = 'Пользователь не найден'
+UI_BAN_SERVICE_UZHE_ZABANEN_42 = 'уже забанен'
+UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_58 = 'Пользователь не найден'
+UI_BAN_SERVICE_UZHE_RAZBANEN_60 = 'уже разбанен'
+UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_77 = 'Пользователь не найден'
+UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_130 = 'Пользователь не найден'
+UI_BAN_SERVICE_ZABANEN_198 = 'забанен'
+UI_BAN_SERVICE_RAZBANEN_229 = 'разбанен'

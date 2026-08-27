@@ -116,7 +116,7 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
 
     servers = await get_active_servers(session)
     if not servers:
-        return "<i>Серверов пока нет</i>"
+        return texts.UI_DASHBOARD_SERVEROV_POKA_NET_119
 
     db_counts = await get_server_peer_counts(session)
     lines = []
@@ -145,28 +145,28 @@ async def _show_admin_dashboard(
     servers_summary = await _get_servers_capacity_summary(session)
     maintenance_enabled = await MaintenanceService.is_enabled(session)
 
-    header = format_admin_breadcrumbs("Главный Дашборд")
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_GLAVNYY_DASHBORD_148)
     text = (
-        f"{header}"
-        f"📊 <b>Пользователи и Подписки:</b>\n"
-        f"• Всего пользователей: <b>{stats['total']}</b>\n"
-        f"• Активных подписок: <b>{stats['active']}</b>\n"
-        f"• Новых за 24 часа: <b>{stats['new_24h']}</b>\n\n"
-        f"💰 <b>Финансовые показатели:</b>\n"
-        f"• Выручка за 24ч: <b>{fin_stats['rev_24h']} ₽</b> ({fin_stats['count_24h']} продаж)\n"
-        f"• Выручка за 7д: <b>{fin_stats['rev_7d']} ₽</b>\n"
-        f"• Выручка за 30д: <b>{fin_stats['rev_30d']} ₽</b>\n"
-        f"• Средний чек (30д): <b>{fin_stats['avg_check']} ₽</b>\n\n"
-        f"🖥 <b>VPN Серверы и Пул IP:</b>\n"
-        f"• Свободных IP в пуле: <b>{free_ips}</b>\n"
+        f"{header}"+
+        texts.UI_DASHBOARD_POLZOVATELI_I_PODPISKI_151.format()+
+        texts.UI_DASHBOARD_VSEGO_POLZOVATELEY_TOTAL_152.format(stats__total=stats['total'])+
+        texts.UI_DASHBOARD_AKTIVNYKH_PODPISOK_ACTIVE_153.format(stats__active=stats['active'])+
+        texts.UI_DASHBOARD_NOVYKH_ZA_24_CHASA_NEW_24H_154.format(stats__new_24h=stats['new_24h'])+
+        texts.UI_DASHBOARD_FINANSOVYE_POKAZATELI_155.format()+
+        texts.UI_DASHBOARD_VYRUCHKA_ZA_24CH_PRODAZH_REV_2_156.format(fin_stats__rev_24h=fin_stats['rev_24h'], fin_stats__count_24h=fin_stats['count_24h'])+
+        texts.UI_DASHBOARD_VYRUCHKA_ZA_7D_REV_7D_157.format(fin_stats__rev_7d=fin_stats['rev_7d'])+
+        texts.UI_DASHBOARD_VYRUCHKA_ZA_30D_REV_30D_158.format(fin_stats__rev_30d=fin_stats['rev_30d'])+
+        texts.UI_DASHBOARD_SREDNIY_CHEK_30D_AVG_CHECK_159.format(fin_stats__avg_check=fin_stats['avg_check'])+
+        texts.UI_DASHBOARD_VPN_SERVERY_I_PUL_IP_160.format()+
+        texts.UI_DASHBOARD_SVOBODNYKH_IP_V_PULE_161.format(free_ips=free_ips)+
         f"{servers_summary}\n\n"
     )
 
     if dead_queues_count > 0 or disputes_count > 0:
         text += (
-            f"⚠️ <b>Требует внимания:</b>\n"
-            f"• Зависших задач в очередях: <b>{dead_queues_count}</b>\n"
-            f"• Открытых платежных споров: <b>{disputes_count}</b>\n\n"
+            texts.UI_DASHBOARD_TREBUET_VNIMANIYA_167.format()+
+            texts.UI_DASHBOARD_ZAVISSHIKH_ZADACH_V_OCHEREDYAK_168.format(dead_queues_count=dead_queues_count)+
+            texts.UI_DASHBOARD_OTKRYTYKH_PLATEZHNYKH_SPOROV_169.format(disputes_count=disputes_count)
         )
 
     if maintenance_enabled:
@@ -221,8 +221,8 @@ async def show_admin_cat_users(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    header = format_admin_breadcrumbs("👥 Пользователи и Рассылки")
-    text = f"{header}👥 <b>Управление пользователями и рассылками:</b>\n\nВыберите нужный раздел:"
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_POLZOVATELI_I_RASSYLKI_224)
+    text = texts.UI_DASHBOARD_UPRAVLENIE_POLZOVATELYAMI_I_RA_225.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_users_keyboard(), parse_mode="HTML")
     except TelegramBadRequest:
@@ -236,8 +236,8 @@ async def show_admin_cat_infra(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    header = format_admin_breadcrumbs("⚙️ Серверы и Тарифы")
-    text = f"{header}⚙️ <b>Управление VPN-серверами и тарифами:</b>\n\nВыберите нужный раздел:"
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_SERVERY_I_TARIFY_239)
+    text = texts.UI_DASHBOARD_UPRAVLENIE_VPN_SERVERAMI_I_TAR_240.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_infra_keyboard(), parse_mode="HTML")
     except TelegramBadRequest:
@@ -253,8 +253,8 @@ async def show_admin_cat_finance(callback: CallbackQuery, state: FSMContext, ses
     await state.clear()
     disputes_count = await _get_disputes_count(session)
     dead_queues_count = await _get_dead_queues_count(session)
-    header = format_admin_breadcrumbs("💰 Финансы и Очереди")
-    text = f"{header}💰 <b>Финансы, Очереди и Платежные споры:</b>\n\nВыберите нужный раздел:"
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_FINANSY_I_OCHEREDI_256)
+    text = texts.UI_DASHBOARD_FINANSY_OCHEREDI_I_PLATEZHNYE__257.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_finance_keyboard(dead_queues_count, disputes_count), parse_mode="HTML")
     except TelegramBadRequest:
@@ -269,8 +269,8 @@ async def show_admin_cat_system(callback: CallbackQuery, state: FSMContext, sess
         return
     await state.clear()
     maintenance_enabled = await MaintenanceService.is_enabled(session)
-    header = format_admin_breadcrumbs("🛠 Система и Настройки")
-    text = f"{header}🛠 <b>Системные настройки и логи:</b>\n\nВыберите нужный раздел:"
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_SISTEMA_I_NASTROYKI_272)
+    text = texts.UI_DASHBOARD_SISTEMNYE_NASTROYKI_I_LOGI_VYB_273.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_system_keyboard(maintenance_enabled), parse_mode="HTML")
     except TelegramBadRequest:
@@ -308,8 +308,8 @@ async def show_admin_audit(
 
     logs = await get_all_audit_logs_paginated(session, offset=offset, limit=per_page)
 
-    header = format_admin_breadcrumbs("🛠 Система", "📜 Аудит-лог")
-    text = f"{header}📜 <b>Аудит-лог действий администраторов</b> (Стр. {page}/{total_pages}, всего: {total_count})\n\n"
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_SISTEMA_311, texts.UI_DASHBOARD_AUDIT_LOG_311)
+    text = texts.UI_DASHBOARD_AUDIT_LOG_DEYSTVIY_ADMINISTRAT_312.format(header=header, page=page, total_pages=total_pages, total_count=total_count)
 
     if not logs:
         text += texts.AUDIT_LOG_EMPTY
@@ -438,23 +438,23 @@ async def show_admin_settings(
 
     await state.clear()
     mtproto_url = await get_system_setting(session, "mtproto_proxy_url", "")
-    header = format_admin_breadcrumbs("⚙️ Настройки бота")
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_NASTROYKI_BOTA_441)
 
     text = (
-        f"{header}"
-        f"⚙️ <b>Системные настройки бота:</b>\n\n"
-        f"🚀 <b>MTProto Proxy URL:</b>\n"
-        f"<code>{safe(mtproto_url or 'Не задано (ссылка скрыта от пользователей)')}</code>\n\n"
-        f"Вы можете изменить ссылку на MTProto Proxy в 1 клик прямо из бота без перезапуска сервера."
+        f"{header}"+
+        texts.UI_DASHBOARD_SISTEMNYE_NASTROYKI_BOTA_445.format()+
+        f"🚀 <b>MTProto Proxy URL:</b>\n"+
+        texts.UI_DASHBOARD_NE_ZADANO_SSYLKA_SKRYTA_OT_POL_447.format(safe_mtproto_url_or=safe(mtproto_url or 'Не задано (ссылка скрыта от пользователей)'))+
+        texts.UI_DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M_448.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🚀 Изменить ссылку MTProto Proxy",
+        text=texts.UI_DASHBOARD_IZMENIT_SSYLKU_MTPROTO_PROXY_453,
         callback_data="admin_edit_mtproto",
     )
     builder.button(
-        text="🔙 В админ-меню",
+        text=texts.UI_DASHBOARD_V_ADMIN_MENYU_457,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -480,12 +480,12 @@ async def start_edit_mtproto(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs("⚙️ Настройки", "MTProto Proxy")
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_NASTROYKI_483, "MTProto Proxy")
     text = (
-        f"{header}"
-        f"🚀 <b>Ввод ссылки MTProto Proxy:</b>\n\n"
-        f"Отправьте новую ссылку на MTProto Proxy (например, <code>https://t.me/proxy?server=...</code>)\n"
-        f"Или отправьте <code>-</code> (дефис), чтобы удалить ссылку и скрыть кнопку у пользователей:"
+        f"{header}"+
+        texts.UI_DASHBOARD_VVOD_SSYLKI_MTPROTO_PROXY_486.format()+
+        texts.UI_DASHBOARD_OTPRAVTE_NOVUYU_SSYLKU_NA_MTPR_487.format()+
+        texts.UI_DASHBOARD_ILI_OTPRAVTE_DEFIS_CHTOBY_UDAL_488.format()
     )
 
     try:
@@ -530,9 +530,9 @@ async def process_edit_mtproto(
     await set_system_setting(session, "mtproto_proxy_url", new_val, updated_by=message.from_user.id)
     await state.clear()
 
-    header = format_admin_breadcrumbs("⚙️ Настройки", "🚀 MTProto Proxy")
+    header = format_admin_breadcrumbs(texts.UI_DASHBOARD_NASTROYKI_533, "🚀 MTProto Proxy")
 
-    status_msg = "✅ Ссылка MTProto Proxy успешно удалена." if not new_val else f"✅ Ссылка MTProto Proxy обновлена на:\n<code>{safe(new_val)}</code>"
+    status_msg = texts.UI_DASHBOARD_SSYLKA_MTPROTO_PROXY_USPESHNO__535 if not new_val else texts.UI_DASHBOARD_SSYLKA_MTPROTO_PROXY_OBNOVLENA_535.format(safe_new_val=safe(new_val))
 
     await render_hub(
         message.bot,

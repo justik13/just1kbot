@@ -164,7 +164,7 @@ async def confirm_delete_device(
             answered = True
             return
         except DeviceCreationError:
-            await callback.answer("⚠️ Идёт автоматическое восстановление или действие недоступно.", show_alert=True)
+            await callback.answer(texts.UI_DEVICE_DELETE_ROUTES_IDET_AVTOMATICHESKOE_VOSSTANOV_167, show_alert=True)
             answered = True
             return
 

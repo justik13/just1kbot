@@ -1,3 +1,4 @@
+from bot import texts
 import logging
 import re
 from datetime import date, datetime, timedelta, timezone
@@ -123,7 +124,7 @@ class DeviceService:
                     break
             else:
                 slot_index = max(used) + 1 if used else 1
-            device_name = f"Устройство #{slot_index}"
+            device_name = texts.UI_DEVICE_SERVICE_USTROYSTVO_126.format(slot_index=slot_index)
         duplicate = (
             await session.execute(
                 select(VPNProfile.id).where(

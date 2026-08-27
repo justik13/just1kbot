@@ -115,9 +115,9 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
-    status_str = "🟢 Активна" if is_active else "🔴 Неактивна"
+    status_str = texts.UI_U_AKTIVNA_118 if is_active else texts.UI_U_NEAKTIVNA_118
     valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else "—"
-    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else "0 дней"
+    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.UI_U_0_DNEY_120
 
     inviter_line = ""
     if db_user.referred_by:
@@ -126,11 +126,11 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
             ref_name = safe(referrer.first_name) if referrer.first_name else ""
             ref_username = f" (@{safe(referrer.username)})" if referrer.username else ""
             if ref_name or ref_username:
-                inviter_line = f"\n🤝 Вас пригласил: {ref_name}{ref_username} (ID: <code>{referrer.telegram_id}</code>)"
+                inviter_line = texts.UI_U_VAS_PRIGLASIL_ID_129.format(ref_name=ref_name, ref_username=ref_username, referrer_telegram_id=referrer.telegram_id)
             else:
-                inviter_line = f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
+                inviter_line = texts.UI_U_VAS_PRIGLASIL_ID_131.format(referrer_telegram_id=referrer.telegram_id)
         else:
-            inviter_line = f"\n🤝 Вас пригласил: ID <code>{db_user.referred_by}</code>"
+            inviter_line = texts.UI_U_VAS_PRIGLASIL_ID_133.format(db_user_referred_by=db_user.referred_by)
 
     text = texts.HUB_HEADER.format(
         name=name,
@@ -192,7 +192,7 @@ async def cmd_start(
 
     if user is None:
         logger.error(
-            "cmd_start: user is still None after onboarding "
+            "cmd_start: user is still None after onboarding "+
             "for telegram_id=%s",
             telegram_id,
         )
@@ -210,7 +210,7 @@ async def cmd_start(
     await _ensure_bot_unblocked(session, telegram_id)
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+    builder.button(text=texts.UI_U_GLAVNOE_MENYU_213, callback_data="back_to_main_menu")
 
     await render_hub(
         message.bot,
@@ -222,16 +222,16 @@ async def cmd_start(
 
 
 @router.message(F.text & F.text.in_({
-    "👤 Профиль",
-    "💳 Купить / Продлить",
-    "🔑 Подключение",
-    "🆘 Поддержка",
-    "Профиль",
-    "Купить / Продлить",
-    "Подключение",
-    "Поддержка",
-    "Главное меню",
-    "🏠 Главное меню",
+    texts.UI_U_PROFIL_225,
+    texts.UI_U_KUPIT_PRODLIT_226,
+    texts.UI_U_PODKLYUCHENIE_227,
+    texts.UI_U_PODDERZHKA_228,
+    texts.UI_U_PROFIL_229,
+    texts.UI_U_KUPIT_PRODLIT_230,
+    texts.UI_U_PODKLYUCHENIE_231,
+    texts.UI_U_PODDERZHKA_232,
+    texts.UI_U_GLAVNOE_MENYU_233,
+    texts.UI_U_GLAVNOE_MENYU_234,
 }))
 async def handle_legacy_reply_keyboard(
     message: Message,

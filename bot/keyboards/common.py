@@ -53,7 +53,7 @@ def get_hub_keyboard(
     if is_admin:
         # White Internet is under development and visible only to administrators
         builder.button(
-            text="⚪️ Белый Интернет",
+            text=texts.UI_U_BELYY_INTERNET_56,
             callback_data="white_internet",
         )
         builder.button(

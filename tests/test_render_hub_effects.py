@@ -336,6 +336,7 @@ class TestRenderHubEffects(unittest.IsolatedAsyncioTestCase):
 
             await settle_succeeded_topup(session, payment=payment, source="test", settings=mock_settings, bot=bot)
 
+        print(f'DEBUG: {payment.topup_context}')
         self.assertEqual(len(queued_tasks), 1)  # Only _send_topup_push for purchase
 
         with patch("utils.telegram.render_hub", new_callable=AsyncMock) as mock_render_hub, \

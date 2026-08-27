@@ -25,16 +25,16 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
     from urllib.parse import quote
-    text_param = quote(f"Здравствуйте! Мой ID: {telegram_id}") if telegram_id else ""
+    text_param = quote(texts.UI_U_ZDRAVSTVUYTE_MOY_ID_28.format(telegram_id=telegram_id)) if telegram_id else ""
     support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
 
     builder.button(
-        text="💬 Написать в поддержку",
+        text=texts.UI_U_NAPISAT_V_PODDERZHKU_32,
         url=support_url,
     )
 
     builder.button(
-        text="ℹ️ Помощь и Инструкции",
+        text=texts.UI_U_POMOSHCH_I_INSTRUKTSII_37,
         callback_data="support_help",
     )
 
@@ -98,43 +98,43 @@ async def show_support_help(callback: CallbackQuery):
     suffix = f":device_{device_id}" if device_id else ""
 
     text = (
-        "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
-        "В этом разделе вы найдёте руководства по подключению, скачиванию клиента и настройке сервиса.\n\n"
-        "⚠️ <b>Правила и особенности работы:</b>\n"
-        "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n\n"
-        "Выберите нужную тему ниже:"
+        texts.UI_U_INSTRUKTSII_I_SPRAVKA_AMNEZIAV_101+
+        texts.UI_U_V_ETOM_RAZDELE_VY_NAYDETE_RUKO_102+
+        texts.UI_U_PRAVILA_I_OSOBENNOSTI_RABOTY_103+
+        texts.UI_U_NE_REKOMENDUETSYA_ISPOLZOVAT_T_104+
+        texts.UI_U_CHAST_SAYTOV_SERVISOV_MOZHET_B_105+
+        texts.UI_U_VYBERITE_NUZHNUYU_TEMU_NIZHE_106
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📥 Скачать клиент Amnezia",
+        text=texts.UI_U_SKACHAT_KLIENT_AMNEZIA_111,
         callback_data=f"help_download{suffix}",
     )
     builder.button(
-        text="🍏 Инструкция iOS (для РФ)",
+        text=texts.UI_U_INSTRUKTSIYA_IOS_DLYA_RF_115,
         callback_data=f"help_ios{suffix}",
     )
     builder.button(
-        text="💻 Инструкции Windows",
+        text=texts.UI_U_INSTRUKTSII_WINDOWS_119,
         callback_data=f"help_windows{suffix}",
     )
     builder.button(
-        text="🔀 Раздельное Туннелирование",
+        text=texts.UI_U_RAZDELNOE_TUNNELIROVANIE_123,
         callback_data=f"help_split{suffix}",
     )
     builder.button(
-        text="📚 Документация Amnezia",
+        text=texts.UI_U_DOKUMENTATSIYA_AMNEZIA_127,
         url=AMNEZIA_DOCS,
     )
     if device_id:
         builder.button(
-            text="← Назад в устройство",
+            text=texts.UI_U_NAZAD_V_USTROYSTVO_132,
             callback_data=f"manage_device:{device_id}",
         )
     else:
         builder.button(
-            text="← Назад в поддержку",
+            text=texts.UI_U_NAZAD_V_PODDERZHKU_137,
             callback_data="menu_support",
         )
     builder.adjust(1, 1, 1, 1, 1, 1)
@@ -154,28 +154,28 @@ async def show_help_download(callback: CallbackQuery):
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
-        "📥 <b>Скачать клиент Amnezia для подключения</b>\n\n"
-        "Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:\n\n"
-        "• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиенту\n"
-        "• <b>GitHub Releases</b> — релизы и бинарные файлы всех версий\n"
-        "• <b>Официальный сайт Amnezia</b> — подробная информация"
+        texts.UI_U_SKACHAT_KLIENT_AMNEZIA_DLYA_PO_157+
+        texts.UI_U_OFITSIALNYE_SSYLKI_DLYA_ZAGRUZ_158+
+        texts.UI_U_PRYAMAYA_SSYLKA_ZERKALO_ZAGRUZ_159+
+        texts.UI_U_GITHUB_RELEASES_RELIZY_I_BINAR_160+
+        texts.UI_U_OFITSIALNYY_SAYT_AMNEZIA_PODRO_161
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🌐 Скачать клиент (Зеркало)",
+        text=texts.UI_U_SKACHAT_KLIENT_ZERKALO_166,
         url=AMNEZIA_DOWNLOAD_MIRROR,
     )
     builder.button(
-        text="📦 Последняя версия (GitHub)",
+        text=texts.UI_U_POSLEDNYAYA_VERSIYA_GITHUB_170,
         url=AMNEZIA_GITHUB_LATEST,
     )
     builder.button(
-        text="🏠 Официальный сайт Amnezia",
+        text=texts.UI_U_OFITSIALNYY_SAYT_AMNEZIA_174,
         url=AMNEZIA_OFFICIAL_SITE,
     )
     builder.button(
-        text="← Назад",
+        text=texts.UI_U_NAZAD_178,
         callback_data=back_cb,
     )
     builder.adjust(1, 1, 1, 1)
@@ -195,17 +195,17 @@ async def show_help_ios(callback: CallbackQuery):
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
-        "🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>\n\n"
-        "Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store."
+        texts.UI_U_USTANOVKA_AMNEZIAVPN_NA_IOS_DL_198+
+        texts.UI_U_PODROBNOE_POSHAGOVOE_RUKOVODST_199
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📖 Открыть инструкцию iOS",
+        text=texts.UI_U_OTKRYT_INSTRUKTSIYU_IOS_204,
         url=AMNEZIA_IOS_RU,
     )
     builder.button(
-        text="← Назад",
+        text=texts.UI_U_NAZAD_208,
         callback_data=back_cb,
     )
     builder.adjust(1, 1)
@@ -225,21 +225,21 @@ async def show_help_windows(callback: CallbackQuery):
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
-        "💻 <b>Инструкции для Windows</b>\n\n"
-        "Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows:"
+        texts.UI_U_INSTRUKTSII_DLYA_WINDOWS_228+
+        texts.UI_U_RUKOVODSTVA_PO_USTANOVKE_I_OBN_229
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📥 Установка AmneziaVPN на Windows",
+        text=texts.UI_U_USTANOVKA_AMNEZIAVPN_NA_WINDOW_234,
         url=AMNEZIA_WIN_INSTALL,
     )
     builder.button(
-        text="🔄 Обновление AmneziaVPN на Windows",
+        text=texts.UI_U_OBNOVLENIE_AMNEZIAVPN_NA_WINDO_238,
         url=AMNEZIA_WIN_UPDATE,
     )
     builder.button(
-        text="← Назад",
+        text=texts.UI_U_NAZAD_242,
         callback_data=back_cb,
     )
     builder.adjust(1, 1, 1)
@@ -259,17 +259,17 @@ async def show_help_split(callback: CallbackQuery):
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
     text = (
-        "🔀 <b>Инструкция для Раздельного Туннелирования</b>\n\n"
-        "Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов."
+        texts.UI_U_INSTRUKTSIYA_DLYA_RAZDELNOGO_T_262+
+        texts.UI_U_RAZDELNOE_TUNNELIROVANIE_SPLIT_263
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📖 Инструкция по Раздельному Туннелированию",
+        text=texts.UI_U_INSTRUKTSIYA_PO_RAZDELNOMU_TUN_268,
         url=AMNEZIA_SPLIT_TUNNELING,
     )
     builder.button(
-        text="← Назад",
+        text=texts.UI_U_NAZAD_272,
         callback_data=back_cb,
     )
     builder.adjust(1, 1)

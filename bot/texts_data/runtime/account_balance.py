@@ -1,0 +1,3 @@
+
+UI_ACCOUNT_BALANCE_GLAVNOE_MENYU_93 = '🏠 Главное меню'
+UI_ACCOUNT_BALANCE_PROCHITANO_97 = '✅ Прочитано'

@@ -86,11 +86,11 @@ async def start_broadcast(
     await state.clear()
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs("📢 Рассылка", "Шаг 1: Выбор аудитории")
+    header = format_admin_breadcrumbs(texts.UI_BROADCAST_RASSYLKA_89, texts.UI_BROADCAST_SHAG_1_VYBOR_AUDITORII_89)
 
     try:
         await callback.message.edit_text(
-            f"{header}<b>Выберите аудиторию для рассылки:</b>\n\nКому отправить сообщение?",
+            texts.UI_BROADCAST_VYBERITE_AUDITORIYU_DLYA_RASSY_93.format(header=header),
             reply_markup=get_broadcast_audience_keyboard(),
             parse_mode="HTML",
         )
@@ -215,10 +215,10 @@ async def process_broadcast_message(
     aud_label = label_map.get(target_audience, target_audience)
 
     preview_summary = (
-        f"✅ <b>Тестовое сообщение отправлено вам для проверки!</b>\n\n"
-        f"👥 <b>Аудитория:</b> {aud_label}\n"
-        f"📊 <b>Получателей:</b> {total_count} чел.\n\n"
-        f"Ознакомьтесь с предпросмотром выше и подтвердите запуск рассылки."
+        texts.UI_BROADCAST_TESTOVOE_SOOBSHCHENIE_OTPRAVLE_218.format()+
+        texts.UI_BROADCAST_AUDITORIYA_219.format(aud_label=aud_label)+
+        texts.UI_BROADCAST_POLUCHATELEY_CHEL_220.format(total_count=total_count)+
+        texts.UI_BROADCAST_OZNAKOMTES_S_PREDPROSMOTROM_VY_221.format()
     )
 
     try:
@@ -583,9 +583,9 @@ async def _send_broadcast_to_users_with_resume(
                     admin_id,
                     "BROADCAST",
                     details=(
-                        f"to {final_progress.label if final_progress else '?'}: "
-                        f"{final_progress.success_count if final_progress else 0} success, "
-                        f"{final_progress.fail_count if final_progress else 0} fail, "
+                        f"to {final_progress.label if final_progress else '?'}: "+
+                        f"{final_progress.success_count if final_progress else 0} success, "+
+                        f"{final_progress.fail_count if final_progress else 0} fail, "+
                         f"status={final_progress.status if final_progress else 'unknown'}"
                     ),
                 )
@@ -746,7 +746,7 @@ async def _start_broadcast_process(
             "expired": "🔴 Истекшие подписки",
             "never": "🆕 Без подписок",
         }
-        label = label_map.get(audience, "🧪 Тест мне (Админу)" if audience.startswith("test_") else audience)
+        label = label_map.get(audience, texts.UI_BROADCAST_TEST_MNE_ADMINU_749 if audience.startswith("test_") else audience)
 
         async with session_scope() as sess:
             progress = BroadcastProgress(

@@ -161,22 +161,22 @@ async def _build_users_list_text_and_kb(
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
         from utils.tariff_names import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
-    header = format_admin_breadcrumbs("👥 Пользователи", f"Фильтр: {cur_filter_name}")
+    header = format_admin_breadcrumbs(texts.UI_COMMON_POLZOVATELI_164, texts.UI_COMMON_FILTR_164.format(cur_filter_name=cur_filter_name))
 
     rendered = (
-        f"{header}"
-        f"👥 <b>Управление пользователями</b> (Стр. {page}/{total_pages}, всего: {total})\n\n"
+        f"{header}"+
+        texts.UI_COMMON_UPRAVLENIE_POLZOVATELYAMI_STR__168.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     filters = [
-        ("all", "Все", "none"),
-        ("new_7d", "🆕 Новые (7д)", "none"),
-        ("expiring_3d", "⏳ < 3 дней", "none"),
-        ("active", "⚡ Активные", "none"),
-        ("expired", "🔴 Без подписки", "none"),
-        ("banned", "🚫 Забаненные", "none"),
+        ("all", texts.UI_COMMON_VSE_174, "none"),
+        ("new_7d", texts.UI_COMMON_NOVYE_7D_175, "none"),
+        ("expiring_3d", texts.UI_COMMON_3_DNEY_176, "none"),
+        ("active", texts.UI_COMMON_AKTIVNYE_177, "none"),
+        ("expired", texts.UI_COMMON_BEZ_PODPISKI_178, "none"),
+        ("banned", texts.UI_COMMON_ZABANENNYE_179, "none"),
     ]
 
     for f_code, f_name, f_param in filters:
@@ -186,14 +186,14 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    server_label = "• 🖥 По VPN серверам •" if filter_type == "server" else "🖥 По VPN серверам"
-    tariff_label = "• 💎 По тарифам •" if filter_type == "tariff" else "💎 По тарифам"
+    server_label = texts.UI_COMMON_PO_VPN_SERVERAM_189 if filter_type == "server" else texts.UI_COMMON_PO_VPN_SERVERAM_189
+    tariff_label = texts.UI_COMMON_PO_TARIFAM_190 if filter_type == "tariff" else texts.UI_COMMON_PO_TARIFAM_190
 
     builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
 
     if not users:
-        rendered += "<i>Пользователи не найдены.</i>"
+        rendered += texts.UI_COMMON_POLZOVATELI_NE_NAYDENY_196
     else:
         current_time = now_utc()
 
@@ -203,7 +203,7 @@ async def _build_users_list_text_and_kb(
                 if user.subscription_end and user.subscription_end > current_time
                 else "🔴"
             )
-            ban = " [БАН]" if user.is_banned else (" [Блок бота]" if user.is_bot_blocked else "")
+            ban = texts.UI_COMMON_BAN_206 if user.is_banned else (texts.UI_COMMON_BLOK_BOTA_206 if user.is_bot_blocked else "")
             username = (
                 f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
             )
@@ -215,7 +215,7 @@ async def _build_users_list_text_and_kb(
             )
 
             button_text = truncate_button_text(
-                f"{status}{ban} {username} | {days} | {profiles_count} устр."
+                texts.UI_COMMON_USTR_218.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
             )
 
             builder.button(
@@ -226,25 +226,25 @@ async def _build_users_list_text_and_kb(
     nav_buttons = 0
     if page > 1:
         builder.button(
-            text="◀️ Назад",
+            text=texts.UI_COMMON_NAZAD_229,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page - 1}",
         )
         nav_buttons += 1
 
     if page < total_pages:
         builder.button(
-            text="Вперед ▶️",
+            text=texts.UI_COMMON_VPERED_236,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page + 1}",
         )
         nav_buttons += 1
 
     builder.button(
-        text="🔍 Поиск по @username / ID",
+        text=texts.UI_COMMON_POISK_PO_USERNAME_ID_242,
         callback_data="admin_users_search",
     )
 
     builder.button(
-        text="🔙 В админ-меню",
+        text=texts.UI_COMMON_V_ADMIN_MENYU_247,
         callback_data="admin_menu",
     )
 
@@ -262,16 +262,16 @@ async def _build_users_list_text_and_kb(
 async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
     from utils.tariff_names import get_tariff_display_name
 
-    tariff_info = "Не активирован"
+    tariff_info = texts.UI_COMMON_NE_AKTIVIROVAN_265
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(session, user.current_tariff_id)
         if tariff:
-            tariff_info = f"{tariff.name} (до {tariff.device_limit} устр.)"
+            tariff_info = texts.UI_COMMON_DO_USTR_269.format(tariff_name=tariff.name, tariff_device_limit=tariff.device_limit)
     elif user.device_limit:
         t_name = get_tariff_display_name(user.device_limit)
-        tariff_info = f"{t_name} (до {user.device_limit} устр.)"
+        tariff_info = texts.UI_COMMON_DO_USTR_272.format(t_name=t_name, user_device_limit=user.device_limit)
 
-    referrer_info = "Прямой переход"
+    referrer_info = texts.UI_COMMON_PRYAMOY_PEREKHOD_274
     if user.referred_by:
         referrer = await get_user_by_telegram_id(session, user.referred_by)
         if referrer:

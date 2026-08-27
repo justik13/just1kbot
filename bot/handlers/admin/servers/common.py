@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 SERVERS_PER_PAGE = 10
 
 URL_REGEX = re.compile(
-    r"^https?://"
-    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"
-    r"localhost|"
-    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
-    r"(?::\d+)?"
+    r"^https?://"+
+    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"+
+    r"localhost|"+
+    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"+
+    r"(?::\d+)?"+
     r"(?:/?|[/?]\S+)$",
     re.IGNORECASE,
 )
@@ -107,38 +107,38 @@ async def _show_server_card(
     flag = server.country_flag or "🌐"
 
     if server.is_active:
-        status_line = "🟢 <b>Активен</b>"
+        status_line = texts.UI_COMMON_AKTIVEN_110
         extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
-        status_line = "🔴 <b>Автоматически отключён</b>"
+        status_line = texts.UI_COMMON_AVTOMATICHESKI_OTKLYUCHEN_113
         disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"
         last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
         extra_status_info = (
-            f"• Причина: <b>API недоступен / нестабильное соединение</b>\n"
-            f"• Отключён: <code>{disabled_at_str}</code>\n"
-            f"• Последний отклик: <code>{last_check_str}</code>\n"
+            texts.UI_COMMON_PRICHINA_API_NEDOSTUPEN_NESTAB_117.format()+
+            texts.UI_COMMON_OTKLYUCHEN_118.format(disabled_at_str=disabled_at_str)+
+            texts.UI_COMMON_POSLEDNIY_OTKLIK_119.format(last_check_str=last_check_str)
         )
     else:
-        status_line = "🔴 <b>Отключён вручную</b>"
+        status_line = texts.UI_COMMON_OTKLYUCHEN_VRUCHNUYU_122
         extra_status_info = ""
 
     peer_counts = await get_server_peer_counts(session)
     used_clients = peer_counts.get(server.id, 0)
     max_clients = server.max_clients or 240
-    header = format_admin_breadcrumbs("🖥 Серверы", f"{flag} {server.name}")
+    header = format_admin_breadcrumbs(texts.UI_COMMON_SERVERY_128, f"{flag} {server.name}")
 
     rendered = (
-        f"{header}"
-        f"🖥 <b>Карточка VPN-сервера {flag} {safe(server.name)}</b> (ID: {server.id})\n\n"
-        f"• Статус в боте: {status_line}\n"
-        f"{extra_status_info}"
-        f"• Протокол: <code>{safe(server.protocol)}</code>\n"
-        f"• Заполненность слотов: <b>{used_clients} / {max_clients}</b>\n"
+        f"{header}"+
+        texts.UI_COMMON_KARTOCHKA_VPN_SERVERA_ID_132.format(flag=flag, safe_server_name=safe(server.name), server_id=server.id)+
+        texts.UI_COMMON_STATUS_V_BOTE_133.format(status_line=status_line)+
+        f"{extra_status_info}"+
+        texts.UI_COMMON_PROTOKOL_135.format(safe_server_protocol=safe(server.protocol))+
+        texts.UI_COMMON_ZAPOLNENNOST_SLOTOV_136.format(used_clients=used_clients, max_clients=max_clients)+
         f"• API URL: <code>{safe(server.api_url)}</code>\n"
     )
 
     if ping_result:
-        rendered += f"\n⚡ <b>Результат проверки связи:</b>\n{ping_result}\n"
+        rendered += texts.UI_COMMON_REZULTAT_PROVERKI_SVYAZI_141.format(ping_result=ping_result)
 
     try:
         await callback.message.edit_text(

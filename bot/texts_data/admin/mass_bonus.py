@@ -1,0 +1,70 @@
+
+UI_MASS_BONUS_MASSOVYY_BONUS_57 = '🎁 Массовый бонус'
+UI_MASS_BONUS_VYBOR_AUDITORII_57 = 'Выбор аудитории'
+UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSNOGO_61 = """🎁 <b>Массовое начисление бонусного баланса</b>
+
+"""
+UI_MASS_BONUS_VYBERITE_TSELEVUYU_GRUPPU_POLZ_62 = 'Выберите целевую группу пользователей для получения компенсации/бонусов:'
+UI_MASS_BONUS_VSEM_POLZOVATELYAM_67 = '👥 Всем пользователям'
+UI_MASS_BONUS_TOLKO_S_AKTIVNOY_PODPISKOY_71 = '⚡ Только с активной подпиской'
+UI_MASS_BONUS_TOLKO_BEZ_PODPISKI_75 = '⏳ Только без подписки'
+UI_MASS_BONUS_V_ADMIN_MENYU_79 = '🔙 В админ-меню'
+UI_MASS_BONUS_MASSOVYY_BONUS_110 = '🎁 Массовый бонус'
+UI_MASS_BONUS_VVOD_SUMMY_110 = 'Ввод суммы'
+UI_MASS_BONUS_SUMMA_BONUSNOGO_NACHISLENIYA_N_113 = """💰 <b>Сумма бонусного начисления на каждого пользователя:</b>
+
+"""
+UI_MASS_BONUS_VVEDITE_SUMMU_BONUSOV_V_RUBLYA_114 = 'Введите сумму бонусов в рублях (целое число, например <code>100</code>):'
+UI_MASS_BONUS_VVEDITE_KORREKTNUYU_SUMMU_NACH_146 = '⚠️ Введите корректную сумму начисления от 1 до 100 000 ₽'
+UI_MASS_BONUS_MASSOVYY_BONUS_155 = '🎁 Массовый бонус'
+UI_MASS_BONUS_VVOD_PRICHINY_155 = 'Ввод причины'
+UI_MASS_BONUS_PRICHINA_MASSOVOGO_NACHISLENIY_158 = """📝 <b>Причина массового начисления (+{amount} ₽):</b>
+
+"""
+UI_MASS_BONUS_VVEDITE_SOOBSHCHENIE_DLYA_POLZ_159 = """Введите сообщение для пользователей и лога аудита
+"""
+UI_MASS_BONUS_NAPRIMER_KOMPENSATSIYA_ZA_SBOY_160 = '(например: <i>Компенсация за сбой на серверах 09.08</i>):'
+UI_MASS_BONUS_MASSOVAYA_KOMPENSATSIYA_183 = 'Массовая компенсация'
+UI_MASS_BONUS_MASSOVYY_BONUS_202 = '🎁 Массовый бонус'
+UI_MASS_BONUS_PODTVERZHDENIE_202 = 'Подтверждение'
+UI_MASS_BONUS_PODTVERZHDENIE_MASSOVOGO_NACHI_207 = """⚠️ <b>Подтверждение массового начисления бонусов:</b>
+
+"""
+UI_MASS_BONUS_AUDITORIYA_208 = """• Аудитория: <b>{aud_label}</b>
+"""
+UI_MASS_BONUS_POLUCHATELEY_CHEL_209 = """• Получателей: <b>{user_count} чел.</b>
+"""
+UI_MASS_BONUS_BONUS_KAZHDOMU_210 = """• Бонус каждому: <b>+{amount} ₽</b>
+"""
+UI_MASS_BONUS_OBSHCHIY_BYUDZHET_BONUSOV_211 = """• Общий бюджет бонусов: <b>{total_budget} ₽</b>
+"""
+UI_MASS_BONUS_PRICHINA_212 = """• Причина: <i>{safe_reason}</i>
+
+"""
+UI_MASS_BONUS_VY_UVERENY_CHTO_KHOTITE_ZAPUST_213 = 'Вы уверены, что хотите запустить начисление?'
+UI_MASS_BONUS_ZAPUSTIT_NACHISLENIE_218 = '🚀 Запустить начисление'
+UI_MASS_BONUS_OTMENA_222 = '❌ Отмена'
+UI_MASS_BONUS_MASSOVOE_NACHISLENIE_UZHE_VYPO_249 = '⚠️ Массовое начисление уже выполняется!'
+UI_MASS_BONUS_MASSOVYY_BONUS_257 = 'Массовый бонус'
+UI_MASS_BONUS_MASSOVOE_NACHISLENIE_ZAPUSHCHE_260 = '🚀 Массовое начисление запущено в фоне!'
+UI_MASS_BONUS_MASSOVYY_BONUS_262 = '🎁 Массовый бонус'
+UI_MASS_BONUS_REZULTAT_262 = 'Результат'
+UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSOV_P_265 = """{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>
+
+"""
+UI_MASS_BONUS_PO_ZAVERSHENII_OPERATSII_VAM_P_266 = 'По завершении операции вам придет уведомление со статистикой.'
+UI_MASS_BONUS_VAM_NACHISLEN_BONUSNYY_BALANS_362 = """🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>
+"""
+UI_MASS_BONUS_PRICHINA_363 = 'Причина: <i>{safe_reason}</i>'
+UI_MASS_BONUS_MASSOVYY_BONUS_390 = '🎁 Массовый бонус'
+UI_MASS_BONUS_ITOGI_390 = 'Итоги'
+UI_MASS_BONUS_NOVYY_MASSOVYY_BONUS_392 = '🎁 Новый массовый бонус'
+UI_MASS_BONUS_V_ADMIN_MENYU_393 = '🏠 В админ-меню'
+UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSOV_Z_399 = """{header}✅ <b>Массовое начисление бонусов завершено!</b>
+
+"""
+UI_MASS_BONUS_ZACHISLENO_CHEL_KAZHDOMU_400 = """• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)
+"""
+UI_MASS_BONUS_OSHIBOK_401 = """• Ошибок: <b>{fail_count}</b>
+"""
+UI_MASS_BONUS_ZABLOKIROVALI_BOTA_402 = '• Заблокировали бота: <b>{blocked_count}</b>'

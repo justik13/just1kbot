@@ -1,3 +1,4 @@
+from bot import texts
 import base64
 import logging
 from datetime import timedelta
@@ -91,8 +92,8 @@ class SubscriptionFeedService:
             )
 
         support_username = (settings.SUPPORT_USERNAME or "support").lstrip("@")
-        desc_text = f"Личные устройства | @{support_username}"
-        announce_text = "Управление устройствами в Telegram"
+        desc_text = texts.UI_FEED_SERVICE_LICHNYE_USTROYSTVA_94.format(support_username=support_username)
+        announce_text = texts.UI_FEED_SERVICE_UPRAVLENIE_USTROYSTVAMI_V_TELE_95
 
         desc_b64 = base64.b64encode(desc_text.encode("utf-8")).decode("ascii")
         announce_b64 = base64.b64encode(announce_text.encode("utf-8")).decode("ascii")

@@ -107,7 +107,7 @@ async def _build_payments_list_text_and_kb(
             text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L110_1,
             callback_data=f"admin_payments_page:{page + 1}",
         )
-    builder.button(text="🛒 К логам покупок", callback_data="admin_purchases")
+    builder.button(text=texts.UI_PAYMENTS_K_LOGAM_POKUPOK_110, callback_data="admin_purchases")
     builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L113_1, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder

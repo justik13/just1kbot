@@ -21,7 +21,7 @@ from utils.telegram import render_hub, safe
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_#-]+$")
+DEVICE_NAME_REGEX = re.compile(texts.UI_COMMON_A_ZA_ZA_YAA_YAEE0_9_S_24)
 
 _PROTOCOL_DISPLAY = {
     AMNEZIA_PROTOCOL: "AmneziaWG",
@@ -148,7 +148,7 @@ async def _build_connections_screen(
             )
 
             traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было активностей"
+            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.UI_COMMON_NE_BYLO_AKTIVNOSTEY_151
 
             rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})\n   └ 📊 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
             labels = {
@@ -163,7 +163,7 @@ async def _build_connections_screen(
             if profile.provisioning_status in labels:
                 rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
 
-        rendered += "\n\n<i>Нажмите на устройство ниже для просмотра статуса и управления:</i>"
+        rendered += texts.UI_COMMON_NAZHMITE_NA_USTROYSTVO_NIZHE_D_166
 
     if not read_only and quota_profiles_count < device_limit:
         builder.button(
@@ -174,12 +174,12 @@ async def _build_connections_screen(
 
     if can_show_incy_subscription(read_only=read_only):
         builder.button(
-            text="🔗 Добавить в INCY (iOS / Android) [🧪]",
+            text=texts.UI_COMMON_DOBAVIT_V_INCY_IOS_ANDROID_177,
             callback_data="menu_incy_subscription",
         )
 
     builder.button(
-        text="🌐 Статус серверов",
+        text=texts.UI_COMMON_STATUS_SERVEROV_182,
         url="https://stats.uptimerobot.com/de5q3DNc95",
     )
     builder.button(

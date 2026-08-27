@@ -174,19 +174,19 @@ async def render_device_screen(
 
     status = getattr(profile, "provisioning_status", "")
     if status == "pending_create":
-        rendered += "\n\n⏳ <b>Устройство создаётся на сервере...</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_SOZDAETSYA_NA_SERVE_177
     elif status == "pending_update":
-        rendered += "\n\n🔄 <b>Конфигурация устройства обновляется...</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_KONFIGURATSIYA_USTROYSTVA_OBNO_179
     elif status == "update_failed":
-        rendered += "\n\n⚠️ <b>Не удалось обновить конфигурацию на сервере (действует текущая версия).</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_OBNOVIT_KONFIGURATSI_181
     elif status == "create_failed":
-        rendered += "\n\n❌ <b>Не удалось создать устройство на сервере.</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_SOZDAT_USTROYSTVO_NA_183
     elif status == "create_cleanup_pending":
-        rendered += "\n\n⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_IDET_AVTOMATICHESKOE_VOSSTANOV_185
     elif status == "deleting":
-        rendered += "\n\n🗑 <b>Устройство удаляется с сервера...</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_UDALYAETSYA_S_SERVE_187
     elif status == "delete_failed":
-        rendered += "\n\n⚠️ <b>Не удалось удалить устройство на сервере. Попробуйте повторить.</b>"
+        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_UDALIT_USTROYSTVO_NA_189
 
     has_access = await SubscriptionService.check_access(session, user.telegram_id)
     show_delete = can_show_delete_action(profile)
@@ -199,52 +199,52 @@ async def render_device_screen(
             display_key = build_display_vpn_key(raw_cfg, profile, server)
 
         if display_key:
-            copy_hint = "<i>👆 Нажмите на моноширинный ключ выше, чтобы скопировать его.</i>"
+            copy_hint = texts.UI_DEVICE_VIEW_ROUTES_NAZHMITE_NA_MONOSHIRINNYY_KLYU_202
             key_block = (
-                f"\n\n🔑 <b>Ключ подключения:</b>\n"
-                f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"
+                texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_204.format()+
+                f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"+
                 f"{copy_hint}"
             )
             if len(rendered) + len(key_block) <= 4000:
                 rendered += key_block
             else:
                 rendered += (
-                    "\n\n🔑 <b>Ключ подключения:</b>\n"
-                    "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
+                    texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_212+
+                    texts.UI_DEVICE_VIEW_ROUTES_KONFIGURATSIYA_DOSTUPNA_CHEREZ_213
                 )
 
         if display_key:
             amnezia_howto = (
-                "• <b>AmneziaVPN / DefaultVPN</b>: скопируйте ключ выше → "
-                "откройте приложение → нажмите «Вставить» → «Подключиться»."
+                texts.UI_DEVICE_VIEW_ROUTES_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY_218+
+                texts.UI_DEVICE_VIEW_ROUTES_OTKROYTE_PRILOZHENIE_NAZHMITE__219
             )
         else:
             amnezia_howto = (
-                "• <b>AmneziaVPN / DefaultVPN</b>: нажмите «🔄 Другой способ подключения» ниже, "
-                "чтобы получить файл конфигурации или ключ."
+                texts.UI_DEVICE_VIEW_ROUTES_AMNEZIAVPN_DEFAULTVPN_NAZHMITE_223+
+                texts.UI_DEVICE_VIEW_ROUTES_CHTOBY_POLUCHIT_FAYL_KONFIGURA_224
             )
         guide_block = (
-            "\n\n<blockquote expandable>🚀 <b>Как подключиться и проверить работу:</b>\n"
-            f"{amnezia_howto}\n"
-            "• <b>INCY (iOS / Android)</b>: откройте «🔌 Подключения» → «🔗 Добавить в INCY» для добавления всех серверов сразу.\n\n"
-            "✅ <b>Как понять, что всё работает:</b>\n"
-            "1. В приложении статус сменится на <b>«Подключено»</b>;\n"
-            "2. В строке состояния появится значок подключения (или 🔑);\n"
-            "3. На сайте <code>2ip.ru</code> страна сменится на локацию сервера;\n"
-            "4. Популярные сервисы и зарубежные сайты открываются быстро и стабильно.</blockquote>"
+            texts.UI_DEVICE_VIEW_ROUTES_KAK_PODKLYUCHITSYA_I_PROVERIT__227+
+            f"{amnezia_howto}\n"+
+            texts.UI_DEVICE_VIEW_ROUTES_INCY_IOS_ANDROID_OTKROYTE_PODK_229+
+            texts.UI_DEVICE_VIEW_ROUTES_KAK_PONYAT_CHTO_VSE_RABOTAET_230+
+            texts.UI_DEVICE_VIEW_ROUTES_1_V_PRILOZHENII_STATUS_SMENITS_231+
+            texts.UI_DEVICE_VIEW_ROUTES_2_V_STROKE_SOSTOYANIYA_POYAVIT_232+
+            texts.UI_DEVICE_VIEW_ROUTES_3_NA_SAYTE_2IP_RU_STRANA_SMENI_233+
+            texts.UI_DEVICE_VIEW_ROUTES_4_POPULYARNYE_SERVISY_I_ZARUBE_234
         )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
 
         btn_info_lines = [
-            "\n\n💡 <b>Кнопки управления:</b>",
+            texts.UI_DEVICE_VIEW_ROUTES_KNOPKI_UPRAVLENIYA_240,
         ]
         if config_ready:
-            btn_info_lines.append("• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик")
-        btn_info_lines.append("• <b>✏️ Переименовать</b> — изменить название устройства")
-        btn_info_lines.append("• <b>📖 Инструкция</b> — пошаговое руководство по настройке")
+            btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V_243)
+        btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_PEREIMENOVAT_IZMENIT_NAZVANIE__244)
+        btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_INSTRUKTSIYA_POSHAGOVOE_RUKOVO_245)
         if show_delete:
-            btn_info_lines.append("• <b>🗑 Удалить</b> — отозвать ключ и освободить слот")
+            btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_UDALIT_OTOZVAT_KLYUCH_I_OSVOBO_247)
 
         btn_info = "\n".join(btn_info_lines)
         if len(rendered) + len(btn_info) <= 4000:
@@ -292,7 +292,7 @@ async def manage_device(
 
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer("Устройство не найдено или было удалено", show_alert=True)
+        await callback.answer(texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_NE_NAYDENO_ILI_BYLO_295, show_alert=True)
         if db_user:
             await _render_connections(callback.message, db_user, session)
         return
@@ -334,7 +334,7 @@ async def device_help(
     """
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer("Некорректный запрос", show_alert=True)
+        await callback.answer(texts.UI_DEVICE_VIEW_ROUTES_NEKORREKTNYY_ZAPROS_337, show_alert=True)
         return
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
@@ -342,14 +342,14 @@ async def device_help(
         return
 
     text = (
-        "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
-        "В этом разделе вы найдёте руководства по подключению, "
-        "скачиванию клиента и настройке сервиса.\n\n"
-        "<blockquote expandable>⚠️ <b>Правила и особенности работы:</b>\n"
-        "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n"
-        "• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b></blockquote>\n\n"
-        "Выберите нужную тему ниже:"
+        texts.UI_DEVICE_VIEW_ROUTES_INSTRUKTSII_I_SPRAVKA_AMNEZIAV_345+
+        texts.UI_DEVICE_VIEW_ROUTES_V_ETOM_RAZDELE_VY_NAYDETE_RUKO_346+
+        texts.UI_DEVICE_VIEW_ROUTES_SKACHIVANIYU_KLIENTA_I_NASTROY_347+
+        texts.UI_DEVICE_VIEW_ROUTES_PRAVILA_I_OSOBENNOSTI_RABOTY_348+
+        texts.UI_DEVICE_VIEW_ROUTES_NE_REKOMENDUETSYA_ISPOLZOVAT_T_349+
+        texts.UI_DEVICE_VIEW_ROUTES_CHAST_SAYTOV_SERVISOV_MOZHET_B_350+
+        texts.UI_DEVICE_VIEW_ROUTES_REKOMENDUEM_ISPOLZOVAT_PROTOKO_351+
+        texts.UI_DEVICE_VIEW_ROUTES_VYBERITE_NUZHNUYU_TEMU_NIZHE_352
     )
 
     builder = InlineKeyboardBuilder()
@@ -588,36 +588,36 @@ async def alt_connection(
 
             if vpn_sent and conf_sent:
                 files_info = (
-                    "1. Сохраните один из прикреплённых файлов конфигурации:\n"
-                    "   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>\n"
-                    "   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)\n"
+                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_ODIN_IZ_PRIKREPLE_591+
+                    texts.UI_DEVICE_VIEW_ROUTES_VPN_DLYA_PRILOZHENIYA_AMNEZIAV_592+
+                    texts.UI_DEVICE_VIEW_ROUTES_CONF_DLYA_AMNEZIAWG_DEFAULTVPN_593
                 )
             elif vpn_sent:
                 files_info = (
-                    "1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).\n"
+                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_PRIKREPLENNYY_FAY_597
                 )
             elif conf_sent:
                 files_info = (
-                    "1. Сохраните прикреплённый файл <code>.conf</code> (для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG — Keenetic AWG).\n"
+                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_PRIKREPLENNYY_FAY_601
                 )
             else:
                 escaped_key = safe(profile.raw_config or "")
                 key_block = (
-                    f"🔑 <b>Ключ подключения:</b>\n<blockquote expandable><code>{escaped_key}</code></blockquote>\n"
+                    texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_606.format(escaped_key=escaped_key)
                     if len(escaped_key) <= 3500
-                    else "🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.\n"
+                    else texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_DOSTUPEN_608
                 )
                 files_info = (
-                    "⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>\n\n"
+                    texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_PRIKREPIT_FAYLY_KONF_611+
                     f"{key_block}"
                 )
 
-            bridge_hint = "\n3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки." if amnezia_bridge_url else ""
+            bridge_hint = texts.UI_DEVICE_VIEW_ROUTES_3_LIBO_NAZHMITE_KNOPKU_OTKRYT__615 if amnezia_bridge_url else ""
             alt_guide_text = (
-                f"🔄 <b>Другой способ подключения: {safe(profile.device_name)}</b>\n\n"
-                "Если прямая вставка ключа не сработала или ваше приложение требует файл:\n\n"
-                f"{files_info}"
-                "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
+                texts.UI_DEVICE_VIEW_ROUTES_DRUGOY_SPOSOB_PODKLYUCHENIYA_617.format(safe_profile_device_name=safe(profile.device_name))+
+                texts.UI_DEVICE_VIEW_ROUTES_ESLI_PRYAMAYA_VSTAVKA_KLYUCHA__618+
+                f"{files_info}"+
+                texts.UI_DEVICE_VIEW_ROUTES_2_OTKROYTE_PRILOZHENIE_I_VYBER_620+
                 f"{bridge_hint}"
             )
 

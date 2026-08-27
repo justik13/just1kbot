@@ -172,25 +172,25 @@ def generate_mock_amnezia_vpn_uri(
 ) -> str:
     """Generate a realistic AmneziaWG 2.0 configuration URI with obfuscation parameters."""
     conf_str = (
-        f"[Interface]\n"
-        f"PrivateKey = MOCK_PRIVKEY_{peer_id[:8]}==\n"
-        f"Address = 10.8.0.2/32\n"
-        f"DNS = 1.1.1.1, 8.8.8.8\n"
-        f"Jc = 4\n"
-        f"Jmin = 40\n"
-        f"Jmax = 70\n"
-        f"S1 = 15\n"
-        f"S2 = 30\n"
-        f"S3 = 10\n"
-        f"S4 = 20\n"
-        f"H1 = 1\n"
-        f"H2 = 2\n"
-        f"H3 = 3\n"
-        f"H4 = 4\n\n"
-        f"[Peer]\n"
-        f"PublicKey = MOCK_PUBKEY_SERVER_NL==\n"
-        f"Endpoint = {host}:51820\n"
-        f"AllowedIPs = 0.0.0.0/0, ::/0\n"
+        f"[Interface]\n"+
+        f"PrivateKey = MOCK_PRIVKEY_{peer_id[:8]}==\n"+
+        f"Address = 10.8.0.2/32\n"+
+        f"DNS = 1.1.1.1, 8.8.8.8\n"+
+        f"Jc = 4\n"+
+        f"Jmin = 40\n"+
+        f"Jmax = 70\n"+
+        f"S1 = 15\n"+
+        f"S2 = 30\n"+
+        f"S3 = 10\n"+
+        f"S4 = 20\n"+
+        f"H1 = 1\n"+
+        f"H2 = 2\n"+
+        f"H3 = 3\n"+
+        f"H4 = 4\n\n"+
+        f"[Peer]\n"+
+        f"PublicKey = MOCK_PUBKEY_SERVER_NL==\n"+
+        f"Endpoint = {host}:51820\n"+
+        f"AllowedIPs = 0.0.0.0/0, ::/0\n"+
         f"PersistentKeepalive = 25\n"
     )
     last_cfg = {
@@ -480,21 +480,21 @@ class SimulationAutoSeedMiddleware:
                     ref1 = User(
                         telegram_id=user.id + 101,
                         username=f"friend_dmitry_{user.id}",
-                        first_name="Дмитрий",
+                        first_name=texts.UI_SIMULATE_BOT_DMITRIY_483,
                         referred_by=user.id,
                         created_at=now_utc() - timedelta(days=10),
                     )
                     ref2 = User(
                         telegram_id=user.id + 102,
                         username=f"friend_elena_{user.id}",
-                        first_name="Елена",
+                        first_name=texts.UI_SIMULATE_BOT_ELENA_490,
                         referred_by=user.id,
                         created_at=now_utc() - timedelta(days=5),
                     )
                     ref3 = User(
                         telegram_id=user.id + 103,
                         username=f"friend_sergey_{user.id}",
-                        first_name="Сергей",
+                        first_name=texts.UI_SIMULATE_BOT_SERGEY_497,
                         referred_by=user.id,
                         created_at=now_utc() - timedelta(days=2),
                     )
@@ -588,13 +588,13 @@ async def run_simulation(args: argparse.Namespace):
         # Ensure partial unique indexes required by ON CONFLICT clauses
         await conn.execute(
             text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_conversion_quote "
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_conversion_quote "+
                 "ON paid_value_ledger (quote_id) WHERE entry_type='tariff_conversion'"
             )
         )
         await conn.execute(
             text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_account_purchase "
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_account_purchase "+
                 "ON paid_value_ledger (quote_id) WHERE entry_type='account_purchase'"
             )
         )
@@ -631,7 +631,7 @@ async def run_simulation(args: argparse.Namespace):
         servers = [
             Server(
                 id=1,
-                name="Нидерланды #1 (Амстердам)",
+                name=texts.UI_SIMULATE_BOT_NIDERLANDY_1_AMSTERDAM_634,
                 country_flag="🇳🇱",
                 api_url="http://nl1.just1k.net:8080",
                 api_key="enc_key_nl",
@@ -641,7 +641,7 @@ async def run_simulation(args: argparse.Namespace):
             ),
             Server(
                 id=2,
-                name="Германия #1 (Франкфурт)",
+                name=texts.UI_SIMULATE_BOT_GERMANIYA_1_FRANKFURT_644,
                 country_flag="🇩🇪",
                 api_url="http://de1.just1k.net:8080",
                 api_key="enc_key_de",
@@ -651,7 +651,7 @@ async def run_simulation(args: argparse.Namespace):
             ),
             Server(
                 id=3,
-                name="Швеция #1 (Стокгольм)",
+                name=texts.UI_SIMULATE_BOT_SHVETSIYA_1_STOKGOLM_654,
                 country_flag="🇸🇪",
                 api_url="http://se1.just1k.net:8080",
                 api_key="enc_key_se",
@@ -661,7 +661,7 @@ async def run_simulation(args: argparse.Namespace):
             ),
             Server(
                 id=4,
-                name="Финляндия #1 (Хельсинки)",
+                name=texts.UI_SIMULATE_BOT_FINLYANDIYA_1_KHELSINKI_664,
                 country_flag="🇫🇮",
                 api_url="http://fi1.just1k.net:8080",
                 api_key="enc_key_fi",
@@ -676,7 +676,7 @@ async def run_simulation(args: argparse.Namespace):
     if args.maintenance:
         async with session_scope() as session:
             from services.maintenance_service import MaintenanceService
-            await MaintenanceService.enable(session, admin_id=999999999, message="⚙️ Ведутся технические работы. Пожалуйста, попробуйте позже.")
+            await MaintenanceService.enable(session, admin_id=999999999, message=texts.UI_SIMULATE_BOT_VEDUTSYA_TEKHNICHESKIE_RABOTY__679)
             logger.info("⚙️ [MAINTENANCE] Maintenance mode enabled.")
 
     # Initialize Telegram Bot & Dispatcher

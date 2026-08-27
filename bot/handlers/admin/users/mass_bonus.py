@@ -54,29 +54,29 @@ async def start_mass_bonus(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Выбор аудитории")
+    header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_57, texts.UI_MASS_BONUS_VYBOR_AUDITORII_57)
 
     text = (
-        f"{header}"
-        f"🎁 <b>Массовое начисление бонусного баланса</b>\n\n"
-        f"Выберите целевую группу пользователей для получения компенсации/бонусов:"
+        f"{header}"+
+        texts.UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSNOGO_61.format()+
+        texts.UI_MASS_BONUS_VYBERITE_TSELEVUYU_GRUPPU_POLZ_62.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="👥 Всем пользователям",
+        text=texts.UI_MASS_BONUS_VSEM_POLZOVATELYAM_67,
         callback_data="mass_bonus_aud:all",
     )
     builder.button(
-        text="⚡ Только с активной подпиской",
+        text=texts.UI_MASS_BONUS_TOLKO_S_AKTIVNOY_PODPISKOY_71,
         callback_data="mass_bonus_aud:active",
     )
     builder.button(
-        text="⏳ Только без подписки",
+        text=texts.UI_MASS_BONUS_TOLKO_BEZ_PODPISKI_75,
         callback_data="mass_bonus_aud:expired",
     )
     builder.button(
-        text="🔙 В админ-меню",
+        text=texts.UI_MASS_BONUS_V_ADMIN_MENYU_79,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -107,11 +107,11 @@ async def select_mass_bonus_audience(
     await state.update_data(target_aud=target_aud)
     await state.set_state(AdminStates.entering_mass_bonus_amount)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Ввод суммы")
+    header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_110, texts.UI_MASS_BONUS_VVOD_SUMMY_110)
     text = (
-        f"{header}"
-        f"💰 <b>Сумма бонусного начисления на каждого пользователя:</b>\n\n"
-        f"Введите сумму бонусов в рублях (целое число, например <code>100</code>):"
+        f"{header}"+
+        texts.UI_MASS_BONUS_SUMMA_BONUSNOGO_NACHISLENIYA_N_113.format()+
+        texts.UI_MASS_BONUS_VVEDITE_SUMMU_BONUSOV_V_RUBLYA_114.format()
     )
 
     try:
@@ -143,7 +143,7 @@ async def process_mass_bonus_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Введите корректную сумму начисления от 1 до 100 000 ₽",
+            texts.UI_MASS_BONUS_VVEDITE_KORREKTNUYU_SUMMU_NACH_146,
             get_back_button("admin_mass_bonus"),
             trigger_message_id=message.message_id,
         )
@@ -152,12 +152,12 @@ async def process_mass_bonus_amount(
     await state.update_data(amount=amount)
     await state.set_state(AdminStates.entering_mass_bonus_reason)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Ввод причины")
+    header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_155, texts.UI_MASS_BONUS_VVOD_PRICHINY_155)
     text = (
-        f"{header}"
-        f"📝 <b>Причина массового начисления (+{amount} ₽):</b>\n\n"
-        f"Введите сообщение для пользователей и лога аудита\n"
-        f"(например: <i>Компенсация за сбой на серверах 09.08</i>):"
+        f"{header}"+
+        texts.UI_MASS_BONUS_PRICHINA_MASSOVOGO_NACHISLENIY_158.format(amount=amount)+
+        texts.UI_MASS_BONUS_VVEDITE_SOOBSHCHENIE_DLYA_POLZ_159.format()+
+        texts.UI_MASS_BONUS_NAPRIMER_KOMPENSATSIYA_ZA_SBOY_160.format()
     )
 
     await render_hub(
@@ -180,7 +180,7 @@ async def process_mass_bonus_reason(
         await state.clear()
         return
 
-    reason = message.text.strip() if message.text else "Массовая компенсация"
+    reason = message.text.strip() if message.text else texts.UI_MASS_BONUS_MASSOVAYA_KOMPENSATSIYA_183
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)
@@ -199,27 +199,27 @@ async def process_mass_bonus_reason(
     await state.update_data(reason=reason, user_count=user_count)
     await state.set_state(AdminStates.confirming_mass_bonus)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Подтверждение")
+    header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_202, texts.UI_MASS_BONUS_PODTVERZHDENIE_202)
     aud_label = {"all": "Всем пользователям", "active": "Только с активной подпиской", "expired": "Только без подписки"}.get(target_aud, target_aud)
 
     text = (
-        f"{header}"
-        f"⚠️ <b>Подтверждение массового начисления бонусов:</b>\n\n"
-        f"• Аудитория: <b>{aud_label}</b>\n"
-        f"• Получателей: <b>{user_count} чел.</b>\n"
-        f"• Бонус каждому: <b>+{amount} ₽</b>\n"
-        f"• Общий бюджет бонусов: <b>{total_budget} ₽</b>\n"
-        f"• Причина: <i>{safe(reason)}</i>\n\n"
-        f"Вы уверены, что хотите запустить начисление?"
+        f"{header}"+
+        texts.UI_MASS_BONUS_PODTVERZHDENIE_MASSOVOGO_NACHI_207.format()+
+        texts.UI_MASS_BONUS_AUDITORIYA_208.format(aud_label=aud_label)+
+        texts.UI_MASS_BONUS_POLUCHATELEY_CHEL_209.format(user_count=user_count)+
+        texts.UI_MASS_BONUS_BONUS_KAZHDOMU_210.format(amount=amount)+
+        texts.UI_MASS_BONUS_OBSHCHIY_BYUDZHET_BONUSOV_211.format(total_budget=total_budget)+
+        texts.UI_MASS_BONUS_PRICHINA_212.format(safe_reason=safe(reason))+
+        texts.UI_MASS_BONUS_VY_UVERENY_CHTO_KHOTITE_ZAPUST_213.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🚀 Запустить начисление",
+        text=texts.UI_MASS_BONUS_ZAPUSTIT_NACHISLENIE_218,
         callback_data="confirm_mass_bonus_apply",
     )
     builder.button(
-        text="❌ Отмена",
+        text=texts.UI_MASS_BONUS_OTMENA_222,
         callback_data="admin_mass_bonus",
     )
     builder.adjust(1)
@@ -246,7 +246,7 @@ async def apply_mass_bonus(
         return
 
     if admin_id in _mass_bonus_in_progress:
-        await callback.answer("⚠️ Массовое начисление уже выполняется!", show_alert=True)
+        await callback.answer(texts.UI_MASS_BONUS_MASSOVOE_NACHISLENIE_UZHE_VYPO_249, show_alert=True)
         return
 
     _mass_bonus_in_progress.add(admin_id)
@@ -254,16 +254,16 @@ async def apply_mass_bonus(
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)
-    reason = data.get("reason", "Массовый бонус")
+    reason = data.get("reason", texts.UI_MASS_BONUS_MASSOVYY_BONUS_257)
 
     await state.clear()
-    await callback.answer("🚀 Массовое начисление запущено в фоне!", show_alert=True)
+    await callback.answer(texts.UI_MASS_BONUS_MASSOVOE_NACHISLENIE_ZAPUSHCHE_260, show_alert=True)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Результат")
+    header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_262, texts.UI_MASS_BONUS_REZULTAT_262)
     try:
         await callback.message.edit_text(
-            f"{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>\n\n"
-            f"По завершении операции вам придет уведомление со статистикой.",
+            texts.UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSOV_P_265.format(header=header, amount=amount)+
+            texts.UI_MASS_BONUS_PO_ZAVERSHENII_OPERATSII_VAM_P_266.format(),
             parse_mode="HTML",
         )
     except Exception:
@@ -359,8 +359,8 @@ async def _run_mass_bonus_background(
                         await global_send_limiter.acquire()
                         await bot.send_message(
                             tg_id,
-                            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-                            f"Причина: <i>{safe(reason)}</i>",
+                            texts.UI_MASS_BONUS_VAM_NACHISLEN_BONUSNYY_BALANS_362.format(amount=amount)+
+                            texts.UI_MASS_BONUS_PRICHINA_363.format(safe_reason=safe(reason)),
                             parse_mode="HTML",
                         )
                     except TelegramForbiddenError:
@@ -387,19 +387,19 @@ async def _run_mass_bonus_background(
             )
 
         try:
-            header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
+            header = format_admin_breadcrumbs(texts.UI_MASS_BONUS_MASSOVYY_BONUS_390, texts.UI_MASS_BONUS_ITOGI_390)
             builder = InlineKeyboardBuilder()
-            builder.button(text="🎁 Новый массовый бонус", callback_data="admin_mass_bonus")
-            builder.button(text="🏠 В админ-меню", callback_data="admin_menu")
+            builder.button(text=texts.UI_MASS_BONUS_NOVYY_MASSOVYY_BONUS_392, callback_data="admin_mass_bonus")
+            builder.button(text=texts.UI_MASS_BONUS_V_ADMIN_MENYU_393, callback_data="admin_menu")
             builder.adjust(1)
 
             await render_hub(
                 bot,
                 admin_id,
-                f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
-                f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
-                f"• Ошибок: <b>{fail_count}</b>\n"
-                f"• Заблокировали бота: <b>{blocked_count}</b>",
+                texts.UI_MASS_BONUS_MASSOVOE_NACHISLENIE_BONUSOV_Z_399.format(header=header)+
+                texts.UI_MASS_BONUS_ZACHISLENO_CHEL_KAZHDOMU_400.format(success_count=success_count, amount=amount)+
+                texts.UI_MASS_BONUS_OSHIBOK_401.format(fail_count=fail_count)+
+                texts.UI_MASS_BONUS_ZABLOKIROVALI_BOTA_402.format(blocked_count=blocked_count),
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )

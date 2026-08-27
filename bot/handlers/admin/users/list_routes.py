@@ -78,7 +78,7 @@ async def show_extended_filter_menu(
     if filter_type == "server":
         rows = (await session.scalars(select(Server).order_by(Server.name))).all()
         if not rows:
-            await callback.answer("Серверов нет", show_alert=True)
+            await callback.answer(texts.UI_LIST_ROUTES_SERVEROV_NET_81, show_alert=True)
             return
         for server in rows:
             flag = server.country_flag or "🌐"
@@ -86,7 +86,7 @@ async def show_extended_filter_menu(
                 text=f"🖥 {flag} {server.name}",
                 callback_data=f"admin_users_filter:server:{server.id}:1",
             )
-        title = "🖥 <b>Выберите сервер:</b>"
+        title = texts.UI_LIST_ROUTES_VYBERITE_SERVER_89
     elif filter_type == "country":
         rows = (
             await session.execute(
@@ -97,18 +97,18 @@ async def show_extended_filter_menu(
             )
         ).scalars().all()
         if not rows:
-            await callback.answer("Стран нет", show_alert=True)
+            await callback.answer(texts.UI_LIST_ROUTES_STRAN_NET_100, show_alert=True)
             return
         for country in rows:
             builder.button(
                 text=f"🌐 {country}",
                 callback_data=f"admin_users_filter:country:{country}:1",
             )
-        title = "🌐 <b>Выберите страну:</b>"
+        title = texts.UI_LIST_ROUTES_VYBERITE_STRANU_107
     elif filter_type == "tariff":
         rows = (await session.scalars(select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.device_limit, Tariff.id))).all()
         if not rows:
-            await callback.answer("Тарифов нет", show_alert=True)
+            await callback.answer(texts.UI_LIST_ROUTES_TARIFOV_NET_111, show_alert=True)
             return
         from utils.tariff_names import get_tariff_group_name
         seen_limits = set()
@@ -122,12 +122,12 @@ async def show_extended_filter_menu(
                 text=f"💎 {label}",
                 callback_data=f"admin_users_filter:tariff:{limit}:1",
             )
-        title = "💎 <b>Выберите тариф:</b>"
+        title = texts.UI_LIST_ROUTES_VYBERITE_TARIF_125
     else:
-        await callback.answer("Неизвестный фильтр", show_alert=True)
+        await callback.answer(texts.UI_LIST_ROUTES_NEIZVESTNYY_FILTR_127, show_alert=True)
         return
 
-    builder.button(text="🔙 Назад", callback_data="admin_users")
+    builder.button(text=texts.UI_LIST_ROUTES_NAZAD_130, callback_data="admin_users")
     builder.adjust(1)
     await callback.answer(show_alert=False)
     try:
@@ -168,7 +168,7 @@ async def users_filter_pagination(
 
     param_val = None if filter_param == "none" else filter_param
     if filter_type in {"server", "tariff"} and param_val is not None and not str(param_val).isdigit():
-        await callback.answer("Некорректный параметр фильтра", show_alert=True)
+        await callback.answer(texts.UI_LIST_ROUTES_NEKORREKTNYY_PARAMETR_FILTRA_171, show_alert=True)
         return
 
     total_users = await get_filtered_users_count(
@@ -176,7 +176,7 @@ async def users_filter_pagination(
     )
 
     if total_users == 0:
-        await callback.answer("Пользователи не найдены по фильтру", show_alert=True)
+        await callback.answer(texts.UI_LIST_ROUTES_POLZOVATELI_NE_NAYDENY_PO_FILT_179, show_alert=True)
     else:
         await callback.answer(show_alert=False)
     await state.clear()
@@ -284,7 +284,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Введите @username, Telegram ID или ID пользователя для поиска.",
+            texts.UI_LIST_ROUTES_VVEDITE_USERNAME_TELEGRAM_ID_I_287,
             get_back_button("admin_users"),
         )
         return
@@ -300,7 +300,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"🔍 Пользователь по запросу <b>{safe(message.text)}</b> не найден.",
+            texts.UI_LIST_ROUTES_POLZOVATEL_PO_ZAPROSU_NE_NAYDE_303.format(safe_message_text=safe(message.text)),
             get_back_button("admin_users"),
             parse_mode="HTML",
         )
@@ -431,30 +431,30 @@ async def show_user_audit(
     }
 
     lines = [
-        f"📜 <b>История действий пользователя ID {user.telegram_id}:</b>",
-        f"<i>Всего записей: {total_count}</i>\n",
+        texts.UI_LIST_ROUTES_ISTORIYA_DEYSTVIY_POLZOVATELYA_434.format(user_telegram_id=user.telegram_id),
+        texts.UI_LIST_ROUTES_VSEGO_ZAPISEY_435.format(total_count=total_count),
     ]
     if not logs:
-        lines.append("<i>История действий пуста.</i>")
+        lines.append(texts.UI_LIST_ROUTES_ISTORIYA_DEYSTVIY_PUSTA_438)
     else:
         for item in logs:
             dt = format_datetime(item.created_at)
-            action_text = safe(action_map.get(item.action, item.action or "Действие"))
+            action_text = safe(action_map.get(item.action, item.action or texts.UI_LIST_ROUTES_DEYSTVIE_442))
             details_text = safe(format_audit_details(item.details))
             lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
     if total_pages > 1:
         if page > 1:
-            builder.button(text="◀️ Назад", callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
+            builder.button(text=texts.UI_LIST_ROUTES_NAZAD_449, callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=f"Стр {page}/{total_pages}", callback_data="ignore")
+        builder.button(text=texts.UI_LIST_ROUTES_STR_452.format(page=page, total_pages=total_pages), callback_data="ignore")
         if page < total_pages:
-            builder.button(text="Вперед ▶️", callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
+            builder.button(text=texts.UI_LIST_ROUTES_VPERED_454, callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-    builder.button(text="🔙 К карточке пользователя", callback_data=f"admin_user_card:{telegram_id}")
+    builder.button(text=texts.UI_LIST_ROUTES_K_KARTOCHKE_POLZOVATELYA_457, callback_data=f"admin_user_card:{telegram_id}")
     if total_pages > 1:
         builder.adjust(3, 1)
     else:

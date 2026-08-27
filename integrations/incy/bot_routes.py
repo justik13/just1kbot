@@ -20,36 +20,36 @@ logger = logging.getLogger(__name__)
 
 def _build_incy_text(sub_url: str) -> str:
     return (
-        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
-        "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
-        "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
-        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
-        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
-        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
-        "4. Включите подключение в приложении.\n\n"
-        "<b>Ваша персональная ссылка:</b>\n"
-        f"<code>{sub_url}</code>\n\n"
-        "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
-        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
+        texts.UI_BOT_ROUTES_PODKLYUCHENIE_CHEREZ_PRILOZHEN_23+
+        texts.UI_BOT_ROUTES_VSE_VASHI_SERVERY_I_USTROYSTVA_24+
+        texts.UI_BOT_ROUTES_KAK_NASTROIT_NA_TELEFONE_IOS_A_25+
+        texts.UI_BOT_ROUTES_1_USTANOVITE_PRILOZHENIE_INCY__26+
+        texts.UI_BOT_ROUTES_2_NAZHMITE_OTKRYT_V_INCY_DLYA__27+
+        texts.UI_BOT_ROUTES_3_ESLI_PRILOZHENIE_NE_OTKRYLOS_28+
+        texts.UI_BOT_ROUTES_4_VKLYUCHITE_PODKLYUCHENIE_V_P_29+
+        texts.UI_BOT_ROUTES_VASHA_PERSONALNAYA_SSYLKA_30+
+        f"<code>{sub_url}</code>\n\n"+
+        texts.UI_BOT_ROUTES_DLYA_KOMPYUTEROV_DLYA_WINDOWS__32+
+        texts.UI_BOT_ROUTES_PRI_SOZDANII_ILI_UDALENII_USTR_33
     )
 
 
 def _build_incy_keyboard(sub_url: str, open_url: str):
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📱 Открыть в INCY",
+        text=texts.UI_BOT_ROUTES_OTKRYT_V_INCY_40,
         url=open_url,
     )
     builder.button(
-        text="📋 Скопировать ссылку",
+        text=texts.UI_BOT_ROUTES_SKOPIROVAT_SSYLKU_44,
         copy_text=CopyTextButton(text=sub_url),
     )
     builder.button(
-        text="🔄 Сбросить ссылку",
+        text=texts.UI_BOT_ROUTES_SBROSIT_SSYLKU_48,
         callback_data="rotate_incy_token",
     )
     builder.button(
-        text="⬅️ Назад к устройствам",
+        text=texts.UI_BOT_ROUTES_NAZAD_K_USTROYSTVAM_52,
         callback_data="back_to_connections",
     )
     builder.adjust(1)
@@ -136,8 +136,8 @@ async def rotate_incy_subscription(
             _build_incy_text(sub_url),
             _build_incy_keyboard(sub_url, open_url),
         )
-        await callback.answer("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
+        await callback.answer(texts.UI_BOT_ROUTES_SSYLKA_USPESHNO_SBROSHENA_STAR_139, show_alert=True)
     except Exception as e:
         logger.exception("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__)
-        await callback.answer("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        await callback.answer(texts.UI_BOT_ROUTES_OSHIBKA_PRI_SBROSE_SSYLKI_POPR_142, show_alert=True)
         return

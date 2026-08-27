@@ -121,10 +121,10 @@ async def _show_hub(
         for limit in sorted(grouped.keys()):
             min_price = min(int(t.price_rub) for t in grouped[limit])
             name = get_tariff_display_name(limit)
-            tariff_lines.append(f"• <b>{name}</b> ({limit} уст.) — от <b>{min_price} ₽</b>")
+            tariff_lines.append(texts.UI_COMMON_UST_OT_124.format(name=name, limit=limit, min_price=min_price))
 
         if tariff_lines:
-            text += "\n\n💡 <b>Доступные варианты тарифов:</b>\n" + "\n".join(tariff_lines)
+            text += texts.UI_COMMON_DOSTUPNYE_VARIANTY_TARIFOV_127 + "\n".join(tariff_lines)
 
     builder = InlineKeyboardBuilder()
     builder.button(
