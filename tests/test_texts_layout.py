@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import unittest
 from pathlib import Path
 
 from bot import texts
@@ -47,16 +48,18 @@ EXPECTED_FILES = {
 }
 
 
-class TestTextsLayout:
+class TestTextsLayout(unittest.TestCase):
     def test_exact_domain_layout(self):
         actual = {
             path.relative_to(TEXTS_DIR).as_posix()
             for path in TEXTS_DIR.rglob("*.py")
         }
-        assert actual == EXPECTED_FILES, (
-            "bot/texts layout drift detected. "
-            f"Missing={sorted(EXPECTED_FILES - actual)}, "
-            f"Unexpected={sorted(actual - EXPECTED_FILES)}"
+        self.assertEqual(
+            actual,
+            EXPECTED_FILES,
+            "bot/texts layout drift detected: "
+            f"missing={sorted(EXPECTED_FILES - actual)}, "
+            f"unexpected={sorted(actual - EXPECTED_FILES)}",
         )
 
     def test_facade_is_thin_and_contains_no_text_assignments(self):
@@ -75,9 +78,11 @@ class TestTextsLayout:
             for target in targets:
                 if isinstance(target, ast.Name):
                     assigned_names.add(target.id)
-        assert assigned_names <= {"_TEXT_KEYS"}, (
+        self.assertLessEqual(
+            assigned_names,
+            {"_TEXT_KEYS"},
             "Facade must not own canonical text constants: "
-            f"{sorted(assigned_names - {'_TEXT_KEYS'})}"
+            f"{sorted(assigned_names - {'_TEXT_KEYS'})}",
         )
 
     def test_every_canonical_text_is_reachable_through_facade(self):
@@ -90,9 +95,10 @@ class TestTextsLayout:
                     continue
                 for target in statement.targets:
                     if isinstance(target, ast.Name) and target.id.isupper():
-                        assert hasattr(texts, target.id), (
+                        self.assertTrue(
+                            hasattr(texts, target.id),
                             f"Canonical key {target.id} from {py_file.relative_to(ROOT)} "
-                            "is not exposed by bot.texts"
+                            "is not exposed by bot.texts",
                         )
 
     def test_config_constants_has_no_user_facing_text(self):
@@ -104,10 +110,10 @@ class TestTextsLayout:
                 continue
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id.isupper():
-                    value = node.value
-                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                        ui_values.append((target.id, value.value))
-        assert all(not any(ch.isspace() for ch in value) for _, value in ui_values), (
-            "User-facing string literals must live under bot/texts, not config/constants.py: "
-            f"{ui_values}"
+                    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        ui_values.append((target.id, node.value.value))
+        self.assertEqual(
+            ui_values,
+            [],
+            "User-facing string literals must live under bot/texts, not config/constants.py",
         )
