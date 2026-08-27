@@ -47,7 +47,7 @@ EXPECTED_FILES = {
 }
 
 
-class TextsLayoutTests:
+class TestTextsLayout:
     def test_exact_domain_layout(self):
         actual = {
             path.relative_to(TEXTS_DIR).as_posix()
@@ -64,14 +64,14 @@ class TextsLayoutTests:
             (TEXTS_DIR / "__init__.py").read_text(encoding="utf-8"),
             filename="bot/texts/__init__.py",
         )
-        assignments = [
-            node
-            for node in tree.body
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
-        ]
         assigned_names = set()
-        for node in assignments:
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, ast.AnnAssign):
+                targets = [node.target]
+            else:
+                continue
             for target in targets:
                 if isinstance(target, ast.Name):
                     assigned_names.add(target.id)
@@ -94,3 +94,20 @@ class TextsLayoutTests:
                             f"Canonical key {target.id} from {py_file.relative_to(ROOT)} "
                             "is not exposed by bot.texts"
                         )
+
+    def test_config_constants_has_no_user_facing_text(self):
+        path = ROOT / "config" / "constants.py"
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        ui_values = []
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.isupper():
+                    value = node.value
+                    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                        ui_values.append((target.id, value.value))
+        assert all(not any(ch.isspace() for ch in value) for _, value in ui_values), (
+            "User-facing string literals must live under bot/texts, not config/constants.py: "
+            f"{ui_values}"
+        )
