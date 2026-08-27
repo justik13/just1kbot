@@ -2,7 +2,6 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot import texts
 from database.repositories.maintenance_repo import (
     get_maintenance_mode,
     is_maintenance_enabled,
@@ -14,49 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 class MaintenanceService:
-    """
-    Сервис режима технических работ.
-
-    Правила:
-    - обычные пользователи не могут создавать новые устройства;
-    - обычные пользователи не могут создавать новые платежи;
-    - существующие подключения продолжают работать;
-    - админка доступна;
-    - админы могут обходить режим;
-    - webhook и фоновые задачи продолжают работать,
-      чтобы не терять уже оплаченные платежи.
-    """
+    """Service for persisting and evaluating maintenance mode state."""
 
     @staticmethod
     async def is_enabled(session: AsyncSession) -> bool:
         return await is_maintenance_enabled(session)
 
     @staticmethod
-    async def get_message(session: AsyncSession) -> str:
+    async def get_message(session: AsyncSession) -> str | None:
         maintenance = await get_maintenance_mode(session)
-        if maintenance is None:
-            return texts.MAINTENANCE_DEFAULT_MESSAGE
-
-        if maintenance.message:
-            return maintenance.message
-
-        return texts.MAINTENANCE_DEFAULT_MESSAGE
+        return maintenance.message if maintenance is not None else None
 
     @staticmethod
     async def can_user_perform_action(
         session: AsyncSession,
         telegram_id: int,
     ) -> bool:
-        """
-        Возвращает True, если пользователю разрешено выполнять
-        ограниченные действия.
-
-        Админы всегда могут выполнять действия.
-        Обычные пользователи — только если режим выключен.
-        """
+        """Return True when the user may perform maintenance-restricted actions."""
         if is_admin(telegram_id):
             return True
-
         return not await is_maintenance_enabled(session)
 
     @staticmethod
@@ -68,13 +43,10 @@ class MaintenanceService:
         await set_maintenance_mode(
             session,
             is_enabled=True,
-            message=message or texts.MAINTENANCE_DEFAULT_MESSAGE,
+            message=message,
             updated_by=admin_id,
         )
-        logger.info(
-            "Maintenance mode enabled by admin %s",
-            admin_id,
-        )
+        logger.info("Maintenance mode enabled by admin %s", admin_id)
 
     @staticmethod
     async def disable(
@@ -86,10 +58,7 @@ class MaintenanceService:
             is_enabled=False,
             updated_by=admin_id,
         )
-        logger.info(
-            "Maintenance mode disabled by admin %s",
-            admin_id,
-        )
+        logger.info("Maintenance mode disabled by admin %s", admin_id)
 
     @staticmethod
     async def toggle(
@@ -97,21 +66,12 @@ class MaintenanceService:
         admin_id: int,
         message: str | None = None,
     ) -> bool:
-        """
-        Переключает режим технических работ.
-        Возвращает новое состояние:
-        - True — режим включён;
-        - False — режим выключен.
-        """
+        """Toggle maintenance mode and return its new state."""
         current = await is_maintenance_enabled(session)
 
         if current:
             await MaintenanceService.disable(session, admin_id)
             return False
 
-        await MaintenanceService.enable(
-            session,
-            admin_id,
-            message=message,
-        )
+        await MaintenanceService.enable(session, admin_id, message=message)
         return True
