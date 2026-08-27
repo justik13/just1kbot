@@ -188,22 +188,43 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
 
         # Worker captures generation before making HTTP request
         gen_before = get_server_generation(2)
-        self.assertEqual(gen_before, 0)
 
         # Admin changes URL or deletes server -> invalidation bumps generation
         invalidate_server_cache(2)
-        self.assertEqual(get_server_generation(2), 1)
+        self.assertEqual(get_server_generation(2), gen_before + 1)
         self.assertIsNone(get_cached_peer_count(2))
 
-        # In-flight request from old node finishes with old generation (0) -> MUST be rejected!
+        # In-flight request from old node finishes with old generation -> MUST be rejected!
         updated = update_cached_peer_count(2, 15, timestamp=150.0, generation=gen_before)
         self.assertFalse(updated)
         self.assertIsNone(get_cached_peer_count(2))
 
-        # New request from new node with current generation (1) succeeds
-        updated = update_cached_peer_count(2, 6, timestamp=160.0, generation=1)
+        # New request from new node with current generation succeeds
+        updated = update_cached_peer_count(2, 6, timestamp=160.0, generation=gen_before + 1)
         self.assertTrue(updated)
         self.assertEqual(get_cached_peer_count(2), 6)
+
+    def test_clear_slots_cache_advances_global_generation_and_rejects_in_flight(self):
+        from services.slots_cache import (
+            clear_slots_cache,
+            get_cached_peer_count,
+            get_server_generation,
+            update_cached_peer_count,
+        )
+
+        gen_before = get_server_generation(20)
+        update_cached_peer_count(20, 10, generation=gen_before)
+        self.assertEqual(get_cached_peer_count(20), 10)
+
+        # Global clear
+        clear_slots_cache()
+        self.assertIsNone(get_cached_peer_count(20))
+        self.assertGreater(get_server_generation(20), gen_before)
+
+        # In-flight request with old generation
+        updated = update_cached_peer_count(20, 10, generation=gen_before)
+        self.assertFalse(updated)
+        self.assertIsNone(get_cached_peer_count(20))
 
     async def test_cleanup_worker_preserves_cache_on_api_failure(self):
         from services.slots_cache import get_cached_peer_count, update_cached_peer_count

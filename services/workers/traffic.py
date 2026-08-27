@@ -175,11 +175,24 @@ async def _traffic_sync_once(bot: Bot | None = None):
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
         update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 
-        await _process_server_traffic(server_info, api_clients, bot)
+        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen)
 
 
-async def _process_server_traffic(server_info, api_clients, bot: Bot | None = None):
+async def _process_server_traffic(
+    server_info,
+    api_clients,
+    bot: Bot | None = None,
+    expected_gen: int | None = None,
+):
     server_id = server_info["id"]
+    from services.slots_cache import get_server_generation
+    if expected_gen is not None and get_server_generation(server_id) != expected_gen:
+        logger.info(
+            "Aborting _process_server_traffic for server %s due to configuration generation change",
+            server_id,
+        )
+        return
+
     updates_data = {}
     current_time = now_utc()
 
