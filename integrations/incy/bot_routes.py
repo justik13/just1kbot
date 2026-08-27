@@ -74,7 +74,7 @@ async def show_incy_subscription(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            "❌ Пользователь не найден.",
+            "❌ Пользователь не найден",
             _build_back_keyboard(),
         )
         return
@@ -114,7 +114,7 @@ async def rotate_incy_subscription(
     await state.clear()
 
     if not db_user:
-        await callback.answer("❌ Пользователь не найден.", show_alert=True)
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
         return
 
     if not SubscriptionTokenService.is_enabled():
@@ -140,7 +140,7 @@ async def rotate_incy_subscription(
             _build_incy_text(sub_url),
             _build_incy_keyboard(sub_url, open_url),
         )
-        await callback.answer("✅ Ссылка успешно сброшена. Старая ссылка больше не работает.", show_alert=True)
+        await callback.answer("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
     except Exception as e:
         logger.exception("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__)
         await callback.answer("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
