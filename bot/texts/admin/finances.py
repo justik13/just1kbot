@@ -76,10 +76,10 @@ ADMIN_PAYMENT_USER_WITH_ID = "ID: <code>{user_id}</code> (@{username})"
 ADMIN_PURCHASES_BTN_BACK = "↩️ Вернуть доступный остаток"
 ADMIN_PURCHASES_BTN_REFUND = """✅ <b>Возврат принят</b>
 
-{status_text}
 Сумма: <b>{amount_rub} RUB</b>
-Operation: <code>{operation_id}</code>
-Статус: <code>{operation_status}</code>
+Платёж: <code>#{payment_id}</code>
+Operation: <code>{status}</code>
+Статус: <code>{details}</code>
 
 Зарезервированная сумма недоступна для новых покупок до подтверждения или безопасного завершения операции."""
 ADMIN_PURCHASES_BTN_USER = "💳 К списку платежей"
