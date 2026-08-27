@@ -76,7 +76,7 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_kwargs = bot.send_message.call_args[1]
             self.assertEqual(call_kwargs["chat_id"], 999)
-            self.assertIn("Диск Устройство-ноды забит > 85%", call_kwargs["text"])
+            self.assertIn("Диск VPN-ноды забит > 85%", call_kwargs["text"])
 
     async def test_node_monitor_down_alert(self):
         bot = AsyncMock()
@@ -127,7 +127,7 @@ class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):
             bot.send_message.assert_called_once()
             call_kwargs = bot.send_message.call_args[1]
             self.assertEqual(call_kwargs["chat_id"], 888)
-            self.assertIn("Проблема с сервером", call_kwargs["text"])
+            self.assertIn("Проблема с VPN-сервером", call_kwargs["text"])
 
 
 

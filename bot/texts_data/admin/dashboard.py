@@ -195,7 +195,7 @@ UI_DASHBOARD_SSYLKA_MTPROTO_PROXY_OBNOVLENA_535 = """✅ Ссылка MTProto Pr
 <code>{safe_new_val}</code>"""
 UI_DASHBOARD_FINANSY_I_OCHEREDI_28 = '💰 Финансы и Очереди{fin_badge}'
 UI_DASHBOARD_SISTEMA_I_LOGI_34 = '🛠 Система и Логи {maint_icon}'
-UI_DASHBOARD_DISPUTY_73 = '⚠️ Диспуты ({disputes_count})'
+UI_DASHBOARD_DISPUTY_COUNT_73 = '⚠️ Диспуты ({disputes_count})'
 UI_DASHBOARD_DISPUTY_73 = '⚖️ Диспуты'
 UI_DASHBOARD_OCHEREDI_75 = '🚨 Очереди ({dead_queues_count})'
 UI_DASHBOARD_OCHEREDI_ZADACH_75 = '🔄 Очереди задач'

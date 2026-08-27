@@ -70,7 +70,7 @@ def get_admin_cat_finance_keyboard(
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_ISTORIYA_PLATEZHEJ, callback_data="admin_payments")
     builder.button(text=texts.BTN_ZHURNAL_POKUPOK, callback_data="admin_purchases")
-    dispute_label = texts.UI_DASHBOARD_DISPUTY_73.format(disputes_count=disputes_count) if disputes_count > 0 else texts.UI_DASHBOARD_DISPUTY_73
+    dispute_label = texts.UI_DASHBOARD_DISPUTY_COUNT_73.format(disputes_count=disputes_count) if disputes_count > 0 else texts.UI_DASHBOARD_DISPUTY_73
     builder.button(text=dispute_label, callback_data="admin_disputes")
     queue_label = texts.UI_DASHBOARD_OCHEREDI_75.format(dead_queues_count=dead_queues_count) if dead_queues_count > 0 else texts.UI_DASHBOARD_OCHEREDI_ZADACH_75
     builder.button(text=queue_label, callback_data="aq:home")
