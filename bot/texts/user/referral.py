@@ -11,6 +11,8 @@ REFERRAL_LIST_FOOTER = """
 REFERRAL_LIST_HEADER = """👥 <b>Ваши рефералы</b>
 """
 
+REFERRAL_LIST_ITEM_FORMAT = "\n{idx}. <b>{user}</b> ({date})"
+
 REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! При первом пополнении получишь +10% бонуса на баланс:"
 
 REFERRAL_TEXT_BALANCE = """🎁 <b>Пригласи друга — получайте бонусы вместе!</b>
