@@ -43,10 +43,6 @@ ADMIN_DISPUTE_BTN_REVIEW = "Некорректный статус спора"
 
 ADMIN_DISPUTE_CARD = "открыт"
 
-ADMIN_DISPUTE_CONFIRM_ACTION = "← В админку"
-
-ADMIN_DISPUTE_CONFIRM_AMOUNT = "Некорректный ID"
-
 ADMIN_DISPUTE_CONFIRM_CASE = "➕ Зарегистрировать спор"
 
 ADMIN_DISPUTE_CONFIRM_NOTE = """⚠️ <b>Подтвердите исход спора</b>
@@ -58,8 +54,6 @@ ADMIN_DISPUTE_CONFIRM_NOTE = """⚠️ <b>Подтвердите исход сп
 ADMIN_DISPUTE_CONFIRM_PAYMENT = "Исход спора зафиксирован"
 
 ADMIN_DISPUTE_CONFIRM_PROMPT = "✅ Продавец выиграл"
-
-ADMIN_DISPUTE_CONFIRM_STATUS = "🔄 Обновить"
 
 ADMIN_DISPUTE_CONFIRM_TITLE = "Состояние спора уже изменилось"
 
@@ -85,6 +79,8 @@ ADMIN_DISPUTE_LIST_EMPTY = "выигран продавцом"
 
 ADMIN_DISPUTE_LIST_HEADER = "проигран продавцом"
 
+ADMIN_DISPUTE_NOT_FOUND_ALERT = "Спор не найден"
+
 ADMIN_DISPUTE_NOT_FOUND_OR_RESOLVED = "Сумма превышает остаток платёжного риска"
 
 ADMIN_DISPUTE_PROMPT_AMOUNT = "Платёж ещё не подтверждён"
@@ -97,28 +93,22 @@ ADMIN_DISPUTE_PROMPT_REASON = "Пополнение ещё не зачислен
 
 ADMIN_DISPUTE_REJECT_SUCCESS = "Нужен ID спора банка/провайдера"
 
-ADMIN_DISPUTE_RESOLVED_ALREADY = "Спор не найден"
-
 ADMIN_DISPUTE_ROW_ITEM = "ручная проверка"
 
 ADMIN_DISPUTE_SET_REVIEW_SUCCESS = "Сумма должна быть целым числом рублей"
-
-ADMIN_DISPUTE_STATUS_CANCELLED_BADGE = "Некорректный ID"
-
-ADMIN_DISPUTE_STATUS_LOST_BADGE = "Спор не найден"
 
 ADMIN_DISPUTE_STATUS_LOST_LABEL = "Споров пока нет."
 
 ADMIN_DISPUTE_STATUS_OPEN_BADGE = "Переведено на ручную проверку"
 
-ADMIN_DISPUTE_STATUS_REVIEW_BADGE = "Некорректный ID"
-
 ADMIN_DISPUTE_STATUS_REVIEW_LABEL = "reservation будет освобождена"
 
 ADMIN_DISPUTE_STATUS_UNDER_REVIEW_LABEL = "будет создан exactly-once chargeback debit; возможен долг"
 
-ADMIN_DISPUTE_STATUS_WON_BADGE = "Некорректный ID"
-
 ADMIN_DISPUTE_STATUS_WON_LABEL = "#{value_0} · {value_1} · {value_2} ₽ · case={value_3}"
 
+BTN_REFRESH_ACTION = "🔄 Обновить"
+
 DISPUTE_RESERVATION_MISSING = "нет"
+
+ERROR_INVALID_ID = "Некорректный ID"

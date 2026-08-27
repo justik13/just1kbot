@@ -3,6 +3,10 @@ from __future__ import annotations
 
 ADMIN_BROADCAST = "Всего"
 
+ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': 'Все пользователи', 'active': 'Активные подписки', 'expiring_3d': 'Подписки истекают < 3 дней', 'expired': 'Истекшие подписки', 'never': 'Без подписок', 'test': 'Тестовая отправка админу'}
+
+ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': 'Все пользователи', 'active': 'Активные подписки', 'expiring_3d': '⏳ Истекают < 3 дней', 'expired': '🔴 Истекшие подписки', 'never': '🆕 Без подписок'}
+
 ADMIN_BROADCAST_RECIPIENTS_COUNT = "⚠️ Текст рассылки слишком длинный. Максимум {value_0} символов."
 
 ADMIN_BROADCAST_SENDING_PROGRESS = """🚨 <b>Рассылка остановлена из-за ошибки</b>
@@ -62,5 +66,3 @@ BROADCAST_TEST_MESSAGE_OTPRAVLE = """✅ <b>Тестовое сообщение 
 """
 
 BROADCAST_TEST_MNE_ADMINU = "🧪 Тест мне (Админу)"
-
-BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"

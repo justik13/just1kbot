@@ -72,7 +72,7 @@ def get_admin_user_balance_keyboard(
         callback_data=f"admin_balance_deduct:{user_id}",
     )
     builder.button(
-        text=texts.ADMIN_USER_LIST_HEADER,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{user_id}",
     )
 
@@ -110,7 +110,7 @@ def get_admin_subscription_keyboard(
         )
 
     builder.button(
-        text=texts.ADMIN_USER_LIST_HEADER,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 
@@ -139,7 +139,7 @@ def get_admin_change_tariff_keyboard(
         label = get_tariff_group_name(device_limit)
 
         if device_limit == current_device_limit:
-            label += texts.ADMIN_USERS
+            label += texts.PAYMENT_STATUS_ACTIVE_BADGE
 
         builder.button(
             text=truncate_button_text(label),
@@ -192,7 +192,7 @@ def get_admin_grant_days_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.ADMIN_USER_CARD_STATUS_BANNED.format(value_0=days),
+            text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
                 f"admin_sub_grant_confirm:"
                 f"{telegram_id}:{tariff_id}:{days}"
@@ -200,7 +200,7 @@ def get_admin_grant_days_keyboard(
         )
 
     builder.button(
-        text=texts.ADMIN_USER_BALANCE_VIEW_CARD,
+        text=texts.LABEL_FOREVER,
         callback_data=(
             f"admin_sub_grant_confirm:"
             f"{telegram_id}:{tariff_id}:36500"
@@ -208,7 +208,7 @@ def get_admin_grant_days_keyboard(
     )
 
     builder.button(
-        text=texts.ADMIN_USER_BALANCE_ADJUST_PROMPT,
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
         callback_data=(
             f"admin_sub_grant_custom:{telegram_id}:{tariff_id}"
         ),
@@ -231,21 +231,21 @@ def get_admin_extend_days_new_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.ADMIN_USER_BALANCE_REASON_PROMPT.format(value_0=days),
+            text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
                 f"admin_sub_confirm_extend:{telegram_id}:{days}"
             ),
         )
 
     builder.button(
-        text=texts.ADMIN_USER_BALANCE_CONFIRM_PROMPT,
+        text=texts.LABEL_FOREVER,
         callback_data=(
             f"admin_sub_confirm_extend:{telegram_id}:36500"
         ),
     )
 
     builder.button(
-        text=texts.ADMIN_USER_MASS_BONUS_AMOUNT_PROMPT,
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
         callback_data=f"admin_sub_extend_custom:{telegram_id}",
     )
 
@@ -300,7 +300,7 @@ def get_admin_user_devices_keyboard(
         )
 
     builder.button(
-        text=texts.ADMIN_USER_MASS_BONUS_CONFIRM_PROMPT,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 

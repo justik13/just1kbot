@@ -3,19 +3,17 @@ from __future__ import annotations
 
 BTN_BACK_TO_DEVICES = "← К списку устройств"
 
+BTN_CHANGE_NAME = "✏️ Изменить имя"
+
 BTN_CHANGE_TARIFF = "⚙️ Сменить тариф"
 
 BTN_DELETE_DEVICE = "🗑 Удалить устройство"
-
-CONNECTION_DEVICES_DEVICE = "🗑 Удалить устройство"
 
 CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "🔄 Другой способ подключения"
 
 CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE = "← К устройству"
 
 CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA = "🚀 Открыть в Amnezia"
-
-CONNECTION_DEVICE_CREATE = "🌍"
 
 CONNECTION_DEVICE_CREATE_CREATING_SCREEN = """⏳ <b>Настраиваем подключение...</b>
 
@@ -24,8 +22,6 @@ CONNECTION_DEVICE_CREATE_CREATING_SCREEN = """⏳ <b>Настраиваем по
 <i>Подготавливаем защищенный доступ...</i>"""
 
 CONNECTION_DEVICE_CREATE_DEFAULT_SERVER_NAME = "Сервер подключения"
-
-CONNECTION_DEVICE_VIEW = "🌍"
 
 DEVICE_ACCESS_INACTIVE = "⚠️ Доступ неактивен. Продлите подписку."
 
@@ -65,12 +61,6 @@ DEVICE_CREATING_SPINNER_NOTICE = "{value_0} {value_1}"
 
 DEVICE_DATA_NONE = "Нет данных"
 
-DEVICE_DEFAULT_FLAG_ICON = "← К списку устройств"
-
-DEVICE_DEFAULT_SERVER_TITLE = "🏠 В главное меню"
-
-DEVICE_DELETE_ALREADY_IN_PROGRESS = "🗑 Устройство уже удаляется с сервера."
-
 DEVICE_DELETE_CANCELLED = "❌ Удаление отменено"
 
 DEVICE_DELETE_CONFIRM = """⚠️ <b>Подтверждение удаления</b>
@@ -102,15 +92,11 @@ DEVICE_NAME_DUPLICATE = """⚠️ <b>Устройство с таким имен
 
 Выберите другое имя."""
 
-DEVICE_NAME_UNKNOWN = "Неизвестно"
-
 DEVICE_RENAMED_SUCCESS = "✅ Устройство переименовано в <b>{device_name}</b>"
 
 DEVICE_RENAME_PROMPT = """✏️ <b>Переименование устройства</b>
 
 Введите новое имя (латиница, цифры, пробелы, дефисы, подчёркивания, до 16 символов):"""
-
-DEVICE_SELF_HEALING_IN_PROGRESS = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
 
 DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name}:</b>
 
@@ -119,8 +105,6 @@ DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name
 <i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 
 DEVICE_STATUS_CREATING_LABEL = "✅ Да, удалить"
-
-DEVICE_STATUS_DELETING_LABEL = "✏️ Изменить имя"
 
 DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 

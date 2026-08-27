@@ -26,12 +26,6 @@ ADMIN_SUB_EXTEND_FAILED = "❌ Не удалось продлить подпис
 ADMIN_SUB_EXTEND_HEADER = """⏳ Продление подписки для <code>{telegram_id}</code>
 Текущий срок: <code>{valid_until}</code>"""
 
-ADMIN_SUB_EXTEND_OPTION_1M = "—"
-
-ADMIN_SUB_EXTEND_OPTION_3M = "Некорректное количество дней"
-
-ADMIN_SUB_EXTEND_OPTION_6M = "Некорректное количество дней"
-
 ADMIN_SUB_EXTEND_PROMPT = "На сколько дней продлить подписку для <code>{telegram_id}</code>?"
 
 ADMIN_SUB_EXTEND_SUCCESS = "✅ Подписка пользователя <code>{telegram_id}</code> продлена на <b>{days_text}</b> (до <code>{new_end}</code>)."
@@ -45,12 +39,6 @@ ADMIN_SUB_GRANT_FAILED = "❌ Ошибка при выдаче подписки.
 
 ADMIN_SUB_GRANT_HEADER = """🎁 Выдача подписки для <code>{telegram_id}</code>
 Выберите тариф:"""
-
-ADMIN_SUB_GRANT_OPTION_1M = "—"
-
-ADMIN_SUB_GRANT_OPTION_3M = "Некорректное количество дней"
-
-ADMIN_SUB_GRANT_OPTION_6M = "Некорректное количество дней"
 
 ADMIN_SUB_GRANT_SUCCESS = "✅ Пользователю <code>{telegram_id}</code> выдан тариф <b>{tariff_name}</b> на <b>{days_text}</b> (до <code>{new_end}</code>)."
 
@@ -82,12 +70,4 @@ ADMIN_SUB_STATUS_NONE = """<b>Статус:</b> ⚪️ Нет подписки
 
 ADMIN_SUB_TARIFF_ALREADY_SELECTED = "❌ Этот тариф уже активен."
 
-ADMIN_USERS_SUBSCRIPTION_CHANGE = "—"
-
-ADMIN_USERS_SUBSCRIPTION_EXTEND = "{value_0} дн."
-
-ADMIN_USERS_SUBSCRIPTION_GRANT = "{value_0} дн."
-
-ADMIN_USERS_SUBSCRIPTION_MENU = "—"
-
-ADMIN_USERS_SUBSCRIPTION_REDUCE = "Некорректное количество дней"
+ERROR_INVALID_DAYS_COUNT = "Некорректное количество дней"

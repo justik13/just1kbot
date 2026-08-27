@@ -61,7 +61,7 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_DEVICE_USERS, f"ID {telegram_id}", texts.ADMIN_USERS_DEVICE_DEVICES)
+    header = format_admin_breadcrumbs(texts.BTN_USERS, f"ID {telegram_id}", texts.ADMIN_USERS_DEVICE_DEVICES)
     now = now_utc()
 
     if not profiles:
@@ -176,7 +176,7 @@ async def admin_delete_device_confirm(
         return
 
     server = getattr(profile, "server", None)
-    flag = server.country_flag if server else texts.ADMIN_USERS_DEVICE
+    flag = server.country_flag if server else texts.EMOJI_GLOBE
     server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
 
     text = texts.ADMIN_DELETE_DEVICE_CONFIRM.format(

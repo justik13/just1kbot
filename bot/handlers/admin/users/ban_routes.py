@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from config.settings import get_settings
-from services.ban_service import BanService, BanStatus
+from services.ban_service import BanService
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 
@@ -20,13 +20,7 @@ from .common import (
 router = Router()
 logger = logging.getLogger(__name__)
 
-BAN_STATUS_LABELS: dict[str, str] = {
-    BanStatus.USER_NOT_FOUND: "Пользователь не найден",
-    BanStatus.ALREADY_BANNED: "уже забанен",
-    BanStatus.BANNED: "забанен",
-    BanStatus.ALREADY_UNBANNED: "уже разбанен",
-    BanStatus.UNBANNED: "разбанен",
-}
+BAN_STATUS_LABELS: dict[str, str] = texts.ADMIN_USER_BAN_STATUS_LABELS
 
 
 @router.callback_query(F.data.startswith("admin_ban:"))

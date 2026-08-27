@@ -23,7 +23,7 @@ def get_device_keyboard(
         adjustments.append(1)
 
     builder.button(
-        text=texts.DEVICE_STATUS_DELETING_LABEL,
+        text=texts.BTN_CHANGE_NAME,
         callback_data=f"rename_device:{profile_id}",
     )
     builder.button(
@@ -34,18 +34,18 @@ def get_device_keyboard(
 
     if show_delete:
         builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE,
+            text=texts.BTN_DELETE_DEVICE,
             callback_data=f"request_delete_device:{profile_id}",
             style="danger",
         )
         adjustments.append(1)
 
     builder.button(
-        text=texts.DEVICE_DEFAULT_FLAG_ICON,
+        text=texts.BTN_BACK_TO_DEVICES,
         callback_data="back_to_connections",
     )
     builder.button(
-        text=texts.DEVICE_DEFAULT_SERVER_TITLE,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
     adjustments.append(2)

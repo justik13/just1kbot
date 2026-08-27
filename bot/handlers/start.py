@@ -115,9 +115,9 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
-    status_str = "🟢 Активна" if is_active else "🔴 Неактивна"
-    valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else "—"
-    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else "0 дней"
+    status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
+    valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
+    days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
 
     inviter_line = ""
     if db_user.referred_by:
@@ -126,11 +126,14 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
             ref_name = safe(referrer.first_name) if referrer.first_name else ""
             ref_username = f" (@{safe(referrer.username)})" if referrer.username else ""
             if ref_name or ref_username:
-                inviter_line = f"\n🤝 Вас пригласил: {ref_name}{ref_username} (ID: <code>{referrer.telegram_id}</code>)"
+                inviter_line = texts.INVITED_BY_NAMED_LINE.format(
+                    name=f"{ref_name}{ref_username}",
+                    referrer_id=referrer.telegram_id,
+                )
             else:
-                inviter_line = f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
+                inviter_line = texts.INVITED_BY_ID_LINE.format(referrer_id=referrer.telegram_id)
         else:
-            inviter_line = f"\n🤝 Вас пригласил: ID <code>{db_user.referred_by}</code>"
+            inviter_line = texts.INVITED_BY_ID_LINE.format(referrer_id=db_user.referred_by)
 
     text = texts.HUB_HEADER.format(
         name=name,
@@ -221,18 +224,7 @@ async def cmd_start(
     )
 
 
-@router.message(F.text & F.text.in_({
-    "👤 Профиль",
-    "💳 Купить / Продлить",
-    "🔑 Подключение",
-    "🆘 Поддержка",
-    "Профиль",
-    "Купить / Продлить",
-    "Подключение",
-    "Поддержка",
-    "Главное меню",
-    "🏠 Главное меню",
-}))
+@router.message(F.text & F.text.in_(texts.LEGACY_REPLY_BUTTON_TRIGGER_TEXTS))
 async def handle_legacy_reply_keyboard(
     message: Message,
     state: FSMContext,

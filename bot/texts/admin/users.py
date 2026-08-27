@@ -1,6 +1,8 @@
 """Domain texts for admin/users.py."""
 from __future__ import annotations
 
+ADMIN_AUDIT_EVENT_LABELS = {'USER_REGISTER': '👋 Регистрация', 'REFERRAL_ATTACHED': '🤝 Привязка реферала', 'USER_RESTORED': '♻️ Восстановление аккаунта', 'PAYMENT_SUCCESS': '💳 Пополнение баланса', 'TOPUP_USER_BALANCE': '💳 Начисление баланса', 'ADMIN_BALANCE_TOPUP': '➕ Начисление баланса админом', 'ADMIN_BALANCE_DEDUCT': '➖ Списание баланса админом', 'DEDUCT_USER_BALANCE': '➖ Списание баланса админом', 'MASS_BONUS_GRANTED': '🎁 Массовый бонус', 'REFERRAL_BONUS_GRANTED': '🎁 Реферальный бонус', 'WELCOME_BONUS_GRANTED': '🎁 Приветственный бонус', 'ACCOUNT_PURCHASE_SETTLED': '🛒 Покупка тарифа', 'ACCOUNT_TARIFF_CHANGE_SETTLED': '🔄 Смена тарифа', 'ADMIN_SUB_GRANT': '🎁 Выдача подписки админом', 'GRANT': '🎁 Выдача подписки админом', 'ADMIN_SUB_EXTEND': '⏳ Продление подписки админом', 'EXTEND': '⏳ Продление подписки админом', 'ADMIN_SUB_REDUCE': '✂️ Сокращение подписки админом', 'REDUCE': '✂️ Сокращение подписки админом', 'ADMIN_SUB_CHANGE': '⚙️ Изменение тарифа админом', 'CHANGE_TARIFF': '⚙️ Изменение тарифа', 'SUB_EXPIRED': '⌛ Истечение срока подписки', 'DEVICE_CREATE': '📱 Создание устройства', 'DEVICE_CREATED': '📱 Создание устройства', 'DEVICE_DELETE': '🗑 Удаление устройства', 'DEVICE_DELETED': '🗑 Удаление устройства', 'DEVICE_RENAME': '✏️ Переименование устройства', 'ADMIN_DEVICE_DELETE': '🗑 Удаление устройства админом', 'CLEANUP_DEVICE_DELETE': '🧹 Автоудаление устройства', 'BAN': '🚫 Блокировка пользователя', 'BAN_USER': '🚫 Блокировка пользователя', 'UNBAN': '✅ Разблокировка пользователя', 'UNBAN_USER': '✅ Разблокировка пользователя', 'ADMIN_DIRECT_MESSAGE_SENT': '✉️ Сообщение от админа', 'ADMIN_DIRECT_MESSAGE': '✉️ Сообщение от админа', 'PAYMENT_DISPUTE_OPENED': '⚠️ Открыт спор по платежу', 'PAYMENT_DISPUTE_RESOLVED': '⚖️ Спор по платежу разрешён', 'PAYMENT_DISPUTE_MANUAL_REVIEW': '🧪 Спор на проверке', 'BALANCE_REFUND_REQUESTED': '↩️ Запрос возврата средств', 'PAYMENT_FAILED': '❌ Ошибка оплаты', 'REFUND': '↩️ Возврат средств'}
+
 ADMIN_BAN_CONFIRM = "Вы уверены, что хотите забанить пользователя <code>{telegram_id}</code>?"
 
 ADMIN_BAN_FAILED = """❌ Ошибка при попытке забанить пользователя:
@@ -8,6 +10,12 @@ ADMIN_BAN_FAILED = """❌ Ошибка при попытке забанить п
 
 ADMIN_BAN_SUCCESS = """✅ Пользователь успешно забанен.
 {message}"""
+
+ADMIN_BONUS_REASON_LINE_FORMAT = "Причина: <i>{safe_reason}</i>"
+
+ADMIN_BTN_BACK_TO_CARD = "← К карточке"
+
+ADMIN_BTN_INPUT_MANUALLY = "⌨️ Ввести вручную"
 
 ADMIN_DELETE_DEVICE_CONFIRM = "Удалить устройство <b>{device_name}</b> ({flag} {server_name}) у пользователя <code>{telegram_id}</code>?"
 
@@ -29,21 +37,15 @@ ADMIN_DIRECT_MESSAGE_HEADER_PLAIN = """📨 Сообщение от админи
 
 """
 
-ADMIN_DIRECT_MESSAGE_TEXT_FORMAT = """📨 Сообщение от администрации:
-
-{text_to_send_or}"""
-
 ADMIN_MANUAL_GRANT_USER_BANNED = "❌ Невозможно выдать подписку: пользователь забанен."
 
 ADMIN_MANUAL_GRANT_USER_DELETED = "❌ Невозможно выдать подписку: пользователь удален."
 
+ADMIN_MASS_BONUS_AUDIENCE_LABELS = {'all': 'Всем пользователям', 'active': 'Только с активной подпиской', 'expired': 'Только без подписки'}
+
 ADMIN_MASS_BONUS_DEFAULT_REASON = "Массовый бонус"
 
-ADMIN_MASS_BONUS_REASON_LINE = "Причина: <i>{safe_reason}</i>"
-
 ADMIN_UNBAN_CONFIRM = "Вы уверены, что хотите разбанить пользователя <code>{telegram_id}</code>?"
-
-ADMIN_USERS = " ✅"
 
 ADMIN_USERS_BALANCE_AMOUNT_DOLZHNA_BYT_BOLSHE_0_I_N = "⚠️ Сумма должна быть больше 0 и не превышать {MAX_BALANCE_ADJUSTMENT} ₽"
 
@@ -89,8 +91,6 @@ ADMIN_USERS_BALANCE_NEDOSTATOCHNO_BONUS_SREDST = "⚠️ Недостаточн�
 
 ADMIN_USERS_BALANCE_PODTVERDIT_I_PRIMENIT = "✅ Подтвердить и применить"
 
-ADMIN_USERS_BALANCE_PROCHITANO = "✅ Прочитано"
-
 ADMIN_USERS_BALANCE_REAL_BALANCE = """💰 Реальный баланс: <b>{real_rub} ₽</b>
 """
 
@@ -126,21 +126,9 @@ ADMIN_USERS_BALANCE_TYPE_ACCOUNT_BONUS_BALANCE_RUB = """Тип счета: <b>�
 ADMIN_USERS_BALANCE_USER = """Пользователь: <b>{safe_username_str}</b>
 """
 
-ADMIN_USERS_BALANCE_USERS = "👥 Пользователи"
-
-ADMIN_USERS_BALANCE_U_POLZOVATELYA_NEDOSTATOCHNO_B = """⚠️ <b>У пользователя недостаточно бонусных средств.</b>
-"""
-
-ADMIN_USERS_BALANCE_VAM_NACHISLEN_BONUS_BALANCE = """🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>
-"""
-
 ADMIN_USERS_BALANCE_VY_UVERENY_CHTO_KHOTITE_PRIMEN = "Вы уверены, что хотите применить данное изменение?"
 
 ADMIN_USERS_BALANCE_V_BALANCE = "💳 В баланс"
-
-ADMIN_USERS_COMMON = "—"
-
-ADMIN_USERS_DEVICE = "🌍"
 
 ADMIN_USERS_DEVICE_AKTIVNOST = """   Активность: <i>{last_conn}</i>
 """
@@ -171,13 +159,13 @@ ADMIN_USERS_DEVICE_SOSTOYANIE = """   Состояние: {status_hs}
 ADMIN_USERS_DEVICE_TRAFIK = """   Трафик: <code>{traffic_total}</code>
 """
 
-ADMIN_USERS_DEVICE_USERS = "👥 Пользователи"
-
 ADMIN_USERS_DEVICE_U_POLZOVATELYA_POKA_NET_SOZDAN = "<i>У пользователя пока нет созданных устройств.</i>"
 
 ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN = "🟢 <b>В сети (активность ≤ 3 мин)</b>"
 
 ADMIN_USERS_LIST_ACTION = "Действие"
+
+ADMIN_USERS_LIST_EMPTY_NOTICE = "<i>Пользователи не найдены.</i>"
 
 ADMIN_USERS_LIST_ENTER_USERNAME_TELEGRAM_ID_I = "⚠️ Введите @username, Telegram ID или ID пользователя для поиска."
 
@@ -200,8 +188,6 @@ ADMIN_USERS_LIST_SELECT_STRANU = "🌐 <b>Выберите страну:</b>"
 ADMIN_USERS_LIST_SELECT_TARIFF = "💎 <b>Выберите тариф:</b>"
 
 ADMIN_USERS_LIST_SERVEROV_NET = "Серверов нет"
-
-ADMIN_USERS_LIST_STR = "Стр {page}/{total_pages}"
 
 ADMIN_USERS_LIST_STRAN_NET = "Стран нет"
 
@@ -259,8 +245,6 @@ ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_UZHE_VYPO = "⚠️ Массовое на�
 
 ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_ZAPUSHCHE = "🚀 Массовое начисление запущено в фоне!"
 
-ADMIN_USERS_MASS_BONUS_MASS_BONUS = "🎁 Массовый бонус"
-
 ADMIN_USERS_MASS_BONUS_NAPRIMER_KOMPENSATSIYA_ZA_SBOY = "(например: <i>Компенсация за сбой на серверах 09.08</i>):"
 
 ADMIN_USERS_MASS_BONUS_NEW_MASS_BONUS = "🎁 Новый массовый бонус"
@@ -293,9 +277,6 @@ ADMIN_USERS_MASS_BONUS_SELECT_TSELEVUYU_GRUPPU_POLZ = "Выберите целе
 ADMIN_USERS_MASS_BONUS_TOLKO_BEZ_SUBSCRIPTION = "⏳ Только без подписки"
 
 ADMIN_USERS_MASS_BONUS_TOLKO_S_AKTIVNOY_PODPISKOY = "⚡ Только с активной подпиской"
-
-ADMIN_USERS_MASS_BONUS_VAM_NACHISLEN_BONUS_BALANCE = """🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>
-"""
 
 ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY = "Ввод причины"
 
@@ -330,8 +311,6 @@ ADMIN_USERS_MESSAGE_PODDERZHIVAETSYA_HTML_RAZMETKA = "<i>Поддерживае�
 
 ADMIN_USERS_MESSAGE_POZHALUYSTA_OTPRAVTE_TEKSTOVOE = "⚠️ Пожалуйста, отправьте текстовое сообщение или медиа с подписью."
 
-ADMIN_USERS_MESSAGE_PROCHITANO = "✅ Прочитано"
-
 ADMIN_USERS_MESSAGE_SENDING_MESSAGE_POLZOVA = """✉️ <b>Отправка сообщения пользователю</b>
 
 """
@@ -342,15 +321,13 @@ ADMIN_USERS_MESSAGE_USER_ID = """Пользователь: <b>{safe_user_usernam
 
 ADMIN_USERS_MESSAGE_USER_ZABLOKIROVAL_BOTA = "Пользователь заблокировал бота"
 
-ADMIN_USER_BALANCE_ADJUST_PROMPT = "⌨️ Ввести вручную"
+ADMIN_USER_BALANCE_INSUFFICIENT_FOR_DEBIT = """⚠️ <b>У пользователя недостаточно бонусных средств.</b>
+"""
 
-ADMIN_USER_BALANCE_CONFIRM_PROMPT = "∞ Навсегда"
+ADMIN_USER_BAN_STATUS_LABELS = {'user_not_found': 'Пользователь не найден', 'already_banned': 'уже забанен', 'banned': 'забанен', 'already_unbanned': 'уже разбанен', 'unbanned': 'разбанен'}
 
-ADMIN_USER_BALANCE_REASON_LINE = "Причина: <i>{safe_reason}</i>"
-
-ADMIN_USER_BALANCE_REASON_PROMPT = "{value_0} дней"
-
-ADMIN_USER_BALANCE_VIEW_CARD = "∞ Навсегда"
+ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION = """🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>
+"""
 
 ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › 👤 <b>Карточка</b>
 
@@ -369,8 +346,6 @@ ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › �
 
 ADMIN_USER_CARD_STATUS_ACTIVE = "Устройство #{value_0}"
 
-ADMIN_USER_CARD_STATUS_BANNED = "{value_0} дней"
-
 ADMIN_USER_CARD_STATUS_EXPIRED = "🗑 {value_0}"
 
 ADMIN_USER_CARD_STATUS_NO_SUB = "📅 Подписка"
@@ -387,11 +362,7 @@ ADMIN_USER_DIRECT_MESSAGE_PROMPT = "🚫 Забанить"
 
 ADMIN_USER_DIRECT_MESSAGE_SUCCESS = "💎 Сменить тариф"
 
-ADMIN_USER_LIST_HEADER = "← К карточке"
-
-ADMIN_USER_MASS_BONUS_AMOUNT_PROMPT = "⌨️ Ввести вручную"
-
-ADMIN_USER_MASS_BONUS_CONFIRM_PROMPT = "← К карточке"
+ADMIN_USER_FILTER_LABELS = {'all': 'Все', 'new': '🆕 Новые (7д)', 'new_24h': '🆕 Новые (7д)', 'new_7d': '🆕 Новые (7д)', 'expiring_3d': '⏳ < 3 дней', 'active': '⚡ С подпиской', 'expired': '🔴 Без подписки', 'no_sub': '🔴 Без подписки', 'banned': '🚫 Забаненные', 'problem': '🚫 Забаненные', 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
 
 ADMIN_USER_MASS_BONUS_REASON_PROMPT = "🔧 Устройства"
 
@@ -407,10 +378,16 @@ ADMIN_USER_SEARCH_PROMPT = """🛠 Админка › 👥 Пользовате�
 
 Введите Telegram ID пользователя:"""
 
-LABEL_UNKNOWN_CAP = "Неизвестно"
+INVITED_BY_ID_LINE = """
+🤝 Вас пригласил: ID <code>{referrer_id}</code>"""
+
+INVITED_BY_NAMED_LINE = """
+🤝 Вас пригласил: {name} (ID: <code>{referrer_id}</code>)"""
+
+LABEL_FOREVER = "∞ Навсегда"
+
+LABEL_NOT_SET_LINK_HIDDEN = "Не задано (ссылка скрыта от пользователей)"
 
 STATUS_EXPIRED_LABEL = "истекла"
 
-TIME_DAYS_HOURS_FORMAT = "{value_0} дн. {value_1} ч."
-
-TIME_HOURS_MINUTES_FORMAT = "{value_0} ч. {value_1} мин."
+TIME_DAYS_FULL_FORMAT = "{days} дней"

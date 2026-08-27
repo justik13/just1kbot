@@ -49,11 +49,11 @@ async def rename_device_start(
 
     if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         if profile.provisioning_status == "deleting":
-            msg = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_UZHE_UDALYAETSYA_S
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif profile.provisioning_status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IDET_AVTOMATICHESKOE_VOSSTANOV
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         await callback.answer(msg, show_alert=True)
         return
 
@@ -133,11 +133,11 @@ async def rename_device_process(
     if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         await state.clear()
         if profile.provisioning_status == "deleting":
-            msg = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_UZHE_UDALYAETSYA_S
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif profile.provisioning_status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IDET_AVTOMATICHESKOE_VOSSTANOV
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         await render_hub(
             message.bot,
             message.chat.id,

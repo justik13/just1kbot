@@ -1,7 +1,13 @@
 """Domain texts for admin/finances.py."""
 from __future__ import annotations
 
+ADMIN_BTN_BACK_TO_PAYMENT = "← Назад к платежу"
+
 ADMIN_BTN_BACK_TO_PAYMENTS = "← К списку платежей"
+
+ADMIN_BTN_PAGINATION_NEXT = "➡️"
+
+ADMIN_BTN_PAGINATION_PREV = "⬅️"
 
 ADMIN_FINANCES_PAYMENTS_K_LOGAM_POKUPOK = "🛒 К логам покупок"
 
@@ -59,8 +65,6 @@ ADMIN_FINANCES_PURCHASES_USER_TELEGRAM_ID = """👤 <b>Пользователь:
 
 ADMIN_FINANCES_PURCHASES_ZAPIS_PURCHASE_NE_NAYDENA = "Запись покупки не найдена"
 
-ADMIN_PAYMENTS = "—"
-
 ADMIN_PAYMENTS_BTN_BACK = "Этот возврат уже находится в durable-очереди."
 
 ADMIN_PAYMENTS_BTN_FILTER_ALL = "Можно вернуть только пополнение баланса"
@@ -75,35 +79,23 @@ ADMIN_PAYMENTS_BTN_PREV = "Не удалось поставить возврат
 
 ADMIN_PAYMENTS_BTN_REFUND = "Возврат требует ручной проверки"
 
-ADMIN_PAYMENTS_BTN_USER = "Возвращаемого остатка уже нет"
-
 ADMIN_PAYMENTS_CARD = "{value_0} #{value_1} · {value_2} · {value_3}₽"
-
-ADMIN_PAYMENTS_LIST_EMPTY = "❓"
 
 ADMIN_PAYMENTS_LIST_HEADER = """🛠 Админка › 💳 <b>Платежи</b>
 (стр. {value_0}/{value_1}) · Всего: {value_2}
 """
 
-ADMIN_PAYMENTS_REFUND_FAILED = "← В админку"
-
-ADMIN_PAYMENTS_REFUND_INVALID = "Платёж не найден"
-
-ADMIN_PAYMENTS_REFUND_PROMPT = "⬅️"
-
-ADMIN_PAYMENTS_REFUND_SUCCESS = "➡️"
+ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER = "Возвращаемого остатка уже нет"
 
 ADMIN_PAYMENTS_ROW_ITEM = """<i>Платежей пока нет</i>
 """
 
-ADMIN_PAYMENTS_SEARCH_NOT_FOUND = "Возвращаемого остатка уже нет"
-
 ADMIN_PAYMENTS_SEARCH_PROMPT = "Платёж недоступен для возврата"
+
+ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
 
 ADMIN_PAYMENT_STATUS_CANCELED_LABEL = """
 <b>Можно вернуть:</b> {value_0} RUB"""
-
-ADMIN_PAYMENT_STATUS_FAILED_LABEL = "Платёж не найден"
 
 ADMIN_PAYMENT_STATUS_PENDING_LABEL = "❓"
 
@@ -140,8 +132,6 @@ Operation: <code>{value_2}</code>
 
 ADMIN_PURCHASES_BTN_USER = "💳 К списку платежей"
 
-ADMIN_PURCHASES_CARD = "← Назад к платежу"
-
 ADMIN_PURCHASES_LIST_EMPTY = """⚠️ <b>Подтверждение возврата</b>
 
 Платёж: <code>#{value_0}</code>
@@ -151,7 +141,5 @@ YooKassa ID: <code>{value_1}</code>
 Сумма сначала будет заморожена на внутреннем балансе, затем durable worker отправит идемпотентный запрос в YooKassa."""
 
 ADMIN_PURCHASES_LIST_HEADER = "✅ Подтвердить возврат {value_0} ₽"
-
-ADMIN_PURCHASES_ROW_ITEM = "← Назад к платежу"
 
 ADMIN_PURCHASES_SEARCH_PROMPT = "👤 Карточка клиента"

@@ -26,11 +26,15 @@ FORBIDDEN_USER_WORDING = (
 
 
 def _effective_user_text_values() -> list[str]:
+    from bot.texts import connection, payment, user
+
     values: list[str] = []
-    for name in texts.get_all_text_keys():
-        value = getattr(texts, name)
-        if isinstance(value, str):
-            values.append(value)
+    for mod in (user, connection, payment):
+        for name in dir(mod):
+            if name.isupper() and not name.startswith("_"):
+                value = getattr(mod, name)
+                if isinstance(value, str):
+                    values.append(value)
     return values
 
 

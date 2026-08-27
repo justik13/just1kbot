@@ -12,11 +12,11 @@ def get_admin_menu(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.BTN_POLZOVATELI_I_RASSYLKI,
+        text=texts.BTN_USERS_AND_BROADCAST,
         callback_data="admin_cat_users",
     )
     builder.button(
-        text=texts.BTN_SERVERY_I_TARIFY,
+        text=texts.BTN_SERVERS_AND_TARIFFS,
         callback_data="admin_cat_infra",
     )
 
@@ -48,7 +48,7 @@ def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_SPISOK_POLZOVATELEJ, callback_data="admin_users")
     builder.button(text=texts.BTN_MASSOVAYA_RASSYLKA, callback_data="admin_broadcast")
-    builder.button(text=texts.BTN_MASSOVYJ_BONUS, callback_data="admin_mass_bonus")
+    builder.button(text=texts.BTN_MASS_BONUS, callback_data="admin_mass_bonus")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
@@ -56,7 +56,7 @@ def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
 
 def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_VPN_SERVERY, callback_data="admin_servers")
+    builder.button(text=texts.BTN_SERVERS, callback_data="admin_servers")
     builder.button(text=texts.BTN_TARIFY_PODPISOK, callback_data="admin_tariffs")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
@@ -97,7 +97,7 @@ def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMar
             builder.button(text=texts.BTN_BACK, callback_data=f"admin_audit:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=texts.DASHBOARD_STR.format(page=page, total_pages=total_pages), callback_data="ignore")
+        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), callback_data="ignore")
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_audit:{page + 1}")
         else:

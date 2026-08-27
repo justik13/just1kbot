@@ -82,14 +82,14 @@ async def _build_payments_list_text_and_kb(
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.ADMIN_PAYMENTS_LIST_EMPTY,
+                texts.ADMIN_PAYMENT_STATUS_PENDING_LABEL,
             )
             if payment.user and payment.user.username:
                 user_label = f"@{payment.user.username}"
             elif payment.user:
                 user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
             else:
-                user_label = texts.ADMIN_PAYMENTS
+                user_label = texts.PLACEHOLDER_DASH
             button_text = truncate_button_text(
                 texts.ADMIN_PAYMENTS_CARD.format(value_0=status_icon, value_1=payment.id, value_2=user_label, value_3=payment.amount)
             )
@@ -99,16 +99,16 @@ async def _build_payments_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text=texts.ADMIN_PAYMENTS_REFUND_PROMPT,
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
             callback_data=f"admin_payments_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.ADMIN_PAYMENTS_REFUND_SUCCESS,
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_payments_page:{page + 1}",
         )
     builder.button(text=texts.ADMIN_FINANCES_PAYMENTS_K_LOGAM_POKUPOK, callback_data="admin_purchases")
-    builder.button(text=texts.ADMIN_PAYMENTS_REFUND_FAILED, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -218,7 +218,7 @@ async def show_payment_card(
     payment = await get_payment_by_id(session, payment_id)
     if not payment:
         await callback.answer(
-            texts.ADMIN_PAYMENTS_REFUND_INVALID,
+            texts.ADMIN_PAYMENT_NOT_FOUND_ALERT,
             show_alert=True,
         )
         return
@@ -233,7 +233,7 @@ async def show_payment_card(
         user_label = texts.ADMIN_PAYMENT_USER_ID.format(user_id=payment.user.telegram_id)
         user_telegram_id = payment.user.telegram_id
     else:
-        user_label = texts.ADMIN_PAYMENTS
+        user_label = texts.PLACEHOLDER_DASH
         user_telegram_id = None
 
     display_status = payment_display_status(payment)
@@ -306,7 +306,7 @@ async def confirm_payment_refund(
         payment_id=payment.id,
     )
     if refundable <= 0:
-        await callback.answer(texts.ADMIN_PAYMENTS_SEARCH_NOT_FOUND, show_alert=True)
+        await callback.answer(texts.ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER, show_alert=True)
         return
     await state.clear()
     builder = InlineKeyboardBuilder()
@@ -315,7 +315,7 @@ async def confirm_payment_refund(
         callback_data=f"admin_payment_refund_confirm:{payment.id}",
     )
     builder.button(
-        text=texts.ADMIN_PURCHASES_ROW_ITEM,
+        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
         callback_data=f"admin_payment_card:{payment.id}",
     )
     builder.adjust(1)
@@ -348,11 +348,11 @@ async def enqueue_payment_refund(
         )
     except BalanceRefundError as exc:
         messages = {
-            "payment_not_found": texts.ADMIN_PAYMENT_STATUS_FAILED_LABEL,
+            "payment_not_found": texts.ADMIN_PAYMENT_NOT_FOUND_ALERT,
             "refund_requires_balance_topup": texts.ADMIN_PAYMENTS_BTN_FILTER_ALL,
             "payment_not_refundable": texts.ADMIN_PAYMENTS_BTN_FILTER_SUCCEEDED,
             "provider_payment_id_missing": texts.ADMIN_PAYMENTS_BTN_FILTER_REFUNDED,
-            "no_refundable_balance": texts.ADMIN_PAYMENTS_BTN_USER,
+            "no_refundable_balance": texts.ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER,
             "active_refund_reservation_missing": texts.ADMIN_PAYMENTS_BTN_REFUND,
         }
         await callback.answer(
@@ -364,7 +364,7 @@ async def enqueue_payment_refund(
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.ADMIN_PURCHASES_CARD,
+        text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
         callback_data=f"admin_payment_card:{payment_id}",
     )
     builder.button(text=texts.ADMIN_PURCHASES_BTN_USER, callback_data="admin_payments")

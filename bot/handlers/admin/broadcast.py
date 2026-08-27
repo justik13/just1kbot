@@ -204,15 +204,7 @@ async def process_broadcast_message(
         except Exception as e:
             logger.warning(f"Failed to count recipients in session: {e}")
 
-    label_map = {
-        "all": "Все пользователи",
-        "active": "Активные подписки",
-        "expiring_3d": "Подписки истекают < 3 дней",
-        "expired": "Истекшие подписки",
-        "never": "Без подписок",
-        "test": "Тестовая отправка админу",
-    }
-    aud_label = label_map.get(target_audience, target_audience)
+    aud_label = texts.ADMIN_BROADCAST_AUDIENCE_LABELS.get(target_audience, target_audience)
 
     preview_summary = (
         texts.BROADCAST_TEST_MESSAGE_OTPRAVLE.format()+
@@ -739,14 +731,7 @@ async def _start_broadcast_process(
             await state.clear()
             return
 
-        label_map = {
-            "all": texts.ADMIN_BROADCAST,
-            "active": texts.BROADCAST_ACTIVE_LABEL,
-            "expiring_3d": "⏳ Истекают < 3 дней",
-            "expired": "🔴 Истекшие подписки",
-            "never": "🆕 Без подписок",
-        }
-        label = label_map.get(audience, texts.BROADCAST_TEST_MNE_ADMINU if audience.startswith("test_") else audience)
+        label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(audience, texts.BROADCAST_TEST_MNE_ADMINU if audience.startswith("test_") else audience)
 
         async with session_scope() as sess:
             progress = BroadcastProgress(

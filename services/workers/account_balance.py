@@ -6,10 +6,29 @@ import uuid
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.types import InlineKeyboardMarkup
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select, or_, text
+from sqlalchemy import or_, select, text
 
+from bot.keyboards.notifications import (
+    get_purchase_completed_notification_keyboard,
+    get_referral_bonus_keyboard,
+)
+from bot.keyboards.payment import (
+    get_topup_credit_keyboard,
+    get_topup_payment_keyboard,
+)
+from bot.texts.runtime.alerts import ALERT_BALANCE_LIMIT_EXCEEDED
+from bot.texts.runtime.notifications import (
+    BALANCE_PURCHASE_SUCCESS_NOTIFICATION,
+    BALANCE_TOPUP_CREDITED,
+    BALANCE_TOPUP_RESUME_HINT,
+    BALANCE_TOPUP_WELCOME_BONUS,
+    REFERRAL_BONUS_ACCREDITED,
+    TIME_DAYS_FORMAT,
+    TIME_DAYS_HOURS_FORMAT,
+    TITLE_SUBSCRIPTION_EXTENDED,
+    TITLE_TARIFF_CHANGED,
+    TOPUP_LINK_CARD,
+)
 from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
@@ -23,36 +42,6 @@ from utils.telegram import render_hub
 logger = logging.getLogger("AccountBalanceNotifications")
 BALANCE_NOTIFICATION_INTERVAL = 10.0
 BALANCE_NOTIFICATION_BATCH = 50
-
-
-def _build_topup_payment_keyboard(payment_url: str, payment_id: int) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text="💳 Оплатить", url=payment_url)
-    builder.button(
-        text="🔄 Проверить оплату",
-        callback_data=f"balance_check:{payment_id}",
-    )
-    builder.button(
-        text="❌ Отмена",
-        callback_data=f"balance_cancel:{payment_id}",
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def _build_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    tariff_id = context.get("tariff_id")
-    source = context.get("source")
-    if tariff_id and source in {"showcase", "renew", "change"}:
-        builder.button(
-            text="🛒 Продолжить оформление",
-            callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
-        )
-    builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-    builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
-    builder.adjust(1)
-    return builder.as_markup()
 
 
 async def process_balance_purchase_notifications(bot: Bot) -> int:
@@ -103,27 +92,24 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 else duration_hours
             )
             days, remainder = divmod(hours, 24)
-            duration = f"{days} дн." + (f" {remainder} ч." if remainder else "")
+            duration = (
+                TIME_DAYS_HOURS_FORMAT.format(days=days, hours=remainder)
+                if remainder
+                else TIME_DAYS_FORMAT.format(days=days)
+            )
             title = (
-                "Тариф успешно изменён!"
+                TITLE_TARIFF_CHANGED
                 if operation_type == "change"
-                else "Подписка успешно продлена!"
+                else TITLE_SUBSCRIPTION_EXTENDED
             )
-            builder = InlineKeyboardBuilder()
-            builder.button(
-                text="🏠 Главное меню",
-                callback_data="back_to_main_menu",
-            )
-            builder.button(
-                text="✅ Прочитано",
-                callback_data="dismiss_notification",
-            )
-            builder.adjust(2)
-
             await bot.send_message(
                 telegram_id,
-                f"🎉 <b>{title}</b>\n\nДлительность: <b>{duration}</b>\nЛимит устройств: <b>{device_limit}</b>",
-                reply_markup=builder.as_markup(),
+                BALANCE_PURCHASE_SUCCESS_NOTIFICATION.format(
+                    title=title,
+                    duration=duration,
+                    device_limit=device_limit,
+                ),
+                reply_markup=get_purchase_completed_notification_keyboard(),
                 parse_mode="HTML",
             )
         except TelegramForbiddenError:
@@ -186,8 +172,8 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                 await render_hub(
                     bot,
                     chat_id,
-                    f"💳 <b>Оплата создана</b>\n\nСумма: <b>{int(payment.amount)} ₽</b>\n\nНажмите кнопку ниже для перехода к оплате.",
-                    _build_topup_payment_keyboard(payment.payment_url, payment.id),
+                    TOPUP_LINK_CARD.format(amount=int(payment.amount)),
+                    get_topup_payment_keyboard(payment.payment_url, payment.id),
                 )
             except TelegramForbiddenError:
                 await mark_user_bot_blocked(session, user.telegram_id)
@@ -302,10 +288,8 @@ async def process_balance_notifications(bot: Bot) -> int:
                 ref_blocked = False
                 try:
                     await global_send_limiter.acquire()
-                    b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = f"🎁 Вам начислен реферальный бонус: <b>+{ref_bonus} ₽</b>!"
-                    await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
+                    ref_text = REFERRAL_BONUS_ACCREDITED.format(bonus=ref_bonus)
+                    await render_hub(bot, ref_id, ref_text, get_referral_bonus_keyboard())
                     ref_sent = True
                 except TelegramForbiddenError:
                     ref_blocked = True
@@ -337,24 +321,19 @@ async def process_balance_notifications(bot: Bot) -> int:
             continue
 
         if balance_snapshot is not None:
-            resume = bool(ctx.get("operation"))
-            suffix = (
-                "\n\n💡 Нажмите кнопку ниже, чтобы завершить начатую операцию."
-                if resume
-                else ""
-            )
-            message = (
-                f"✅ <b>Баланс пополнен на +{int(payment_amount)} ₽!</b>\n\n"
-                f"💰 Баланс: <b>{int(balance_snapshot.real_available)} ₽</b>\n"
-                f"🎁 Бонусный баланс: <b>{int(balance_snapshot.bonus_available)} ₽</b>"
-                f"{suffix}"
-            )
+            resume_hint = BALANCE_TOPUP_RESUME_HINT if bool(ctx.get("operation")) else ""
+            welcome_bonus = ""
             if ctx.get("purchaser_welcome_bonus", 0) > 0:
                 wb = ctx["purchaser_welcome_bonus"]
-                message += (
-                    f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
-                    f"за первое пополнение по приглашению!</b>"
-                )
+                welcome_bonus = BALANCE_TOPUP_WELCOME_BONUS.format(bonus=wb)
+
+            message = BALANCE_TOPUP_CREDITED.format(
+                amount=int(payment_amount),
+                real_balance=int(balance_snapshot.real_available),
+                bonus_balance=int(balance_snapshot.bonus_available),
+                resume_hint=resume_hint,
+                welcome_bonus=welcome_bonus,
+            )
 
             user_sent = False
             user_blocked = False
@@ -364,13 +343,13 @@ async def process_balance_notifications(bot: Bot) -> int:
                     bot,
                     telegram_id,
                     message,
-                    _build_topup_credit_keyboard(ctx),
+                    get_topup_credit_keyboard(ctx),
                 )
                 if balance_snapshot.real_position > get_settings().BALANCE_MAX_AVAILABLE_RUB:
-                    diagnostic = (
-                        f"⚠️ <b>ВНИМАНИЕ: Превышен лимит баланса!</b>\n\n"
-                        f"Платёж #{payment_id}, пользователь {telegram_id}\n"
-                        f"Позиция: {int(balance_snapshot.real_position)} ₽"
+                    diagnostic = ALERT_BALANCE_LIMIT_EXCEEDED.format(
+                        payment_id=payment_id,
+                        telegram_id=telegram_id,
+                        real_position=int(balance_snapshot.real_position),
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()

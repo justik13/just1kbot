@@ -4,9 +4,23 @@ from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy import or_, select
+
+from bot.keyboards.notifications import (
+    get_post_expiry_keyboard,
+    get_pre_expiry_keyboard,
+)
+from bot.texts.runtime.notifications import (
+    NOTIFY_1D,
+    NOTIFY_2H,
+    NOTIFY_3D,
+    NOTIFY_EXPIRED,
+    NOTIFY_GRACE_12H,
+    TIME_DAYS_HOURS_FORMAT,
+    TIME_HOURS_MINUTES_FORMAT,
+    TIME_SOON_LABEL,
+)
 from config.constants import (
     GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
@@ -31,38 +45,6 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
     ttl=86400,
 )
 
-NOTIFY_3D = """⏳ <b>Напоминание о подписке</b>
-
-До окончания вашей подписки осталось <b>3 дня</b>.
-
-Продлите доступ заранее, чтобы не потерять подключение."""
-
-NOTIFY_1D = """⏳ <b>Напоминание о подписке</b>
-
-До окончания вашей подписки остался <b>1 день</b>.
-
-Продлите доступ, чтобы ваши устройства не отключились."""
-
-NOTIFY_2H = """⚠️ <b>Подписка скоро закончится!</b>
-
-До окончания подписки осталось <b>2 часа</b>.
-
-Продлите доступ прямо сейчас, чтобы связь не прервалась."""
-
-NOTIFY_EXPIRED = """🔴 <b>Подписка закончилась!</b>
-
-Доступ к серверам приостановлен.
-
-⏳ До полного удаления ваших настроек и ключей осталось: <b>{countdown}</b>.
-
-Продлите подписку, чтобы сохранить все настройки."""
-
-NOTIFY_GRACE_12H = """🚨 <b>Внимание: Скоро удаление устройств!</b>
-
-Осталось менее <b>12 часов</b> до безвозвратного удаления ваших конфигураций.
-
-Продлите подписку прямо сейчас, чтобы не настраивать всё заново."""
-
 
 def _get_backoff_delay(retry_count: int) -> int:
     index = min(retry_count, len(NOTIFICATION_RETRY_DELAYS) - 1)
@@ -71,17 +53,17 @@ def _get_backoff_delay(retry_count: int) -> int:
 
 def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
-        return "в ближайшее время"
+        return TIME_SOON_LABEL
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return f"{days} дн. {hours} ч."
+        return TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return f"{hours} ч. {minutes} мин."
+    return TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
 
 
 def _maybe_reset_retry_on_type_change(
@@ -280,24 +262,10 @@ async def _send_pre_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    builder = InlineKeyboardBuilder()
-
-                    builder.button(
-                        text="💳 Продлить доступ",
-                        callback_data="menu_subscription",
-                    )
-
-                    builder.button(
-                        text="✅ Прочитано (убрать)",
-                        callback_data="dismiss_notification",
-                    )
-
-                    builder.adjust(1)
-
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=builder.as_markup(),
+                        reply_markup=get_pre_expiry_keyboard(),
                         parse_mode="HTML",
                     )
 
@@ -447,29 +415,10 @@ async def _send_post_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    builder = InlineKeyboardBuilder()
-
-                    builder.button(
-                        text="🚀 Купить доступ",
-                        callback_data="menu_buy",
-                    )
-
-                    builder.button(
-                        text="💬 Поддержка",
-                        callback_data="menu_support",
-                    )
-
-                    builder.button(
-                        text="✅ Прочитано (убрать)",
-                        callback_data="dismiss_notification",
-                    )
-
-                    builder.adjust(1)
-
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=builder.as_markup(),
+                        reply_markup=get_post_expiry_keyboard(),
                         parse_mode="HTML",
                     )
 

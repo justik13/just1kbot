@@ -63,17 +63,17 @@ async def _build_tariffs_list_text_and_kb(
 
     if page > 1:
         builder.button(
-            text=texts.ADMIN_TARIFF_BTN_TOGGLE_ACTIVE,
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
             callback_data=f"admin_tariffs_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.ADMIN_TARIFF_BTN_BACK,
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_tariffs_page:{page + 1}",
         )
 
     builder.button(
-        text=texts.ADMIN_TARIFF_CREATE_PROMPT_NAME,
+        text=texts.ADMIN_BTN_BACK_TO_ADMIN,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -169,7 +169,7 @@ async def _show_tariff_card(
     tariff,
 ):
     status = (
-        texts.ADMIN_TARIFFS
+        texts.STATUS_ACTIVE_BADGE
         if tariff.is_active
         else texts.ADMIN_TARIFF_CARD_BODY
     )
@@ -180,23 +180,23 @@ async def _show_tariff_card(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.ADMIN_TARIFF_EDIT_SUCCESS,
+        text=texts.ADMIN_TARIFF_BTN_EDIT_PRICE,
         callback_data=f"admin_tariff_edit_rub:{tariff.id}",
     )
 
     if tariff.is_active:
         builder.button(
-            text=texts.ADMIN_TARIFF_EDIT_INVALID,
+            text=texts.BTN_DISABLE_SERVER,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
     else:
         builder.button(
-            text=texts.ADMIN_TARIFF_TOGGLE_ACTIVE_SUCCESS,
+            text=texts.BTN_ENABLE_SERVER_CARD,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
 
     builder.button(
-        text=texts.ADMIN_TARIFF_BTN_EDIT_PRICE,
+        text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
         callback_data="admin_tariffs",
     )
     builder.adjust(1)

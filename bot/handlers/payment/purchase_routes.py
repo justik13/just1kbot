@@ -40,28 +40,28 @@ logger = logging.getLogger(__name__)
 
 
 PURCHASE_ERRORS = {
-    "quote_not_found": texts.PAYMENT_PURCHASE_QUOTE_NOT_FOUND,
+    "quote_not_found": texts.PAYMENT_QUOTE_NOT_FOUND_NOTICE,
     "quote_expired": texts.PAYMENT_PURCHASE_PRICE_STALE,
-    "quote_not_active": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
-    "tariff_unavailable": texts.PAYMENT_PURCHASE_UNAVAILABLE,
+    "quote_not_active": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "tariff_unavailable": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
     "tariff_price_changed": texts.PAYMENT_PURCHASE_PRICE_CHANGED_NOTICE,
     "quote_price_mismatch": texts.PAYMENT_PURCHASE_PRICE_EXPIRED_RETRY,
     "subscription_state_changed": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
-    "insufficient_balance": texts.PAYMENT_PURCHASE_INSUFFICIENT_FUNDS_ALERT,
-    "financial_hold": texts.PAYMENT_PURCHASE_DISPUTE_BLOCKED,
-    "account_debt": texts.PAYMENT_PURCHASE_DEBT_BLOCKED,
-    "too_many_devices": texts.PAYMENT_PURCHASE_DEVICES_BLOCKED,
+    "insufficient_balance": texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT,
+    "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+    "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+    "too_many_devices": texts.PAYMENT_DEVICES_BLOCKED_NOTICE,
     "purchase_user_missing": texts.ERROR_USER_NOT_FOUND,
-    "purchase_user_banned": texts.PAYMENT_PURCHASE_DISPUTE_BLOCKED,
+    "purchase_user_banned": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
     "purchase_user_ineligible": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
-    "current_tariff_unknown": texts.PAYMENT_PURCHASE_UNAVAILABLE,
+    "current_tariff_unknown": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
     "tariff_change_required": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
-    "active_tariff_change_quote_exists": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "active_tariff_change_quote_exists": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "consumed_quote_incomplete": texts.PAYMENT_PURCHASE_PRICE_STALE,
-    "quote_operation_mismatch": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
-    "active_quote_has_existing_debit": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
-    "active_quote_has_existing_entitlement": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
-    "tariff_duration_not_whole_days": texts.PAYMENT_PURCHASE_UNAVAILABLE,
+    "quote_operation_mismatch": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "active_quote_has_existing_debit": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "active_quote_has_existing_entitlement": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "tariff_duration_not_whole_days": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
 }
 
 
@@ -105,7 +105,7 @@ async def _render_purchase_review(
     tariff_name = get_tariff_display_name(intent.version.device_limit)
     operation = texts.PAYMENT_PURCHASE_OPERATION_RENEW_TITLE if quote.operation_type == "renew" else texts.WORD_PURCHASE
     text = (
-        texts.PAYMENT_PURCHASE_CONFIRM_CARD.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
+        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -116,7 +116,7 @@ async def _render_purchase_review(
                 texts.PAYMENT_PURCHASE.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
             )
         else:
-            text += texts.PAYMENT_PURCHASE_SHORTAGE_LINE.format(value_0=int(intent.shortage))
+            text += texts.PAYMENT_SHORTAGE_LINE.format(value_0=int(intent.shortage))
         keyboard = get_balance_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -263,7 +263,7 @@ async def confirm_purchase(
             callback.bot,
             callback.message.chat.id,
             PURCHASE_ERRORS.get(
-                exc.code, texts.PAYMENT_PURCHASE_CANCELLED_NO_DEBIT
+                exc.code, texts.PAYMENT_CANCELLED_NO_DEBIT_NOTICE
             ),
             get_back_button("menu_subscription"),
         )
@@ -317,7 +317,7 @@ async def topup_exact_shortage(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.PAYMENT_PURCHASE_CREATING_LINK, show_alert=False
+        texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False
     )
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -328,7 +328,7 @@ async def topup_exact_shortage(
         )
     except AccountPurchaseError:
         await callback.answer(
-            texts.PAYMENT_PURCHASE_QUOTE_EXPIRED_ALERT, show_alert=True
+            texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE, show_alert=True
         )
         return
     if intent.shortage <= 0:
@@ -368,7 +368,7 @@ async def topup_custom_shortage(
             session, db_user, quote_id
         )
     except AccountPurchaseError:
-        await callback.answer(texts.PAYMENT_PURCHASE_QUOTE_EXPIRED_RETRY, show_alert=True)
+        await callback.answer(texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE, show_alert=True)
         return
     minimum = max(
         int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
@@ -380,7 +380,7 @@ async def topup_custom_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.PAYMENT_PURCHASE_AMOUNT_PROMPT.format(value_0=minimum),
+        texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(value_0=minimum),
         get_back_button(
             f"balance_purchase_review:{intent.quote.public_id}"
         ),
@@ -451,7 +451,7 @@ async def resume_purchase_after_topup(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            PURCHASE_ERRORS.get(exc.code, texts.PAYMENT_PURCHASE_STALE_RETRY),
+            PURCHASE_ERRORS.get(exc.code, texts.PAYMENT_PURCHASE_EXPIRED_RETRY),
             get_back_button("menu_subscription"),
         )
         return

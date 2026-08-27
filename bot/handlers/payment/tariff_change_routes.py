@@ -36,29 +36,29 @@ logger = logging.getLogger(__name__)
 
 
 CHANGE_ERRORS = {
-    "quote_not_found": texts.PAYMENT_CHANGE_TARIFF_QUOTE_NOT_FOUND,
+    "quote_not_found": texts.PAYMENT_QUOTE_NOT_FOUND_NOTICE,
     "quote_expired": texts.PAYMENT_CHANGE_TARIFF_CALC_EXPIRED,
-    "quote_not_active": texts.PAYMENT_CHANGE_TARIFF_NOT_ACTIVE,
-    "tariff_unavailable": texts.PAYMENT_CHANGE_TARIFF_UNAVAILABLE,
+    "quote_not_active": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "tariff_unavailable": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
     "tariff_price_changed": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
     "quote_source_history_changed": texts.PAYMENT_CHANGE_TARIFF_SUB_CHANGED,
     "quote_economics_changed": texts.PAYMENT_CHANGE_TARIFF_ECONOMY_CHANGED,
     "quote_economics_invalid": texts.PAYMENT_CHANGE_TARIFF_ECONOMY_CHANGED,
     "subscription_state_changed": texts.PAYMENT_CHANGE_TARIFF_STATE_CHANGED,
     "subscription_balance_untracked": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
-    "insufficient_balance": texts.PAYMENT_CHANGE_TARIFF_INSUFFICIENT_FUNDS,
-    "financial_hold": texts.PAYMENT_CHANGE_TARIFF_DISPUTE_BLOCKED,
-    "account_debt": texts.PAYMENT_CHANGE_TARIFF_DEBT_BLOCKED,
-    "too_many_devices": texts.PAYMENT_CHANGE_TARIFF_DEVICES_BLOCKED,
+    "insufficient_balance": texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT,
+    "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+    "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+    "too_many_devices": texts.PAYMENT_DEVICES_BLOCKED_NOTICE,
     "change_user_ineligible": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
-    "quote_operation_mismatch": texts.PAYMENT_CHANGE_TARIFF_NOT_ACTIVE,
+    "quote_operation_mismatch": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "quote_amount_invalid": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
     "consumed_quote_incomplete": texts.PAYMENT_CHANGE_TARIFF_CALC_EXPIRED,
-    "quote_tariff_version_invalid": texts.PAYMENT_CHANGE_TARIFF_UNAVAILABLE,
+    "quote_tariff_version_invalid": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
     "quote_currency_invalid": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
-    "active_quote_has_existing_debit": texts.PAYMENT_CHANGE_TARIFF_NOT_ACTIVE,
+    "active_quote_has_existing_debit": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "paid_value_ledger_conflict": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
-    "active_quote_has_existing_entitlement": texts.PAYMENT_CHANGE_TARIFF_NOT_ACTIVE,
+    "active_quote_has_existing_entitlement": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
     "change_cooldown_active": texts.PAYMENT_DOWNGRADE_COOLDOWN_ALERT,
 }
 
@@ -72,8 +72,8 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return texts.PAYMENT_CHANGE_TARIFF_DURATION_DAYS.format(
-        value_0=days
+    return texts.TIME_DAYS_FORMAT.format(
+        days=days
     ) + (
         texts.DURATION_HOURS_SUFFIX.format(hours=remainder)
         if remainder
@@ -109,7 +109,7 @@ async def render_tariff_change_review(
     before = int(intent.balance.available)
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
-    text = texts.PAYMENT_CHANGE_TARIFF_CONFIRM_CARD.format(
+    text = texts.PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD.format(
         value_0=get_tariff_display_name(intent.target_version.device_limit),
         value_1=intent.target_version.device_limit,
         value_2=_hours_text(
@@ -130,7 +130,7 @@ async def render_tariff_change_review(
                 value_2=remainder,
             )
         else:
-            text += texts.PAYMENT_CHANGE_TARIFF_SHORTAGE_LINE.format(
+            text += texts.PAYMENT_SHORTAGE_LINE.format(
                 value_0=int(intent.shortage)
             )
         keyboard = get_balance_change_shortage_keyboard(
@@ -226,7 +226,7 @@ async def confirm_tariff_change(
             callback.message.chat.id,
             CHANGE_ERRORS.get(
                 exc.code,
-                texts.PAYMENT_CHANGE_TARIFF_CANCELLED_NO_DEBIT,
+                texts.PAYMENT_CANCELLED_NO_DEBIT_NOTICE,
             ),
             get_back_button("payment_change_tariff"),
         )
@@ -242,7 +242,7 @@ async def confirm_tariff_change(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.PAYMENT_CHANGE_TARIFF_SUCCESS_CARD.format(
+        texts.PAYMENT_TARIFF_CHANGE_SUCCESS_CARD.format(
             value_0=get_tariff_display_name(intent.target_version.device_limit),
             value_1=_hours_text(
                 result.quote.resulting_paid_hours
@@ -281,7 +281,7 @@ async def topup_exact_change_shortage(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.PAYMENT_CHANGE_TARIFF_CREATING_LINK,
+        texts.PAYMENT_CREATING_LINK_NOTICE,
         show_alert=False,
     )
     quote_id = _uuid_from_callback(callback.data)
@@ -293,7 +293,7 @@ async def topup_exact_change_shortage(
         )
     except AccountTariffChangeError:
         await callback.answer(
-            texts.PAYMENT_CHANGE_TARIFF_QUOTE_EXPIRED_ALERT,
+            texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE,
             show_alert=True,
         )
         return
@@ -335,7 +335,7 @@ async def topup_custom_change_shortage(
         )
     except AccountTariffChangeError:
         await callback.answer(
-            texts.PAYMENT_CHANGE_TARIFF_QUOTE_EXPIRED_RETRY,
+            texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE,
             show_alert=True,
         )
         return
@@ -349,7 +349,7 @@ async def topup_custom_change_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.PAYMENT_CHANGE_TARIFF_AMOUNT_PROMPT.format(
+        texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(
             value_0=minimum
         ),
         get_back_button(f"balance_change_review:{intent.quote.public_id}"),

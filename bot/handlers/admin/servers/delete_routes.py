@@ -92,7 +92,7 @@ async def request_delete_server(
 
     profiles_count = len(result.all())
 
-    flag = server.country_flag or texts.ADMIN_SERVERS_DELETE
+    flag = server.country_flag or texts.EMOJI_GLOBE
 
     await state.update_data(delete_server_id=server_id)
     await state.set_state(AdminStates.confirming_server_delete)

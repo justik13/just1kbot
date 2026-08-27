@@ -131,10 +131,10 @@ async def _show_hub(
         text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION, callback_data="payment_quick_renew"
     )
     builder.button(
-        text=texts.BTN_PAYMENT_CHANGE_TARIFF, callback_data="payment_change_tariff"
+        text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff"
     )
     builder.button(
-        text=texts.BTN_PAYMENT_TO_MAIN_MENU, callback_data="back_to_main_menu"
+        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
     builder.adjust(1, 1, 1)
     await render_hub(

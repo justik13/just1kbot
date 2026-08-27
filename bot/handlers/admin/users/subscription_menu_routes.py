@@ -62,7 +62,7 @@ async def admin_subscription_menu(
         user.id,
     )
 
-    tariff_name = texts.ADMIN_USERS_SUBSCRIPTION_MENU
+    tariff_name = texts.PLACEHOLDER_DASH
     device_limit = user.device_limit or 0
 
     if user.current_tariff_id:

@@ -197,7 +197,7 @@ async def start_edit_server_flag(
         )
         return
 
-    current_flag = server.country_flag or texts.ADMIN_SERVERS_EDIT
+    current_flag = server.country_flag or texts.EMOJI_GLOBE
 
     await state.update_data(
         server_id=server_id,
@@ -476,7 +476,7 @@ async def process_edit_server_url(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.LABEL_UNKNOWN
+                    else texts.LABEL_UNKNOWN_LOWER
                 ),
             ),
             get_back_button("admin_servers"),
@@ -739,7 +739,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.LABEL_UNKNOWN
+                    else texts.LABEL_UNKNOWN_LOWER
                 ),
             ),
             get_back_button("admin_servers"),

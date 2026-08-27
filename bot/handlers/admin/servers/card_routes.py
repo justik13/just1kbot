@@ -96,7 +96,7 @@ async def toggle_server_confirm(
 
     new_status = not server.is_active
 
-    flag = server.country_flag or texts.ADMIN_SERVERS_CARD
+    flag = server.country_flag or texts.EMOJI_GLOBE
 
     if new_status:
         text = texts.ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM.format(

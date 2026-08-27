@@ -5,6 +5,8 @@ ADMIN_BTN_BACK_TO_ADMIN = "← В админку"
 
 ADMIN_DEVICE_LIMIT_SLOT_LABEL = "{t_name} (до {user_device_limit} устр.)"
 
+BTN_USERS = "👥 Пользователи"
+
 COMMON_3_DAYS = "⏳ < 3 дней"
 
 COMMON_AKTIVEN = "🟢 <b>Активен</b>"
@@ -58,12 +60,8 @@ COMMON_REZULTAT_PROVERKI_SVYAZI = """
 
 COMMON_SEARCH_PO_USERNAME_ID = "🔍 Поиск по @username / ID"
 
-COMMON_SERVERS = "🖥 Серверы"
-
 COMMON_STATUS_V_BOTE = """• Статус в боте: {status_line}
 """
-
-COMMON_USERS = "👥 Пользователи"
 
 COMMON_USTR = "{status}{ban} {username} | {days} | {profiles_count} устр."
 

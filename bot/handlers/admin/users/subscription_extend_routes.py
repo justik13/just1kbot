@@ -120,7 +120,7 @@ async def admin_sub_confirm_extend(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            texts.ADMIN_SUB_EXTEND_OPTION_3M,
+            texts.ERROR_INVALID_DAYS_COUNT,
             show_alert=True,
         )
         return
@@ -155,7 +155,7 @@ async def admin_sub_confirm_extend(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.ADMIN_USERS_SUBSCRIPTION_EXTEND.format(value_0=days)
+        else texts.TIME_DAYS_FORMAT.format(days=days)
     )
 
     text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(
@@ -216,7 +216,7 @@ async def admin_sub_apply_extend(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            texts.ADMIN_SUB_EXTEND_OPTION_6M,
+            texts.ERROR_INVALID_DAYS_COUNT,
             show_alert=True,
         )
         return
@@ -253,7 +253,7 @@ async def admin_sub_apply_extend(
         days_text = (
             texts.ADMIN_SUB_PERMANENT_LABEL
             if days >= PERMANENT_SUBSCRIPTION_DAYS
-            else texts.ADMIN_USERS_SUBSCRIPTION_EXTEND.format(value_0=days)
+            else texts.TIME_DAYS_FORMAT.format(days=days)
         )
 
         await AuditService.log_action(
@@ -268,7 +268,7 @@ async def admin_sub_apply_extend(
         new_end_str = (
             format_datetime(user.subscription_end)
             if user and user.subscription_end
-            else texts.ADMIN_SUB_EXTEND_OPTION_1M
+            else texts.PLACEHOLDER_DASH
         )
 
         text = texts.ADMIN_SUB_EXTEND_SUCCESS.format(
@@ -412,7 +412,7 @@ async def admin_sub_extend_custom_process(
     days_text = (
         texts.ADMIN_SUB_PERMANENT_LABEL
         if days >= PERMANENT_SUBSCRIPTION_DAYS
-        else texts.ADMIN_USERS_SUBSCRIPTION_EXTEND.format(value_0=days)
+        else texts.TIME_DAYS_FORMAT.format(days=days)
     )
 
     confirm_text = texts.ADMIN_SUB_CONFIRM_EXTEND.format(

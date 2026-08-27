@@ -54,7 +54,7 @@ async def start_mass_bonus(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
 
     text = (
         f"{header}"+
@@ -107,7 +107,7 @@ async def select_mass_bonus_audience(
     await state.update_data(target_aud=target_aud)
     await state.set_state(AdminStates.entering_mass_bonus_amount)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_SUMMY)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_SUMMY)
     text = (
         f"{header}"+
         texts.ADMIN_USERS_MASS_BONUS_AMOUNT_BONUS_GRANT_N.format()+
@@ -152,7 +152,7 @@ async def process_mass_bonus_amount(
     await state.update_data(amount=amount)
     await state.set_state(AdminStates.entering_mass_bonus_reason)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
     text = (
         f"{header}"+
         texts.ADMIN_USERS_MASS_BONUS_REASON_MASSOVOGO_NACHISLENIY.format(amount=amount)+
@@ -199,8 +199,8 @@ async def process_mass_bonus_reason(
     await state.update_data(reason=reason, user_count=user_count)
     await state.set_state(AdminStates.confirming_mass_bonus)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
-    aud_label = {"all": "Всем пользователям", "active": "Только с активной подпиской", "expired": "Только без подписки"}.get(target_aud, target_aud)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
+    aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     text = (
         f"{header}"+
@@ -259,7 +259,7 @@ async def apply_mass_bonus(
     await state.clear()
     await callback.answer(texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_ZAPUSHCHE, show_alert=True)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
     try:
         await callback.message.edit_text(
             texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_P.format(header=header, amount=amount)+
@@ -359,8 +359,8 @@ async def _run_mass_bonus_background(
                         await global_send_limiter.acquire()
                         await bot.send_message(
                             tg_id,
-                            texts.ADMIN_USERS_MASS_BONUS_VAM_NACHISLEN_BONUS_BALANCE.format(amount=amount)+
-                            texts.ADMIN_MASS_BONUS_REASON_LINE.format(safe_reason=safe(reason)),
+                            texts.ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION.format(amount=amount)+
+                            texts.ADMIN_BONUS_REASON_LINE_FORMAT.format(safe_reason=safe(reason)),
                             parse_mode="HTML",
                         )
                     except TelegramForbiddenError:
@@ -387,7 +387,7 @@ async def _run_mass_bonus_background(
             )
 
         try:
-            header = format_admin_breadcrumbs(texts.ADMIN_USERS_MASS_BONUS_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
+            header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
             builder = InlineKeyboardBuilder()
             builder.button(text=texts.ADMIN_USERS_MASS_BONUS_NEW_MASS_BONUS, callback_data="admin_mass_bonus")
             builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")

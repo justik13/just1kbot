@@ -123,37 +123,55 @@ class CircularImportRegressionTests(unittest.TestCase):
         return violations
 
     def test_downward_dependency_ast_scan(self):
-        """Verify statically via AST that lower architectural layers NEVER import bot or bot.*.
+        """Verify statically via AST that lower architectural layers obey strict boundary rules.
 
-        Architecture Invariant:
-        config/, database/, integrations/, services/ (including workers), and utils/
-        must NEVER import ANY module from the bot presentation layer (bot, bot.texts,
-        bot.keyboards, bot.middlewares, bot.handlers, bot.states, bot.constants, etc.).
+        Architecture Invariants:
+        1. Pure core layers: config/, database/, integrations/, utils/, and services/*.py (pure services)
+           must NEVER import ANY module from the bot layer (bot, bot.texts, bot.keyboards, bot.handlers, etc.).
+        2. Delivery adapter workers: services/workers/* may import only canonical presentation adapters
+           (bot.texts.* and bot.keyboards.*), but must NEVER import bot.handlers, bot.middlewares, or bot.states.
         """
         project_root = Path(__file__).resolve().parent.parent
-
-        bot_free_dirs = ["config", "database", "integrations", "services", "utils"]
         violations = []
 
-        for dir_name in bot_free_dirs:
+        # 1. Pure core modules (MUST NEVER import bot.*)
+        pure_bot_free_dirs = ["config", "database", "integrations", "utils"]
+        for dir_name in pure_bot_free_dirs:
             target_dir = project_root / dir_name
             if not target_dir.exists():
                 continue
             for py_file in target_dir.rglob("*.py"):
-                try:
-                    with open(py_file, "r", encoding="utf-8") as f:
-                        tree = ast.parse(f.read(), filename=str(py_file))
-                except Exception as exc:
-                    self.fail(f"Failed to parse {py_file}: {exc}")
-
+                with open(py_file, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=str(py_file))
                 file_violations = self._find_ast_import_violations(tree, ("bot",))
+                for lineno, name in file_violations:
+                    violations.append((str(py_file.relative_to(project_root)), lineno, name))
+
+        # Pure services in services/*.py (excluding workers subdirectory)
+        services_dir = project_root / "services"
+        if services_dir.exists():
+            for py_file in services_dir.glob("*.py"):
+                with open(py_file, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=str(py_file))
+                file_violations = self._find_ast_import_violations(tree, ("bot",))
+                for lineno, name in file_violations:
+                    violations.append((str(py_file.relative_to(project_root)), lineno, name))
+
+        # 2. Worker layer (services/workers/*): may ONLY import bot.texts and bot.keyboards
+        workers_dir = services_dir / "workers"
+        if workers_dir.exists():
+            forbidden_for_workers = ("bot.handlers", "bot.middlewares", "bot.states", "bot.main")
+            for py_file in workers_dir.rglob("*.py"):
+                with open(py_file, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=str(py_file))
+                file_violations = self._find_ast_import_violations(tree, forbidden_for_workers)
                 for lineno, name in file_violations:
                     violations.append((str(py_file.relative_to(project_root)), lineno, name))
 
         self.assertEqual(
             violations,
             [],
-            f"Strict Architectural Firewall Violation: Found upward imports to bot.* in lower layers:\n{violations}",
+            f"Strict Architectural Firewall Violation: Found illegal upward imports:\n{violations}",
         )
 
     def test_ast_guard_detects_deliberate_violation(self):

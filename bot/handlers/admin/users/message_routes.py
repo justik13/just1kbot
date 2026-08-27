@@ -134,7 +134,7 @@ async def process_send_user_message(
     error_reason = None
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     dismiss_builder = InlineKeyboardBuilder()
-    dismiss_builder.button(text=texts.ADMIN_USERS_MESSAGE_PROCHITANO, callback_data="dismiss_notification")
+    dismiss_builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
     reply_markup = dismiss_builder.as_markup()
 
     try:
@@ -152,7 +152,7 @@ async def process_send_user_message(
                 await message.bot.send_photo(
                     target_telegram_id,
                     photo=photo_id,
-                    caption=texts.ADMIN_DIRECT_MESSAGE_TEXT_FORMAT.format(text_to_send_or=text_to_send or ''),
+                    caption=texts.ADMIN_DIRECT_MESSAGE_BODY_FORMAT.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                 )
         elif message.document:

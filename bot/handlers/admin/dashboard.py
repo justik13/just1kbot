@@ -221,8 +221,8 @@ async def show_admin_cat_users(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    header = format_admin_breadcrumbs(texts.DASHBOARD_USERS_I_BROADCAST)
-    text = texts.DASHBOARD_MANAGE_POLZOVATELYAMI_I_RA.format(header=header)
+    header = format_admin_breadcrumbs(texts.BTN_USERS_AND_BROADCAST)
+    text = texts.ADMIN_DASHBOARD_SECTION_USERS_BROADCAST.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_users_keyboard(), parse_mode="HTML")
     except TelegramBadRequest:
@@ -236,7 +236,7 @@ async def show_admin_cat_infra(callback: CallbackQuery, state: FSMContext):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
     await state.clear()
-    header = format_admin_breadcrumbs(texts.DASHBOARD_SERVERS_I_TARIFFS)
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS_AND_TARIFFS)
     text = texts.DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR.format(header=header)
     try:
         await callback.message.edit_text(text, reply_markup=get_admin_cat_infra_keyboard(), parse_mode="HTML")
@@ -443,8 +443,8 @@ async def show_admin_settings(
     text = (
         f"{header}"+
         texts.DASHBOARD_SISTEMNYE_SETTINGS_BOTA.format()+
-        "🚀 <b>MTProto Proxy URL:</b>\n"+
-        texts.DASHBOARD_NE_ZADANO_LINK_HIDDEN_OT_POL.format(safe_mtproto_url_or=safe(mtproto_url or 'Не задано (ссылка скрыта от пользователей)'))+
+        texts.DASHBOARD_MTPROTO_PROXY_URL_HEADER+
+        texts.DASHBOARD_NE_ZADANO_LINK_HIDDEN_OT_POL.format(safe_mtproto_url_or=safe(mtproto_url or texts.LABEL_NOT_SET_LINK_HIDDEN))+
         texts.DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M.format()
     )
 

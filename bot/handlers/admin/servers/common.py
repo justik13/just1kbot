@@ -53,8 +53,8 @@ async def _build_servers_list_text_and_kb(
         rendered += texts.ADMIN_SERVERS_EMPTY
     else:
         for server in servers:
-            flag = server.country_flag or texts.ADMIN_SERVER_DEFAULT_FLAG
-            status = texts.ADMIN_SERVER_STATUS_ONLINE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
+            flag = server.country_flag or texts.EMOJI_GLOBE
+            status = texts.ADMIN_TARIFF_CARD_HEADER if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
             )
@@ -125,7 +125,7 @@ async def _show_server_card(
     peer_counts = await get_server_peer_counts(session)
     used_clients = peer_counts.get(server.id, 0)
     max_clients = server.max_clients or 240
-    header = format_admin_breadcrumbs(texts.COMMON_SERVERS, f"{flag} {server.name}")
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
     rendered = (
         f"{header}"+

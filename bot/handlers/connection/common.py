@@ -71,7 +71,7 @@ def _format_grace_countdown(deletion_time) -> str:
     delta = deletion_time - current_time
 
     if delta.total_seconds() <= 0:
-        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_DAYS
+        return texts.TIME_SOON_LABEL
 
     days = delta.days
     hours = delta.seconds // 3600
@@ -137,8 +137,8 @@ async def _build_connections_screen(
         for profile in profiles:
             server = profile.server
 
-            flag = server.country_flag if server else texts.CONNECTION_COMMON
-            server_name = server.name if server else texts.DEVICE_STATUS_UNKNOWN
+            flag = server.country_flag if server else texts.EMOJI_GLOBE
+            server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
             location_label = f"{flag} {safe(server_name)}"
 
             btn_text = f"{location_label} — {safe(profile.device_name)}"
@@ -183,7 +183,7 @@ async def _build_connections_screen(
         url="https://stats.uptimerobot.com/de5q3DNc95",
     )
     builder.button(
-        text=texts.BUTTON_MAIN_MENU,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 
@@ -246,7 +246,7 @@ async def _render_connections(
             callback_data="menu_buy",
         )
         builder.button(
-            text=texts.CONNECTION_CONFIG_SUMMARY_HEADER,
+            text=texts.BTN_MAIN_MENU_NAV,
             callback_data="back_to_main_menu",
         )
         builder.adjust(1)

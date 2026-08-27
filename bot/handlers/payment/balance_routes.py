@@ -395,7 +395,7 @@ async def create_preset_topup(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.TOPUP_CREATING_ALERT, show_alert=False)
+    await callback.answer(texts.PAYMENT_CREATING_LINK_NOTICE, show_alert=False)
     amount = parse_callback_id(callback.data, 1)
     if db_user is None or amount is None:
         return

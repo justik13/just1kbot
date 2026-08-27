@@ -15,7 +15,7 @@ def get_admin_server_card_keyboard(
         callback_data=f"admin_server_ping:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_STATUS_PROBLEM_BADGE,
+        text=texts.BTN_CHANGE_NAME,
         callback_data=f"admin_server_edit_name:{server_id}",
     )
     builder.button(
@@ -36,9 +36,9 @@ def get_admin_server_card_keyboard(
     )
 
     if is_active:
-        status_text = texts.ADMIN_SERVERS
+        status_text = texts.BTN_DISABLE_SERVER
     else:
-        status_text = texts.ADMIN_SERVER_STATUS_ONLINE_BADGE
+        status_text = texts.BTN_ENABLE_SERVER_CARD
 
     builder.button(
         text=status_text,
@@ -49,7 +49,7 @@ def get_admin_server_card_keyboard(
         callback_data=f"admin_server_delete:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_EDIT_IP_PROMPT,
+        text=texts.ADMIN_BTN_BACK_TO_SERVERS,
         callback_data="admin_servers",
     )
 
@@ -72,11 +72,11 @@ def get_server_delete_confirm_keyboard(
         callback_data=f"admin_server_card:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_EDIT_LIMIT_PROMPT,
+        text=texts.ADMIN_BTN_BACK_TO_SERVERS,
         callback_data="admin_servers",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_EDIT_SUCCESS,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 

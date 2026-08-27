@@ -3,6 +3,8 @@ import logging
 from datetime import datetime, timezone
 
 from aiogram import Bot
+from bot.keyboards.notifications import get_traffic_alert_keyboard
+from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
 from sqlalchemy import select, update
 
@@ -320,32 +322,20 @@ async def _send_quota_alert(
             return
 
         tib = total_bytes / (1024**4)
-        msg = (
-            f"⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 <b>Пользователь:</b> <code>{telegram_id}</code>\n"
-            f"🖥 <b>Сервер:</b> {server_name}\n"
-            f"📊 <b>Трафик за сутки:</b> {tib:.2f} TiB\n"
-            f"🔑 <b>Профиль ID:</b> {profile_id}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"<i>Рекомендуется проверить активность пользователя.</i>"
+        msg = ALERT_TRAFFIC_OVERUSAGE.format(
+            telegram_id=telegram_id,
+            server_name=server_name,
+            tib=tib,
+            profile_id=profile_id,
         )
-
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text="👤 Открыть карточку",
-            callback_data=f"admin_user_card:{telegram_id}",
-        )
-        builder.adjust(1)
+        reply_markup = get_traffic_alert_keyboard(telegram_id)
 
         for admin_id in admin_ids:
             try:
                 await bot.send_message(
                     admin_id,
                     msg,
-                    reply_markup=builder.as_markup(),
+                    reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
             except Exception as e:

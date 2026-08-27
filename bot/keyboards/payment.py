@@ -23,7 +23,7 @@ def get_tariff_showcase_keyboard(
             callback_data=f"select_tariff_type:{limit}:showcase",
         )
     builder.button(
-        text=texts.BUTTON_MAIN_MENU, callback_data="back_to_main_menu"
+        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -43,7 +43,7 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         or getattr(base_tariff, "duration_days", 0) <= 0
         or days <= getattr(base_tariff, "duration_days", 0)
     ):
-        return f"⏱ {days} дн. — {display_price} ₽"
+        return texts.BTN_DURATION_STANDARD.format(days=days, display_price=display_price)
 
     base_days = Decimal(str(base_tariff.duration_days))
     base_price = Decimal(str(base_tariff.price_rub))
@@ -59,13 +59,13 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         savings_rub = 0
 
     if savings_rub <= 0 or discount_pct <= 0:
-        return f"⏱ {days} дн. — {display_price} ₽"
+        return texts.BTN_DURATION_STANDARD.format(days=days, display_price=display_price)
 
     if days >= 360:
-        return f"💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+        return texts.BTN_DURATION_YEAR_DISCOUNT.format(days=days, display_price=display_price, discount_pct=discount_pct)
     elif days >= 180:
-        return f"⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
-    return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
+        return texts.BTN_DURATION_HALF_YEAR_DISCOUNT.format(days=days, display_price=display_price, discount_pct=discount_pct)
+    return texts.BTN_DURATION_MONTH_DISCOUNT.format(days=days, display_price=display_price, discount_pct=discount_pct)
 
 
 def get_tariff_duration_keyboard(
@@ -172,7 +172,7 @@ def get_payment_success_keyboard() -> InlineKeyboardMarkup:
         text=texts.BTN_PAYMENT_TO_SUBSCRIPTION, callback_data="menu_subscription"
     )
     builder.button(
-        text=texts.BUTTON_MAIN_MENU, callback_data="back_to_main_menu"
+        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
     )
     builder.adjust(1, 1, 1)
     return builder.as_markup()
@@ -398,12 +398,12 @@ def get_balance_change_shortage_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_PAYMENT_TOPUP_AMOUNT_OPTION.format(value_0=exact_amount),
+        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(value_0=exact_amount),
         callback_data=f"bal_chg_short_exact:{quote_public_id}",
         style="success",
     )
     builder.button(
-        text=texts.BTN_PAYMENT_CUSTOM_AMOUNT_OPTION,
+        text=texts.BTN_PAYMENT_SPECIFY_OTHER_AMOUNT,
         callback_data=f"bal_chg_short_custom:{quote_public_id}",
     )
     builder.button(text=texts.BTN_BACK, callback_data=back_callback)
@@ -421,6 +421,6 @@ def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
     builder.button(text=texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance")
-    builder.button(text=texts.BTN_PROCHITANO, callback_data="dismiss_notification")
+    builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()

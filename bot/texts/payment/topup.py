@@ -14,8 +14,6 @@ TOPUP_CHECKING_ALERT = "Проверяем…"
 
 TOPUP_CONFIRMED_NOTICE = "✅ Оплата подтверждена. Зачисляем деньги на баланс."
 
-TOPUP_CREATING_ALERT = "Создаём ссылку…"
-
 TOPUP_CREDITED_NOTICE = "✅ Баланс пополнен."
 
 TOPUP_CUSTOM_AMOUNT_PROMPT = """Введите сумму пополнения целым числом от {minimum} до {maximum} ₽.

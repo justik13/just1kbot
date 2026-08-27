@@ -3,23 +3,11 @@ from __future__ import annotations
 
 ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 
-ADMIN_BTN_PAGINATION_NEXT = "➡️"
-
-ADMIN_BTN_PAGINATION_PREV = "⬅️"
-
-ADMIN_SERVERS = "🔴 Выключить"
-
-ADMIN_SERVERS_ADD = "неизвестно"
-
-ADMIN_SERVERS_CARD = "🌍"
+ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 
 ADMIN_SERVERS_COMMON = """🛠 Админка › 🌍 <b>Серверы</b>
 (стр. {value_0}/{value_1}) · Всего: {value_2}
 """
-
-ADMIN_SERVERS_DELETE = "🌍"
-
-ADMIN_SERVERS_EDIT = "🌍"
 
 ADMIN_SERVERS_EMPTY = """<i>Серверов пока нет</i>
 """
@@ -43,8 +31,6 @@ ADMIN_SERVER_CHECKING = "🔄 Проверка сервера..."
 
 ADMIN_SERVER_CONFIRMATION_EXPIRED = "⚠️ Сессия подтверждения истекла"
 
-ADMIN_SERVER_DEFAULT_FLAG = "🌍"
-
 ADMIN_SERVER_DELETED_BADGE = "Удалено"
 
 ADMIN_SERVER_DELETE_BLOCKED_PENDING = """⚠️ <b>Удаление сервера отменено:</b>
@@ -60,8 +46,6 @@ ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
 ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {value_0} удалён ({value_1} устр.)"
 
-ADMIN_SERVER_EDIT_IP_PROMPT = "← К списку серверов"
-
 ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.
 
 • Связанных устройств: <b>{devices_count}</b>
@@ -71,13 +55,9 @@ ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ AP
 
 ADMIN_SERVER_EDIT_KEY_PROMPT = "Введите новый ключ для сервера:"
 
-ADMIN_SERVER_EDIT_LIMIT_PROMPT = "← К списку серверов"
-
 ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT = "Введите максимальное количество клиентов для сервера:"
 
 ADMIN_SERVER_EDIT_PORT_PROMPT = "✅ Да, удалить полностью"
-
-ADMIN_SERVER_EDIT_SUCCESS = "🏠 В главное меню"
 
 ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.
 
@@ -129,12 +109,6 @@ ADMIN_SERVER_STATUS_DISABLED_BADGE = "🔗 Изменить URL"
 
 ADMIN_SERVER_STATUS_OFFLINE_BADGE = "🏳 Изменить флаг"
 
-ADMIN_SERVER_STATUS_ONLINE_BADGE = "🟢 Включить"
-
-ADMIN_SERVER_STATUS_ONLINE_ICON = "🟢"
-
-ADMIN_SERVER_STATUS_PROBLEM_BADGE = "✏️ Изменить имя"
-
 ADMIN_SERVER_TOGGLE_DISABLE_CONFIRM = "Вы уверены, что хотите отключить сервер {flag} <b>{name}</b>?"
 
 ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM = "Вы уверены, что хотите включить сервер {flag} <b>{name}</b>?"
@@ -148,4 +122,10 @@ ADMIN_SERVER_URL_PROMPT = "🔗 Введите API URL сервера (напр�
 
 ADMIN_SERVER_URL_UPDATED = "✅ API URL сервера обновлен на <code>{api_url}</code>."
 
-LABEL_UNKNOWN = "неизвестно"
+ADMIN_TARIFF_CARD_HEADER = "🟢"
+
+BTN_DISABLE_SERVER = "🔴 Выключить"
+
+BTN_ENABLE_SERVER_CARD = "🟢 Включить"
+
+LABEL_UNKNOWN_LOWER = "неизвестно"

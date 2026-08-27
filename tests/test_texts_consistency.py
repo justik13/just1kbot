@@ -11,9 +11,15 @@ from bot import texts
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = PROJECT_ROOT / "bot" / "texts"
 
+# Explicit canonical alias registry for intentional aliases (e.g. backward compat or semantic alias)
+CANONICAL_ALIASES: dict[str, str] = {
+    # Alias Key -> Canonical Key
+    "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT": "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT",
+}
+
 
 class TextsConsistencyTests(unittest.TestCase):
-    """Automated consistency, markup, and placeholder verification for all application texts."""
+    """Automated consistency, markup, placeholder, and architectural verification for all application texts."""
 
     def test_all_text_keys_are_valid_identifiers(self):
         """Verify that all keys in texts facade are valid uppercase/semantic identifiers."""
@@ -21,10 +27,27 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertGreater(len(keys), 100, "Text catalogue must contain loaded keys.")
         for key in keys:
             self.assertTrue(key.isidentifier(), f"Key {key!r} is not a valid Python identifier.")
+            self.assertTrue(key.isupper(), f"Key {key!r} must be uppercase constant.")
             # Disallow line-number based keys or unsemantic names
             self.assertIsNone(
                 re.search(r"(_L\d+_\d+|_L\d+)$", key),
                 f"Key {key!r} contains forbidden line-number suffix.",
+            )
+
+    def test_get_all_text_keys_returns_strictly_text_constants(self):
+        """Verify that get_all_text_keys() returns strictly text constant names and no helper functions."""
+        keys = texts.get_all_text_keys()
+        forbidden_helper_names = {"get_text", "get_all_text_keys", "reload_texts"}
+        for helper in forbidden_helper_names:
+            self.assertNotIn(
+                helper,
+                keys,
+                f"Helper function {helper!r} illegally returned by get_all_text_keys()",
+            )
+        for key in keys:
+            self.assertTrue(
+                key.isupper(),
+                f"Non-constant identifier {key!r} returned by get_all_text_keys()",
             )
 
     def test_strict_no_duplicate_keys_across_domain_modules(self):
@@ -53,6 +76,42 @@ class TextsConsistencyTests(unittest.TestCase):
             duplicates,
             [],
             f"SSOT Violation: Duplicate text keys found across domain modules:\n{duplicates}",
+        )
+
+    def test_no_duplicate_canonical_text_values_across_catalogue(self):
+        """Verify that identical text values across constants are unified or explicitly registered as aliases."""
+        val_to_keys: dict[str, list[tuple[str, str]]] = {}
+
+        for py_file in sorted(TEXTS_DIR.rglob("*.py")):
+            if py_file.name == "__init__.py":
+                continue
+            rel_path = py_file.relative_to(TEXTS_DIR).as_posix()
+            content = py_file.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=str(py_file))
+
+            for stmt in tree.body:
+                if isinstance(stmt, ast.Assign):
+                    for target in stmt.targets:
+                        if isinstance(target, ast.Name) and target.id.isupper():
+                            if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+                                val = stmt.value.value
+                                if val not in val_to_keys:
+                                    val_to_keys[val] = []
+                                val_to_keys[val].append((target.id, rel_path))
+
+        unaliased_duplicates = []
+        for val, keys_list in val_to_keys.items():
+            if len(keys_list) > 1:
+                # Check if all extra keys are registered in CANONICAL_ALIASES
+                keys = [k for k, _ in keys_list]
+                unregistered = [k for k in keys if k not in CANONICAL_ALIASES and k not in CANONICAL_ALIASES.values()]
+                if len(unregistered) > 1:
+                    unaliased_duplicates.append((val[:60], keys_list))
+
+        self.assertEqual(
+            unaliased_duplicates,
+            [],
+            f"SSOT Violation: Found duplicate text string values without canonical alias mapping:\n{unaliased_duplicates}",
         )
 
     def test_no_overrides_model_and_no_overrides_file(self):
@@ -108,10 +167,8 @@ class TextsConsistencyTests(unittest.TestCase):
             if not isinstance(val, str):
                 continue
 
-            # Skip double braces
             clean_val = val.replace("{{", "").replace("}}", "")
 
-            # Check for unclosed or broken braces
             open_count = clean_val.count("{")
             close_count = clean_val.count("}")
             self.assertEqual(
@@ -120,7 +177,6 @@ class TextsConsistencyTests(unittest.TestCase):
                 f"Mismatched braces in text key {key!r}:\n{val}",
             )
 
-            # Check placeholder names are valid
             for placeholder in placeholder_pattern.findall(clean_val):
                 var_name = placeholder.split(":")[0].split("!")[0].strip()
                 if var_name.isdigit():
@@ -129,6 +185,55 @@ class TextsConsistencyTests(unittest.TestCase):
                     var_name.isidentifier(),
                     f"Invalid placeholder name {placeholder!r} in text key {key!r}:\n{val}",
                 )
+
+    def test_placeholder_compatibility_across_call_sites(self):
+        """Verify statically that every .format(...) call site supplies the exact placeholders required."""
+        placeholder_pattern = re.compile(r"\{([a-zA-Z0-9_]+)")
+        mismatches = []
+
+        scanned_dirs = [
+            PROJECT_ROOT / "bot",
+            PROJECT_ROOT / "services" / "workers",
+        ]
+
+        for base_dir in scanned_dirs:
+            for py_file in base_dir.rglob("*.py"):
+                if "texts" in py_file.parts:
+                    continue
+                content = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(content, filename=str(py_file))
+
+                for node in ast.walk(tree):
+                    if (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "format"
+                        and isinstance(node.func.value, ast.Attribute)
+                        and isinstance(node.func.value.value, ast.Name)
+                        and node.func.value.value.id == "texts"
+                    ):
+                        text_key = node.func.value.attr
+                        template = getattr(texts, text_key, None)
+                        if isinstance(template, str):
+                            placeholders = set(placeholder_pattern.findall(template))
+                            call_kwargs = {kw.arg for kw in node.keywords if kw.arg}
+                            call_args_count = len(node.args)
+
+                            if placeholders:
+                                if call_args_count == 0 and call_kwargs:
+                                    missing = placeholders - call_kwargs
+                                    extra = call_kwargs - placeholders
+                                    if missing or extra:
+                                        mismatches.append(
+                                            f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} {text_key}: missing={missing} extra={extra}"
+                                        )
+
+        self.assertEqual(
+            mismatches,
+            [],
+            "Placeholder mismatch found between .format(...) call sites and text templates:\n"
+            + "\n".join(mismatches),
+        )
 
     def test_html_markup_nesting_and_validity(self):
         """Verify that HTML tags used in Telegram messages are balanced and properly nested."""
@@ -229,51 +334,124 @@ class TextsConsistencyTests(unittest.TestCase):
                                 f"Text module {py_file} illegally imports from {node.module!r}",
                             )
 
-    def test_no_hardcoded_user_facing_strings_in_handlers_and_keyboards(self):
-        """AST guard ensuring all user-facing text strings in handlers and keyboards come from canonical texts."""
+    @staticmethod
+    def _is_logging_call(node: ast.AST, parent_calls: list[ast.Call]) -> bool:
+        """Check if an AST node is inside a logger/logging call."""
+    @staticmethod
+    def _is_logging_or_regex_call(parent_calls: list[ast.Call]) -> bool:
+        """Check if an AST node is inside a logger/logging call or regex pattern."""
+        for call in parent_calls:
+            if isinstance(call.func, ast.Attribute):
+                if isinstance(call.func.value, ast.Name) and call.func.value.id in (
+                    "logger",
+                    "logging",
+                    "log",
+                    "root_logger",
+                    "re",
+                ):
+                    return True
+            elif isinstance(call.func, ast.Name) and call.func.id in ("re", "compile"):
+                return True
+        return False
+
+    def test_no_hardcoded_user_facing_strings_in_handlers_keyboards_and_workers(self):
+        """Deep AST guard scanning handlers, keyboards, and workers for hardcoded user-facing strings."""
         cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
         violations = []
 
-        targets = list((PROJECT_ROOT / "bot" / "handlers").rglob("*.py")) + list(
-            (PROJECT_ROOT / "bot" / "keyboards").rglob("*.py")
-        )
+        scanned_dirs = [
+            PROJECT_ROOT / "bot" / "handlers",
+            PROJECT_ROOT / "bot" / "keyboards",
+            PROJECT_ROOT / "services" / "workers",
+        ]
 
-        for py_file in targets:
-            content = py_file.read_text(encoding="utf-8")
-            tree = ast.parse(content, filename=str(py_file))
+        class HardcodedStringVisitor(ast.NodeVisitor):
+            def __init__(self, file_path: Path, docstring_nodes: set[ast.AST]):
+                self.file_path = file_path
+                self.docstring_nodes = docstring_nodes
+                self.call_stack: list[ast.Call] = []
 
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Call):
-                    func_name = ""
-                    if isinstance(node.func, ast.Attribute):
-                        func_name = node.func.attr
-                    elif isinstance(node.func, ast.Name):
-                        func_name = node.func.id
+            def visit_Call(self, node: ast.Call):
+                self.call_stack.append(node)
+                self.generic_visit(node)
+                self.call_stack.pop()
 
-                    if func_name in ("answer", "edit_text", "button", "InlineKeyboardButton", "send_message"):
-                        # Check positional arguments
-                        for arg in node.args:
-                            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                                if cyrillic_pattern.search(arg.value):
-                                    violations.append(
-                                        f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} passes hardcoded Cyrillic string to {func_name}(): {arg.value!r}"
-                                    )
-                        # Check keyword arguments (text=..., caption=...)
-                        for kw in node.keywords:
-                            if kw.arg in ("text", "caption") and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                                if cyrillic_pattern.search(kw.value.value):
-                                    violations.append(
-                                        f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} passes hardcoded Cyrillic string to {func_name}({kw.arg}=...): {kw.value.value!r}"
-                                    )
+            def visit_Constant(self, node: ast.Constant):
+                if node in self.docstring_nodes:
+                    return
+                if isinstance(node.value, str) and cyrillic_pattern.search(node.value):
+                    if not TextsConsistencyTests._is_logging_or_regex_call(self.call_stack):
+                        rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
+                        violations.append(
+                            f"{rel_path}:{node.lineno} contains hardcoded Cyrillic string: {node.value[:50]!r}"
+                        )
+                self.generic_visit(node)
+
+            def visit_JoinedStr(self, node: ast.JoinedStr):
+                if not TextsConsistencyTests._is_logging_or_regex_call(self.call_stack):
+                    for part in node.values:
+                        if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                            if cyrillic_pattern.search(part.value):
+                                rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
+                                violations.append(
+                                    f"{rel_path}:{node.lineno} contains hardcoded Cyrillic f-string: {part.value[:50]!r}"
+                                )
+                self.generic_visit(node)
+
+        for base_dir in scanned_dirs:
+            for py_file in base_dir.rglob("*.py"):
+                content = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(content, filename=str(py_file))
+
+                # Collect all docstring constant nodes across module, classes, functions
+                docstring_nodes = set()
+                # Module docstring
+                if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant):
+                    docstring_nodes.add(tree.body[0].value)
+                for node in ast.walk(tree):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                        if node.body and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Constant):
+                            docstring_nodes.add(node.body[0].value)
+
+                visitor = HardcodedStringVisitor(py_file, docstring_nodes)
+                visitor.visit(tree)
 
         self.assertEqual(
             violations,
             [],
-            "Found hardcoded user-facing strings in handlers/keyboards without canonical text keys:\n"
+            "Found hardcoded user-facing strings across handlers/keyboards/workers:\n"
             + "\n".join(violations),
         )
+
+    def test_ast_guard_detects_deliberate_hardcoded_string_violations(self):
+        """Negative self-test proving that the AST scanner detects raw Cyrillic strings in dicts, f-strings, and vars."""
+        bad_code_samples = [
+            "label_map = {'key': 'Текст'}",
+            "msg = f'Привет, {user_id}'",
+            "btn_text = 'Оплатить доступ'",
+            "text = texts.FOO + ' дополнительный текст'",
+        ]
+
+        cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
+
+        for sample in bad_code_samples:
+            with self.subTest(code=sample):
+                tree = ast.parse(sample)
+                found = False
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                        if cyrillic_pattern.search(node.value):
+                            found = True
+                    elif isinstance(node, ast.JoinedStr):
+                        for part in node.values:
+                            if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                                if cyrillic_pattern.search(part.value):
+                                    found = True
+                self.assertTrue(
+                    found,
+                    f"AST guard failed to detect deliberate violation in: {sample!r}",
+                )
 
 
 if __name__ == "__main__":
     unittest.main()
-

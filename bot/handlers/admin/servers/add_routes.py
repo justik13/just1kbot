@@ -255,7 +255,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
                     protocols=safe(
-                        ", ".join(protocols) if protocols else texts.ADMIN_SERVERS_ADD
+                        ", ".join(protocols) if protocols else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
                 get_back_button("admin_servers"),

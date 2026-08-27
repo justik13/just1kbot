@@ -379,56 +379,7 @@ async def show_user_audit(
     page = min(max(1, page), total_pages)
     offset = (page - 1) * page_size
     logs = await get_user_audit_logs(session, user_id=user.id, telegram_id=user.telegram_id, offset=offset, limit=page_size)
-
-    action_map = {
-        # User lifecycle
-        "USER_REGISTER": "👋 Регистрация",
-        "REFERRAL_ATTACHED": "🤝 Привязка реферала",
-        "USER_RESTORED": "♻️ Восстановление аккаунта",
-        # Balance & payments
-        "PAYMENT_SUCCESS": "💳 Пополнение баланса",
-        "TOPUP_USER_BALANCE": "💳 Начисление баланса",
-        "ADMIN_BALANCE_TOPUP": "➕ Начисление баланса админом",
-        "ADMIN_BALANCE_DEDUCT": "➖ Списание баланса админом",
-        "DEDUCT_USER_BALANCE": "➖ Списание баланса админом",
-        "MASS_BONUS_GRANTED": "🎁 Массовый бонус",
-        "REFERRAL_BONUS_GRANTED": "🎁 Реферальный бонус",
-        "WELCOME_BONUS_GRANTED": "🎁 Приветственный бонус",
-        # Subscriptions
-        "ACCOUNT_PURCHASE_SETTLED": "🛒 Покупка тарифа",
-        "ACCOUNT_TARIFF_CHANGE_SETTLED": "🔄 Смена тарифа",
-        "ADMIN_SUB_GRANT": "🎁 Выдача подписки админом",
-        "GRANT": "🎁 Выдача подписки админом",
-        "ADMIN_SUB_EXTEND": "⏳ Продление подписки админом",
-        "EXTEND": "⏳ Продление подписки админом",
-        "ADMIN_SUB_REDUCE": "✂️ Сокращение подписки админом",
-        "REDUCE": "✂️ Сокращение подписки админом",
-        "ADMIN_SUB_CHANGE": "⚙️ Изменение тарифа админом",
-        "CHANGE_TARIFF": "⚙️ Изменение тарифа",
-        "SUB_EXPIRED": "⌛ Истечение срока подписки",
-        # Devices
-        "DEVICE_CREATE": "📱 Создание устройства",
-        "DEVICE_CREATED": "📱 Создание устройства",
-        "DEVICE_DELETE": "🗑 Удаление устройства",
-        "DEVICE_DELETED": "🗑 Удаление устройства",
-        "DEVICE_RENAME": "✏️ Переименование устройства",
-        "ADMIN_DEVICE_DELETE": "🗑 Удаление устройства админом",
-        "CLEANUP_DEVICE_DELETE": "🧹 Автоудаление устройства",
-        # Moderation
-        "BAN": "🚫 Блокировка пользователя",
-        "BAN_USER": "🚫 Блокировка пользователя",
-        "UNBAN": "✅ Разблокировка пользователя",
-        "UNBAN_USER": "✅ Разблокировка пользователя",
-        "ADMIN_DIRECT_MESSAGE_SENT": "✉️ Сообщение от админа",
-        "ADMIN_DIRECT_MESSAGE": "✉️ Сообщение от админа",
-        # Disputes & refunds
-        "PAYMENT_DISPUTE_OPENED": "⚠️ Открыт спор по платежу",
-        "PAYMENT_DISPUTE_RESOLVED": "⚖️ Спор по платежу разрешён",
-        "PAYMENT_DISPUTE_MANUAL_REVIEW": "🧪 Спор на проверке",
-        "BALANCE_REFUND_REQUESTED": "↩️ Запрос возврата средств",
-        "PAYMENT_FAILED": "❌ Ошибка оплаты",
-        "REFUND": "↩️ Возврат средств",
-    }
+    action_map = texts.ADMIN_AUDIT_EVENT_LABELS
 
     lines = [
         texts.ADMIN_USERS_LIST_HISTORY_DEYSTVIY_POLZOVATELYA.format(user_telegram_id=user.telegram_id),
@@ -449,7 +400,7 @@ async def show_user_audit(
             builder.button(text=texts.BTN_BACK, callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=texts.ADMIN_USERS_LIST_STR.format(page=page, total_pages=total_pages), callback_data="ignore")
+        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), callback_data="ignore")
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:

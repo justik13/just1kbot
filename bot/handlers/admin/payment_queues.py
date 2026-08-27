@@ -54,7 +54,7 @@ async def _deny(event) -> None:
 
 def _duration(seconds: int | None) -> str:
     if seconds is None:
-        return texts.ADMIN_QUEUES_PURGE_FAILED
+        return texts.PLACEHOLDER_DASH
     if seconds >= 86400:
         return texts.ADMIN_QUEUES_CONFIRM_RETRY_PROMPT.format(value_0=seconds // 86400)
     if seconds >= 3600:
@@ -71,7 +71,7 @@ def diagnostics_keyboard():
             text=texts.ADMIN_QUEUES_FAILURE_RATE_METRIC.format(value_0=QUEUE_LABELS[queue]),
             callback_data=f"aq:l:{QUEUE_CODES[queue]}:1",
         )
-    b.button(text=texts.ADMIN_QUEUES_REFRESHED_NOTICE, callback_data="aq:home")
+    b.button(text=texts.BTN_REFRESH_ACTION, callback_data="aq:home")
     b.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     b.adjust(1)
     return b.as_markup()
@@ -125,7 +125,7 @@ async def _show_list(
 ):
     result = await list_problem_operations(session, queue, page)
     lines = [
-        texts.ADMIN_QUEUES_STATUS_UNHEALTHY_LABEL.format(value_0=QUEUE_LABELS[queue]),
+        texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[queue]),
         texts.ADMIN_QUEUES_STATUS_CRITICAL_LABEL.format(value_0=page, value_1=result.total_pages, value_2=result.total),
         "",
     ]
@@ -141,9 +141,9 @@ async def _show_list(
             callback_data=f"aq:c:{QUEUE_CODES[queue]}:{row.operation_id}",
         )
     if page > 1:
-        b.button(text=texts.ADMIN_QUEUES_DEAD_LIST_EMPTY, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page - 1}")
+        b.button(text=texts.ADMIN_BTN_PAGINATION_PREV, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page - 1}")
     if page < result.total_pages:
-        b.button(text=texts.ADMIN_QUEUES_DEAD_LIST_HEADER, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page + 1}")
+        b.button(text=texts.ADMIN_BTN_PAGINATION_NEXT, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page + 1}")
     b.button(text=texts.ADMIN_QUEUES_DEAD_ROW_ITEM, callback_data="aq:home")
     b.adjust(1)
     await _edit(callback, "\n".join(lines), b.as_markup())
@@ -152,7 +152,7 @@ async def _show_list(
 def _card_text(row) -> str:
     return "\n".join(
         (
-            texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(value_0=QUEUE_LABELS[row.queue]),
+            texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[row.queue]),
             texts.ADMIN_QUEUE_CARD_ID.format(operation_id=row.operation_id),
             texts.ADMIN_QUEUE_CARD_PAYMENT.format(payment_id=row.payment_id or texts.PLACEHOLDER_DASH),
             texts.ADMIN_QUEUES_BTN_DETAILS.format(value_0=safe(row.operation_type)),
@@ -206,11 +206,11 @@ async def queue_list(callback: CallbackQuery, state: FSMContext, session: AsyncS
     try:
         page = int(parsed[1][3])
     except (TypeError, ValueError):
-        return await callback.answer(texts.ADMIN_QUEUES_DEAD_RETRY_SUCCESS, show_alert=True)
+        return await callback.answer(texts.ADMIN_QUEUES_INVALID_PAGE_ALERT, show_alert=True)
     try:
         await _show_list(callback, session, parsed[0], page)
     except ValueError:
-        return await callback.answer(texts.ADMIN_QUEUES_DEAD_RETRY_FAILED, show_alert=True)
+        return await callback.answer(texts.ADMIN_QUEUES_INVALID_PAGE_ALERT, show_alert=True)
     await state.clear()
     await callback.answer()
 
@@ -225,10 +225,10 @@ async def queue_card(callback: CallbackQuery, state: FSMContext, session: AsyncS
     except (TypeError, ValueError):
         operation_id = 0
     if operation_id < 1:
-        return await callback.answer(texts.ADMIN_QUEUES_DEAD_PURGE_SUCCESS, show_alert=True)
+        return await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
     await state.clear()
     found = await _show_card(callback, session, parsed[0], operation_id)
-    await callback.answer("" if found else texts.ADMIN_QUEUES_HEALTH_WARN_BADGE, show_alert=not found)
+    await callback.answer("" if found else texts.QUEUE_OPERATION_NOT_FOUND, show_alert=not found)
 
 
 @router.callback_query(F.data.startswith("aq:r:"))
@@ -243,11 +243,11 @@ async def prepare_retry(
     except (TypeError, ValueError):
         operation_id = 0
     if operation_id < 1:
-        return await callback.answer(texts.ADMIN_QUEUES_ACTION_CANCELLED, show_alert=True)
+        return await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
     row = await get_operation_card(session, parsed[0], operation_id)
     if not row or not row.retry_allowed:
         await state.clear()
-        return await callback.answer(texts.ADMIN_QUEUES_AUTO_RECOVER_ENABLED, show_alert=True)
+        return await callback.answer(texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE, show_alert=True)
     await state.set_state(QueueRetry.reason)
     await state.set_data(
         {
@@ -285,7 +285,7 @@ async def receive_retry_reason(
     row = await get_operation_card(session, data["queue"], data["operation_id"])
     if not row or not row.retry_allowed:
         await state.clear()
-        return await message.answer(texts.ADMIN_QUEUES_METRICS_HEADER)
+        return await message.answer(texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE)
     await state.update_data(
         reason=reason, confirmation_version=row.confirmation_version
     )
@@ -357,12 +357,12 @@ async def apply_retry(
     messages = {
         "retry_scheduled": texts.ADMIN_QUEUES_HEALTH_CRIT_BADGE,
         "rejected": texts.ADMIN_QUEUES_ROW_ITEM.format(value_0=result.rejection_code or 'safety_policy'),
-        "not_found": texts.ADMIN_QUEUES_DEAD_LETTER_CARD,
-        "already_changed": texts.ADMIN_QUEUES_RETRY_SUCCESS,
+        "not_found": texts.QUEUE_OPERATION_NOT_FOUND,
+        "already_changed": texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE,
     }
     await _show_card(callback, session, parsed[0], operation_id)
     await callback.answer(
-        messages.get(result.outcome, texts.ADMIN_QUEUES_RETRY_FAILED), show_alert=True
+        messages.get(result.outcome, texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE), show_alert=True
     )
 
 

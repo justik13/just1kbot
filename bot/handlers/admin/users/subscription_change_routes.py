@@ -70,7 +70,7 @@ async def admin_sub_change_tariff(
 
     profiles_count = await get_user_profiles_count(session, user.id)
 
-    current_tariff_name = texts.ADMIN_USERS_SUBSCRIPTION_CHANGE
+    current_tariff_name = texts.PLACEHOLDER_DASH
 
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(
@@ -192,7 +192,7 @@ async def admin_sub_select_group(
         )
         return
 
-    old_tariff_name = texts.ADMIN_USERS_SUBSCRIPTION_CHANGE
+    old_tariff_name = texts.PLACEHOLDER_DASH
 
     if user.current_tariff_id:
         old_tariff = await get_tariff_by_id(

@@ -57,7 +57,7 @@ def _error_text(code: str) -> str:
         "dispute_exceeds_payment_exposure": (
             texts.ADMIN_DISPUTE_NOT_FOUND_OR_RESOLVED
         ),
-        "dispute_not_found": texts.ADMIN_DISPUTE_RESOLVED_ALREADY,
+        "dispute_not_found": texts.ADMIN_DISPUTE_NOT_FOUND_ALERT,
         "dispute_already_resolved": texts.ADMIN_DISPUTE_GENERAL_ERROR,
     }.get(code, texts.ADMIN_DISPUTE_BTN_REGISTER)
 
@@ -65,8 +65,8 @@ def _error_text(code: str) -> str:
 def _list_keyboard() -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.ADMIN_DISPUTE_CONFIRM_CASE, callback_data="admin_dispute_new")
-    builder.button(text=texts.ADMIN_DISPUTE_CONFIRM_STATUS, callback_data="admin_disputes")
-    builder.button(text=texts.ADMIN_DISPUTE_CONFIRM_ACTION, callback_data="admin_menu")
+    builder.button(text=texts.BTN_REFRESH_ACTION, callback_data="admin_disputes")
+    builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return builder
 
@@ -257,11 +257,11 @@ async def show_dispute_card(callback: CallbackQuery, session: AsyncSession):
     try:
         dispute_id = int(callback.data.rsplit(":", 1)[1])
     except (TypeError, ValueError):
-        await callback.answer(texts.ADMIN_DISPUTE_STATUS_WON_BADGE, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
         return
     rendered = await _render_card(session, dispute_id)
     if rendered is None:
-        await callback.answer(texts.ADMIN_DISPUTE_STATUS_LOST_BADGE, show_alert=True)
+        await callback.answer(texts.ADMIN_DISPUTE_NOT_FOUND_ALERT, show_alert=True)
         return
     await callback.message.edit_text(
         rendered[0],
@@ -285,7 +285,7 @@ async def mark_dispute_review(callback: CallbackQuery, session: AsyncSession):
             note="marked for manual review in Telegram admin",
         )
     except (TypeError, ValueError):
-        await callback.answer(texts.ADMIN_DISPUTE_STATUS_REVIEW_BADGE, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
         return
     except PaymentDisputeError as exc:
         await callback.answer(_error_text(exc.code), show_alert=True)
@@ -317,7 +317,7 @@ async def confirm_dispute_resolution(
     try:
         dispute_id = int(parts[2])
     except ValueError:
-        await callback.answer(texts.ADMIN_DISPUTE_STATUS_CANCELLED_BADGE, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
         return
     dispute = await session.get(PaymentDispute, dispute_id)
     if dispute is None or dispute.status not in {"open", "manual_review"}:
@@ -366,7 +366,7 @@ async def apply_dispute_resolution(
             admin_id=callback.from_user.id,
         )
     except (TypeError, ValueError):
-        await callback.answer(texts.ADMIN_DISPUTE_CONFIRM_AMOUNT, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_ID, show_alert=True)
         return
     except PaymentDisputeError as exc:
         await callback.answer(_error_text(exc.code), show_alert=True)

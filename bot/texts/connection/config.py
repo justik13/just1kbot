@@ -1,8 +1,6 @@
 """Domain texts for connection/config.py."""
 from __future__ import annotations
 
-CONNECTION_COMMON = "🌍"
-
 CONNECTION_CONFIG_COMMON_ADD_V_INCY_IOS_ANDROID = "🔗 Добавить в INCY (iOS / Android) [🧪]"
 
 CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D = """
@@ -38,9 +36,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "4. Популя�
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "• <b>AmneziaVPN / DefaultVPN</b>: нажмите «🔄 Другой способ подключения» ниже, "
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = "• <b>AmneziaVPN / DefaultVPN</b>: скопируйте ключ выше → "
-
-CONNECTION_CONFIG_DEVICE_VIEW_CHAST_SAYTOV_SERVISOV_MOZHET_B = """• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>
-"""
 
 CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = "чтобы получить файл конфигурации или ключ."
 
@@ -152,13 +147,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • <code>.v
 
 CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO = "В этом разделе вы найдёте руководства по подключению, "
 
-CONNECTION_CONFIG_ESTIMATED_TIME_DAYS = "в ближайшее время"
-
 CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{value_0} дн. {value_1} ч."
 
 CONNECTION_CONFIG_PROTOCOL_FORMAT = "{value_0} ч. {value_1} мин."
-
-CONNECTION_CONFIG_SUMMARY_HEADER = "🏠 В главное меню"
 
 CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
 
@@ -193,6 +184,9 @@ CONNECTION_LIST_HEADER = """🔌 <b>Ваши устройства</b> ({count}/{
 CONNECTION_SELECT_SERVER = """🌍 <b>Выберите локацию для подключения:</b>
 """
 
+CONNECTION_THIRD_PARTY_SERVICE_NOTICE = """• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>
+"""
+
 DEVICE_STATUS_CLEANUP = "очистка после ошибки создания"
 
 DEVICE_STATUS_CREATING = "создаётся"
@@ -203,10 +197,10 @@ DEVICE_STATUS_LINE_FORMAT = """
 ⏳ Статус: {value_0}
 """
 
-DEVICE_STATUS_UNKNOWN = "Неизвестно"
-
 DEVICE_STATUS_UPDATE_ERROR = "ошибка обновления"
+
+EMOJI_GLOBE = "🌍"
 
 INCY_SUBSCRIPTION_UNAVAILABLE = "⚠️ Подписка INCY временно недоступна."
 
-TIME_SOON_LABEL = "в ближайшее время"
+LABEL_UNKNOWN_CAP = "Неизвестно"

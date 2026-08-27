@@ -19,6 +19,6 @@ HUB_HEADER = """🏠 <b>Главное меню</b>
 
 Выберите нужный раздел:"""
 
-USER_HUB_PROFILE = "⏳"
+PAYMENT_STATUS_PENDING_ICON = "⏳"
 
 USER_HUB_START = "Пользователь"

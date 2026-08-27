@@ -47,7 +47,7 @@ router = Router()
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return texts.PAYMENT_SHOWCASE_DURATION_DAYS.format(value_0=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
+    return texts.TIME_DAYS_FORMAT.format(days=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(
@@ -212,10 +212,10 @@ async def select_tariff(
                     texts.PAYMENT_SHOWCASE
                 ),
                 "financial_hold": (
-                    texts.PAYMENT_SHOWCASE_DISPUTE_BLOCKED
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
                 ),
                 "account_debt": (
-                    texts.PAYMENT_SHOWCASE_DEBT_BLOCKED
+                    texts.PAYMENT_DEBT_BLOCKED_NOTICE
                 ),
                 "subscription_balance_untracked": (
                     texts.PAYMENT_SHOWCASE_CALC_FAILED
@@ -277,7 +277,7 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_SHOWCASE_TARIFF_CHANGE_CARD.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit, value_2=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
+            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit, value_2=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
             get_balance_change_start_keyboard(
                 str(intent.quote.public_id), "payment_change_tariff"
             ),
@@ -307,10 +307,10 @@ async def select_tariff(
         )
     except AccountPurchaseError as exc:
         errors = {
-            "financial_hold": texts.PAYMENT_SHOWCASE_OPEN_DISPUTE_BLOCKED,
+            "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
             "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
             "tariff_change_required": texts.PAYMENT_SHOWCASE_USE_CHANGE_SECTION,
-            "active_tariff_change_quote_exists": texts.PAYMENT_SHOWCASE_CHANGE_IN_PROGRESS,
+            "active_tariff_change_quote_exists": texts.PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE,
         }
         await render_hub(
             callback.bot,
@@ -325,7 +325,7 @@ async def select_tariff(
     balance_before = int(intent.balance.available)
     balance_after = max(0, balance_before - price)
     shortage_line = (
-        texts.PAYMENT_SHOWCASE_SHORTAGE_WARN.format(value_0=int(intent.shortage))
+        texts.PAYMENT_SHORTAGE_WARNING.format(value_0=int(intent.shortage))
         if intent.shortage > 0
         else ""
     )

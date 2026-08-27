@@ -3,13 +3,9 @@ from __future__ import annotations
 
 ADMIN_PAYMENT_QUEUES = "pending={value_0} · retry={value_1} · due={value_2} · overdue={value_3}"
 
-ADMIN_QUEUES_ACTION_CANCELLED = "Некорректный ID"
-
 ADMIN_QUEUES_ACTION_CONFIRMED = "Причина обязательна и должна содержать 3–200 символов."
 
 ADMIN_QUEUES_AUTO_RECOVER_DISABLED = "Укажите причину ручного retry (3–200 символов)."
-
-ADMIN_QUEUES_AUTO_RECOVER_ENABLED = "Состояние уже изменилось"
 
 ADMIN_QUEUES_BTN_BACK = "Обновлено: {value_0}"
 
@@ -17,7 +13,7 @@ ADMIN_QUEUES_BTN_DETAILS = "Тип: {value_0}"
 
 ADMIN_QUEUES_BTN_PURGE_DEAD = "Попытки: {value_0}/{value_1}"
 
-ADMIN_QUEUES_BTN_QUEUE_DEAD = "🧰 <b>{value_0}</b>"
+ADMIN_QUEUES_BTN_QUEUE_DEAD = "🧰 <b>{queue_name}</b>"
 
 ADMIN_QUEUES_BTN_QUEUE_PRIMARY = "#{value_0} · {value_1} · {value_2} · {value_3}/{value_4} · error={value_5} · возраст {value_6}"
 
@@ -33,19 +29,7 @@ ADMIN_QUEUES_CONFIRM_RETRY_PROMPT = "{value_0}д"
 
 ADMIN_QUEUES_DEAD_DETAILS_HEADER = "Подготовить retry"
 
-ADMIN_QUEUES_DEAD_LETTER_CARD = "Операция не найдена"
-
-ADMIN_QUEUES_DEAD_LIST_EMPTY = "⬅️"
-
-ADMIN_QUEUES_DEAD_LIST_HEADER = "➡️"
-
-ADMIN_QUEUES_DEAD_PURGE_SUCCESS = "Некорректный ID"
-
-ADMIN_QUEUES_DEAD_RETRY_FAILED = "Некорректная страница"
-
 ADMIN_QUEUES_DEAD_RETRY_PROMPT = "← К очереди"
-
-ADMIN_QUEUES_DEAD_RETRY_SUCCESS = "Некорректная страница"
 
 ADMIN_QUEUES_DEAD_ROW_ITEM = "← Диагностика"
 
@@ -59,27 +43,19 @@ ADMIN_QUEUES_HEALTH_CRIT_BADGE = "Операция поставлена в retry
 
 ADMIN_QUEUES_HEALTH_OK_BADGE = "Ручной retry: {value_0}"
 
-ADMIN_QUEUES_HEALTH_WARN_BADGE = "Операция не найдена"
+ADMIN_QUEUES_INVALID_PAGE_ALERT = "Некорректная страница"
 
 ADMIN_QUEUES_LATENCY_METRIC = "Подтвердить retry"
 
 ADMIN_QUEUES_METRICS_CARD = "{value_0}м"
 
-ADMIN_QUEUES_METRICS_HEADER = "Состояние уже изменилось"
-
 ADMIN_QUEUES_OVERVIEW_HEADER = "Завершено/обработано: {value_0}"
-
-ADMIN_QUEUES_PURGE_FAILED = "—"
 
 ADMIN_QUEUES_PURGE_SUCCESS = "Отменено"
 
-ADMIN_QUEUES_REFRESHED_NOTICE = "🔄 Обновить"
-
-ADMIN_QUEUES_RETRY_FAILED = "Состояние уже изменилось"
-
-ADMIN_QUEUES_RETRY_SUCCESS = "Состояние уже изменилось"
-
 ADMIN_QUEUES_ROW_ITEM = "Retry отклонён: {value_0}"
+
+ADMIN_QUEUES_STATE_CHANGED_NOTICE = "Состояние уже изменилось"
 
 ADMIN_QUEUES_STATUS_CRITICAL_LABEL = "Проблемные операции · стр. {value_0}/{value_1} · всего {value_2}"
 
@@ -90,8 +66,6 @@ ADMIN_QUEUES_STATUS_HEALTHY_LABEL = "processing={value_0} · stale={value_1} · 
 ADMIN_QUEUES_STATUS_PAUSED_LABEL = "Проблемных операций нет."
 
 ADMIN_QUEUES_STATUS_SUMMARY = "Подтверждение устарело."
-
-ADMIN_QUEUES_STATUS_UNHEALTHY_LABEL = "🧰 <b>{value_0}</b>"
 
 ADMIN_QUEUES_TASK_DETAILS_CARD = "{value_0}с"
 

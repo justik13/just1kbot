@@ -154,8 +154,8 @@ async def render_device_screen(
     message_effect_id: str | None = None,
 ):
     server = await get_server_by_id(session, profile.server_id)
-    flag = server.country_flag if server else texts.CONNECTION_DEVICE_VIEW
-    server_name = server.name if server else texts.DEVICE_NAME_UNKNOWN
+    flag = server.country_flag if server else texts.EMOJI_GLOBE
+    server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
     protocol = _format_protocol(server.protocol if server else None)
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
@@ -347,18 +347,18 @@ async def device_help(
         texts.CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY+
         texts.CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY+
         texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T+
-        texts.CONNECTION_CONFIG_DEVICE_VIEW_CHAST_SAYTOV_SERVISOV_MOZHET_B+
+        texts.CONNECTION_THIRD_PARTY_SERVICE_NOTICE+
         texts.CONNECTION_CONFIG_DEVICE_VIEW_REKOMENDUEM_ISPOLZOVAT_PROTOKO+
         texts.CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW
     )
 
     builder = InlineKeyboardBuilder()
     suffix = f":device_{profile_id}"
-    builder.button(text=texts.BTN_SKACHAT_KLIENT_AMNEZIA, callback_data=f"help_download{suffix}")
-    builder.button(text=texts.BTN_INSTRUKTSIYA_IOS_DLYA_RF, callback_data=f"help_ios{suffix}")
-    builder.button(text=texts.BTN_INSTRUKTSII_WINDOWS, callback_data=f"help_windows{suffix}")
-    builder.button(text=texts.BTN_RAZDELNOE_TUNNELIROVANIE, callback_data=f"help_split{suffix}")
-    builder.button(text=texts.BTN_DOKUMENTATSIYA_AMNEZIA, url=_AMNEZIA_DOCS)
+    builder.button(text=texts.BTN_DOWNLOAD_AMNEZIA, callback_data=f"help_download{suffix}")
+    builder.button(text=texts.BTN_INSTRUCTION_IOS, callback_data=f"help_ios{suffix}")
+    builder.button(text=texts.BTN_INSTRUCTION_WINDOWS, callback_data=f"help_windows{suffix}")
+    builder.button(text=texts.BTN_SPLIT_TUNNELING, callback_data=f"help_split{suffix}")
+    builder.button(text=texts.BTN_AMNEZIA_DOCS, url=_AMNEZIA_DOCS)
     builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
 

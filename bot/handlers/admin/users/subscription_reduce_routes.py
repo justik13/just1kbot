@@ -187,7 +187,7 @@ async def admin_sub_apply_reduce(
         or days > PERMANENT_SUBSCRIPTION_DAYS
     ):
         await callback.answer(
-            texts.ADMIN_USERS_SUBSCRIPTION_REDUCE,
+            texts.ERROR_INVALID_DAYS_COUNT,
             show_alert=True,
         )
         return

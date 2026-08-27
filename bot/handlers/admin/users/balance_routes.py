@@ -267,7 +267,7 @@ async def process_balance_deduct(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_USERS_BALANCE_U_POLZOVATELYA_NEDOSTATOCHNO_B.format()+
+            texts.ADMIN_USER_BALANCE_INSUFFICIENT_FOR_DEBIT.format()+
             texts.ADMIN_USERS_BALANCE_DOSTUPNO_FOR_REDUCE_BONUSN.format(int_balance_info_bonus_available=int(balance_info.bonus_available)),
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
@@ -321,7 +321,7 @@ async def process_balance_reason(
     change_str = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_BALANCE_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
+    header = format_admin_breadcrumbs(texts.BTN_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
 
     text = (
         f"{header}"+
@@ -433,12 +433,12 @@ async def apply_user_balance_change(
     try:
         builder = InlineKeyboardBuilder()
         builder.button(text=texts.ADMIN_USERS_BALANCE_V_BALANCE, callback_data="menu_balance")
-        builder.button(text=texts.ADMIN_USERS_BALANCE_PROCHITANO, callback_data="dismiss_notification")
+        builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
         builder.adjust(2)
 
         msg_text = (
-            texts.ADMIN_USERS_BALANCE_VAM_NACHISLEN_BONUS_BALANCE.format(amount=amount)+
-            texts.ADMIN_USER_BALANCE_REASON_LINE.format(safe_reason=safe(reason))
+            texts.ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION.format(amount=amount)+
+            texts.ADMIN_BONUS_REASON_LINE_FORMAT.format(safe_reason=safe(reason))
             if action_type == "topup"
             else texts.ADMIN_USERS_BALANCE_S_VASHEGO_BONUS_BALANCE_SP.format(amount=amount, safe_reason=safe(reason))
         )
@@ -455,7 +455,7 @@ async def apply_user_balance_change(
     await callback.answer(texts.ADMIN_USERS_BALANCE_SUCCESS_PRIVEDENO_V_ACTION, show_alert=True)
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.ADMIN_USERS_BALANCE_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
+    header = format_admin_breadcrumbs(texts.BTN_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
     change_formatted = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 
     await render_hub(

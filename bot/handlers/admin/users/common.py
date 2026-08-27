@@ -46,8 +46,8 @@ def format_user_card_text(
     has_access = user.subscription_end and user.subscription_end > now
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
-    status_str = "🟢 Активен" if has_access else "🔴 Неактивен"
-    ban_str = "🚫 Забанен" if user.is_banned else "—"
+    status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
+    ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.PLACEHOLDER_DASH
 
     return texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,
@@ -100,7 +100,7 @@ def _is_subscription_active(user: User) -> bool:
 
 def _format_time_left(subscription_end) -> str:
     if not subscription_end:
-        return texts.ADMIN_USERS_COMMON
+        return texts.PLACEHOLDER_DASH
 
     from utils.datetime_helpers import is_permanent_subscription
     if is_permanent_subscription(subscription_end):
@@ -119,11 +119,11 @@ def _format_time_left(subscription_end) -> str:
         return texts.ADMIN_SUB_PERMANENT_LABEL
 
     if days > 0:
-        return texts.TIME_DAYS_HOURS_FORMAT.format(value_0=days, value_1=hours)
+        return texts.TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return texts.TIME_HOURS_MINUTES_FORMAT.format(value_0=hours, value_1=minutes)
+    return texts.TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
 
 
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
@@ -175,7 +175,7 @@ async def _get_user_with_profiles(
 
 
 async def _build_users_list_text_and_kb(
-    users,
+    users: list[User],
     page: int,
     total_pages: int,
     total: int,
@@ -184,25 +184,16 @@ async def _build_users_list_text_and_kb(
 ) -> tuple[str, InlineKeyboardBuilder]:
     from utils.formatters import format_admin_breadcrumbs
 
-    filter_labels = {
-        "all": "Все",
-        "new": "🆕 Новые (7д)",
-        "new_24h": "🆕 Новые (7д)",
-        "new_7d": "🆕 Новые (7д)",
-        "expiring_3d": "⏳ < 3 дней",
-        "active": "⚡ С подпиской",
-        "expired": "🔴 Без подписки",
-        "no_sub": "🔴 Без подписки",
-        "banned": "🚫 Забаненные",
-        "problem": "🚫 Забаненные",
-        "server": f"Сервер #{filter_param}",
-        "tariff": f"Тариф #{filter_param}",
-    }
-    cur_filter_name = filter_labels.get(filter_type, filter_type)
+    raw_label = texts.ADMIN_USER_FILTER_LABELS.get(filter_type, filter_type)
+    if "{filter_param}" in raw_label:
+        cur_filter_name = raw_label.format(filter_param=filter_param)
+    else:
+        cur_filter_name = raw_label
+
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
         from utils.tariff_names import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
-    header = format_admin_breadcrumbs(texts.COMMON_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
+    header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
         f"{header}"+
@@ -227,14 +218,14 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    server_label = "• 🖥 По VPN серверам •" if filter_type == "server" else "🖥 По VPN серверам"
-    tariff_label = "• 💎 По тарифам •" if filter_type == "tariff" else "💎 По тарифам"
+    server_label = texts.BTN_FILTER_BY_SERVER_ACTIVE if filter_type == "server" else texts.BTN_FILTER_BY_SERVER
+    tariff_label = texts.BTN_FILTER_BY_TARIFF_ACTIVE if filter_type == "tariff" else texts.BTN_FILTER_BY_TARIFF
 
     builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
 
     if not users:
-        rendered += "<i>Пользователи не найдены.</i>"
+        rendered += texts.ADMIN_USERS_LIST_EMPTY_NOTICE
     else:
         current_time = now_utc()
 

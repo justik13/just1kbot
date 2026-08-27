@@ -6,6 +6,10 @@ ADMIN_DASHBOARD_REVENUE_24H_LINE = """• Выручка за 24ч: <b>{fin_stat
 
 ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES = "💰 Финансы и Очереди{fin_badge}"
 
+ADMIN_DASHBOARD_SECTION_USERS_BROADCAST = """{header}👥 <b>Управление пользователями и рассылками:</b>
+
+Выберите нужный раздел:"""
+
 ADMIN_MAINTENANCE_DISABLED_ANSWER = "✅ Технические работы выключены"
 
 ADMIN_MAINTENANCE_ENABLED_ANSWER = "✅ Технические работы включены"
@@ -113,13 +117,12 @@ DASHBOARD_MAINTENANCE_ON = """
 
 DASHBOARD_MAIN_DASHBOARD = "Главный Дашборд"
 
-DASHBOARD_MANAGE_POLZOVATELYAMI_I_RA = """{header}👥 <b>Управление пользователями и рассылками:</b>
-
-Выберите нужный раздел:"""
-
 DASHBOARD_MANAGE_VPN_SERVERAMI_I_TAR = """{header}⚙️ <b>Управление серверами и тарифами:</b>
 
 Выберите нужный раздел:"""
+
+DASHBOARD_MTPROTO_PROXY_URL_HEADER = """🚀 <b>MTProto Proxy URL:</b>
+"""
 
 DASHBOARD_NEW_ZA_24_HOURS_NEW_24H = """• Новых за 24 часа: <b>{stats__new_24h}</b>
 
@@ -148,8 +151,6 @@ DASHBOARD_REVENUE_ZA_7D_REV_7D = """• Выручка за 7д: <b>{fin_stats__
 
 DASHBOARD_SERVEROV_POKA_NET = "<i>Серверов пока нет</i>"
 
-DASHBOARD_SERVERS_I_TARIFFS = "⚙️ Серверы и Тарифы"
-
 DASHBOARD_SETTINGS = "⚙️ Настройки"
 
 DASHBOARD_SETTINGS_BOTA = "⚙️ Настройки бота"
@@ -171,16 +172,12 @@ DASHBOARD_SISTEMNYE_SETTINGS_I_LOGI_VYB = """{header}🛠 <b>Системные 
 DASHBOARD_STALE_TASKS_V_OCHEREDYAK = """• Зависших задач в очередях: <b>{dead_queues_count}</b>
 """
 
-DASHBOARD_STR = "Стр {page}/{total_pages}"
-
 DASHBOARD_TEKHRABOTY_VKLYUCHENY = "🔴 Техработы: ВКЛЮЧЕНЫ"
 
 DASHBOARD_TEKHRABOTY_VYKLYUCHENY = "🟢 Техработы: ВЫКЛЮЧЕНЫ"
 
 DASHBOARD_TOTAL_USERS_TOTAL = """• Всего пользователей: <b>{stats__total}</b>
 """
-
-DASHBOARD_USERS_I_BROADCAST = "👥 Пользователи и Рассылки"
 
 DASHBOARD_USERS_I_SUBSCRIPTION = """📊 <b>Пользователи и Подписки:</b>
 """
@@ -193,3 +190,5 @@ DASHBOARD_VVOD_SSYLKI_MTPROTO_PROXY = """🚀 <b>Ввод ссылки MTProto P
 """
 
 DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M = "Вы можете изменить ссылку на MTProto Proxy в 1 клик прямо из бота без перезапуска сервера."
+
+PAGE_INDEX_FORMAT = "Стр {page}/{total_pages}"

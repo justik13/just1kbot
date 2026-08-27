@@ -53,11 +53,25 @@ BTN_CONNECTIONS = "🔌 Подключения"
 
 BTN_CONTACT_SUPPORT = "💬 Написать в поддержку"
 
-BTN_DOKUMENTATSIYA_AMNEZIA = "📚 Документация Amnezia"
+BTN_DISMISS = "✅ Прочитано"
+
+BTN_DISMISS_ALERT = "🗑 Прочитано"
+
+BTN_DISMISS_NOTIFICATION = "✅ Прочитано (убрать)"
 
 BTN_DOWNLOAD_AMNEZIA = "📥 Скачать клиент Amnezia"
 
 BTN_DOWNLOAD_MIRROR = "🌐 Скачать клиент (Зеркало)"
+
+BTN_ENABLE_SERVER = "🔘 Включить сервер"
+
+BTN_FILTER_BY_SERVER = "🖥 По VPN серверам"
+
+BTN_FILTER_BY_SERVER_ACTIVE = "• 🖥 По VPN серверам •"
+
+BTN_FILTER_BY_TARIFF = "💎 По тарифам"
+
+BTN_FILTER_BY_TARIFF_ACTIVE = "• 💎 По тарифам •"
 
 BTN_HELP_INSTRUCTIONS = "ℹ️ Помощь и Инструкции"
 
@@ -68,10 +82,6 @@ BTN_INSTALL_WINDOWS = "📥 Установка AmneziaVPN на Windows"
 BTN_INSTRUCTION_IOS = "🍏 Инструкция iOS (для РФ)"
 
 BTN_INSTRUCTION_WINDOWS = "💻 Инструкции Windows"
-
-BTN_INSTRUKTSII_WINDOWS = "💻 Инструкции Windows"
-
-BTN_INSTRUKTSIYA_IOS_DLYA_RF = "🍏 Инструкция iOS (для РФ)"
 
 BTN_INSTRUKTSIYA_I_POMOSCH = "📖 Инструкция и помощь"
 
@@ -85,11 +95,13 @@ BTN_ISTORIYA_POPOLNENIJ = "🧾 История пополнений"
 
 BTN_LATEST_VERSION_GITHUB = "📦 Последняя версия (GitHub)"
 
-BTN_MAIN_MENU = "← В главное меню"
+BTN_MAIN_MENU = "🏠 Главное меню"
+
+BTN_MAIN_MENU_NAV = "🏠 В главное меню"
 
 BTN_MASSOVAYA_RASSYLKA = "📢 Массовая рассылка"
 
-BTN_MASSOVYJ_BONUS = "🎁 Массовый бонус"
+BTN_MASS_BONUS = "🎁 Массовый бонус"
 
 BTN_MTPROTO_PROXY = "🚀 MTProto Proxy"
 
@@ -105,23 +117,29 @@ BTN_OPEN_IOS_INSTRUCTION = "📖 Открыть инструкцию iOS"
 
 BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION = "📖 Инструкция по Раздельному Туннелированию"
 
+BTN_OPEN_USER_CARD = "👤 Открыть карточку"
+
 BTN_PAGINATION_NEXT = "Вперед ▶️"
 
-BTN_POLZOVATELI_I_RASSYLKI = "👥 Пользователи и Рассылки"
+BTN_PAYMENT_CANCEL = "❌ Отмена"
 
-BTN_PROCHITANO = "✅ Прочитано"
+BTN_PAYMENT_CHECK = "🔄 Проверить оплату"
 
-BTN_RAZDELNOE_TUNNELIROVANIE = "🔀 Раздельное Туннелирование"
+BTN_PAYMENT_PAY = "💳 Оплатить"
 
-BTN_READ_DISMISS = "✅ Прочитано"
+BTN_RENEW_ACCESS = "💳 Продлить доступ"
 
-BTN_SERVERY_I_TARIFY = "⚙️ Серверы и Тарифы"
+BTN_RESUME_PURCHASE = "🛒 Продолжить оформление"
+
+BTN_SERVERS = "🖥 Серверы"
+
+BTN_SERVERS_AND_TARIFFS = "⚙️ Серверы и Тарифы"
+
+BTN_SERVERS_LIST = "📋 Список серверов"
 
 BTN_SHARE_REFERRAL = "↗️ Поделиться"
 
 BTN_SISTEMNYJ_AUDIT_LOG = "📜 Системный аудит-лог"
-
-BTN_SKACHAT_KLIENT_AMNEZIA = "📥 Скачать клиент Amnezia"
 
 BTN_SPISOK_POLZOVATELEJ = "👥 Список пользователей"
 
@@ -131,9 +149,11 @@ BTN_SUPPORT = "💬 Поддержка"
 
 BTN_TARIFY_PODPISOK = "💎 Тарифы подписок"
 
+BTN_TO_SERVER = "⚙️ К серверу"
+
 BTN_UPDATE_WINDOWS = "🔄 Обновление AmneziaVPN на Windows"
 
-BTN_VPN_SERVERY = "🖥 Серверы"
+BTN_USERS_AND_BROADCAST = "👥 Пользователи и Рассылки"
 
 BTN_V_GLAVNOE_MENYU_BOTA = "🔙 В главное меню бота"
 
@@ -151,8 +171,6 @@ BUTTON_COPY_REFERRAL = "📋 Скопировать ссылку"
 
 BUTTON_CUSTOM_AMOUNT = "Другая сумма"
 
-BUTTON_MAIN_MENU = "🏠 В главное меню"
-
 BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
 BUTTON_REFERRAL_LIST = "👥 Список рефералов"
@@ -160,3 +178,5 @@ BUTTON_REFERRAL_LIST = "👥 Список рефералов"
 BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"
 
 BUTTON_TOPUP = "➕ Пополнить баланс"
+
+LEGACY_REPLY_BUTTON_TRIGGER_TEXTS = {'Подключение', 'Профиль', '🔑 Подключение', 'Поддержка', 'Главное меню', 'Купить / Продлить', '🏠 Главное меню', '🆘 Поддержка', '💳 Купить / Продлить', '👤 Профиль'}

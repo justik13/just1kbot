@@ -25,7 +25,7 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
     from urllib.parse import quote
-    text_param = quote(f"Здравствуйте! Мой ID: {telegram_id}") if telegram_id else ""
+    text_param = quote(texts.SUPPORT_GREETING_TEMPLATE.format(telegram_id=telegram_id)) if telegram_id else ""
     support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
 
     builder.button(
@@ -97,14 +97,7 @@ async def show_support_help(callback: CallbackQuery):
     device_id = _extract_device_id(callback.data)
     suffix = f":device_{device_id}" if device_id else ""
 
-    text = (
-        "📖 <b>Инструкции и справка AmneziaVPN</b>\n\n"
-        "В этом разделе вы найдёте руководства по подключению, скачиванию клиента и настройке сервиса.\n\n"
-        "⚠️ <b>Правила и особенности работы:</b>\n"
-        "• <b>Не рекомендуется использовать торренты/P2P.</b>\n"
-        "• <b>Часть сайтов/сервисов может быть недоступна по решению провайдеров.</b>\n\n"
-        "Выберите нужную тему ниже:"
-    )
+    text = texts.SUPPORT_HELP_ROOT_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -127,16 +120,10 @@ async def show_support_help(callback: CallbackQuery):
         text=texts.BTN_AMNEZIA_DOCS,
         url=AMNEZIA_DOCS,
     )
-    if device_id:
-        builder.button(
-            text=texts.BTN_BACK_TO_DEVICE,
-            callback_data=f"manage_device:{device_id}",
-        )
-    else:
-        builder.button(
-            text=texts.BTN_BACK_TO_SUPPORT,
-            callback_data="menu_support",
-        )
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=f"manage_device:{device_id}" if device_id else "menu_support",
+    )
     builder.adjust(1, 1, 1, 1, 1, 1)
 
     await render_hub(
@@ -153,13 +140,7 @@ async def show_help_download(callback: CallbackQuery):
     device_id = _extract_device_id(callback.data)
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
-    text = (
-        "📥 <b>Скачать клиент Amnezia для подключения</b>\n\n"
-        "Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:\n\n"
-        "• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиенту\n"
-        "• <b>GitHub Releases</b> — релизы и бинарные файлы всех версий\n"
-        "• <b>Официальный сайт Amnezia</b> — подробная информация"
-    )
+    text = texts.SUPPORT_DOWNLOAD_CLIENT_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -194,10 +175,7 @@ async def show_help_ios(callback: CallbackQuery):
     device_id = _extract_device_id(callback.data)
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
-    text = (
-        "🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>\n\n"
-        "Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store."
-    )
+    text = texts.SUPPORT_IOS_INSTRUCTION_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -224,10 +202,7 @@ async def show_help_windows(callback: CallbackQuery):
     device_id = _extract_device_id(callback.data)
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
-    text = (
-        "💻 <b>Инструкции для Windows</b>\n\n"
-        "Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows:"
-    )
+    text = texts.SUPPORT_WINDOWS_INSTRUCTION_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -258,10 +233,7 @@ async def show_help_split(callback: CallbackQuery):
     device_id = _extract_device_id(callback.data)
     back_cb = f"support_help:device_{device_id}" if device_id else "support_help"
 
-    text = (
-        "🔀 <b>Инструкция для Раздельного Туннелирования</b>\n\n"
-        "Раздельное туннелирование (Split Tunneling) позволяет направить через выбранное подключение только нужные сайты или приложения, сохраняя обычное подключение для остальных ресурсов."
-    )
+    text = texts.SUPPORT_SPLIT_TUNNELING_TEXT
 
     builder = InlineKeyboardBuilder()
     builder.button(
