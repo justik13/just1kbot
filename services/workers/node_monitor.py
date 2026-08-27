@@ -1,5 +1,5 @@
-from bot import texts
 """Periodic health, disk usage (>85%), and availability monitor for VPN nodes.
+from bot import texts
 
 Unified Server Health Monitor with persistent state machine:
 ONLINE -> WAITING_CONFIRMATION -> PROBLEM -> AUTO_DISABLED -> MANUAL_DISABLED

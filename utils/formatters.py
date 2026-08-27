@@ -1,3 +1,4 @@
+from bot import texts
 from datetime import datetime, timezone
 
 from utils.datetime_helpers import days_left_msk, format_datetime_msk
@@ -39,7 +40,6 @@ def format_user_card_text(
     tariff_info: str = "—",
     referrer_info: str = "—",
 ) -> str:
-    from bot import texts
     from utils.telegram import safe
 
     if now.tzinfo is None:
@@ -175,7 +175,6 @@ def format_connection_device_card(
     server_name: str,
     last_connected_text: str,
 ) -> str:
-    from bot import texts
     from utils.telegram import safe
 
     traffic_total = format_traffic(profile.traffic_down + profile.traffic_up)
