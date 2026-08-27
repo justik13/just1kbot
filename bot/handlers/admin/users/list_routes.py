@@ -379,7 +379,7 @@ async def show_user_audit(
     page = min(max(1, page), total_pages)
     offset = (page - 1) * page_size
     logs = await get_user_audit_logs(session, user_id=user.id, telegram_id=user.telegram_id, offset=offset, limit=page_size)
-    action_map = texts.ADMIN_AUDIT_EVENT_LABELS
+    action_map = texts.AUDIT_ACTIONS
 
     lines = [
         texts.ADMIN_USERS_LIST_HISTORY_DEYSTVIY_POLZOVATELYA.format(user_telegram_id=user.telegram_id),

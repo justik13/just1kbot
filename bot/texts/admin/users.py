@@ -1,7 +1,8 @@
 """Domain texts for admin/users.py."""
 from __future__ import annotations
+from bot.texts.admin.common import COMMON_ALL_USERS_LABEL
+from bot.texts.admin.common import COMMON_VSE, COMMON_NOVYE_7D, COMMON_3_DAYS, COMMON_BEZ_SUBSCRIPTION, COMMON_ZABANENNYE
 
-ADMIN_AUDIT_EVENT_LABELS = {'USER_REGISTER': '👋 Регистрация', 'REFERRAL_ATTACHED': '🤝 Привязка реферала', 'USER_RESTORED': '♻️ Восстановление аккаунта', 'PAYMENT_SUCCESS': '💳 Пополнение баланса', 'TOPUP_USER_BALANCE': '💳 Начисление баланса', 'ADMIN_BALANCE_TOPUP': '➕ Начисление баланса админом', 'ADMIN_BALANCE_DEDUCT': '➖ Списание баланса админом', 'DEDUCT_USER_BALANCE': '➖ Списание баланса админом', 'MASS_BONUS_GRANTED': '🎁 Массовый бонус', 'REFERRAL_BONUS_GRANTED': '🎁 Реферальный бонус', 'WELCOME_BONUS_GRANTED': '🎁 Приветственный бонус', 'ACCOUNT_PURCHASE_SETTLED': '🛒 Покупка тарифа', 'ACCOUNT_TARIFF_CHANGE_SETTLED': '🔄 Смена тарифа', 'ADMIN_SUB_GRANT': '🎁 Выдача подписки админом', 'GRANT': '🎁 Выдача подписки админом', 'ADMIN_SUB_EXTEND': '⏳ Продление подписки админом', 'EXTEND': '⏳ Продление подписки админом', 'ADMIN_SUB_REDUCE': '✂️ Сокращение подписки админом', 'REDUCE': '✂️ Сокращение подписки админом', 'ADMIN_SUB_CHANGE': '⚙️ Изменение тарифа админом', 'CHANGE_TARIFF': '⚙️ Изменение тарифа', 'SUB_EXPIRED': '⌛ Истечение срока подписки', 'DEVICE_CREATE': '📱 Создание устройства', 'DEVICE_CREATED': '📱 Создание устройства', 'DEVICE_DELETE': '🗑 Удаление устройства', 'DEVICE_DELETED': '🗑 Удаление устройства', 'DEVICE_RENAME': '✏️ Переименование устройства', 'ADMIN_DEVICE_DELETE': '🗑 Удаление устройства админом', 'CLEANUP_DEVICE_DELETE': '🧹 Автоудаление устройства', 'BAN': '🚫 Блокировка пользователя', 'BAN_USER': '🚫 Блокировка пользователя', 'UNBAN': '✅ Разблокировка пользователя', 'UNBAN_USER': '✅ Разблокировка пользователя', 'ADMIN_DIRECT_MESSAGE_SENT': '✉️ Сообщение от админа', 'ADMIN_DIRECT_MESSAGE': '✉️ Сообщение от админа', 'PAYMENT_DISPUTE_OPENED': '⚠️ Открыт спор по платежу', 'PAYMENT_DISPUTE_RESOLVED': '⚖️ Спор по платежу разрешён', 'PAYMENT_DISPUTE_MANUAL_REVIEW': '🧪 Спор на проверке', 'BALANCE_REFUND_REQUESTED': '↩️ Запрос возврата средств', 'PAYMENT_FAILED': '❌ Ошибка оплаты', 'REFUND': '↩️ Возврат средств'}
 
 ADMIN_BAN_CONFIRM = "Вы уверены, что хотите забанить пользователя <code>{telegram_id}</code>?"
 
@@ -45,8 +46,9 @@ ADMIN_USER_ID_FORMAT = "ID: {telegram_id}"
 ADMIN_USER_ID_NO_COLON_FORMAT = "ID {telegram_id}"
 ADMIN_USER_PAREN_ID_FORMAT = " (ID: {telegram_id})"
 
+
 ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
-    "all": "Все пользователи",
+    "all": COMMON_ALL_USERS_LABEL,
     "active": "Только активные подписки",
     "inactive": "Только без активной подписки"
 }
@@ -372,7 +374,8 @@ ADMIN_USER_DIRECT_MESSAGE_PROMPT = "🚫 Забанить"
 
 ADMIN_USER_DIRECT_MESSAGE_SUCCESS = "💎 Сменить тариф"
 
-ADMIN_USER_FILTER_LABELS = {'all': 'Все', 'new': '🆕 Новые (7д)', 'new_24h': '🆕 Новые (7д)', 'new_7d': '🆕 Новые (7д)', 'expiring_3d': '⏳ < 3 дней', 'active': '⚡ С подпиской', 'expired': '🔴 Без подписки', 'no_sub': '🔴 Без подписки', 'banned': '🚫 Забаненные', 'problem': '🚫 Забаненные', 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
+
+ADMIN_USER_FILTER_LABELS = {'all': COMMON_VSE, 'new': COMMON_NOVYE_7D, 'new_24h': COMMON_NOVYE_7D, 'new_7d': COMMON_NOVYE_7D, 'expiring_3d': COMMON_3_DAYS, 'active': '⚡ С подпиской', 'expired': COMMON_BEZ_SUBSCRIPTION, 'no_sub': COMMON_BEZ_SUBSCRIPTION, 'banned': COMMON_ZABANENNYE, 'problem': COMMON_ZABANENNYE, 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
 
 ADMIN_USER_MASS_BONUS_REASON_PROMPT = "🔧 Устройства"
 

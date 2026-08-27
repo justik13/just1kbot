@@ -34,6 +34,8 @@ from bot.texts.admin.common import (
     COMMON_3_DAYS,
     COMMON_AKTIVEN,
     COMMON_AKTIVNYE,
+    COMMON_ALL_USERS_LABEL,
+    COMMON_ACTIVE_SUBSCRIPTIONS_LABEL,
     COMMON_AVTOMATICHESKI_OTKLYUCHEN,
     COMMON_BAN,
     COMMON_BEZ_SUBSCRIPTION,
@@ -383,7 +385,6 @@ from bot.texts.admin.tariffs import (
 )
 
 from bot.texts.admin.users import (
-    ADMIN_AUDIT_EVENT_LABELS,
     ADMIN_BAN_CONFIRM,
     ADMIN_BAN_FAILED,
     ADMIN_BAN_SUCCESS,
@@ -537,7 +538,6 @@ from bot.texts.admin.users import (
 )
 
 __all__ = [
-    "ADMIN_AUDIT_EVENT_LABELS",
     "ADMIN_BAN_CONFIRM",
     "ADMIN_BAN_FAILED",
     "ADMIN_BAN_SUCCESS",
@@ -955,6 +955,8 @@ __all__ = [
     "COMMON_3_DAYS",
     "COMMON_AKTIVEN",
     "COMMON_AKTIVNYE",
+    "COMMON_ALL_USERS_LABEL",
+    "COMMON_ACTIVE_SUBSCRIPTIONS_LABEL",
     "COMMON_AVTOMATICHESKI_OTKLYUCHEN",
     "COMMON_BAN",
     "COMMON_BEZ_SUBSCRIPTION",

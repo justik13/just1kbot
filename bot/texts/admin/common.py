@@ -13,6 +13,10 @@ COMMON_AKTIVEN = "🟢 <b>Активен</b>"
 
 COMMON_AKTIVNYE = "⚡ Активные"
 
+COMMON_ALL_USERS_LABEL = "Все пользователи"
+
+COMMON_ACTIVE_SUBSCRIPTIONS_LABEL = "Активные подписки"
+
 COMMON_AVTOMATICHESKI_OTKLYUCHEN = "🔴 <b>Автоматически отключён</b>"
 
 COMMON_BAN = " [БАН]"

@@ -1,11 +1,14 @@
 """Domain texts for admin/broadcast.py."""
 from __future__ import annotations
+from bot.texts.admin.common import COMMON_ALL_USERS_LABEL, COMMON_ACTIVE_SUBSCRIPTIONS_LABEL
+from bot.texts.common import BTN_BROADCAST_EXPIRING, BTN_BROADCAST_NO_SUB
 
 ADMIN_BROADCAST = "Всего"
 
-ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': 'Все пользователи', 'active': 'Активные подписки', 'expiring_3d': 'Подписки истекают < 3 дней', 'expired': 'Истекшие подписки', 'never': 'Без подписок', 'test': 'Тестовая отправка админу'}
 
-ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': 'Все пользователи', 'active': 'Активные подписки', 'expiring_3d': '⏳ Истекают < 3 дней', 'expired': '🔴 Истекшие подписки', 'never': '🆕 Без подписок'}
+ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL, 'expiring_3d': 'Подписки истекают < 3 дней', 'expired': 'Истекшие подписки', 'never': 'Без подписок', 'test': 'Тестовая отправка админу'}
+
+ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL, 'expiring_3d': BTN_BROADCAST_EXPIRING, 'expired': '🔴 Истекшие подписки', 'never': BTN_BROADCAST_NO_SUB}
 
 ADMIN_BROADCAST_RECIPIENTS_COUNT = "⚠️ Текст рассылки слишком длинный. Максимум {max_chars} символов."
 
