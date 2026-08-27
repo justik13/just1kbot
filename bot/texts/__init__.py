@@ -5,12 +5,12 @@ This module is intentionally a thin backwards-compatible facade: application cod
 continue to use ``from bot import texts`` without knowing the domain layout.
 """
 
-from bot.texts.admin import *  # noqa: F401,F403
-from bot.texts.common import *  # noqa: F401,F403
-from bot.texts.connection import *  # noqa: F401,F403
-from bot.texts.payment import *  # noqa: F401,F403
-from bot.texts.runtime import *  # noqa: F401,F403
-from bot.texts.user import *  # noqa: F401,F403
+from bot.texts.admin import *  # noqa: F403
+from bot.texts.common import *  # noqa: F403
+from bot.texts.connection import *  # noqa: F403
+from bot.texts.payment import *  # noqa: F403
+from bot.texts.runtime import *  # noqa: F403
+from bot.texts.user import *  # noqa: F403
 
 _TEXT_KEYS = frozenset(name for name in globals() if name.isupper())
 
@@ -29,6 +29,3 @@ def get_text(key: str, default=None, **kwargs):
         except (KeyError, IndexError, ValueError):
             return value
     return value
-
-
-__all__ = ["get_all_text_keys", "get_text", *_TEXT_KEYS]
