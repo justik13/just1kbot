@@ -13,7 +13,7 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.ADMIN_USER_CARD_STATUS_NO_SUB,
+        text=texts.ADMIN_BTN_SUBSCRIPTION,
         callback_data=f"admin_subscription:{user_id}",
     )
 
@@ -23,7 +23,7 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
-        text=texts.ADMIN_USER_MASS_BONUS_REASON_PROMPT,
+        text=texts.ADMIN_BTN_USER_DEVICES,
         callback_data=f"admin_user_devices:{user_id}",
     )
 
@@ -39,17 +39,17 @@ def get_admin_user_card_keyboard(
 
     if is_banned:
         builder.button(
-            text=texts.ADMIN_USER_MASS_BONUS_SUCCESS,
+            text=texts.ADMIN_BTN_UNBAN,
             callback_data=f"admin_unban:{user_id}",
         )
     else:
         builder.button(
-            text=texts.ADMIN_USER_DIRECT_MESSAGE_PROMPT,
+            text=texts.ADMIN_BTN_BAN,
             callback_data=f"admin_ban:{user_id}",
         )
 
     builder.button(
-        text=texts.ADMIN_USER_DIRECT_MESSAGE_CONFIRM,
+        text=texts.ADMIN_BTN_BACK_TO_USERS_LIST,
         callback_data="admin_users",
     )
 
@@ -90,22 +90,22 @@ def get_admin_subscription_keyboard(
 
     if has_active_sub:
         builder.button(
-            text=texts.ADMIN_USER_DIRECT_MESSAGE_SUCCESS,
+            text=texts.ADMIN_BTN_CHANGE_TARIFF,
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
 
         builder.button(
-            text=texts.ADMIN_USER_SEARCH_BY_ID_PROMPT,
+            text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
 
         builder.button(
-            text=texts.ADMIN_USER_SEARCH_BY_USERNAME_PROMPT,
+            text=texts.ADMIN_BTN_REDUCE_SUBSCRIPTION,
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
     else:
         builder.button(
-            text=texts.ADMIN_USER_SEARCH_NOT_FOUND,
+            text=texts.ADMIN_BTN_GRANT_SUBSCRIPTION,
             callback_data=f"admin_sub_grant:{telegram_id}",
         )
 
@@ -289,11 +289,11 @@ def get_admin_user_devices_keyboard(
     for profile in profiles:
         name = (
             getattr(profile, "device_name", None)
-            or texts.ADMIN_USER_CARD_STATUS_ACTIVE.format(v0=profile.id)
+            or texts.ADMIN_DEVICE_NAME_TEMPLATE.format(v0=profile.id)
         )
 
         builder.button(
-            text=truncate_button_text(texts.ADMIN_USER_CARD_STATUS_EXPIRED.format(v0=name)),
+            text=truncate_button_text(texts.ADMIN_DEVICE_DELETE_BUTTON_LABEL.format(v0=name)),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),

@@ -356,11 +356,11 @@ ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › �
 <b>Приглашено рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}"""
 
-ADMIN_USER_CARD_STATUS_ACTIVE = "Устройство #{v0}"
+ADMIN_DEVICE_NAME_TEMPLATE = "Устройство #{v0}"
 
-ADMIN_USER_CARD_STATUS_EXPIRED = "🗑 {v0}"
+ADMIN_DEVICE_DELETE_BUTTON_LABEL = "🗑 {v0}"
 
-ADMIN_USER_CARD_STATUS_NO_SUB = "📅 Подписка"
+ADMIN_BTN_SUBSCRIPTION = "📅 Подписка"
 
 ADMIN_USER_DEBIT_REASON_PROMPT = """Введите текстовое примечание (причину списания) для лога аудита:
 """
@@ -368,24 +368,24 @@ ADMIN_USER_DEBIT_REASON_PROMPT = """Введите текстовое приме
 ADMIN_USER_DEVICES_HEADER = """{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>
 """
 
-ADMIN_USER_DIRECT_MESSAGE_CONFIRM = "← К списку пользователей"
+ADMIN_BTN_BACK_TO_USERS_LIST = "← К списку пользователей"
 
-ADMIN_USER_DIRECT_MESSAGE_PROMPT = "🚫 Забанить"
+ADMIN_BTN_BAN = "🚫 Забанить"
 
-ADMIN_USER_DIRECT_MESSAGE_SUCCESS = "💎 Сменить тариф"
+ADMIN_BTN_CHANGE_TARIFF = "💎 Сменить тариф"
 
 
 ADMIN_USER_FILTER_LABELS = {'all': COMMON_VSE, 'new': COMMON_NOVYE_7D, 'new_24h': COMMON_NOVYE_7D, 'new_7d': COMMON_NOVYE_7D, 'expiring_3d': COMMON_3_DAYS, 'active': '⚡ С подпиской', 'expired': COMMON_BEZ_SUBSCRIPTION, 'no_sub': COMMON_BEZ_SUBSCRIPTION, 'banned': COMMON_ZABANENNYE, 'problem': COMMON_ZABANENNYE, 'server': 'Сервер #{filter_param}', 'tariff': 'Тариф #{filter_param}'}
 
-ADMIN_USER_MASS_BONUS_REASON_PROMPT = "🔧 Устройства"
+ADMIN_BTN_USER_DEVICES = "🔧 Устройства"
 
-ADMIN_USER_MASS_BONUS_SUCCESS = "✅ Разбанить"
+ADMIN_BTN_UNBAN = "✅ Разбанить"
 
-ADMIN_USER_SEARCH_BY_ID_PROMPT = "➕ Продлить доступ"
+ADMIN_BTN_EXTEND_SUBSCRIPTION = "➕ Продлить доступ"
 
-ADMIN_USER_SEARCH_BY_USERNAME_PROMPT = "➖ Уменьшить дни"
+ADMIN_BTN_REDUCE_SUBSCRIPTION = "➖ Уменьшить дни"
 
-ADMIN_USER_SEARCH_NOT_FOUND = "🎫 Выдать доступ"
+ADMIN_BTN_GRANT_SUBSCRIPTION = "🎫 Выдать доступ"
 
 ADMIN_USER_SEARCH_PROMPT = """🛠 Админка › 👥 Пользователи › 🔍 <b>Поиск</b>
 
