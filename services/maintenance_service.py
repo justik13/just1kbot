@@ -2,7 +2,7 @@ import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import DEFAULT_MAINTENANCE_MESSAGE
+from bot import texts
 from database.repositories.maintenance_repo import (
     get_maintenance_mode,
     is_maintenance_enabled,
@@ -35,12 +35,12 @@ class MaintenanceService:
     async def get_message(session: AsyncSession) -> str:
         maintenance = await get_maintenance_mode(session)
         if maintenance is None:
-            return DEFAULT_MAINTENANCE_MESSAGE
+            return texts.MAINTENANCE_DEFAULT_MESSAGE
 
         if maintenance.message:
             return maintenance.message
 
-        return DEFAULT_MAINTENANCE_MESSAGE
+        return texts.MAINTENANCE_DEFAULT_MESSAGE
 
     @staticmethod
     async def can_user_perform_action(
@@ -68,7 +68,7 @@ class MaintenanceService:
         await set_maintenance_mode(
             session,
             is_enabled=True,
-            message=message or DEFAULT_MAINTENANCE_MESSAGE,
+            message=message or texts.MAINTENANCE_DEFAULT_MESSAGE,
             updated_by=admin_id,
         )
         logger.info(
