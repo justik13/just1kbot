@@ -55,15 +55,11 @@ class ServerHealthState:
     MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
-DEFAULT_MAINTENANCE_MESSAGE = "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
-
-
 __all__ = [
     "AMNEZIA_PROTOCOL",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
-    "DEFAULT_MAINTENANCE_MESSAGE",
     "DEVICE_DAILY_LIMIT",
     "GRACE_PERIOD_HOURS",
     "HUB_CACHE_MAX_SIZE",
@@ -83,4 +79,3 @@ __all__ = [
     "USER_CONTEXT_CACHE_TTL",
     "WORKER_ERROR_SLEEP_INTERVAL",
 ]
-
