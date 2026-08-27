@@ -147,9 +147,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • <code>.v
 
 CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO = "В этом разделе вы найдёте руководства по подключению, "
 
-CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{value_0} дн. {value_1} ч."
+CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
 
-CONNECTION_CONFIG_PROTOCOL_FORMAT = "{value_0} ч. {value_1} мин."
+CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
 
 CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
 
@@ -194,7 +194,7 @@ DEVICE_STATUS_CREATING = "создаётся"
 DEVICE_STATUS_DELETING = "удаляется"
 
 DEVICE_STATUS_LINE_FORMAT = """
-⏳ Статус: {value_0}
+⏳ Статус: {v0}
 """
 
 DEVICE_STATUS_UPDATE_ERROR = "ошибка обновления"

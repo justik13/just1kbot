@@ -77,10 +77,10 @@ def _format_grace_countdown(deletion_time) -> str:
     hours = delta.seconds // 3600
 
     if days > 0:
-        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_HOURS.format(value_0=days, value_1=hours)
+        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_HOURS.format(v0=days, v1=hours)
 
     minutes = (delta.seconds % 3600) // 60
-    return texts.CONNECTION_CONFIG_PROTOCOL_FORMAT.format(value_0=hours, value_1=minutes)
+    return texts.CONNECTION_CONFIG_PROTOCOL_FORMAT.format(v0=hours, v1=minutes)
 
 
 async def _render_maintenance(
@@ -161,7 +161,7 @@ async def _build_connections_screen(
                 "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
-                rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(value_0=labels[profile.provisioning_status])
+                rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
 

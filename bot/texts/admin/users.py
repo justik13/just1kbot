@@ -354,9 +354,9 @@ ADMIN_USER_CARD = """🛠 Админка › 👥 Пользователи › �
 <b>Приглашено рефералов:</b> {referrals_count}
 <b>Регистрация:</b> {created_at}"""
 
-ADMIN_USER_CARD_STATUS_ACTIVE = "Устройство #{value_0}"
+ADMIN_USER_CARD_STATUS_ACTIVE = "Устройство #{v0}"
 
-ADMIN_USER_CARD_STATUS_EXPIRED = "🗑 {value_0}"
+ADMIN_USER_CARD_STATUS_EXPIRED = "🗑 {v0}"
 
 ADMIN_USER_CARD_STATUS_NO_SUB = "📅 Подписка"
 

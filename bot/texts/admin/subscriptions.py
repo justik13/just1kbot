@@ -44,7 +44,7 @@ ADMIN_SUB_GRANT_SUCCESS = "✅ Пользователю <code>{telegram_id}</cod
 
 ADMIN_SUB_GROUP_NOT_FOUND = "❌ Группа тарифов не найдена."
 
-ADMIN_SUB_MENU_DEVICE_COUNT_FORMAT = "{value_0} ({value_1} устр.)"
+ADMIN_SUB_MENU_DEVICE_COUNT_FORMAT = "{v0} ({v1} устр.)"
 
 ADMIN_SUB_NO_SUBSCRIPTION = "У пользователя нет активной подписки."
 

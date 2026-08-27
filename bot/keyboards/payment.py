@@ -239,7 +239,7 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for amount in amounts:
         builder.button(
-            text=texts.PAYMENT_PRICE_RUB_FORMAT.format(value_0=amount),
+            text=texts.PAYMENT_PRICE_RUB_FORMAT.format(amount_rub=amount),
             callback_data=f"balance_create:{amount}",
         )
     builder.button(
@@ -377,7 +377,7 @@ def get_balance_shortage_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(value_0=exact_amount),
+        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(amount_rub=exact_amount),
         callback_data=f"bal_short_exact:{quote_public_id}",
         style="success",
     )
@@ -398,7 +398,7 @@ def get_balance_change_shortage_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(value_0=exact_amount),
+        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(amount_rub=exact_amount),
         callback_data=f"bal_chg_short_exact:{quote_public_id}",
         style="success",
     )

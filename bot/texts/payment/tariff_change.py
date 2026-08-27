@@ -43,7 +43,7 @@ PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB = """⚠️ <b>Смена тарифа 
 
 PAYMENT_CREATING_LINK_NOTICE = "Создаём ссылку…"
 
-PAYMENT_CUSTOM_AMOUNT_PROMPT = "Введите целую сумму от <b>{value_0} ₽</b> до 5000 ₽."
+PAYMENT_CUSTOM_AMOUNT_PROMPT = "Введите целую сумму от <b>{amount_rub} ₽</b> до 5000 ₽."
 
 PAYMENT_DEBT_BLOCKED_NOTICE = "Смена тарифа недоступна до погашения задолженности."
 
@@ -71,15 +71,15 @@ PAYMENT_QUOTE_NOT_FOUND_NOTICE = "Котировка не найдена. Выб
 
 PAYMENT_SHORTAGE_LINE = """
 
-Не хватает: <b>{value_0} ₽</b>."""
+Не хватает: <b>{amount_rub} ₽</b>."""
 
 PAYMENT_TARIFF_CHANGE = """
 
-Не хватает {value_0} ₽. Минимальное пополнение — {value_1} ₽; после смены останется {value_2} ₽."""
+Не хватает {amount_rub} ₽. Минимальное пополнение — {value_1} ₽; после смены останется {value_2} ₽."""
 
 PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD = """✅ <b>Подтверждение смены тарифа</b>
 
-Новый тариф: <b>{value_0}</b>
+Новый тариф: <b>{amount_rub}</b>
 Лимит устройств: <b>{value_1}</b>
 Срок после конвертации: <b>{value_2}</b>
 Доплата: <b>{value_3} ₽</b>
@@ -89,7 +89,7 @@ PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD = """✅ <b>Подтверждение �
 
 PAYMENT_TARIFF_CHANGE_SUCCESS_CARD = """🎉 <b>Тариф изменён</b>
 
-Новый тариф: <b>{value_0}</b>
+Новый тариф: <b>{amount_rub}</b>
 Срок: {value_1}
 Списано: <b>{value_2} ₽</b>
 💰 Баланс: <b>{value_3} ₽</b>

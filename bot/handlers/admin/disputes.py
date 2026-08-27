@@ -106,7 +106,7 @@ async def _render_card(
         else None
     )
     text = (
-        texts.ADMIN_DISPUTES.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, safe(dispute.status)), value_2=safe(dispute.provider_case_id), value_3=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH), value_4=int(dispute.amount), value_5=dispute.disputed_at.date().isoformat(), value_6=reservation.id if reservation else texts.PLACEHOLDER_DASH, value_7=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING, value_8=dispute.chargeback_entry_id or texts.PLACEHOLDER_DASH, value_9=safe(dispute.note or texts.PLACEHOLDER_DASH))
+        texts.ADMIN_DISPUTES.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, safe(dispute.status)), amount_rub=safe(dispute.provider_case_id), case=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH), value_4=int(dispute.amount), value_5=dispute.disputed_at.date().isoformat(), value_6=reservation.id if reservation else texts.PLACEHOLDER_DASH, value_7=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING, value_8=dispute.chargeback_entry_id or texts.PLACEHOLDER_DASH, value_9=safe(dispute.note or texts.PLACEHOLDER_DASH))
     )
     return text, _card_keyboard(dispute).as_markup()
 
@@ -136,11 +136,11 @@ async def show_disputes(
     builder = _list_keyboard()
     for dispute in rows:
         lines.append(
-            texts.ADMIN_DISPUTE_STATUS_WON_LABEL.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, dispute.status), value_2=int(dispute.amount), value_3=safe(dispute.provider_case_id))
+            texts.ADMIN_DISPUTE_STATUS_WON_LABEL.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status), amount_rub=int(dispute.amount), case=safe(dispute.provider_case_id))
         )
         builder.button(
             text=(
-                texts.ADMIN_DISPUTE_BTN_LIST.format(value_0=dispute.id, value_1=STATUS_LABELS.get(dispute.status, dispute.status))
+                texts.ADMIN_DISPUTE_BTN_LIST.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status))
             ),
             callback_data=f"admin_dispute_card:{dispute.id}",
         )
@@ -339,7 +339,7 @@ async def confirm_dispute_resolution(
         else texts.ADMIN_DISPUTE_STATUS_UNDER_REVIEW_LABEL
     )
     await callback.message.edit_text(
-        texts.ADMIN_DISPUTE_CONFIRM_NOTE.format(value_0=dispute.id, value_1=STATUS_LABELS[parts[1]], value_2=effect),
+        texts.ADMIN_DISPUTE_CONFIRM_NOTE.format(dispute_id=dispute.id, status=STATUS_LABELS[parts[1]], amount_rub=effect),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

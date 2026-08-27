@@ -6,7 +6,7 @@ ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 
 ADMIN_SERVERS_COMMON = """🛠 Админка › 🌍 <b>Серверы</b>
-(стр. {value_0}/{value_1}) · Всего: {value_2}
+(стр. {v0}/{v1}) · Всего: {v2}
 """
 
 ADMIN_SERVERS_EMPTY = """<i>Серверов пока нет</i>
@@ -49,7 +49,7 @@ ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?
 📱 Активных устройств на сервере: <b>{profiles_count}</b>"""
 
-ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {value_0} удалён ({value_1} устр.)"
+ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён ({v1} устр.)"
 
 ADMIN_SERVER_EDIT_KEY_BLOCKED = """❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.
 
@@ -86,7 +86,7 @@ ADMIN_SERVER_KEY_PROMPT = "Введите ключ доступа:"
 
 ADMIN_SERVER_KEY_UPDATED = "✅ Ключ сервера обновлен."
 
-ADMIN_SERVER_LIST_ROW_FORMAT = "{value_0} {value_1} {value_2} · {value_3}"
+ADMIN_SERVER_LIST_ROW_FORMAT = "{v0} {v1} {v2} · {v3}"
 
 ADMIN_SERVER_MAX_CLIENTS_UPDATED = "✅ Макс. количество клиентов обновлено: <b>{max_clients}</b>."
 

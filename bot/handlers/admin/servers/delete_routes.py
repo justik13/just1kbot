@@ -232,7 +232,7 @@ async def confirm_delete_server(
     )
 
     await callback.answer(
-        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(value_0=server_name, value_1=deleted_profiles),
+        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name, v1=deleted_profiles),
         show_alert=True,
     )
 

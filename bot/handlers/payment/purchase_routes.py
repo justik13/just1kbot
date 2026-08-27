@@ -105,7 +105,7 @@ async def _render_purchase_review(
     tariff_name = get_tariff_display_name(intent.version.device_limit)
     operation = texts.PAYMENT_PURCHASE_OPERATION_RENEW_TITLE if quote.operation_type == "renew" else texts.WORD_PURCHASE
     text = (
-        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
+        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(amount_rub=operation.lower(), tariff_name=tariff_name, duration_days=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -113,10 +113,10 @@ async def _render_purchase_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += (
-                texts.PAYMENT_PURCHASE.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
+                texts.PAYMENT_PURCHASE.format(amount_rub=int(intent.shortage), tariff_name=minimum, duration_days=remainder)
             )
         else:
-            text += texts.PAYMENT_SHORTAGE_LINE.format(value_0=int(intent.shortage))
+            text += texts.PAYMENT_SHORTAGE_LINE.format(amount_rub=int(intent.shortage))
         keyboard = get_balance_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -281,9 +281,9 @@ async def confirm_purchase(
         callback.bot,
         callback.message.chat.id,
         texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-            value_0=operation,
-            value_1=get_tariff_display_name(intent.version.device_limit),
-            value_2=intent.version.duration_hours // 24,
+            amount_rub=operation,
+            tariff_name=get_tariff_display_name(intent.version.device_limit),
+            duration_days=intent.version.duration_hours // 24,
             value_3=charged,
             value_4=int(result.balance_after.real_available),
             value_5=int(result.balance_after.bonus_available),
@@ -380,7 +380,7 @@ async def topup_custom_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(value_0=minimum),
+        texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(amount_rub=minimum),
         get_back_button(
             f"balance_purchase_review:{intent.quote.public_id}"
         ),

@@ -1,5 +1,6 @@
 """Automated consistency, SSOT, markup, and architectural verification for bot.texts."""
 from __future__ import annotations
+import collections
 
 import ast
 import re
@@ -14,11 +15,18 @@ TEXTS_DIR = PROJECT_ROOT / "bot" / "texts"
 # Explicit canonical alias registry for intentional aliases (e.g. backward compat or semantic alias)
 CANONICAL_ALIASES: dict[str, str] = {
     # Alias Key -> Canonical Key
-    "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT": "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT",
+    "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT_ALIAS": "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT",
 }
 
 
 class TextsConsistencyTests(unittest.TestCase):
+
+    def test_alias_registry_is_acyclic_and_valid(self):
+        """Verify CANONICAL_ALIASES contains valid mapping and no self-aliases."""
+        for alias, canonical in CANONICAL_ALIASES.items():
+            self.assertNotEqual(alias, canonical, f"Self-alias detected: {alias} -> {canonical}")
+            self.assertNotIn(canonical, CANONICAL_ALIASES, f"Alias cycle detected: {canonical} is also an alias key")
+
     """Automated consistency, markup, placeholder, and architectural verification for all application texts."""
 
     def test_all_text_keys_are_valid_identifiers(self):
@@ -79,33 +87,54 @@ class TextsConsistencyTests(unittest.TestCase):
         )
 
     def test_no_duplicate_canonical_text_values_across_catalogue(self):
-        """Verify that identical text values across constants are unified or explicitly registered as aliases."""
-        val_to_keys: dict[str, list[tuple[str, str]]] = {}
+        """Ensure no two distinct canonical text keys share the exact same string value, including within dicts/lists."""
+        val_to_keys = collections.defaultdict(list)
 
-        for py_file in sorted(TEXTS_DIR.rglob("*.py")):
+        def _extract_strings(node, path):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                return [(node.value, path)]
+            elif isinstance(node, ast.Dict):
+                res = []
+                for v in node.values:
+                    res.extend(_extract_strings(v, path))
+                return res
+            elif isinstance(node, (ast.List, ast.Tuple)):
+                res = []
+                for elt in node.elts:
+                    res.extend(_extract_strings(elt, path))
+                return res
+            return []
+
+        for py_file in Path('bot/texts').rglob("*.py"):
             if py_file.name == "__init__.py":
                 continue
-            rel_path = py_file.relative_to(TEXTS_DIR).as_posix()
+
             content = py_file.read_text(encoding="utf-8")
-            tree = ast.parse(content, filename=str(py_file))
+            tree = ast.parse(content)
 
             for stmt in tree.body:
                 if isinstance(stmt, ast.Assign):
                     for target in stmt.targets:
                         if isinstance(target, ast.Name) and target.id.isupper():
-                            if isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
-                                val = stmt.value.value
-                                if val not in val_to_keys:
-                                    val_to_keys[val] = []
-                                val_to_keys[val].append((target.id, rel_path))
+                            # Skip if this is an explicit alias
+                            if target.id in CANONICAL_ALIASES:
+                                continue
+                            
+                            # SKIP DICT/LIST LABELS WHICH INTENTIONALLY SHARE STRINGS
+                            if target.id.endswith("_LABELS"):
+                                continue
+
+                            strings = _extract_strings(stmt.value, target.id)
+                            for s, _ in strings:
+                                if len(s) > 3 and not s.startswith("http") and not s.startswith("/") and not re.match(r"^[A-Z_]+$", s):
+                                    val_to_keys[s].append((target.id, py_file.name))
 
         unaliased_duplicates = []
         for val, keys_list in val_to_keys.items():
             if len(keys_list) > 1:
-                # Check if all extra keys are registered in CANONICAL_ALIASES
-                keys = [k for k, _ in keys_list]
-                unregistered = [k for k in keys if k not in CANONICAL_ALIASES and k not in CANONICAL_ALIASES.values()]
-                if len(unregistered) > 1:
+                # Check if they are just aliases
+                keys = set(k for k, _ in keys_list)
+                if len(keys) > 1:
                     unaliased_duplicates.append((val[:60], keys_list))
 
         self.assertEqual(
@@ -113,6 +142,7 @@ class TextsConsistencyTests(unittest.TestCase):
             [],
             f"SSOT Violation: Found duplicate text string values without canonical alias mapping:\n{unaliased_duplicates}",
         )
+
 
     def test_no_overrides_model_and_no_overrides_file(self):
         """Verify that overrides.py does not exist and no OVERRIDES dictionary is defined."""

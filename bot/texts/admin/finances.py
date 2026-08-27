@@ -79,10 +79,10 @@ ADMIN_PAYMENTS_BTN_PREV = "Не удалось поставить возврат
 
 ADMIN_PAYMENTS_BTN_REFUND = "Возврат требует ручной проверки"
 
-ADMIN_PAYMENTS_CARD = "{value_0} #{value_1} · {value_2} · {value_3}₽"
+ADMIN_PAYMENTS_CARD = "{amount_rub} #{payment_id} · {status} · {details}₽"
 
 ADMIN_PAYMENTS_LIST_HEADER = """🛠 Админка › 💳 <b>Платежи</b>
-(стр. {value_0}/{value_1}) · Всего: {value_2}
+(стр. {amount_rub}/{payment_id}) · Всего: {status}
 """
 
 ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER = "Возвращаемого остатка уже нет"
@@ -95,14 +95,14 @@ ADMIN_PAYMENTS_SEARCH_PROMPT = "Платёж недоступен для воз�
 ADMIN_PAYMENT_NOT_FOUND_ALERT = "Платёж не найден"
 
 ADMIN_PAYMENT_STATUS_CANCELED_LABEL = """
-<b>Можно вернуть:</b> {value_0} RUB"""
+<b>Можно вернуть:</b> {amount_rub} RUB"""
 
 ADMIN_PAYMENT_STATUS_PENDING_LABEL = "❓"
 
-ADMIN_PAYMENT_STATUS_REFUNDED_LABEL = """🛠 Админка › 💳 Платежи › <b>Платёж #{value_0}</b>
-<b>ID:</b> {value_1}
-<b>Пользователь:</b> {value_2}
-<b>Сумма:</b> {value_3} {value_4}
+ADMIN_PAYMENT_STATUS_REFUNDED_LABEL = """🛠 Админка › 💳 Платежи › <b>Платёж #{amount_rub}</b>
+<b>ID:</b> {payment_id}
+<b>Пользователь:</b> {status}
+<b>Сумма:</b> {details} {value_4}
 <b>Статус:</b> {value_5} {value_6}
 <b>Provider:</b> {value_7}
 <b>Исполнение:</b> {value_8}
@@ -111,7 +111,7 @@ ADMIN_PAYMENT_STATUS_REFUNDED_LABEL = """🛠 Админка › 💳 Плате
 <b>External ID:</b> <code>{value_11}</code>{value_12}{value_13}"""
 
 ADMIN_PAYMENT_STATUS_SUCCEEDED_LABEL = """
-<b>Причина:</b> {value_0}"""
+<b>Причина:</b> {amount_rub}"""
 
 ADMIN_PAYMENT_USER_ID = "ID: <code>{user_id}</code>"
 
@@ -123,10 +123,10 @@ ADMIN_PURCHASES_BTN_BACK = "↩️ Вернуть доступный остат�
 
 ADMIN_PURCHASES_BTN_REFUND = """✅ <b>Возврат принят</b>
 
-{value_0}
-Сумма: <b>{value_1} RUB</b>
-Operation: <code>{value_2}</code>
-Статус: <code>{value_3}</code>
+{amount_rub}
+Сумма: <b>{payment_id} RUB</b>
+Operation: <code>{status}</code>
+Статус: <code>{details}</code>
 
 Зарезервированная сумма недоступна для новых покупок до подтверждения или безопасного завершения операции."""
 
@@ -134,13 +134,13 @@ ADMIN_PURCHASES_BTN_USER = "💳 К списку платежей"
 
 ADMIN_PURCHASES_LIST_EMPTY = """⚠️ <b>Подтверждение возврата</b>
 
-Платёж: <code>#{value_0}</code>
-YooKassa ID: <code>{value_1}</code>
-Будет возвращено: <b>{value_2} RUB</b>
+Платёж: <code>#{amount_rub}</code>
+YooKassa ID: <code>{payment_id}</code>
+Будет возвращено: <b>{status} RUB</b>
 
 Сумма сначала будет заморожена на внутреннем балансе, затем durable worker отправит идемпотентный запрос в YooKassa."""
 
-ADMIN_PURCHASES_LIST_HEADER = "✅ Подтвердить возврат {value_0} ₽"
+ADMIN_PURCHASES_LIST_HEADER = "✅ Подтвердить возврат {amount_rub} ₽"
 
 ADMIN_PURCHASES_SEARCH_PROMPT = "👤 Карточка клиента"
 

@@ -195,7 +195,7 @@ async def start_add_device(
     for server in servers:
         flag = server.country_flag or texts.EMOJI_GLOBE
         builder.button(
-            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(value_0=flag, value_1=server.name),
+            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(v0=flag, value_1=server.name),
             callback_data=f"select_server:{server.id}",
         )
 
@@ -312,7 +312,7 @@ async def _process_server_selection(
             callback.bot,
             callback.message.chat.id,
             texts.CONNECTION_DEVICE_CREATE_CREATING_SCREEN.format(
-                value_0=safe(server_name)
+                v0=safe(server_name)
             ),
             get_back_button("add_device"),
             parse_mode="HTML",

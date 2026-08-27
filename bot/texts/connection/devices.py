@@ -17,7 +17,7 @@ CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA = "🚀 Открыть в Amnezia"
 
 CONNECTION_DEVICE_CREATE_CREATING_SCREEN = """⏳ <b>Настраиваем подключение...</b>
 
-🌍 Сервер: <b>{value_0}</b>
+🌍 Сервер: <b>{v0}</b>
 
 <i>Подготавливаем защищенный доступ...</i>"""
 
@@ -57,7 +57,7 @@ DEVICE_CONFIG_VPN_CAPTION = """📁 <b>Файл для AmneziaVPN</b>
 
 DEVICE_CREATE_IN_PROGRESS = "⏳ Уже обрабатываем запрос..."
 
-DEVICE_CREATING_SPINNER_NOTICE = "{value_0} {value_1}"
+DEVICE_CREATING_SPINNER_NOTICE = "{v0} {value_1}"
 
 DEVICE_DATA_NONE = "Нет данных"
 

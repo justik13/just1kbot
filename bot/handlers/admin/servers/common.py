@@ -46,7 +46,7 @@ async def _build_servers_list_text_and_kb(
     servers, page: int, total_pages: int, total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.ADMIN_SERVERS_COMMON.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_SERVERS_COMMON.format(v0=page, v1=total_pages, v2=total)
     )
     builder = InlineKeyboardBuilder()
     if not servers:
@@ -56,7 +56,7 @@ async def _build_servers_list_text_and_kb(
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.ADMIN_TARIFF_CARD_HEADER if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
+                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=server.protocol)
             )
             builder.button(
                 text=button_text,

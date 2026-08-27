@@ -266,7 +266,7 @@ async def select_tariff(
         before = int(intent.balance.available)
         after = max(0, before - due)
         shortage = (
-            texts.PAYMENT_SHORTAGE_WARNING.format(value_0=int(intent.shortage))
+            texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
             if intent.shortage > 0
             else ""
         )
@@ -277,7 +277,7 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit, value_2=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
+            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(amount_rub=get_tariff_display_name(device_limit), tariff_name=device_limit, duration_days=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
             get_balance_change_start_keyboard(
                 str(intent.quote.public_id), "payment_change_tariff"
             ),
@@ -325,12 +325,12 @@ async def select_tariff(
     balance_before = int(intent.balance.available)
     balance_after = max(0, balance_before - price)
     shortage_line = (
-        texts.PAYMENT_SHORTAGE_WARNING.format(value_0=int(intent.shortage))
+        texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
         if intent.shortage > 0
         else ""
     )
     text = (
-        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(value_0=tariff_name, value_1=tariff.duration_days, value_2=device_limit, value_3=price, value_4=balance_before, value_5=balance_after, value_6=shortage_line)
+        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(amount_rub=tariff_name, tariff_name=tariff.duration_days, duration_days=device_limit, value_3=price, value_4=balance_before, value_5=balance_after, value_6=shortage_line)
     )
 
     await render_hub(

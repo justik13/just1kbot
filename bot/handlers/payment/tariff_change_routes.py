@@ -110,7 +110,7 @@ async def render_tariff_change_review(
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
     text = texts.PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD.format(
-        value_0=get_tariff_display_name(intent.target_version.device_limit),
+        amount_rub=get_tariff_display_name(intent.target_version.device_limit),
         value_1=intent.target_version.device_limit,
         value_2=_hours_text(
             quote.resulting_paid_hours + quote.resulting_bonus_hours
@@ -125,13 +125,13 @@ async def render_tariff_change_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += texts.PAYMENT_TARIFF_CHANGE.format(
-                value_0=int(intent.shortage),
+                amount_rub=int(intent.shortage),
                 value_1=minimum,
                 value_2=remainder,
             )
         else:
             text += texts.PAYMENT_SHORTAGE_LINE.format(
-                value_0=int(intent.shortage)
+                amount_rub=int(intent.shortage)
             )
         keyboard = get_balance_change_shortage_keyboard(
             str(quote.public_id), exact, back
@@ -243,7 +243,7 @@ async def confirm_tariff_change(
         callback.bot,
         callback.message.chat.id,
         texts.PAYMENT_TARIFF_CHANGE_SUCCESS_CARD.format(
-            value_0=get_tariff_display_name(intent.target_version.device_limit),
+            amount_rub=get_tariff_display_name(intent.target_version.device_limit),
             value_1=_hours_text(
                 result.quote.resulting_paid_hours
                 + result.quote.resulting_bonus_hours
@@ -350,7 +350,7 @@ async def topup_custom_change_shortage(
         callback.bot,
         callback.message.chat.id,
         texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(
-            value_0=minimum
+            amount_rub=minimum
         ),
         get_back_button(f"balance_change_review:{intent.quote.public_id}"),
     )

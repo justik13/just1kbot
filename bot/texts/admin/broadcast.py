@@ -7,16 +7,16 @@ ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': 'Все пользователи', 'ac
 
 ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': 'Все пользователи', 'active': 'Активные подписки', 'expiring_3d': '⏳ Истекают < 3 дней', 'expired': '🔴 Истекшие подписки', 'never': '🆕 Без подписок'}
 
-ADMIN_BROADCAST_RECIPIENTS_COUNT = "⚠️ Текст рассылки слишком длинный. Максимум {value_0} символов."
+ADMIN_BROADCAST_RECIPIENTS_COUNT = "⚠️ Текст рассылки слишком длинный. Максимум {max_chars} символов."
 
 ADMIN_BROADCAST_SENDING_PROGRESS = """🚨 <b>Рассылка остановлена из-за ошибки</b>
-<code>{value_0}</code>"""
+<code>{max_chars}</code>"""
 
 ADMIN_BROADCAST_STOPPED_NOTICE = "✅ Ок (Убрать)"
 
 ADMIN_BROADCAST_SUMMARY_RESULT = "Рассылка не запущена"
 
-ADMIN_BROADCAST_TEST_SENT_SUCCESS = "⚠️ Подпись к медиа слишком длинная. Максимум {value_0} символов."
+ADMIN_BROADCAST_TEST_SENT_SUCCESS = "⚠️ Подпись к медиа слишком длинная. Максимум {max_chars} символов."
 
 BROADCAST_ACTIVE_LABEL = "Активных"
 

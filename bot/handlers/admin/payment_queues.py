@@ -56,19 +56,19 @@ def _duration(seconds: int | None) -> str:
     if seconds is None:
         return texts.PLACEHOLDER_DASH
     if seconds >= 86400:
-        return texts.ADMIN_QUEUES_CONFIRM_RETRY_PROMPT.format(value_0=seconds // 86400)
+        return texts.ADMIN_QUEUES_CONFIRM_RETRY_PROMPT.format(v0=seconds // 86400)
     if seconds >= 3600:
-        return texts.ADMIN_QUEUES_CONFIRM_PURGE_PROMPT.format(value_0=seconds // 3600)
+        return texts.ADMIN_QUEUES_CONFIRM_PURGE_PROMPT.format(v0=seconds // 3600)
     if seconds >= 60:
-        return texts.ADMIN_QUEUES_METRICS_CARD.format(value_0=seconds // 60)
-    return texts.ADMIN_QUEUES_TASK_DETAILS_CARD.format(value_0=seconds)
+        return texts.ADMIN_QUEUES_METRICS_CARD.format(v0=seconds // 60)
+    return texts.ADMIN_QUEUES_TASK_DETAILS_CARD.format(v0=seconds)
 
 
 def diagnostics_keyboard():
     b = InlineKeyboardBuilder()
     for queue in QUEUE_TYPES:
         b.button(
-            text=texts.ADMIN_QUEUES_FAILURE_RATE_METRIC.format(value_0=QUEUE_LABELS[queue]),
+            text=texts.ADMIN_QUEUES_FAILURE_RATE_METRIC.format(v0=QUEUE_LABELS[queue]),
             callback_data=f"aq:l:{QUEUE_CODES[queue]}:1",
         )
     b.button(text=texts.BTN_REFRESH_ACTION, callback_data="aq:home")
@@ -104,9 +104,9 @@ async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
         lines.extend(
             (
                 texts.ADMIN_QUEUE_NAME.format(name=names[q.name]),
-                texts.ADMIN_PAYMENT_QUEUES.format(value_0=q.pending, value_1=q.retry, value_2=q.due, value_3=q.overdue),
-                texts.ADMIN_QUEUES_STATUS_HEALTHY_LABEL.format(value_0=q.processing, value_1=q.stale_processing, value_2=q.dead),
-                texts.ADMIN_QUEUES_STATUS_DEGRADED_LABEL.format(value_0=_duration(oldest)),
+                texts.ADMIN_PAYMENT_QUEUES.format(v0=q.pending, v1=q.retry, v2=q.due, v3=q.overdue),
+                texts.ADMIN_QUEUES_STATUS_HEALTHY_LABEL.format(v0=q.processing, v1=q.stale_processing, v2=q.dead),
+                texts.ADMIN_QUEUES_STATUS_DEGRADED_LABEL.format(v0=_duration(oldest)),
                 "",
             )
         )
@@ -126,7 +126,7 @@ async def _show_list(
     result = await list_problem_operations(session, queue, page)
     lines = [
         texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[queue]),
-        texts.ADMIN_QUEUES_STATUS_CRITICAL_LABEL.format(value_0=page, value_1=result.total_pages, value_2=result.total),
+        texts.ADMIN_QUEUES_STATUS_CRITICAL_LABEL.format(v0=page, v1=result.total_pages, v2=result.total),
         "",
     ]
     b = InlineKeyboardBuilder()
@@ -134,10 +134,10 @@ async def _show_list(
         lines.append(texts.ADMIN_QUEUES_STATUS_PAUSED_LABEL)
     for row in result.rows:
         lines.append(
-            texts.ADMIN_QUEUES_BTN_QUEUE_PRIMARY.format(value_0=row.operation_id, value_1=safe(row.operation_type), value_2=safe(row.status), value_3=row.attempts, value_4=row.max_attempts, value_5=safe(row.last_error_code or texts.PLACEHOLDER_DASH), value_6=_duration(row.age_seconds))
+            texts.ADMIN_QUEUES_BTN_QUEUE_PRIMARY.format(v0=row.operation_id, v1=safe(row.operation_type), v2=safe(row.status), v3=row.attempts, v4=row.max_attempts, v5=safe(row.last_error_code or texts.PLACEHOLDER_DASH), v6=_duration(row.age_seconds))
         )
         b.button(
-            text=texts.ADMIN_QUEUES_BTN_QUEUE_RETRY.format(value_0=row.operation_id, value_1=row.status, value_2=row.operation_type)[:60],
+            text=texts.ADMIN_QUEUES_BTN_QUEUE_RETRY.format(v0=row.operation_id, v1=row.status, v2=row.operation_type)[:60],
             callback_data=f"aq:c:{QUEUE_CODES[queue]}:{row.operation_id}",
         )
     if page > 1:
@@ -155,16 +155,16 @@ def _card_text(row) -> str:
             texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[row.queue]),
             texts.ADMIN_QUEUE_CARD_ID.format(operation_id=row.operation_id),
             texts.ADMIN_QUEUE_CARD_PAYMENT.format(payment_id=row.payment_id or texts.PLACEHOLDER_DASH),
-            texts.ADMIN_QUEUES_BTN_DETAILS.format(value_0=safe(row.operation_type)),
-            texts.ADMIN_QUEUES_BTN_RETRY_DEAD.format(value_0=safe(row.status)),
-            texts.ADMIN_QUEUES_BTN_PURGE_DEAD.format(value_0=row.attempts, value_1=row.max_attempts),
+            texts.ADMIN_QUEUES_BTN_DETAILS.format(v0=safe(row.operation_type)),
+            texts.ADMIN_QUEUES_BTN_RETRY_DEAD.format(v0=safe(row.status)),
+            texts.ADMIN_QUEUES_BTN_PURGE_DEAD.format(v0=row.attempts, v1=row.max_attempts),
             texts.ADMIN_QUEUE_CARD_ERROR.format(error_code=safe(row.last_error_code or texts.PLACEHOLDER_DASH)),
-            texts.ADMIN_QUEUES_BTN_REFRESH.format(value_0=format_datetime(row.created_at)),
-            texts.ADMIN_QUEUES_BTN_BACK.format(value_0=format_datetime(row.updated_at)),
-            texts.ADMIN_QUEUES_OVERVIEW_HEADER.format(value_0=format_datetime(row.terminal_at)),
+            texts.ADMIN_QUEUES_BTN_REFRESH.format(v0=format_datetime(row.created_at)),
+            texts.ADMIN_QUEUES_BTN_BACK.format(v0=format_datetime(row.updated_at)),
+            texts.ADMIN_QUEUES_OVERVIEW_HEADER.format(v0=format_datetime(row.terminal_at)),
             texts.ADMIN_QUEUE_CARD_LOCK.format(locked_at=format_datetime(row.locked_at)),
             texts.ADMIN_QUEUE_CARD_LEASE.format(lease=row.lease_status),
-            texts.ADMIN_QUEUES_HEALTH_OK_BADGE.format(value_0=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
+            texts.ADMIN_QUEUES_HEALTH_OK_BADGE.format(v0=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
         )
     )
 
@@ -356,7 +356,7 @@ async def apply_retry(
     await state.clear()
     messages = {
         "retry_scheduled": texts.ADMIN_QUEUES_HEALTH_CRIT_BADGE,
-        "rejected": texts.ADMIN_QUEUES_ROW_ITEM.format(value_0=result.rejection_code or 'safety_policy'),
+        "rejected": texts.ADMIN_QUEUES_ROW_ITEM.format(v0=result.rejection_code or 'safety_policy'),
         "not_found": texts.QUEUE_OPERATION_NOT_FOUND,
         "already_changed": texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE,
     }

@@ -75,7 +75,7 @@ async def admin_subscription_menu(
             device_limit = tariff.device_limit
 
             tariff_name = (
-                texts.ADMIN_SUB_MENU_DEVICE_COUNT_FORMAT.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
+                texts.ADMIN_SUB_MENU_DEVICE_COUNT_FORMAT.format(v0=get_tariff_display_name(device_limit), v1=device_limit)
             )
 
     if has_active:

@@ -289,11 +289,11 @@ def get_admin_user_devices_keyboard(
     for profile in profiles:
         name = (
             getattr(profile, "device_name", None)
-            or texts.ADMIN_USER_CARD_STATUS_ACTIVE.format(value_0=profile.id)
+            or texts.ADMIN_USER_CARD_STATUS_ACTIVE.format(v0=profile.id)
         )
 
         builder.button(
-            text=truncate_button_text(texts.ADMIN_USER_CARD_STATUS_EXPIRED.format(value_0=name)),
+            text=truncate_button_text(texts.ADMIN_USER_CARD_STATUS_EXPIRED.format(v0=name)),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),

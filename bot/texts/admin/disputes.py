@@ -3,10 +3,10 @@ from __future__ import annotations
 
 ADMIN_BTN_BACK_TO_DISPUTES = "← К спорам"
 
-ADMIN_DISPUTES = """⚠️ <b>Спор #{value_0}</b>
-Статус: <b>{value_1}</b>
-Case ID: <code>{value_2}</code>
-YooKassa payment: <code>{value_3}</code>
+ADMIN_DISPUTES = """⚠️ <b>Спор #{dispute_id}</b>
+Статус: <b>{status}</b>
+Case ID: <code>{amount_rub}</code>
+YooKassa payment: <code>{case}</code>
 Сумма: <b>{value_4} RUB</b>
 Дата спора: <code>{value_5}</code>
 Reservation: <code>{value_6}</code> ({value_7})
@@ -33,7 +33,7 @@ ADMIN_DISPUTE_BTN_ACCEPT = """Отправьте одной строкой:
 
 ADMIN_DISPUTE_BTN_BACK_TO_LIST = "Дата должна быть в формате YYYY-MM-DD"
 
-ADMIN_DISPUTE_BTN_LIST = "#{value_0} · {value_1}"
+ADMIN_DISPUTE_BTN_LIST = "#{dispute_id} · {status}"
 
 ADMIN_DISPUTE_BTN_REGISTER = "Операция со спором отклонена финансовыми инвариантами"
 
@@ -47,9 +47,9 @@ ADMIN_DISPUTE_CONFIRM_CASE = "➕ Зарегистрировать спор"
 
 ADMIN_DISPUTE_CONFIRM_NOTE = """⚠️ <b>Подтвердите исход спора</b>
 
-Спор: <code>#{value_0}</code>
-Исход: <b>{value_1}</b>
-Эффект: {value_2}."""
+Спор: <code>#{dispute_id}</code>
+Исход: <b>{status}</b>
+Эффект: {amount_rub}."""
 
 ADMIN_DISPUTE_CONFIRM_PAYMENT = "Исход спора зафиксирован"
 
@@ -105,7 +105,7 @@ ADMIN_DISPUTE_STATUS_REVIEW_LABEL = "reservation будет освобожден
 
 ADMIN_DISPUTE_STATUS_UNDER_REVIEW_LABEL = "будет создан exactly-once chargeback debit; возможен долг"
 
-ADMIN_DISPUTE_STATUS_WON_LABEL = "#{value_0} · {value_1} · {value_2} ₽ · case={value_3}"
+ADMIN_DISPUTE_STATUS_WON_LABEL = "#{dispute_id} · {status} · {amount_rub} ₽ · case={case}"
 
 BTN_REFRESH_ACTION = "🔄 Обновить"
 

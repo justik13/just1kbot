@@ -158,7 +158,7 @@ async def process_broadcast_message(
             message.bot,
             message.chat.id,
             texts.ADMIN_BROADCAST_RECIPIENTS_COUNT.format(
-                value_0=TELEGRAM_MESSAGE_LIMIT
+                max_chars=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -168,7 +168,7 @@ async def process_broadcast_message(
             message.bot,
             message.chat.id,
             texts.ADMIN_BROADCAST_TEST_SENT_SUCCESS.format(
-                value_0=TELEGRAM_CAPTION_LIMIT
+                max_chars=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -527,7 +527,7 @@ async def _send_broadcast_to_users_with_resume(
             await bot.send_message(
                 admin_id,
                 texts.ADMIN_BROADCAST_SENDING_PROGRESS.format(
-                    value_0=html.escape(
+                    max_chars=html.escape(
                         type(e).__name__ + ": " + str(e)[:200]
                     )
                 ),

@@ -72,7 +72,7 @@ async def _build_payments_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.ADMIN_PAYMENTS_LIST_HEADER.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_PAYMENTS_LIST_HEADER.format(amount_rub=page, payment_id=total_pages, status=total)
     )
     builder = InlineKeyboardBuilder()
     if not payments:
@@ -91,7 +91,7 @@ async def _build_payments_list_text_and_kb(
             else:
                 user_label = texts.PLACEHOLDER_DASH
             button_text = truncate_button_text(
-                texts.ADMIN_PAYMENTS_CARD.format(value_0=status_icon, value_1=payment.id, value_2=user_label, value_3=payment.amount)
+                texts.ADMIN_PAYMENTS_CARD.format(amount_rub=status_icon, payment_id=payment.id, status=user_label, details=payment.amount)
             )
             builder.button(
                 text=button_text,
@@ -252,7 +252,7 @@ async def show_payment_card(
         and payment.manual_review_reason
     ):
         reason_line = (
-            texts.ADMIN_PAYMENT_STATUS_SUCCEEDED_LABEL.format(value_0=safe(payment.manual_review_reason))
+            texts.ADMIN_PAYMENT_STATUS_SUCCEEDED_LABEL.format(amount_rub=safe(payment.manual_review_reason))
         )
 
     refundable_line = ""
@@ -261,10 +261,10 @@ async def show_payment_card(
             session,
             payment_id=payment.id,
         )
-        refundable_line = texts.ADMIN_PAYMENT_STATUS_CANCELED_LABEL.format(value_0=int(refundable))
+        refundable_line = texts.ADMIN_PAYMENT_STATUS_CANCELED_LABEL.format(amount_rub=int(refundable))
 
     rendered = (
-        texts.ADMIN_PAYMENT_STATUS_REFUNDED_LABEL.format(value_0=payment.id, value_1=payment.id, value_2=user_label, value_3=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
+        texts.ADMIN_PAYMENT_STATUS_REFUNDED_LABEL.format(amount_rub=payment.id, payment_id=payment.id, status=user_label, details=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
     )
 
     kb = _get_payment_card_keyboard(
@@ -311,7 +311,7 @@ async def confirm_payment_refund(
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.ADMIN_PURCHASES_LIST_HEADER.format(value_0=int(refundable)),
+        text=texts.ADMIN_PURCHASES_LIST_HEADER.format(amount_rub=int(refundable)),
         callback_data=f"admin_payment_refund_confirm:{payment.id}",
     )
     builder.button(
@@ -320,7 +320,7 @@ async def confirm_payment_refund(
     )
     builder.adjust(1)
     await callback.message.edit_text(
-        texts.ADMIN_PURCHASES_LIST_EMPTY.format(value_0=payment.id, value_1=safe(payment.external_id), value_2=int(refundable)),
+        texts.ADMIN_PURCHASES_LIST_EMPTY.format(amount_rub=payment.id, payment_id=safe(payment.external_id), status=int(refundable)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -375,7 +375,7 @@ async def enqueue_payment_refund(
         else texts.ADMIN_PAYMENTS_BTN_BACK
     )
     await callback.message.edit_text(
-        texts.ADMIN_PURCHASES_BTN_REFUND.format(value_0=status_text, value_1=int(request.operation.amount), value_2=request.operation.operation_id, value_3=safe(request.operation.status)),
+        texts.ADMIN_PURCHASES_BTN_REFUND.format(amount_rub=status_text, payment_id=int(request.operation.amount), status=request.operation.operation_id, details=safe(request.operation.status)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

@@ -1,31 +1,31 @@
 """Domain texts for admin/queues.py."""
 from __future__ import annotations
 
-ADMIN_PAYMENT_QUEUES = "pending={value_0} · retry={value_1} · due={value_2} · overdue={value_3}"
+ADMIN_PAYMENT_QUEUES = "pending={v0} · retry={v1} · due={v2} · overdue={v3}"
 
 ADMIN_QUEUES_ACTION_CONFIRMED = "Причина обязательна и должна содержать 3–200 символов."
 
 ADMIN_QUEUES_AUTO_RECOVER_DISABLED = "Укажите причину ручного retry (3–200 символов)."
 
-ADMIN_QUEUES_BTN_BACK = "Обновлено: {value_0}"
+ADMIN_QUEUES_BTN_BACK = "Обновлено: {v0}"
 
-ADMIN_QUEUES_BTN_DETAILS = "Тип: {value_0}"
+ADMIN_QUEUES_BTN_DETAILS = "Тип: {v0}"
 
-ADMIN_QUEUES_BTN_PURGE_DEAD = "Попытки: {value_0}/{value_1}"
+ADMIN_QUEUES_BTN_PURGE_DEAD = "Попытки: {v0}/{v1}"
 
 ADMIN_QUEUES_BTN_QUEUE_DEAD = "🧰 <b>{queue_name}</b>"
 
-ADMIN_QUEUES_BTN_QUEUE_PRIMARY = "#{value_0} · {value_1} · {value_2} · {value_3}/{value_4} · error={value_5} · возраст {value_6}"
+ADMIN_QUEUES_BTN_QUEUE_PRIMARY = "#{v0} · {v1} · {v2} · {v3}/{v4} · error={v5} · возраст {v6}"
 
-ADMIN_QUEUES_BTN_QUEUE_RETRY = "#{value_0} · {value_1} · {value_2}"
+ADMIN_QUEUES_BTN_QUEUE_RETRY = "#{v0} · {v1} · {v2}"
 
-ADMIN_QUEUES_BTN_REFRESH = "Создано: {value_0}"
+ADMIN_QUEUES_BTN_REFRESH = "Создано: {v0}"
 
-ADMIN_QUEUES_BTN_RETRY_DEAD = "Статус: {value_0}"
+ADMIN_QUEUES_BTN_RETRY_DEAD = "Статус: {v0}"
 
-ADMIN_QUEUES_CONFIRM_PURGE_PROMPT = "{value_0}ч"
+ADMIN_QUEUES_CONFIRM_PURGE_PROMPT = "{v0}ч"
 
-ADMIN_QUEUES_CONFIRM_RETRY_PROMPT = "{value_0}д"
+ADMIN_QUEUES_CONFIRM_RETRY_PROMPT = "{v0}д"
 
 ADMIN_QUEUES_DEAD_DETAILS_HEADER = "Подготовить retry"
 
@@ -33,7 +33,7 @@ ADMIN_QUEUES_DEAD_RETRY_PROMPT = "← К очереди"
 
 ADMIN_QUEUES_DEAD_ROW_ITEM = "← Диагностика"
 
-ADMIN_QUEUES_FAILURE_RATE_METRIC = "Открыть {value_0}"
+ADMIN_QUEUES_FAILURE_RATE_METRIC = "Открыть {v0}"
 
 ADMIN_QUEUES_HEADER = """🔄 <b>Диагностика очередей платежей и задач</b>
 
@@ -41,33 +41,33 @@ ADMIN_QUEUES_HEADER = """🔄 <b>Диагностика очередей пла�
 
 ADMIN_QUEUES_HEALTH_CRIT_BADGE = "Операция поставлена в retry. Исполнение выполнит фоновый worker."
 
-ADMIN_QUEUES_HEALTH_OK_BADGE = "Ручной retry: {value_0}"
+ADMIN_QUEUES_HEALTH_OK_BADGE = "Ручной retry: {v0}"
 
 ADMIN_QUEUES_INVALID_PAGE_ALERT = "Некорректная страница"
 
 ADMIN_QUEUES_LATENCY_METRIC = "Подтвердить retry"
 
-ADMIN_QUEUES_METRICS_CARD = "{value_0}м"
+ADMIN_QUEUES_METRICS_CARD = "{v0}м"
 
-ADMIN_QUEUES_OVERVIEW_HEADER = "Завершено/обработано: {value_0}"
+ADMIN_QUEUES_OVERVIEW_HEADER = "Завершено/обработано: {v0}"
 
 ADMIN_QUEUES_PURGE_SUCCESS = "Отменено"
 
-ADMIN_QUEUES_ROW_ITEM = "Retry отклонён: {value_0}"
+ADMIN_QUEUES_ROW_ITEM = "Retry отклонён: {v0}"
 
 ADMIN_QUEUES_STATE_CHANGED_NOTICE = "Состояние уже изменилось"
 
-ADMIN_QUEUES_STATUS_CRITICAL_LABEL = "Проблемные операции · стр. {value_0}/{value_1} · всего {value_2}"
+ADMIN_QUEUES_STATUS_CRITICAL_LABEL = "Проблемные операции · стр. {v0}/{v1} · всего {v2}"
 
-ADMIN_QUEUES_STATUS_DEGRADED_LABEL = "Старейшая проблема: {value_0}"
+ADMIN_QUEUES_STATUS_DEGRADED_LABEL = "Старейшая проблема: {v0}"
 
-ADMIN_QUEUES_STATUS_HEALTHY_LABEL = "processing={value_0} · stale={value_1} · dead={value_2}"
+ADMIN_QUEUES_STATUS_HEALTHY_LABEL = "processing={v0} · stale={v1} · dead={v2}"
 
 ADMIN_QUEUES_STATUS_PAUSED_LABEL = "Проблемных операций нет."
 
 ADMIN_QUEUES_STATUS_SUMMARY = "Подтверждение устарело."
 
-ADMIN_QUEUES_TASK_DETAILS_CARD = "{value_0}с"
+ADMIN_QUEUES_TASK_DETAILS_CARD = "{v0}с"
 
 ADMIN_QUEUES_THROUGHPUT_METRIC = "Подтверждение устарело"
 

@@ -29,7 +29,7 @@ BTN_PAYMENT_SPECIFY_OTHER_AMOUNT = "Указать другую сумму"
 
 BTN_PAYMENT_START_ONBOARDING = "🚀 Начать"
 
-BTN_PAYMENT_TOPUP_PRESET_AMOUNT = "Пополнить на {value_0} ₽"
+BTN_PAYMENT_TOPUP_PRESET_AMOUNT = "Пополнить на {amount_rub} ₽"
 
 BTN_PAYMENT_TO_BALANCE = "💰 К балансу"
 
@@ -68,16 +68,16 @@ PAYMENT_NO_TARIFFS = """💳 В данный момент нет доступн�
 
 Обратитесь в поддержку для оформления подписки вручную."""
 
-PAYMENT_PRICE_RUB_FORMAT = "{value_0} ₽"
+PAYMENT_PRICE_RUB_FORMAT = "{amount_rub} ₽"
 
 PAYMENT_PURCHASE = """
 
-Не хватает {value_0} ₽. Минимальное пополнение — {value_1} ₽; после покупки останется {value_2} ₽."""
+Не хватает {amount_rub} ₽. Минимальное пополнение — {tariff_name} ₽; после покупки останется {duration_days} ₽."""
 
-PAYMENT_PURCHASE_CONFIRMATION_CARD = """✅ <b>Подтверждение: {value_0}</b>
+PAYMENT_PURCHASE_CONFIRMATION_CARD = """✅ <b>Подтверждение: {amount_rub}</b>
 
-Тариф: <b>{value_1}</b>
-Срок: <b>{value_2} дней</b>
+Тариф: <b>{tariff_name}</b>
+Срок: <b>{duration_days} дней</b>
 Лимит устройств: <b>{value_3}</b>
 Цена: <b>{value_4} ₽</b>
 
@@ -104,10 +104,10 @@ PAYMENT_PURCHASE_RENEW_COMPLETED = "Продление выполнено"
 
 PAYMENT_PURCHASE_STATE_CHANGED_RETRY = "Состояние подписки изменилось. Начните операцию заново."
 
-PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{value_0}</b>
+PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{amount_rub}</b>
 
-Тариф: <b>{value_1}</b>
-Срок: {value_2} дней
+Тариф: <b>{tariff_name}</b>
+Срок: {duration_days} дней
 Списано: <b>{value_3} ₽</b>
 💰 Баланс: <b>{value_4} ₽</b>
 🎁 Бонусный баланс: <b>{value_5} ₽</b>"""
@@ -120,7 +120,7 @@ PAYMENT_QUICK_RENEW_HEADER = """🔄 <b>Продление доступа</b>
 Выберите, на сколько продлить:"""
 
 PAYMENT_SHORTAGE_WARNING = """
-⚠️ Не хватает: <b>{value_0} ₽</b>"""
+⚠️ Не хватает: <b>{amount_rub} ₽</b>"""
 
 PAYMENT_SHOWCASE = "У вас уже подключён этот тариф. Для добавления дней используйте продление."
 
@@ -133,9 +133,9 @@ PAYMENT_SHOWCASE_HEADER = """🛡 <b>Выберите формат подпис�
 
 PAYMENT_SHOWCASE_ORDER_CARD = """💳 <b>Оформление заказа</b>
 
-📦 Тариф: <b>{value_0}</b>
-⏱ Срок: {value_1} дней
-🔌 Устройства: до {value_2}
+📦 Тариф: <b>{amount_rub}</b>
+⏱ Срок: {tariff_name} дней
+🔌 Устройства: до {duration_days}
 💰 Цена: <b>{value_3} ₽</b>
 
 Баланс: <b>{value_4} ₽</b>
@@ -161,9 +161,9 @@ PAYMENT_TARIFFS_SERVICES_WORKERS_PAYMENTS = "🧪"
 
 PAYMENT_TARIFF_CHANGE_HEADER_CARD = """💱 <b>Смена тарифа</b>
 
-Новый тариф: <b>{value_0}</b>
-Лимит устройств: <b>{value_1}</b>
-Срок после конвертации: <b>{value_2}</b>
+Новый тариф: <b>{amount_rub}</b>
+Лимит устройств: <b>{tariff_name}</b>
+Срок после конвертации: <b>{duration_days}</b>
 Доплата: <b>{value_3} ₽</b>
 
 Баланс: <b>{value_4} ₽</b>
