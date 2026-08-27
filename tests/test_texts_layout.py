@@ -11,57 +11,26 @@ ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = ROOT / "bot" / "texts"
 
 EXPECTED_FILES = {
-    "__init__.py",
-    "common/__init__.py",
-    "common/buttons.py",
-    "common/errors.py",
-    "common/status.py",
-    "user/__init__.py",
-    "user/hub.py",
-    "user/onboarding.py",
-    "user/referral.py",
-    "user/support.py",
-    "connection/__init__.py",
-    "connection/devices.py",
-    "connection/config.py",
-    "connection/actions.py",
-    "payment/__init__.py",
-    "payment/balance.py",
-    "payment/topup.py",
-    "payment/tariffs.py",
-    "payment/tariff_change.py",
-    "payment/status.py",
-    "admin/__init__.py",
-    "admin/dashboard.py",
-    "admin/servers.py",
-    "admin/users.py",
-    "admin/tariffs.py",
-    "admin/subscriptions.py",
-    "admin/finances.py",
-    "admin/disputes.py",
-    "admin/queues.py",
-    "admin/broadcast.py",
-    "admin/common.py",
-    "runtime/__init__.py",
-    "runtime/alerts.py",
-    "runtime/notifications.py",
+    "__init__.py", "common/__init__.py", "common/buttons.py", "common/errors.py", "common/status.py",
+    "user/__init__.py", "user/hub.py", "user/onboarding.py", "user/referral.py", "user/support.py",
+    "connection/__init__.py", "connection/devices.py", "connection/config.py", "connection/actions.py",
+    "payment/__init__.py", "payment/balance.py", "payment/topup.py", "payment/tariffs.py",
+    "payment/tariff_change.py", "payment/status.py",
+    "admin/__init__.py", "admin/dashboard.py", "admin/servers.py", "admin/users.py", "admin/tariffs.py",
+    "admin/subscriptions.py", "admin/finances.py", "admin/disputes.py", "admin/queues.py", "admin/broadcast.py", "admin/common.py",
+    "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
 }
 
-PRODUCTION_DIRS = (
-    ROOT / "bot",
-    ROOT / "services",
-    ROOT / "integrations",
-)
+PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "integrations")
 
 
 def _collect_docstring_node_ids(tree: ast.AST) -> set[int]:
     ids: set[int] = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            if node.body and isinstance(node.body[0], ast.Expr):
-                value = node.body[0].value
-                if isinstance(value, ast.Constant) and isinstance(value.value, str):
-                    ids.add(id(value))
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            value = node.body[0].value if isinstance(node.body[0], ast.Expr) else None
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                ids.add(id(value))
     return ids
 
 
@@ -85,9 +54,7 @@ def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[st
                 and id(node) not in docstring_node_ids
                 and not self._inside_logger_call()
             ):
-                violations.append(
-                    f"{path.relative_to(ROOT)}:{node.lineno}: {value[:80]!r}"
-                )
+                violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: {value[:80]!r}")
             self.generic_visit(node)
 
         def _inside_logger_call(self) -> bool:
@@ -104,23 +71,16 @@ def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[st
 
 class TestTextsLayout(unittest.TestCase):
     def test_exact_domain_layout(self):
-        actual = {
-            path.relative_to(TEXTS_DIR).as_posix()
-            for path in TEXTS_DIR.rglob("*.py")
-        }
+        actual = {path.relative_to(TEXTS_DIR).as_posix() for path in TEXTS_DIR.rglob("*.py")}
         self.assertEqual(
             actual,
             EXPECTED_FILES,
             "bot/texts layout drift detected: "
-            f"missing={sorted(EXPECTED_FILES - actual)}, "
-            f"unexpected={sorted(actual - EXPECTED_FILES)}",
+            f"missing={sorted(EXPECTED_FILES - actual)}, unexpected={sorted(actual - EXPECTED_FILES)}",
         )
 
     def test_facade_is_thin_and_contains_no_text_assignments(self):
-        tree = ast.parse(
-            (TEXTS_DIR / "__init__.py").read_text(encoding="utf-8"),
-            filename="bot/texts/__init__.py",
-        )
+        tree = ast.parse((TEXTS_DIR / "__init__.py").read_text(encoding="utf-8"))
         assigned_names = set()
         for node in tree.body:
             if isinstance(node, ast.Assign):
@@ -132,12 +92,7 @@ class TestTextsLayout(unittest.TestCase):
             for target in targets:
                 if isinstance(target, ast.Name):
                     assigned_names.add(target.id)
-        self.assertLessEqual(
-            assigned_names,
-            {"_TEXT_KEYS"},
-            "Facade must not own canonical text constants: "
-            f"{sorted(assigned_names - {'_TEXT_KEYS'})}",
-        )
+        self.assertLessEqual(assigned_names, {"_TEXT_KEYS"})
 
     def test_every_canonical_text_is_reachable_through_facade(self):
         for py_file in TEXTS_DIR.rglob("*.py"):
@@ -151,8 +106,7 @@ class TestTextsLayout(unittest.TestCase):
                     if isinstance(target, ast.Name) and target.id.isupper():
                         self.assertTrue(
                             hasattr(texts, target.id),
-                            f"Canonical key {target.id} from {py_file.relative_to(ROOT)} "
-                            "is not exposed by bot.texts",
+                            f"Canonical key {target.id} from {py_file.relative_to(ROOT)} is not exposed by bot.texts",
                         )
 
     def test_config_constants_has_no_user_facing_text(self):
@@ -166,14 +120,9 @@ class TestTextsLayout(unittest.TestCase):
                 if isinstance(target, ast.Name) and target.id.isupper():
                     if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                         ui_values.append((target.id, node.value.value))
-        self.assertEqual(
-            ui_values,
-            [],
-            "User-facing string literals must live under bot/texts, not config/constants.py",
-        )
+        self.assertEqual(ui_values, [])
 
     def test_no_cyrillic_string_literals_outside_texts(self):
-        """Production modules must not own Russian UI text outside bot/texts."""
         violations: list[str] = []
         for base_dir in PRODUCTION_DIRS:
             for path in base_dir.rglob("*.py"):
@@ -181,7 +130,6 @@ class TestTextsLayout(unittest.TestCase):
                     continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
                 violations.extend(_find_cyrillic_literals(path, _collect_docstring_node_ids(tree)))
-
         self.assertEqual(
             violations,
             [],
