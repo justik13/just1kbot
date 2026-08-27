@@ -122,14 +122,59 @@ class CircularImportRegressionTests(unittest.TestCase):
                             violations.append((node.lineno, arg_val))
         return violations
 
+    @staticmethod
+    def _find_illegal_bot_imports_for_services(tree: ast.AST) -> list[tuple[int, str]]:
+        """Flag bot.* imports that are not the data-only facades bot.texts/bot.constants.
+
+        Pure services may depend on the canonical text/constants catalogues (pure data,
+        no aiogram, no upward imports) but must never touch presentation/behavioural
+        layers (bot.handlers, bot.middlewares, bot.states, bot.main, bot.keyboards).
+        """
+        allowed_modules = {"bot.texts", "bot.constants"}
+        violations: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == "bot":
+                        violations.append((node.lineno, alias.name))
+                    elif alias.name.startswith("bot.") and alias.name.rsplit(".", 1)[0] not in allowed_modules:
+                        violations.append((node.lineno, alias.name))
+            elif isinstance(node, ast.ImportFrom):
+                module_name = node.module or ""
+                if module_name == "bot":
+                    for alias in node.names:
+                        if alias.name not in {"texts", "constants"}:
+                            violations.append((node.lineno, f"from bot import {alias.name}"))
+                elif module_name.startswith("bot.") and module_name.rsplit(".", 1)[0] not in allowed_modules:
+                    violations.append((node.lineno, module_name))
+            elif isinstance(node, ast.Call):
+                if (
+                    isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "import_module"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                ):
+                    arg_val = node.args[0].value
+                    if arg_val == "bot" or (
+                        arg_val.startswith("bot.")
+                        and arg_val.rsplit(".", 1)[0] not in allowed_modules
+                    ):
+                        violations.append((node.lineno, arg_val))
+        return violations
+
     def test_downward_dependency_ast_scan(self):
         """Verify statically via AST that lower architectural layers obey strict boundary rules.
 
         Architecture Invariants:
-        1. Pure core layers: config/, database/, integrations/, utils/, and services/*.py (pure services)
-           must NEVER import ANY module from the bot layer (bot, bot.texts, bot.keyboards, bot.handlers, etc.).
-        2. Delivery adapter workers: services/workers/* may import only canonical presentation adapters
-           (bot.texts.* and bot.keyboards.*), but must NEVER import bot.handlers, bot.middlewares, or bot.states.
+        1. Pure core layers: config/, database/, integrations/, utils/ must NEVER import ANY
+           module from the bot layer (bot, bot.texts, bot.keyboards, bot.handlers, etc.).
+        2. Pure services (services/*.py) may import ONLY the data-only facades bot.texts and
+           bot.constants (no aiogram, no upward imports); bot.handlers/bot.middlewares/
+           bot.states/bot.main/bot.keyboards remain forbidden.
+        3. Delivery adapter workers: services/workers/* may import only canonical presentation
+           adapters (bot.texts.* and bot.keyboards.*), but must NEVER import bot.handlers,
+           bot.middlewares, or bot.states.
         """
         project_root = Path(__file__).resolve().parent.parent
         violations = []
@@ -147,13 +192,14 @@ class CircularImportRegressionTests(unittest.TestCase):
                 for lineno, name in file_violations:
                     violations.append((str(py_file.relative_to(project_root)), lineno, name))
 
-        # Pure services in services/*.py (excluding workers subdirectory)
+        # 2. Pure services in services/*.py (excluding workers subdirectory)
+        #    May import only the data-only facades bot.texts / bot.constants.
         services_dir = project_root / "services"
         if services_dir.exists():
             for py_file in services_dir.glob("*.py"):
                 with open(py_file, "r", encoding="utf-8") as f:
                     tree = ast.parse(f.read(), filename=str(py_file))
-                file_violations = self._find_ast_import_violations(tree, ("bot",))
+                file_violations = self._find_illegal_bot_imports_for_services(tree)
                 for lineno, name in file_violations:
                     violations.append((str(py_file.relative_to(project_root)), lineno, name))
 

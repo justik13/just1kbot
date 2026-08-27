@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import string
 import unittest
 from pathlib import Path
@@ -22,7 +23,10 @@ EXPECTED_FILES = {
     "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
 }
 
-PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "integrations")
+PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services")
+# integrations/ — автономные веб-приложения (incy, amnezia_bridge) с собственным
+# презентационным слоем и HTML-шаблонами. Они не являются текстами Telegram-бота
+# и сознательно выведены за границы SSOT-каталога bot/texts/ (см. ТЗ по SSOT).
 
 
 def _collect_docstring_node_ids(tree: ast.AST) -> set[int]:
@@ -35,7 +39,7 @@ def _collect_docstring_node_ids(tree: ast.AST) -> set[int]:
     return ids
 
 
-def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[str]:
+def _find_cyrillic_literals(path: Path, tree: ast.AST, docstring_node_ids: set[int]) -> list[str]:
     violations: list[str] = []
 
     class Visitor(ast.NodeVisitor):
@@ -66,7 +70,7 @@ def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[st
                 for call in self.call_stack
             )
 
-    Visitor().visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+    Visitor().visit(tree)
     return violations
 
 
@@ -177,6 +181,11 @@ class TestTextsLayout(unittest.TestCase):
                         )
 
     def test_config_constants_has_no_user_facing_text(self):
+        """Константы конфига не должны быть UI-текстами.
+
+        Технические идентификаторы (protocol='amneziawg2', таймауты-строки и
+        т.п.) допустимы; запрещены значения с кириллицей и англоязычные фразы.
+        """
         path = ROOT / "config" / "constants.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         ui_values = []
@@ -186,7 +195,13 @@ class TestTextsLayout(unittest.TestCase):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id.isupper():
                     if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-                        ui_values.append((target.id, node.value.value))
+                        value = node.value.value
+                        if any("\u0400" <= ch <= "\u04ff" for ch in value):
+                            ui_values.append((target.id, value))
+                            continue
+                        words = [w for w in re.split(r"\s+", value.strip()) if w]
+                        if len(words) >= 2 and all(re.search(r"[A-Za-z]{3}", w) for w in words):
+                            ui_values.append((target.id, value))
         self.assertEqual(ui_values, [])
 
     def test_no_cyrillic_string_literals_outside_texts(self):
@@ -196,7 +211,9 @@ class TestTextsLayout(unittest.TestCase):
                 if TEXTS_DIR in path.parents:
                     continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-                violations.extend(_find_cyrillic_literals(path, _collect_docstring_node_ids(tree)))
+                violations.extend(
+                    _find_cyrillic_literals(path, tree, _collect_docstring_node_ids(tree))
+                )
         self.assertEqual(
             violations,
             [],

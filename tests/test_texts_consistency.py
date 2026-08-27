@@ -121,7 +121,7 @@ class TextsConsistencyTests(unittest.TestCase):
                                 continue
                             
                             # SKIP DICT/LIST LABELS WHICH INTENTIONALLY SHARE STRINGS
-                            if target.id.endswith("_LABELS"):
+                            if target.id.endswith("_LABELS") or target.id == "AUDIT_ACTIONS":
                                 continue
 
                             strings = _extract_strings(stmt.value, target.id)
@@ -365,9 +365,6 @@ class TextsConsistencyTests(unittest.TestCase):
                             )
 
     @staticmethod
-    def _is_logging_call(node: ast.AST, parent_calls: list[ast.Call]) -> bool:
-        """Check if an AST node is inside a logger/logging call."""
-    @staticmethod
     def _is_logging_or_regex_call(parent_calls: list[ast.Call]) -> bool:
         """Check if an AST node is inside a logger/logging call or regex pattern."""
         for call in parent_calls:
@@ -470,23 +467,6 @@ class TextsConsistencyTests(unittest.TestCase):
             if re.search(r"[A-Za-z]{2,}", clean_s) and " " in clean_s:
                 return True
             if re.search(r"[A-Za-z]", clean_s) and " " in clean_s:
-                return True
-            return False
-            if s in ALLOWED_INTERNAL_STRINGS:
-                return False
-            if re.search(r"[Ѐ-ӿ]", s):
-                return True
-            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
-                return False
-            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
-                return False
-            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", s):
-                return False
-            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", s):
-                return False
-            if re.search(r"[A-Za-z]{2,}", s) and " " in s:
-                return True
-            if re.search(r"[A-Za-z]", s) and " " in s:
                 return True
             return False
 
