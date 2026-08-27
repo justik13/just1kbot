@@ -19,8 +19,6 @@ from bot.texts.runtime.alerts import (
     ALERT_SERVER_RESTORED,
 )
 from config.constants import ServerHealthState
-
-_build_alert_keyboard = get_node_monitor_alert_keyboard
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -33,6 +31,8 @@ from database.repositories.servers_repo import (
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
+
+_build_alert_keyboard = get_node_monitor_alert_keyboard
 
 logger = logging.getLogger(__name__)
 
