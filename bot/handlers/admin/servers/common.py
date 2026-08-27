@@ -122,19 +122,34 @@ async def _show_server_card(
         status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
-    peer_counts = await get_server_peer_counts(session)
-    used_clients = peer_counts.get(server.id, 0)
+    from services.slots_cache import get_cached_peer_count
+
+    db_counts = await get_server_peer_counts(session)
+    db_used = db_counts.get(server.id, 0)
+    cached_used = get_cached_peer_count(server.id)
+    used_clients = cached_used if cached_used is not None else db_used
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
+    if cached_used is not None and cached_used != db_used:
+        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
+            used_clients=used_clients, max_clients=max_clients
+        ) + texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
+    else:
+        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
+            used_clients=used_clients, max_clients=max_clients
+        )
+
     rendered = (
-        f"{header}"+
-        texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(flag=flag, safe_server_name=safe(server.name), server_id=server.id)+
-        texts.COMMON_STATUS_V_BOTE.format(status_line=status_line)+
-        f"{extra_status_info}"+
-        texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))+
-        texts.COMMON_ZAPOLNENNOST_SLOTOV.format(used_clients=used_clients, max_clients=max_clients)+
-        texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
+        f"{header}"
+        + texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(
+            flag=flag, safe_server_name=safe(server.name), server_id=server.id
+        )
+        + texts.COMMON_STATUS_V_BOTE.format(status_line=status_line)
+        + f"{extra_status_info}"
+        + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
+        + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
+        + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 
     if ping_result:

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from aiogram import Bot
@@ -132,27 +133,31 @@ async def _traffic_sync_once(bot: Bot | None = None):
         return
 
     async def _fetch_server_traffic(server_info):
+        from services.slots_cache import get_server_generation
         client = AmneziaClient(
             server_info["api_url"], server_info["api_key"]
         )
+        gen = get_server_generation(server_info["id"])
         try:
             api_clients_list = await client.get_all_clients()
+            t_done = time.monotonic()
             if api_clients_list is None:
-                return server_info["id"], None
+                return server_info["id"], None, t_done, gen
             return server_info["id"], {
                 c.id: c for c in api_clients_list
-            }
+            }, t_done, gen
         except Exception as e:
+            t_done = time.monotonic()
             logger.error(
                 "Failed to fetch traffic from server %s: %s", server_info["name"], e
             )
-            return server_info["id"], None
+            return server_info["id"], None, t_done, gen
 
     tasks = [_fetch_server_traffic(s) for s in servers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     api_data_by_server = {
-        r[0]: r[1]
+        r[0]: (r[1], r[2], r[3])
         for r in results
         if not isinstance(r, Exception) and r is not None and r[1] is not None
     }
@@ -161,16 +166,34 @@ async def _traffic_sync_once(bot: Bot | None = None):
         server_id = server_info["id"]
         if server_id not in api_data_by_server:
             continue
-        api_clients = api_data_by_server[server_id]
+        api_clients, t_done, gen = api_data_by_server[server_id]
+
+        from services.slots_cache import get_server_generation
+        if gen != get_server_generation(server_id):
+            logger.info("Skipping traffic processing for server %s due to configuration generation change", server_id)
+            continue
 
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
-        update_cached_peer_count(server_id, len(api_clients))
+        update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 
-        await _process_server_traffic(server_info, api_clients, bot)
+        await _process_server_traffic(server_info, api_clients, bot, expected_gen=gen)
 
 
-async def _process_server_traffic(server_info, api_clients, bot: Bot | None = None):
+async def _process_server_traffic(
+    server_info,
+    api_clients,
+    bot: Bot | None = None,
+    expected_gen: int | None = None,
+):
     server_id = server_info["id"]
+    from services.slots_cache import get_server_generation
+    if expected_gen is not None and get_server_generation(server_id) != expected_gen:
+        logger.info(
+            "Aborting _process_server_traffic for server %s due to configuration generation change",
+            server_id,
+        )
+        return
+
     updates_data = {}
     current_time = now_utc()
 

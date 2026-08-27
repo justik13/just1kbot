@@ -822,16 +822,17 @@ class AmneziaClient:
             )
         ) is not None
 
-    async def get_server_load(self, timeout: float = 5.0) -> dict | None:
+    async def get_server_load(self, timeout: float = 10.0) -> dict | None:
         """
         Запрашивает метрики загрузки сервера (/server/load или /server).
         Возвращает словарь с cpu_percent, ram_percent, disk_percent, uptime_seconds и т.д.
-        Ограничен таймаутом в 5 секунд.
+        Ограничен таймаутом в 10 секунд.
         """
         try:
             return await asyncio.wait_for(self._get_server_load_internal(), timeout=timeout)
         except Exception as exc:
-            logger.warning("get_server_load timed out or failed for %s: %s", self._log_target, exc)
+            err_msg = str(exc) if str(exc) else type(exc).__name__
+            logger.warning("get_server_load timed out or failed for %s: %s", self._log_target, err_msg)
             return None
 
     async def _get_server_load_internal(self) -> dict | None:

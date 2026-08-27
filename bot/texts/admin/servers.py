@@ -106,6 +106,10 @@ ADMIN_SERVER_RENAMED = "✅ Сервер успешно переименован
 
 ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
+ADMIN_SERVER_SLOTS_DB_NOTE = " <i>(в БД: {db_used})</i>"
+
+ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
+
 ADMIN_SERVER_STATE_DISABLED = "🔴 Отключен"
 
 ADMIN_SERVER_STATE_ENABLED = "🟢 Включен"

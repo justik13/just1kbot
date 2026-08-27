@@ -29,7 +29,7 @@ COMMON_DO_USTR = "{tariff_name} (до {tariff_device_limit} устр.)"
 
 COMMON_FILTR = "Фильтр: {f_name}"
 
-COMMON_KARTOCHKA_VPN_SERVER_ID = """🖥 <b>Карточка сервера {flag} {safe_server_name}</b> (ID: {server_id})
+COMMON_KARTOCHKA_VPN_SERVER_ID = """🖥 <b>Карточка VPN-сервера {flag} {safe_server_name}</b> (ID: {server_id})
 
 """
 
@@ -73,7 +73,7 @@ COMMON_VSE = "Все"
 
 COMMON_ZABANENNYE = "🚫 Забаненные"
 
-COMMON_ZAPOLNENNOST_SLOTOV = """• Заполненность слотов: <b>{used_clients} / {max_clients}</b>
+COMMON_ZAPOLNENNOST_SLOTOV = """• Заполненность слотов: {slots_text}
 """
 
 

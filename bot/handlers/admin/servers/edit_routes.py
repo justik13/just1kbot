@@ -570,6 +570,9 @@ async def process_edit_server_url(
 
     await update_server(session, server, api_url=new_url)
 
+    from services.slots_cache import invalidate_server_cache
+    invalidate_server_cache(server_id)
+
     cleanup_server_circuit_breakers(old_url)
 
     await AuditService.log_action(
@@ -818,6 +821,9 @@ async def process_edit_server_key(
             return
 
     await update_server(session, server, api_key=new_key)
+
+    from services.slots_cache import invalidate_server_cache
+    invalidate_server_cache(server_id)
 
     await AuditService.log_action(
         session,
