@@ -1,11 +1,7 @@
-"""Shared helpers used by more than one handler domain.
-
-Kept intentionally tiny: these functions were previously duplicated verbatim
-(or with dangerously swapped signatures) across payment/common.py and
-connection/common.py.
-"""
+"""Shared helpers used by more than one handler domain."""
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot import texts
 from bot.keyboards import get_back_button
 from services.maintenance_service import MaintenanceService
 from services.subscription import SubscriptionService
@@ -30,7 +26,7 @@ async def render_maintenance(
     bot = getattr(target, "bot", None)
     chat = getattr(target, "chat", None)
     chat_id = chat.id if chat else None
-    if (bot is None or chat_id is None):
+    if bot is None or chat_id is None:
         from aiogram.types import CallbackQuery
 
         if isinstance(target, CallbackQuery):
@@ -39,6 +35,8 @@ async def render_maintenance(
     if bot is None or chat_id is None:
         return
     message = await MaintenanceService.get_message(session)
+    if not message:
+        message = texts.MAINTENANCE_DEFAULT_MESSAGE
     await render_hub(
         bot,
         chat_id,
