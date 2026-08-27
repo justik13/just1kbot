@@ -35,7 +35,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         datetime.now(timezone.utc),
     )
 
-_slots_cache = TTLCache(maxsize=100, ttl=1800)
+_slots_cache: TTLCache[int, tuple[int, float]] = TTLCache(maxsize=100, ttl=1800)
 _locks: dict[int, tuple[asyncio.Lock, float]] = {}
 _last_cleanup_time: float = 0.0
 _CLEANUP_INTERVAL = 3600.0
@@ -43,14 +43,27 @@ _LOCK_TTL = 3600.0
 
 
 def get_cached_peer_count(server_id: int) -> int | None:
-    return _slots_cache.get(server_id)
+    entry = _slots_cache.get(server_id)
+    if entry is None:
+        return None
+    if isinstance(entry, tuple):
+        return entry[0]
+    return entry
 
 
-# ──────────────────────────────────────────────────────────────
-# ДОБАВЛЕНО: публичная функция для записи из traffic worker.
-# ──────────────────────────────────────────────────────────────
-def update_cached_peer_count(server_id: int, count: int) -> None:
-    _slots_cache[server_id] = count
+def update_cached_peer_count(server_id: int, count: int, timestamp: float | None = None) -> None:
+    now = timestamp if timestamp is not None else time.monotonic()
+    entry = _slots_cache.get(server_id)
+    if entry is not None and isinstance(entry, tuple):
+        _, last_ts = entry
+        if now < last_ts:
+            return
+    _slots_cache[server_id] = (count, now)
+
+
+def invalidate_server_cache(server_id: int) -> None:
+    """Evict a specific server from slots cache on configuration change."""
+    _slots_cache.pop(server_id, None)
 
 
 def clear_slots_cache() -> None:
@@ -65,8 +78,9 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         _cleanup_old_locks(now)
         _last_cleanup_time = now
 
-    if not force_refresh and server.id in _slots_cache:
-        return _slots_cache[server.id]
+    cached = get_cached_peer_count(server.id)
+    if not force_refresh and cached is not None:
+        return cached
 
     if server.id not in _locks:
         _locks[server.id] = (asyncio.Lock(), now)
@@ -76,8 +90,9 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
 
     lock = _locks[server.id][0]
     async with lock:
-        if not force_refresh and server.id in _slots_cache:
-            return _slots_cache[server.id]
+        cached = get_cached_peer_count(server.id)
+        if not force_refresh and cached is not None:
+            return cached
 
         client = AmneziaClient(server.api_url, server.api_key)
         try:
@@ -98,7 +113,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             return -1
 
         count = len(clients)
-        _slots_cache[server.id] = count
+        update_cached_peer_count(server.id, count, now)
         logger.info(
             "Cached real peer count for server %s (%s): %s/%s",
             server.id, server.name, count, server.max_clients,

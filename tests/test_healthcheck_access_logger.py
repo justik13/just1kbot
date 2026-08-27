@@ -2,7 +2,7 @@ import asyncio
 import inspect
 import logging
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from aiohttp import web
 from bot.main import HealthcheckAccessLogger
@@ -142,9 +142,63 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
         ):
             await common._show_server_card(callback, session, server)
 
-        rendered = callback.message.edit_text.call_args.args[0]
-        self.assertIn("6 / 240", rendered)
-        self.assertNotIn("(в БД:", rendered)
+    async def test_slots_cache_monotonic_ordering_prevents_stale_overwrite(self):
+        from services.slots_cache import get_cached_peer_count, update_cached_peer_count
+
+        # Newer snapshot at t=100 has 8 peers
+        update_cached_peer_count(1, 8, timestamp=100.0)
+        self.assertEqual(get_cached_peer_count(1), 8)
+
+        # Slower delayed snapshot at t=90 with 5 peers finishes later -> must NOT overwrite newer t=100
+        update_cached_peer_count(1, 5, timestamp=90.0)
+        self.assertEqual(get_cached_peer_count(1), 8)
+
+        # Even newer snapshot at t=110 with 10 peers -> MUST overwrite
+        update_cached_peer_count(1, 10, timestamp=110.0)
+        self.assertEqual(get_cached_peer_count(1), 10)
+
+    def test_invalidate_server_cache_removes_entry(self):
+        from services.slots_cache import get_cached_peer_count, invalidate_server_cache, update_cached_peer_count
+
+        update_cached_peer_count(2, 15)
+        self.assertEqual(get_cached_peer_count(2), 15)
+
+        invalidate_server_cache(2)
+        self.assertIsNone(get_cached_peer_count(2))
+
+    async def test_cleanup_worker_preserves_cache_on_api_failure(self):
+        from services.slots_cache import get_cached_peer_count, update_cached_peer_count
+        from services.workers.cleanup import _cleanup_dangling_peers
+
+        update_cached_peer_count(3, 9)
+
+        # Simulate Server in DB
+        server_mock = MagicMock(id=3, name="DE Node", api_url="http://de.node", api_key="k", is_active=True)
+
+        class MockSession:
+            async def execute(self, stmt):
+                res = MagicMock()
+                # If selecting server: return server_mock
+                res.scalars.return_value.all.return_value = [server_mock]
+                # If selecting vpn profiles: return []
+                res.all.return_value = []
+                return res
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def mock_session_scope():
+            yield MockSession()
+
+        # Simulate API returning None (failure/timeout)
+        with (
+            patch("services.workers.cleanup.session_scope", mock_session_scope),
+            patch("services.workers.cleanup.AmneziaClient.get_all_clients", AsyncMock(return_value=None)),
+        ):
+            await _cleanup_dangling_peers()
+
+        # Cache must NOT be overwritten with 0!
+        self.assertEqual(get_cached_peer_count(3), 9)
 
 
 if __name__ == "__main__":

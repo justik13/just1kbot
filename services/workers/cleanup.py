@@ -411,18 +411,19 @@ async def _cleanup_dangling_peers():
             server_info["api_url"],
             server_info["api_key"],
         )
+        t_start = time.monotonic()
         try:
             api_clients_list = await client.get_all_clients()
             if api_clients_list is None:
-                return server_info, []
-            return server_info, api_clients_list
+                return server_info, None, t_start
+            return server_info, api_clients_list, t_start
         except Exception as e:
             logger.error(
                 texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1,
                 server_info["name"],
                 e,
             )
-            return server_info, []
+            return server_info, None, t_start
 
     tasks = [_fetch_api_peers(s) for s in servers_data]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -430,13 +431,13 @@ async def _cleanup_dangling_peers():
     unmanaged_count = 0
 
     for result in results:
-        if isinstance(result, Exception):
+        if isinstance(result, Exception) or result is None:
             continue
 
-        server_info, api_clients_list = result
+        server_info, api_clients_list, t_start = result
         if api_clients_list is not None:
             from services.slots_cache import update_cached_peer_count
-            update_cached_peer_count(server_info["id"], len(api_clients_list))
+            update_cached_peer_count(server_info["id"], len(api_clients_list), timestamp=t_start)
         if not api_clients_list:
             continue
 

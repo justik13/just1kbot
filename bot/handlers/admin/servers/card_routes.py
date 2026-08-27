@@ -260,9 +260,9 @@ async def ping_server(
                 clients = await client.get_all_clients()
                 if clients is not None:
                     from services.slots_cache import update_cached_peer_count
-                    update_cached_peer_count(server.id, len(clients))
-            except Exception:
-                pass
+                    update_cached_peer_count(server.id, len(clients), timestamp=start_t)
+            except Exception as e:
+                logger.warning("Failed to refresh client count during server ping for %s: %s", server.id, e)
             ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
         else:
             ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
