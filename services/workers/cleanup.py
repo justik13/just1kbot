@@ -438,6 +438,14 @@ async def _cleanup_dangling_peers():
             continue
 
         server_info, api_clients_list, t_done, gen = result
+        from services.slots_cache import get_server_generation
+        if gen != get_server_generation(server_info["id"]):
+            logger.info(
+                "Skipping cleanup for server %s due to configuration generation change",
+                server_info["name"],
+            )
+            continue
+
         if api_clients_list is not None:
             from services.slots_cache import update_cached_peer_count
             update_cached_peer_count(

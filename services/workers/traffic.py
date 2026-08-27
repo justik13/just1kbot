@@ -167,6 +167,11 @@ async def _traffic_sync_once(bot: Bot | None = None):
             continue
         api_clients, t_done, gen = api_data_by_server[server_id]
 
+        from services.slots_cache import get_server_generation
+        if gen != get_server_generation(server_id):
+            logger.info("Skipping traffic processing for server %s due to configuration generation change", server_id)
+            continue
+
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
         update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 

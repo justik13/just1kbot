@@ -56,7 +56,6 @@ def get_cached_peer_count(server_id: int) -> int | None:
         count, _, gen = entry
         current_gen = _server_generations.get(server_id, 0)
         if gen != current_gen:
-            _slots_cache.pop(server_id, None)
             return None
         return count
     return entry
@@ -97,7 +96,7 @@ def invalidate_server_cache(server_id: int) -> None:
 
 
 def clear_slots_cache() -> None:
-    """Clear all cached peer counts and generations."""
+    """Clear all cached peer counts and reset generations."""
     _slots_cache.clear()
     _server_generations.clear()
 
@@ -126,8 +125,10 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             return cached
 
         client = AmneziaClient(server.api_url, server.api_key)
+        gen = get_server_generation(server.id)
         try:
             clients = await client.get_all_clients()
+            t_done = time.monotonic()
         except Exception as e:
             logger.error(
                 "Failed to get real peer count for server %s (%s): %s",
@@ -144,7 +145,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             return -1
 
         count = len(clients)
-        update_cached_peer_count(server.id, count, now)
+        update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
         logger.info(
             "Cached real peer count for server %s (%s): %s/%s",
             server.id, server.name, count, server.max_clients,

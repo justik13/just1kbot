@@ -237,6 +237,72 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
         # Cache must NOT be overwritten with 0!
         self.assertEqual(get_cached_peer_count(3), 9)
 
+    async def test_get_real_peer_count_rejects_in_flight_when_invalidated(self):
+        from database.models import Server
+        from services.slots_cache import get_cached_peer_count, get_real_peer_count, invalidate_server_cache
+
+        server = Server(
+            id=10,
+            name="NL Node",
+            api_url="http://nl.node",
+            api_key="k",
+            is_active=True,
+            max_clients=240,
+        )
+
+        async def mock_slow_clients():
+            # Invalidation occurs while HTTP request is in-flight
+            invalidate_server_cache(10)
+            return [MagicMock(), MagicMock(), MagicMock()]  # 3 clients
+
+        with patch("services.slots_cache.AmneziaClient.get_all_clients", side_effect=mock_slow_clients):
+            res = await get_real_peer_count(server, force_refresh=True)
+            self.assertEqual(res, 3)
+
+        # Cache must NOT store the stale generation snapshot!
+        self.assertIsNone(get_cached_peer_count(10))
+
+    async def test_traffic_worker_skips_processing_on_generation_mismatch(self):
+        from services.slots_cache import get_cached_peer_count, invalidate_server_cache
+        from services.workers.traffic import _traffic_sync_once
+
+        async def mock_slow_traffic():
+            # URL/key changed in admin while traffic worker was fetching
+            invalidate_server_cache(11)
+            client_mock = MagicMock()
+            client_mock.id = "tg_111"
+            return [client_mock]
+
+        class MockSession:
+            async def execute(self, stmt):
+                res = MagicMock()
+                mock_s = MagicMock()
+                mock_s.id = 11
+                mock_s.name = "FR Node"
+                mock_s.api_url = "http://fr.node"
+                mock_s.api_key = "k"
+                mock_s.is_active = True
+                res.scalars.return_value.all.return_value = [mock_s]
+                return res
+
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def mock_session_scope():
+            yield MockSession()
+
+        with (
+            patch("services.workers.traffic.session_scope", mock_session_scope),
+            patch("services.workers.traffic.AmneziaClient.get_all_clients", side_effect=mock_slow_traffic),
+            patch("services.workers.traffic._process_server_traffic", new_callable=AsyncMock) as mock_proc,
+        ):
+            await _traffic_sync_once()
+
+            # _process_server_traffic MUST NOT be called because generation mismatched!
+            mock_proc.assert_not_called()
+
+        self.assertIsNone(get_cached_peer_count(11))
+
 
 if __name__ == "__main__":
     unittest.main()
