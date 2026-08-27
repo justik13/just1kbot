@@ -3,6 +3,8 @@ from __future__ import annotations
 
 DURATION_HOURS_SUFFIX = " {hours} ч."
 
+MAINTENANCE_DEFAULT_MESSAGE = "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
+
 PLACEHOLDER_DASH = "—"
 
 PROVISIONING_CREATE_FAILED = "ошибка создания"
