@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ast
+import string
 import unittest
 from pathlib import Path
 
@@ -66,6 +67,72 @@ def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[st
             )
 
     Visitor().visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+    return violations
+
+
+def _canonical_text_fields() -> dict[str, set[str]]:
+    fields: dict[str, set[str]] = {}
+    formatter = string.Formatter()
+    for py_file in TEXTS_DIR.rglob("*.py"):
+        if py_file.name == "__init__.py":
+            continue
+        tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+        for statement in tree.body:
+            if not isinstance(statement, ast.Assign) or not isinstance(statement.value, ast.Constant):
+                continue
+            if not isinstance(statement.value.value, str):
+                continue
+            for target in statement.targets:
+                if not isinstance(target, ast.Name) or not target.id.isupper():
+                    continue
+                names: set[str] = set()
+                for _, field_name, _, _ in formatter.parse(statement.value.value):
+                    if field_name and not field_name.isdigit() and not field_name.startswith("{"):
+                        names.add(field_name.split(".", 1)[0].split("[", 1)[0])
+                fields[target.id] = names
+    return fields
+
+
+def _find_missing_text_format_args() -> list[str]:
+    expected = _canonical_text_fields()
+    violations: list[str] = []
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self, path: Path) -> None:
+            self.path = path
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and func.attr == "format"
+                and isinstance(func.value, ast.Attribute)
+                and isinstance(func.value.value, ast.Name)
+                and func.value.value.id == "texts"
+            ):
+                key = func.value.attr
+                required = expected.get(key, set())
+                if required:
+                    provided = {kw.arg for kw in node.keywords if kw.arg is not None}
+                    has_dynamic_kwargs = any(kw.arg is None for kw in node.keywords)
+                    if not has_dynamic_kwargs:
+                        missing = sorted(required - provided)
+                        if missing:
+                            violations.append(
+                                f"{self.path.relative_to(ROOT)}:{node.lineno}: texts.{key}.format() missing {missing}"
+                            )
+            self.generic_visit(node)
+
+    for base_dir in PRODUCTION_DIRS:
+        for path in base_dir.rglob("*.py"):
+            if TEXTS_DIR in path.parents:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as exc:
+                violations.append(f"{path.relative_to(ROOT)}:{exc.lineno}: syntax error: {exc.msg}")
+                continue
+            Visitor(path).visit(tree)
     return violations
 
 
@@ -134,4 +201,12 @@ class TestTextsLayout(unittest.TestCase):
             violations,
             [],
             "Cyrillic string literals outside bot/texts detected:\n" + "\n".join(violations),
+        )
+
+    def test_text_format_calls_provide_all_named_placeholders(self):
+        violations = _find_missing_text_format_args()
+        self.assertEqual(
+            violations,
+            [],
+            "Text format calls have missing placeholders:\n" + "\n".join(violations),
         )
