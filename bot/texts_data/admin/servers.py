@@ -157,12 +157,8 @@ TEXTS = {
     'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
     'BTN_VPN_SERVERY': '🖥 VPN Серверы',
     'BTN_TARIFY_PODPISOK': '💎 Тарифы подписок',
-    'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
     'BTN_ISTORIYA_PLATEZHEJ': '💳 История платежей',
     'BTN_ZHURNAL_POKUPOK': '🛒 Журнал покупок',
-    'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
     'BTN_NASTROJKI_MTPROTO_PROXY': '🚀 Настройки MTProto Proxy',
     'BTN_SISTEMNYJ_AUDIT_LOG': '📜 Системный аудит-лог',
-    'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
-    'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
 }

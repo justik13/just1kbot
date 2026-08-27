@@ -2,7 +2,6 @@
 import logging
 import importlib
 import pkgutil
-import sys
 from typing import Any
 import bot.texts_data
 
@@ -15,14 +14,13 @@ def _load_all_modules():
     _ALL_MODULES = []
     
     def iter_namespace(ns_pkg):
-        import pkgutil
         return pkgutil.iter_modules(ns_pkg.__path__, ns_pkg.__name__ + ".")
         
-    for finder, name, ispkg in iter_namespace(bot.texts_data):
+    for _finder, name, ispkg in iter_namespace(bot.texts_data):
         if ispkg:
             # e.g. bot.texts_data.admin
             pkg = importlib.import_module(name)
-            for sub_finder, sub_name, sub_ispkg in iter_namespace(pkg):
+            for _sub_finder, sub_name, _sub_ispkg in iter_namespace(pkg):
                 mod = importlib.import_module(sub_name)
                 _ALL_MODULES.append((sub_name.replace("bot.texts_data.", ""), mod))
         else:
