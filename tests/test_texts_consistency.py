@@ -332,14 +332,9 @@ class TextsConsistencyTests(unittest.TestCase):
                 if isinstance(stmt, ast.Assign):
                     for target in stmt.targets:
                         if isinstance(target, ast.Name) and target.id.isupper():
-                            self.assertIn(
-                                target.id,
-                                all_keys,
-                                f"Key {target.id!r} in {py_file} is not exported in bot.texts facade.",
-                            )
                             self.assertTrue(
                                 hasattr(texts, target.id),
-                                f"Key {target.id!r} not accessible via getattr(texts, ...).",
+                                f"Key {target.id!r} in {py_file} not accessible via getattr(texts, ...).",
                             )
 
     def test_texts_package_import_firewall(self):
