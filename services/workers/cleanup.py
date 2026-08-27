@@ -407,22 +407,26 @@ async def _cleanup_dangling_peers():
         return
 
     async def _fetch_api_peers(server_info):
+        from services.slots_cache import get_server_generation
         client = AmneziaClient(
             server_info["api_url"],
             server_info["api_key"],
         )
+        gen = get_server_generation(server_info["id"])
         try:
             api_clients_list = await client.get_all_clients()
+            t_done = time.monotonic()
             if api_clients_list is None:
-                return server_info, []
-            return server_info, api_clients_list
+                return server_info, None, t_done, gen
+            return server_info, api_clients_list, t_done, gen
         except Exception as e:
+            t_done = time.monotonic()
             logger.error(
                 texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1,
                 server_info["name"],
                 e,
             )
-            return server_info, []
+            return server_info, None, t_done, gen
 
     tasks = [_fetch_api_peers(s) for s in servers_data]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -430,10 +434,23 @@ async def _cleanup_dangling_peers():
     unmanaged_count = 0
 
     for result in results:
-        if isinstance(result, Exception):
+        if isinstance(result, Exception) or result is None:
             continue
 
-        server_info, api_clients_list = result
+        server_info, api_clients_list, t_done, gen = result
+        from services.slots_cache import get_server_generation
+        if gen != get_server_generation(server_info["id"]):
+            logger.info(
+                "Skipping cleanup for server %s due to configuration generation change",
+                server_info["name"],
+            )
+            continue
+
+        if api_clients_list is not None:
+            from services.slots_cache import update_cached_peer_count
+            update_cached_peer_count(
+                server_info["id"], len(api_clients_list), timestamp=t_done, generation=gen
+            )
         if not api_clients_list:
             continue
 

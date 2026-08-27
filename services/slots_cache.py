@@ -35,27 +35,73 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         datetime.now(timezone.utc),
     )
 
-_slots_cache = TTLCache(maxsize=100, ttl=300)
+_slots_cache: TTLCache[int, tuple[int, float, int]] = TTLCache(maxsize=100, ttl=1800)
+_server_generations: dict[int, int] = {}
+_global_generation: int = 0
 _locks: dict[int, tuple[asyncio.Lock, float]] = {}
 _last_cleanup_time: float = 0.0
 _CLEANUP_INTERVAL = 3600.0
 _LOCK_TTL = 3600.0
 
 
+def get_server_generation(server_id: int) -> int:
+    """Get current configuration generation for server_id."""
+    return _server_generations.get(server_id, _global_generation)
+
+
 def get_cached_peer_count(server_id: int) -> int | None:
-    return _slots_cache.get(server_id)
+    entry = _slots_cache.get(server_id)
+    if entry is None:
+        return None
+    if isinstance(entry, tuple):
+        count, _, gen = entry
+        current_gen = get_server_generation(server_id)
+        if gen != current_gen:
+            return None
+        return count
+    return entry
 
 
-# ──────────────────────────────────────────────────────────────
-# ДОБАВЛЕНО: публичная функция для записи из traffic worker.
-# ──────────────────────────────────────────────────────────────
-def update_cached_peer_count(server_id: int, count: int) -> None:
-    _slots_cache[server_id] = count
+def update_cached_peer_count(
+    server_id: int,
+    count: int,
+    timestamp: float | None = None,
+    generation: int | None = None,
+) -> bool:
+    """
+    Updates cached peer count if snapshot is fresher than current entry and matches server generation.
+    Returns True if cache was updated, False if discarded.
+    """
+    now = timestamp if timestamp is not None else time.monotonic()
+    current_gen = get_server_generation(server_id)
+    req_gen = generation if generation is not None else current_gen
+
+    # Discard snapshot if it was requested under a prior server configuration generation
+    if req_gen != current_gen:
+        return False
+
+    entry = _slots_cache.get(server_id)
+    if entry is not None and isinstance(entry, tuple):
+        _, last_ts, entry_gen = entry
+        if entry_gen == current_gen and now < last_ts:
+            return False
+
+    _slots_cache[server_id] = (count, now, current_gen)
+    return True
+
+
+def invalidate_server_cache(server_id: int) -> None:
+    """Evict a specific server from slots cache and bump generation to discard in-flight requests."""
+    _server_generations[server_id] = get_server_generation(server_id) + 1
+    _slots_cache.pop(server_id, None)
 
 
 def clear_slots_cache() -> None:
-    """Clear all cached peer counts."""
+    """Clear all cached peer counts and advance global generation so in-flight requests are invalidated."""
+    global _global_generation
+    _global_generation += 1
     _slots_cache.clear()
+    _server_generations.clear()
 
 
 async def get_real_peer_count(server: Server, force_refresh: bool = False) -> int:
@@ -65,8 +111,9 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
         _cleanup_old_locks(now)
         _last_cleanup_time = now
 
-    if not force_refresh and server.id in _slots_cache:
-        return _slots_cache[server.id]
+    cached = get_cached_peer_count(server.id)
+    if not force_refresh and cached is not None:
+        return cached
 
     if server.id not in _locks:
         _locks[server.id] = (asyncio.Lock(), now)
@@ -76,12 +123,15 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
 
     lock = _locks[server.id][0]
     async with lock:
-        if not force_refresh and server.id in _slots_cache:
-            return _slots_cache[server.id]
+        cached = get_cached_peer_count(server.id)
+        if not force_refresh and cached is not None:
+            return cached
 
         client = AmneziaClient(server.api_url, server.api_key)
+        gen = get_server_generation(server.id)
         try:
             clients = await client.get_all_clients()
+            t_done = time.monotonic()
         except Exception as e:
             logger.error(
                 "Failed to get real peer count for server %s (%s): %s",
@@ -98,7 +148,7 @@ async def get_real_peer_count(server: Server, force_refresh: bool = False) -> in
             return -1
 
         count = len(clients)
-        _slots_cache[server.id] = count
+        update_cached_peer_count(server.id, count, timestamp=t_done, generation=gen)
         logger.info(
             "Cached real peer count for server %s (%s): %s/%s",
             server.id, server.name, count, server.max_clients,
