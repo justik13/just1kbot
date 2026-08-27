@@ -369,17 +369,12 @@ async def enqueue_payment_refund(
     )
     builder.button(text=texts.ADMIN_PURCHASES_BTN_USER, callback_data="admin_payments")
     builder.adjust(1)
-    status_text = (
-        texts.ADMIN_PAYMENTS_BTN_NEXT
-        if request.created
-        else texts.ADMIN_PAYMENTS_BTN_BACK
-    )
     await callback.message.edit_text(
         texts.ADMIN_PURCHASES_BTN_REFUND.format(
-            status_text=status_text,
             amount_rub=int(request.operation.amount),
-            operation_id=safe(request.operation.operation_id),
-            operation_status=safe(request.operation.status),
+            payment_id=payment_id,
+            status=request.operation.operation_id,
+            details=safe(request.operation.status),
         ),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
