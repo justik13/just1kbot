@@ -16,3 +16,6 @@ ignore = [
     "PLW0108",
     "ASYNC109",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

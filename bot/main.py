@@ -18,6 +18,7 @@ from aiogram.types import (
 )
 from aiogram.utils.chat_action import ChatActionMiddleware
 from aiohttp import web
+from aiohttp.web_log import AccessLogger
 from cachetools import TTLCache
 from cryptography.fernet import Fernet
 
@@ -283,6 +284,15 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     return bot, dp
 
 
+class HealthcheckAccessLogger(AccessLogger):
+    """Suppresses access logging for successful GET /health requests to avoid polluting logs."""
+
+    def log(self, request: web.Request, response: web.StreamResponse, time: float) -> None:
+        if request.path == "/health" and response.status == 200:
+            return
+        super().log(request, response, time)
+
+
 @web.middleware
 async def _http_correlation_middleware(request: web.Request, handler):
     """Give every public HTTP request the same request_id as Telegram updates."""
@@ -303,7 +313,7 @@ async def start_webhook_server(port: int):
     app.middlewares.append(_http_correlation_middleware)
     setup_webhook_routes(app)
 
-    runner = web.AppRunner(app)
+    runner = web.AppRunner(app, access_log_class=HealthcheckAccessLogger)
     await runner.setup()
 
     host = os.getenv("WEBHOOK_HOST", "127.0.0.1")
