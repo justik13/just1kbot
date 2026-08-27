@@ -1,6 +1,9 @@
 """Domain copy catalogue for: admin/queues.py"""
 
 TEXTS = {
+    'ADMIN_QUEUES_HEADER': """🔄 <b>Диагностика очередей платежей и задач</b>
+
+ℹ️ <i>Очереди обеспечивают фоновую обработку чеков ЮKassa, автопродлений и синхронизации с серверами. Если транзакция задерживается, она переводится в статус повтора.</i>""",
     'ADMIN_QUEUE_CARD_ERROR': 'Error code: {error_code}',
     'ADMIN_QUEUE_CARD_ID': 'ID: <code>{operation_id}</code>',
     'ADMIN_QUEUE_CARD_LEASE': 'Lease: {lease}',

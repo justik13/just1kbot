@@ -1,4 +1,4 @@
-from bot import texts
+from enum import StrEnum
 import logging
 
 from sqlalchemy import select, text
@@ -16,6 +16,14 @@ from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
+
+
+class BanStatus(StrEnum):
+    USER_NOT_FOUND = "Пользователь не найден"
+    ALREADY_BANNED = "уже забанен"
+    BANNED = "забанен"
+    ALREADY_UNBANNED = "уже разбанен"
+    UNBANNED = "разбанен"
 
 
 class BanService:
@@ -38,9 +46,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_40
+            return False, BanStatus.USER_NOT_FOUND
         if user.is_banned:
-            return True, texts.UI_BAN_SERVICE_UZHE_ZABANEN_42
+            return True, BanStatus.ALREADY_BANNED
         return await BanService._ban_user(
             session=session,
             admin_id=admin_id,
@@ -56,9 +64,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_58
+            return False, BanStatus.USER_NOT_FOUND
         if not user.is_banned:
-            return True, texts.UI_BAN_SERVICE_UZHE_RAZBANEN_60
+            return True, BanStatus.ALREADY_UNBANNED
         return await BanService._unban_user(
             session=session,
             admin_id=admin_id,
@@ -75,7 +83,7 @@ class BanService:
         user = await get_user_by_telegram_id(session, telegram_id)
 
         if not user:
-            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_77
+            return False, BanStatus.USER_NOT_FOUND
 
         new_status = not user.is_banned
 
@@ -128,7 +136,7 @@ class BanService:
             .with_for_update()
         )
         if locked_user is None or locked_user.is_deleted:
-            return False, texts.UI_BAN_SERVICE_POLZOVATEL_NE_NAYDEN_130
+            return False, BanStatus.USER_NOT_FOUND
 
         payments_closed = 0
         reconciliations_queued = 0
@@ -196,7 +204,7 @@ class BanService:
             reconciliations_queued,
         )
 
-        return True, texts.UI_BAN_SERVICE_ZABANEN_198
+        return True, BanStatus.BANNED
 
     @staticmethod
     async def _unban_user(
@@ -227,4 +235,4 @@ class BanService:
             admin_id,
         )
 
-        return True, texts.UI_BAN_SERVICE_RAZBANEN_229
+        return True, BanStatus.UNBANNED

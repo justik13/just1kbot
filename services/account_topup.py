@@ -1,7 +1,6 @@
 """Balance top-up creation, hiding, and exactly-once settlement."""
 
 from __future__ import annotations
-from bot import texts
 
 import uuid
 from dataclasses import dataclass
@@ -30,10 +29,10 @@ def get_topup_description(context: dict | None = None) -> str:
     operation = ctx.get("operation")
 
     if action == "purchase" and operation == "renew":
-        return texts.UI_ACCOUNT_TOPUP_PRODLENIE_DOSTUPA_K_INFORMATSI_32
+        return "Продление доступа к информационному сервису Just1k"
     if action == "tariff_change":
-        return texts.UI_ACCOUNT_TOPUP_IZMENENIE_PARAMETROV_DOSTUPA_K_34
-    return texts.UI_ACCOUNT_TOPUP_PREDOSTAVLENIE_DOSTUPA_K_INFOR_35
+        return "Изменение параметров доступа к сервису Just1k"
+    return "Предоставление доступа к информационному сервису Just1k"
 
 
 UNFINISHED_TOPUP_PROVIDER_STATUSES = (
@@ -411,8 +410,8 @@ async def settle_succeeded_topup(
                 try:
                     from aiogram.utils.keyboard import InlineKeyboardBuilder
                     b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text=texts.UI_ACCOUNT_TOPUP_MOY_BALANS_413, callback_data="menu_balance")
-                    ref_text = texts.UI_ACCOUNT_TOPUP_VASH_REFERAL_POPOLNIL_BALANS_V_414.format(int_referrer_bonus_amount=int(referrer_bonus_amount))
+                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
+                    ref_text = f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{int(referrer_bonus_amount)} ₽</b> бонусов на баланс."
                     ref_markup = b_builder.as_markup()
                     ref_target = user.referred_by
                     target_payment_id = payment.id
@@ -534,25 +533,25 @@ async def settle_succeeded_topup(
 
                 if auto_fulfilled_action == "tariff_change":
                     text = (
-                        texts.UI_ACCOUNT_TOPUP_OPLATA_POLUCHENA_I_TARIF_USPES_536+
-                        texts.UI_ACCOUNT_TOPUP_VASH_NOVYY_TARIF_AKTIVIROVAN_N_537
+                        "🎉 <b>Оплата получена и тариф успешно обновлен!</b>\n\n"
+                        "Ваш новый тариф активирован. Настройки подписки и подключений обновлены."
                     )
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_MOI_PODKLYUCHENIYA_539, callback_data="menu_connections")
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_PODPISKA_540, callback_data="menu_subscription")
+                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
+                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
                 elif auto_fulfilled_action == "purchase":
                     text = (
-                        texts.UI_ACCOUNT_TOPUP_OPLATA_POLUCHENA_I_PODPISKA_US_543+
-                        texts.UI_ACCOUNT_TOPUP_VASHI_VPN_KLYUCHI_I_NASTROYKI__544
+                        "🎉 <b>Оплата получена и подписка успешно оформлена!</b>\n\n"
+                        "Ваши VPN-ключи и настройки подключений доступны в меню «Мои подключения»."
                     )
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_MOI_PODKLYUCHENIYA_546, callback_data="menu_connections")
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_PODPISKA_547, callback_data="menu_subscription")
+                    builder.button(text="📱 Мои подключения", callback_data="menu_connections")
+                    builder.button(text="📋 Подписка", callback_data="menu_subscription")
                 else:
                     text = (
-                        texts.UI_ACCOUNT_TOPUP_BALANS_POPOLNEN_NA_550.format(int_payment_amount=int(payment.amount))+
-                        texts.UI_ACCOUNT_TOPUP_BALANS_551.format(int_balance_real_available=int(balance.real_available))
+                        f"✅ <b>Баланс пополнен на +{int(payment.amount)} ₽!</b>\n\n"
+                        f"💰 Баланс: <b>{int(balance.real_available)} ₽</b>"
                     )
                     if balance.bonus_available > 0:
-                        text += texts.UI_ACCOUNT_TOPUP_BONUSNYY_BALANS_554.format(int_balance_bonus_available=int(balance.bonus_available))
+                        text += f"\n🎁 Бонусный баланс: <b>{int(balance.bonus_available)} ₽</b>"
                     if (
                         payment.topup_context
                         and isinstance(payment.topup_context, dict)
@@ -560,12 +559,12 @@ async def settle_succeeded_topup(
                     ):
                         wb = payment.topup_context["purchaser_welcome_bonus"]
                         text += (
-                            texts.UI_ACCOUNT_TOPUP_VAM_NACHISLEN_PRIVETSTVENNYY_B_562.format(wb=wb)+
-                            texts.UI_ACCOUNT_TOPUP_ZA_PERVOE_POPOLNENIE_PO_PRIGLA_563.format()
+                            f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
+                            f"за первое пополнение по приглашению!</b>"
                         )
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_MOY_BALANS_565, callback_data="menu_balance")
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_KUPIT_PODPISKU_566, callback_data="payment_showcase")
-                    builder.button(text=texts.UI_ACCOUNT_TOPUP_GLAVNOE_MENYU_567, callback_data="back_to_main_menu")
+                    builder.button(text="💰 Мой баланс", callback_data="menu_balance")
+                    builder.button(text="📦 Купить подписку", callback_data="payment_showcase")
+                    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
 
                 builder.adjust(1)
                 push_text = text

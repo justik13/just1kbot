@@ -1,4 +1,3 @@
-from bot import texts
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -69,9 +68,9 @@ def days_left_msk(dt: datetime | None) -> str:
     hours = diff.seconds // 3600
 
     if days > 0:
-        return texts.UI_DATETIME_HELPERS_DN_CH_71.format(days=days, hours=hours)
+        return f"{days} дн. {hours} ч."
 
-    return texts.UI_DATETIME_HELPERS_CH_73.format(hours=hours)
+    return f"{hours} ч."
 
 
 def is_expired(dt: datetime | None) -> bool:

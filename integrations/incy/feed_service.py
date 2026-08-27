@@ -1,4 +1,3 @@
-from bot import texts
 import base64
 import logging
 from datetime import timedelta
@@ -6,7 +5,6 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.constants import AMNEZIA_PROTOCOL
 from config.settings import get_settings
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
@@ -18,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # В текущей реализации проекта поддерживается только AmneziaWG 2.0 ("amneziawg2"); стандартный WireGuard не используется.
 # Планы развития (Roadmap): поддержка AWG 3.0 ("amneziawg3") и стека Xray (VLESS-Reality и др.).
-SUPPORTED_SUBSCRIPTION_PROTOCOLS = {AMNEZIA_PROTOCOL}
+SUPPORTED_SUBSCRIPTION_PROTOCOLS = {"amneziawg2"}
 
 
 class SubscriptionFeedService:
@@ -92,8 +90,8 @@ class SubscriptionFeedService:
             )
 
         support_username = (settings.SUPPORT_USERNAME or "support").lstrip("@")
-        desc_text = texts.UI_FEED_SERVICE_LICHNYE_USTROYSTVA_94.format(support_username=support_username)
-        announce_text = texts.UI_FEED_SERVICE_UPRAVLENIE_USTROYSTVAMI_V_TELE_95
+        desc_text = f"Личные устройства | @{support_username}"
+        announce_text = "Управление устройствами в Telegram"
 
         desc_b64 = base64.b64encode(desc_text.encode("utf-8")).decode("ascii")
         announce_b64 = base64.b64encode(announce_text.encode("utf-8")).decode("ascii")

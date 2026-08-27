@@ -22,7 +22,11 @@ class TextsConsistencyTests(unittest.TestCase):
         duplicates = []
 
         for mod_name, mod in _ALL_MODULES:
-            mod_texts = getattr(mod, "TEXTS", {})
+            mod_texts = dict(getattr(mod, "TEXTS", {}))
+            for var_name in dir(mod):
+                if var_name.isupper() and not var_name.startswith('_') and var_name != 'TEXTS':
+                    mod_texts[var_name] = getattr(mod, var_name)
+
             for key in mod_texts.keys():
                 if key in seen_keys:
                     duplicates.append((key, seen_keys[key], mod_name))
@@ -35,13 +39,46 @@ class TextsConsistencyTests(unittest.TestCase):
             f"SSOT Violation: Duplicate text keys found across domain modules:\n{duplicates}",
         )
 
+    def test_no_duplicate_variable_assignments_in_texts_files(self):
+        """Verify statically via AST that no file in texts_data defines the same variable twice."""
+        project_root = Path(__file__).resolve().parent.parent
+        texts_dir = project_root / "bot" / "texts_data"
+        dup_assignments = []
+
+        for py_file in texts_dir.rglob("*.py"):
+            if py_file.name.startswith("__"):
+                continue
+            tree = ast.parse(py_file.read_text(encoding="utf-8"), filename=str(py_file))
+            file_seen = set()
+            for node in tree.body:
+                if isinstance(node, ast.Assign):
+                    for target in node.targets:
+                        if isinstance(target, ast.Name) and target.id.isupper() and target.id != "TEXTS":
+                            if target.id in file_seen:
+                                dup_assignments.append((str(py_file.relative_to(project_root)), node.lineno, target.id))
+                            else:
+                                file_seen.add(target.id)
+
+        self.assertEqual(
+            dup_assignments,
+            [],
+            f"Found duplicate variable assignments within texts_data files:\n{dup_assignments}",
+        )
+
+    def test_reload_texts_rebuilds_registry(self):
+        """Verify that reload_texts executes cleanly and preserves loaded keys."""
+        initial_keys = set(texts.get_all_text_keys())
+        texts.reload_texts()
+        reloaded_keys = set(texts.get_all_text_keys())
+        self.assertEqual(initial_keys, reloaded_keys)
+
     def test_all_text_placeholders_syntax_is_valid(self):
         """Verify that any text containing {placeholders} does not have broken braces or syntax errors."""
         placeholder_pattern = re.compile(r"\{([^{}]+)\}")
         
         for key in texts.get_all_text_keys():
             val = getattr(texts, key)
-            if not isinstance(val, str) or 'WEB_TEMPLATES' in key:
+            if not isinstance(val, str):
                 continue
             
             # Skip double braces
@@ -76,7 +113,7 @@ class TextsConsistencyTests(unittest.TestCase):
         
         for key in texts.get_all_text_keys():
             val = getattr(texts, key)
-            if not isinstance(val, str) or 'WEB_TEMPLATES' in key:
+            if not isinstance(val, str):
                 continue
             
             # Skip checking templates that use placeholders as whole tags if any

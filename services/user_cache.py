@@ -1,7 +1,8 @@
 """User context in-memory caching service.
 
-Provides a thread-safe, decoupled cache for Telegram ID to Database User ID mapping
-allowing safe usage by bot middlewares, ban services, and subscription workflows.
+Provides decoupled, high-performance in-memory caching for Telegram ID to Database User ID
+mapping within the asyncio event loop, safely shared by bot middlewares, ban services,
+and subscription lifecycle workflows.
 """
 
 from __future__ import annotations
@@ -15,10 +16,26 @@ _user_cache: TTLCache[int, int | None] = TTLCache(
     ttl=USER_CONTEXT_CACHE_TTL,
 )
 
+_MISSING = object()
 
-def get_user_cache() -> TTLCache[int, int | None]:
-    """Return the global user context cache instance."""
-    return _user_cache
+
+def get_cached_user_id(telegram_id: int) -> tuple[bool, int | None]:
+    """Retrieve cached user ID for a Telegram ID.
+
+    Returns:
+        tuple[bool, int | None]: (is_cached, user_id).
+        If not cached, returns (False, None).
+        If cached, returns (True, user_id) where user_id may be None (e.g. deleted user tombstone).
+    """
+    val = _user_cache.get(telegram_id, _MISSING)
+    if val is _MISSING:
+        return False, None
+    return True, val
+
+
+def set_cached_user_id(telegram_id: int, user_id: int | None) -> None:
+    """Store or update user_id (or None for tombstoned deleted users) for a telegram_id."""
+    _user_cache[telegram_id] = user_id
 
 
 def invalidate_user_cache(telegram_id: int) -> None:
@@ -33,6 +50,7 @@ def clear_user_cache() -> None:
 
 __all__ = [
     "clear_user_cache",
-    "get_user_cache",
+    "get_cached_user_id",
     "invalidate_user_cache",
+    "set_cached_user_id",
 ]

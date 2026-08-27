@@ -186,8 +186,8 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    server_label = texts.UI_COMMON_PO_VPN_SERVERAM_189 if filter_type == "server" else texts.UI_COMMON_PO_VPN_SERVERAM_189
-    tariff_label = texts.UI_COMMON_PO_TARIFAM_190 if filter_type == "tariff" else texts.UI_COMMON_PO_TARIFAM_190
+    server_label = texts.UI_COMMON_PO_VPN_SERVERAM_ACTIVE_189 if filter_type == "server" else texts.UI_COMMON_PO_VPN_SERVERAM_189
+    tariff_label = texts.UI_COMMON_PO_TARIFAM_ACTIVE_190 if filter_type == "tariff" else texts.UI_COMMON_PO_TARIFAM_190
 
     builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")

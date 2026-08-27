@@ -1,4 +1,3 @@
-from bot import texts
 import html
 
 AMNEZIA_SECURITY_HEADERS = {
@@ -14,14 +13,14 @@ AMNEZIA_SECURITY_HEADERS = {
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Content-Security-Policy": (
-        "default-src 'none'; "+
-        "style-src 'unsafe-inline'; "+
-        "script-src 'unsafe-inline'; "+
-        "connect-src 'none'; "+
-        "img-src 'none'; "+
-        "object-src 'none'; "+
-        "frame-ancestors 'none'; "+
-        "base-uri 'none'; "+
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "script-src 'unsafe-inline'; "
+        "connect-src 'none'; "
+        "img-src 'none'; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'none'; "
         "form-action 'none';"
     ),
 }
@@ -154,7 +153,68 @@ BASE_CSS = """
         }
 """
 
-BRIDGE_JS = texts.UI_WEB_TEMPLATES_VAR_TIMERSECONDS_3_VAR_TIMEREL_156
+BRIDGE_JS = """
+        var timerSeconds = 3;
+        var timerElement = document.getElementById("timer");
+        var countdownElement = document.getElementById("countdown-text");
+        var triggered = false;
+
+        function getVpnUri() {
+            var el = document.getElementById("vpn-key");
+            return el ? el.value : "";
+        }
+
+        function openVpnApp() {
+            var uri = getVpnUri();
+            if (uri) {
+                window.location.href = uri;
+            }
+        }
+
+        function copyVpnKey() {
+            var vpnKeyEl = document.getElementById("vpn-key");
+            var feedback = document.getElementById("copy-feedback");
+            var text = vpnKeyEl ? vpnKeyEl.value : "";
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(function() {
+                    feedback.innerText = "✅ Ключ скопирован в буфер обмена!";
+                    feedback.style.display = "block";
+                }).catch(function() {
+                    fallbackCopy(vpnKeyEl, feedback);
+                });
+            } else {
+                fallbackCopy(vpnKeyEl, feedback);
+            }
+        }
+
+        function fallbackCopy(vpnKeyEl, feedback) {
+            if (vpnKeyEl) {
+                vpnKeyEl.removeAttribute("hidden");
+                vpnKeyEl.focus();
+                vpnKeyEl.select();
+            }
+            feedback.innerText = "📋 Выделите и скопируйте полный ключ вручную, затем вставьте его в AmneziaVPN.";
+            feedback.style.display = "block";
+        }
+
+        var interval = setInterval(function() {
+            timerSeconds--;
+            if (timerElement) {
+                timerElement.innerText = timerSeconds;
+            }
+            if (timerSeconds <= 0) {
+                clearInterval(interval);
+                if (countdownElement) {
+                    countdownElement.style.display = "none";
+                }
+                if (!triggered) {
+                    triggered = true;
+                    openVpnApp();
+                }
+            }
+        }, 1000);
+"""
 
 
 def render_amnezia_bridge_html(
@@ -171,63 +231,63 @@ def render_amnezia_bridge_html(
     header_title = f"{safe_flag} {safe_server} — {safe_device}".strip() if safe_flag else f"{safe_server} — {safe_device}"
 
     return (
-        "<!DOCTYPE html>\n"+
-        "<html lang=\"ru\">\n"+
-        "<head>\n"+
-        "    <meta charset=\"utf-8\">\n"+
-        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"+
-        texts.UI_WEB_TEMPLATES_PODKLYUCHENIE_K_AMNEZIAVPN_239+
-        f"    <style>{BASE_CSS}</style>\n"+
-        "</head>\n"+
-        "<body>\n"+
-        "    <div class=\"card\">\n"+
-        texts.UI_WEB_TEMPLATES_EKSPERIMENTALNAYA_FUNKTSIYA_244+
-        f"        <h1>{header_title}</h1>\n"+
-        texts.UI_WEB_TEMPLATES_AVTOMATICHESKOE_OTKRYTIE_CHERE_246+
-        "\n"+
-        "        <button class=\"btn btn-primary\" id=\"open-btn\" onclick=\"openVpnApp()\">\n"+
-        texts.UI_WEB_TEMPLATES_POPROBOVAT_OTKRYT_V_AMNEZIAVPN_249+
-        "        </button>\n"+
-        "\n"+
-        "        <button class=\"btn btn-secondary\" id=\"copy-btn\" onclick=\"copyVpnKey()\">\n"+
-        texts.UI_WEB_TEMPLATES_SKOPIROVAT_POLNYY_KLYUCH_253+
-        "        </button>\n"+
-        "\n"+
-        "        <div class=\"feedback\" id=\"copy-feedback\"></div>\n"+
-        "\n"+
-        f"        <textarea id=\"vpn-key\" class=\"textarea-fallback\" hidden readonly>{safe_vpn_uri}</textarea>\n"+
-        "\n"+
-        "        <div class=\"hint\">\n"+
-        texts.UI_WEB_TEMPLATES_INSTRUKTSIYA_ESLI_PRILOZHENIE__261+
-        "        </div>\n"+
-        "    </div>\n"+
-        "\n"+
-        f"    <script>{BRIDGE_JS}</script>\n"+
-        "</body>\n"+
+        "<!DOCTYPE html>\n"
+        "<html lang=\"ru\">\n"
+        "<head>\n"
+        "    <meta charset=\"utf-8\">\n"
+        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+        "    <title>Подключение к AmneziaVPN</title>\n"
+        f"    <style>{BASE_CSS}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "    <div class=\"card\">\n"
+        "        <div class=\"badge\">🧪 Экспериментальная функция</div>\n"
+        f"        <h1>{header_title}</h1>\n"
+        "        <div class=\"countdown\" id=\"countdown-text\">Автоматическое открытие через <b id=\"timer\">3</b> сек...</div>\n"
+        "\n"
+        "        <button class=\"btn btn-primary\" id=\"open-btn\" onclick=\"openVpnApp()\">\n"
+        "            🚀 Попробовать открыть в AmneziaVPN\n"
+        "        </button>\n"
+        "\n"
+        "        <button class=\"btn btn-secondary\" id=\"copy-btn\" onclick=\"copyVpnKey()\">\n"
+        "            📋 Скопировать полный ключ\n"
+        "        </button>\n"
+        "\n"
+        "        <div class=\"feedback\" id=\"copy-feedback\"></div>\n"
+        "\n"
+        f"        <textarea id=\"vpn-key\" class=\"textarea-fallback\" hidden readonly>{safe_vpn_uri}</textarea>\n"
+        "\n"
+        "        <div class=\"hint\">\n"
+        "            💡 <b>Инструкция:</b> Если приложение не открылось автоматически (например, на ПК в Windows или при переходе из стороннего браузера), нажмите кнопку <b>«Скопировать полный ключ»</b> выше, затем откройте AmneziaVPN и выберите <b>«Добавить подключение» → «Вставить ключ из буфера»</b>.\n"
+        "        </div>\n"
+        "    </div>\n"
+        "\n"
+        f"    <script>{BRIDGE_JS}</script>\n"
+        "</body>\n"
         "</html>"
     )
 
 
 def render_expired_html() -> str:
     return (
-        "<!DOCTYPE html>\n"+
-        "<html lang=\"ru\">\n"+
-        "<head>\n"+
-        "    <meta charset=\"utf-8\">\n"+
-        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"+
-        texts.UI_WEB_TEMPLATES_SSYLKA_USTARELA_278+
-        f"    <style>{BASE_CSS}</style>\n"+
-        "</head>\n"+
-        "<body>\n"+
-        "    <div class=\"card\">\n"+
-        texts.UI_WEB_TEMPLATES_SROK_DEYSTVIYA_ISTEK_283+
-        texts.UI_WEB_TEMPLATES_SSYLKA_USTARELA_284+
-        texts.UI_WEB_TEMPLATES_SROK_DEYSTVIYA_SSYLKI_15_MINUT_285+
-        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"+
-        texts.UI_WEB_TEMPLATES_VERNITES_V_KARTOCHKU_USTROYSTV_287+
-        "        </div>\n"+
-        "    </div>\n"+
-        "</body>\n"+
+        "<!DOCTYPE html>\n"
+        "<html lang=\"ru\">\n"
+        "<head>\n"
+        "    <meta charset=\"utf-8\">\n"
+        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+        "    <title>Ссылка устарела</title>\n"
+        f"    <style>{BASE_CSS}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "    <div class=\"card\">\n"
+        "        <div class=\"badge\" style=\"background: rgba(239, 68, 68, 0.15); color: #f87171;\">⏳ Срок действия истёк</div>\n"
+        "        <h1>Ссылка устарела</h1>\n"
+        "        <p>Срок действия ссылки (15 минут) истёк в целях безопасности.</p>\n"
+        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"
+        "            Вернитесь в карточку устройства в Telegram-боте и нажмите кнопку <b>«Открыть в Amnezia»</b> ещё раз, чтобы получить свежую ссылку.\n"
+        "        </div>\n"
+        "    </div>\n"
+        "</body>\n"
         "</html>"
     )
 
@@ -236,47 +296,47 @@ def render_error_html(title: str, message: str) -> str:
     safe_title = html.escape(title, quote=True)
     safe_message = html.escape(message, quote=True)
     return (
-        "<!DOCTYPE html>\n"+
-        "<html lang=\"ru\">\n"+
-        "<head>\n"+
-        "    <meta charset=\"utf-8\">\n"+
-        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"+
-        f"    <title>{safe_title}</title>\n"+
-        f"    <style>{BASE_CSS}</style>\n"+
-        "</head>\n"+
-        "<body>\n"+
-        "    <div class=\"card\">\n"+
-        texts.UI_WEB_TEMPLATES_OSHIBKA_DOSTUPA_309+
-        f"        <h1>{safe_title}</h1>\n"+
-        f"        <p>{safe_message}</p>\n"+
-        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"+
-        texts.UI_WEB_TEMPLATES_VERNITES_V_TELEGRAM_BOT_DLYA_P_313+
-        "        </div>\n"+
-        "    </div>\n"+
-        "</body>\n"+
+        "<!DOCTYPE html>\n"
+        "<html lang=\"ru\">\n"
+        "<head>\n"
+        "    <meta charset=\"utf-8\">\n"
+        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+        f"    <title>{safe_title}</title>\n"
+        f"    <style>{BASE_CSS}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "    <div class=\"card\">\n"
+        "        <div class=\"badge\" style=\"background: rgba(239, 68, 68, 0.15); color: #f87171;\">⚠️ Ошибка доступа</div>\n"
+        f"        <h1>{safe_title}</h1>\n"
+        f"        <p>{safe_message}</p>\n"
+        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"
+        "            Вернитесь в Telegram-бот для проверки статуса подписки и устройства.\n"
+        "        </div>\n"
+        "    </div>\n"
+        "</body>\n"
         "</html>"
     )
 
 
 def render_500_html() -> str:
     return (
-        "<!DOCTYPE html>\n"+
-        "<html lang=\"ru\">\n"+
-        "<head>\n"+
-        "    <meta charset=\"utf-8\">\n"+
-        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"+
-        texts.UI_WEB_TEMPLATES_OSHIBKA_SERVERA_328+
-        f"    <style>{BASE_CSS}</style>\n"+
-        "</head>\n"+
-        "<body>\n"+
-        "    <div class=\"card\">\n"+
-        texts.UI_WEB_TEMPLATES_VREMENNAYA_OSHIBKA_333+
-        texts.UI_WEB_TEMPLATES_VREMENNAYA_OSHIBKA_SERVERA_334+
-        texts.UI_WEB_TEMPLATES_NE_UDALOS_SFORMIROVAT_KLYUCH_P_335+
-        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"+
-        texts.UI_WEB_TEMPLATES_ESLI_OSHIBKA_POVTORYAETSYA_OBR_337+
-        "        </div>\n"+
-        "    </div>\n"+
-        "</body>\n"+
+        "<!DOCTYPE html>\n"
+        "<html lang=\"ru\">\n"
+        "<head>\n"
+        "    <meta charset=\"utf-8\">\n"
+        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n"
+        "    <title>Ошибка сервера</title>\n"
+        f"    <style>{BASE_CSS}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        "    <div class=\"card\">\n"
+        "        <div class=\"badge\" style=\"background: rgba(239, 68, 68, 0.15); color: #f87171;\">⚠️ Временная ошибка</div>\n"
+        "        <h1>Временная ошибка сервера</h1>\n"
+        "        <p>Не удалось сформировать ключ подключения. Пожалуйста, попробуйте позже.</p>\n"
+        "        <div class=\"hint\" style=\"border-top: none; text-align: center;\">\n"
+        "            Если ошибка повторяется, обратитесь в службу поддержки через Telegram-бота.\n"
+        "        </div>\n"
+        "    </div>\n"
+        "</body>\n"
         "</html>"
     )
