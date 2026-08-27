@@ -322,7 +322,6 @@ class TextsConsistencyTests(unittest.TestCase):
 
     def test_public_facade_consistency(self):
         """Verify that all canonical keys in bot/texts/* are exported via facade."""
-        all_keys = set(texts.get_all_text_keys())
         for py_file in TEXTS_DIR.rglob("*.py"):
             if py_file.name == "__init__.py":
                 continue
