@@ -156,7 +156,7 @@ UI_DASHBOARD_UPRAVLENIE_POLZOVATELYAMI_I_RA_225 = """{header}👥 <b>Управ�
 
 Выберите нужный раздел:"""
 UI_DASHBOARD_SERVERY_I_TARIFY_239 = '⚙️ Серверы и Тарифы'
-UI_DASHBOARD_UPRAVLENIE_VPN_SERVERAMI_I_TAR_240 = """{header}⚙️ <b>Управление VPN-серверами и тарифами:</b>
+UI_DASHBOARD_UPRAVLENIE_VPN_SERVERAMI_I_TAR_240 = """{header}⚙️ <b>Управление серверами и тарифами:</b>
 
 Выберите нужный раздел:"""
 UI_DASHBOARD_FINANSY_I_OCHEREDI_256 = '💰 Финансы и Очереди'

@@ -28,7 +28,7 @@ UI_U_GLAVNOE_MENYU_234 = '🏠 Главное меню'
 UI_U_ZDRAVSTVUYTE_MOY_ID_28 = 'Здравствуйте! Мой ID: {telegram_id}'
 UI_U_NAPISAT_V_PODDERZHKU_32 = '💬 Написать в поддержку'
 UI_U_POMOSHCH_I_INSTRUKTSII_37 = 'ℹ️ Помощь и Инструкции'
-UI_U_INSTRUKTSII_I_SPRAVKA_AMNEZIAV_101 = """📖 <b>Инструкции и справка AmneziaУстройство</b>
+UI_U_INSTRUKTSII_I_SPRAVKA_AMNEZIAV_101 = """📖 <b>Инструкции и справка AmneziaVPN</b>
 
 """
 UI_U_V_ETOM_RAZDELE_VY_NAYDETE_RUKO_102 = """В этом разделе вы найдёте руководства по подключению, скачиванию клиента и настройке сервиса.
@@ -52,7 +52,7 @@ UI_U_NAZAD_V_PODDERZHKU_137 = '← Назад в поддержку'
 UI_U_SKACHAT_KLIENT_AMNEZIA_DLYA_PO_157 = """📥 <b>Скачать клиент Amnezia для подключения</b>
 
 """
-UI_U_OFITSIALNYE_SSYLKI_DLYA_ZAGRUZ_158 = """Официальные ссылки для загрузки приложения AmneziaУстройство для Windows, Android, iOS, macOS и Linux:
+UI_U_OFITSIALNYE_SSYLKI_DLYA_ZAGRUZ_158 = """Официальные ссылки для загрузки приложения AmneziaVPN для Windows, Android, iOS, macOS и Linux:
 
 """
 UI_U_PRYAMAYA_SSYLKA_ZERKALO_ZAGRUZ_159 = """• <b>Прямая ссылка (Зеркало)</b> — загрузка последней сборки клиенту
@@ -64,18 +64,18 @@ UI_U_SKACHAT_KLIENT_ZERKALO_166 = '🌐 Скачать клиент (Зерка�
 UI_U_POSLEDNYAYA_VERSIYA_GITHUB_170 = '📦 Последняя версия (GitHub)'
 UI_U_OFITSIALNYY_SAYT_AMNEZIA_174 = '🏠 Официальный сайт Amnezia'
 UI_U_NAZAD_178 = '← Назад'
-UI_U_USTANOVKA_AMNEZIAVPN_NA_IOS_DL_198 = """🍏 <b>Установка AmneziaУстройство на iOS для жителей России</b>
+UI_U_USTANOVKA_AMNEZIAVPN_NA_IOS_DL_198 = """🍏 <b>Установка AmneziaVPN на iOS для жителей России</b>
 
 """
-UI_U_PODROBNOE_POSHAGOVOE_RUKOVODST_199 = 'Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaУстройство на iPhone и iPad в условиях региональных ограничений App Store.'
+UI_U_PODROBNOE_POSHAGOVOE_RUKOVODST_199 = 'Подробное пошаговое руководство по скачиванию и первичной настройке приложения AmneziaVPN на iPhone и iPad в условиях региональных ограничений App Store.'
 UI_U_OTKRYT_INSTRUKTSIYU_IOS_204 = '📖 Открыть инструкцию iOS'
 UI_U_NAZAD_208 = '← Назад'
 UI_U_INSTRUKTSII_DLYA_WINDOWS_228 = """💻 <b>Инструкции для Windows</b>
 
 """
-UI_U_RUKOVODSTVA_PO_USTANOVKE_I_OBN_229 = 'Руководства по установке и обновлению приложения AmneziaУстройство на ПК под управлением Windows:'
-UI_U_USTANOVKA_AMNEZIAVPN_NA_WINDOW_234 = '📥 Установка AmneziaУстройство на Windows'
-UI_U_OBNOVLENIE_AMNEZIAVPN_NA_WINDO_238 = '🔄 Обновление AmneziaУстройство на Windows'
+UI_U_RUKOVODSTVA_PO_USTANOVKE_I_OBN_229 = 'Руководства по установке и обновлению приложения AmneziaVPN на ПК под управлением Windows:'
+UI_U_USTANOVKA_AMNEZIAVPN_NA_WINDOW_234 = '📥 Установка AmneziaVPN на Windows'
+UI_U_OBNOVLENIE_AMNEZIAVPN_NA_WINDO_238 = '🔄 Обновление AmneziaVPN на Windows'
 UI_U_NAZAD_242 = '← Назад'
 UI_U_INSTRUKTSIYA_DLYA_RAZDELNOGO_T_262 = """🔀 <b>Инструкция для Раздельного Туннелирования</b>
 

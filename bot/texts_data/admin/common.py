@@ -9,7 +9,7 @@ UI_COMMON_POSLEDNIY_OTKLIK_119 = """• Последний отклик: <code>{
 """
 UI_COMMON_OTKLYUCHEN_VRUCHNUYU_122 = '🔴 <b>Отключён вручную</b>'
 UI_COMMON_SERVERY_128 = '🖥 Серверы'
-UI_COMMON_KARTOCHKA_VPN_SERVERA_ID_132 = """🖥 <b>Карточка VPN-сервера {flag} {safe_server_name}</b> (ID: {server_id})
+UI_COMMON_KARTOCHKA_VPN_SERVERA_ID_132 = """🖥 <b>Карточка сервера {flag} {safe_server_name}</b> (ID: {server_id})
 
 """
 UI_COMMON_STATUS_V_BOTE_133 = """• Статус в боте: {status_line}

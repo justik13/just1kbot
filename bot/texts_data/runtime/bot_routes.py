@@ -18,7 +18,7 @@ UI_BOT_ROUTES_4_VKLYUCHITE_PODKLYUCHENIE_V_P_29 = """4. Включите под�
 """
 UI_BOT_ROUTES_VASHA_PERSONALNAYA_SSYLKA_30 = """<b>Ваша персональная ссылка:</b>
 """
-UI_BOT_ROUTES_DLYA_KOMPYUTEROV_DLYA_WINDOWS__32 = """<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaУстройство</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>
+UI_BOT_ROUTES_DLYA_KOMPYUTEROV_DLYA_WINDOWS__32 = """<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>
 
 """
 UI_BOT_ROUTES_PRI_SOZDANII_ILI_UDALENII_USTR_33 = '<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>'

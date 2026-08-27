@@ -191,7 +191,7 @@ async def admin_delete_device_confirm(
             text,
             reply_markup=get_admin_confirm_action_keyboard(
                 confirm_callback=(
-                    f"admin_delete_device_apply:"+
+                    "admin_delete_device_apply:"+
                     f"{telegram_id}:{profile_id}"
                 ),
                 cancel_callback=(

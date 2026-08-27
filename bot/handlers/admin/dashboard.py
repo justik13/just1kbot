@@ -443,7 +443,7 @@ async def show_admin_settings(
     text = (
         f"{header}"+
         texts.UI_DASHBOARD_SISTEMNYE_NASTROYKI_BOTA_445.format()+
-        f"🚀 <b>MTProto Proxy URL:</b>\n"+
+        "🚀 <b>MTProto Proxy URL:</b>\n"+
         texts.UI_DASHBOARD_NE_ZADANO_SSYLKA_SKRYTA_OT_POL_447.format(safe_mtproto_url_or=safe(mtproto_url or 'Не задано (ссылка скрыта от пользователей)'))+
         texts.UI_DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M_448.format()
     )

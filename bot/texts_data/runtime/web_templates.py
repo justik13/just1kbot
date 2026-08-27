@@ -40,7 +40,7 @@ UI_WEB_TEMPLATES_VAR_TIMERSECONDS_3_VAR_TIMEREL_156 = """
                 устройствоKeyEl.focus();
                 устройствоKeyEl.select();
             }
-            feedback.innerText = "📋 Выделите и скопируйте полный ключ вручную, затем вставьте его в AmneziaУстройство.";
+            feedback.innerText = "📋 Выделите и скопируйте полный ключ вручную, затем вставьте его в AmneziaVPN.";
             feedback.style.display = "block";
         }
 
@@ -61,17 +61,17 @@ UI_WEB_TEMPLATES_VAR_TIMERSECONDS_3_VAR_TIMEREL_156 = """
             }
         }, 1000);
 """
-UI_WEB_TEMPLATES_PODKLYUCHENIE_K_AMNEZIAVPN_239 = """    <title>Подключение к AmneziaУстройство</title>
+UI_WEB_TEMPLATES_PODKLYUCHENIE_K_AMNEZIAVPN_239 = """    <title>Подключение к AmneziaVPN</title>
 """
 UI_WEB_TEMPLATES_EKSPERIMENTALNAYA_FUNKTSIYA_244 = """        <div class="badge">🧪 Экспериментальная функция</div>
 """
 UI_WEB_TEMPLATES_AVTOMATICHESKOE_OTKRYTIE_CHERE_246 = """        <div class="countdown" id="countdown-text">Автоматическое открытие через <b id="timer">3</b> сек...</div>
 """
-UI_WEB_TEMPLATES_POPROBOVAT_OTKRYT_V_AMNEZIAVPN_249 = """            🚀 Попробовать открыть в AmneziaУстройство
+UI_WEB_TEMPLATES_POPROBOVAT_OTKRYT_V_AMNEZIAVPN_249 = """            🚀 Попробовать открыть в AmneziaVPN
 """
 UI_WEB_TEMPLATES_SKOPIROVAT_POLNYY_KLYUCH_253 = """            📋 Скопировать полный ключ
 """
-UI_WEB_TEMPLATES_INSTRUKTSIYA_ESLI_PRILOZHENIE__261 = """            💡 <b>Инструкция:</b> Если приложение не открылось автоматически (например, на ПК в Windows или при переходе из стороннего браузера), нажмите кнопку <b>«Скопировать полный ключ»</b> выше, затем откройте AmneziaУстройство и выберите <b>«Добавить подключение» → «Вставить ключ из буфера»</b>.
+UI_WEB_TEMPLATES_INSTRUKTSIYA_ESLI_PRILOZHENIE__261 = """            💡 <b>Инструкция:</b> Если приложение не открылось автоматически (например, на ПК в Windows или при переходе из стороннего браузера), нажмите кнопку <b>«Скопировать полный ключ»</b> выше, затем откройте AmneziaVPN и выберите <b>«Добавить подключение» → «Вставить ключ из буфера»</b>.
 """
 UI_WEB_TEMPLATES_SSYLKA_USTARELA_278 = """    <title>Ссылка устарела</title>
 """
@@ -365,7 +365,7 @@ UI_WEB_TEMPLATES_PODKLYUCHENIE_K_INCY_BOX_SIZIN_188 = """<!DOCTYPE html>
         <a href="https://incy.cc/" target="_blank" rel="noopener">Сайт INCY</a>
       </div>
       <p style="font-size: 12px; color: #8b949e; margin-top: 14px; line-height: 1.4;">
-        💻 <b>Пользователям на ПК:</b> для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaУстройство</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом конфигурации <code>.conf</code> (в Telegram-боте).
+        💻 <b>Пользователям на ПК:</b> для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом конфигурации <code>.conf</code> (в Telegram-боте).
       </p>
     </div>
   </div>
