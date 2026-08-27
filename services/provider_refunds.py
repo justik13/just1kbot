@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import func, or_, select
 
+from bot import texts
 from database.dispute_models import PaymentDispute
 from database.models import (
     AccountBalanceReservation,
@@ -223,7 +224,7 @@ def _refund_payload(claim: ProviderRefundClaim) -> dict:
             "value": format(claim.amount, ".2f"),
             "currency": claim.currency,
         },
-        "description": f"Возврат средств по заказу #{claim.payment_id}",
+        "description": texts.REFUND_ORDER_DESCRIPTION_TEMPLATE.format(order_id=claim.payment_id),
     }
 
 

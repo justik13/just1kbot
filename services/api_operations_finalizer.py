@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 
+from bot import texts
 from database.connection import session_scope
 from database.models import APIOperation, Server, VPNProfile
 from services.api_operations_queue import (
@@ -238,18 +239,11 @@ async def finalize_operation_failure(
         operation.last_error_code = (error_code or "unknown_error")[:100]
         operation.last_error = error_message[:2000]
         if profile:
-            # P2-5: Человекочитаемый текст для last_sync_error
-            error_mapping = {
-                "server_full": "Сервер переполнен",
-                "auth_failed": "Неверный API ключ сервера",
-                "invalid_raw_config": "Ошибка шифрования конфига",
-                "create_ambiguous_reconcile": "Не удалось проверить создание пира",
-                "invalid_created_config_cleanup": "Конфиг не сгенерирован (очистка)",
-                "duplicate_exact_client_name": "Такое имя уже существует на сервере",
-                "network_error": "Ошибка сети при обращении к серверу",
-                "timeout": "Таймаут обращения к серверу",
-            }
-            human_readable = error_mapping.get(operation.last_error_code, f"Operation failed: {operation.last_error_code}")
+            # P2-5: человекочитаемый текст ошибки для last_sync_error берём из SSOT-каталога
+            human_readable = texts.FINALIZER_ERROR_LABELS.get(
+                operation.last_error_code,
+                texts.FINALIZER_OPERATION_FAILED_TEMPLATE.format(code=operation.last_error_code),
+            )
             if error_message:
                 human_readable = f"{human_readable} ({error_message[:1000]})"
             profile.last_sync_error = human_readable[:2000]
