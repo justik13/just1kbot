@@ -122,10 +122,19 @@ async def _show_server_card(
         status_line = "🔴 <b>Отключён вручную</b>"
         extra_status_info = ""
 
-    peer_counts = await get_server_peer_counts(session)
-    used_clients = peer_counts.get(server.id, 0)
+    from services.slots_cache import get_cached_peer_count
+
+    db_counts = await get_server_peer_counts(session)
+    db_used = db_counts.get(server.id, 0)
+    cached_used = get_cached_peer_count(server.id)
+    used_clients = cached_used if cached_used is not None else db_used
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs("🖥 Серверы", f"{flag} {server.name}")
+
+    if cached_used is not None and cached_used != db_used:
+        slots_text = f"<b>{used_clients} / {max_clients}</b> <i>(в БД: {db_used})</i>"
+    else:
+        slots_text = f"<b>{used_clients} / {max_clients}</b>"
 
     rendered = (
         f"{header}"
@@ -133,7 +142,7 @@ async def _show_server_card(
         f"• Статус в боте: {status_line}\n"
         f"{extra_status_info}"
         f"• Протокол: <code>{safe(server.protocol)}</code>\n"
-        f"• Заполненность слотов: <b>{used_clients} / {max_clients}</b>\n"
+        f"• Заполненность слотов: {slots_text}\n"
         f"• API URL: <code>{safe(server.api_url)}</code>\n"
     )
 

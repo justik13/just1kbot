@@ -434,6 +434,9 @@ async def _cleanup_dangling_peers():
             continue
 
         server_info, api_clients_list = result
+        if api_clients_list is not None:
+            from services.slots_cache import update_cached_peer_count
+            update_cached_peer_count(server_info["id"], len(api_clients_list))
         if not api_clients_list:
             continue
 

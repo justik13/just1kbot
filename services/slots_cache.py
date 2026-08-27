@@ -35,7 +35,7 @@ async def capture_server_peer_snapshot(server_id: int) -> ServerPeerSnapshot:
         datetime.now(timezone.utc),
     )
 
-_slots_cache = TTLCache(maxsize=100, ttl=300)
+_slots_cache = TTLCache(maxsize=100, ttl=1800)
 _locks: dict[int, tuple[asyncio.Lock, float]] = {}
 _last_cleanup_time: float = 0.0
 _CLEANUP_INTERVAL = 3600.0

@@ -63,5 +63,89 @@ class TestGetServerLoadTimeout(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("TimeoutError", mock_warn.call_args[0][2])
 
 
+class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        from services.slots_cache import clear_slots_cache
+        clear_slots_cache()
+
+    def tearDown(self):
+        from services.slots_cache import clear_slots_cache
+        clear_slots_cache()
+
+    def test_slots_cache_ttl_is_at_least_1800s(self):
+        from services.slots_cache import _slots_cache
+        self.assertGreaterEqual(_slots_cache.ttl, 1800)
+
+    async def test_show_server_card_uses_cached_real_count_and_displays_db_discrepancy(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from bot.handlers.admin.servers import common
+        from services.slots_cache import update_cached_peer_count
+
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        server = SimpleNamespace(
+            id=5,
+            name="Poland Node",
+            country_flag="🇵🇱",
+            is_active=True,
+            disabled_reason=None,
+            protocol="amneziawg2",
+            max_clients=240,
+            api_url="https://pl.example.com:8443",
+        )
+        session = AsyncMock()
+
+        # Set cached real count = 6, DB count = 8
+        update_cached_peer_count(5, 6)
+
+        with patch.object(
+            common,
+            "get_server_peer_counts",
+            new=AsyncMock(return_value={5: 8}),
+        ):
+            await common._show_server_card(callback, session, server)
+
+        rendered = callback.message.edit_text.call_args.args[0]
+        self.assertIn("6 / 240", rendered)
+        self.assertIn("(в БД: 8)", rendered)
+
+    async def test_show_server_card_shows_clean_slots_when_counts_match(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+        from bot.handlers.admin.servers import common
+        from services.slots_cache import update_cached_peer_count
+
+        callback = SimpleNamespace(
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+        server = SimpleNamespace(
+            id=5,
+            name="Poland Node",
+            country_flag="🇵🇱",
+            is_active=True,
+            disabled_reason=None,
+            protocol="amneziawg2",
+            max_clients=240,
+            api_url="https://pl.example.com:8443",
+        )
+        session = AsyncMock()
+
+        # Both cached and DB are 6
+        update_cached_peer_count(5, 6)
+
+        with patch.object(
+            common,
+            "get_server_peer_counts",
+            new=AsyncMock(return_value={5: 6}),
+        ):
+            await common._show_server_card(callback, session, server)
+
+        rendered = callback.message.edit_text.call_args.args[0]
+        self.assertIn("6 / 240", rendered)
+        self.assertNotIn("(в БД:", rendered)
+
+
 if __name__ == "__main__":
     unittest.main()
