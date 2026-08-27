@@ -13,7 +13,7 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L15_1,
+        text=texts.ADMIN_USER_CARD_STATUS_NO_SUB,
         callback_data=f"admin_subscription:{user_id}",
     )
 
@@ -23,7 +23,7 @@ def get_admin_user_card_keyboard(
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L20_1,
+        text=texts.ADMIN_USER_MASS_BONUS_REASON_PROMPT,
         callback_data=f"admin_user_devices:{user_id}",
     )
 
@@ -39,17 +39,17 @@ def get_admin_user_card_keyboard(
 
     if is_banned:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L26_1,
+            text=texts.ADMIN_USER_MASS_BONUS_SUCCESS,
             callback_data=f"admin_unban:{user_id}",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L31_1,
+            text=texts.ADMIN_USER_DIRECT_MESSAGE_PROMPT,
             callback_data=f"admin_ban:{user_id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L36_1,
+        text=texts.ADMIN_USER_DIRECT_MESSAGE_CONFIRM,
         callback_data="admin_users",
     )
 
@@ -72,7 +72,7 @@ def get_admin_user_balance_keyboard(
         callback_data=f"admin_balance_deduct:{user_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
+        text=texts.ADMIN_USER_LIST_HEADER,
         callback_data=f"admin_user_card:{user_id}",
     )
 
@@ -90,27 +90,27 @@ def get_admin_subscription_keyboard(
 
     if has_active_sub:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L53_1,
+            text=texts.ADMIN_USER_DIRECT_MESSAGE_SUCCESS,
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
 
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L58_1,
+            text=texts.ADMIN_USER_SEARCH_BY_ID_PROMPT,
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
 
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L63_1,
+            text=texts.ADMIN_USER_SEARCH_BY_USERNAME_PROMPT,
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L68_1,
+            text=texts.ADMIN_USER_SEARCH_NOT_FOUND,
             callback_data=f"admin_sub_grant:{telegram_id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
+        text=texts.ADMIN_USER_LIST_HEADER,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 
@@ -139,7 +139,7 @@ def get_admin_change_tariff_keyboard(
         label = get_tariff_group_name(device_limit)
 
         if device_limit == current_device_limit:
-            label += texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L103_1
+            label += texts.ADMIN_USERS
 
         builder.button(
             text=truncate_button_text(label),
@@ -149,7 +149,7 @@ def get_admin_change_tariff_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L112_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -175,7 +175,7 @@ def get_admin_grant_tariff_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L138_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -192,7 +192,7 @@ def get_admin_grant_days_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L155_1.format(value_0=days),
+            text=texts.ADMIN_USER_CARD_STATUS_BANNED.format(value_0=days),
             callback_data=(
                 f"admin_sub_grant_confirm:"
                 f"{telegram_id}:{tariff_id}:{days}"
@@ -200,7 +200,7 @@ def get_admin_grant_days_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L163_1,
+        text=texts.ADMIN_USER_BALANCE_VIEW_CARD,
         callback_data=(
             f"admin_sub_grant_confirm:"
             f"{telegram_id}:{tariff_id}:36500"
@@ -208,14 +208,14 @@ def get_admin_grant_days_keyboard(
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L171_1,
+        text=texts.ADMIN_USER_BALANCE_ADJUST_PROMPT,
         callback_data=(
             f"admin_sub_grant_custom:{telegram_id}:{tariff_id}"
         ),
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L178_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -231,26 +231,26 @@ def get_admin_extend_days_new_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L194_1.format(value_0=days),
+            text=texts.ADMIN_USER_BALANCE_REASON_PROMPT.format(value_0=days),
             callback_data=(
                 f"admin_sub_confirm_extend:{telegram_id}:{days}"
             ),
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L201_1,
+        text=texts.ADMIN_USER_BALANCE_CONFIRM_PROMPT,
         callback_data=(
             f"admin_sub_confirm_extend:{telegram_id}:36500"
         ),
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L208_1,
+        text=texts.ADMIN_USER_MASS_BONUS_AMOUNT_PROMPT,
         callback_data=f"admin_sub_extend_custom:{telegram_id}",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L213_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -266,12 +266,12 @@ def get_admin_confirm_action_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L229_1,
+        text=texts.BTN_CONFIRM,
         callback_data=confirm_callback,
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L234_1,
+        text=texts.BTN_CANCEL,
         callback_data=cancel_callback,
     )
 
@@ -289,18 +289,18 @@ def get_admin_user_devices_keyboard(
     for profile in profiles:
         name = (
             getattr(profile, "device_name", None)
-            or texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L253_1.format(value_0=profile.id)
+            or texts.ADMIN_USER_CARD_STATUS_ACTIVE.format(value_0=profile.id)
         )
 
         builder.button(
-            text=truncate_button_text(texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L257_1.format(value_0=name)),
+            text=truncate_button_text(texts.ADMIN_USER_CARD_STATUS_EXPIRED.format(value_0=name)),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L263_1,
+        text=texts.ADMIN_USER_MASS_BONUS_CONFIRM_PROMPT,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 

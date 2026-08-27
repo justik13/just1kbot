@@ -70,6 +70,7 @@ from bot.middlewares.ban_check import BanCheckMiddleware
 from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
+from config.constants import AMNEZIA_PROTOCOL
 from config.settings import Settings, get_settings
 import database.connection as db_conn
 from database.connection import DEFAULT_TARIFFS, session_scope
@@ -635,7 +636,7 @@ async def run_simulation(args: argparse.Namespace):
                 country_flag="🇳🇱",
                 api_url="http://nl1.just1k.net:8080",
                 api_key="enc_key_nl",
-                protocol="amneziawg2",
+                protocol=AMNEZIA_PROTOCOL,
                 is_active=True,
                 max_clients=100,
             ),
@@ -645,7 +646,7 @@ async def run_simulation(args: argparse.Namespace):
                 country_flag="🇩🇪",
                 api_url="http://de1.just1k.net:8080",
                 api_key="enc_key_de",
-                protocol="amneziawg2",
+                protocol=AMNEZIA_PROTOCOL,
                 is_active=True,
                 max_clients=100,
             ),
@@ -655,7 +656,7 @@ async def run_simulation(args: argparse.Namespace):
                 country_flag="🇸🇪",
                 api_url="http://se1.just1k.net:8080",
                 api_key="enc_key_se",
-                protocol="amneziawg2",
+                protocol=AMNEZIA_PROTOCOL,
                 is_active=True,
                 max_clients=100,
             ),
@@ -665,7 +666,7 @@ async def run_simulation(args: argparse.Namespace):
                 country_flag="🇫🇮",
                 api_url="http://fi1.just1k.net:8080",
                 api_key="enc_key_fi",
-                protocol="amneziawg2",
+                protocol=AMNEZIA_PROTOCOL,
                 is_active=True,
                 max_clients=100,
             ),

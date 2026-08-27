@@ -36,23 +36,23 @@ async def _show_purchases_list(
     total_pages = max(1, math.ceil(total / PURCHASES_PER_PAGE))
     page = min(max(1, page), total_pages)
 
-    header = format_admin_breadcrumbs(texts.UI_PURCHASES_POKUPKI_39, texts.UI_PURCHASES_STR_39.format(page=page, total_pages=total_pages))
+    header = format_admin_breadcrumbs(texts.ADMIN_FINANCES_PURCHASES_PURCHASE, texts.ADMIN_FINANCES_PURCHASES_STR.format(page=page, total_pages=total_pages))
     rendered = (
         f"{header}"+
-        texts.UI_PURCHASES_LOGI_POKUPOK_POLZOVATELEY_STR__42.format(page=page, total_pages=total_pages, total=total)
+        texts.ADMIN_FINANCES_PURCHASES_LOGI_POKUPOK_USERS_STR.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not entries:
-        rendered += texts.UI_PURCHASES_POKUPKI_NE_NAYDENY_48
+        rendered += texts.ADMIN_FINANCES_PURCHASES_PURCHASE_NE_NAYDENY
     else:
         for idx, entry in enumerate(entries, start=1):
             dt_str = format_datetime(entry.created_at)
-            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.UI_PURCHASES_0_BONUS_52
+            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_FINANCES_PURCHASES_0_BONUS
             rendered += (
                 f"<b>{idx}. {safe(entry.user_label)}</b> | {safe(entry.operation_title)}\n"+
-                texts.UI_PURCHASES_DN_USTR_55.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str)+
+                texts.ADMIN_FINANCES_PURCHASES_DN_USTR.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str)+
                 f"   🕒 {dt_str}\n\n"
             )
 
@@ -68,20 +68,20 @@ async def _show_purchases_list(
     nav_buttons = 0
     if page > 1:
         builder.button(
-            text=texts.UI_PURCHASES_NAZAD_71,
+            text=texts.BTN_BACK,
             callback_data=f"admin_purchases_page:{page - 1}",
         )
         nav_buttons += 1
 
     if page < total_pages:
         builder.button(
-            text=texts.UI_PURCHASES_VPERED_78,
+            text=texts.BTN_PAGINATION_NEXT,
             callback_data=f"admin_purchases_page:{page + 1}",
         )
         nav_buttons += 1
 
-    builder.button(text=texts.UI_PURCHASES_K_PLATEZHAM_83, callback_data="admin_payments")
-    builder.button(text=texts.UI_PURCHASES_V_ADMIN_MENYU_84, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_FINANCES_PURCHASES_K_PLATEZHAM, callback_data="admin_payments")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
 
     adjust_pattern = [1] * len(entries)
     if nav_buttons > 0:
@@ -143,43 +143,43 @@ async def show_purchase_card(
 
     parts = callback.data.split(":", 1)
     if len(parts) < 2:
-        await callback.answer(texts.UI_PURCHASES_ZAPIS_POKUPKI_NE_NAYDENA_146, show_alert=True)
+        await callback.answer(texts.ADMIN_FINANCES_PURCHASES_ZAPIS_PURCHASE_NE_NAYDENA, show_alert=True)
         return
 
     entry_id = parts[1]
     entry = await get_purchase_log_by_id(session, entry_id)
     if not entry:
-        await callback.answer(texts.UI_PURCHASES_POKUPKA_NE_NAYDENA_152, show_alert=True)
+        await callback.answer(texts.ADMIN_FINANCES_PURCHASES_PURCHASE_NE_NAYDENA, show_alert=True)
         return
 
     await state.clear()
     await callback.answer(show_alert=False)
 
-    header = format_admin_breadcrumbs(texts.UI_PURCHASES_POKUPKI_158, texts.UI_PURCHASES_DETALI_158.format(entry_numeric_id=entry.numeric_id))
-    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.UI_PURCHASES_0_BONUS_VYDACHA_159
+    header = format_admin_breadcrumbs(texts.ADMIN_FINANCES_PURCHASES_PURCHASE, texts.ADMIN_FINANCES_PURCHASES_DETALI.format(entry_numeric_id=entry.numeric_id))
+    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_FINANCES_PURCHASES_0_BONUS_VYDACHA
     dt_str = format_datetime(entry.created_at)
 
     rendered = (
         f"{header}"+
-        texts.UI_PURCHASES_DETALI_POKUPKI_TRANZAKTSII_164.format(entry_numeric_id=entry.numeric_id)+
-        texts.UI_PURCHASES_POLZOVATEL_TELEGRAM_ID_165.format(safe_entry_user_label=safe(entry.user_label), entry_telegram_id=entry.telegram_id)+
-        texts.UI_PURCHASES_TARIF_166.format(safe_entry_tariff_name=safe(entry.tariff_name))+
-        texts.UI_PURCHASES_LIMIT_USTROYSTV_SHT_167.format(entry_device_limit=entry.device_limit)+
-        texts.UI_PURCHASES_DLITELNOST_DNEY_168.format(entry_duration_days=entry.duration_days)+
-        texts.UI_PURCHASES_SUMMA_169.format(amount_str=amount_str)+
-        texts.UI_PURCHASES_TIP_OPERATSII_170.format(safe_entry_operation_title=safe(entry.operation_title))+
-        texts.UI_PURCHASES_DATA_I_VREMYA_171.format(dt_str=dt_str)
+        texts.ADMIN_FINANCES_PURCHASES_DETALI_PURCHASE_TRANZAKTSII.format(entry_numeric_id=entry.numeric_id)+
+        texts.ADMIN_FINANCES_PURCHASES_USER_TELEGRAM_ID.format(safe_entry_user_label=safe(entry.user_label), entry_telegram_id=entry.telegram_id)+
+        texts.ADMIN_FINANCES_PURCHASES_TARIFF.format(safe_entry_tariff_name=safe(entry.tariff_name))+
+        texts.ADMIN_FINANCES_PURCHASES_LIMIT_DEVICES_SHT.format(entry_device_limit=entry.device_limit)+
+        texts.ADMIN_FINANCES_PURCHASES_DLITELNOST_DAYS.format(entry_duration_days=entry.duration_days)+
+        texts.ADMIN_FINANCES_PURCHASES_AMOUNT.format(amount_str=amount_str)+
+        texts.ADMIN_FINANCES_PURCHASES_TYPE_OPERATIONS.format(safe_entry_operation_title=safe(entry.operation_title))+
+        texts.ADMIN_FINANCES_PURCHASES_DATA_I_TIME.format(dt_str=dt_str)
 
     )
 
     builder = InlineKeyboardBuilder()
     if entry.telegram_id:
         builder.button(
-            text=texts.UI_PURCHASES_KARTOCHKA_POLZOVATELYA_178,
+            text=texts.ADMIN_FINANCES_PURCHASES_KARTOCHKA_POLZOVATELYA,
             callback_data=f"admin_user_card:{entry.telegram_id}",
         )
-    builder.button(text=texts.UI_PURCHASES_K_SPISKU_POKUPOK_181, callback_data="admin_purchases")
-    builder.button(text=texts.UI_PURCHASES_V_ADMIN_MENYU_182, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_FINANCES_PURCHASES_K_SPISKU_POKUPOK, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
 
     try:

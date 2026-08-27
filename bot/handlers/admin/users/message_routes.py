@@ -51,15 +51,15 @@ async def prompt_send_user_message(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_MESSAGE_ROUTES_OTMENA_54,
+        text=texts.BTN_CANCEL,
         callback_data=f"admin_user_card:{user.telegram_id}",
     )
 
     text = (
-        texts.UI_MESSAGE_ROUTES_OTPRAVKA_SOOBSHCHENIYA_POLZOVA_59.format()+
-        texts.UI_MESSAGE_ROUTES_POLZOVATEL_ID_60.format(safe_user_username_or_str_user_telegram_id=safe(user.username or str(user.telegram_id)), user_telegram_id=user.telegram_id)+
-        texts.UI_MESSAGE_ROUTES_VVEDITE_TEKST_SOOBSHCHENIYA_KO_61.format()+
-        texts.UI_MESSAGE_ROUTES_PODDERZHIVAETSYA_HTML_RAZMETKA_62.format()
+        texts.ADMIN_USERS_MESSAGE_SENDING_MESSAGE_POLZOVA.format()+
+        texts.ADMIN_USERS_MESSAGE_USER_ID.format(safe_user_username_or_str_user_telegram_id=safe(user.username or str(user.telegram_id)), user_telegram_id=user.telegram_id)+
+        texts.ADMIN_USERS_MESSAGE_ENTER_TEXT_MESSAGE_KO.format()+
+        texts.ADMIN_USERS_MESSAGE_PODDERZHIVAETSYA_HTML_RAZMETKA.format()
     )
 
     try:
@@ -97,7 +97,7 @@ async def process_send_user_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_MESSAGE_ROUTES_OSHIBKA_NE_NAYDEN_TSELEVOY_POL_100,
+            texts.ADMIN_USERS_MESSAGE_ERROR_NE_NAYDEN_TSELEVOY_POL,
             get_back_button("admin_users"),
             trigger_message_id=message.message_id,
         )
@@ -122,7 +122,7 @@ async def process_send_user_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_MESSAGE_ROUTES_POZHALUYSTA_OTPRAVTE_TEKSTOVOE_125,
+            texts.ADMIN_USERS_MESSAGE_POZHALUYSTA_OTPRAVTE_TEKSTOVOE,
             get_back_button(f"admin_user_card:{target_telegram_id}"),
             trigger_message_id=message.message_id,
         )
@@ -134,7 +134,7 @@ async def process_send_user_message(
     error_reason = None
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     dismiss_builder = InlineKeyboardBuilder()
-    dismiss_builder.button(text=texts.UI_MESSAGE_ROUTES_PROCHITANO_137, callback_data="dismiss_notification")
+    dismiss_builder.button(text=texts.ADMIN_USERS_MESSAGE_PROCHITANO, callback_data="dismiss_notification")
     reply_markup = dismiss_builder.as_markup()
 
     try:
@@ -144,7 +144,7 @@ async def process_send_user_message(
                 await message.bot.send_photo(
                     target_telegram_id,
                     photo=photo_id,
-                    caption=texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_147.format(text_to_send_or=text_to_send or ''),
+                    caption=texts.ADMIN_USERS_MESSAGE_MESSAGE_OT_ADMINISTRATSII.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
@@ -152,7 +152,7 @@ async def process_send_user_message(
                 await message.bot.send_photo(
                     target_telegram_id,
                     photo=photo_id,
-                    caption=texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_155.format(text_to_send_or=text_to_send or ''),
+                    caption=texts.ADMIN_DIRECT_MESSAGE_TEXT_FORMAT.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                 )
         elif message.document:
@@ -161,7 +161,7 @@ async def process_send_user_message(
                 await message.bot.send_document(
                     target_telegram_id,
                     document=doc_id,
-                    caption=texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_164.format(text_to_send_or=text_to_send or ''),
+                    caption=texts.ADMIN_USERS_MESSAGE_MESSAGE_OT_ADMINISTRATSII.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
@@ -169,12 +169,12 @@ async def process_send_user_message(
                 await message.bot.send_document(
                     target_telegram_id,
                     document=doc_id,
-                    caption=texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_172.format(text_to_send_or=text_to_send or ''),
+                    caption=texts.ADMIN_DIRECT_MESSAGE_BODY_FORMAT.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                 )
         else:
             try:
-                header = texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_177
+                header = texts.ADMIN_DIRECT_MESSAGE_HEADER_HTML
                 await message.bot.send_message(
                     target_telegram_id,
                     f"{header}{text_to_send}",
@@ -182,7 +182,7 @@ async def process_send_user_message(
                     parse_mode="HTML",
                 )
             except TelegramBadRequest:
-                header = texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_OT_ADMINISTRATSII_185
+                header = texts.ADMIN_DIRECT_MESSAGE_HEADER_PLAIN
                 await message.bot.send_message(
                     target_telegram_id,
                     f"{header}{text_to_send}",
@@ -190,7 +190,7 @@ async def process_send_user_message(
                 )
         msg_sent = True
     except TelegramForbiddenError:
-        error_reason = texts.UI_MESSAGE_ROUTES_POLZOVATEL_ZABLOKIROVAL_BOTA_193
+        error_reason = texts.ADMIN_USERS_MESSAGE_USER_ZABLOKIROVAL_BOTA
     except Exception as exc:
         error_reason = str(exc)
         logger.warning(f"Failed to send admin direct message to {target_telegram_id}: {exc}")
@@ -208,9 +208,9 @@ async def process_send_user_message(
                 "text": text_to_send[:500] if text_to_send else "",
             }, ensure_ascii=False),
         )
-        notice = texts.UI_MESSAGE_ROUTES_SOOBSHCHENIE_POLZOVATELYU_ID_U_211.format(target_telegram_id=target_telegram_id)
+        notice = texts.ADMIN_USERS_MESSAGE_MESSAGE_POLZOVATELYU_ID_U.format(target_telegram_id=target_telegram_id)
     else:
-        notice = texts.UI_MESSAGE_ROUTES_NE_UDALOS_OTPRAVIT_SOOBSHCHENI_213.format(safe_error_reason=safe(error_reason))
+        notice = texts.ADMIN_USERS_MESSAGE_NE_UDALOS_OTPRAVIT_SOOBSHCHENI.format(safe_error_reason=safe(error_reason))
 
     await _show_user_card_edit(message, user, session, notice=notice)
 

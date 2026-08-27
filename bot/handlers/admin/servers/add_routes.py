@@ -112,7 +112,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L114_1,
+                texts.ADMIN_SERVER_FLAG_TOO_LONG,
                 get_back_button("admin_servers"),
             )
             return
@@ -155,7 +155,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L157_1,
+                texts.ADMIN_SERVER_URL_FORBIDDEN,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -255,7 +255,7 @@ async def process_add_server(
                 message.chat.id,
                 texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
                     protocols=safe(
-                        ", ".join(protocols) if protocols else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L254_1
+                        ", ".join(protocols) if protocols else texts.ADMIN_SERVERS_ADD
                     ),
                 ),
                 get_back_button("admin_servers"),

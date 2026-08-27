@@ -218,7 +218,7 @@ class ActionLockMiddleware(BaseMiddleware):
         if not _validate_callback_params(callback_data):
             try:
                 await event.answer(
-                    texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L199_1,
+                    texts.ERROR_INVALID_REQUEST,
                     show_alert=True,
                 )
             except Exception:
@@ -236,7 +236,7 @@ class ActionLockMiddleware(BaseMiddleware):
         if _is_stale_action(callback_data) and _is_stale_callback(event):
             try:
                 await event.answer(
-                    texts.UI_BOT_MIDDLEWARES_ACTION_LOCK_L217_1,
+                    texts.ERROR_CONFIRMATION_EXPIRED,
                     show_alert=True,
                 )
             except Exception:

@@ -2,7 +2,7 @@ import re
 import unittest
 
 from bot import texts
-from bot.texts_data.user.referral import TEXTS as REFERRAL_TEXTS
+from bot.texts.user import referral as REFERRAL_TEXTS
 
 FORBIDDEN_USER_WORDING = (
     "Что делать, если VPN не подключается или медленно работает?",
@@ -56,8 +56,8 @@ class TestUserTextAudit(unittest.TestCase):
         assert ".conf" in faq
 
     def test_referral_texts_do_not_keep_removed_profile_screens(self):
-        assert "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE" not in REFERRAL_TEXTS
-        assert "PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE" not in REFERRAL_TEXTS
+        assert "PROFILE_TEXT_ACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)
+        assert "PROFILE_TEXT_INACTIVE_REFERRAL_BALANCE" not in dir(REFERRAL_TEXTS)
 
     def test_faq_uses_dynamic_device_limit_wording(self):
         faq = texts.FAQ_TEXT

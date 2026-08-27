@@ -154,8 +154,8 @@ async def render_device_screen(
     message_effect_id: str | None = None,
 ):
     server = await get_server_by_id(session, profile.server_id)
-    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L60_1
-    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L61_1
+    flag = server.country_flag if server else texts.CONNECTION_DEVICE_VIEW
+    server_name = server.name if server else texts.DEVICE_NAME_UNKNOWN
     protocol = _format_protocol(server.protocol if server else None)
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
@@ -168,25 +168,25 @@ async def render_device_screen(
         last_connected=(
             format_datetime(profile.last_connected)
             if getattr(profile, "last_connected", None)
-            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L73_1
+            else texts.DEVICE_DATA_NONE
         ),
     )
 
     status = getattr(profile, "provisioning_status", "")
     if status == "pending_create":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_SOZDAETSYA_NA_SERVE_177
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_SOZDAETSYA_NA_SERVE
     elif status == "pending_update":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_KONFIGURATSIYA_USTROYSTVA_OBNO_179
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO
     elif status == "update_failed":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_OBNOVIT_KONFIGURATSI_181
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_OBNOVIT_KONFIGURATSI
     elif status == "create_failed":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_SOZDAT_USTROYSTVO_NA_183
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_SOZDAT_DEVICE_NA
     elif status == "create_cleanup_pending":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_IDET_AVTOMATICHESKOE_VOSSTANOV_185
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_IDET_AVTOMATICHESKOE_VOSSTANOV
     elif status == "deleting":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_UDALYAETSYA_S_SERVE_187
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_UDALYAETSYA_S_SERVE
     elif status == "delete_failed":
-        rendered += texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_UDALIT_USTROYSTVO_NA_189
+        rendered += texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_DELETE_DEVICE_NA
 
     has_access = await SubscriptionService.check_access(session, user.telegram_id)
     show_delete = can_show_delete_action(profile)
@@ -199,9 +199,9 @@ async def render_device_screen(
             display_key = build_display_vpn_key(raw_cfg, profile, server)
 
         if display_key:
-            copy_hint = texts.UI_DEVICE_VIEW_ROUTES_NAZHMITE_NA_MONOSHIRINNYY_KLYU_202
+            copy_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU
             key_block = (
-                texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_204.format()+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA.format()+
                 f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"+
                 f"{copy_hint}"
             )
@@ -209,42 +209,42 @@ async def render_device_screen(
                 rendered += key_block
             else:
                 rendered += (
-                    texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_212+
-                    texts.UI_DEVICE_VIEW_ROUTES_KONFIGURATSIYA_DOSTUPNA_CHEREZ_213
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA+
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ
                 )
 
         if display_key:
             amnezia_howto = (
-                texts.UI_DEVICE_VIEW_ROUTES_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY_218+
-                texts.UI_DEVICE_VIEW_ROUTES_OTKROYTE_PRILOZHENIE_NAZHMITE__219
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE
             )
         else:
             amnezia_howto = (
-                texts.UI_DEVICE_VIEW_ROUTES_AMNEZIAVPN_DEFAULTVPN_NAZHMITE_223+
-                texts.UI_DEVICE_VIEW_ROUTES_CHTOBY_POLUCHIT_FAYL_KONFIGURA_224
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA
             )
         guide_block = (
-            texts.UI_DEVICE_VIEW_ROUTES_KAK_PODKLYUCHITSYA_I_PROVERIT__227+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT+
             f"{amnezia_howto}\n"+
-            texts.UI_DEVICE_VIEW_ROUTES_INCY_IOS_ANDROID_OTKROYTE_PODK_229+
-            texts.UI_DEVICE_VIEW_ROUTES_KAK_PONYAT_CHTO_VSE_RABOTAET_230+
-            texts.UI_DEVICE_VIEW_ROUTES_1_V_PRILOZHENII_STATUS_SMENITS_231+
-            texts.UI_DEVICE_VIEW_ROUTES_2_V_STROKE_SOSTOYANIYA_POYAVIT_232+
-            texts.UI_DEVICE_VIEW_ROUTES_3_NA_SAYTE_2IP_RU_STRANA_SMENI_233+
-            texts.UI_DEVICE_VIEW_ROUTES_4_POPULYARNYE_SERVISY_I_ZARUBE_234
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_INCY_IOS_ANDROID_OTKROYTE_PODK+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI+
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE
         )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
 
         btn_info_lines = [
-            texts.UI_DEVICE_VIEW_ROUTES_KNOPKI_UPRAVLENIYA_240,
+            texts.CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA,
         ]
         if config_ready:
-            btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V_243)
-        btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_PEREIMENOVAT_IZMENIT_NAZVANIE__244)
-        btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_INSTRUKTSIYA_POSHAGOVOE_RUKOVO_245)
+            btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V)
+        btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE)
+        btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO)
         if show_delete:
-            btn_info_lines.append(texts.UI_DEVICE_VIEW_ROUTES_UDALIT_OTOZVAT_KLYUCH_I_OSVOBO_247)
+            btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO)
 
         btn_info = "\n".join(btn_info_lines)
         if len(rendered) + len(btn_info) <= 4000:
@@ -256,13 +256,13 @@ async def render_device_screen(
             show_delete=show_delete,
         )
     else:
-        rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L87_1
+        rendered += texts.DEVICE_ACCESS_INACTIVE_NOTICE
 
         builder = InlineKeyboardBuilder()
         if show_delete:
-            builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L93_1, callback_data=f"request_delete_device:{profile.id}")
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L94_1, callback_data="back_to_connections")
-        builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L95_1, callback_data="back_to_main_menu")
+            builder.button(text=texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}")
+        builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
+        builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
         builder.adjust(1)
         keyboard = builder.as_markup()
 
@@ -287,12 +287,12 @@ async def manage_device(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L51_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
-        await callback.answer(texts.UI_DEVICE_VIEW_ROUTES_USTROYSTVO_NE_NAYDENO_ILI_BYLO_295, show_alert=True)
+        await callback.answer(texts.CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO, show_alert=True)
         if db_user:
             await _render_connections(callback.message, db_user, session)
         return
@@ -314,7 +314,7 @@ def _get_device_config_keyboard(profile_id: int):
     # - Back button returns directly to the device card.
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_INSTRUKTSIYA_I_POMOSCH, callback_data=f"device_help:{profile_id}")
-    builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
+    builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -334,7 +334,7 @@ async def device_help(
     """
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer(texts.UI_DEVICE_VIEW_ROUTES_NEKORREKTNYY_ZAPROS_337, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
     profile = await get_profile_by_id(session, profile_id)
     if not profile or not db_user or profile.user_id != db_user.id:
@@ -342,14 +342,14 @@ async def device_help(
         return
 
     text = (
-        texts.UI_DEVICE_VIEW_ROUTES_INSTRUKTSII_I_SPRAVKA_AMNEZIAV_345+
-        texts.UI_DEVICE_VIEW_ROUTES_V_ETOM_RAZDELE_VY_NAYDETE_RUKO_346+
-        texts.UI_DEVICE_VIEW_ROUTES_SKACHIVANIYU_KLIENTA_I_NASTROY_347+
-        texts.UI_DEVICE_VIEW_ROUTES_PRAVILA_I_OSOBENNOSTI_RABOTY_348+
-        texts.UI_DEVICE_VIEW_ROUTES_NE_REKOMENDUETSYA_ISPOLZOVAT_T_349+
-        texts.UI_DEVICE_VIEW_ROUTES_CHAST_SAYTOV_SERVISOV_MOZHET_B_350+
-        texts.UI_DEVICE_VIEW_ROUTES_REKOMENDUEM_ISPOLZOVAT_PROTOKO_351+
-        texts.UI_DEVICE_VIEW_ROUTES_VYBERITE_NUZHNUYU_TEMU_NIZHE_352
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_CHAST_SAYTOV_SERVISOV_MOZHET_B+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_REKOMENDUEM_ISPOLZOVAT_PROTOKO+
+        texts.CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW
     )
 
     builder = InlineKeyboardBuilder()
@@ -359,7 +359,7 @@ async def device_help(
     builder.button(text=texts.BTN_INSTRUKTSII_WINDOWS, callback_data=f"help_windows{suffix}")
     builder.button(text=texts.BTN_RAZDELNOE_TUNNELIROVANIE, callback_data=f"help_split{suffix}")
     builder.button(text=texts.BTN_DOKUMENTATSIYA_AMNEZIA, url=_AMNEZIA_DOCS)
-    builder.button(text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
+    builder.button(text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE, callback_data=f"manage_device:{profile_id}")
     builder.adjust(1)
 
     await render_hub(
@@ -383,7 +383,7 @@ async def show_config(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L114_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -449,7 +449,7 @@ async def alt_connection(
 
     profile_id = parse_callback_id(callback.data, 1)
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_VIEW_ROUTES_L176_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -588,36 +588,36 @@ async def alt_connection(
 
             if vpn_sent and conf_sent:
                 files_info = (
-                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_ODIN_IZ_PRIKREPLE_591+
-                    texts.UI_DEVICE_VIEW_ROUTES_VPN_DLYA_PRILOZHENIYA_AMNEZIAV_592+
-                    texts.UI_DEVICE_VIEW_ROUTES_CONF_DLYA_AMNEZIAWG_DEFAULTVPN_593
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE+
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV+
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN
                 )
             elif vpn_sent:
                 files_info = (
-                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_PRIKREPLENNYY_FAY_597
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY
                 )
             elif conf_sent:
                 files_info = (
-                    texts.UI_DEVICE_VIEW_ROUTES_1_SOKHRANITE_PRIKREPLENNYY_FAY_601
+                    texts.CONNECTION_GUIDE_SAVE_CONF_FILE
                 )
             else:
                 escaped_key = safe(profile.raw_config or "")
                 key_block = (
-                    texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_606.format(escaped_key=escaped_key)
+                    texts.CONNECTION_KEY_BLOCK_FORMAT.format(escaped_key=escaped_key)
                     if len(escaped_key) <= 3500
-                    else texts.UI_DEVICE_VIEW_ROUTES_KLYUCH_PODKLYUCHENIYA_DOSTUPEN_608
+                    else texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN
                 )
                 files_info = (
-                    texts.UI_DEVICE_VIEW_ROUTES_NE_UDALOS_PRIKREPIT_FAYLY_KONF_611+
+                    texts.CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_PRIKREPIT_FAYLY_KONF+
                     f"{key_block}"
                 )
 
-            bridge_hint = texts.UI_DEVICE_VIEW_ROUTES_3_LIBO_NAZHMITE_KNOPKU_OTKRYT__615 if amnezia_bridge_url else ""
+            bridge_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_3_LIBO_NAZHMITE_KNOPKU_OTKRYT if amnezia_bridge_url else ""
             alt_guide_text = (
-                texts.UI_DEVICE_VIEW_ROUTES_DRUGOY_SPOSOB_PODKLYUCHENIYA_617.format(safe_profile_device_name=safe(profile.device_name))+
-                texts.UI_DEVICE_VIEW_ROUTES_ESLI_PRYAMAYA_VSTAVKA_KLYUCHA__618+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA.format(safe_profile_device_name=safe(profile.device_name))+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY+
                 f"{files_info}"+
-                texts.UI_DEVICE_VIEW_ROUTES_2_OTKROYTE_PRILOZHENIE_I_VYBER_620+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER+
                 f"{bridge_hint}"
             )
 

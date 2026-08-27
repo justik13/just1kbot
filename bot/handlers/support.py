@@ -29,32 +29,32 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     support_url = f"https://t.me/{username}?text={text_param}" if text_param else f"https://t.me/{username}"
 
     builder.button(
-        text="💬 Написать в поддержку",
+        text=texts.BTN_CONTACT_SUPPORT,
         url=support_url,
     )
 
     builder.button(
-        text="ℹ️ Помощь и Инструкции",
+        text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data="support_help",
     )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_SUPPORT_L23_1,
+        text=texts.SUPPORT,
         callback_data="faq",
     )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_SUPPORT_L28_1,
+        text=texts.BTN_TOS,
         url=texts.TOS_AGREEMENT_URL,
     )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_SUPPORT_L33_1,
+        text=texts.BTN_PRIVACY_POLICY,
         url=texts.PRIVACY_POLICY_URL,
     )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_SUPPORT_L38_1,
+        text=texts.BTN_MAIN_MENU,
         callback_data="back_to_main_menu",
     )
 
@@ -108,33 +108,33 @@ async def show_support_help(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📥 Скачать клиент Amnezia",
+        text=texts.BTN_DOWNLOAD_AMNEZIA,
         callback_data=f"help_download{suffix}",
     )
     builder.button(
-        text="🍏 Инструкция iOS (для РФ)",
+        text=texts.BTN_INSTRUCTION_IOS,
         callback_data=f"help_ios{suffix}",
     )
     builder.button(
-        text="💻 Инструкции Windows",
+        text=texts.BTN_INSTRUCTION_WINDOWS,
         callback_data=f"help_windows{suffix}",
     )
     builder.button(
-        text="🔀 Раздельное Туннелирование",
+        text=texts.BTN_SPLIT_TUNNELING,
         callback_data=f"help_split{suffix}",
     )
     builder.button(
-        text="📚 Документация Amnezia",
+        text=texts.BTN_AMNEZIA_DOCS,
         url=AMNEZIA_DOCS,
     )
     if device_id:
         builder.button(
-            text="← Назад в устройство",
+            text=texts.BTN_BACK_TO_DEVICE,
             callback_data=f"manage_device:{device_id}",
         )
     else:
         builder.button(
-            text="← Назад в поддержку",
+            text=texts.BTN_BACK_TO_SUPPORT,
             callback_data="menu_support",
         )
     builder.adjust(1, 1, 1, 1, 1, 1)
@@ -163,19 +163,19 @@ async def show_help_download(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🌐 Скачать клиент (Зеркало)",
+        text=texts.BTN_DOWNLOAD_MIRROR,
         url=AMNEZIA_DOWNLOAD_MIRROR,
     )
     builder.button(
-        text="📦 Последняя версия (GitHub)",
+        text=texts.BTN_LATEST_VERSION_GITHUB,
         url=AMNEZIA_GITHUB_LATEST,
     )
     builder.button(
-        text="🏠 Официальный сайт Amnezia",
+        text=texts.BTN_OFFICIAL_SITE_AMNEZIA,
         url=AMNEZIA_OFFICIAL_SITE,
     )
     builder.button(
-        text="← Назад",
+        text=texts.BTN_BACK,
         callback_data=back_cb,
     )
     builder.adjust(1, 1, 1, 1)
@@ -201,11 +201,11 @@ async def show_help_ios(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📖 Открыть инструкцию iOS",
+        text=texts.BTN_OPEN_IOS_INSTRUCTION,
         url=AMNEZIA_IOS_RU,
     )
     builder.button(
-        text="← Назад",
+        text=texts.BTN_BACK,
         callback_data=back_cb,
     )
     builder.adjust(1, 1)
@@ -231,15 +231,15 @@ async def show_help_windows(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📥 Установка AmneziaVPN на Windows",
+        text=texts.BTN_INSTALL_WINDOWS,
         url=AMNEZIA_WIN_INSTALL,
     )
     builder.button(
-        text="🔄 Обновление AmneziaVPN на Windows",
+        text=texts.BTN_UPDATE_WINDOWS,
         url=AMNEZIA_WIN_UPDATE,
     )
     builder.button(
-        text="← Назад",
+        text=texts.BTN_BACK,
         callback_data=back_cb,
     )
     builder.adjust(1, 1, 1)
@@ -265,11 +265,11 @@ async def show_help_split(callback: CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📖 Инструкция по Раздельному Туннелированию",
+        text=texts.BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION,
         url=AMNEZIA_SPLIT_TUNNELING,
     )
     builder.button(
-        text="← Назад",
+        text=texts.BTN_BACK,
         callback_data=back_cb,
     )
     builder.adjust(1, 1)

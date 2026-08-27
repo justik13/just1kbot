@@ -32,7 +32,7 @@ def get_broadcast_audience_keyboard() -> InlineKeyboardMarkup:
         callback_data="broadcast_aud:test",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L19_1,
+        text=texts.BTN_CANCEL,
         callback_data="admin_menu",
     )
 
@@ -64,7 +64,7 @@ def get_broadcast_result_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L32_1,
+        text=texts.ADMIN_BROADCAST_STOPPED_NOTICE,
         callback_data="broadcast_dismiss",
     )
 
@@ -77,7 +77,7 @@ def get_broadcast_close_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L45_1,
+        text=texts.BTN_DISMISS_NOTIFICATION,
         callback_data="dismiss_broadcast",
     )
 

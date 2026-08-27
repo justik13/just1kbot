@@ -40,28 +40,28 @@ logger = logging.getLogger(__name__)
 
 
 PURCHASE_ERRORS = {
-    "quote_not_found": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L38_1,
-    "quote_expired": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L39_1,
-    "quote_not_active": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
-    "tariff_unavailable": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
-    "tariff_price_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L42_1,
-    "quote_price_mismatch": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L43_1,
-    "subscription_state_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
-    "insufficient_balance": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L45_1,
-    "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L46_1,
-    "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L47_1,
-    "too_many_devices": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L48_1,
+    "quote_not_found": texts.PAYMENT_PURCHASE_QUOTE_NOT_FOUND,
+    "quote_expired": texts.PAYMENT_PURCHASE_PRICE_STALE,
+    "quote_not_active": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "tariff_unavailable": texts.PAYMENT_PURCHASE_UNAVAILABLE,
+    "tariff_price_changed": texts.PAYMENT_PURCHASE_PRICE_CHANGED_NOTICE,
+    "quote_price_mismatch": texts.PAYMENT_PURCHASE_PRICE_EXPIRED_RETRY,
+    "subscription_state_changed": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
+    "insufficient_balance": texts.PAYMENT_PURCHASE_INSUFFICIENT_FUNDS_ALERT,
+    "financial_hold": texts.PAYMENT_PURCHASE_DISPUTE_BLOCKED,
+    "account_debt": texts.PAYMENT_PURCHASE_DEBT_BLOCKED,
+    "too_many_devices": texts.PAYMENT_PURCHASE_DEVICES_BLOCKED,
     "purchase_user_missing": texts.ERROR_USER_NOT_FOUND,
-    "purchase_user_banned": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L46_1,
-    "purchase_user_ineligible": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
-    "current_tariff_unknown": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
-    "tariff_change_required": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L44_1,
-    "active_tariff_change_quote_exists": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
-    "consumed_quote_incomplete": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L39_1,
-    "quote_operation_mismatch": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
-    "active_quote_has_existing_debit": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
-    "active_quote_has_existing_entitlement": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L40_1,
-    "tariff_duration_not_whole_days": texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L41_1,
+    "purchase_user_banned": texts.PAYMENT_PURCHASE_DISPUTE_BLOCKED,
+    "purchase_user_ineligible": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
+    "current_tariff_unknown": texts.PAYMENT_PURCHASE_UNAVAILABLE,
+    "tariff_change_required": texts.PAYMENT_PURCHASE_STATE_CHANGED_RETRY,
+    "active_tariff_change_quote_exists": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "consumed_quote_incomplete": texts.PAYMENT_PURCHASE_PRICE_STALE,
+    "quote_operation_mismatch": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "active_quote_has_existing_debit": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "active_quote_has_existing_entitlement": texts.PAYMENT_PURCHASE_NOT_ACTIVE,
+    "tariff_duration_not_whole_days": texts.PAYMENT_PURCHASE_UNAVAILABLE,
 }
 
 
@@ -92,7 +92,7 @@ async def _render_purchase_review(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            PURCHASE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L79_1),
+            PURCHASE_ERRORS.get(exc.code, texts.PAYMENT_PURCHASE_OPEN_FAILED),
             get_back_button("menu_subscription"),
         )
         return
@@ -103,9 +103,9 @@ async def _render_purchase_review(
     before = int(intent.balance.available)
     after = max(0, before - price)
     tariff_name = get_tariff_display_name(intent.version.device_limit)
-    operation = texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L90_1 if quote.operation_type == "renew" else texts.WORD_PURCHASE
+    operation = texts.PAYMENT_PURCHASE_OPERATION_RENEW_TITLE if quote.operation_type == "renew" else texts.WORD_PURCHASE
     text = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L92_1.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
+        texts.PAYMENT_PURCHASE_CONFIRM_CARD.format(value_0=operation.lower(), value_1=tariff_name, value_2=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -113,10 +113,10 @@ async def _render_purchase_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += (
-                texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L106_1.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
+                texts.PAYMENT_PURCHASE.format(value_0=int(intent.shortage), value_1=minimum, value_2=remainder)
             )
         else:
-            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L111_1.format(value_0=int(intent.shortage))
+            text += texts.PAYMENT_PURCHASE_SHORTAGE_LINE.format(value_0=int(intent.shortage))
         keyboard = get_balance_shortage_keyboard(
             str(quote.public_id), exact, back
         )
@@ -141,7 +141,7 @@ async def review_purchase(
     await callback.answer(show_alert=False)
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
+        await callback.answer(texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
     if not await MaintenanceService.can_user_perform_action(
         session, callback.from_user.id
@@ -159,7 +159,7 @@ async def cancel_purchase(
 ) -> None:
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L135_1, show_alert=True)
+        await callback.answer(texts.PAYMENT_PURCHASE_INVALID_OPERATION, show_alert=True)
         return
 
     try:
@@ -182,7 +182,7 @@ async def cancel_purchase(
         await callback.answer(
             PURCHASE_ERRORS.get(
                 exc.code,
-                texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L79_1,
+                texts.PAYMENT_PURCHASE_OPEN_FAILED,
             ),
             show_alert=True,
         )
@@ -194,7 +194,7 @@ async def cancel_purchase(
             quote_id,
         )
         await callback.answer(
-            texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L79_1,
+            texts.PAYMENT_PURCHASE_OPEN_FAILED,
             show_alert=True,
         )
         return
@@ -220,7 +220,7 @@ async def confirm_purchase(
     session: AsyncSession,
     db_user: User | None = None,
 ) -> None:
-    await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L147_1, show_alert=False)
+    await callback.answer(texts.PAYMENT_PURCHASE_PROCESSING_NOTICE, show_alert=False)
     await state.clear()
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -263,7 +263,7 @@ async def confirm_purchase(
             callback.bot,
             callback.message.chat.id,
             PURCHASE_ERRORS.get(
-                exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L167_1
+                exc.code, texts.PAYMENT_PURCHASE_CANCELLED_NO_DEBIT
             ),
             get_back_button("menu_subscription"),
         )
@@ -275,12 +275,12 @@ async def confirm_purchase(
         session, user_id=db_user.id, quote_public_id=quote_id
     )
     operation = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L176_1 if result.quote.operation_type == "renew" else texts.PURCHASE_COMPLETED
+        texts.PAYMENT_PURCHASE_RENEW_COMPLETED if result.quote.operation_type == "renew" else texts.PURCHASE_COMPLETED
     )
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L180_1.format(
+        texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
             value_0=operation,
             value_1=get_tariff_display_name(intent.version.device_limit),
             value_2=intent.version.duration_hours // 24,
@@ -317,7 +317,7 @@ async def topup_exact_shortage(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L209_1, show_alert=False
+        texts.PAYMENT_PURCHASE_CREATING_LINK, show_alert=False
     )
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
@@ -328,7 +328,7 @@ async def topup_exact_shortage(
         )
     except AccountPurchaseError:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L218_1, show_alert=True
+            texts.PAYMENT_PURCHASE_QUOTE_EXPIRED_ALERT, show_alert=True
         )
         return
     if intent.shortage <= 0:
@@ -368,7 +368,7 @@ async def topup_custom_shortage(
             session, db_user, quote_id
         )
     except AccountPurchaseError:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L251_1, show_alert=True)
+        await callback.answer(texts.PAYMENT_PURCHASE_QUOTE_EXPIRED_RETRY, show_alert=True)
         return
     minimum = max(
         int(intent.shortage), get_settings().BALANCE_MIN_TOPUP_RUB
@@ -380,7 +380,7 @@ async def topup_custom_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L263_1.format(value_0=minimum),
+        texts.PAYMENT_PURCHASE_AMOUNT_PROMPT.format(value_0=minimum),
         get_back_button(
             f"balance_purchase_review:{intent.quote.public_id}"
         ),
@@ -425,14 +425,14 @@ async def resume_purchase_after_topup(
                 await render_hub(
                     callback.bot,
                     callback.message.chat.id,
-                    texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1,
+                    texts.PAYMENT_SHOWCASE,
                     get_same_tariff_keyboard(),
                 )
                 return
             await render_hub(
                 callback.bot,
                 callback.message.chat.id,
-                texts.UI_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L300_1,
+                texts.PAYMENT_PURCHASE_EXPIRED_RETRY,
                 get_back_button("payment_change_tariff"),
             )
             return
@@ -451,7 +451,7 @@ async def resume_purchase_after_topup(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            PURCHASE_ERRORS.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_PURCHASE_ROUTES_L316_1),
+            PURCHASE_ERRORS.get(exc.code, texts.PAYMENT_PURCHASE_STALE_RETRY),
             get_back_button("menu_subscription"),
         )
         return

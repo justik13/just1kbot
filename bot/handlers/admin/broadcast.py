@@ -86,11 +86,11 @@ async def start_broadcast(
     await state.clear()
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.UI_BROADCAST_RASSYLKA_89, texts.UI_BROADCAST_SHAG_1_VYBOR_AUDITORII_89)
+    header = format_admin_breadcrumbs(texts.BROADCAST_BROADCAST, texts.BROADCAST_STEP_1_SELECT_AUDIENCE)
 
     try:
         await callback.message.edit_text(
-            texts.UI_BROADCAST_VYBERITE_AUDITORIYU_DLYA_RASSY_93.format(header=header),
+            texts.BROADCAST_SELECT_AUDITORIYU_FOR_RASSY.format(header=header),
             reply_markup=get_broadcast_audience_keyboard(),
             parse_mode="HTML",
         )
@@ -157,7 +157,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L116_1.format(
+            texts.ADMIN_BROADCAST_RECIPIENTS_COUNT.format(
                 value_0=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
@@ -167,7 +167,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L125_1.format(
+            texts.ADMIN_BROADCAST_TEST_SENT_SUCCESS.format(
                 value_0=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
@@ -215,10 +215,10 @@ async def process_broadcast_message(
     aud_label = label_map.get(target_audience, target_audience)
 
     preview_summary = (
-        texts.UI_BROADCAST_TESTOVOE_SOOBSHCHENIE_OTPRAVLE_218.format()+
-        texts.UI_BROADCAST_AUDITORIYA_219.format(aud_label=aud_label)+
-        texts.UI_BROADCAST_POLUCHATELEY_CHEL_220.format(total_count=total_count)+
-        texts.UI_BROADCAST_OZNAKOMTES_S_PREDPROSMOTROM_VY_221.format()
+        texts.BROADCAST_TEST_MESSAGE_OTPRAVLE.format()+
+        texts.BROADCAST_AUDIENCE.format(aud_label=aud_label)+
+        texts.BROADCAST_RECIPIENTS_CHEL.format(total_count=total_count)+
+        texts.BROADCAST_PREVIEW_S_PREVIEW_VY.format()
     )
 
     try:
@@ -534,7 +534,7 @@ async def _send_broadcast_to_users_with_resume(
         try:
             await bot.send_message(
                 admin_id,
-                texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L423_1.format(
+                texts.ADMIN_BROADCAST_SENDING_PROGRESS.format(
                     value_0=html.escape(
                         type(e).__name__ + ": " + str(e)[:200]
                     )
@@ -740,13 +740,13 @@ async def _start_broadcast_process(
             return
 
         label_map = {
-            "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
+            "all": texts.ADMIN_BROADCAST,
             "active": texts.BROADCAST_ACTIVE_LABEL,
             "expiring_3d": "⏳ Истекают < 3 дней",
             "expired": "🔴 Истекшие подписки",
             "never": "🆕 Без подписок",
         }
-        label = label_map.get(audience, texts.UI_BROADCAST_TEST_MNE_ADMINU_749 if audience.startswith("test_") else audience)
+        label = label_map.get(audience, texts.BROADCAST_TEST_MNE_ADMINU if audience.startswith("test_") else audience)
 
         async with session_scope() as sess:
             progress = BroadcastProgress(
@@ -934,7 +934,7 @@ async def stop_broadcast(callback: CallbackQuery):
     admin_id = callback.from_user.id
     if admin_id not in _broadcast_in_progress:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L709_1,
+            texts.ADMIN_BROADCAST_SUMMARY_RESULT,
             show_alert=True,
         )
         return

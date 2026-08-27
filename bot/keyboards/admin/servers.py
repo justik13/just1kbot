@@ -15,41 +15,41 @@ def get_admin_server_card_keyboard(
         callback_data=f"admin_server_ping:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L12_1,
+        text=texts.ADMIN_SERVER_STATUS_PROBLEM_BADGE,
         callback_data=f"admin_server_edit_name:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L16_1,
+        text=texts.ADMIN_SERVER_STATUS_OFFLINE_BADGE,
         callback_data=f"admin_server_edit_flag:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L20_1,
+        text=texts.ADMIN_SERVER_STATUS_DISABLED_BADGE,
         callback_data=f"admin_server_edit_url:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L24_1,
+        text=texts.ADMIN_SERVER_BTN_PING,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L28_1,
+        text=texts.ADMIN_SERVER_BTN_EDIT,
         callback_data=f"admin_server_edit_max_clients:{server_id}",
     )
 
     if is_active:
-        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_SERVERS_L34_1
+        status_text = texts.ADMIN_SERVERS
     else:
-        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_SERVERS_L36_1
+        status_text = texts.ADMIN_SERVER_STATUS_ONLINE_BADGE
 
     builder.button(
         text=status_text,
         callback_data=f"admin_server_toggle:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L42_1,
+        text=texts.ADMIN_SERVER_BTN_DELETE,
         callback_data=f"admin_server_delete:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L46_1,
+        text=texts.ADMIN_SERVER_EDIT_IP_PROMPT,
         callback_data="admin_servers",
     )
 
@@ -64,19 +64,19 @@ def get_server_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L60_1,
+        text=texts.ADMIN_SERVER_EDIT_PORT_PROMPT,
         callback_data=f"confirm_server_delete:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L64_1,
+        text=texts.BTN_CANCEL,
         callback_data=f"admin_server_card:{server_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L68_1,
+        text=texts.ADMIN_SERVER_EDIT_LIMIT_PROMPT,
         callback_data="admin_servers",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_SERVERS_L72_1,
+        text=texts.ADMIN_SERVER_EDIT_SUCCESS,
         callback_data="back_to_main_menu",
     )
 

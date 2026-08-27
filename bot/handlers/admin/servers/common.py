@@ -46,17 +46,17 @@ async def _build_servers_list_text_and_kb(
     servers, page: int, total_pages: int, total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L48_1.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_SERVERS_COMMON.format(value_0=page, value_1=total_pages, value_2=total)
     )
     builder = InlineKeyboardBuilder()
     if not servers:
-        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L53_1
+        rendered += texts.ADMIN_SERVERS_EMPTY
     else:
         for server in servers:
-            flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L56_1
-            status = texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L57_1 if server.is_active else texts.STATUS_INACTIVE_ICON
+            flag = server.country_flag or texts.ADMIN_SERVER_DEFAULT_FLAG
+            status = texts.ADMIN_SERVER_STATUS_ONLINE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L59_1.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
+                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
             )
             builder.button(
                 text=button_text,
@@ -64,16 +64,16 @@ async def _build_servers_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L67_1,
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
             callback_data=f"admin_servers_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L72_1,
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_servers_page:{page + 1}",
         )
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L75_1, callback_data="admin_server_add")
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L76_1, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_BTN_ADD_SERVER, callback_data="admin_server_add")
+    builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -107,38 +107,38 @@ async def _show_server_card(
     flag = server.country_flag or "🌐"
 
     if server.is_active:
-        status_line = texts.UI_COMMON_AKTIVEN_110
+        status_line = texts.COMMON_AKTIVEN
         extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
-        status_line = texts.UI_COMMON_AVTOMATICHESKI_OTKLYUCHEN_113
+        status_line = texts.COMMON_AVTOMATICHESKI_OTKLYUCHEN
         disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"
         last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
         extra_status_info = (
-            texts.UI_COMMON_PRICHINA_API_NEDOSTUPEN_NESTAB_117.format()+
-            texts.UI_COMMON_OTKLYUCHEN_118.format(disabled_at_str=disabled_at_str)+
-            texts.UI_COMMON_POSLEDNIY_OTKLIK_119.format(last_check_str=last_check_str)
+            texts.COMMON_REASON_API_NEDOSTUPEN_NESTAB.format()+
+            texts.COMMON_OTKLYUCHEN.format(disabled_at_str=disabled_at_str)+
+            texts.COMMON_POSLEDNIY_OTKLIK.format(last_check_str=last_check_str)
         )
     else:
-        status_line = texts.UI_COMMON_OTKLYUCHEN_VRUCHNUYU_122
+        status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
     peer_counts = await get_server_peer_counts(session)
     used_clients = peer_counts.get(server.id, 0)
     max_clients = server.max_clients or 240
-    header = format_admin_breadcrumbs(texts.UI_COMMON_SERVERY_128, f"{flag} {server.name}")
+    header = format_admin_breadcrumbs(texts.COMMON_SERVERS, f"{flag} {server.name}")
 
     rendered = (
         f"{header}"+
-        texts.UI_COMMON_KARTOCHKA_VPN_SERVERA_ID_132.format(flag=flag, safe_server_name=safe(server.name), server_id=server.id)+
-        texts.UI_COMMON_STATUS_V_BOTE_133.format(status_line=status_line)+
+        texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(flag=flag, safe_server_name=safe(server.name), server_id=server.id)+
+        texts.COMMON_STATUS_V_BOTE.format(status_line=status_line)+
         f"{extra_status_info}"+
-        texts.UI_COMMON_PROTOKOL_135.format(safe_server_protocol=safe(server.protocol))+
-        texts.UI_COMMON_ZAPOLNENNOST_SLOTOV_136.format(used_clients=used_clients, max_clients=max_clients)+
+        texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))+
+        texts.COMMON_ZAPOLNENNOST_SLOTOV.format(used_clients=used_clients, max_clients=max_clients)+
         f"• API URL: <code>{safe(server.api_url)}</code>\n"
     )
 
     if ping_result:
-        rendered += texts.UI_COMMON_REZULTAT_PROVERKI_SVYAZI_141.format(ping_result=ping_result)
+        rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
 
     try:
         await callback.message.edit_text(

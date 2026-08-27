@@ -28,7 +28,7 @@ class AdminServerDeleteSafetyTests(unittest.IsolatedAsyncioTestCase):
             await confirm_delete_server(callback, state, AsyncMock())
 
         callback.answer.assert_awaited_once_with(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L134_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         state.clear.assert_awaited_once()

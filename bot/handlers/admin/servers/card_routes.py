@@ -40,7 +40,7 @@ async def show_server_card(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L43_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -77,7 +77,7 @@ async def toggle_server_confirm(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L80_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -96,7 +96,7 @@ async def toggle_server_confirm(
 
     new_status = not server.is_active
 
-    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L99_1
+    flag = server.country_flag or texts.ADMIN_SERVERS_CARD
 
     if new_status:
         text = texts.ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM.format(
@@ -139,7 +139,7 @@ async def toggle_server_apply(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L142_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return

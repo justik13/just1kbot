@@ -57,7 +57,7 @@ def get_referrals_list_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
+            builder.button(text=texts.BTN_BACK, callback_data=f"referrals_list:{page - 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
@@ -68,10 +68,10 @@ def get_referrals_list_keyboard(
         else:
             builder.button(text=" ", callback_data="ignore")
 
-        builder.button(text=texts.BUTTON_BACK, callback_data="referral")
+        builder.button(text=texts.BTN_BACK, callback_data="referral")
         builder.adjust(3, 1)
     else:
-        builder.button(text=texts.BUTTON_BACK, callback_data="referral")
+        builder.button(text=texts.BTN_BACK, callback_data="referral")
         builder.adjust(1)
 
     return builder.as_markup()

@@ -260,7 +260,7 @@ class TestPaymentFixes(unittest.IsolatedAsyncioTestCase):
 
         mock_hub.assert_awaited_once()
         args = mock_hub.call_args[0]
-        self.assertEqual(args[2], texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1)
+        self.assertEqual(args[2], texts.PAYMENT_SHOWCASE)
         self.assertIn("payment_quick_renew", _kb_callbacks(args[3]))
 
     async def test_select_tariff_inactive_same_tier_reports_unavailable(self):

@@ -84,16 +84,16 @@ async def _await_profile_ready(
 
 def _get_no_subscription_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L51_1, callback_data="menu_buy")
-    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L52_1, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
+    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
 
 def _get_device_limit_keyboard():
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L59_1, callback_data="payment_change_tariff")
-    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L60_1, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff")
+    builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -193,13 +193,13 @@ async def start_add_device(
     builder = InlineKeyboardBuilder()
 
     for server in servers:
-        flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L148_1
+        flag = server.country_flag or texts.CONNECTION_DEVICE_CREATE
         builder.button(
-            text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L150_1.format(value_0=flag, value_1=server.name),
+            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(value_0=flag, value_1=server.name),
             callback_data=f"select_server:{server.id}",
         )
 
-    builder.button(text=texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_L154_1, callback_data="back_to_connections")
+    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
     builder.adjust(1)
 
     await render_hub(
@@ -306,12 +306,12 @@ async def _process_server_selection(
         server_name = (
             server.name
             if server
-            else texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_DEFAULT_SERVER_NAME
+            else texts.CONNECTION_DEVICE_CREATE_DEFAULT_SERVER_NAME
         )
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.RUNTIME_BOT_HANDLERS_CONNECTION_DEVICE_CREATE_ROUTES_CREATING_SCREEN.format(
+            texts.CONNECTION_DEVICE_CREATE_CREATING_SCREEN.format(
                 value_0=safe(server_name)
             ),
             get_back_button("add_device"),

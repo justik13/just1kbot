@@ -83,11 +83,11 @@ def _history_lines(entries: list) -> str:
         return texts.BALANCE_HISTORY_EMPTY
     lines = []
     for entry in entries:
-        label = HISTORY_LABELS.get(entry.entry_type, texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L83_1)
-        sign = "+" if entry.amount > 0 else texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L84_1
+        label = HISTORY_LABELS.get(entry.entry_type, texts.BALANCE_OPERATION_DEFAULT_LABEL)
+        sign = "+" if entry.amount > 0 else texts.BALANCE_SIGN_MINUS
         amount = abs(int(entry.amount))
         lines.append(
-            texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L87_1.format(value_0=format_datetime(entry.created_at), value_1=label, value_2=sign, value_3=amount)
+            texts.BALANCE_HISTORY_ROW_FORMAT.format(value_0=format_datetime(entry.created_at), value_1=label, value_2=sign, value_3=amount)
         )
     return "\n".join(lines)
 
@@ -107,21 +107,21 @@ async def _render_balance(
     history = await get_account_history(session, user_id=user.id, limit=5)
     visible = await get_visible_balance_topup(session, user_id=user.id)
     details = [
-        texts.UI_BALANCE_ROUTES_BALANS_110.format(int_snapshot_real_available=int(snapshot.real_available)),
+        texts.BALANCE_BALANCE.format(int_snapshot_real_available=int(snapshot.real_available)),
     ]
     if snapshot.bonus_available > 0:
         details.append(
-            texts.UI_BALANCE_ROUTES_BONUSNYY_BALANS_114.format(int_snapshot_bonus_available=int(snapshot.bonus_available))
+            texts.BALANCE_BONUS_BALANCE.format(int_snapshot_bonus_available=int(snapshot.bonus_available))
         )
     if snapshot.reserved > 0:
-        details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L106_1.format(value_0=int(snapshot.reserved)))
+        details.append(texts.PAYMENT_BALANCE.format(value_0=int(snapshot.reserved)))
     if snapshot.debt > 0:
-        details.append(texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L108_1.format(value_0=int(snapshot.debt)))
+        details.append(texts.BALANCE_INSUFFICIENT_FUNDS_DIFFERENCE.format(value_0=int(snapshot.debt)))
     prefix = f"{notice}\n\n" if notice else ""
     text = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L111_1.format(value_0=prefix)
+        texts.BALANCE_TOPUP_CANCELLED_NO_DEBIT.format(value_0=prefix)
         + "\n".join(details)
-        + texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L113_1
+        + texts.BALANCE_HISTORY_SECTION_TITLE
         + _history_lines(history)
     )
 
@@ -163,7 +163,7 @@ async def _render_topup(
     balance = await get_account_balance(session, user_id=user.id)
     if payment.payment_url:
         text = (
-            texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L151_1.format(value_0=int(payment.amount), value_1=int(balance.available))
+            texts.BALANCE_TOPUP_CARD.format(value_0=int(payment.amount), value_1=int(balance.available))
         )
         message_id = await render_hub(
             bot,
@@ -181,7 +181,7 @@ async def _render_topup(
         )
         return
     text = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L172_1.format(value_0=int(payment.amount), value_1=int(balance.available))
+        texts.BALANCE_TOPUP_CREATING_LINK_CARD.format(value_0=int(payment.amount), value_1=int(balance.available))
     )
     message_id = await render_hub(
         bot,
@@ -268,7 +268,7 @@ async def show_balance(
     await callback.answer(show_alert=False)
     await state.clear()
     if db_user is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_BALANCE_ROUTES_L246_1, show_alert=True)
+        await callback.answer(texts.BALANCE_HISTORY_LIMIT_REACHED_NOTE, show_alert=True)
         return
     await _render_balance(
         callback.bot,
@@ -354,9 +354,9 @@ async def choose_topup_amount(
     tariff_amounts = topup_presets(tariffs)
     amounts = sorted(list(set(preset_defaults + tariff_amounts)))
     balance = await get_account_balance(session, user_id=db_user.id)
-    balance_lines = texts.UI_BALANCE_ROUTES_BALANS_357.format(int_balance_real_available=int(balance.real_available))
+    balance_lines = texts.BALANCE_TOTAL_AVAILABLE_LABEL.format(int_balance_real_available=int(balance.real_available))
     if balance.bonus_available > 0:
-        balance_lines += texts.UI_BALANCE_ROUTES_BONUSNYY_BALANS_359.format(int_balance_bonus_available=int(balance.bonus_available))
+        balance_lines += texts.BALANCE_BONUS_REMAINING_LABEL.format(int_balance_bonus_available=int(balance.bonus_available))
 
     from services.referral_bonus import is_first_topup_eligible
     is_first_eligible = await is_first_topup_eligible(session, user_id=db_user.id)
@@ -364,21 +364,21 @@ async def choose_topup_amount(
     bonus_notice = ""
     if is_first_eligible:
         bonus_lines = "\n".join(
-            texts.UI_BALANCE_ROUTES_NA_BONUSNYY_BALANS_367.format(amt=amt, amt____10=amt // 10)
+            texts.BALANCE_NA_BONUS_BALANCE.format(amt=amt, amt____10=amt // 10)
             for amt in amounts
         )
         bonus_notice = (
-            texts.UI_BALANCE_ROUTES_BONUS_NA_PERVOE_POPOLNENIE_371.format()+
-            texts.UI_BALANCE_ROUTES_VY_POLUCHITE_10_OT_SUMMY_POPOL_372.format()+
-            texts.UI_BALANCE_ROUTES_PODROBNEE_V_MENYU_PRIGLASIT_DR_373.format()+
-            texts.UI_BALANCE_ROUTES_RASCHET_BONUSA_K_SUMME_374.format(bonus_lines=bonus_lines)
+            texts.BALANCE_BONUS_NA_PERVOE_TOPUP.format()+
+            texts.BALANCE_VY_POLUCHITE_10_OT_SUMMY_POPOL.format()+
+            texts.BALANCE_PODROBNEE_V_MENYU_PRIGLASIT_DR.format()+
+            texts.BALANCE_RASCHET_BONUSA_K_SUMME.format(bonus_lines=bonus_lines)
         )
 
     text = (
-        texts.UI_BALANCE_ROUTES_POPOLNENIE_BALANSA_378.format()+
+        texts.BALANCE_TOPUP_BALANCE.format()+
         f"{balance_lines}\n"+
         f"{bonus_notice}\n"+
-        texts.UI_BALANCE_ROUTES_VYBERITE_SUMMU_ILI_UKAZHITE_DR_381.format()
+        texts.BALANCE_SELECT_AMOUNT_ILI_UKAZHITE_DR.format()
     )
     await render_hub(
         callback.bot,
@@ -654,7 +654,7 @@ async def cancel_all_topups_ui(
         callback.message.chat.id,
         session,
         db_user,
-        notice=texts.UI_BALANCE_ROUTES_OTMENENO_SSYLOK_657.format(count=count) if count > 0 else None,
+        notice=texts.BALANCE_OTMENENO_SSYLOK.format(count=count) if count > 0 else None,
     )
 
 

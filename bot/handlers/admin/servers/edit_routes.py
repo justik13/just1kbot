@@ -48,7 +48,7 @@ async def start_edit_server_name(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L50_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -180,7 +180,7 @@ async def start_edit_server_flag(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L182_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -197,7 +197,7 @@ async def start_edit_server_flag(
         )
         return
 
-    current_flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L199_1
+    current_flag = server.country_flag or texts.ADMIN_SERVERS_EDIT
 
     await state.update_data(
         server_id=server_id,
@@ -322,7 +322,7 @@ async def start_edit_server_url(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L324_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -476,7 +476,7 @@ async def process_edit_server_url(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
+                    else texts.LABEL_UNKNOWN
                 ),
             ),
             get_back_button("admin_servers"),
@@ -616,7 +616,7 @@ async def start_edit_server_key(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L537_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -739,7 +739,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
+                    else texts.LABEL_UNKNOWN
                 ),
             ),
             get_back_button("admin_servers"),
@@ -861,7 +861,7 @@ async def start_edit_server_max_clients(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L707_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return

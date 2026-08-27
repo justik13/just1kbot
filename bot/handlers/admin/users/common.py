@@ -100,7 +100,7 @@ def _is_subscription_active(user: User) -> bool:
 
 def _format_time_left(subscription_end) -> str:
     if not subscription_end:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L55_1
+        return texts.ADMIN_USERS_COMMON
 
     from utils.datetime_helpers import is_permanent_subscription
     if is_permanent_subscription(subscription_end):
@@ -110,7 +110,7 @@ def _format_time_left(subscription_end) -> str:
     delta = subscription_end - current_time
 
     if delta.total_seconds() <= 0:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L64_1
+        return texts.STATUS_EXPIRED_LABEL
 
     days = delta.days
     hours = delta.seconds // 3600
@@ -119,11 +119,11 @@ def _format_time_left(subscription_end) -> str:
         return texts.ADMIN_SUB_PERMANENT_LABEL
 
     if days > 0:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L73_1.format(value_0=days, value_1=hours)
+        return texts.TIME_DAYS_HOURS_FORMAT.format(value_0=days, value_1=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L77_1.format(value_0=hours, value_1=minutes)
+    return texts.TIME_HOURS_MINUTES_FORMAT.format(value_0=hours, value_1=minutes)
 
 
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
@@ -202,22 +202,22 @@ async def _build_users_list_text_and_kb(
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
         from utils.tariff_names import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
-    header = format_admin_breadcrumbs(texts.UI_COMMON_POLZOVATELI_164, texts.UI_COMMON_FILTR_164.format(f_name=cur_filter_name))
+    header = format_admin_breadcrumbs(texts.COMMON_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
         f"{header}"+
-        texts.UI_COMMON_UPRAVLENIE_POLZOVATELYAMI_STR__168.format(page=page, total_pages=total_pages, total=total)
+        texts.COMMON_MANAGE_POLZOVATELYAMI_STR.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     filters = [
-        ("all", texts.UI_COMMON_VSE_174, "none"),
-        ("new_7d", texts.UI_COMMON_NOVYE_7D_175, "none"),
-        ("expiring_3d", texts.UI_COMMON_3_DNEY_176, "none"),
-        ("active", texts.UI_COMMON_AKTIVNYE_177, "none"),
-        ("expired", texts.UI_COMMON_BEZ_PODPISKI_178, "none"),
-        ("banned", texts.UI_COMMON_ZABANENNYE_179, "none"),
+        ("all", texts.COMMON_VSE, "none"),
+        ("new_7d", texts.COMMON_NOVYE_7D, "none"),
+        ("expiring_3d", texts.COMMON_3_DAYS, "none"),
+        ("active", texts.COMMON_AKTIVNYE, "none"),
+        ("expired", texts.COMMON_BEZ_SUBSCRIPTION, "none"),
+        ("banned", texts.COMMON_ZABANENNYE, "none"),
     ]
 
     for f_code, f_name, f_param in filters:
@@ -244,7 +244,7 @@ async def _build_users_list_text_and_kb(
                 if user.subscription_end and user.subscription_end > current_time
                 else "🔴"
             )
-            ban = texts.UI_COMMON_BAN_206 if user.is_banned else (texts.UI_COMMON_BLOK_BOTA_206 if user.is_bot_blocked else "")
+            ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
                 f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
             )
@@ -256,7 +256,7 @@ async def _build_users_list_text_and_kb(
             )
 
             button_text = truncate_button_text(
-                texts.UI_COMMON_USTR_218.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
+                texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
             )
 
             builder.button(
@@ -267,25 +267,25 @@ async def _build_users_list_text_and_kb(
     nav_buttons = 0
     if page > 1:
         builder.button(
-            text=texts.UI_COMMON_NAZAD_229,
+            text=texts.BTN_BACK,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page - 1}",
         )
         nav_buttons += 1
 
     if page < total_pages:
         builder.button(
-            text=texts.UI_COMMON_VPERED_236,
+            text=texts.BTN_PAGINATION_NEXT,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page + 1}",
         )
         nav_buttons += 1
 
     builder.button(
-        text=texts.UI_COMMON_POISK_PO_USERNAME_ID_242,
+        text=texts.COMMON_SEARCH_PO_USERNAME_ID,
         callback_data="admin_users_search",
     )
 
     builder.button(
-        text=texts.UI_COMMON_V_ADMIN_MENYU_247,
+        text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
 
@@ -303,16 +303,16 @@ async def _build_users_list_text_and_kb(
 async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
     from utils.tariff_names import get_tariff_display_name
 
-    tariff_info = texts.UI_COMMON_NE_AKTIVIROVAN_265
+    tariff_info = texts.COMMON_NE_AKTIVIROVAN
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(session, user.current_tariff_id)
         if tariff:
-            tariff_info = texts.UI_COMMON_DO_USTR_269.format(tariff_name=tariff.name, tariff_device_limit=tariff.device_limit)
+            tariff_info = texts.COMMON_DO_USTR.format(tariff_name=tariff.name, tariff_device_limit=tariff.device_limit)
     elif user.device_limit:
         t_name = get_tariff_display_name(user.device_limit)
-        tariff_info = texts.UI_COMMON_DO_USTR_272.format(t_name=t_name, user_device_limit=user.device_limit)
+        tariff_info = texts.ADMIN_DEVICE_LIMIT_SLOT_LABEL.format(t_name=t_name, user_device_limit=user.device_limit)
 
-    referrer_info = texts.UI_COMMON_PRYAMOY_PEREKHOD_274
+    referrer_info = texts.COMMON_PRYAMOY_PEREKHOD
     if user.referred_by:
         referrer = await get_user_by_telegram_id(session, user.referred_by)
         if referrer:

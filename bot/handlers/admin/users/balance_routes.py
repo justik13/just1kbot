@@ -57,11 +57,11 @@ async def show_user_balance_menu(
 
     username_str = f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
     text = (
-        texts.UI_BALANCE_ROUTES_UPRAVLENIE_BALANSOM_POLZOVATEL_60.format()+
-        texts.UI_BALANCE_ROUTES_POLZOVATEL_61.format(safe_username_str=safe(username_str))+
-        texts.UI_BALANCE_ROUTES_REALNYY_BALANS_62.format(real_rub=real_rub)+
-        texts.UI_BALANCE_ROUTES_BONUSNYY_BALANS_63.format(bonus_rub=bonus_rub)+
-        texts.UI_BALANCE_ROUTES_VYBERITE_DEYSTVIE_NIZHE_64.format()
+        texts.ADMIN_USERS_BALANCE_MANAGE_BALANCE_USER.format()+
+        texts.ADMIN_USERS_BALANCE_USER.format(safe_username_str=safe(username_str))+
+        texts.ADMIN_USERS_BALANCE_REAL_BALANCE.format(real_rub=real_rub)+
+        texts.ADMIN_USERS_BALANCE_BONUS_BALANCE.format(bonus_rub=bonus_rub)+
+        texts.ADMIN_USERS_BALANCE_SELECT_ACTION_BELOW.format()
     )
 
     try:
@@ -96,8 +96,8 @@ async def start_balance_topup(
 
     try:
         await callback.message.edit_text(
-            texts.UI_BALANCE_ROUTES_NACHISLENIE_BONUSNOGO_BALANSA_99.format()+
-            texts.UI_BALANCE_ROUTES_VVEDITE_SUMMU_NACHISLENIYA_V_R_100.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
+            texts.ADMIN_USERS_BALANCE_GRANT_BONUS_BALANCE.format()+
+            texts.ADMIN_USERS_BALANCE_ENTER_AMOUNT_GRANT_V_R.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             reply_markup=get_back_button(f"admin_user_balance:{telegram_id}"),
             parse_mode="HTML",
         )
@@ -127,8 +127,8 @@ async def start_balance_deduct(
 
     try:
         await callback.message.edit_text(
-            texts.UI_BALANCE_ROUTES_SPISANIE_BONUSNYKH_SREDSTV_130.format()+
-            texts.UI_BALANCE_ROUTES_VVEDITE_SUMMU_SPISANIYA_BONUSN_131.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
+            texts.ADMIN_USERS_BALANCE_REDUCE_BONUS_FUNDS.format()+
+            texts.ADMIN_USERS_BALANCE_ENTER_AMOUNT_REDUCE_BONUSN.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             reply_markup=get_back_button(f"admin_user_balance:{telegram_id}"),
             parse_mode="HTML",
         )
@@ -181,7 +181,7 @@ async def process_balance_topup(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BALANCE_ROUTES_SUMMA_DOLZHNA_BYT_BOLSHE_0_I_N_184.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
+            texts.ADMIN_USERS_BALANCE_AMOUNT_DOLZHNA_BYT_BOLSHE_0_I_N.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
         )
@@ -193,9 +193,9 @@ async def process_balance_topup(
     await render_hub(
         message.bot,
         message.chat.id,
-        texts.UI_BALANCE_ROUTES_PRICHINA_NACHISLENIYA_196.format(amount=amount)+
-        texts.UI_BALANCE_ROUTES_VVEDITE_TEKSTOVOE_PRIMECHANIE__197.format()+
-        texts.UI_BALANCE_ROUTES_ILI_OTPRAVTE_DEFIS_DLYA_ABSTRA_198.format(),
+        texts.ADMIN_USERS_BALANCE_REASON_GRANT.format(amount=amount)+
+        texts.ADMIN_USERS_BALANCE_ENTER_TEKSTOVOE_NOTE.format()+
+        texts.ADMIN_USERS_BALANCE_ILI_OTPRAVTE_DEFIS_FOR_ABSTRA.format(),
         get_back_button(f"admin_user_balance:{telegram_id}"),
         trigger_message_id=message.message_id,
     )
@@ -244,7 +244,7 @@ async def process_balance_deduct(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BALANCE_ROUTES_SUMMA_DOLZHNA_BYT_BOLSHE_0_I_N_247.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
+            texts.ADMIN_USERS_BALANCE_AMOUNT_DOLZHNA_BYT_BOLSHE_0_I_N.format(MAX_BALANCE_ADJUSTMENT=MAX_BALANCE_ADJUSTMENT),
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
         )
@@ -267,8 +267,8 @@ async def process_balance_deduct(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BALANCE_ROUTES_U_POLZOVATELYA_NEDOSTATOCHNO_B_270.format()+
-            texts.UI_BALANCE_ROUTES_DOSTUPNO_DLYA_SPISANIYA_BONUSN_271.format(int_balance_info_bonus_available=int(balance_info.bonus_available)),
+            texts.ADMIN_USERS_BALANCE_U_POLZOVATELYA_NEDOSTATOCHNO_B.format()+
+            texts.ADMIN_USERS_BALANCE_DOSTUPNO_FOR_REDUCE_BONUSN.format(int_balance_info_bonus_available=int(balance_info.bonus_available)),
             get_back_button(f"admin_user_balance:{telegram_id}"),
             trigger_message_id=message.message_id,
         )
@@ -281,9 +281,9 @@ async def process_balance_deduct(
     await render_hub(
         message.bot,
         message.chat.id,
-        texts.UI_BALANCE_ROUTES_PRICHINA_SPISANIYA_284.format(amount=amount)+
-        texts.UI_BALANCE_ROUTES_VVEDITE_TEKSTOVOE_PRIMECHANIE__285.format()+
-        texts.UI_BALANCE_ROUTES_ILI_OTPRAVTE_DEFIS_DLYA_ABSTRA_286.format(),
+        texts.ADMIN_USERS_BALANCE_REASON_REDUCE.format(amount=amount)+
+        texts.ADMIN_USER_DEBIT_REASON_PROMPT.format()+
+        texts.ADMIN_USERS_BALANCE_ILI_OTPRAVTE_DEFIS_FOR_ABSTRA.format(),
         get_back_button(f"admin_user_balance:{telegram_id}"),
         trigger_message_id=message.message_id,
     )
@@ -308,7 +308,7 @@ async def process_balance_reason(
         await state.clear()
         return
 
-    reason = message.text.strip() if message.text and message.text.strip() != "-" else texts.UI_BALANCE_ROUTES_KORREKTIROVKA_ADMINISTRATOROM_311
+    reason = message.text.strip() if message.text and message.text.strip() != "-" else texts.ADMIN_USERS_BALANCE_KORREKTIROVKA_ADMINISTRATOROM
     adjustment_id = uuid4().hex
     await state.update_data(reason=reason, adjustment_id=adjustment_id)
 
@@ -321,25 +321,25 @@ async def process_balance_reason(
     change_str = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.UI_BALANCE_ROUTES_POLZOVATELI_324, f"ID {user.telegram_id}", texts.UI_BALANCE_ROUTES_BALANS_324)
+    header = format_admin_breadcrumbs(texts.ADMIN_USERS_BALANCE_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
 
     text = (
         f"{header}"+
-        texts.UI_BALANCE_ROUTES_PODTVERZHDENIE_IZMENENIYA_BALA_328.format()+
-        texts.UI_BALANCE_ROUTES_POLZOVATEL_329.format(safe_username_str=safe(username_str))+
-        texts.UI_BALANCE_ROUTES_TIP_SCHETA_BONUSNYY_BALANS_RUB_330.format()+
-        texts.UI_BALANCE_ROUTES_IZMENENIE_331.format(change_str=change_str)+
-        texts.UI_BALANCE_ROUTES_PRICHINA_332.format(safe_reason=safe(reason))+
-        texts.UI_BALANCE_ROUTES_VY_UVERENY_CHTO_KHOTITE_PRIMEN_333.format()
+        texts.ADMIN_USERS_BALANCE_CONFIRM_CHANGE_BALA.format()+
+        texts.ADMIN_USERS_BALANCE_USER.format(safe_username_str=safe(username_str))+
+        texts.ADMIN_USERS_BALANCE_TYPE_ACCOUNT_BONUS_BALANCE_RUB.format()+
+        texts.ADMIN_USERS_BALANCE_CHANGE.format(change_str=change_str)+
+        texts.ADMIN_USERS_BALANCE_REASON.format(safe_reason=safe(reason))+
+        texts.ADMIN_USERS_BALANCE_VY_UVERENY_CHTO_KHOTITE_PRIMEN.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BALANCE_ROUTES_PODTVERDIT_I_PRIMENIT_338,
+        text=texts.ADMIN_USERS_BALANCE_PODTVERDIT_I_PRIMENIT,
         callback_data="confirm_admin_balance_apply",
     )
     builder.button(
-        text=texts.UI_BALANCE_ROUTES_OTMENA_342,
+        text=texts.BTN_CANCEL,
         callback_data=f"admin_user_balance:{telegram_id}",
     )
     builder.adjust(1)
@@ -370,11 +370,11 @@ async def apply_user_balance_change(
     telegram_id = data.get("target_telegram_id")
     amount = data.get("amount")
     action_type = data.get("action_type")
-    reason = data.get("reason", texts.UI_BALANCE_ROUTES_KORREKTIROVKA_ADMINISTRATOROM_373)
+    reason = data.get("reason", texts.ADMIN_USERS_BALANCE_KORREKTIROVKA_ADMINISTRATOROM)
     adjustment_id = data.get("adjustment_id")
 
     if not telegram_id or not amount or not action_type or not adjustment_id:
-        await callback.answer(texts.UI_BALANCE_ROUTES_OSHIBKA_DANNYE_USTARELI_377, show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_BALANCE_ERROR_DANNYE_USTARELI, show_alert=True)
         await state.clear()
         return
 
@@ -405,14 +405,14 @@ async def apply_user_balance_change(
         await session.rollback()
         fresh = await get_account_balance(session, user_id=target_user_id)
         await callback.answer(
-            texts.UI_BALANCE_ROUTES_NEDOSTATOCHNO_BONUSNYKH_SREDST_408.format(int_fresh_bonus_available=int(fresh.bonus_available)),
+            texts.ADMIN_USERS_BALANCE_NEDOSTATOCHNO_BONUS_SREDST.format(int_fresh_bonus_available=int(fresh.bonus_available)),
             show_alert=True,
         )
         await state.clear()
         return
     except Exception as exc:
         logger.error("Failed to apply admin balance adjustment for user %s: %s", target_user_id, exc)
-        await callback.answer(texts.UI_BALANCE_ROUTES_OSHIBKA_PRIMENENIYA_BALANSA_415, show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_BALANCE_ERROR_PRIMENENIYA_BALANCE, show_alert=True)
         await state.clear()
         return
 
@@ -432,15 +432,15 @@ async def apply_user_balance_change(
 
     try:
         builder = InlineKeyboardBuilder()
-        builder.button(text=texts.UI_BALANCE_ROUTES_V_BALANS_435, callback_data="menu_balance")
-        builder.button(text=texts.UI_BALANCE_ROUTES_PROCHITANO_436, callback_data="dismiss_notification")
+        builder.button(text=texts.ADMIN_USERS_BALANCE_V_BALANCE, callback_data="menu_balance")
+        builder.button(text=texts.ADMIN_USERS_BALANCE_PROCHITANO, callback_data="dismiss_notification")
         builder.adjust(2)
 
         msg_text = (
-            texts.UI_BALANCE_ROUTES_VAM_NACHISLEN_BONUSNYY_BALANS_440.format(amount=amount)+
-            texts.UI_BALANCE_ROUTES_PRICHINA_441.format(safe_reason=safe(reason))
+            texts.ADMIN_USERS_BALANCE_VAM_NACHISLEN_BONUS_BALANCE.format(amount=amount)+
+            texts.ADMIN_USER_BALANCE_REASON_LINE.format(safe_reason=safe(reason))
             if action_type == "topup"
-            else texts.UI_BALANCE_ROUTES_S_VASHEGO_BONUSNOGO_BALANSA_SP_443.format(amount=amount, safe_reason=safe(reason))
+            else texts.ADMIN_USERS_BALANCE_S_VASHEGO_BONUS_BALANCE_SP.format(amount=amount, safe_reason=safe(reason))
         )
         await callback.bot.send_message(
             user.telegram_id,
@@ -452,16 +452,16 @@ async def apply_user_balance_change(
         logger.debug("Failed to notify user %s about balance change: %s", user.telegram_id, e)
 
     await state.clear()
-    await callback.answer(texts.UI_BALANCE_ROUTES_USPESHNO_PRIVEDENO_V_DEYSTVIE_455, show_alert=True)
+    await callback.answer(texts.ADMIN_USERS_BALANCE_SUCCESS_PRIVEDENO_V_ACTION, show_alert=True)
 
     from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs(texts.UI_BALANCE_ROUTES_POLZOVATELI_458, f"ID {user.telegram_id}", texts.UI_BALANCE_ROUTES_BALANS_458)
+    header = format_admin_breadcrumbs(texts.ADMIN_USERS_BALANCE_USERS, f"ID {user.telegram_id}", texts.ADMIN_USERS_BALANCE_BALANCE)
     change_formatted = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BALANCE_ROUTES_USPESHNO_BONUSNYY_BALANS_POLZO_464.format(header=header, user_telegram_id=user.telegram_id, change_formatted=change_formatted, safe_reason=safe(reason)),
+        texts.ADMIN_USERS_BALANCE_SUCCESS_BONUS_BALANCE_POLZO.format(header=header, user_telegram_id=user.telegram_id, change_formatted=change_formatted, safe_reason=safe(reason)),
         get_back_button(f"admin_user_card:{user.telegram_id}"),
         parse_mode="HTML",
     )

@@ -88,15 +88,15 @@ def get_tariff_duration_keyboard(
         )
     if source == "change":
         builder.button(
-            text=texts.BUTTON_BACK, callback_data="payment_change_tariff"
+            text=texts.BTN_BACK, callback_data="payment_change_tariff"
         )
     elif source == "renew":
         builder.button(
-            text=texts.BUTTON_BACK, callback_data="menu_subscription"
+            text=texts.BTN_BACK, callback_data="menu_subscription"
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_PAYMENT_L52_1, callback_data="payment_showcase"
+            text=texts.BTN_PAYMENT_TO_TARIFF_CHOICE, callback_data="payment_showcase"
         )
     builder.adjust(1)
     return builder.as_markup()
@@ -116,7 +116,7 @@ def get_renew_keyboard(tariffs: list) -> InlineKeyboardMarkup:
         builder.button(
             text=text, callback_data=f"select_tariff:{t.id}:renew"
         )
-    builder.button(text=texts.BUTTON_BACK, callback_data="menu_subscription")
+    builder.button(text=texts.BTN_BACK, callback_data="menu_subscription")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -141,11 +141,11 @@ def get_change_tariff_keyboard(
     for limit in sorted(grouped.keys()):
         group_name = get_tariff_group_name(limit)
         if is_subscription_active and limit < current_limit:
-            group_name += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L94_1
+            group_name += texts.PAYMENT
         elif limit == current_limit:
-            group_name += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L96_1
+            group_name += texts.PAYMENT_STATUS_ACTIVE_BADGE
         elif limit > current_limit:
-            group_name += texts.RUNTIME_BOT_KEYBOARDS_PAYMENT_L98_1
+            group_name += texts.PAYMENT_STATUS_UPGRADE_BADGE
 
         group_tariffs = grouped[limit]
         best_tariff = next(
@@ -157,7 +157,7 @@ def get_change_tariff_keyboard(
             callback_data=f"select_tariff:{best_tariff.id}:change",
         )
     builder.button(
-        text=texts.BUTTON_BACK, callback_data="back_to_main_menu"
+        text=texts.BTN_BACK, callback_data="back_to_main_menu"
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -166,10 +166,10 @@ def get_change_tariff_keyboard(
 def get_payment_success_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L113_1, callback_data="menu_connections"
+        text=texts.BTN_PAYMENT_CONNECT_DEVICE, callback_data="menu_connections"
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L116_1, callback_data="menu_subscription"
+        text=texts.BTN_PAYMENT_TO_SUBSCRIPTION, callback_data="menu_subscription"
     )
     builder.button(
         text=texts.BUTTON_MAIN_MENU, callback_data="back_to_main_menu"
@@ -200,7 +200,7 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
     builder.adjust(1, 2, 1)
     return builder.as_markup()
 
@@ -214,21 +214,21 @@ def get_balance_history_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_NAZAD, callback_data=f"balance_history:{page - 1}")
+            builder.button(text=texts.BTN_BACK, callback_data=f"balance_history:{page - 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
         builder.button(text=f"📄 {page}/{total_pages}", callback_data="ignore")
 
         if page < total_pages:
-            builder.button(text=texts.BTN_VPERED, callback_data=f"balance_history:{page + 1}")
+            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"balance_history:{page + 1}")
         else:
             builder.button(text=" ", callback_data="ignore")
 
-        builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+        builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
         builder.adjust(3, 1)
     else:
-        builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+        builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
         builder.adjust(1)
 
     return builder.as_markup()
@@ -239,14 +239,14 @@ def get_balance_amounts_keyboard(amounts: list[int]) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     for amount in amounts:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_PAYMENT_L150_1.format(value_0=amount),
+            text=texts.PAYMENT_PRICE_RUB_FORMAT.format(value_0=amount),
             callback_data=f"balance_create:{amount}",
         )
     builder.button(
         text=texts.BUTTON_CUSTOM_AMOUNT,
         callback_data="balance_custom_amount",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+    builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
     builder.adjust(2, 2, 2, 1, 1)
     return builder.as_markup()
 
@@ -258,7 +258,7 @@ def get_back_or_cancel_topups_keyboard() -> InlineKeyboardMarkup:
         callback_data="balance_cancel_all",
         style="danger",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data="menu_balance")
+    builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -303,12 +303,12 @@ def get_balance_purchase_start_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L206_1,
+        text=texts.BTN_PAYMENT_BUY_FROM_BALANCE,
         callback_data=f"balance_purchase_review:{quote_public_id}",
         style="success",
     )
     builder.button(
-        text=texts.BUTTON_BACK,
+        text=texts.BTN_BACK,
         callback_data=f"balance_purchase_cancel:{quote_public_id}",
     )
     builder.adjust(1)
@@ -320,12 +320,12 @@ def get_balance_purchase_confirm_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L219_1,
+        text=texts.BTN_PAYMENT_CONFIRM_PURCHASE,
         callback_data=f"balance_purchase_confirm:{quote_public_id}",
         style="success",
     )
     builder.button(
-        text=texts.BUTTON_BACK,
+        text=texts.BTN_BACK,
         callback_data=f"balance_purchase_cancel:{quote_public_id}",
     )
     builder.adjust(1)
@@ -337,11 +337,11 @@ def get_balance_change_start_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L232_1,
+        text=texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE,
         callback_data=f"balance_change_review:{quote_public_id}",
         style="success",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -351,11 +351,11 @@ def get_balance_change_confirm_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L245_1,
+        text=texts.BTN_PAYMENT_CONFIRM_TARIFF_CHANGE,
         callback_data=f"balance_change_confirm:{quote_public_id}",
         style="success",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -363,11 +363,11 @@ def get_balance_change_confirm_keyboard(
 def get_same_tariff_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L256_1,
+        text=texts.BTN_PAYMENT_GO_TO_RENEW,
         callback_data="payment_quick_renew",
         style="success",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data="payment_change_tariff")
+    builder.button(text=texts.BTN_BACK, callback_data="payment_change_tariff")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -377,16 +377,16 @@ def get_balance_shortage_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L269_1.format(value_0=exact_amount),
+        text=texts.BTN_PAYMENT_TOPUP_PRESET_AMOUNT.format(value_0=exact_amount),
         callback_data=f"bal_short_exact:{quote_public_id}",
         style="success",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L273_1,
+        text=texts.BTN_PAYMENT_SPECIFY_OTHER_AMOUNT,
         callback_data=f"bal_short_custom:{quote_public_id}",
     )
     builder.button(
-        text=texts.BUTTON_BACK,
+        text=texts.BTN_BACK,
         callback_data=f"balance_purchase_cancel:{quote_public_id}",
     )
     builder.adjust(1)
@@ -398,15 +398,15 @@ def get_balance_change_shortage_keyboard(
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L286_1.format(value_0=exact_amount),
+        text=texts.BTN_PAYMENT_TOPUP_AMOUNT_OPTION.format(value_0=exact_amount),
         callback_data=f"bal_chg_short_exact:{quote_public_id}",
         style="success",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_PAYMENT_L290_1,
+        text=texts.BTN_PAYMENT_CUSTOM_AMOUNT_OPTION,
         callback_data=f"bal_chg_short_custom:{quote_public_id}",
     )
-    builder.button(text=texts.BUTTON_BACK, callback_data=back_callback)
+    builder.button(text=texts.BTN_BACK, callback_data=back_callback)
     builder.adjust(1)
     return builder.as_markup()
 
@@ -417,10 +417,10 @@ def get_topup_credit_keyboard(context: dict) -> InlineKeyboardMarkup:
     source = context.get("source")
     if tariff_id and source in {"showcase", "renew", "change"}:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_PAYMENT_L304_1,
+            text=texts.BTN_PAYMENT_RETURN_TO_PURCHASE,
             callback_data=f"balance_resume_purchase:{tariff_id}:{source}",
         )
-    builder.button(text=texts.UI_BOT_KEYBOARDS_PAYMENT_L307_1, callback_data="menu_balance")
+    builder.button(text=texts.BTN_PAYMENT_TO_BALANCE, callback_data="menu_balance")
     builder.button(text=texts.BTN_PROCHITANO, callback_data="dismiss_notification")
     builder.adjust(1)
     return builder.as_markup()

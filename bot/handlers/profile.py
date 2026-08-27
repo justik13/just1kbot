@@ -67,10 +67,10 @@ async def show_history(
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.RUNTIME_BOT_HANDLERS_PROFILE_L208_1,
+                texts.USER_HUB_PROFILE,
             )
             date = format_datetime(payment.paid_at or payment.created_at)
-            currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
+            currency = texts.CURRENCY_RUB_SYMBOL
             rendered += (
                 f"{status_icon} {date} | "
                 f"{payment.amount} {currency}\n"

@@ -54,10 +54,10 @@ async def _check_tariff_change_allowed(
     if is_active:
         current_tariff_id = getattr(db_user, "current_tariff_id", None)
         if current_tariff_id is None:
-            return texts.RUNTIME_BOT_HANDLERS_PAYMENT_COMMON_L70_1
+            return texts.PAYMENT_COMMON
         current_limit = await _get_effective_device_limit(session, db_user)
         if new_limit != current_limit:
-            return texts.RUNTIME_BOT_HANDLERS_PAYMENT_COMMON_L73_1
+            return texts.PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE
         profiles_count = await get_user_profiles_count(session, db_user.id)
         if profiles_count > new_limit:
             return texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
@@ -121,20 +121,20 @@ async def _show_hub(
         for limit in sorted(grouped.keys()):
             min_price = min(int(t.price_rub) for t in grouped[limit])
             name = get_tariff_display_name(limit)
-            tariff_lines.append(texts.UI_COMMON_UST_OT_124.format(name=name, limit=limit, min_price=min_price))
+            tariff_lines.append(texts.PAYMENT_STATUS_COMMON_UST_OT.format(name=name, limit=limit, min_price=min_price))
 
         if tariff_lines:
-            text += texts.UI_COMMON_DOSTUPNYE_VARIANTY_TARIFOV_127 + "\n".join(tariff_lines)
+            text += texts.PAYMENT_STATUS_COMMON_DOSTUPNYE_VARIANTY_TARIFOV + "\n".join(tariff_lines)
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_HANDLERS_PAYMENT_COMMON_L125_1, callback_data="payment_quick_renew"
+        text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION, callback_data="payment_quick_renew"
     )
     builder.button(
-        text=texts.UI_BOT_HANDLERS_PAYMENT_COMMON_L128_1, callback_data="payment_change_tariff"
+        text=texts.BTN_PAYMENT_CHANGE_TARIFF, callback_data="payment_change_tariff"
     )
     builder.button(
-        text=texts.UI_BOT_HANDLERS_PAYMENT_COMMON_L131_1, callback_data="back_to_main_menu"
+        text=texts.BTN_PAYMENT_TO_MAIN_MENU, callback_data="back_to_main_menu"
     )
     builder.adjust(1, 1, 1)
     await render_hub(

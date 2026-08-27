@@ -25,13 +25,13 @@ def get_admin_menu(
         fin_badge = f" ⚠️ ({disputes_count + dead_queues_count})"
 
     builder.button(
-        text=texts.UI_DASHBOARD_FINANSY_I_OCHEREDI_28.format(fin_badge=fin_badge),
+        text=texts.ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES.format(fin_badge=fin_badge),
         callback_data="admin_cat_finance",
     )
 
     maint_icon = "🔴" if maintenance_enabled else "🟢"
     builder.button(
-        text=texts.UI_DASHBOARD_SISTEMA_I_LOGI_34.format(maint_icon=maint_icon),
+        text=texts.DASHBOARD_SISTEMA_I_LOGI.format(maint_icon=maint_icon),
         callback_data="admin_cat_system",
     )
 
@@ -49,7 +49,7 @@ def get_admin_cat_users_keyboard() -> InlineKeyboardMarkup:
     builder.button(text=texts.BTN_SPISOK_POLZOVATELEJ, callback_data="admin_users")
     builder.button(text=texts.BTN_MASSOVAYA_RASSYLKA, callback_data="admin_broadcast")
     builder.button(text=texts.BTN_MASSOVYJ_BONUS, callback_data="admin_mass_bonus")
-    builder.button(text=texts.BTN_V_ADMIN_MENYU, callback_data="admin_menu")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -58,7 +58,7 @@ def get_admin_cat_infra_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_VPN_SERVERY, callback_data="admin_servers")
     builder.button(text=texts.BTN_TARIFY_PODPISOK, callback_data="admin_tariffs")
-    builder.button(text=texts.BTN_V_ADMIN_MENYU, callback_data="admin_menu")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -70,11 +70,11 @@ def get_admin_cat_finance_keyboard(
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_ISTORIYA_PLATEZHEJ, callback_data="admin_payments")
     builder.button(text=texts.BTN_ZHURNAL_POKUPOK, callback_data="admin_purchases")
-    dispute_label = texts.UI_DASHBOARD_DISPUTY_COUNT_73.format(disputes_count=disputes_count) if disputes_count > 0 else texts.UI_DASHBOARD_DISPUTY_73
+    dispute_label = texts.DASHBOARD_DISPUTY_COUNT.format(disputes_count=disputes_count) if disputes_count > 0 else texts.DASHBOARD_DISPUTY
     builder.button(text=dispute_label, callback_data="admin_disputes")
-    queue_label = texts.UI_DASHBOARD_OCHEREDI_75.format(dead_queues_count=dead_queues_count) if dead_queues_count > 0 else texts.UI_DASHBOARD_OCHEREDI_ZADACH_75
+    queue_label = texts.DASHBOARD_OCHEREDI.format(dead_queues_count=dead_queues_count) if dead_queues_count > 0 else texts.DASHBOARD_OCHEREDI_TASKS
     builder.button(text=queue_label, callback_data="aq:home")
-    builder.button(text=texts.BTN_V_ADMIN_MENYU, callback_data="admin_menu")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -83,9 +83,9 @@ def get_admin_cat_system_keyboard(maintenance_enabled: bool = False) -> InlineKe
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_NASTROJKI_MTPROTO_PROXY, callback_data="admin_settings")
     builder.button(text=texts.BTN_SISTEMNYJ_AUDIT_LOG, callback_data="admin_audit")
-    maint_label = texts.UI_DASHBOARD_TEKHRABOTY_VKLYUCHENY_86 if maintenance_enabled else texts.UI_DASHBOARD_TEKHRABOTY_VYKLYUCHENY_86
+    maint_label = texts.DASHBOARD_TEKHRABOTY_VKLYUCHENY if maintenance_enabled else texts.DASHBOARD_TEKHRABOTY_VYKLYUCHENY
     builder.button(text=maint_label, callback_data="admin_maintenance")
-    builder.button(text=texts.BTN_V_ADMIN_MENYU, callback_data="admin_menu")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -94,12 +94,12 @@ def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMar
     builder = InlineKeyboardBuilder()
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_NAZAD, callback_data=f"admin_audit:{page - 1}")
+            builder.button(text=texts.BTN_BACK, callback_data=f"admin_audit:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=texts.UI_DASHBOARD_STR_100.format(page=page, total_pages=total_pages), callback_data="ignore")
+        builder.button(text=texts.DASHBOARD_STR.format(page=page, total_pages=total_pages), callback_data="ignore")
         if page < total_pages:
-            builder.button(text=texts.BTN_VPERED, callback_data=f"admin_audit:{page + 1}")
+            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_audit:{page + 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
         builder.adjust(3, 1)
@@ -107,7 +107,7 @@ def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMar
         builder.adjust(1)
 
     builder.button(
-        text=texts.BTN_V_ADMIN_MENYU,
+        text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
     return builder.as_markup()
@@ -116,11 +116,11 @@ def get_audit_keyboard(page: int = 1, total_pages: int = 1) -> InlineKeyboardMar
 def get_maintenance_confirm_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L80_1,
+        text=texts.BTN_CONFIRM,
         callback_data="admin_maintenance_toggle_apply",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_DASHBOARD_L84_1,
+        text=texts.BTN_CANCEL,
         callback_data="admin_menu",
     )
     builder.adjust(2)

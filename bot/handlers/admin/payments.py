@@ -47,18 +47,18 @@ def _get_payment_card_keyboard(
 
     if _refund_available(payment):
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L50_1,
+            text=texts.ADMIN_PURCHASES_BTN_BACK,
             callback_data=f"admin_payment_refund:{payment.id}",
         )
 
     if user_telegram_id:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L56_1,
+            text=texts.ADMIN_PURCHASES_SEARCH_PROMPT,
             callback_data=f"admin_user_card:{user_telegram_id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L61_1,
+        text=texts.ADMIN_BTN_BACK_TO_PAYMENTS,
         callback_data="admin_payments",
     )
     builder.adjust(1)
@@ -72,26 +72,26 @@ async def _build_payments_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L75_1.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_PAYMENTS_LIST_HEADER.format(value_0=page, value_1=total_pages, value_2=total)
     )
     builder = InlineKeyboardBuilder()
     if not payments:
-        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L80_1
+        rendered += texts.ADMIN_PAYMENTS_ROW_ITEM
     else:
         for payment in payments:
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L86_1,
+                texts.ADMIN_PAYMENTS_LIST_EMPTY,
             )
             if payment.user and payment.user.username:
                 user_label = f"@{payment.user.username}"
             elif payment.user:
                 user_label = texts.ADMIN_PAYMENT_USER_ID_COMPACT.format(user_id=payment.user.telegram_id)
             else:
-                user_label = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L93_1
+                user_label = texts.ADMIN_PAYMENTS
             button_text = truncate_button_text(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L95_1.format(value_0=status_icon, value_1=payment.id, value_2=user_label, value_3=payment.amount)
+                texts.ADMIN_PAYMENTS_CARD.format(value_0=status_icon, value_1=payment.id, value_2=user_label, value_3=payment.amount)
             )
             builder.button(
                 text=button_text,
@@ -99,16 +99,16 @@ async def _build_payments_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L105_1,
+            text=texts.ADMIN_PAYMENTS_REFUND_PROMPT,
             callback_data=f"admin_payments_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L110_1,
+            text=texts.ADMIN_PAYMENTS_REFUND_SUCCESS,
             callback_data=f"admin_payments_page:{page + 1}",
         )
-    builder.button(text=texts.UI_PAYMENTS_K_LOGAM_POKUPOK_110, callback_data="admin_purchases")
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L113_1, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_FINANCES_PAYMENTS_K_LOGAM_POKUPOK, callback_data="admin_purchases")
+    builder.button(text=texts.ADMIN_PAYMENTS_REFUND_FAILED, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -186,7 +186,7 @@ async def payments_pagination(
     page = parse_callback_id(callback.data, 1)
     if page is None or page < 1:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L192_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -210,7 +210,7 @@ async def show_payment_card(
     payment_id = parse_callback_id(callback.data, 1)
     if payment_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L216_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -218,7 +218,7 @@ async def show_payment_card(
     payment = await get_payment_by_id(session, payment_id)
     if not payment:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L224_1,
+            texts.ADMIN_PAYMENTS_REFUND_INVALID,
             show_alert=True,
         )
         return
@@ -233,7 +233,7 @@ async def show_payment_card(
         user_label = texts.ADMIN_PAYMENT_USER_ID.format(user_id=payment.user.telegram_id)
         user_telegram_id = payment.user.telegram_id
     else:
-        user_label = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L239_1
+        user_label = texts.ADMIN_PAYMENTS
         user_telegram_id = None
 
     display_status = payment_display_status(payment)
@@ -243,7 +243,7 @@ async def show_payment_card(
     )
     status_icon = texts.PAYMENT_STATUS_ICONS.get(
         display_status,
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L249_1,
+        texts.ADMIN_PAYMENT_STATUS_PENDING_LABEL,
     )
 
     reason_line = ""
@@ -252,7 +252,7 @@ async def show_payment_card(
         and payment.manual_review_reason
     ):
         reason_line = (
-            texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L258_1.format(value_0=safe(payment.manual_review_reason))
+            texts.ADMIN_PAYMENT_STATUS_SUCCEEDED_LABEL.format(value_0=safe(payment.manual_review_reason))
         )
 
     refundable_line = ""
@@ -261,10 +261,10 @@ async def show_payment_card(
             session,
             payment_id=payment.id,
         )
-        refundable_line = texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L268_1.format(value_0=int(refundable))
+        refundable_line = texts.ADMIN_PAYMENT_STATUS_CANCELED_LABEL.format(value_0=int(refundable))
 
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L271_1.format(value_0=payment.id, value_1=payment.id, value_2=user_label, value_3=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
+        texts.ADMIN_PAYMENT_STATUS_REFUNDED_LABEL.format(value_0=payment.id, value_1=payment.id, value_2=user_label, value_3=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
     )
 
     kb = _get_payment_card_keyboard(
@@ -299,28 +299,28 @@ async def confirm_payment_refund(
         else None
     )
     if payment is None or not _refund_available(payment):
-        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L319_1, show_alert=True)
+        await callback.answer(texts.ADMIN_PAYMENTS_SEARCH_PROMPT, show_alert=True)
         return
     refundable = await get_payment_refundable_amount(
         session,
         payment_id=payment.id,
     )
     if refundable <= 0:
-        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L326_1, show_alert=True)
+        await callback.answer(texts.ADMIN_PAYMENTS_SEARCH_NOT_FOUND, show_alert=True)
         return
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L331_1.format(value_0=int(refundable)),
+        text=texts.ADMIN_PURCHASES_LIST_HEADER.format(value_0=int(refundable)),
         callback_data=f"admin_payment_refund_confirm:{payment.id}",
     )
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L335_1,
+        text=texts.ADMIN_PURCHASES_ROW_ITEM,
         callback_data=f"admin_payment_card:{payment.id}",
     )
     builder.adjust(1)
     await callback.message.edit_text(
-        texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L340_1.format(value_0=payment.id, value_1=safe(payment.external_id), value_2=int(refundable)),
+        texts.ADMIN_PURCHASES_LIST_EMPTY.format(value_0=payment.id, value_1=safe(payment.external_id), value_2=int(refundable)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -338,7 +338,7 @@ async def enqueue_payment_refund(
         return
     payment_id = parse_callback_id(callback.data, 1)
     if payment_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L363_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
     try:
         request = await request_balance_topup_refund(
@@ -348,15 +348,15 @@ async def enqueue_payment_refund(
         )
     except BalanceRefundError as exc:
         messages = {
-            "payment_not_found": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L368_1,
-            "refund_requires_balance_topup": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L369_1,
-            "payment_not_refundable": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L370_1,
-            "provider_payment_id_missing": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L371_1,
-            "no_refundable_balance": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L372_1,
-            "active_refund_reservation_missing": texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L373_1,
+            "payment_not_found": texts.ADMIN_PAYMENT_STATUS_FAILED_LABEL,
+            "refund_requires_balance_topup": texts.ADMIN_PAYMENTS_BTN_FILTER_ALL,
+            "payment_not_refundable": texts.ADMIN_PAYMENTS_BTN_FILTER_SUCCEEDED,
+            "provider_payment_id_missing": texts.ADMIN_PAYMENTS_BTN_FILTER_REFUNDED,
+            "no_refundable_balance": texts.ADMIN_PAYMENTS_BTN_USER,
+            "active_refund_reservation_missing": texts.ADMIN_PAYMENTS_BTN_REFUND,
         }
         await callback.answer(
-            messages.get(exc.code, texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L376_1),
+            messages.get(exc.code, texts.ADMIN_PAYMENTS_BTN_PREV),
             show_alert=True,
         )
         return
@@ -364,18 +364,18 @@ async def enqueue_payment_refund(
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L389_1,
+        text=texts.ADMIN_PURCHASES_CARD,
         callback_data=f"admin_payment_card:{payment_id}",
     )
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L392_1, callback_data="admin_payments")
+    builder.button(text=texts.ADMIN_PURCHASES_BTN_USER, callback_data="admin_payments")
     builder.adjust(1)
     status_text = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L390_1
+        texts.ADMIN_PAYMENTS_BTN_NEXT
         if request.created
-        else texts.RUNTIME_BOT_HANDLERS_ADMIN_PAYMENTS_L392_1
+        else texts.ADMIN_PAYMENTS_BTN_BACK
     )
     await callback.message.edit_text(
-        texts.UI_BOT_HANDLERS_ADMIN_PAYMENTS_L400_1.format(value_0=status_text, value_1=int(request.operation.amount), value_2=request.operation.operation_id, value_3=safe(request.operation.status)),
+        texts.ADMIN_PURCHASES_BTN_REFUND.format(value_0=status_text, value_1=int(request.operation.amount), value_2=request.operation.operation_id, value_3=safe(request.operation.status)),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

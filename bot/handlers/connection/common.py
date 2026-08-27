@@ -21,7 +21,7 @@ from utils.telegram import render_hub, safe
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME_REGEX = re.compile(texts.UI_COMMON_A_ZA_ZA_YAA_YAEE0_9_S_24)
+DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_#-]+$")
 
 _PROTOCOL_DISPLAY = {
     AMNEZIA_PROTOCOL: "AmneziaWG",
@@ -39,7 +39,7 @@ def can_show_incy_subscription(read_only: bool = False) -> bool:
 
 def _format_protocol(raw_protocol: str | None) -> str:
     if not raw_protocol:
-        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L37_1
+        return texts.PLACEHOLDER_DASH
     return _PROTOCOL_DISPLAY.get(raw_protocol, raw_protocol)
 
 
@@ -65,22 +65,22 @@ def _get_grace_deletion_time(user: User):
 
 def _format_grace_countdown(deletion_time) -> str:
     if not deletion_time:
-        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L69_1
+        return texts.TIME_SOON_LABEL
 
     current_time = now_utc()
     delta = deletion_time - current_time
 
     if delta.total_seconds() <= 0:
-        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L75_1
+        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_DAYS
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L81_1.format(value_0=days, value_1=hours)
+        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_HOURS.format(value_0=days, value_1=hours)
 
     minutes = (delta.seconds % 3600) // 60
-    return texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L84_1.format(value_0=hours, value_1=minutes)
+    return texts.CONNECTION_CONFIG_PROTOCOL_FORMAT.format(value_0=hours, value_1=minutes)
 
 
 async def _render_maintenance(
@@ -137,8 +137,8 @@ async def _build_connections_screen(
         for profile in profiles:
             server = profile.server
 
-            flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L140_1
-            server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L141_1
+            flag = server.country_flag if server else texts.CONNECTION_COMMON
+            server_name = server.name if server else texts.DEVICE_STATUS_UNKNOWN
             location_label = f"{flag} {safe(server_name)}"
 
             btn_text = f"{location_label} — {safe(profile.device_name)}"
@@ -148,38 +148,38 @@ async def _build_connections_screen(
             )
 
             traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.UI_COMMON_NE_BYLO_AKTIVNOSTEY_151
+            last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
             rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})\n   └ 📊 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
             labels = {
-                "pending_create": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L171_1,
+                "pending_create": texts.DEVICE_STATUS_CREATING,
                 "pending_update": texts.PROVISIONING_UPDATING,
-                "deleting": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L172_1,
+                "deleting": texts.DEVICE_STATUS_DELETING,
                 "create_failed": texts.PROVISIONING_CREATE_FAILED,
-                "create_cleanup_pending": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L173_1,
-                "update_failed": texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L174_1,
+                "create_cleanup_pending": texts.DEVICE_STATUS_CLEANUP,
+                "update_failed": texts.DEVICE_STATUS_UPDATE_ERROR,
                 "delete_failed": texts.PROVISIONING_DELETE_FAILED,
             }
             if profile.provisioning_status in labels:
-                rendered += texts.RUNTIME_BOT_HANDLERS_CONNECTION_COMMON_L177_1.format(value_0=labels[profile.provisioning_status])
+                rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(value_0=labels[profile.provisioning_status])
 
-        rendered += texts.UI_COMMON_NAZHMITE_NA_USTROYSTVO_NIZHE_D_166
+        rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
 
     if not read_only and quota_profiles_count < device_limit:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L181_1,
+            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
             callback_data="add_device",
             style="success",
         )
 
     if can_show_incy_subscription(read_only=read_only):
         builder.button(
-            text=texts.UI_COMMON_DOBAVIT_V_INCY_IOS_ANDROID_177,
+            text=texts.CONNECTION_CONFIG_COMMON_ADD_V_INCY_IOS_ANDROID,
             callback_data="menu_incy_subscription",
         )
 
     builder.button(
-        text=texts.UI_COMMON_STATUS_SERVEROV_182,
+        text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
         url="https://stats.uptimerobot.com/de5q3DNc95",
     )
     builder.button(
@@ -227,7 +227,7 @@ async def _render_connections(
             )
 
             builder.button(
-                text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L223_1,
+                text=texts.BTN_BUY_ACCESS,
                 callback_data="menu_buy",
             )
             builder.adjust(1)
@@ -242,11 +242,11 @@ async def _render_connections(
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L242_1,
+            text=texts.BTN_BUY_ACCESS,
             callback_data="menu_buy",
         )
         builder.button(
-            text=texts.UI_BOT_HANDLERS_CONNECTION_COMMON_L246_1,
+            text=texts.CONNECTION_CONFIG_SUMMARY_HEADER,
             callback_data="back_to_main_menu",
         )
         builder.adjust(1)

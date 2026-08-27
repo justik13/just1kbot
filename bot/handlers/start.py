@@ -111,7 +111,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
-    name = safe(db_user.first_name or texts.RUNTIME_BOT_HANDLERS_START_L206_1)
+    name = safe(db_user.first_name or texts.USER_HUB_START)
     balance = await get_account_balance(session, user_id=db_user.id)
     profiles = await get_user_profiles(session, db_user.id)
 
@@ -210,7 +210,7 @@ async def cmd_start(
     await _ensure_bot_unblocked(session, telegram_id)
 
     builder = InlineKeyboardBuilder()
-    builder.button(text="🏠 Главное меню", callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
 
     await render_hub(
         message.bot,

@@ -44,7 +44,7 @@ async def admin_user_devices(
     telegram_id = parse_callback_id(callback.data, 1)
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L46_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -61,26 +61,26 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
-    header = format_admin_breadcrumbs(texts.UI_DEVICE_ROUTES_POLZOVATELI_64, f"ID {telegram_id}", texts.UI_DEVICE_ROUTES_USTROYSTVA_64)
+    header = format_admin_breadcrumbs(texts.ADMIN_USERS_DEVICE_USERS, f"ID {telegram_id}", texts.ADMIN_USERS_DEVICE_DEVICES)
     now = now_utc()
 
     if not profiles:
         text = (
             f"{header}"+
-            texts.UI_DEVICE_ROUTES_USTROYSTVA_POLZOVATELYA_ID_70.format(telegram_id=telegram_id)+
-            texts.UI_DEVICE_ROUTES_U_POLZOVATELYA_POKA_NET_SOZDAN_71.format()
+            texts.ADMIN_USERS_DEVICE_DEVICES_POLZOVATELYA_ID.format(telegram_id=telegram_id)+
+            texts.ADMIN_USERS_DEVICE_U_POLZOVATELYA_POKA_NET_SOZDAN.format()
         )
     else:
-        lines = [texts.UI_DEVICE_ROUTES_USTROYSTVA_POLZOVATELYA_ID_74.format(header=header, telegram_id=telegram_id)]
+        lines = [texts.ADMIN_USER_DEVICES_HEADER.format(header=header, telegram_id=telegram_id)]
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
-                or texts.UI_DEVICE_ROUTES_USTROYSTVO_78.format(profile_id=profile.id)
+                or texts.ADMIN_USERS_DEVICE_DEVICE.format(profile_id=profile.id)
             )
             # get_user_profiles() eagerly loads VPNProfile.server, so this does
             # not add a query per device and keeps the device list efficient.
             server = getattr(profile, "server", None)
-            server_name = safe(server.name) if server else texts.UI_DEVICE_ROUTES_NEIZVESTNYY_SERVER_83
+            server_name = safe(server.name) if server else texts.ADMIN_USERS_DEVICE_NEIZVESTNYY_SERVER
             server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
 
             # VPNProfile does not have a last_handshake_at column. The traffic
@@ -97,17 +97,17 @@ async def admin_user_devices(
                 if 0 <= delta_sec <= 180:
                     is_online = True
 
-            status_hs = texts.UI_DEVICE_ROUTES_V_SETI_AKTIVNOST_3_MIN_100 if is_online else texts.UI_DEVICE_ROUTES_OFLAYN_100
+            status_hs = texts.ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN if is_online else texts.ADMIN_USERS_DEVICE_OFLAYN
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.UI_DEVICE_ROUTES_NE_BYLO_PODKLYUCHENIYA_102
+            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA
 
             lines.append(
                 f"• 📱 <b>{safe(name)}</b>\n"+
-                texts.UI_DEVICE_ROUTES_ID_USTROYSTVA_106.format(profile_id=profile.id)+
-                texts.UI_DEVICE_ROUTES_SERVER_107.format(server_flag=server_flag, server_name=server_name)+
-                texts.UI_DEVICE_ROUTES_SOSTOYANIE_108.format(status_hs=status_hs)+
-                texts.UI_DEVICE_ROUTES_TRAFIK_109.format(traffic_total=traffic_total)+
-                texts.UI_DEVICE_ROUTES_AKTIVNOST_110.format(last_conn=last_conn)
+                texts.ADMIN_USERS_DEVICE_ID_DEVICES.format(profile_id=profile.id)+
+                texts.ADMIN_USERS_DEVICE_SERVER.format(server_flag=server_flag, server_name=server_name)+
+                texts.ADMIN_USERS_DEVICE_SOSTOYANIE.format(status_hs=status_hs)+
+                texts.ADMIN_USERS_DEVICE_TRAFIK.format(traffic_total=traffic_total)+
+                texts.ADMIN_USERS_DEVICE_AKTIVNOST.format(last_conn=last_conn)
             )
         text = "\n".join(lines)
 
@@ -139,7 +139,7 @@ async def admin_delete_device_confirm(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L109_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -149,7 +149,7 @@ async def admin_delete_device_confirm(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L119_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -176,8 +176,8 @@ async def admin_delete_device_confirm(
         return
 
     server = getattr(profile, "server", None)
-    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L135_1
-    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L136_1
+    flag = server.country_flag if server else texts.ADMIN_USERS_DEVICE
+    server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
 
     text = texts.ADMIN_DELETE_DEVICE_CONFIRM.format(
         telegram_id=telegram_id,
@@ -221,7 +221,7 @@ async def admin_delete_device_apply(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L180_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -231,7 +231,7 @@ async def admin_delete_device_apply(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L190_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
