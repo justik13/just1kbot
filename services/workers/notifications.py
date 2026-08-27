@@ -38,8 +38,6 @@ BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
 
-NOTIFICATION_RETRY_DELAYS = (60, 300, 600, 1800, 3600)
-
 _last_notification_type: TTLCache[int, str] = TTLCache(
     maxsize=10000,
     ttl=86400,
@@ -47,8 +45,8 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
 
 
 def _get_backoff_delay(retry_count: int) -> int:
-    index = min(retry_count, len(NOTIFICATION_RETRY_DELAYS) - 1)
-    return NOTIFICATION_RETRY_DELAYS[index]
+    capped = min(retry_count, MAX_RETRY_COUNT)
+    return BACKOFF_BASE_INTERVAL * (2**capped)
 
 
 def _format_countdown(delta: timedelta) -> str:
@@ -79,6 +77,7 @@ def _maybe_reset_retry_on_type_change(
         user.last_notification_attempt = None
 
     _last_notification_type[user.id] = notification_type
+
 
 def _infer_last_notification_type(user: User) -> str | None:
     if user.notified_grace_12h:
