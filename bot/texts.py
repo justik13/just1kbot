@@ -52,11 +52,6 @@ def _merge_texts(modules: list[tuple[str, ModuleType]]) -> dict[str, Any]:
     for source_name, module in modules:
         source_texts: dict[str, Any] = dict(getattr(module, "TEXTS", {}))
 
-        # also collect any uppercase module-level variables
-        for var_name in dir(module):
-            if var_name.isupper() and not var_name.startswith("_") and var_name != "TEXTS":
-                source_texts[var_name] = getattr(module, var_name)
-
         for key, value in source_texts.items():
             _validate_key(key)
 
@@ -93,8 +88,9 @@ def _rebuild() -> None:
     for stale_k in stale_keys:
         g.pop(stale_k, None)
 
-    # 5. Update globals() with new texts
+    # 5. Update globals() with new texts and sync __all__
     g.update(new_texts)
+    g["__all__"] = list(new_texts.keys()) + list(_CORE_EXPORTS)
 
     # 6. Atomic swap
     _ALL_MODULES = reloaded_modules

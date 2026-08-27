@@ -20,11 +20,52 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
 )
 from utils.datetime_helpers import is_expired, now_utc
-from utils.formatters import format_days_left, format_user_card_text
+from utils.formatters import format_datetime, format_days_left
 from utils.telegram import render_hub
 from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)
+
+
+def format_user_card_text(
+    user,
+    profiles: list,
+    referrals,
+    now,
+    real_balance: int = 0,
+    bonus_balance: int = 0,
+    tariff_info: str = "—",
+    referrer_info: str = "—",
+) -> str:
+    from datetime import timezone
+    from utils.telegram import safe
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    has_access = user.subscription_end and user.subscription_end > now
+    referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
+
+    status_str = "🟢 Активен" if has_access else "🔴 Неактивен"
+    ban_str = "🚫 Забанен" if user.is_banned else "—"
+
+    return texts.ADMIN_USER_CARD.format(
+        telegram_id=user.telegram_id,
+        username=safe(user.username),
+        first_name=safe(user.first_name),
+        status=status_str,
+        ban=ban_str,
+        tariff_info=safe(tariff_info),
+        referrer_info=safe(referrer_info),
+        real_balance=real_balance,
+        bonus_balance=bonus_balance,
+        valid_until=format_datetime(user.subscription_end),
+        days_left=format_days_left(user.subscription_end),
+        devices_count=len(profiles),
+        device_limit=user.device_limit or 0,
+        referrals_count=referrals_count,
+        created_at=format_datetime(user.created_at),
+    )
 
 USERS_PER_PAGE = 10
 
@@ -161,7 +202,7 @@ async def _build_users_list_text_and_kb(
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
         from utils.tariff_names import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
-    header = format_admin_breadcrumbs(texts.UI_COMMON_POLZOVATELI_164, texts.UI_COMMON_FILTR_164.format(cur_filter_name=cur_filter_name))
+    header = format_admin_breadcrumbs(texts.UI_COMMON_POLZOVATELI_164, texts.UI_COMMON_FILTR_164.format(f_name=cur_filter_name))
 
     rendered = (
         f"{header}"+

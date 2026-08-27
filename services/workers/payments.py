@@ -7,8 +7,6 @@ from datetime import timedelta
 from aiogram import Bot
 from cachetools import TTLCache
 from sqlalchemy import and_, or_, select
-
-from bot import texts
 from config.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
@@ -228,27 +226,16 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         return
     details = []
     for payment, telegram_id in new_rows[:10]:
+        icon = "⚠️" if payment_display_status(payment) == "requires_manual_review" else "⏳"
+        method = payment.payment_method or "не указан"
         details.append(
-            texts.STALE_TOPUP_ALERT_ROW.format(
-                icon=(
-                    texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L139_1
-                    if payment_display_status(payment) == "requires_manual_review"
-                    else texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L141_1
-                ),
-                payment_id=payment.id,
-                telegram_id=telegram_id,
-                amount=payment.amount,
-                currency=payment.currency,
-                method=payment.payment_method or texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L147_1,
-            )
+            f"• {icon} #{payment.id} (user {telegram_id}): {payment.amount} {payment.currency} via {method}\n"
         )
     if len(new_rows) > 10:
-        details.append(
-            texts.STALE_TOPUP_ALERT_MORE.format(count=len(new_rows) - 10)
-        )
-    message = texts.STALE_TOPUP_ALERT.format(
-        count=len(new_rows),
-        details="".join(details),
+        details.append(f"• ...и ещё {len(new_rows) - 10} платежей\n")
+    message = (
+        f"⚠️ <b>Обнаружены зависшие пополнения ({len(new_rows)} шт.)</b>\n\n"
+        f"{''.join(details)}"
     )
     for admin_id in settings.ADMIN_IDS:
         try:

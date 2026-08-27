@@ -43,7 +43,7 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         or getattr(base_tariff, "duration_days", 0) <= 0
         or days <= getattr(base_tariff, "duration_days", 0)
     ):
-        return texts.UI_U_DN_46.format(days=days, display_price=display_price)
+        return f"⏱ {days} дн. — {display_price} ₽"
 
     base_days = Decimal(str(base_tariff.duration_days))
     base_price = Decimal(str(base_tariff.price_rub))
@@ -59,13 +59,13 @@ def format_dynamic_tariff_button(t, base_tariff=None) -> str:
         savings_rub = 0
 
     if savings_rub <= 0 or discount_pct <= 0:
-        return texts.UI_U_DN_62.format(days=days, display_price=display_price)
+        return f"⏱ {days} дн. — {display_price} ₽"
 
     if days >= 360:
-        return texts.UI_U_DN_65.format(days=days, display_price=display_price, discount_pct=discount_pct)
+        return f"💎 {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
     elif days >= 180:
-        return texts.UI_U_DN_67.format(days=days, display_price=display_price, discount_pct=discount_pct)
-    return texts.UI_U_DN_68.format(days=days, display_price=display_price, discount_pct=discount_pct)
+        return f"⚡️ {days} дн. — {display_price} ₽ (-{discount_pct}%) 🔥"
+    return f"⏱ {days} дн. — {display_price} ₽ (-{discount_pct}%)"
 
 
 def get_tariff_duration_keyboard(

@@ -9,8 +9,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from aiogram import Bot
-
-from bot import texts
 from config.settings import get_settings
 from database.connection import session_scope
 from services.payment_queue_health import (
@@ -196,7 +194,7 @@ class QueueHealthMonitor:
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_HIDE, callback_data="dismiss_notification")
+        builder.button(text="✖ Скрыть", callback_data="dismiss_notification")
         reply_markup = builder.as_markup()
 
         async def send_one(admin_id: int) -> bool:
@@ -219,40 +217,31 @@ class QueueHealthMonitor:
     def _unhealthy_message(queue: QueueSnapshot) -> str:
         problems = []
         if queue.dead:
-            problems.append(texts.QUEUE_HEALTH_PROBLEM_DEAD.format(count=queue.dead, age=queue.oldest_dead_age_seconds))
+            problems.append(f"{queue.dead} dead (oldest {queue.oldest_dead_age_seconds}s)")
         if queue.overdue:
-            problems.append(texts.QUEUE_HEALTH_PROBLEM_OVERDUE.format(count=queue.overdue, age=queue.oldest_due_age_seconds))
+            problems.append(f"{queue.overdue} overdue (oldest {queue.oldest_due_age_seconds}s)")
         if queue.stale_processing:
-            problems.append(
-                texts.QUEUE_HEALTH_PROBLEM_STALE.format(
-                count=queue.stale_processing,
-                age=queue.oldest_stale_age_seconds,
-            )
-            )
+            problems.append(f"{queue.stale_processing} stale (oldest {queue.oldest_stale_age_seconds}s)")
         examples = []
         for item in queue.examples:
-            payment = texts.QUEUE_HEALTH_PAYMENT_FRAGMENT.format(payment_id=item.payment_id) if item.payment_id is not None else ""
-            code = texts.QUEUE_HEALTH_CODE_FRAGMENT.format(code=html.escape(item.last_error_code)) if item.last_error_code else ""
+            payment = f" payment={item.payment_id}" if item.payment_id is not None else ""
+            code = f" error={html.escape(item.last_error_code)}" if item.last_error_code else ""
             examples.append(
-                texts.QUEUE_HEALTH_EXAMPLE.format(
-                    operation_id=item.operation_id,
-                    payment=payment,
-                    operation_type=html.escape(item.operation_type),
-                    status=item.status,
-                    attempts=item.attempts,
-                    max_attempts=item.max_attempts,
-                    age=item.age_seconds,
-                    code=code,
-                )
+                f"<code>op={item.operation_id}{payment} "
+                f"type={html.escape(item.operation_type)} status={item.status} "
+                f"attempts={item.attempts}/{item.max_attempts} "
+                f"age={item.age_seconds}s{code}</code>"
             )
         suffix = "\n" + "\n".join(examples) if examples else ""
         return (
-            texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L230_1.format(value_0=queue.name, value_1=', '.join(problems), value_2=suffix)
+            f"🚨 <b>Durable queue unhealthy</b>\n"
+            f"Queue: <code>{queue.name}</code>\n"
+            f"Problems: {', '.join(problems)}{suffix}"
         )
 
     @staticmethod
     def _recovery_message(queue: QueueSnapshot) -> str:
-        return texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L237_1.format(value_0=queue.name)
+        return f"✅ <b>Durable queue recovered</b>\nQueue: <code>{queue.name}</code>"
 
     async def close(self) -> None:
         tasks = list(self.alert_tasks)

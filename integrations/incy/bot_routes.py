@@ -2,12 +2,10 @@ import logging
 
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, CopyTextButton
+from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot import texts
-from bot.keyboards import get_back_button
 from config.settings import get_settings
 from database.models import User
 from integrations.incy.token_service import SubscriptionTokenService
@@ -18,38 +16,44 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _build_back_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="◀️ Назад к устройствам", callback_data="back_to_connections")
+    return builder.as_markup()
+
+
 def _build_incy_text(sub_url: str) -> str:
     return (
-        texts.UI_BOT_ROUTES_PODKLYUCHENIE_CHEREZ_PRILOZHEN_23+
-        texts.UI_BOT_ROUTES_VSE_VASHI_SERVERY_I_USTROYSTVA_24+
-        texts.UI_BOT_ROUTES_KAK_NASTROIT_NA_TELEFONE_IOS_A_25+
-        texts.UI_BOT_ROUTES_1_USTANOVITE_PRILOZHENIE_INCY__26+
-        texts.UI_BOT_ROUTES_2_NAZHMITE_OTKRYT_V_INCY_DLYA__27+
-        texts.UI_BOT_ROUTES_3_ESLI_PRILOZHENIE_NE_OTKRYLOS_28+
-        texts.UI_BOT_ROUTES_4_VKLYUCHITE_PODKLYUCHENIE_V_P_29+
-        texts.UI_BOT_ROUTES_VASHA_PERSONALNAYA_SSYLKA_30+
-        f"<code>{sub_url}</code>\n\n"+
-        texts.UI_BOT_ROUTES_DLYA_KOMPYUTEROV_DLYA_WINDOWS__32+
-        texts.UI_BOT_ROUTES_PRI_SOZDANII_ILI_UDALENII_USTR_33
+        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
+        "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
+        "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
+        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
+        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
+        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
+        "4. Включите подключение в приложении.\n\n"
+        "<b>Ваша персональная ссылка:</b>\n"
+        f"<code>{sub_url}</code>\n\n"
+        "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
+        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
     )
 
 
-def _build_incy_keyboard(sub_url: str, open_url: str):
+def _build_incy_keyboard(sub_url: str, open_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_ROUTES_OTKRYT_V_INCY_40,
+        text="📱 Открыть в INCY",
         url=open_url,
     )
     builder.button(
-        text=texts.UI_BOT_ROUTES_SKOPIROVAT_SSYLKU_44,
+        text="📋 Скопировать ссылку",
         copy_text=CopyTextButton(text=sub_url),
     )
     builder.button(
-        text=texts.UI_BOT_ROUTES_SBROSIT_SSYLKU_48,
+        text="🔄 Сбросить ссылку",
         callback_data="rotate_incy_token",
     )
     builder.button(
-        text=texts.UI_BOT_ROUTES_NAZAD_K_USTROYSTVAM_52,
+        text="◀️ Назад к устройствам",
         callback_data="back_to_connections",
     )
     builder.adjust(1)
@@ -70,18 +74,18 @@ async def show_incy_subscription(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_connections"),
+            "❌ Пользователь не найден.",
+            _build_back_keyboard(),
         )
         return
 
     if not SubscriptionTokenService.is_enabled():
-        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
+        await callback.answer("⚠️ Подписка INCY временно недоступна.", show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
+        await callback.answer("⚠️ Ваша подписка неактивна.", show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -110,16 +114,16 @@ async def rotate_incy_subscription(
     await state.clear()
 
     if not db_user:
-        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
+        await callback.answer("❌ Пользователь не найден.", show_alert=True)
         return
 
     if not SubscriptionTokenService.is_enabled():
-        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
+        await callback.answer("⚠️ Подписка INCY временно недоступна.", show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
+        await callback.answer("⚠️ Ваша подписка неактивна.", show_alert=True)
         return
 
     try:
@@ -136,8 +140,8 @@ async def rotate_incy_subscription(
             _build_incy_text(sub_url),
             _build_incy_keyboard(sub_url, open_url),
         )
-        await callback.answer(texts.UI_BOT_ROUTES_SSYLKA_USPESHNO_SBROSHENA_STAR_139, show_alert=True)
+        await callback.answer("✅ Ссылка успешно сброшена. Старая ссылка больше не работает.", show_alert=True)
     except Exception as e:
         logger.exception("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__)
-        await callback.answer(texts.UI_BOT_ROUTES_OSHIBKA_PRI_SBROSE_SSYLKI_POPR_142, show_alert=True)
+        await callback.answer("❌ Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         return

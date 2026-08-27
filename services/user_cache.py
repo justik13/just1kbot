@@ -49,7 +49,6 @@ def clear_user_cache() -> None:
 
 
 __all__ = [
-    "_user_cache",
     "clear_user_cache",
     "get_cached_user_id",
     "invalidate_user_cache",

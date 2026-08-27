@@ -6,7 +6,6 @@ from aiogram import Bot
 from cachetools import TTLCache
 from sqlalchemy import select, update
 
-from bot import texts
 from config.constants import (
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
@@ -76,7 +75,7 @@ async def traffic_sync_loop(
                 TRAFFIC_MAX_BACKOFF,
             )
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L67_1,
+                "Traffic sync worker crashed (attempt %s), backing off for %ss: %s",
                 _consecutive_crashes,
                 backoff,
                 e,
@@ -143,7 +142,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
             }
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L128_1, server_info["name"], e
+                "Failed to fetch traffic from server %s: %s", server_info["name"], e
             )
             return server_info["id"], None
 
@@ -322,14 +321,21 @@ async def _send_quota_alert(
 
         tib = total_bytes / (1024**4)
         msg = (
-            texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L304_1.format(value_0=texts.SEPARATOR_LINE * 20, value_1=telegram_id, value_2=server_name, value_3=tib, value_4=profile_id, value_5=texts.SEPARATOR_LINE * 20)
+            f"⚠️ <b>Fair Usage Policy: Превышение квоты трафика!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 <b>Пользователь:</b> <code>{telegram_id}</code>\n"
+            f"🖥 <b>Сервер:</b> {server_name}\n"
+            f"📊 <b>Трафик за сутки:</b> {tib:.2f} TiB\n"
+            f"🔑 <b>Профиль ID:</b> {profile_id}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>Рекомендуется проверить активность пользователя.</i>"
         )
 
         from aiogram.utils.keyboard import InlineKeyboardBuilder
 
         builder = InlineKeyboardBuilder()
         builder.button(
-            text=texts.UI_SERVICES_WORKERS_TRAFFIC_L319_1,
+            text="👤 Открыть карточку",
             callback_data=f"admin_user_card:{telegram_id}",
         )
         builder.adjust(1)

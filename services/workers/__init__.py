@@ -7,8 +7,6 @@ from dataclasses import asdict, dataclass
 
 import aiohttp
 from aiogram import Bot
-
-from bot import texts
 from config.settings import get_settings
 
 from .account_balance import account_balance_notifications_loop
@@ -146,7 +144,12 @@ def heartbeat_allowed(*, now: float | None = None) -> bool:
 
 async def _send_alert(bot: Bot, title: str, worker: str,
                       failure_count: int, error_type: str) -> None:
-    message = texts.RUNTIME_SERVICES_WORKERS_INIT_L119_1.format(value_0=title, value_1=worker, value_2=failure_count, value_3=error_type)
+    message = (
+        f"🚨 <b>{title}</b>\n"
+        f"🧩 <b>Воркер:</b> <code>{worker}</code>\n"
+        f"🔁 <b>Падений:</b> {failure_count}\n"
+        f"⚠️ <b>Тип ошибки:</b> <code>{error_type}</code>"
+    )
     try:
         for admin_id in get_settings().ADMIN_IDS:
             try:
@@ -188,7 +191,7 @@ def _fatal(bot: Bot, worker: str, count: int, error_type: str) -> None:
     _supervisor_healthy = False
     shutdown_event.set()
     logger.critical("Fatal background failure: worker=%s failures=%s type=%s", worker, count, error_type)
-    _schedule_alert(bot, "fatal", texts.RUNTIME_SERVICES_WORKERS_INIT_L174_1, worker, count, error_type)
+    _schedule_alert(bot, "fatal", "Критическая остановка фоновых задач", worker, count, error_type)
 
 
 def _spawn(definition: WorkerDefinition, bot: Bot, now: float) -> None:
@@ -262,7 +265,7 @@ async def _supervise_workers(bot: Bot, *, check_interval: float | None = None,
             health.state = "backoff"
             count = health.consecutive_failures
             logger.critical("Worker %s died unexpectedly: %s (failure %s)", name, error_type, count)
-            _schedule_alert(bot, f"crash:{name}", texts.RUNTIME_SERVICES_WORKERS_INIT_L233_1, name, count, error_type)
+            _schedule_alert(bot, f"crash:{name}", "Фоновый воркер упал", name, count, error_type)
 
             if count > definition.max_consecutive_failures:
                 if definition.critical:

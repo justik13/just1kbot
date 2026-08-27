@@ -302,18 +302,19 @@ async def _push_payment_url(bot, session, payment) -> None:
         chat_id = ctx.get("chat_id") or user.telegram_id
         message_id = ctx.get("message_id")
 
-        from bot import texts as _texts
         from database.repositories.account_ledger_repo import get_account_balance
         balance = await get_account_balance(session, user_id=payment.user_id)
-        text = _texts.PAYMENT_LINK_READY.format(
-            amount=int(payment.amount),
-            balance=int(balance.available),
+        text = (
+            f"💳 <b>Ссылка на оплату готова!</b>\n\n"
+            f"Сумма: <b>{int(payment.amount)} ₽</b>\n"
+            f"Текущий баланс: <b>{int(balance.available)} ₽</b>\n\n"
+            f"Нажмите кнопку ниже, чтобы перейти к оплате."
         )
         from aiogram.utils.keyboard import InlineKeyboardBuilder
         builder = InlineKeyboardBuilder()
-        builder.button(text=_texts.BUTTON_OPEN_PAYMENT, url=payment.payment_url)
-        builder.button(text=_texts.BUTTON_CHECK_TOPUP, callback_data=f"balance_check:{payment.id}")
-        builder.button(text=_texts.BUTTON_CLOSE_TOPUP, callback_data=f"balance_cancel:{payment.id}")
+        builder.button(text="💳 Оплатить", url=payment.payment_url)
+        builder.button(text="🔄 Проверить оплату", callback_data=f"balance_check:{payment.id}")
+        builder.button(text="❌ Отмена", callback_data=f"balance_cancel:{payment.id}")
         builder.adjust(1)
         keyboard = builder.as_markup()
 

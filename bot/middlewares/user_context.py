@@ -16,7 +16,6 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id_any,
 )
 from services.user_cache import (
-    _user_cache,
     clear_user_cache,
     get_cached_user_id,
     invalidate_user_cache,
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "UserContextMiddleware",
-    "_user_cache",
     "clear_user_cache",
     "get_cached_user_id",
     "invalidate_user_cache",

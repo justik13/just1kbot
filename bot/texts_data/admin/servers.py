@@ -155,7 +155,7 @@ TEXTS = {
     'BTN_MASSOVAYA_RASSYLKA': '📢 Массовая рассылка',
     'BTN_MASSOVYJ_BONUS': '🎁 Массовый бонус',
     'BTN_V_ADMIN_MENYU': '🔙 В админ-меню',
-    'BTN_VPN_SERVERY': '🖥 VPN Серверы',
+    'BTN_VPN_SERVERY': '🖥 Серверы',
     'BTN_TARIFY_PODPISOK': '💎 Тарифы подписок',
     'BTN_ISTORIYA_PLATEZHEJ': '💳 История платежей',
     'BTN_ZHURNAL_POKUPOK': '🛒 Журнал покупок',

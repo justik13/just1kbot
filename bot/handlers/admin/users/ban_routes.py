@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from config.settings import get_settings
-from services.ban_service import BanService
+from services.ban_service import BanService, BanStatus
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 
@@ -19,6 +19,14 @@ from .common import (
 
 router = Router()
 logger = logging.getLogger(__name__)
+
+BAN_STATUS_LABELS: dict[str, str] = {
+    BanStatus.USER_NOT_FOUND: "Пользователь не найден",
+    BanStatus.ALREADY_BANNED: "уже забанен",
+    BanStatus.BANNED: "забанен",
+    BanStatus.ALREADY_UNBANNED: "уже разбанен",
+    BanStatus.UNBANNED: "разбанен",
+}
 
 
 @router.callback_query(F.data.startswith("admin_ban:"))
@@ -106,15 +114,16 @@ async def admin_ban_apply(
         telegram_id,
     )
 
+    status_label = BAN_STATUS_LABELS.get(message, str(message))
     if not success:
         await callback.answer(
-            texts.ADMIN_BAN_FAILED.format(message=message),
+            texts.ADMIN_BAN_FAILED.format(message=status_label),
             show_alert=True,
         )
         return
 
     await callback.answer(
-        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        texts.ADMIN_BAN_SUCCESS.format(message=status_label),
         show_alert=True,
     )
 
@@ -191,15 +200,16 @@ async def admin_unban_apply(
         telegram_id,
     )
 
+    status_label = BAN_STATUS_LABELS.get(message, str(message))
     if not success:
         await callback.answer(
-            texts.ADMIN_BAN_FAILED.format(message=message),
+            texts.ADMIN_BAN_FAILED.format(message=status_label),
             show_alert=True,
         )
         return
 
     await callback.answer(
-        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        texts.ADMIN_BAN_SUCCESS.format(message=status_label),
         show_alert=True,
     )
 

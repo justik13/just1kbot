@@ -9,8 +9,6 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from bot import texts
 from config.constants import GRACE_PERIOD_HOURS
 from database.connection import session_scope
 from database.models import (
@@ -95,7 +93,7 @@ async def cleanup_dangling_peers_loop(
             break
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L90_1,
+                "Error in cleanup worker: %s",
                 e,
                 exc_info=True,
             )
@@ -199,18 +197,22 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                         try:
                             builder = InlineKeyboardBuilder()
                             builder.button(
-                                text=texts.BTN_BUY_SUBSCRIPTION,
+                                text="🛒 Купить подписку",
                                 callback_data="menu_buy",
                             )
                             builder.button(
-                                text=texts.BTN_READ_DISMISS,
+                                text="✅ Прочитано",
                                 callback_data="dismiss_notification",
                             )
                             builder.adjust(1)
 
                             await bot.send_message(
                                 user.telegram_id,
-                                texts.UI_SERVICES_WORKERS_CLEANUP_L184_1,
+                                (
+                                    "⚠️ Ваши устройства были удалены из-за истечения"
+                                    " подписки. Продлите доступ, чтобы создать"
+                                    " новые."
+                                ),
                                 reply_markup=builder.as_markup(),
                                 parse_mode="HTML",
                             )
@@ -418,7 +420,7 @@ async def _cleanup_dangling_peers():
             return server_info, api_clients_list
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1,
+                "Failed to fetch clients from server %s: %s",
                 server_info["name"],
                 e,
             )

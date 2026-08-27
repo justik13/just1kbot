@@ -19,11 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class BanStatus(StrEnum):
-    USER_NOT_FOUND = "Пользователь не найден"
-    ALREADY_BANNED = "уже забанен"
-    BANNED = "забанен"
-    ALREADY_UNBANNED = "уже разбанен"
-    UNBANNED = "разбанен"
+    USER_NOT_FOUND = "USER_NOT_FOUND"
+    ALREADY_BANNED = "ALREADY_BANNED"
+    BANNED = "BANNED"
+    ALREADY_UNBANNED = "ALREADY_UNBANNED"
+    UNBANNED = "UNBANNED"
 
 
 class BanService:

@@ -123,14 +123,20 @@ class CircularImportRegressionTests(unittest.TestCase):
         return violations
 
     def test_downward_dependency_ast_scan(self):
-        """Verify statically via AST that lower architectural layers do not import forbidden upward modules."""
+        """Verify statically via AST that lower architectural layers NEVER import bot or bot.*.
+
+        Architecture Invariant:
+        config/, database/, integrations/, services/ (including workers), and utils/
+        must NEVER import ANY module from the bot presentation layer (bot, bot.texts,
+        bot.keyboards, bot.middlewares, bot.handlers, bot.states, bot.constants, etc.).
+        """
         project_root = Path(__file__).resolve().parent.parent
 
-        # Tier 1: config, database, and integrations/amnezia_bridge must NEVER import ANY bot modules
-        tier_1_dirs = ["config", "database", "integrations/amnezia_bridge"]
-        tier_1_violations = []
-        for dir_rel in tier_1_dirs:
-            target_dir = project_root / dir_rel
+        bot_free_dirs = ["config", "database", "integrations", "services", "utils"]
+        violations = []
+
+        for dir_name in bot_free_dirs:
+            target_dir = project_root / dir_name
             if not target_dir.exists():
                 continue
             for py_file in target_dir.rglob("*.py"):
@@ -142,44 +148,12 @@ class CircularImportRegressionTests(unittest.TestCase):
 
                 file_violations = self._find_ast_import_violations(tree, ("bot",))
                 for lineno, name in file_violations:
-                    tier_1_violations.append((str(py_file.relative_to(project_root)), lineno, name))
+                    violations.append((str(py_file.relative_to(project_root)), lineno, name))
 
         self.assertEqual(
-            tier_1_violations,
+            violations,
             [],
-            f"Found Tier 1 (config/database/bridge) upward imports to bot.*:\n{tier_1_violations}",
-        )
-
-        # Tier 2: Core services and utils must NEVER import UI state, filters, handlers, middlewares, or constants
-        tier_2_forbidden = (
-            "bot.middlewares",
-            "bot.states",
-            "bot.filters",
-            "bot.handlers",
-            "bot.constants",
-        )
-        tier_2_dirs = ["utils", "services"]
-        tier_2_violations = []
-
-        for dir_name in tier_2_dirs:
-            target_dir = project_root / dir_name
-            if not target_dir.exists():
-                continue
-            for py_file in target_dir.rglob("*.py"):
-                try:
-                    with open(py_file, "r", encoding="utf-8") as f:
-                        tree = ast.parse(f.read(), filename=str(py_file))
-                except Exception as exc:
-                    self.fail(f"Failed to parse {py_file}: {exc}")
-
-                file_violations = self._find_ast_import_violations(tree, tier_2_forbidden)
-                for lineno, name in file_violations:
-                    tier_2_violations.append((str(py_file.relative_to(project_root)), lineno, name))
-
-        self.assertEqual(
-            tier_2_violations,
-            [],
-            f"Found Tier 2 (services/utils) upward imports violating clean layer decoupling:\n{tier_2_violations}",
+            f"Strict Architectural Firewall Violation: Found upward imports to bot.* in lower layers:\n{violations}",
         )
 
     def test_ast_guard_detects_deliberate_violation(self):

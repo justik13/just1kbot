@@ -7,8 +7,6 @@ from aiogram.exceptions import TelegramForbiddenError
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy import or_, select
-
-from bot import texts
 from config.constants import (
     GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
@@ -26,30 +24,65 @@ BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL
 NOTIFICATION_BATCH_SIZE = 20
 NOTIFICATION_START_DELAY = 60.0
 
+NOTIFICATION_RETRY_DELAYS = (60, 300, 600, 1800, 3600)
+
 _last_notification_type: TTLCache[int, str] = TTLCache(
     maxsize=10000,
     ttl=86400,
 )
 
+NOTIFY_3D = """⏳ <b>Напоминание о подписке</b>
+
+До окончания вашей подписки осталось <b>3 дня</b>.
+
+Продлите доступ заранее, чтобы не потерять подключение."""
+
+NOTIFY_1D = """⏳ <b>Напоминание о подписке</b>
+
+До окончания вашей подписки остался <b>1 день</b>.
+
+Продлите доступ, чтобы ваши устройства не отключились."""
+
+NOTIFY_2H = """⚠️ <b>Подписка скоро закончится!</b>
+
+До окончания подписки осталось <b>2 часа</b>.
+
+Продлите доступ прямо сейчас, чтобы связь не прервалась."""
+
+NOTIFY_EXPIRED = """🔴 <b>Подписка закончилась!</b>
+
+Доступ к серверам приостановлен.
+
+⏳ До полного удаления ваших настроек и ключей осталось: <b>{countdown}</b>.
+
+Продлите подписку, чтобы сохранить все настройки."""
+
+NOTIFY_GRACE_12H = """🚨 <b>Внимание: Скоро удаление устройств!</b>
+
+Осталось менее <b>12 часов</b> до безвозвратного удаления ваших конфигураций.
+
+Продлите подписку прямо сейчас, чтобы не настраивать всё заново."""
+
 
 def _get_backoff_delay(retry_count: int) -> int:
-    capped = min(retry_count, MAX_RETRY_COUNT)
+    index = min(retry_count, len(NOTIFICATION_RETRY_DELAYS) - 1)
+    return NOTIFICATION_RETRY_DELAYS[index]
 
-    return BACKOFF_BASE_INTERVAL * (2**capped)
 
 def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
-        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L43_1
+        return "в ближайшее время"
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L49_1.format(value_0=days, value_1=hours)
+        return f"{days} дн. {hours} ч."
 
     minutes = (delta.seconds % 3600) // 60
 
-    return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L53_1.format(value_0=hours, value_1=minutes)
+    return f"{hours} ч. {minutes} мин."
+
 
 def _maybe_reset_retry_on_type_change(
     user: User,
@@ -116,7 +149,7 @@ async def subscription_notifications_loop(
 
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L122_1,
+                "Критическая ошибка в цикле уведомлений: %s",
                 e,
                 exc_info=True,
             )
@@ -223,15 +256,15 @@ async def _send_pre_expiry_notifications(
                 notification_type = None
 
                 if time_left <= timedelta(hours=2) and not user.notified_2h:
-                    msg = texts.NOTIFY_2H
+                    msg = NOTIFY_2H
                     notification_type = "2h"
 
                 elif time_left <= timedelta(days=1) and not user.notified_1d:
-                    msg = texts.NOTIFY_1D
+                    msg = NOTIFY_1D
                     notification_type = "1d"
 
                 elif time_left <= timedelta(days=3) and not user.notified_3d:
-                    msg = texts.NOTIFY_3D
+                    msg = NOTIFY_3D
                     notification_type = "3d"
 
                 if not msg:
@@ -250,12 +283,12 @@ async def _send_pre_expiry_notifications(
                     builder = InlineKeyboardBuilder()
 
                     builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L251_1,
+                        text="💳 Продлить доступ",
                         callback_data="menu_subscription",
                     )
 
                     builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L256_1,
+                        text="✅ Прочитано (убрать)",
                         callback_data="dismiss_notification",
                     )
 
@@ -389,13 +422,13 @@ async def _send_post_expiry_notifications(
                     not user.notified_grace_12h
                     and current_time >= deletion_time - timedelta(hours=12)
                 ):
-                    msg = texts.NOTIFY_GRACE_12H
+                    msg = NOTIFY_GRACE_12H
                     notification_type = "grace_12h"
 
                 elif not user.notified_expired:
                     countdown = _format_countdown(time_until_delete)
 
-                    msg = texts.NOTIFY_EXPIRED.format(
+                    msg = NOTIFY_EXPIRED.format(
                         countdown=countdown,
                     )
 
@@ -417,17 +450,17 @@ async def _send_post_expiry_notifications(
                     builder = InlineKeyboardBuilder()
 
                     builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L410_1,
+                        text="🚀 Купить доступ",
                         callback_data="menu_buy",
                     )
 
                     builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L415_1,
+                        text="💬 Поддержка",
                         callback_data="menu_support",
                     )
 
                     builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L420_1,
+                        text="✅ Прочитано (убрать)",
                         callback_data="dismiss_notification",
                     )
 
