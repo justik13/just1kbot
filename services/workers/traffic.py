@@ -132,28 +132,31 @@ async def _traffic_sync_once(bot: Bot | None = None):
         return
 
     async def _fetch_server_traffic(server_info):
+        from services.slots_cache import get_server_generation
         client = AmneziaClient(
             server_info["api_url"], server_info["api_key"]
         )
-        t_start = time.monotonic()
+        gen = get_server_generation(server_info["id"])
         try:
             api_clients_list = await client.get_all_clients()
+            t_done = time.monotonic()
             if api_clients_list is None:
-                return server_info["id"], None, t_start
+                return server_info["id"], None, t_done, gen
             return server_info["id"], {
                 c.id: c for c in api_clients_list
-            }, t_start
+            }, t_done, gen
         except Exception as e:
+            t_done = time.monotonic()
             logger.error(
                 texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L128_1, server_info["name"], e
             )
-            return server_info["id"], None, t_start
+            return server_info["id"], None, t_done, gen
 
     tasks = [_fetch_server_traffic(s) for s in servers]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     api_data_by_server = {
-        r[0]: (r[1], r[2])
+        r[0]: (r[1], r[2], r[3])
         for r in results
         if not isinstance(r, Exception) and r is not None and r[1] is not None
     }
@@ -162,10 +165,10 @@ async def _traffic_sync_once(bot: Bot | None = None):
         server_id = server_info["id"]
         if server_id not in api_data_by_server:
             continue
-        api_clients, t_start = api_data_by_server[server_id]
+        api_clients, t_done, gen = api_data_by_server[server_id]
 
         # ── ИСПРАВЛЕНО: обновляем slots_cache реальными данными ──
-        update_cached_peer_count(server_id, len(api_clients), timestamp=t_start)
+        update_cached_peer_count(server_id, len(api_clients), timestamp=t_done, generation=gen)
 
         await _process_server_traffic(server_info, api_clients, bot)
 

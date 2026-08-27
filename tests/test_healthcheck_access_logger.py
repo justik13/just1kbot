@@ -142,29 +142,50 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
         ):
             await common._show_server_card(callback, session, server)
 
-    async def test_slots_cache_monotonic_ordering_prevents_stale_overwrite(self):
+    async def test_slots_cache_completion_timestamp_ordering(self):
         from services.slots_cache import get_cached_peer_count, update_cached_peer_count
 
-        # Newer snapshot at t=100 has 8 peers
-        update_cached_peer_count(1, 8, timestamp=100.0)
+        # Request A completes at t=115 with 8 peers
+        updated = update_cached_peer_count(1, 8, timestamp=115.0)
+        self.assertTrue(updated)
         self.assertEqual(get_cached_peer_count(1), 8)
 
-        # Slower delayed snapshot at t=90 with 5 peers finishes later -> must NOT overwrite newer t=100
-        update_cached_peer_count(1, 5, timestamp=90.0)
-        self.assertEqual(get_cached_peer_count(1), 8)
-
-        # Even newer snapshot at t=110 with 10 peers -> MUST overwrite
-        update_cached_peer_count(1, 10, timestamp=110.0)
+        # Request B started earlier but completed later at t=130 with 10 peers -> MUST update
+        updated = update_cached_peer_count(1, 10, timestamp=130.0)
+        self.assertTrue(updated)
         self.assertEqual(get_cached_peer_count(1), 10)
 
-    def test_invalidate_server_cache_removes_entry(self):
-        from services.slots_cache import get_cached_peer_count, invalidate_server_cache, update_cached_peer_count
+        # Slower Request C completed at t=120, arrives later -> must NOT overwrite t=130
+        updated = update_cached_peer_count(1, 5, timestamp=120.0)
+        self.assertFalse(updated)
+        self.assertEqual(get_cached_peer_count(1), 10)
 
-        update_cached_peer_count(2, 15)
-        self.assertEqual(get_cached_peer_count(2), 15)
+    def test_invalidate_server_cache_bumps_generation_and_rejects_in_flight_requests(self):
+        from services.slots_cache import (
+            get_cached_peer_count,
+            get_server_generation,
+            invalidate_server_cache,
+            update_cached_peer_count,
+        )
 
+        # Worker captures generation before making HTTP request
+        gen_before = get_server_generation(2)
+        self.assertEqual(gen_before, 0)
+
+        # Admin changes URL or deletes server -> invalidation bumps generation
         invalidate_server_cache(2)
+        self.assertEqual(get_server_generation(2), 1)
         self.assertIsNone(get_cached_peer_count(2))
+
+        # In-flight request from old node finishes with old generation (0) -> MUST be rejected!
+        updated = update_cached_peer_count(2, 15, timestamp=150.0, generation=gen_before)
+        self.assertFalse(updated)
+        self.assertIsNone(get_cached_peer_count(2))
+
+        # New request from new node with current generation (1) succeeds
+        updated = update_cached_peer_count(2, 6, timestamp=160.0, generation=1)
+        self.assertTrue(updated)
+        self.assertEqual(get_cached_peer_count(2), 6)
 
     async def test_cleanup_worker_preserves_cache_on_api_failure(self):
         from services.slots_cache import get_cached_peer_count, update_cached_peer_count
@@ -178,9 +199,7 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
         class MockSession:
             async def execute(self, stmt):
                 res = MagicMock()
-                # If selecting server: return server_mock
                 res.scalars.return_value.all.return_value = [server_mock]
-                # If selecting vpn profiles: return []
                 res.all.return_value = []
                 return res
 
