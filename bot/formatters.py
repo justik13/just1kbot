@@ -84,10 +84,13 @@ def get_tariff_group_name(device_limit: int) -> str:
 
 
 def format_days_left(dt) -> str:
-    from utils.datetime_helpers import now_msk, to_msk
+    from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
 
     if dt is None:
         return texts.PLACEHOLDER_DASH
+    if is_permanent_subscription(dt):
+        return texts.TIME_FOREVER
+
     msk_dt = to_msk(dt)
     now_msk_dt = now_msk()
     if msk_dt < now_msk_dt:
