@@ -172,26 +172,26 @@ def generate_mock_amnezia_vpn_uri(
 ) -> str:
     """Generate a realistic AmneziaWG 2.0 configuration URI with obfuscation parameters."""
     conf_str = (
-        f"[Interface]\n"+
+        "[Interface]\n"+
         f"PrivateKey = MOCK_PRIVKEY_{peer_id[:8]}==\n"+
-        f"Address = 10.8.0.2/32\n"+
-        f"DNS = 1.1.1.1, 8.8.8.8\n"+
-        f"Jc = 4\n"+
-        f"Jmin = 40\n"+
-        f"Jmax = 70\n"+
-        f"S1 = 15\n"+
-        f"S2 = 30\n"+
-        f"S3 = 10\n"+
-        f"S4 = 20\n"+
-        f"H1 = 1\n"+
-        f"H2 = 2\n"+
-        f"H3 = 3\n"+
-        f"H4 = 4\n\n"+
-        f"[Peer]\n"+
-        f"PublicKey = MOCK_PUBKEY_SERVER_NL==\n"+
+        "Address = 10.8.0.2/32\n"+
+        "DNS = 1.1.1.1, 8.8.8.8\n"+
+        "Jc = 4\n"+
+        "Jmin = 40\n"+
+        "Jmax = 70\n"+
+        "S1 = 15\n"+
+        "S2 = 30\n"+
+        "S3 = 10\n"+
+        "S4 = 20\n"+
+        "H1 = 1\n"+
+        "H2 = 2\n"+
+        "H3 = 3\n"+
+        "H4 = 4\n\n"+
+        "[Peer]\n"+
+        "PublicKey = MOCK_PUBKEY_SERVER_NL==\n"+
         f"Endpoint = {host}:51820\n"+
-        f"AllowedIPs = 0.0.0.0/0, ::/0\n"+
-        f"PersistentKeepalive = 25\n"
+        "AllowedIPs = 0.0.0.0/0, ::/0\n"+
+        "PersistentKeepalive = 25\n"
     )
     last_cfg = {
         "hostName": host,
