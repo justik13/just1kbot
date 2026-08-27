@@ -16,7 +16,7 @@ from database.repositories.account_ledger_repo import create_admin_adjustment
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_admin_breadcrumbs
+from bot.formatters import format_admin_breadcrumbs
 from utils.telegram import render_hub, safe
 
 router = Router()

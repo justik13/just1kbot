@@ -107,7 +107,8 @@ async def _ensure_bot_unblocked(
 
 async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
     from database.repositories.profiles_repo import get_user_profiles
-    from utils.formatters import format_datetime, format_days_left
+    from utils.formatters import format_datetime
+    from bot.formatters import format_days_left
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS

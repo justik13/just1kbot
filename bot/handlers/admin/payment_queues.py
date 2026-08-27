@@ -56,19 +56,19 @@ def _duration(seconds: int | None) -> str:
     if seconds is None:
         return texts.PLACEHOLDER_DASH
     if seconds >= 86400:
-        return texts.ADMIN_QUEUES_CONFIRM_RETRY_PROMPT.format(v0=seconds // 86400)
+        return texts.QUEUE_DURATION_DAYS.format(days=seconds // 86400)
     if seconds >= 3600:
-        return texts.ADMIN_QUEUES_CONFIRM_PURGE_PROMPT.format(v0=seconds // 3600)
+        return texts.QUEUE_DURATION_HOURS.format(hours=seconds // 3600)
     if seconds >= 60:
-        return texts.ADMIN_QUEUES_METRICS_CARD.format(v0=seconds // 60)
-    return texts.ADMIN_QUEUES_TASK_DETAILS_CARD.format(v0=seconds)
+        return texts.QUEUE_DURATION_MINUTES.format(minutes=seconds // 60)
+    return texts.QUEUE_DURATION_SECONDS.format(seconds=seconds)
 
 
 def diagnostics_keyboard():
     b = InlineKeyboardBuilder()
     for queue in QUEUE_TYPES:
         b.button(
-            text=texts.ADMIN_QUEUES_FAILURE_RATE_METRIC.format(v0=QUEUE_LABELS[queue]),
+            text=texts.QUEUE_BTN_OPEN.format(queue=QUEUE_LABELS[queue]),
             callback_data=f"aq:l:{QUEUE_CODES[queue]}:1",
         )
     b.button(text=texts.BTN_REFRESH_ACTION, callback_data="aq:home")
@@ -104,9 +104,9 @@ async def _show_home(callback: CallbackQuery, session: AsyncSession) -> None:
         lines.extend(
             (
                 texts.ADMIN_QUEUE_NAME.format(name=names[q.name]),
-                texts.ADMIN_PAYMENT_QUEUES.format(v0=q.pending, v1=q.retry, v2=q.due, v3=q.overdue),
-                texts.ADMIN_QUEUES_STATUS_HEALTHY_LABEL.format(v0=q.processing, v1=q.stale_processing, v2=q.dead),
-                texts.ADMIN_QUEUES_STATUS_DEGRADED_LABEL.format(v0=_duration(oldest)),
+                texts.QUEUE_STATE_COUNTS.format(pending=q.pending, retry=q.retry, due=q.due, overdue=q.overdue),
+                texts.QUEUE_HEALTH_COUNTS.format(processing=q.processing, stale=q.stale_processing, dead=q.dead),
+                texts.QUEUE_OLDEST_PROBLEM.format(oldest=_duration(oldest)),
                 "",
             )
         )
@@ -126,25 +126,33 @@ async def _show_list(
     result = await list_problem_operations(session, queue, page)
     lines = [
         texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[queue]),
-        texts.ADMIN_QUEUES_STATUS_CRITICAL_LABEL.format(v0=page, v1=result.total_pages, v2=result.total),
+        texts.QUEUE_PROBLEM_LIST_TITLE.format(page=page, total_pages=result.total_pages, total=result.total),
         "",
     ]
     b = InlineKeyboardBuilder()
     if not result.rows:
-        lines.append(texts.ADMIN_QUEUES_STATUS_PAUSED_LABEL)
+        lines.append(texts.QUEUE_PROBLEM_LIST_EMPTY)
     for row in result.rows:
         lines.append(
-            texts.ADMIN_QUEUES_BTN_QUEUE_PRIMARY.format(v0=row.operation_id, v1=safe(row.operation_type), v2=safe(row.status), v3=row.attempts, v4=row.max_attempts, v5=safe(row.last_error_code or texts.PLACEHOLDER_DASH), v6=_duration(row.age_seconds))
+            texts.QUEUE_OPERATION_ROW.format(
+                operation_id=row.operation_id,
+                operation_type=safe(row.operation_type),
+                status=safe(row.status),
+                attempts=row.attempts,
+                max_attempts=row.max_attempts,
+                error=safe(row.last_error_code or texts.PLACEHOLDER_DASH),
+                age=_duration(row.age_seconds),
+            )
         )
         b.button(
-            text=texts.ADMIN_QUEUES_BTN_QUEUE_RETRY.format(v0=row.operation_id, v1=row.status, v2=row.operation_type)[:60],
+            text=texts.QUEUE_RETRY_ROW.format(operation_id=row.operation_id, status=row.status, operation_type=row.operation_type)[:60],
             callback_data=f"aq:c:{QUEUE_CODES[queue]}:{row.operation_id}",
         )
     if page > 1:
         b.button(text=texts.ADMIN_BTN_PAGINATION_PREV, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page - 1}")
     if page < result.total_pages:
         b.button(text=texts.ADMIN_BTN_PAGINATION_NEXT, callback_data=f"aq:l:{QUEUE_CODES[queue]}:{page + 1}")
-    b.button(text=texts.ADMIN_QUEUES_DEAD_ROW_ITEM, callback_data="aq:home")
+    b.button(text=texts.QUEUE_BTN_BACK_TO_DIAGNOSTICS, callback_data="aq:home")
     b.adjust(1)
     await _edit(callback, "\n".join(lines), b.as_markup())
 
@@ -155,16 +163,16 @@ def _card_text(row) -> str:
             texts.ADMIN_QUEUES_BTN_QUEUE_DEAD.format(queue_name=QUEUE_LABELS[row.queue]),
             texts.ADMIN_QUEUE_CARD_ID.format(operation_id=row.operation_id),
             texts.ADMIN_QUEUE_CARD_PAYMENT.format(payment_id=row.payment_id or texts.PLACEHOLDER_DASH),
-            texts.ADMIN_QUEUES_BTN_DETAILS.format(v0=safe(row.operation_type)),
-            texts.ADMIN_QUEUES_BTN_RETRY_DEAD.format(v0=safe(row.status)),
-            texts.ADMIN_QUEUES_BTN_PURGE_DEAD.format(v0=row.attempts, v1=row.max_attempts),
+            texts.QUEUE_CARD_TYPE.format(operation_type=safe(row.operation_type)),
+            texts.QUEUE_CARD_STATUS.format(status=safe(row.status)),
+            texts.QUEUE_CARD_ATTEMPTS.format(attempts=row.attempts, max_attempts=row.max_attempts),
             texts.ADMIN_QUEUE_CARD_ERROR.format(error_code=safe(row.last_error_code or texts.PLACEHOLDER_DASH)),
-            texts.ADMIN_QUEUES_BTN_REFRESH.format(v0=format_datetime(row.created_at)),
-            texts.ADMIN_QUEUES_BTN_BACK.format(v0=format_datetime(row.updated_at)),
-            texts.ADMIN_QUEUES_OVERVIEW_HEADER.format(v0=format_datetime(row.terminal_at)),
+            texts.QUEUE_CARD_CREATED.format(created_at=format_datetime(row.created_at)),
+            texts.QUEUE_CARD_UPDATED.format(updated_at=format_datetime(row.updated_at)),
+            texts.QUEUE_CARD_TERMINATED.format(terminated_at=format_datetime(row.terminal_at)),
             texts.ADMIN_QUEUE_CARD_LOCK.format(locked_at=format_datetime(row.locked_at)),
             texts.ADMIN_QUEUE_CARD_LEASE.format(lease=row.lease_status),
-            texts.ADMIN_QUEUES_HEALTH_OK_BADGE.format(v0=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
+            texts.QUEUE_RETRY_STATUS.format(retry_status=texts.QUEUE_RETRY_AVAILABLE if row.retry_allowed else texts.QUEUE_RETRY_UNAVAILABLE),
         )
     )
 
@@ -178,10 +186,10 @@ async def _show_card(
     b = InlineKeyboardBuilder()
     if row.retry_allowed:
         b.button(
-            text=texts.ADMIN_QUEUES_DEAD_DETAILS_HEADER,
+            text=texts.QUEUE_BTN_PREPARE_RETRY,
             callback_data=f"aq:r:{QUEUE_CODES[queue]}:{operation_id}",
         )
-    b.button(text=texts.ADMIN_QUEUES_DEAD_RETRY_PROMPT, callback_data=f"aq:l:{QUEUE_CODES[queue]}:1")
+    b.button(text=texts.QUEUE_BTN_BACK_TO_QUEUE, callback_data=f"aq:l:{QUEUE_CODES[queue]}:1")
     b.adjust(1)
     await _edit(callback, _card_text(row), b.as_markup())
     return True
@@ -257,7 +265,7 @@ async def prepare_retry(
             "action": "manual_retry",
         }
     )
-    await callback.message.answer(texts.ADMIN_QUEUES_AUTO_RECOVER_DISABLED)
+    await callback.message.answer(texts.QUEUE_ERR_REASON_REQUIRED)
     await callback.answer()
 
 
@@ -277,10 +285,10 @@ async def receive_retry_reason(
         or not isinstance(data.get("operation_id"), int)
     ):
         await state.clear()
-        return await message.answer(texts.ADMIN_QUEUES_STATUS_SUMMARY)
+        return await message.answer(texts.QUEUE_ERR_CONFIRMATION_EXPIRED)
     if not 3 <= len(reason) <= 200:
         return await message.answer(
-            texts.ADMIN_QUEUES_ACTION_CONFIRMED
+            texts.QUEUE_ERR_REASON_LENGTH
         )
     row = await get_operation_card(session, data["queue"], data["operation_id"])
     if not row or not row.retry_allowed:
@@ -292,7 +300,7 @@ async def receive_retry_reason(
     await state.set_state(QueueRetry.confirmation)
     b = InlineKeyboardBuilder()
     b.button(
-        text=texts.ADMIN_QUEUES_LATENCY_METRIC,
+        text=texts.QUEUE_BTN_CONFIRM_RETRY,
         callback_data=f"aq:x:{QUEUE_CODES[row.queue]}:{row.operation_id}",
     )
     b.button(text=texts.BTN_CANCEL, callback_data="aq:no")
@@ -331,7 +339,7 @@ async def apply_retry(
         or len(version) != 64
     ):
         await state.clear()
-        return await callback.answer(texts.ADMIN_QUEUES_THROUGHPUT_METRIC, show_alert=True)
+        return await callback.answer(texts.QUEUE_ERR_STALE_ACTION, show_alert=True)
     try:
         result = await confirm_manual_retry(
             session,
@@ -355,8 +363,8 @@ async def apply_retry(
         return await callback.answer(texts.ERROR_TECHNICAL_MESSAGE, show_alert=True)
     await state.clear()
     messages = {
-        "retry_scheduled": texts.ADMIN_QUEUES_HEALTH_CRIT_BADGE,
-        "rejected": texts.ADMIN_QUEUES_ROW_ITEM.format(v0=result.rejection_code or 'safety_policy'),
+        "retry_scheduled": texts.QUEUE_RETRY_SCHEDULED,
+        "rejected": texts.QUEUE_RETRY_REJECTED.format(code=result.rejection_code or 'safety_policy'),
         "not_found": texts.QUEUE_OPERATION_NOT_FOUND,
         "already_changed": texts.ADMIN_QUEUES_STATE_CHANGED_NOTICE,
     }

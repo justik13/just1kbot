@@ -3,15 +3,15 @@ from __future__ import annotations
 
 ADMIN_BTN_BACK_TO_DISPUTES = "← К спорам"
 
-ADMIN_DISPUTES = """⚠️ <b>Спор #{dispute_id}</b>
+DISPUTE_CARD_TEMPLATE = """⚠️ <b>Спор #{dispute_id}</b>
 Статус: <b>{status}</b>
-Case ID: <code>{amount_rub}</code>
-YooKassa payment: <code>{case}</code>
-Сумма: <b>{value_4} RUB</b>
-Дата спора: <code>{value_5}</code>
-Reservation: <code>{value_6}</code> ({value_7})
-Chargeback entry: <code>{value_8}</code>
-Заметка: {value_9}"""
+Case ID: <code>{case_id}</code>
+YooKassa payment: <code>{payment_id}</code>
+Сумма: <b>{amount_rub} RUB</b>
+Дата спора: <code>{disputed_at}</code>
+Reservation: <code>{reservation_id}</code> ({reservation_status})
+Chargeback entry: <code>{chargeback_entry_id}</code>
+Заметка: {note}"""
 
 ADMIN_DISPUTES_HEADER = """⚖️ <b>Управление платежными спорами (Disputes)</b>
 
@@ -19,93 +19,93 @@ ADMIN_DISPUTES_HEADER = """⚖️ <b>Управление платежными �
 
 ADMIN_DISPUTES_INPUT_CANCELLED = "❌ Ввод спора отменён."
 
-ADMIN_DISPUTE_ACCEPT_SUCCESS = "Нужен YooKassa payment ID"
+DISPUTE_ERR_PAYMENT_ID_REQUIRED = "Нужен YooKassa payment ID"
 
-ADMIN_DISPUTE_ACTION_FAILED = "Некорректная дата спора"
+DISPUTE_ERR_DATE_INVALID = "Некорректная дата спора"
 
-ADMIN_DISPUTE_ACTION_SUCCESS = "🛑 Ручная проверка"
+DISPUTE_BTN_SET_MANUAL_REVIEW = "🛑 Ручная проверка"
 
-ADMIN_DISPUTE_BTN_ACCEPT = """Отправьте одной строкой:
+DISPUTE_PROMPT_INPUT_FORMAT = """Отправьте одной строкой:
 <code>YooKassa_payment_ID | case_ID | сумма | YYYY-MM-DD | open/manual_review/won_by_merchant/lost_by_merchant | заметка</code>
 
 Пример:
 <code>2f... | bank-case-17 | 499 | 2026-08-02 | open | ожидаем документы</code>"""
 
-ADMIN_DISPUTE_BTN_BACK_TO_LIST = "Дата должна быть в формате YYYY-MM-DD"
+DISPUTE_ERR_INVALID_DATE_FORMAT = "Дата должна быть в формате YYYY-MM-DD"
 
-ADMIN_DISPUTE_BTN_LIST = "#{dispute_id} · {status}"
+DISPUTE_LIST_BUTTON_FORMAT = "#{dispute_id} · {status}"
 
-ADMIN_DISPUTE_BTN_REGISTER = "Операция со спором отклонена финансовыми инвариантами"
+DISPUTE_ERR_FINANCIAL_INVARIANT = "Операция со спором отклонена финансовыми инвариантами"
 
-ADMIN_DISPUTE_BTN_REJECT = "Нужно ровно 6 полей, разделённых символом |"
+DISPUTE_ERR_WRONG_FIELD_COUNT = "Нужно ровно 6 полей, разделённых символом |"
 
-ADMIN_DISPUTE_BTN_REVIEW = "Некорректный статус спора"
+DISPUTE_ERR_INVALID_STATUS = "Некорректный статус спора"
 
-ADMIN_DISPUTE_CARD = "открыт"
+DISPUTE_STATUS_OPEN_LABEL = "открыт"
 
-ADMIN_DISPUTE_CONFIRM_CASE = "➕ Зарегистрировать спор"
+DISPUTE_BTN_CREATE = "➕ Зарегистрировать спор"
 
-ADMIN_DISPUTE_CONFIRM_NOTE = """⚠️ <b>Подтвердите исход спора</b>
+DISPUTE_CONFIRM_RESULT_NOTE = """⚠️ <b>Подтвердите исход спора</b>
 
 Спор: <code>#{dispute_id}</code>
 Исход: <b>{status}</b>
 Эффект: {amount_rub}."""
 
-ADMIN_DISPUTE_CONFIRM_PAYMENT = "Исход спора зафиксирован"
+DISPUTE_SET_RESULT_SUCCESS = "Исход спора зафиксирован"
 
-ADMIN_DISPUTE_CONFIRM_PROMPT = "✅ Продавец выиграл"
+DISPUTE_BTN_OUTCOME_WON = "✅ Продавец выиграл"
 
-ADMIN_DISPUTE_CONFIRM_TITLE = "Состояние спора уже изменилось"
+DISPUTE_ERR_STATE_CHANGED = "Состояние спора уже изменилось"
 
 ADMIN_DISPUTE_CREATED_PREFIX = """Создан новый спор.
 
 """
 
-ADMIN_DISPUTE_CREATE_CONFIRM = "По платежу уже открыт спор"
+DISPUTE_ERR_ACTIVE_DISPUTE = "По платежу уже открыт спор"
 
-ADMIN_DISPUTE_CREATE_SUCCESS = "Сначала завершите активный refund"
+DISPUTE_ERR_REFUND_IN_PROGRESS = "Сначала завершите активный refund"
 
-ADMIN_DISPUTE_EXECUTION_NOTICE = "❌ Продавец проиграл"
+DISPUTE_BTN_OUTCOME_LOST = "❌ Продавец проиграл"
 
 ADMIN_DISPUTE_EXISTING_PREFIX = """Спор уже существовал.
 
 """
 
-ADMIN_DISPUTE_GENERAL_ERROR = "Спор уже завершён другим исходом"
+DISPUTE_ERR_ALREADY_RESOLVED = "Спор уже завершён другим исходом"
 
-ADMIN_DISPUTE_INVALID_AMOUNT = "Этот case ID уже связан с другими данными"
+DISPUTE_ERR_CASE_ID_CONFLICT = "Этот case ID уже связан с другими данными"
 
-ADMIN_DISPUTE_LIST_EMPTY = "выигран продавцом"
+DISPUTE_STATUS_WON_LABEL = "выигран продавцом"
 
-ADMIN_DISPUTE_LIST_HEADER = "проигран продавцом"
+DISPUTE_STATUS_LOST_LABEL = "проигран продавцом"
 
 ADMIN_DISPUTE_NOT_FOUND_ALERT = "Спор не найден"
 
-ADMIN_DISPUTE_NOT_FOUND_OR_RESOLVED = "Сумма превышает остаток платёжного риска"
+DISPUTE_ERR_EXCEEDS_RISK_LIMIT = "Сумма превышает остаток платёжного риска"
 
-ADMIN_DISPUTE_PROMPT_AMOUNT = "Платёж ещё не подтверждён"
+DISPUTE_ERR_PAYMENT_NOT_SETTLED = "Платёж ещё не подтверждён"
 
-ADMIN_DISPUTE_PROMPT_CASE_ID = "Платёж с таким YooKassa ID не найден"
+DISPUTE_ERR_PAYMENT_NOT_FOUND = "Платёж с таким YooKassa ID не найден"
 
-ADMIN_DISPUTE_PROMPT_PAYMENT_ID = "Спор поддерживается только для пополнения баланса"
+DISPUTE_ERR_NOT_TOPUP = "Спор поддерживается только для пополнения баланса"
 
-ADMIN_DISPUTE_PROMPT_REASON = "Пополнение ещё не зачислено в ledger"
+DISPUTE_ERR_PAYMENT_NOT_CREDITED = "Пополнение ещё не зачислено в ledger"
 
-ADMIN_DISPUTE_REJECT_SUCCESS = "Нужен ID спора банка/провайдера"
+DISPUTE_ERR_CASE_ID_REQUIRED = "Нужен ID спора банка/провайдера"
 
-ADMIN_DISPUTE_ROW_ITEM = "ручная проверка"
+DISPUTE_STATUS_MANUAL_REVIEW_LABEL = "ручная проверка"
 
-ADMIN_DISPUTE_SET_REVIEW_SUCCESS = "Сумма должна быть целым числом рублей"
+DISPUTE_ERR_AMOUNT_INVALID = "Сумма должна быть целым числом рублей"
 
-ADMIN_DISPUTE_STATUS_LOST_LABEL = "Споров пока нет."
+DISPUTE_LIST_EMPTY = "Споров пока нет."
 
-ADMIN_DISPUTE_STATUS_OPEN_BADGE = "Переведено на ручную проверку"
+DISPUTE_SET_MANUAL_REVIEW_NOTICE = "Переведено на ручную проверку"
 
-ADMIN_DISPUTE_STATUS_REVIEW_LABEL = "reservation будет освобождена"
+DISPUTE_EFFECT_RESERVATION_RELEASED = "reservation будет освобождена"
 
-ADMIN_DISPUTE_STATUS_UNDER_REVIEW_LABEL = "будет создан exactly-once chargeback debit; возможен долг"
+DISPUTE_EFFECT_CHARGEBACK_DEBIT = "будет создан exactly-once chargeback debit; возможен долг"
 
-ADMIN_DISPUTE_STATUS_WON_LABEL = "#{dispute_id} · {status} · {amount_rub} ₽ · case={case}"
+DISPUTE_LIST_ROW_FORMAT = "#{dispute_id} · {status} · {amount_rub} ₽ · case={case}"
 
 BTN_REFRESH_ACTION = "🔄 Обновить"
 

@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
-from utils.tariff_names import get_tariff_group_name
+from bot.formatters import get_tariff_group_name
 
 
 def _round_half_up(val: Decimal | float | int) -> int:
@@ -216,14 +216,17 @@ def get_balance_history_keyboard(
         if page > 1:
             builder.button(text=texts.BTN_BACK, callback_data=f"balance_history:{page - 1}")
         else:
-            builder.button(text=" ", callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 
-        builder.button(text=f"📄 {page}/{total_pages}", callback_data="ignore")
+        builder.button(
+            text=texts.BTN_PAGINATION_PAGE.format(page=page, total_pages=total_pages),
+            callback_data="ignore",
+        )
 
         if page < total_pages:
             builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"balance_history:{page + 1}")
         else:
-            builder.button(text=" ", callback_data="ignore")
+            builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 
         builder.button(text=texts.BTN_BACK, callback_data="menu_balance")
         builder.adjust(3, 1)

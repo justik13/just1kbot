@@ -5,7 +5,7 @@ from database.repositories.system_settings_repo import set_system_setting
 from database.repositories.users_repo import search_user_flexible
 from services.amnezia_client import AmneziaClient
 from services.workers.node_monitor import check_node_resources_and_alerts
-from utils.formatters import format_admin_breadcrumbs
+from bot.formatters import format_admin_breadcrumbs
 
 
 class TestAdminRefactorFeatures(unittest.IsolatedAsyncioTestCase):

@@ -20,7 +20,8 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
 )
 from utils.datetime_helpers import is_expired, now_utc
-from utils.formatters import format_datetime, format_days_left
+from utils.formatters import format_datetime
+from bot.formatters import format_days_left
 from utils.telegram import render_hub
 from utils.text_limits import truncate_button_text
 
@@ -182,7 +183,7 @@ async def _build_users_list_text_and_kb(
     filter_type: str = "all",
     filter_param: str = "none",
 ) -> tuple[str, InlineKeyboardBuilder]:
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
 
     raw_label = texts.ADMIN_USER_FILTER_LABELS.get(filter_type, filter_type)
     if "{filter_param}" in raw_label:
@@ -191,7 +192,7 @@ async def _build_users_list_text_and_kb(
         cur_filter_name = raw_label
 
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
-        from utils.tariff_names import get_tariff_group_name
+        from bot.formatters import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
@@ -292,7 +293,7 @@ async def _build_users_list_text_and_kb(
 
 
 async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
-    from utils.tariff_names import get_tariff_display_name
+    from bot.formatters import get_tariff_display_name
 
     tariff_info = texts.COMMON_NE_AKTIVIROVAN
     if user.current_tariff_id:

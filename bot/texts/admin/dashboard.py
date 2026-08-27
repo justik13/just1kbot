@@ -256,3 +256,54 @@ PAGE_INDEX_FORMAT = "Стр {page}/{total_pages}"
 
 ADMIN_DASHBOARD_PROXY_TAB_LABEL = "MTProto Proxy"
 ADMIN_DASHBOARD_SERVER_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {used}/{total} ({pct}%)"
+
+
+AUDIT_DETAIL_CURRENCY_SUFFIX = " ₽"
+AUDIT_DETAIL_DAYS_SUFFIX = " дн."
+AUDIT_DETAIL_YES = "Да"
+AUDIT_DETAIL_NO = "Нет"
+AUDIT_DETAIL_LABELS = {
+    'amount': 'Сумма',
+    'days': 'Срок',
+    'reason': 'Причина',
+    'tariff_name': 'Тариф',
+    'tariff_id': 'ID тарифа',
+    'device_limit': 'Лимит устройств',
+    'server_name': 'Сервер',
+    'server_id': 'ID сервера',
+    'device_name': 'Устройство',
+    'device_id': 'ID устройства',
+    'profile_id': 'ID устройства',
+    'old_name': 'Старое имя',
+    'new_name': 'Новое имя',
+    'provider': 'Провайдер',
+    'payment_id': 'ID платежа',
+    'referrer_id': 'ID пригласившего',
+    'referrer_telegram_id': 'Telegram ID пригласившего',
+    'referred_by': 'Пригласил',
+    'from_user_id': 'От пользователя',
+    'telegram_id': 'Telegram ID',
+    'username': 'Username',
+    'debit': 'Списано',
+    'credit': 'Зачислено',
+    'conversion': 'Перерасчет',
+    'force': 'Принудительно',
+    'audit_reason': 'Причина',
+    'success_count': 'Успешно',
+    'fail_count': 'Ошибок',
+    'target_audience': 'Аудитория',
+    'batch_id': 'Пакет',
+    'text': 'Текст',
+    'target_telegram_id': 'Telegram ID',
+    'outcome': 'Результат',
+    'note': 'Заметка',
+    'case': 'Кейс',
+    'operation': 'Операция',
+    'profiles_deleted': 'Удалено устройств',
+    'payments_closed': 'Закрыто платежей',
+    'devices_restored': 'Устройства восстановлены',
+    'new_end': 'Новый срок',
+}
+
+
+ADMIN_DASHBOARD_FINANCE_BADGE = " ⚠️ ({count})"

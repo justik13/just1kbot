@@ -12,7 +12,6 @@ from utils.callbacks import (
     parse_callback_parts,
 )
 from utils.datetime_helpers import (
-    days_left_msk,
     format_datetime_msk,
     is_expired,
     now_msk,
@@ -21,11 +20,8 @@ from utils.datetime_helpers import (
 from utils.encryption import (
     EncryptedString,
 )
-from utils.formatters import (
-    format_datetime,
-    format_days_left,
-    format_traffic,
-)
+from bot.formatters import format_days_left
+from utils.formatters import format_datetime, format_traffic
 from utils.logging_security import (
     SensitiveDataFilter,
     safe_url_target,
@@ -84,13 +80,15 @@ class TestUtilsDatetimeHelpers(unittest.TestCase):
 
         self.assertEqual(format_datetime_msk(None), "—")
 
-    def test_days_left_msk(self):
+    def test_format_days_left_future(self):
+        from bot.formatters import format_days_left
+
         dt_future = now_utc() + datetime.timedelta(days=5)
-        res = days_left_msk(dt_future)
+        res = format_days_left(dt_future)
         self.assertNotEqual(res, "—")
         self.assertTrue(len(res) > 0)
 
-        self.assertEqual(days_left_msk(None), "—")
+        self.assertEqual(format_days_left(None), "—")
 
     def test_is_expired(self):
         self.assertTrue(is_expired(None))

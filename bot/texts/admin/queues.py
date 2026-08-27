@@ -1,75 +1,75 @@
 """Domain texts for admin/queues.py."""
 from __future__ import annotations
 
-ADMIN_PAYMENT_QUEUES = "pending={v0} · retry={v1} · due={v2} · overdue={v3}"
+QUEUE_STATE_COUNTS = "pending={pending} · retry={retry} · due={due} · overdue={overdue}"
 
-ADMIN_QUEUES_ACTION_CONFIRMED = "Причина обязательна и должна содержать 3–200 символов."
+QUEUE_ERR_REASON_LENGTH = "Причина обязательна и должна содержать 3–200 символов."
 
-ADMIN_QUEUES_AUTO_RECOVER_DISABLED = "Укажите причину ручного retry (3–200 символов)."
+QUEUE_ERR_REASON_REQUIRED = "Укажите причину ручного retry (3–200 символов)."
 
-ADMIN_QUEUES_BTN_BACK = "Обновлено: {v0}"
+QUEUE_CARD_UPDATED = "Обновлено: {updated_at}"
 
-ADMIN_QUEUES_BTN_DETAILS = "Тип: {v0}"
+QUEUE_CARD_TYPE = "Тип: {operation_type}"
 
-ADMIN_QUEUES_BTN_PURGE_DEAD = "Попытки: {v0}/{v1}"
+QUEUE_CARD_ATTEMPTS = "Попытки: {attempts}/{max_attempts}"
 
 ADMIN_QUEUES_BTN_QUEUE_DEAD = "🧰 <b>{queue_name}</b>"
 
-ADMIN_QUEUES_BTN_QUEUE_PRIMARY = "#{v0} · {v1} · {v2} · {v3}/{v4} · error={v5} · возраст {v6}"
+QUEUE_OPERATION_ROW = "#{operation_id} · {operation_type} · {status} · {attempts}/{max_attempts} · error={error} · возраст {age}"
 
-ADMIN_QUEUES_BTN_QUEUE_RETRY = "#{v0} · {v1} · {v2}"
+QUEUE_RETRY_ROW = "#{operation_id} · {status} · {operation_type}"
 
-ADMIN_QUEUES_BTN_REFRESH = "Создано: {v0}"
+QUEUE_CARD_CREATED = "Создано: {created_at}"
 
-ADMIN_QUEUES_BTN_RETRY_DEAD = "Статус: {v0}"
+QUEUE_CARD_STATUS = "Статус: {status}"
 
-ADMIN_QUEUES_CONFIRM_PURGE_PROMPT = "{v0}ч"
+QUEUE_DURATION_HOURS = "{hours}ч"
 
-ADMIN_QUEUES_CONFIRM_RETRY_PROMPT = "{v0}д"
+QUEUE_DURATION_DAYS = "{days}д"
 
-ADMIN_QUEUES_DEAD_DETAILS_HEADER = "Подготовить retry"
+QUEUE_BTN_PREPARE_RETRY = "Подготовить retry"
 
-ADMIN_QUEUES_DEAD_RETRY_PROMPT = "← К очереди"
+QUEUE_BTN_BACK_TO_QUEUE = "← К очереди"
 
-ADMIN_QUEUES_DEAD_ROW_ITEM = "← Диагностика"
+QUEUE_BTN_BACK_TO_DIAGNOSTICS = "← Диагностика"
 
-ADMIN_QUEUES_FAILURE_RATE_METRIC = "Открыть {v0}"
+QUEUE_BTN_OPEN = "Открыть {queue}"
 
 ADMIN_QUEUES_HEADER = """🔄 <b>Диагностика очередей платежей и задач</b>
 
 ℹ️ <i>Очереди обеспечивают фоновую обработку чеков ЮKassa, автопродлений и синхронизации с серверами. Если транзакция задерживается, она переводится в статус повтора.</i>"""
 
-ADMIN_QUEUES_HEALTH_CRIT_BADGE = "Операция поставлена в retry. Исполнение выполнит фоновый worker."
+QUEUE_RETRY_SCHEDULED = "Операция поставлена в retry. Исполнение выполнит фоновый worker."
 
-ADMIN_QUEUES_HEALTH_OK_BADGE = "Ручной retry: {v0}"
+QUEUE_RETRY_STATUS = "Ручной retry: {retry_status}"
 
 ADMIN_QUEUES_INVALID_PAGE_ALERT = "Некорректная страница"
 
-ADMIN_QUEUES_LATENCY_METRIC = "Подтвердить retry"
+QUEUE_BTN_CONFIRM_RETRY = "Подтвердить retry"
 
-ADMIN_QUEUES_METRICS_CARD = "{v0}м"
+QUEUE_DURATION_MINUTES = "{minutes}м"
 
-ADMIN_QUEUES_OVERVIEW_HEADER = "Завершено/обработано: {v0}"
+QUEUE_CARD_TERMINATED = "Завершено/обработано: {terminated_at}"
 
 ADMIN_QUEUES_PURGE_SUCCESS = "Отменено"
 
-ADMIN_QUEUES_ROW_ITEM = "Retry отклонён: {v0}"
+QUEUE_RETRY_REJECTED = "Retry отклонён: {code}"
 
 ADMIN_QUEUES_STATE_CHANGED_NOTICE = "Состояние уже изменилось"
 
-ADMIN_QUEUES_STATUS_CRITICAL_LABEL = "Проблемные операции · стр. {v0}/{v1} · всего {v2}"
+QUEUE_PROBLEM_LIST_TITLE = "Проблемные операции · стр. {page}/{total_pages} · всего {total}"
 
-ADMIN_QUEUES_STATUS_DEGRADED_LABEL = "Старейшая проблема: {v0}"
+QUEUE_OLDEST_PROBLEM = "Старейшая проблема: {oldest}"
 
-ADMIN_QUEUES_STATUS_HEALTHY_LABEL = "processing={v0} · stale={v1} · dead={v2}"
+QUEUE_HEALTH_COUNTS = "processing={processing} · stale={stale} · dead={dead}"
 
-ADMIN_QUEUES_STATUS_PAUSED_LABEL = "Проблемных операций нет."
+QUEUE_PROBLEM_LIST_EMPTY = "Проблемных операций нет."
 
-ADMIN_QUEUES_STATUS_SUMMARY = "Подтверждение устарело."
+QUEUE_ERR_CONFIRMATION_EXPIRED = "Подтверждение устарело."
 
-ADMIN_QUEUES_TASK_DETAILS_CARD = "{v0}с"
+QUEUE_DURATION_SECONDS = "{seconds}с"
 
-ADMIN_QUEUES_THROUGHPUT_METRIC = "Подтверждение устарело"
+QUEUE_ERR_STALE_ACTION = "Подтверждение устарело"
 
 ADMIN_QUEUE_CARD_ERROR = "Error code: {error_code}"
 

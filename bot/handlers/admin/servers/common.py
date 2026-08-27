@@ -54,7 +54,7 @@ async def _build_servers_list_text_and_kb(
     else:
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
-            status = texts.ADMIN_TARIFF_CARD_HEADER if server.is_active else texts.STATUS_INACTIVE_ICON
+            status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=server.protocol)
             )
@@ -102,7 +102,7 @@ async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
     from utils.datetime_helpers import format_datetime_msk
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
 
     flag = server.country_flag or "🌐"
 

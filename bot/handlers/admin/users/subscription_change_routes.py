@@ -22,7 +22,7 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
-from utils.tariff_names import get_tariff_group_name
+from bot.formatters import get_tariff_group_name
 
 from .common import (
     _get_representative_tariff,

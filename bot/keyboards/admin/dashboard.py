@@ -22,7 +22,7 @@ def get_admin_menu(
 
     fin_badge = ""
     if disputes_count > 0 or dead_queues_count > 0:
-        fin_badge = f" ⚠️ ({disputes_count + dead_queues_count})"
+        fin_badge = texts.ADMIN_DASHBOARD_FINANCE_BADGE.format(count=disputes_count + dead_queues_count)
 
     builder.button(
         text=texts.ADMIN_DASHBOARD_SECTION_FINANCES_QUEUES.format(fin_badge=fin_badge),

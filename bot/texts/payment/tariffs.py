@@ -180,3 +180,11 @@ PAYMENT_USER_NOT_REGISTERED = """⚠️ <b>Профиль не найден</b>
 PURCHASE_COMPLETED = "Тариф куплен"
 
 WORD_PURCHASE = "Покупка"
+
+
+TARIFF_DISPLAY_BASIC = "📱 Базовый"
+TARIFF_DISPLAY_FAMILY = "👨‍👩‍👧‍👦 Семейный"
+TARIFF_DISPLAY_PRO = "🚀 Pro"
+TARIFF_DISPLAY_BASIC_GROUP = "📱 Базовый (2 устр.)"
+TARIFF_DISPLAY_FAMILY_GROUP = "👨‍👩‍👧‍👦 Семейный (5 устр.)"
+TARIFF_DISPLAY_PRO_GROUP = "🚀 Pro ({limit} устр.)"

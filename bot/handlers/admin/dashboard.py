@@ -38,11 +38,8 @@ from services.audit_service import AuditService
 from services.maintenance_service import MaintenanceService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.formatters import (
-    format_admin_breadcrumbs,
-    format_audit_details,
-    format_datetime,
-)
+from bot.formatters import format_admin_breadcrumbs, format_audit_details
+from utils.formatters import format_datetime
 from utils.telegram import render_hub, safe
 from utils.text_limits import truncate_details
 

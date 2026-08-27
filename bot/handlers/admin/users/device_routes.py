@@ -20,7 +20,8 @@ from utils.callbacks import (
     parse_callback_parts,
 )
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_admin_breadcrumbs, format_datetime, format_traffic
+from bot.formatters import format_admin_breadcrumbs
+from utils.formatters import format_datetime, format_traffic
 from utils.telegram import safe
 
 from .common import _get_user_with_profiles

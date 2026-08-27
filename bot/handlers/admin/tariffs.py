@@ -43,18 +43,18 @@ async def _build_tariffs_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.ADMIN_TARIFF_LIST_EMPTY.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_TARIFF_LIST_TITLE.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not tariffs:
-        rendered += texts.ADMIN_TARIFF_LIST_HEADER
+        rendered += texts.ADMIN_TARIFF_LIST_EMPTY
     else:
         for tariff in tariffs:
-            status = texts.ADMIN_TARIFF_CARD_HEADER if tariff.is_active else texts.STATUS_INACTIVE_ICON
+            status = texts.STATUS_ACTIVE_ICON if tariff.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                texts.ADMIN_TARIFF_EDIT_NAME_PROMPT.format(value_0=status, value_1=tariff.name, value_2=tariff.duration_days, value_3=tariff.price_rub)
+                texts.ADMIN_TARIFF_ROW_FORMAT.format(status=status, name=tariff.name, duration_days=tariff.duration_days, price_rub=tariff.price_rub)
             )
             builder.button(
                 text=button_text,
@@ -171,11 +171,19 @@ async def _show_tariff_card(
     status = (
         texts.STATUS_ACTIVE_BADGE
         if tariff.is_active
-        else texts.ADMIN_TARIFF_CARD_BODY
+        else texts.ADMIN_TARIFF_STATUS_DISABLED_BADGE
     )
 
     rendered = (
-        texts.ADMIN_TARIFF_STATUS_ACTIVE_LABEL.format(value_0=tariff.id, value_1=safe(tariff.name), value_2=safe(tariff.description or texts.PLACEHOLDER_DASH), value_3=tariff.duration_days, value_4=tariff.device_limit, value_5=tariff.price_rub, value_6=status)
+        texts.ADMIN_TARIFF_CARD_TEMPLATE.format(
+            tariff_id=tariff.id,
+            name=safe(tariff.name),
+            description=safe(tariff.description or texts.PLACEHOLDER_DASH),
+            duration_days=tariff.duration_days,
+            device_limit=tariff.device_limit,
+            price_rub=tariff.price_rub,
+            status=status,
+        )
     )
 
     builder = InlineKeyboardBuilder()
@@ -283,11 +291,11 @@ async def toggle_tariff_confirm(
 
     if new_status:
         text = (
-            texts.ADMIN_TARIFF_STATUS_INACTIVE_LABEL.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
+            texts.ADMIN_TARIFF_ENABLE_CONFIRM.format(name=safe(tariff.name), duration_days=tariff.duration_days, device_limit=tariff.device_limit)
         )
     else:
         text = (
-            texts.ADMIN_TARIFF_ROW_ITEM.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
+            texts.ADMIN_TARIFF_DISABLE_CONFIRM.format(name=safe(tariff.name), duration_days=tariff.duration_days, device_limit=tariff.device_limit)
         )
 
     try:
@@ -418,7 +426,7 @@ async def start_edit_tariff_rub(
 
     try:
         await callback.message.edit_text(
-            texts.ADMIN_TARIFF_EDIT_RUB_PROMPT,
+            texts.ADMIN_TARIFF_EDIT_PRICE_PROMPT,
             reply_markup=get_back_button(f"admin_tariff_card:{tariff_id}"),
         )
     except TelegramBadRequest as e:
@@ -478,7 +486,7 @@ async def process_edit_tariff_rub(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_TARIFF_BTN_EDIT_DEVICES.format(value_0=MAX_TARIFF_PRICE),
+            texts.ADMIN_TARIFF_ERR_PRICE_RANGE.format(max_price=MAX_TARIFF_PRICE),
             get_back_button("admin_tariffs"),
         )
         return
@@ -517,8 +525,8 @@ async def process_edit_tariff_rub(
     await render_hub(
         message.bot,
         message.chat.id,
-        texts.ADMIN_TARIFF_EDIT_RUB_SUCCESS.format(
-            value=new_value
+        texts.ADMIN_TARIFF_EDIT_PRICE_SUCCESS.format(
+            price_rub=new_value
         ),
         get_back_button("admin_tariffs"),
     )

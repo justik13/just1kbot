@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from database.models import AuditLog, User
 from database.repositories.audit_repo import get_user_audit_logs
 from services.audit_service import AuditService
-from utils.formatters import format_audit_details
+from bot.formatters import format_audit_details
 
 
 class AuditServiceAndHistoryTests(unittest.IsolatedAsyncioTestCase):

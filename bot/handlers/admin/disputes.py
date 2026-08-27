@@ -32,39 +32,39 @@ class DisputeEntry(StatesGroup):
 
 
 STATUS_LABELS = {
-    "open": texts.ADMIN_DISPUTE_CARD,
-    "manual_review": texts.ADMIN_DISPUTE_ROW_ITEM,
-    "won_by_merchant": texts.ADMIN_DISPUTE_LIST_EMPTY,
-    "lost_by_merchant": texts.ADMIN_DISPUTE_LIST_HEADER,
+    "open": texts.DISPUTE_STATUS_OPEN_LABEL,
+    "manual_review": texts.DISPUTE_STATUS_MANUAL_REVIEW_LABEL,
+    "won_by_merchant": texts.DISPUTE_STATUS_WON_LABEL,
+    "lost_by_merchant": texts.DISPUTE_STATUS_LOST_LABEL,
 }
 
 
 def _error_text(code: str) -> str:
     return {
-        "provider_payment_id_required": texts.ADMIN_DISPUTE_ACCEPT_SUCCESS,
-        "provider_case_id_required": texts.ADMIN_DISPUTE_REJECT_SUCCESS,
-        "dispute_amount_invalid": texts.ADMIN_DISPUTE_SET_REVIEW_SUCCESS,
-        "disputed_at_timezone_required": texts.ADMIN_DISPUTE_ACTION_FAILED,
-        "payment_not_found": texts.ADMIN_DISPUTE_PROMPT_CASE_ID,
+        "provider_payment_id_required": texts.DISPUTE_ERR_PAYMENT_ID_REQUIRED,
+        "provider_case_id_required": texts.DISPUTE_ERR_CASE_ID_REQUIRED,
+        "dispute_amount_invalid": texts.DISPUTE_ERR_AMOUNT_INVALID,
+        "disputed_at_timezone_required": texts.DISPUTE_ERR_DATE_INVALID,
+        "payment_not_found": texts.DISPUTE_ERR_PAYMENT_NOT_FOUND,
         "dispute_requires_balance_topup": (
-            texts.ADMIN_DISPUTE_PROMPT_PAYMENT_ID
+            texts.DISPUTE_ERR_NOT_TOPUP
         ),
-        "payment_not_settled": texts.ADMIN_DISPUTE_PROMPT_AMOUNT,
-        "payment_not_credited": texts.ADMIN_DISPUTE_PROMPT_REASON,
-        "provider_case_id_conflict": texts.ADMIN_DISPUTE_INVALID_AMOUNT,
-        "payment_has_active_dispute": texts.ADMIN_DISPUTE_CREATE_CONFIRM,
-        "refund_in_progress": texts.ADMIN_DISPUTE_CREATE_SUCCESS,
+        "payment_not_settled": texts.DISPUTE_ERR_PAYMENT_NOT_SETTLED,
+        "payment_not_credited": texts.DISPUTE_ERR_PAYMENT_NOT_CREDITED,
+        "provider_case_id_conflict": texts.DISPUTE_ERR_CASE_ID_CONFLICT,
+        "payment_has_active_dispute": texts.DISPUTE_ERR_ACTIVE_DISPUTE,
+        "refund_in_progress": texts.DISPUTE_ERR_REFUND_IN_PROGRESS,
         "dispute_exceeds_payment_exposure": (
-            texts.ADMIN_DISPUTE_NOT_FOUND_OR_RESOLVED
+            texts.DISPUTE_ERR_EXCEEDS_RISK_LIMIT
         ),
         "dispute_not_found": texts.ADMIN_DISPUTE_NOT_FOUND_ALERT,
-        "dispute_already_resolved": texts.ADMIN_DISPUTE_GENERAL_ERROR,
-    }.get(code, texts.ADMIN_DISPUTE_BTN_REGISTER)
+        "dispute_already_resolved": texts.DISPUTE_ERR_ALREADY_RESOLVED,
+    }.get(code, texts.DISPUTE_ERR_FINANCIAL_INVARIANT)
 
 
 def _list_keyboard() -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.ADMIN_DISPUTE_CONFIRM_CASE, callback_data="admin_dispute_new")
+    builder.button(text=texts.DISPUTE_BTN_CREATE, callback_data="admin_dispute_new")
     builder.button(text=texts.BTN_REFRESH_ACTION, callback_data="admin_disputes")
     builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
@@ -75,16 +75,16 @@ def _card_keyboard(dispute: PaymentDispute) -> InlineKeyboardBuilder:
     builder = InlineKeyboardBuilder()
     if dispute.status in {"open", "manual_review"}:
         builder.button(
-            text=texts.ADMIN_DISPUTE_CONFIRM_PROMPT,
+            text=texts.DISPUTE_BTN_OUTCOME_WON,
             callback_data=f"admin_dispute_resolve:won_by_merchant:{dispute.id}",
         )
         builder.button(
-            text=texts.ADMIN_DISPUTE_EXECUTION_NOTICE,
+            text=texts.DISPUTE_BTN_OUTCOME_LOST,
             callback_data=f"admin_dispute_resolve:lost_by_merchant:{dispute.id}",
         )
         if dispute.status == "open":
             builder.button(
-                text=texts.ADMIN_DISPUTE_ACTION_SUCCESS,
+                text=texts.DISPUTE_BTN_SET_MANUAL_REVIEW,
                 callback_data=f"admin_dispute_review:{dispute.id}",
             )
     builder.button(text=texts.ADMIN_BTN_BACK_TO_DISPUTES, callback_data="admin_disputes")
@@ -106,7 +106,18 @@ async def _render_card(
         else None
     )
     text = (
-        texts.ADMIN_DISPUTES.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, safe(dispute.status)), amount_rub=safe(dispute.provider_case_id), case=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH), value_4=int(dispute.amount), value_5=dispute.disputed_at.date().isoformat(), value_6=reservation.id if reservation else texts.PLACEHOLDER_DASH, value_7=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING, value_8=dispute.chargeback_entry_id or texts.PLACEHOLDER_DASH, value_9=safe(dispute.note or texts.PLACEHOLDER_DASH))
+        texts.DISPUTE_CARD_TEMPLATE.format(
+                dispute_id=dispute.id,
+                status=STATUS_LABELS.get(dispute.status, safe(dispute.status)),
+                case_id=safe(dispute.provider_case_id),
+                payment_id=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH),
+                amount_rub=int(dispute.amount),
+                disputed_at=dispute.disputed_at.date().isoformat(),
+                reservation_id=reservation.id if reservation else texts.PLACEHOLDER_DASH,
+                reservation_status=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING,
+                chargeback_entry_id=dispute.chargeback_entry_id or texts.PLACEHOLDER_DASH,
+                note=safe(dispute.note or texts.PLACEHOLDER_DASH),
+            )
     )
     return text, _card_keyboard(dispute).as_markup()
 
@@ -136,16 +147,16 @@ async def show_disputes(
     builder = _list_keyboard()
     for dispute in rows:
         lines.append(
-            texts.ADMIN_DISPUTE_STATUS_WON_LABEL.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status), amount_rub=int(dispute.amount), case=safe(dispute.provider_case_id))
+            texts.DISPUTE_LIST_ROW_FORMAT.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status), amount_rub=int(dispute.amount), case=safe(dispute.provider_case_id))
         )
         builder.button(
             text=(
-                texts.ADMIN_DISPUTE_BTN_LIST.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status))
+                texts.DISPUTE_LIST_BUTTON_FORMAT.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status))
             ),
             callback_data=f"admin_dispute_card:{dispute.id}",
         )
     if not rows:
-        lines.append(texts.ADMIN_DISPUTE_STATUS_LOST_LABEL)
+        lines.append(texts.DISPUTE_LIST_EMPTY)
     builder.adjust(1)
     await callback.message.edit_text(
         "\n".join(lines),
@@ -164,7 +175,7 @@ async def start_dispute_entry(callback: CallbackQuery, state: FSMContext):
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_CANCEL, callback_data="admin_dispute_cancel")
     await callback.message.answer(
-        texts.ADMIN_DISPUTE_BTN_ACCEPT,
+        texts.DISPUTE_PROMPT_INPUT_FORMAT,
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -193,18 +204,18 @@ async def receive_dispute_entry(
         return
     parts = [part.strip() for part in (message.text or "").split("|", 5)]
     if len(parts) != 6:
-        await message.answer(texts.ADMIN_DISPUTE_BTN_REJECT)
+        await message.answer(texts.DISPUTE_ERR_WRONG_FIELD_COUNT)
         return
     provider_payment_id, case_id, amount, date_text, status, note = parts
     if status not in STATUS_LABELS:
-        await message.answer(texts.ADMIN_DISPUTE_BTN_REVIEW)
+        await message.answer(texts.DISPUTE_ERR_INVALID_STATUS)
         return
     try:
         disputed_at = datetime.strptime(date_text, "%Y-%m-%d").replace(
             tzinfo=timezone.utc
         )
     except ValueError:
-        await message.answer(texts.ADMIN_DISPUTE_BTN_BACK_TO_LIST)
+        await message.answer(texts.DISPUTE_ERR_INVALID_DATE_FORMAT)
         return
     try:
         result = await open_payment_dispute(
@@ -296,7 +307,7 @@ async def mark_dispute_review(callback: CallbackQuery, session: AsyncSession):
         reply_markup=rendered[1],
         parse_mode="HTML",
     )
-    await callback.answer(texts.ADMIN_DISPUTE_STATUS_OPEN_BADGE, show_alert=True)
+    await callback.answer(texts.DISPUTE_SET_MANUAL_REVIEW_NOTICE, show_alert=True)
 
 
 @router.callback_query(F.data.startswith("admin_dispute_resolve:"))
@@ -321,7 +332,7 @@ async def confirm_dispute_resolution(
         return
     dispute = await session.get(PaymentDispute, dispute_id)
     if dispute is None or dispute.status not in {"open", "manual_review"}:
-        await callback.answer(texts.ADMIN_DISPUTE_CONFIRM_TITLE, show_alert=True)
+        await callback.answer(texts.DISPUTE_ERR_STATE_CHANGED, show_alert=True)
         return
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -334,12 +345,12 @@ async def confirm_dispute_resolution(
     )
     builder.adjust(1)
     effect = (
-        texts.ADMIN_DISPUTE_STATUS_REVIEW_LABEL
+        texts.DISPUTE_EFFECT_RESERVATION_RELEASED
         if parts[1] == "won_by_merchant"
-        else texts.ADMIN_DISPUTE_STATUS_UNDER_REVIEW_LABEL
+        else texts.DISPUTE_EFFECT_CHARGEBACK_DEBIT
     )
     await callback.message.edit_text(
-        texts.ADMIN_DISPUTE_CONFIRM_NOTE.format(dispute_id=dispute.id, status=STATUS_LABELS[parts[1]], amount_rub=effect),
+        texts.DISPUTE_CONFIRM_RESULT_NOTE.format(dispute_id=dispute.id, status=STATUS_LABELS[parts[1]], amount_rub=effect),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -377,4 +388,4 @@ async def apply_dispute_resolution(
         reply_markup=rendered[1],
         parse_mode="HTML",
     )
-    await callback.answer(texts.ADMIN_DISPUTE_CONFIRM_PAYMENT, show_alert=True)
+    await callback.answer(texts.DISPUTE_SET_RESULT_SUCCESS, show_alert=True)

@@ -85,12 +85,12 @@ async def start_broadcast(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
     header = format_admin_breadcrumbs(texts.BROADCAST_BROADCAST, texts.BROADCAST_STEP_1_SELECT_AUDIENCE)
 
     try:
         await callback.message.edit_text(
-            texts.BROADCAST_SELECT_AUDITORIYU_FOR_RASSY.format(header=header),
+            texts.BROADCAST_SELECT_AUDIENCE_PROMPT.format(header=header),
             reply_markup=get_broadcast_audience_keyboard(),
             parse_mode="HTML",
         )
@@ -157,7 +157,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_BROADCAST_RECIPIENTS_COUNT.format(
+            texts.BROADCAST_ERR_TEXT_TOO_LONG.format(
                 max_chars=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
@@ -167,7 +167,7 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.ADMIN_BROADCAST_TEST_SENT_SUCCESS.format(
+            texts.BROADCAST_ERR_CAPTION_TOO_LONG.format(
                 max_chars=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
@@ -207,10 +207,10 @@ async def process_broadcast_message(
     aud_label = texts.ADMIN_BROADCAST_AUDIENCE_LABELS.get(target_audience, target_audience)
 
     preview_summary = (
-        texts.BROADCAST_TEST_MESSAGE_OTPRAVLE.format()+
+        texts.BROADCAST_TEST_SENT_NOTICE.format()+
         texts.BROADCAST_AUDIENCE.format(aud_label=aud_label)+
-        texts.BROADCAST_RECIPIENTS_CHEL.format(total_count=total_count)+
-        texts.BROADCAST_PREVIEW_S_PREVIEW_VY.format()
+        texts.BROADCAST_RECIPIENTS_COUNT_LINE.format(total_count=total_count)+
+        texts.BROADCAST_PREVIEW_CONFIRM_HINT.format()
     )
 
     try:
@@ -526,7 +526,7 @@ async def _send_broadcast_to_users_with_resume(
         try:
             await bot.send_message(
                 admin_id,
-                texts.ADMIN_BROADCAST_SENDING_PROGRESS.format(
+                texts.BROADCAST_STOPPED_ERROR_ALERT.format(
                     max_chars=html.escape(
                         type(e).__name__ + ": " + str(e)[:200]
                     )
@@ -731,7 +731,7 @@ async def _start_broadcast_process(
             await state.clear()
             return
 
-        label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(audience, texts.BROADCAST_TEST_MNE_ADMINU if audience.startswith("test_") else audience)
+        label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(audience, texts.BROADCAST_BTN_TEST_ME if audience.startswith("test_") else audience)
 
         async with session_scope() as sess:
             progress = BroadcastProgress(
@@ -919,7 +919,7 @@ async def stop_broadcast(callback: CallbackQuery):
     admin_id = callback.from_user.id
     if admin_id not in _broadcast_in_progress:
         await callback.answer(
-            texts.ADMIN_BROADCAST_SUMMARY_RESULT,
+            texts.BROADCAST_NOT_STARTED_STATUS,
             show_alert=True,
         )
         return

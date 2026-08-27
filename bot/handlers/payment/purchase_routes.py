@@ -29,7 +29,7 @@ from services.account_purchase import (
 from services.maintenance_service import MaintenanceService
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
-from utils.tariff_names import get_tariff_display_name
+from bot.formatters import get_tariff_display_name
 from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .balance_routes import _create_and_render_topup

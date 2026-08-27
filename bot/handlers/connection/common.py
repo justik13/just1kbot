@@ -150,7 +150,12 @@ async def _build_connections_screen(
             traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
             last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
 
-            rendered += f"\n• 📱 <b>{safe(profile.device_name)}</b> ({location_label})\n   └ 📊 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
+            rendered += texts.CONNECTION_DEVICE_ROW_FORMAT.format(
+                device_name=safe(profile.device_name),
+                location=location_label,
+                traffic=traffic_str,
+                last_conn=last_conn_str,
+            )
             labels = {
                 "pending_create": texts.DEVICE_STATUS_CREATING,
                 "pending_update": texts.PROVISIONING_UPDATING,

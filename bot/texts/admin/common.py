@@ -75,3 +75,8 @@ COMMON_ZABANENNYE = "🚫 Забаненные"
 
 COMMON_ZAPOLNENNOST_SLOTOV = """• Заполненность слотов: <b>{used_clients} / {max_clients}</b>
 """
+
+
+ADMIN_BREADCRUMB_HOME = "🏠 Админка"
+ADMIN_BREADCRUMB_SEPARATOR = " ➔ "
+ADMIN_BREADCRUMB_TEMPLATE = "📌 <b>{path}</b>\n\n"

@@ -28,7 +28,7 @@ from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name, get_tariff_group_name
+from bot.formatters import get_tariff_display_name, get_tariff_group_name
 from utils.telegram import render_hub
 
 from .common import (

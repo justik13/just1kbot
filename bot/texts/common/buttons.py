@@ -180,3 +180,7 @@ BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"
 BUTTON_TOPUP = "➕ Пополнить баланс"
 
 LEGACY_REPLY_BUTTON_TRIGGER_TEXTS = {'Подключение', 'Профиль', '🔑 Подключение', 'Поддержка', 'Главное меню', 'Купить / Продлить', '🏠 Главное меню', '🆘 Поддержка', '💳 Купить / Продлить', '👤 Профиль'}
+
+
+BTN_PAGINATION_PAGE = "📄 {page}/{total_pages}"
+BTN_PAGINATION_EMPTY = " "

@@ -14,8 +14,9 @@ from database.repositories.tariffs_repo import (
     get_active_tariffs,
 )
 from utils.datetime_helpers import is_expired
-from utils.formatters import format_datetime, format_days_left
-from utils.tariff_names import get_tariff_display_name
+from utils.formatters import format_datetime
+from bot.formatters import format_days_left
+from bot.formatters import get_tariff_display_name
 from utils.telegram import render_hub
 
 logger = logging.getLogger(__name__)

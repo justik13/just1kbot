@@ -23,7 +23,7 @@ EXPECTED_FILES = {
     "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
 }
 
-PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services")
+PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "utils")
 # integrations/ — автономные веб-приложения (incy, amnezia_bridge) с собственным
 # презентационным слоем и HTML-шаблонами. Они не являются текстами Telegram-бота
 # и сознательно выведены за границы SSOT-каталога bot/texts/ (см. ТЗ по SSOT).

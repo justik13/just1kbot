@@ -64,7 +64,7 @@ def get_broadcast_result_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.ADMIN_BROADCAST_STOPPED_NOTICE,
+        text=texts.BROADCAST_BTN_DISMISS,
         callback_data="broadcast_dismiss",
     )
 

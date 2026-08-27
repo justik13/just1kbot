@@ -13,7 +13,7 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name
+from bot.formatters import get_tariff_display_name
 
 from .common import (
     _format_time_left,

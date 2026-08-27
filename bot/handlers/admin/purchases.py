@@ -15,7 +15,8 @@ from database.repositories.purchases_repo import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_admin_breadcrumbs, format_datetime
+from bot.formatters import format_admin_breadcrumbs
+from utils.formatters import format_datetime
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 

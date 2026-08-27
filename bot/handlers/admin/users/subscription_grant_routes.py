@@ -32,7 +32,7 @@ from utils.callbacks import (
 )
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_group_name
+from bot.formatters import get_tariff_group_name
 from utils.telegram import render_hub
 
 from .common import (

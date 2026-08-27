@@ -19,7 +19,7 @@ from database.repositories.users_repo import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_audit_details
+from bot.formatters import format_audit_details
 from utils.telegram import render_hub, safe
 
 from .common import (
@@ -81,9 +81,9 @@ async def show_extended_filter_menu(
             await callback.answer(texts.ADMIN_USERS_LIST_SERVEROV_NET, show_alert=True)
             return
         for server in rows:
-            flag = server.country_flag or "🌐"
+            flag = server.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
             builder.button(
-                text=f"🖥 {flag} {server.name}",
+                text=texts.ADMIN_USERS_FILTER_SERVER_BUTTON.format(flag=flag, server_name=server.name),
                 callback_data=f"admin_users_filter:server:{server.id}:1",
             )
         title = texts.ADMIN_USERS_LIST_SELECT_SERVER
@@ -101,7 +101,7 @@ async def show_extended_filter_menu(
             return
         for country in rows:
             builder.button(
-                text=f"🌐 {country}",
+                text=texts.ADMIN_USERS_FILTER_COUNTRY_BUTTON.format(country=country),
                 callback_data=f"admin_users_filter:country:{country}:1",
             )
         title = texts.ADMIN_USERS_LIST_SELECT_STRANU
@@ -110,7 +110,7 @@ async def show_extended_filter_menu(
         if not rows:
             await callback.answer(texts.ADMIN_USERS_LIST_TARIFOV_NET, show_alert=True)
             return
-        from utils.tariff_names import get_tariff_group_name
+        from bot.formatters import get_tariff_group_name
         seen_limits = set()
         for tariff in rows:
             limit = tariff.device_limit
@@ -119,7 +119,7 @@ async def show_extended_filter_menu(
             seen_limits.add(limit)
             label = get_tariff_group_name(limit)
             builder.button(
-                text=f"💎 {label}",
+                text=texts.ADMIN_USERS_FILTER_TARIFF_BUTTON.format(tariff_group=label),
                 callback_data=f"admin_users_filter:tariff:{limit}:1",
             )
         title = texts.ADMIN_USERS_LIST_SELECT_TARIFF

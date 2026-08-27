@@ -320,7 +320,7 @@ async def process_balance_reason(
     username_str = f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
     change_str = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.ADMIN_USER_ID_NO_COLON_FORMAT.format(telegram_id=user.telegram_id), texts.ADMIN_USERS_BALANCE_BALANCE)
 
     text = (
@@ -454,7 +454,7 @@ async def apply_user_balance_change(
     await state.clear()
     await callback.answer(texts.ADMIN_USERS_BALANCE_SUCCESS_PRIVEDENO_V_ACTION, show_alert=True)
 
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
     header = format_admin_breadcrumbs(texts.BTN_USERS, texts.ADMIN_USER_ID_NO_COLON_FORMAT.format(telegram_id=user.telegram_id), texts.ADMIN_USERS_BALANCE_BALANCE)
     change_formatted = f"+{amount} ₽" if action_type == "topup" else f"-{amount} ₽"
 

@@ -114,3 +114,4 @@ DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформироват
 DEVICE_DEFAULT_NAME_TEMPLATE = 'Устройство #{slot}'
 FINALIZER_OPERATION_FAILED_TEMPLATE = 'Operation failed: {code}'
 FINALIZER_ERROR_LABELS = {'server_full': 'Сервер переполнен', 'auth_failed': 'Неверный API ключ сервера', 'invalid_raw_config': 'Ошибка шифрования конфига', 'create_ambiguous_reconcile': 'Не удалось проверить создание пира', 'invalid_created_config_cleanup': 'Конфиг не сгенерирован (очистка)', 'duplicate_exact_client_name': 'Такое имя уже существует на сервере', 'network_error': 'Ошибка сети при обращении к серверу', 'timeout': 'Таймаут обращения к серверу'}
+CONNECTION_DEVICE_ROW_FORMAT = '\n• 📱 <b>{device_name}</b> ({location})\n   └ 📊 <code>{traffic}</code> | <i>{last_conn}</i>'

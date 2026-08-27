@@ -127,7 +127,7 @@ ADMIN_SERVER_URL_PROMPT = "🔗 Введите API URL сервера (напр�
 
 ADMIN_SERVER_URL_UPDATED = "✅ API URL сервера обновлен на <code>{api_url}</code>."
 
-ADMIN_TARIFF_CARD_HEADER = "🟢"
+STATUS_ACTIVE_ICON = "🟢"
 
 BTN_DISABLE_SERVER = "🔴 Выключить"
 

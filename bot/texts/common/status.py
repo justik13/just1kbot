@@ -34,3 +34,7 @@ STATUS_SUBSCRIPTION_INACTIVE = "🔴 Неактивна"
 USER_ID_LABEL = "ID: {user_id}"
 
 ZERO_DAYS_LABEL = "0 дней"
+
+
+TIME_HOURS_LEFT = "{hours} ч."
+TIME_FOREVER = "∞"

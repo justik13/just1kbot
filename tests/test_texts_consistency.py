@@ -456,6 +456,10 @@ class TextsConsistencyTests(unittest.TestCase):
             
             if re.search(r"[\u0400-\u04FF]", clean_s):
                 return True
+            # Emoji/symbols (icon + space) are strong UI markers; plain technical
+            # tokens without spaces are still allowed.
+            if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", clean_s) and " " in clean_s:
+                return True
             if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
                 return False
             if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
@@ -544,6 +548,8 @@ class TextsConsistencyTests(unittest.TestCase):
                 return False
             clean_s = re.sub(r"<[^>]+>", "", s)
             if re.search(r"[\u0400-\u04FF]", clean_s):
+                return True
+            if re.search(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F]", clean_s) and " " in clean_s:
                 return True
             if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
                 return False

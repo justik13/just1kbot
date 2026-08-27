@@ -84,7 +84,7 @@ def _assert_no_key_collisions() -> None:
 
 _assert_no_key_collisions()
 
-_TEXT_KEYS = frozenset(name for name in globals() if name.isupper())
+_TEXT_KEYS = frozenset(name for name, value in globals().items() if name.isupper() and isinstance(value, str))
 
 
 def get_all_text_keys() -> set[str]:
