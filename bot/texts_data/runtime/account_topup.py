@@ -30,5 +30,5 @@ UI_ACCOUNT_TOPUP_BONUSNYY_BALANS_554 = """
 🎁 Бонусный баланс: <b>{int_balance_bonus_available} ₽</b>"""
 UI_ACCOUNT_TOPUP_VAM_NACHISLEN_PRIVETSTVENNYY_B_562 = """
 
-🎁 <b>Вам начислен приветственный бонус +{wb} ₽ """
-UI_ACCOUNT_TOPUP_ZA_PERVOE_POPOLNENIE_PO_PRIGLA_563 = 'за первое пополнение по приглашению!</b>'
+🎁 <b>Вам начислен приветственный бонус +{wb} ₽</b> """
+UI_ACCOUNT_TOPUP_ZA_PERVOE_POPOLNENIE_PO_PRIGLA_563 = 'за первое пополнение по приглашению!'

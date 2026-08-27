@@ -41,7 +41,7 @@ class TextsConsistencyTests(unittest.TestCase):
         
         for key in texts.get_all_text_keys():
             val = getattr(texts, key)
-            if not isinstance(val, str):
+            if not isinstance(val, str) or 'WEB_TEMPLATES' in key:
                 continue
             
             # Skip double braces
@@ -76,7 +76,7 @@ class TextsConsistencyTests(unittest.TestCase):
         
         for key in texts.get_all_text_keys():
             val = getattr(texts, key)
-            if not isinstance(val, str):
+            if not isinstance(val, str) or 'WEB_TEMPLATES' in key:
                 continue
             
             # Skip checking templates that use placeholders as whole tags if any

@@ -14,7 +14,7 @@ UI_NODE_MONITOR_VNIMANIE_DISK_VPN_NODY_ZABIT_8_261 = """⚠️ <b>ВНИМАНИ
 """
 UI_NODE_MONITOR_SERVER_ID_262 = """Сервер: <b>{safe_server_name}</b> (ID: {server_id})
 """
-UI_NODE_MONITOR_ISPOLZOVANIE_DISKA_1F_263 = """Использование диска: <b>{disk_percent:f'.1f'}%</b>
+UI_NODE_MONITOR_ISPOLZOVANIE_DISKA_1F_263 = """Использование диска: <b>{disk_percent:.1f}%</b>
 """
 UI_NODE_MONITOR_REKOMENDUETSYA_OCHISTIT_LOGI_I_264 = 'Рекомендуется очистить логи или расширить диск.'
 UI_NODE_MONITOR_VPN_SERVER_VOSSTANOVLEN_286 = """✅ <b>сервер восстановлен</b>
