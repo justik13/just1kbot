@@ -47,7 +47,7 @@ def format_user_card_text(
     referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
 
     status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
-    ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.PLACEHOLDER_DASH
+    ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.STATUS_NOT_BANNED_BADGE
 
     return texts.ADMIN_USER_CARD.format(
         telegram_id=user.telegram_id,

@@ -21,7 +21,7 @@ from utils.telegram import render_hub, safe
 
 logger = logging.getLogger(__name__)
 
-DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Zа-яА-ЯёЁ0-9\s_#-]+$")
+DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 
 _PROTOCOL_DISPLAY = {
     AMNEZIA_PROTOCOL: "AmneziaWG",

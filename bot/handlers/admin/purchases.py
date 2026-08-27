@@ -36,33 +36,37 @@ async def _show_purchases_list(
     total_pages = max(1, math.ceil(total / PURCHASES_PER_PAGE))
     page = min(max(1, page), total_pages)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_FINANCES_PURCHASES_PURCHASE, texts.ADMIN_FINANCES_PURCHASES_STR.format(page=page, total_pages=total_pages))
+    header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_PAGE_INDICATOR.format(page=page, total_pages=total_pages))
     rendered = (
         f"{header}"+
-        texts.ADMIN_FINANCES_PURCHASES_LOGI_POKUPOK_USERS_STR.format(page=page, total_pages=total_pages, total=total)
+        texts.ADMIN_PURCHASES_LOGS_TITLE.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not entries:
-        rendered += texts.ADMIN_FINANCES_PURCHASES_PURCHASE_NE_NAYDENY
+        rendered += texts.ADMIN_PURCHASES_EMPTY_NOTICE
     else:
         for idx, entry in enumerate(entries, start=1):
             dt_str = format_datetime(entry.created_at)
-            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_FINANCES_PURCHASES_0_BONUS
+            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS
             rendered += (
                 texts.ADMIN_PURCHASES_ROW_FORMAT.format(
                     idx=idx, 
                     user_label=safe(entry.user_label), 
                     operation_title=safe(entry.operation_title), 
-                    tariff_info=texts.ADMIN_FINANCES_PURCHASES_DN_USTR.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str), 
+                    tariff_info=texts.ADMIN_PURCHASES_TARIFF_ROW.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str), 
                     dt_str=dt_str
                 )
             )
 
 
             button_text = truncate_button_text(
-                f"🛒 #{entry.numeric_id} | {entry.user_label} | {amount_str}"
+                texts.ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE.format(
+                    numeric_id=entry.numeric_id,
+                    user_label=entry.user_label,
+                    amount=amount_str,
+                )
             )
             builder.button(
                 text=button_text,
@@ -84,7 +88,7 @@ async def _show_purchases_list(
         )
         nav_buttons += 1
 
-    builder.button(text=texts.ADMIN_FINANCES_PURCHASES_K_PLATEZHAM, callback_data="admin_payments")
+    builder.button(text=texts.ADMIN_PURCHASES_PAYMENTS_BUTTON, callback_data="admin_payments")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
 
     adjust_pattern = [1] * len(entries)
@@ -147,42 +151,42 @@ async def show_purchase_card(
 
     parts = callback.data.split(":", 1)
     if len(parts) < 2:
-        await callback.answer(texts.ADMIN_FINANCES_PURCHASES_ZAPIS_PURCHASE_NE_NAYDENA, show_alert=True)
+        await callback.answer(texts.ADMIN_PURCHASES_RECORD_NOT_FOUND_ALERT, show_alert=True)
         return
 
     entry_id = parts[1]
     entry = await get_purchase_log_by_id(session, entry_id)
     if not entry:
-        await callback.answer(texts.ADMIN_FINANCES_PURCHASES_PURCHASE_NE_NAYDENA, show_alert=True)
+        await callback.answer(texts.ADMIN_PURCHASES_NOT_FOUND_ALERT, show_alert=True)
         return
 
     await state.clear()
     await callback.answer(show_alert=False)
 
-    header = format_admin_breadcrumbs(texts.ADMIN_FINANCES_PURCHASES_PURCHASE, texts.ADMIN_FINANCES_PURCHASES_DETALI.format(entry_numeric_id=entry.numeric_id))
-    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_FINANCES_PURCHASES_0_BONUS_VYDACHA
+    header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_DETAILS_LINK.format(entry_numeric_id=entry.numeric_id))
+    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS_GRANT
     dt_str = format_datetime(entry.created_at)
 
     rendered = (
         f"{header}"+
-        texts.ADMIN_FINANCES_PURCHASES_DETALI_PURCHASE_TRANZAKTSII.format(entry_numeric_id=entry.numeric_id)+
-        texts.ADMIN_FINANCES_PURCHASES_USER_TELEGRAM_ID.format(safe_entry_user_label=safe(entry.user_label), entry_telegram_id=entry.telegram_id)+
-        texts.ADMIN_FINANCES_PURCHASES_TARIFF.format(safe_entry_tariff_name=safe(entry.tariff_name))+
-        texts.ADMIN_FINANCES_PURCHASES_LIMIT_DEVICES_SHT.format(entry_device_limit=entry.device_limit)+
-        texts.ADMIN_FINANCES_PURCHASES_DLITELNOST_DAYS.format(entry_duration_days=entry.duration_days)+
-        texts.ADMIN_FINANCES_PURCHASES_AMOUNT.format(amount_str=amount_str)+
-        texts.ADMIN_FINANCES_PURCHASES_TYPE_OPERATIONS.format(safe_entry_operation_title=safe(entry.operation_title))+
-        texts.ADMIN_FINANCES_PURCHASES_DATA_I_TIME.format(dt_str=dt_str)
+        texts.ADMIN_PURCHASES_ENTRY_TITLE.format(entry_numeric_id=entry.numeric_id)+
+        texts.ADMIN_PURCHASES_ENTRY_USER_LINE.format(safe_entry_user_label=safe(entry.user_label), entry_telegram_id=entry.telegram_id)+
+        texts.ADMIN_PURCHASES_ENTRY_TARIFF_LINE.format(safe_entry_tariff_name=safe(entry.tariff_name))+
+        texts.ADMIN_PURCHASES_ENTRY_DEVICE_LIMIT_LINE.format(entry_device_limit=entry.device_limit)+
+        texts.ADMIN_PURCHASES_ENTRY_DURATION_LINE.format(entry_duration_days=entry.duration_days)+
+        texts.ADMIN_PURCHASES_ENTRY_SUMMARY_LINE.format(amount_str=amount_str)+
+        texts.ADMIN_PURCHASES_ENTRY_OPERATION_TYPE_LINE.format(safe_entry_operation_title=safe(entry.operation_title))+
+        texts.ADMIN_PURCHASES_ENTRY_DATETIME_LINE.format(dt_str=dt_str)
 
     )
 
     builder = InlineKeyboardBuilder()
     if entry.telegram_id:
         builder.button(
-            text=texts.ADMIN_FINANCES_PURCHASES_KARTOCHKA_POLZOVATELYA,
+            text=texts.ADMIN_PURCHASES_USER_CARD_LINK,
             callback_data=f"admin_user_card:{entry.telegram_id}",
         )
-    builder.button(text=texts.ADMIN_FINANCES_PURCHASES_K_SPISKU_POKUPOK, callback_data="admin_purchases")
+    builder.button(text=texts.ADMIN_PURCHASES_LIST_BUTTON, callback_data="admin_purchases")
     builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
 

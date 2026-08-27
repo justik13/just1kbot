@@ -17,7 +17,9 @@ SEPARATOR_LINE = "─"
 
 STATUS_ACTIVE_BADGE = "🟢 Активен"
 
-STATUS_BANNED_BADGE = "🚫 Забанен"
+STATUS_BANNED_BADGE = "🚫 ЗАБАНЕН"
+
+STATUS_NOT_BANNED_BADGE = "✅ Не забанен"
 
 STATUS_INACTIVE_BADGE = "🔴 Неактивен"
 

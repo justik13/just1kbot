@@ -46,3 +46,8 @@ TOPUP_OPERATION_MINIMUM = "Для выбранной операции нужно
 TOPUP_PROVIDER_CANCELLED_NOTICE = "Пополнение отменено платёжным провайдером."
 
 TOPUP_SAVED_NOTICE = "Ссылка сохранена. Вы можете вернуться к пополнению позже."
+
+
+CHECKOUT_DESCRIPTION_RENEW = 'Продление доступа к информационному сервису Just1k'
+CHECKOUT_DESCRIPTION_TARIFF_CHANGE = 'Изменение параметров доступа к сервису Just1k'
+CHECKOUT_DESCRIPTION_DEFAULT = 'Предоставление доступа к информационному сервису Just1k'

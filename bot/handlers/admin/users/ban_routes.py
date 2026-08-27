@@ -108,7 +108,7 @@ async def admin_ban_apply(
         telegram_id,
     )
 
-    status_label = BAN_STATUS_LABELS.get(message, str(message))
+    status_label = BAN_STATUS_LABELS.get(str(message).lower(), str(message).lower())
     if not success:
         await callback.answer(
             texts.ADMIN_BAN_FAILED.format(message=status_label),
@@ -194,7 +194,7 @@ async def admin_unban_apply(
         telegram_id,
     )
 
-    status_label = BAN_STATUS_LABELS.get(message, str(message))
+    status_label = BAN_STATUS_LABELS.get(str(message).lower(), str(message).lower())
     if not success:
         await callback.answer(
             texts.ADMIN_BAN_FAILED.format(message=status_label),

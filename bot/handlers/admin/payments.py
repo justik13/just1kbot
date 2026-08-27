@@ -47,13 +47,13 @@ def _get_payment_card_keyboard(
 
     if _refund_available(payment):
         builder.button(
-            text=texts.ADMIN_PURCHASES_BTN_BACK,
+            text=texts.ADMIN_REFUND_START_BUTTON,
             callback_data=f"admin_payment_refund:{payment.id}",
         )
 
     if user_telegram_id:
         builder.button(
-            text=texts.ADMIN_PURCHASES_SEARCH_PROMPT,
+            text=texts.ADMIN_CLIENT_CARD_BUTTON,
             callback_data=f"admin_user_card:{user_telegram_id}",
         )
 
@@ -72,17 +72,17 @@ async def _build_payments_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.ADMIN_PAYMENTS_LIST_HEADER.format(amount_rub=page, payment_id=total_pages, status=total)
+        texts.ADMIN_PAYMENTS_LIST_TITLE.format(page=page, total_pages=total_pages, total=total)
     )
     builder = InlineKeyboardBuilder()
     if not payments:
-        rendered += texts.ADMIN_PAYMENTS_ROW_ITEM
+        rendered += texts.ADMIN_PAYMENTS_LIST_EMPTY
     else:
         for payment in payments:
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.ADMIN_PAYMENT_STATUS_PENDING_LABEL,
+                texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
             )
             if payment.user and payment.user.username:
                 user_label = f"@{payment.user.username}"
@@ -91,7 +91,7 @@ async def _build_payments_list_text_and_kb(
             else:
                 user_label = texts.PLACEHOLDER_DASH
             button_text = truncate_button_text(
-                texts.ADMIN_PAYMENTS_CARD.format(amount_rub=status_icon, payment_id=payment.id, status=user_label, details=payment.amount)
+                texts.ADMIN_PAYMENTS_ROW_ENTRY.format(status_icon=status_icon, payment_id=payment.id, user_label=user_label, amount_rub=payment.amount)
             )
             builder.button(
                 text=button_text,
@@ -107,7 +107,7 @@ async def _build_payments_list_text_and_kb(
             text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_payments_page:{page + 1}",
         )
-    builder.button(text=texts.ADMIN_FINANCES_PAYMENTS_K_LOGAM_POKUPOK, callback_data="admin_purchases")
+    builder.button(text=texts.ADMIN_PURCHASES_LOGS_BUTTON, callback_data="admin_purchases")
     builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
@@ -243,7 +243,7 @@ async def show_payment_card(
     )
     status_icon = texts.PAYMENT_STATUS_ICONS.get(
         display_status,
-        texts.ADMIN_PAYMENT_STATUS_PENDING_LABEL,
+        texts.ADMIN_PAYMENT_STATUS_FALLBACK_ICON,
     )
 
     reason_line = ""
@@ -252,7 +252,7 @@ async def show_payment_card(
         and payment.manual_review_reason
     ):
         reason_line = (
-            texts.ADMIN_PAYMENT_STATUS_SUCCEEDED_LABEL.format(amount_rub=safe(payment.manual_review_reason))
+            texts.ADMIN_PAYMENT_MANUAL_REVIEW_LINE.format(reason=safe(payment.manual_review_reason))
         )
 
     refundable_line = ""
@@ -261,10 +261,24 @@ async def show_payment_card(
             session,
             payment_id=payment.id,
         )
-        refundable_line = texts.ADMIN_PAYMENT_STATUS_CANCELED_LABEL.format(amount_rub=int(refundable))
+        refundable_line = texts.ADMIN_PAYMENT_REFUNDABLE_LINE.format(amount_rub=int(refundable))
 
     rendered = (
-        texts.ADMIN_PAYMENT_STATUS_REFUNDED_LABEL.format(amount_rub=payment.id, payment_id=payment.id, status=user_label, details=payment.amount, value_4=payment.currency, value_5=status_icon, value_6=status_name, value_7=safe(payment.provider_status), value_8=safe(payment.fulfillment_status), value_9=format_datetime(payment.created_at), value_10=format_datetime(payment.paid_at), value_11=safe(payment.external_id or texts.PLACEHOLDER_DASH), value_12=refundable_line, value_13=reason_line)
+        texts.ADMIN_PAYMENT_CARD_TEMPLATE.format(
+            payment_id=payment.id,
+            user_label=user_label,
+            amount_rub=payment.amount,
+            currency=payment.currency,
+            status_icon=status_icon,
+            status_name=status_name,
+            provider_status=safe(payment.provider_status),
+            fulfillment_status=safe(payment.fulfillment_status),
+            created_at=format_datetime(payment.created_at),
+            paid_at=format_datetime(payment.paid_at),
+            external_id=safe(payment.external_id or texts.PLACEHOLDER_DASH),
+            refundable_line=refundable_line,
+            reason_line=reason_line,
+        )
     )
 
     kb = _get_payment_card_keyboard(
@@ -299,19 +313,19 @@ async def confirm_payment_refund(
         else None
     )
     if payment is None or not _refund_available(payment):
-        await callback.answer(texts.ADMIN_PAYMENTS_SEARCH_PROMPT, show_alert=True)
+        await callback.answer(texts.ADMIN_REFUND_NOT_AVAILABLE_ALERT, show_alert=True)
         return
     refundable = await get_payment_refundable_amount(
         session,
         payment_id=payment.id,
     )
     if refundable <= 0:
-        await callback.answer(texts.ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER, show_alert=True)
+        await callback.answer(texts.ADMIN_REFUND_NO_REMAINDER_ALERT, show_alert=True)
         return
     await state.clear()
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.ADMIN_PURCHASES_LIST_HEADER.format(amount_rub=int(refundable)),
+        text=texts.ADMIN_REFUND_CONFIRM_BUTTON.format(amount_rub=int(refundable)),
         callback_data=f"admin_payment_refund_confirm:{payment.id}",
     )
     builder.button(
@@ -320,7 +334,11 @@ async def confirm_payment_refund(
     )
     builder.adjust(1)
     await callback.message.edit_text(
-        texts.ADMIN_PURCHASES_LIST_EMPTY.format(amount_rub=payment.id, payment_id=safe(payment.external_id), status=int(refundable)),
+        texts.ADMIN_REFUND_CONFIRMATION_BODY.format(
+            payment_id=payment.id,
+            provider_payment_id=safe(payment.external_id),
+            amount_rub=int(refundable),
+        ),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )
@@ -349,14 +367,14 @@ async def enqueue_payment_refund(
     except BalanceRefundError as exc:
         messages = {
             "payment_not_found": texts.ADMIN_PAYMENT_NOT_FOUND_ALERT,
-            "refund_requires_balance_topup": texts.ADMIN_PAYMENTS_BTN_FILTER_ALL,
-            "payment_not_refundable": texts.ADMIN_PAYMENTS_BTN_FILTER_SUCCEEDED,
-            "provider_payment_id_missing": texts.ADMIN_PAYMENTS_BTN_FILTER_REFUNDED,
-            "no_refundable_balance": texts.ADMIN_PAYMENTS_NO_REFUNDABLE_REMAINDER,
-            "active_refund_reservation_missing": texts.ADMIN_PAYMENTS_BTN_REFUND,
+            "refund_requires_balance_topup": texts.ADMIN_REFUND_ERR_ONLY_TOPUP,
+            "payment_not_refundable": texts.ADMIN_REFUND_ERR_NOT_REFUNDABLE,
+            "provider_payment_id_missing": texts.ADMIN_REFUND_ERR_NO_PROVIDER_ID,
+            "no_refundable_balance": texts.ADMIN_REFUND_NO_REMAINDER_ALERT,
+            "active_refund_reservation_missing": texts.ADMIN_REFUND_ERR_MANUAL_REVIEW,
         }
         await callback.answer(
-            messages.get(exc.code, texts.ADMIN_PAYMENTS_BTN_PREV),
+            messages.get(exc.code, texts.ADMIN_REFUND_ENQUEUE_FAILED_ALERT),
             show_alert=True,
         )
         return
@@ -367,14 +385,19 @@ async def enqueue_payment_refund(
         text=texts.ADMIN_BTN_BACK_TO_PAYMENT,
         callback_data=f"admin_payment_card:{payment_id}",
     )
-    builder.button(text=texts.ADMIN_PURCHASES_BTN_USER, callback_data="admin_payments")
+    builder.button(text=texts.ADMIN_PAYMENTS_BACK_TO_LIST_BUTTON, callback_data="admin_payments")
     builder.adjust(1)
+    status_text = (
+        texts.ADMIN_REFUND_ENQUEUED_STATUS
+        if request.created
+        else texts.ADMIN_REFUND_ALREADY_QUEUED_STATUS
+    )
     await callback.message.edit_text(
-        texts.ADMIN_PURCHASES_BTN_REFUND.format(
+        texts.ADMIN_REFUND_ACCEPTED_TEMPLATE.format(
+            status_text=status_text,
             amount_rub=int(request.operation.amount),
-            payment_id=payment_id,
-            status=request.operation.operation_id,
-            details=safe(request.operation.status),
+            operation_id=safe(request.operation.operation_id),
+            operation_status=safe(request.operation.status),
         ),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",

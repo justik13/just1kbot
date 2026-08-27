@@ -21,6 +21,7 @@ from bot.texts.user.referral import (
     REFERRAL_LIST_ITEM_FORMAT,
     REFERRAL_SHARE_TEXT,
     REFERRAL_TEXT_BALANCE,
+    REFERRAL_TOPUP_NOTIFY_TEMPLATE,
 )
 
 from bot.texts.user.support import (
@@ -54,6 +55,7 @@ __all__ = [
     "REFERRAL_LIST_ITEM_FORMAT",
     "REFERRAL_SHARE_TEXT",
     "REFERRAL_TEXT_BALANCE",
+    "REFERRAL_TOPUP_NOTIFY_TEMPLATE",
     "START_REGISTERED",
     "SUPPORT",
     "SUPPORT_DOWNLOAD_CLIENT_TEXT",

@@ -54,6 +54,36 @@ from bot.texts.runtime.alerts import (
     QUEUE_HEALTH_STALE_PROBLEM as QUEUE_HEALTH_STALE_PROBLEM,
 )
 
+from bot.texts import admin as _admin
+from bot.texts import common as _common
+from bot.texts import connection as _connection
+from bot.texts import payment as _payment
+from bot.texts import runtime as _runtime
+from bot.texts import user as _user
+
+
+def _assert_no_key_collisions() -> None:
+    """Fail fast if any text key is defined in two domain modules."""
+    seen: dict[str, str] = {}
+    for _mod, _dom in (
+        (_admin, "admin"),
+        (_common, "common"),
+        (_connection, "connection"),
+        (_payment, "payment"),
+        (_runtime, "runtime"),
+        (_user, "user"),
+    ):
+        for _name in getattr(_mod, "__all__", ()):
+            if _name in seen:
+                raise ImportError(
+                    f"texts key collision: {_name!r} defined in both "
+                    f"{seen[_name]} and {_dom}"
+                )
+            seen[_name] = _dom
+
+
+_assert_no_key_collisions()
+
 _TEXT_KEYS = frozenset(name for name in globals() if name.isupper())
 
 
@@ -63,11 +93,18 @@ def get_all_text_keys() -> set[str]:
 
 
 def get_text(key: str, default=None, **kwargs):
-    """Return a text by key and optionally format it with keyword arguments."""
+    """Return a text by key and optionally format it with keyword arguments.
+
+    Missing keys return *default* (None by default) to preserve the historical
+    "probe" API. Formatting errors are surfaced loudly instead of silently
+    returning the unformatted template, so placeholder typos cannot hide.
+    """
     value = globals().get(key, default)
     if kwargs and isinstance(value, str):
         try:
             return value.format(**kwargs)
-        except (KeyError, IndexError, ValueError):
-            return value
+        except (KeyError, IndexError, ValueError) as exc:
+            raise ValueError(
+                f"Invalid placeholders for text key {key!r}: {exc}."
+            ) from exc
     return value
