@@ -36,20 +36,20 @@ TEXTS = {
     'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L19_1': '❌ Отмена',
     'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L32_1': '✅ Ок (Убрать)',
     'UI_BOT_KEYBOARDS_ADMIN_BROADCAST_L45_1': '✅ Прочитано (убрать)',
+
+    'UI_BROADCAST_RASSYLKA_89': '📢 Рассылка',
+    'UI_BROADCAST_SHAG_1_VYBOR_AUDITORII_89': 'Шаг 1: Выбор аудитории',
+    'UI_BROADCAST_VYBERITE_AUDITORIYU_DLYA_RASSY_93': """{header}<b>Выберите аудиторию для рассылки:</b>
+
+Кому отправить сообщение?""",
+    'UI_BROADCAST_TESTOVOE_SOOBSHCHENIE_OTPRAVLE_218': """✅ <b>Тестовое сообщение отправлено вам для проверки!</b>
+
+""",
+    'UI_BROADCAST_AUDITORIYA_219': """👥 <b>Аудитория:</b> {aud_label}
+""",
+    'UI_BROADCAST_POLUCHATELEY_CHEL_220': """📊 <b>Получателей:</b> {total_count} чел.
+
+""",
+    'UI_BROADCAST_OZNAKOMTES_S_PREDPROSMOTROM_VY_221': 'Ознакомьтесь с предпросмотром выше и подтвердите запуск рассылки.',
+    'UI_BROADCAST_TEST_MNE_ADMINU_749': '🧪 Тест мне (Админу)',
 }
-
-UI_BROADCAST_RASSYLKA_89 = '📢 Рассылка'
-UI_BROADCAST_SHAG_1_VYBOR_AUDITORII_89 = 'Шаг 1: Выбор аудитории'
-UI_BROADCAST_VYBERITE_AUDITORIYU_DLYA_RASSY_93 = """{header}<b>Выберите аудиторию для рассылки:</b>
-
-Кому отправить сообщение?"""
-UI_BROADCAST_TESTOVOE_SOOBSHCHENIE_OTPRAVLE_218 = """✅ <b>Тестовое сообщение отправлено вам для проверки!</b>
-
-"""
-UI_BROADCAST_AUDITORIYA_219 = """👥 <b>Аудитория:</b> {aud_label}
-"""
-UI_BROADCAST_POLUCHATELEY_CHEL_220 = """📊 <b>Получателей:</b> {total_count} чел.
-
-"""
-UI_BROADCAST_OZNAKOMTES_S_PREDPROSMOTROM_VY_221 = 'Ознакомьтесь с предпросмотром выше и подтвердите запуск рассылки.'
-UI_BROADCAST_TEST_MNE_ADMINU_749 = '🧪 Тест мне (Админу)'

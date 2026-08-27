@@ -344,15 +344,17 @@ async def process_balance_notifications(bot: Bot) -> int:
                 else ""
             )
             message = (
-                f"💳 <b>Баланс пополнен!</b>\n\n"
-                f"Сумма: <b>+{int(payment_amount)} ₽</b>\n"
-                f"Основной баланс: <b>{int(balance_snapshot.real_available)} ₽</b>\n"
-                f"Бонусный баланс: <b>{int(balance_snapshot.bonus_available)} ₽</b>"
+                f"✅ <b>Баланс пополнен на +{int(payment_amount)} ₽!</b>\n\n"
+                f"💰 Баланс: <b>{int(balance_snapshot.real_available)} ₽</b>\n"
+                f"🎁 Бонусный баланс: <b>{int(balance_snapshot.bonus_available)} ₽</b>"
                 f"{suffix}"
             )
             if ctx.get("purchaser_welcome_bonus", 0) > 0:
                 wb = ctx["purchaser_welcome_bonus"]
-                message += f"\n\n🎁 Вам начислен приветственный бонус: <b>+{wb} ₽</b>!"
+                message += (
+                    f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
+                    f"за первое пополнение по приглашению!</b>"
+                )
 
             user_sent = False
             user_blocked = False

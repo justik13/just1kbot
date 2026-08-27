@@ -68,6 +68,6 @@ Operation: <code>{value_2}</code>
     'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L50_1': '↩️ Вернуть доступный остаток',
     'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L56_1': '👤 Карточка клиента',
     'UI_BOT_HANDLERS_ADMIN_PAYMENTS_L61_1': '← К списку платежей',
-}
 
-UI_PAYMENTS_K_LOGAM_POKUPOK_110 = '🛒 К логам покупок'
+    'UI_PAYMENTS_K_LOGAM_POKUPOK_110': '🛒 К логам покупок',
+}

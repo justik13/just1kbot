@@ -225,9 +225,9 @@ class QueueHealthMonitor:
         examples = []
         for item in queue.examples:
             payment = f" payment={item.payment_id}" if item.payment_id is not None else ""
-            code = f" error={html.escape(item.last_error_code)}" if item.last_error_code else ""
+            code = f" code={html.escape(item.last_error_code)}" if item.last_error_code else ""
             examples.append(
-                f"<code>op={item.operation_id}{payment} "
+                f"<code>id={item.operation_id}{payment} "
                 f"type={html.escape(item.operation_type)} status={item.status} "
                 f"attempts={item.attempts}/{item.max_attempts} "
                 f"age={item.age_seconds}s{code}</code>"

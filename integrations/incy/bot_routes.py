@@ -85,7 +85,7 @@ async def show_incy_subscription(
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer("⚠️ Ваша подписка неактивна.", show_alert=True)
+        await callback.answer("⚠️ Доступ неактивен. Продлите подписку.", show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -123,7 +123,7 @@ async def rotate_incy_subscription(
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer("⚠️ Ваша подписка неактивна.", show_alert=True)
+        await callback.answer("⚠️ Доступ неактивен. Продлите подписку.", show_alert=True)
         return
 
     try:
@@ -143,5 +143,5 @@ async def rotate_incy_subscription(
         await callback.answer("✅ Ссылка успешно сброшена. Старая ссылка больше не работает.", show_alert=True)
     except Exception as e:
         logger.exception("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__)
-        await callback.answer("❌ Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        await callback.answer("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
         return
