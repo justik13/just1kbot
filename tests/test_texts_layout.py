@@ -54,6 +54,54 @@ PRODUCTION_DIRS = (
 )
 
 
+def _collect_docstring_node_ids(tree: ast.AST) -> set[int]:
+    ids: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if node.body and isinstance(node.body[0], ast.Expr):
+                value = node.body[0].value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    ids.add(id(value))
+    return ids
+
+
+def _find_cyrillic_literals(path: Path, docstring_node_ids: set[int]) -> list[str]:
+    violations: list[str] = []
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.call_stack: list[ast.Call] = []
+
+        def visit_Call(self, node: ast.Call) -> None:
+            self.call_stack.append(node)
+            self.generic_visit(node)
+            self.call_stack.pop()
+
+        def visit_Constant(self, node: ast.Constant) -> None:
+            value = node.value
+            if (
+                isinstance(value, str)
+                and any("\u0400" <= char <= "\u04ff" for char in value)
+                and id(node) not in docstring_node_ids
+                and not self._inside_logger_call()
+            ):
+                violations.append(
+                    f"{path.relative_to(ROOT)}:{node.lineno}: {value[:80]!r}"
+                )
+            self.generic_visit(node)
+
+        def _inside_logger_call(self) -> bool:
+            return any(
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id in {"logger", "logging", "log", "root_logger"}
+                for call in self.call_stack
+            )
+
+    Visitor().visit(ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+    return violations
+
+
 class TestTextsLayout(unittest.TestCase):
     def test_exact_domain_layout(self):
         actual = {
@@ -126,52 +174,13 @@ class TestTextsLayout(unittest.TestCase):
 
     def test_no_cyrillic_string_literals_outside_texts(self):
         """Production modules must not own Russian UI text outside bot/texts."""
-        violations = []
-
+        violations: list[str] = []
         for base_dir in PRODUCTION_DIRS:
             for path in base_dir.rglob("*.py"):
                 if TEXTS_DIR in path.parents:
                     continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-                docstring_nodes = set()
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                        if node.body and isinstance(node.body[0], ast.Expr):
-                            expr = node.body[0].value
-                            if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
-                                docstring_nodes.add(id(expr))
-
-                class Visitor(ast.NodeVisitor):
-                    def __init__(self):
-                        self.call_stack: list[ast.Call] = []
-
-                    def visit_Call(self, node: ast.Call):
-                        self.call_stack.append(node)
-                        self.generic_visit(node)
-                        self.call_stack.pop()
-
-                    def visit_Constant(self, node: ast.Constant):
-                        value = node.value
-                        if (
-                            isinstance(value, str)
-                            and any("\u0400" <= ch <= "\u04ff" for ch in value)
-                            and id(node) not in docstring_nodes
-                            and not self._inside_logger_call()
-                        ):
-                            violations.append(
-                                f"{path.relative_to(ROOT)}:{node.lineno}: {value[:80]!r}"
-                            )
-                        self.generic_visit(node)
-
-                    def _inside_logger_call(self) -> bool:
-                        return any(
-                            isinstance(call.func, ast.Attribute)
-                            and isinstance(call.func.value, ast.Name)
-                            and call.func.value.id in {"logger", "logging", "log", "root_logger"}
-                            for call in self.call_stack
-                        )
-
-                Visitor().visit(tree)
+                violations.extend(_find_cyrillic_literals(path, _collect_docstring_node_ids(tree)))
 
         self.assertEqual(
             violations,
