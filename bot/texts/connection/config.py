@@ -204,3 +204,6 @@ EMOJI_GLOBE = "🌍"
 INCY_SUBSCRIPTION_UNAVAILABLE = "⚠️ Подписка INCY временно недоступна."
 
 LABEL_UNKNOWN_CAP = "Неизвестно"
+CONNECTION_LIST_DEVICE_ROW_FORMAT = "\n  📱 <b>{device_name}</b> ({location_label})\n   📶 <code>{traffic_str}</code> | <i>{last_conn_str}</i>"
+
+CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"

@@ -1,0 +1,127 @@
+bot/handlers/profile.py:173 -> '. <b>' (f-string)
+bot/handlers/profile.py:173 -> '</b> (' (f-string)
+bot/handlers/profile.py:173 -> '. <b>'
+bot/handlers/profile.py:173 -> '</b> ('
+bot/handlers/webhook.py:101 -> 'Payload too large'
+bot/handlers/webhook.py:116 -> 'Invalid webhook'
+bot/handlers/webhook.py:136 -> 'Database unavailable'
+bot/handlers/admin/broadcast.py:313 -> "can't parse entities"
+bot/handlers/admin/broadcast.py:578 -> 'to ' (f-string)
+bot/handlers/admin/broadcast.py:578 -> 'to '
+bot/handlers/admin/broadcast.py:579 -> ' success, ' (f-string)
+bot/handlers/admin/broadcast.py:579 -> ' success, '
+bot/handlers/admin/broadcast.py:580 -> ' fail, ' (f-string)
+bot/handlers/admin/broadcast.py:580 -> ' fail, '
+bot/handlers/admin/dashboard.py:131 -> ' <b>' (f-string)
+bot/handlers/admin/dashboard.py:131 -> '</b>: ' (f-string)
+bot/handlers/admin/dashboard.py:131 -> ' <b>'
+bot/handlers/admin/dashboard.py:131 -> '</b>: '
+bot/handlers/admin/dashboard.py:483 -> 'MTProto Proxy'
+bot/handlers/admin/dashboard.py:533 -> '🚀 MTProto Proxy'
+bot/handlers/admin/disputes.py:225 -> 'manual review'
+bot/handlers/admin/disputes.py:285 -> 'marked for manual review in Telegram admin'
+bot/handlers/admin/purchases.py:54 -> '</b> | ' (f-string)
+bot/handlers/admin/purchases.py:54 -> '</b> | '
+bot/handlers/admin/tariffs.py:375 -> 'toggled to ' (f-string)
+bot/handlers/admin/tariffs.py:375 -> 'toggled to '
+bot/handlers/admin/tariffs.py:514 -> 'RUB: ' (f-string)
+bot/handlers/admin/tariffs.py:514 -> 'RUB: '
+bot/handlers/admin/servers/common.py:137 -> '• API URL: <code>' (f-string)
+bot/handlers/admin/servers/common.py:137 -> '• API URL: <code>'
+bot/handlers/admin/servers/delete_routes.py:231 -> ' profiles deleted' (f-string)
+bot/handlers/admin/servers/delete_routes.py:231 -> ' profiles deleted'
+bot/handlers/admin/servers/edit_routes.py:144 -> 'name -> ' (f-string)
+bot/handlers/admin/servers/edit_routes.py:144 -> 'name -> '
+bot/handlers/admin/servers/edit_routes.py:289 -> 'flag -> ' (f-string)
+bot/handlers/admin/servers/edit_routes.py:289 -> 'flag -> '
+bot/handlers/admin/servers/edit_routes.py:581 -> 'api_url -> ' (f-string)
+bot/handlers/admin/servers/edit_routes.py:581 -> 'api_url -> '
+bot/handlers/admin/servers/edit_routes.py:828 -> 'api_key -> [REDACTED]'
+bot/handlers/admin/servers/edit_routes.py:973 -> 'max_clients: ' (f-string)
+bot/handlers/admin/servers/edit_routes.py:973 -> 'max_clients: '
+bot/handlers/admin/users/balance_routes.py:58 -> 'ID: ' (f-string)
+bot/handlers/admin/users/balance_routes.py:58 -> 'ID: '
+bot/handlers/admin/users/balance_routes.py:320 -> 'ID: ' (f-string)
+bot/handlers/admin/users/balance_routes.py:320 -> 'ID: '
+bot/handlers/admin/users/balance_routes.py:324 -> 'ID ' (f-string)
+bot/handlers/admin/users/balance_routes.py:324 -> 'ID '
+bot/handlers/admin/users/balance_routes.py:458 -> 'ID ' (f-string)
+bot/handlers/admin/users/balance_routes.py:458 -> 'ID '
+bot/handlers/admin/users/common.py:240 -> 'ID: ' (f-string)
+bot/handlers/admin/users/common.py:240 -> 'ID: '
+bot/handlers/admin/users/common.py:312 -> ' (ID: ' (f-string)
+bot/handlers/admin/users/common.py:312 -> ' (ID: '
+bot/handlers/admin/users/common.py:314 -> 'ID: ' (f-string)
+bot/handlers/admin/users/common.py:314 -> 'ID: '
+bot/handlers/admin/users/device_routes.py:64 -> 'ID ' (f-string)
+bot/handlers/admin/users/device_routes.py:64 -> 'ID '
+bot/handlers/admin/users/device_routes.py:105 -> '• 📱 <b>' (f-string)
+bot/handlers/admin/users/device_routes.py:105 -> '• 📱 <b>'
+bot/handlers/admin/users/list_routes.py:395 -> '• <code>[' (f-string)
+bot/handlers/admin/users/list_routes.py:395 -> ']</code> ' (f-string)
+bot/handlers/admin/users/list_routes.py:395 -> '• <code>['
+bot/handlers/admin/users/list_routes.py:395 -> ']</code> '
+bot/handlers/admin/users/mass_bonus.py:386 -> 'Granted +' (f-string)
+bot/handlers/admin/users/mass_bonus.py:386 -> ' RUB bonus to ' (f-string)
+bot/handlers/admin/users/mass_bonus.py:386 -> ' users (batch ' (f-string)
+bot/handlers/admin/users/mass_bonus.py:386 -> '). Reason: ' (f-string)
+bot/handlers/admin/users/mass_bonus.py:386 -> 'Granted +'
+bot/handlers/admin/users/mass_bonus.py:386 -> ' RUB bonus to '
+bot/handlers/admin/users/mass_bonus.py:386 -> ' users (batch '
+bot/handlers/admin/users/mass_bonus.py:386 -> '). Reason: '
+bot/handlers/connection/common.py:153 -> '\n• 📱 <b>' (f-string)
+bot/handlers/connection/common.py:153 -> '</b> (' (f-string)
+bot/handlers/connection/common.py:153 -> ')\n   └ 📊 <code>' (f-string)
+bot/handlers/connection/common.py:153 -> '</code> | <i>' (f-string)
+bot/handlers/connection/common.py:153 -> '\n• 📱 <b>'
+bot/handlers/connection/common.py:153 -> '</b> ('
+bot/handlers/connection/common.py:153 -> ')\n   └ 📊 <code>'
+bot/handlers/connection/common.py:153 -> '</code> | <i>'
+bot/handlers/connection/device_create_routes.py:114 -> 'db error'
+bot/handlers/connection/device_view_routes.py:205 -> '<blockquote expandable><code>' (f-string)
+bot/handlers/connection/device_view_routes.py:205 -> '<blockquote expandable><code>'
+services/workers/account_balance.py:202 -> "payments.topup_context->>'referrer_notified_at' IS NULL AND payments.topup_context->>'referrer_telegram_id' IS NOT NULL"
+services/workers/cleanup.py:321 -> 'Requeued by stuck profile cleanup worker for peer reconciliation'
+services/workers/cleanup.py:365 -> 'Creation timed out by cleanup worker'
+services/workers/heartbeat.py:82 -> 'STOPPED ' (f-string)
+services/workers/heartbeat.py:82 -> 'STOPPED '
+services/workers/payments.py:64 -> "payments.provider_status = 'succeeded'"
+services/workers/payments.py:66 -> "payments.fulfillment_status = 'succeeded'"
+services/workers/payments.py:68 -> 'NOT (COALESCE(payments.topup_context, \'{}\'::jsonb) @> \'{"referral_bonus_processed": true}\'::jsonb)'
+services/workers/payments.py:72 -> "payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"
+services/workers/payments.py:73 -> "payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"
+services/workers/queue_health.py:218 -> ' dead (oldest ' (f-string)
+services/workers/queue_health.py:218 -> ' dead (oldest '
+services/workers/queue_health.py:220 -> ' overdue (oldest ' (f-string)
+services/workers/queue_health.py:220 -> ' overdue (oldest '
+services/workers/queue_health.py:222 -> ' stale (oldest ' (f-string)
+services/workers/queue_health.py:222 -> ' stale (oldest '
+services/workers/queue_health.py:225 -> ' payment=' (f-string)
+services/workers/queue_health.py:225 -> ' payment='
+services/workers/queue_health.py:226 -> ' code=' (f-string)
+services/workers/queue_health.py:226 -> ' code='
+services/workers/queue_health.py:228 -> ' type=' (f-string)
+services/workers/queue_health.py:228 -> ' status=' (f-string)
+services/workers/queue_health.py:228 -> ' attempts=' (f-string)
+services/workers/queue_health.py:228 -> ' age=' (f-string)
+services/workers/queue_health.py:228 -> ' type='
+services/workers/queue_health.py:228 -> ' status='
+services/workers/queue_health.py:228 -> ' attempts='
+services/workers/queue_health.py:228 -> ' age='
+services/workers/queue_health.py:235 -> '🚨 <b>Durable queue unhealthy</b>\nQueue: <code>' (f-string)
+services/workers/queue_health.py:235 -> '</code>\nProblems: ' (f-string)
+services/workers/queue_health.py:235 -> '🚨 <b>Durable queue unhealthy</b>\nQueue: <code>'
+services/workers/queue_health.py:235 -> '</code>\nProblems: '
+services/workers/queue_health.py:242 -> '✅ <b>Durable queue recovered</b>\nQueue: <code>' (f-string)
+services/workers/queue_health.py:242 -> '✅ <b>Durable queue recovered</b>\nQueue: <code>'
+services/workers/webhook_inbox.py:195 -> 'webhook payment.canceled: payment not found for external_id=%s order=%s — discarding silently'
+services/workers/webhook_inbox.py:388 -> 'auto_resolved: ' (f-string)
+services/workers/webhook_inbox.py:388 -> ' for untracked payment' (f-string)
+services/workers/webhook_inbox.py:388 -> 'auto_resolved: '
+services/workers/webhook_inbox.py:388 -> ' for untracked payment'
+services/workers/webhook_inbox.py:393 -> 'requires_manual_review: ' (f-string)
+services/workers/webhook_inbox.py:393 -> ' for untracked payment' (f-string)
+services/workers/webhook_inbox.py:393 -> 'requires_manual_review: '
+services/workers/webhook_inbox.py:393 -> ' for untracked payment'
+services/workers/__init__.py:38 -> 'Healthcheck exception for server %s (%s): %s'
+services/workers/__init__.py:39 -> 'Error reading server load for server %s: %s'

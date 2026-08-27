@@ -15,6 +15,7 @@ from services.payment_queue_health import (
     QueueSnapshot,
     get_payment_queue_health_snapshot,
 )
+from bot import texts
 
 logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 60.0
@@ -215,31 +216,35 @@ class QueueHealthMonitor:
     def _unhealthy_message(queue: QueueSnapshot) -> str:
         problems = []
         if queue.dead:
-            problems.append(f"{queue.dead} dead (oldest {queue.oldest_dead_age_seconds}s)")
+            problems.append(texts.QUEUE_HEALTH_DEAD_PROBLEM.format(count=queue.dead, oldest_age=queue.oldest_dead_age_seconds))
         if queue.overdue:
-            problems.append(f"{queue.overdue} overdue (oldest {queue.oldest_due_age_seconds}s)")
+            problems.append(texts.QUEUE_HEALTH_OVERDUE_PROBLEM.format(count=queue.overdue, oldest_age=queue.oldest_due_age_seconds))
         if queue.stale_processing:
-            problems.append(f"{queue.stale_processing} stale (oldest {queue.oldest_stale_age_seconds}s)")
+            problems.append(texts.QUEUE_HEALTH_STALE_PROBLEM.format(count=queue.stale_processing, oldest_age=queue.oldest_stale_age_seconds))
         examples = []
         for item in queue.examples:
-            payment = f" payment={item.payment_id}" if item.payment_id is not None else ""
-            code = f" code={html.escape(item.last_error_code)}" if item.last_error_code else ""
-            examples.append(
-                f"<code>id={item.operation_id}{payment} "
-                f"type={html.escape(item.operation_type)} status={item.status} "
-                f"attempts={item.attempts}/{item.max_attempts} "
-                f"age={item.age_seconds}s{code}</code>"
-            )
+            payment = texts.QUEUE_HEALTH_PAYMENT_FRAGMENT.format(payment_id=item.payment_id) if item.payment_id is not None else ""
+            code = texts.QUEUE_HEALTH_CODE_FRAGMENT.format(code=html.escape(item.last_error_code)) if item.last_error_code else ""
+            examples.append(texts.QUEUE_HEALTH_EXAMPLE.format(
+                operation_id=item.operation_id,
+                payment=payment,
+                operation_type=html.escape(item.operation_type),
+                status=item.status,
+                attempts=item.attempts,
+                max_attempts=item.max_attempts,
+                age=item.age_seconds,
+                code=code
+            ))
         suffix = "\n" + "\n".join(examples) if examples else ""
-        return (
-            f"🚨 <b>Durable queue unhealthy</b>\n"
-            f"Queue: <code>{queue.name}</code>\n"
-            f"Problems: {', '.join(problems)}{suffix}"
+        return texts.ALERT_QUEUE_UNHEALTHY.format(
+            queue_name=queue.name,
+            problems=', '.join(problems),
+            suffix=suffix
         )
 
     @staticmethod
     def _recovery_message(queue: QueueSnapshot) -> str:
-        return f"✅ <b>Durable queue recovered</b>\nQueue: <code>{queue.name}</code>"
+        return texts.ALERT_QUEUE_RECOVERED.format(queue_name=queue.name)
 
     async def close(self) -> None:
         tasks = list(self.alert_tasks)

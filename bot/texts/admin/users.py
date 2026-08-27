@@ -41,7 +41,17 @@ ADMIN_MANUAL_GRANT_USER_BANNED = "❌ Невозможно выдать подп
 
 ADMIN_MANUAL_GRANT_USER_DELETED = "❌ Невозможно выдать подписку: пользователь удален."
 
-ADMIN_MASS_BONUS_AUDIENCE_LABELS = {'all': 'Всем пользователям', 'active': 'Только с активной подпиской', 'expired': 'Только без подписки'}
+ADMIN_USER_ID_FORMAT = "ID: {telegram_id}"
+ADMIN_USER_ID_NO_COLON_FORMAT = "ID {telegram_id}"
+ADMIN_USER_PAREN_ID_FORMAT = " (ID: {telegram_id})"
+
+ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
+    "all": "Все пользователи",
+    "active": "Только активные подписки",
+    "inactive": "Только без активной подписки"
+}
+
+ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS = "Granted +{amount} RUB bonus to {count} users (batch {batch_id}). Reason: {reason}"
 
 ADMIN_MASS_BONUS_DEFAULT_REASON = "Массовый бонус"
 
@@ -391,3 +401,7 @@ LABEL_NOT_SET_LINK_HIDDEN = "Не задано (ссылка скрыта от �
 STATUS_EXPIRED_LABEL = "истекла"
 
 TIME_DAYS_FULL_FORMAT = "{days} дней"
+
+ADMIN_AUDIT_LOG_LIST_ROW_FORMAT = "  <code>[{dt}]</code> {action_text}{details_text}"
+
+ADMIN_USERS_DEVICE_ROW_HEADER = "  • 📱 <b>{name}</b>\n"

@@ -81,3 +81,16 @@ ALERT_WORKER_CRASH = """🚨 <b>{title}</b>
 🧩 <b>Воркер:</b> <code>{worker}</code>
 🔁 <b>Падений:</b> {failure_count}
 ⚠️ <b>Тип ошибки:</b> <code>{error_type}</code>"""
+
+ALERT_QUEUE_UNHEALTHY = """🚨 <b>Durable queue unhealthy</b>
+Queue: <code>{queue_name}</code>
+Problems: {problems}{suffix}"""
+
+ALERT_QUEUE_RECOVERED = """✅ <b>Durable queue recovered</b>
+Queue: <code>{queue_name}</code>"""
+
+QUEUE_HEALTH_DEAD_PROBLEM = "{count} dead (oldest {oldest_age}s)"
+QUEUE_HEALTH_OVERDUE_PROBLEM = "{count} overdue (oldest {oldest_age}s)"
+QUEUE_HEALTH_STALE_PROBLEM = "{count} stale (oldest {oldest_age}s)"
+
+

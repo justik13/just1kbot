@@ -383,7 +383,9 @@ async def _run_mass_bonus_background(
                 "MASS_BONUS_GRANTED",
                 "User",
                 0,
-                f"Granted +{amount} RUB bonus to {success_count} users (batch {batch_id}). Reason: {reason}",
+                texts.ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS.format(
+                    amount=amount, count=success_count, batch_id=batch_id, reason=reason
+                ),
             )
 
         try:

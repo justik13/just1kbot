@@ -25,6 +25,11 @@ BROADCAST_ALREADY_RUNNING = "⏳ Рассылка уже идёт, дождит�
 BROADCAST_AUDIENCE = """👥 <b>Аудитория:</b> {aud_label}
 """
 
+ADMIN_BROADCAST_TITLE_BROADCAST = "📢 Управление рассылками"
+ADMIN_BROADCAST_VVOD_TEXTA_RASSYLKI = "📝 Введите текст для рассылки"
+
+ADMIN_AUDIT_LOG_DETAILS_BROADCAST = "to {label}: {success} success, {fail} fail, status={status}"
+
 BROADCAST_BROADCAST = "📢 Рассылка"
 
 BROADCAST_NO_RECIPIENTS = "⚠️ Нет получателей для рассылки"

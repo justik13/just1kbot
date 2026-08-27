@@ -143,3 +143,5 @@ YooKassa ID: <code>{value_1}</code>
 ADMIN_PURCHASES_LIST_HEADER = "✅ Подтвердить возврат {value_0} ₽"
 
 ADMIN_PURCHASES_SEARCH_PROMPT = "👤 Карточка клиента"
+
+ADMIN_PURCHASES_ROW_FORMAT = "<b>{idx}. {user_label}</b> | {operation_title}\n{tariff_info}   🕒 {dt_str}\n\n"

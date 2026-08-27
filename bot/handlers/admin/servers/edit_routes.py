@@ -141,7 +141,7 @@ async def process_edit_server_name(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"name -> {new_name}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="name", value=new_name),
     )
 
     await render_hub(
@@ -286,7 +286,7 @@ async def process_edit_server_flag(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"flag -> {new_flag}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="flag", value=new_flag),
     )
 
     await render_hub(
@@ -578,7 +578,7 @@ async def process_edit_server_url(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"api_url -> {new_url}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="api_url", value=new_url),
     )
 
     await render_hub(
@@ -825,7 +825,7 @@ async def process_edit_server_key(
         "EDIT_SERVER",
         "Server",
         server_id,
-        "api_key -> [REDACTED]",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED.format(field="api_key"),
     )
 
     await render_hub(
@@ -970,7 +970,7 @@ async def process_edit_server_max_clients(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"max_clients: {server.max_clients} -> {new_value}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="max_clients", value=f"{server.max_clients} -> {new_value}"),
     )
 
     await render_hub(

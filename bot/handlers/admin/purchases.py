@@ -51,9 +51,13 @@ async def _show_purchases_list(
             dt_str = format_datetime(entry.created_at)
             amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_FINANCES_PURCHASES_0_BONUS
             rendered += (
-                f"<b>{idx}. {safe(entry.user_label)}</b> | {safe(entry.operation_title)}\n"+
-                texts.ADMIN_FINANCES_PURCHASES_DN_USTR.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str)+
-                f"   🕒 {dt_str}\n\n"
+                texts.ADMIN_PURCHASES_ROW_FORMAT.format(
+                    idx=idx, 
+                    user_label=safe(entry.user_label), 
+                    operation_title=safe(entry.operation_title), 
+                    tariff_info=texts.ADMIN_FINANCES_PURCHASES_DN_USTR.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str), 
+                    dt_str=dt_str
+                )
             )
 
 

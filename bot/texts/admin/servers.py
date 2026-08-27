@@ -12,6 +12,11 @@ ADMIN_SERVERS_COMMON = """🛠 Админка › 🌍 <b>Серверы</b>
 ADMIN_SERVERS_EMPTY = """<i>Серверов пока нет</i>
 """
 
+ADMIN_SERVER_API_URL = "• API URL: <code>{api_url}</code>\n"
+ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER = "{server_name}: {count} profiles deleted"
+ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER = "{field} -> {value}"
+ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED = "{field} -> [REDACTED]"
+
 ADMIN_SERVER_ADDED = """🛠 Админка › 🖥 <b>Серверы</b>
 
 ✅ <b>Сервер успешно добавлен!</b>

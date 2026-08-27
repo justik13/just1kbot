@@ -128,7 +128,9 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
         total = s.max_clients or 240
         pct = int((used / total) * 100) if total > 0 else 0
         status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
-        lines.append(f"{status_icon} {flag} <b>{safe(s.name)}</b>: {used}/{total} ({pct}%)")
+        lines.append(texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
+            status_icon=status_icon, flag=flag, name=safe(s.name), used=used, total=total, pct=pct
+        ))
     return "\n".join(lines)
 
 
@@ -480,7 +482,7 @@ async def start_edit_mtproto(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs(texts.DASHBOARD_SETTINGS, "MTProto Proxy")
+    header = format_admin_breadcrumbs(texts.DASHBOARD_SETTINGS, texts.ADMIN_DASHBOARD_PROXY_TAB_LABEL)
     text = (
         f"{header}"+
         texts.DASHBOARD_VVOD_SSYLKI_MTPROTO_PROXY.format()+
@@ -530,7 +532,7 @@ async def process_edit_mtproto(
     await set_system_setting(session, "mtproto_proxy_url", new_val, updated_by=message.from_user.id)
     await state.clear()
 
-    header = format_admin_breadcrumbs(texts.DASHBOARD_SETTINGS, "🚀 MTProto Proxy")
+    header = format_admin_breadcrumbs(texts.DASHBOARD_SETTINGS, texts.BTN_MTPROTO_PROXY)
 
     status_msg = texts.DASHBOARD_LINK_MTPROTO_PROXY_SUCCESS if not new_val else texts.DASHBOARD_LINK_MTPROTO_PROXY_OBNOVLENA.format(safe_new_val=safe(new_val))
 

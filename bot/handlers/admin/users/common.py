@@ -237,7 +237,7 @@ async def _build_users_list_text_and_kb(
             )
             ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
-                f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
+                f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
             days = format_days_left(user.subscription_end)
             profiles_count = (

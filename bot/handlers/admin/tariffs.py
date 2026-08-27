@@ -372,7 +372,7 @@ async def toggle_tariff_apply(
         "EDIT_TARIFF",
         "Tariff",
         tariff_id,
-        f"toggled to {'active' if new_status else 'inactive'}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED.format(status='active' if new_status else 'inactive'),
     )
 
     if new_status:
@@ -511,7 +511,7 @@ async def process_edit_tariff_rub(
         "EDIT_TARIFF",
         "Tariff",
         tariff_id,
-        f"RUB: {old_value} -> {new_value}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB.format(old_value=old_value, new_value=new_value),
     )
 
     await render_hub(

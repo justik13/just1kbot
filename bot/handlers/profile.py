@@ -170,7 +170,7 @@ async def show_referrals_list(
                 else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             )
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
-            rendered += f"\n{idx}. <b>{safe_user}</b> ({created_str})"
+            rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 
         rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(count=total_count)
 

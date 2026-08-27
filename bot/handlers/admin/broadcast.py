@@ -574,11 +574,11 @@ async def _send_broadcast_to_users_with_resume(
                     session,
                     admin_id,
                     "BROADCAST",
-                    details=(
-                        f"to {final_progress.label if final_progress else '?'}: "+
-                        f"{final_progress.success_count if final_progress else 0} success, "+
-                        f"{final_progress.fail_count if final_progress else 0} fail, "+
-                        f"status={final_progress.status if final_progress else 'unknown'}"
+                    details=texts.ADMIN_AUDIT_LOG_DETAILS_BROADCAST.format(
+                        label=final_progress.label if final_progress else '?',
+                        success=final_progress.success_count if final_progress else 0,
+                        fail=final_progress.fail_count if final_progress else 0,
+                        status=final_progress.status if final_progress else 'unknown'
                     ),
                 )
         except Exception as e:

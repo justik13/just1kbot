@@ -228,7 +228,7 @@ async def confirm_delete_server(
         "DELETE_SERVER",
         "Server",
         server_id,
-        f"{server_name}: {deleted_profiles} profiles deleted",
+        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=deleted_profiles),
     )
 
     await callback.answer(

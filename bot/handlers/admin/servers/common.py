@@ -134,7 +134,7 @@ async def _show_server_card(
         f"{extra_status_info}"+
         texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))+
         texts.COMMON_ZAPOLNENNOST_SLOTOV.format(used_clients=used_clients, max_clients=max_clients)+
-        f"• API URL: <code>{safe(server.api_url)}</code>\n"
+        texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 
     if ping_result:

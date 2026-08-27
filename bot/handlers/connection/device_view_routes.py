@@ -202,7 +202,7 @@ async def render_device_screen(
             copy_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU
             key_block = (
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA.format()+
-                f"<blockquote expandable><code>{safe(display_key)}</code></blockquote>\n"+
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE.format(key=safe(display_key))+
                 f"{copy_hint}"
             )
             if len(rendered) + len(key_block) <= 4000:

@@ -48,3 +48,6 @@ ADMIN_TARIFF_TOGGLE_BLOCKED_PENDING = "❌ Нельзя отключить та�
 ADMIN_TARIFF_TOGGLE_SUCCESS_DISABLED = "✅ Тариф отключен."
 
 ADMIN_TARIFF_TOGGLE_SUCCESS_ENABLED = "✅ Тариф включен."
+
+ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED = "toggled to {status}"
+ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB = "RUB: {old_value} -> {new_value}"

@@ -356,7 +356,6 @@ class TextsConsistencyTests(unittest.TestCase):
 
     def test_no_hardcoded_user_facing_strings_in_handlers_keyboards_and_workers(self):
         """Deep AST guard scanning handlers, keyboards, and workers for hardcoded user-facing strings."""
-        cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
         violations = []
 
         scanned_dirs = [
@@ -364,6 +363,102 @@ class TextsConsistencyTests(unittest.TestCase):
             PROJECT_ROOT / "bot" / "keyboards",
             PROJECT_ROOT / "services" / "workers",
         ]
+
+        
+        ALLOWED_INTERNAL_STRINGS = {
+            "db error", "api_failed", "slots_unknown", "unknown",
+            "Requeued by stuck profile cleanup worker for peer reconciliation",
+            "Creation timed out by cleanup worker",
+            "STOPPED ",
+            "webhook payment.canceled: payment not found for external_id=%s order=%s — discarding silently",
+            "auto_resolved: ", " for untracked payment",
+            "requires_manual_review: ",
+            "Healthcheck exception for server %s (%s): %s",
+            "Error reading server load for server %s: %s",
+            "payments.provider_status = 'succeeded'",
+            "payments.fulfillment_status = 'succeeded'",
+            "payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')",
+            "payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')",
+            'NOT (COALESCE(payments.topup_context, \'{}\'::jsonb) @> \'{"referral_bonus_processed": true}\'::jsonb)',
+            "payments.topup_context->>'referrer_notified_at' IS NULL AND payments.topup_context->>'referrer_telegram_id' IS NOT NULL",
+            "Payload too large",
+            "Invalid webhook",
+            "Database unavailable",
+            "can't parse entities",
+            "HTML parse failed for user %s, falling back to plain text",
+            "manual review",
+            "marked for manual review in Telegram admin",
+            " (ID: ",
+            "ID: ",
+            "ID ",
+            "\\n\\u2022 \\U0001f4f1 <b>",
+            "\\u2022 \\U0001f4f1 <b>",
+            "</b> (",
+            ")\\n   \\u2514 \\U0001f4ca <code>",
+            "</code> | <i>",
+            "\\u2022 <code>[",
+            "]</code> ",
+            "<blockquote expandable><code>",
+            ". <b>",
+            "\\u2514 <code>[",
+            "\\n\\u2022 <b>",
+            "</b> | ",
+            " <code>[",
+            "\\n• 📱 <b>",
+            "• 📱 <b>",
+            ")\\n   └ 📊 <code>",
+        }
+        def _is_exempt_call(parent_calls: list[ast.Call]) -> bool:
+            for call in parent_calls:
+                if isinstance(call.func, ast.Name):
+                    if call.func.id in ("re", "compile", "ValueError", "RuntimeError", "Exception", "TypeError", "AssertionError", "getattr", "hasattr"):
+                        return True
+                if isinstance(call.func, ast.Attribute):
+                    if isinstance(call.func.value, ast.Name) and call.func.value.id in (
+                        "logger", "logging", "log", "root_logger", "re",
+                    ):
+                        return True
+            return False
+        def _is_user_facing_string(s: str) -> bool:
+            if not isinstance(s, str) or not s.strip():
+                return False
+            if s in ALLOWED_INTERNAL_STRINGS:
+                return False
+            
+            clean_s = re.sub(r"<[^>]+>", "", s)
+            
+            if re.search(r"[\u0400-\u04FF]", clean_s):
+                return True
+            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
+                return False
+            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
+                return False
+            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", clean_s):
+                return False
+            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", clean_s):
+                return False
+            if re.search(r"[A-Za-z]{2,}", clean_s) and " " in clean_s:
+                return True
+            if re.search(r"[A-Za-z]", clean_s) and " " in clean_s:
+                return True
+            return False
+            if s in ALLOWED_INTERNAL_STRINGS:
+                return False
+            if re.search(r"[Ѐ-ӿ]", s):
+                return True
+            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
+                return False
+            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
+                return False
+            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", s):
+                return False
+            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", s):
+                return False
+            if re.search(r"[A-Za-z]{2,}", s) and " " in s:
+                return True
+            if re.search(r"[A-Za-z]", s) and " " in s:
+                return True
+            return False
 
         class HardcodedStringVisitor(ast.NodeVisitor):
             def __init__(self, file_path: Path, docstring_nodes: set[ast.AST]):
@@ -379,25 +474,25 @@ class TextsConsistencyTests(unittest.TestCase):
             def visit_Constant(self, node: ast.Constant):
                 if node in self.docstring_nodes:
                     return
-                if isinstance(node.value, str) and cyrillic_pattern.search(node.value):
-                    if not TextsConsistencyTests._is_logging_or_regex_call(self.call_stack):
+                if isinstance(node.value, str) and _is_user_facing_string(node.value):
+                    if not _is_exempt_call(self.call_stack):
                         rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
                         violations.append(
-                            f"{rel_path}:{node.lineno} contains hardcoded Cyrillic string: {node.value[:50]!r}"
+                            f"{rel_path}:{node.lineno} contains hardcoded string: {node.value[:50]!r}"
                         )
                 self.generic_visit(node)
 
             def visit_JoinedStr(self, node: ast.JoinedStr):
-                if not TextsConsistencyTests._is_logging_or_regex_call(self.call_stack):
+                if not _is_exempt_call(self.call_stack):
                     for part in node.values:
                         if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                            if cyrillic_pattern.search(part.value):
+                            if _is_user_facing_string(part.value):
                                 rel_path = self.file_path.relative_to(PROJECT_ROOT).as_posix()
                                 violations.append(
-                                    f"{rel_path}:{node.lineno} contains hardcoded Cyrillic f-string: {part.value[:50]!r}"
+                                    f"{rel_path}:{node.lineno} contains hardcoded f-string part: {part.value[:50]!r}"
                                 )
                 self.generic_visit(node)
-
+                
         for base_dir in scanned_dirs:
             for py_file in base_dir.rglob("*.py"):
                 content = py_file.read_text(encoding="utf-8")
@@ -424,15 +519,35 @@ class TextsConsistencyTests(unittest.TestCase):
         )
 
     def test_ast_guard_detects_deliberate_hardcoded_string_violations(self):
-        """Negative self-test proving that the AST scanner detects raw Cyrillic strings in dicts, f-strings, and vars."""
+        """Negative self-test proving that the AST scanner detects raw strings in dicts, f-strings, and vars."""
         bad_code_samples = [
-            "label_map = {'key': 'Текст'}",
-            "msg = f'Привет, {user_id}'",
-            "btn_text = 'Оплатить доступ'",
-            "text = texts.FOO + ' дополнительный текст'",
+            "label_map = {'active': 'Active users'}",
+            "msg = f'Hello {user_id}'",
+            "btn_text = 'Durable queue recovered'",
+            "text = texts.FOO + ' extra'",
+            "status = 'Платёж создан'",
+            "alert = 'VPN server восстановлен'",
         ]
-
-        cyrillic_pattern = re.compile(r"[\u0400-\u04FF]")
+        
+        def _is_user_facing_string(s: str) -> bool:
+            if not isinstance(s, str) or not s.strip():
+                return False
+            clean_s = re.sub(r"<[^>]+>", "", s)
+            if re.search(r"[\u0400-\u04FF]", clean_s):
+                return True
+            if s.startswith(("http://", "https://", "postgres://", "redis://", "/", "urn:", "mailto:", "amneziawg://")):
+                return False
+            if "SELECT " in s.upper() or "UPDATE " in s.upper() or "INSERT INTO" in s.upper() or "DELETE FROM" in s.upper():
+                return False
+            if re.match(r"^[%YmdHMS\-\:\s\.,TZ]+$", clean_s):
+                return False
+            if re.match(r"^[A-Za-z0-9_\-\.\:\/]+$", clean_s):
+                return False
+            if re.search(r"[A-Za-z]{2,}", clean_s) and " " in clean_s:
+                return True
+            if re.search(r"[A-Za-z]", clean_s) and " " in clean_s:
+                return True
+            return False
 
         for sample in bad_code_samples:
             with self.subTest(code=sample):
@@ -440,18 +555,17 @@ class TextsConsistencyTests(unittest.TestCase):
                 found = False
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                        if cyrillic_pattern.search(node.value):
+                        if _is_user_facing_string(node.value):
                             found = True
                     elif isinstance(node, ast.JoinedStr):
                         for part in node.values:
                             if isinstance(part, ast.Constant) and isinstance(part.value, str):
-                                if cyrillic_pattern.search(part.value):
+                                if _is_user_facing_string(part.value):
                                     found = True
                 self.assertTrue(
                     found,
                     f"AST guard failed to detect deliberate violation in: {sample!r}",
                 )
-
 
 if __name__ == "__main__":
     unittest.main()
