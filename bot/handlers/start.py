@@ -173,6 +173,7 @@ async def cmd_start(
     state: FSMContext,
     command: Command,
     session: AsyncSession,
+    is_new_user: bool = False,
 ):
     await state.clear()
 
@@ -189,9 +190,6 @@ async def cmd_start(
         pass
 
     telegram_id = message.from_user.id
-    existing_user = await get_user_by_telegram_id(session, telegram_id)
-    is_new = existing_user is None or getattr(existing_user, "is_deleted", False)
-
     ref_id = parse_referral_id(command.args) if command.args else None
 
     user = await SubscriptionService.process_onboarding(
@@ -221,7 +219,7 @@ async def cmd_start(
 
     await _ensure_bot_unblocked(session, telegram_id)
 
-    if is_new:
+    if is_new_user:
         builder = InlineKeyboardBuilder()
         builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
 
