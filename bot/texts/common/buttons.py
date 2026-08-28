@@ -166,13 +166,14 @@ BUTTON_CHECK_TOPUP = "🔄 Проверить статус"
 
 BUTTON_CLOSE_TOPUP = "🗂 Закрыть эту ссылку"
 
-BUTTON_COPY_REFERRAL = "📋 Скопировать ссылку"
+BUTTON_COPY_REFERRAL = "📋 Скопировать"
 
 BUTTON_CUSTOM_AMOUNT = "Другая сумма"
 
 BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
 BUTTON_REFERRAL_LIST = "👥 Список рефералов"
+BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 
 BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"
 

@@ -21,14 +21,17 @@ def get_history_keyboard() -> InlineKeyboardMarkup:
 
 def get_referral_keyboard(
     referral_link: str,
+    count: int = 0,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    has_copy = False
     if referral_link and 1 <= len(referral_link) <= 256:
         builder.button(
             text=texts.BUTTON_COPY_REFERRAL,
             copy_text=CopyTextButton(text=referral_link),
         )
+        has_copy = True
     share_text = texts.REFERRAL_SHARE_TEXT
     share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
     builder.button(
@@ -36,7 +39,7 @@ def get_referral_keyboard(
         url=share_url,
     )
     builder.button(
-        text=texts.BUTTON_REFERRAL_LIST,
+        text=texts.BUTTON_REFERRAL_LIST_COUNT.format(count=count),
         callback_data="referrals_list",
     )
     builder.button(
@@ -44,7 +47,10 @@ def get_referral_keyboard(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1, 1)
+    if has_copy:
+        builder.adjust(2, 1, 1)
+    else:
+        builder.adjust(1, 1, 1)
 
     return builder.as_markup()
 

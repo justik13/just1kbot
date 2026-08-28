@@ -113,7 +113,9 @@ async def show_referral(
 
     inviter_line = await _get_inviter_line(session, db_user)
     if inviter_line:
-        inviter_line = f"\n{inviter_line}\n"
+        inviter_line = f"\n\n{inviter_line}"
+    else:
+        inviter_line = ""
 
     await render_hub(
         callback.bot,
@@ -124,7 +126,7 @@ async def show_referral(
             bonus_balance=int(bonus_balance),
             inviter_line=inviter_line,
         ),
-        get_referral_keyboard(referral_link),
+        get_referral_keyboard(referral_link, count=invited_count),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
