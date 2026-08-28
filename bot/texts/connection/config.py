@@ -41,7 +41,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
 🔄 <b>Конфигурация устройства обновляется...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «📁 Скачать файлы» ниже.</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)
 """
@@ -58,7 +58,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_UDALYAETSYA_S_SERVE = """
 
 🗑 <b>Устройство удаляется с сервера...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """📁 <b>Файлы подключения: {safe_profile_device_name}</b>
+CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """🔄 <b>Другой способ подключения: {safe_profile_device_name}</b>
 
 """
 

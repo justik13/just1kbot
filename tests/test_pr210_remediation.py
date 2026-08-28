@@ -303,7 +303,8 @@ class TestKeyboardSerialization(unittest.IsolatedAsyncioTestCase):
 
         kb = self._roundtrip(get_device_keyboard(profile_id=7, config_ready=True, show_delete=True))
         flat = [btn for row in kb.inline_keyboard for btn in row]
-        self.assertEqual(flat[0].style, "primary")
+        alt_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("alt_connection"))
+        self.assertIsNone(alt_btn.style)
         delete_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("request_delete_device"))
         self.assertEqual(delete_btn.style, "danger")
 
@@ -728,6 +729,67 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
         routes_path = Path(__file__).resolve().parent.parent / "bot" / "handlers" / "connection" / "device_rename_routes.py"
         content = routes_path.read_text(encoding="utf-8")
         self.assertNotIn("BTN_PAYMENT_CANCEL", content)
+
+    def test_format_subscription_date_friendly(self):
+        """Verify format_subscription_date returns human-friendly Russian date."""
+        from datetime import datetime, timezone
+        from bot.formatters import format_subscription_date
+        from utils.datetime_helpers import now_msk
+
+        now = now_msk()
+        cur_year_dt = datetime(now.year, 9, 25, 12, 0, tzinfo=timezone.utc)
+        res = format_subscription_date(cur_year_dt)
+        self.assertIn("25", res)
+        self.assertIn("сентября", res)
+        self.assertNotIn(str(now.year), res)
+
+        next_year_dt = datetime(now.year + 1, 9, 25, 12, 0, tzinfo=timezone.utc)
+        res_next = format_subscription_date(next_year_dt)
+        self.assertIn(str(now.year + 1), res_next)
+
+        self.assertEqual(format_subscription_date(None), "—")
+
+    def test_tariff_showcase_keyboard_has_starting_price(self):
+        """Verify tariff showcase buttons display starting price."""
+        from types import SimpleNamespace
+        from bot.keyboards.payment import get_tariff_showcase_keyboard
+
+        tariffs = {
+            2: [SimpleNamespace(id=1, price_rub=150, duration_days=30), SimpleNamespace(id=2, price_rub=400, duration_days=90)],
+            5: [SimpleNamespace(id=3, price_rub=300, duration_days=30)],
+        }
+        kb = get_tariff_showcase_keyboard(tariffs)
+        btn_texts = [btn.text for row in kb.inline_keyboard for btn in row]
+        self.assertTrue(any("150 ₽" in t for t in btn_texts))
+        self.assertTrue(any("300 ₽" in t for t in btn_texts))
+
+    def test_change_tariff_keyboard_back_target(self):
+        """Verify change tariff back button returns to subscription when active."""
+        from types import SimpleNamespace
+        from bot.keyboards.payment import get_change_tariff_keyboard
+
+        tariffs = [SimpleNamespace(id=1, device_limit=2), SimpleNamespace(id=2, device_limit=5)]
+        kb_active = get_change_tariff_keyboard(tariffs, current_limit=2, is_subscription_active=True)
+        back_active = [btn for row in kb_active.inline_keyboard for btn in row if btn.callback_data in ("menu_subscription", "back_to_main_menu")]
+        self.assertEqual(back_active[0].callback_data, "menu_subscription")
+
+        kb_inactive = get_change_tariff_keyboard(tariffs, current_limit=2, is_subscription_active=False)
+        back_inactive = [btn for row in kb_inactive.inline_keyboard for btn in row if btn.callback_data in ("menu_subscription", "back_to_main_menu")]
+        self.assertEqual(back_inactive[0].callback_data, "back_to_main_menu")
+
+    def test_device_keyboard_layout_and_button_order(self):
+        """Verify device card keyboard places rename/instructions in row 1, alt connection in row 2."""
+        from bot.keyboards.device import get_device_keyboard
+
+        kb = get_device_keyboard(profile_id=42, config_ready=True, show_delete=True)
+        rows = kb.inline_keyboard
+        self.assertEqual(len(rows[0]), 2)  # Rename, Instructions
+        self.assertTrue(rows[0][0].callback_data.startswith("rename_device"))
+        self.assertTrue(rows[0][1].callback_data.startswith("support_help"))
+
+        self.assertEqual(len(rows[1]), 1)  # Alt connection
+        self.assertTrue(rows[1][0].callback_data.startswith("alt_connection"))
+        self.assertIsNone(rows[1][0].style)  # Not primary!
 
 
 if __name__ == "__main__":

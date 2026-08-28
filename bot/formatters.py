@@ -86,6 +86,25 @@ def get_tariff_group_name(device_limit: int) -> str:
     return texts.TARIFF_DISPLAY_PRO_GROUP.format(limit=device_limit)
 
 
+def format_subscription_date(dt) -> str:
+    from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
+
+    if dt is None:
+        return texts.PLACEHOLDER_DASH
+    if is_permanent_subscription(dt):
+        return texts.TIME_FOREVER
+
+    msk_dt = to_msk(dt)
+    if msk_dt is None:
+        return texts.PLACEHOLDER_DASH
+
+    month_name = texts.MONTH_NAMES_LABELS[msk_dt.month - 1]
+    now_dt = now_msk()
+    if msk_dt.year == now_dt.year:
+        return texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
+    return texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
+
+
 def format_days_left(dt) -> str:
     from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
 
@@ -104,5 +123,5 @@ def format_days_left(dt) -> str:
     days = diff.days
     hours = diff.seconds // 3600
     if days > 0:
-        return texts.TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
+        return texts.TIME_DAYS_FORMAT.format(days=days)
     return texts.TIME_HOURS_LEFT.format(hours=hours)

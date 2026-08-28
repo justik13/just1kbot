@@ -27,8 +27,11 @@ from services.maintenance_service import MaintenanceService
 from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
-from bot.formatters import get_tariff_display_name, get_tariff_group_name
+from bot.formatters import (
+    format_subscription_date,
+    get_tariff_display_name,
+    get_tariff_group_name,
+)
 from utils.telegram import render_hub
 
 from .common import (
@@ -400,7 +403,7 @@ async def show_quick_renew(
 
     text = texts.PAYMENT_QUICK_RENEW_HEADER.format(
         tariff_name=tariff_name,
-        valid_until=format_datetime(db_user.subscription_end),
+        valid_until=format_subscription_date(db_user.subscription_end),
     )
 
     keyboard = get_renew_keyboard(renew_tariffs)
@@ -465,7 +468,7 @@ async def show_change_tariff(
 
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
-        valid_until=format_datetime(db_user.subscription_end),
+        valid_until=format_subscription_date(db_user.subscription_end),
     )
 
     current_tariff = await get_tariff_by_id(session, db_user.current_tariff_id) if getattr(db_user, "current_tariff_id", None) else None

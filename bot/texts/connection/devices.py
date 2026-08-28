@@ -9,7 +9,7 @@ BTN_CHANGE_TARIFF = "⚙️ Сменить тариф"
 
 BTN_DELETE_DEVICE = "🗑 Удалить устройство"
 
-CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "📁 Скачать файлы (.vpn / .conf)"
+CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "🔄 Другой способ подключения"
 
 CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE = "← К устройству"
 

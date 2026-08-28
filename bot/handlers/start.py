@@ -107,8 +107,7 @@ async def _ensure_bot_unblocked(
 
 async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[str, InlineKeyboardMarkup]:
     from database.repositories.profiles_repo import get_user_profiles
-    from utils.formatters import format_datetime
-    from bot.formatters import format_days_left
+    from bot.formatters import format_days_left, format_subscription_date
 
     is_active = await SubscriptionService.check_access(session, db_user.telegram_id)
     is_admin = db_user.telegram_id in get_settings().ADMIN_IDS
@@ -117,7 +116,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     profiles = await get_user_profiles(session, db_user.id)
 
     status_str = texts.STATUS_SUBSCRIPTION_ACTIVE if is_active else texts.STATUS_SUBSCRIPTION_INACTIVE
-    valid_until_str = format_datetime(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
+    valid_until_str = format_subscription_date(db_user.subscription_end) if db_user.subscription_end else texts.PLACEHOLDER_DASH
     days_left_str = format_days_left(db_user.subscription_end) if db_user.subscription_end else texts.ZERO_DAYS_LABEL
 
     inviter_line = ""

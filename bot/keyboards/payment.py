@@ -18,8 +18,14 @@ def get_tariff_showcase_keyboard(
     builder = InlineKeyboardBuilder()
     for limit in sorted(grouped_tariffs.keys()):
         group_name = get_tariff_group_name(limit)
+        tariffs_in_group = grouped_tariffs.get(limit) or []
+        if tariffs_in_group:
+            min_price = min(int(t.price_rub) for t in tariffs_in_group)
+            btn_text = texts.BTN_TARIFF_SHOWCASE_ITEM.format(group_name=group_name, min_price=min_price)
+        else:
+            btn_text = group_name
         builder.button(
-            text=group_name,
+            text=btn_text,
             callback_data=f"select_tariff_type:{limit}:showcase",
         )
     builder.button(
@@ -156,8 +162,9 @@ def get_change_tariff_keyboard(
             text=group_name,
             callback_data=f"select_tariff:{best_tariff.id}:change",
         )
+    back_target = "menu_subscription" if is_subscription_active else "back_to_main_menu"
     builder.button(
-        text=texts.BTN_BACK, callback_data="back_to_main_menu"
+        text=texts.BTN_BACK, callback_data=back_target
     )
     builder.adjust(1)
     return builder.as_markup()

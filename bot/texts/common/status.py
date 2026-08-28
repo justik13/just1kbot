@@ -1,9 +1,28 @@
 """Domain texts for common/status.py."""
 from __future__ import annotations
 
+DATE_DAY_MONTH_FORMAT = "{day} {month}"
+
+DATE_DAY_MONTH_YEAR_FORMAT = "{day} {month} {year} г."
+
 DURATION_HOURS_SUFFIX = " {hours} ч."
 
 MAINTENANCE_DEFAULT_MESSAGE = "🛠 Бот находится на техническом обслуживании. Пожалуйста, попробуйте позже."
+
+MONTH_NAMES_LABELS = (
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
+)
 
 PLACEHOLDER_DASH = "—"
 
