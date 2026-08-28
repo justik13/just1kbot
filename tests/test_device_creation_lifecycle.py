@@ -575,7 +575,8 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
-            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+            patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock(side_effect=mock_render_hub)),
+            patch("bot.handlers.connection.device_view_routes.get_server_by_id", new=AsyncMock(return_value=_server_unused)),
             patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
         ):
             await rename_device_process(message, state, session, db_user)
@@ -631,7 +632,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[active_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=mock_update),
             patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
-            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()),
+            patch("bot.handlers.connection.device_rename_routes.render_device_screen", new=AsyncMock()),
             patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
         ):
             await rename_device_process(message, state, session, db_user)
@@ -1706,7 +1707,7 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         with (
             patch("bot.handlers.connection.device_rename_routes.get_user_profiles", new=AsyncMock(return_value=[target_profile, other_server_profile])),
             patch("bot.handlers.connection.device_rename_routes.update_profile", new=AsyncMock()) as mock_update,
-            patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()),
+            patch("bot.handlers.connection.device_rename_routes.render_device_screen", new=AsyncMock()),
             patch("services.audit_service.AuditService.log_action", new=AsyncMock()),
         ):
             await rename_device_process(message, state, mock_session, db_user)
@@ -2364,7 +2365,7 @@ class DeviceCreationPostgresIntegrationTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions.begin() as session:
             with (
                 patch("bot.handlers.connection.device_rename_routes.SubscriptionService.check_access", new=AsyncMock(return_value=True)),
-                patch("bot.handlers.connection.device_rename_routes.render_hub", new=AsyncMock()) as mock_hub,
+                patch("bot.handlers.connection.device_rename_routes.render_device_screen", new=AsyncMock()) as mock_hub,
             ):
                 await rename_device_process(message, state, session, db_user=db_user)
                 self.assertTrue(mock_hub.called)

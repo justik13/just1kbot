@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_device_keyboard
+from bot.keyboards import get_back_button
 from bot.states import DeviceManagementStates
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import (
@@ -20,7 +20,7 @@ from utils.callbacks import parse_callback_id
 from utils.telegram import EFFECT_LIKE, render_hub, safe
 
 from .common import DEVICE_NAME_REGEX
-from .device_view_routes import can_show_config_actions, can_show_delete_action
+from .device_view_routes import render_device_screen
 
 router = Router()
 
@@ -263,22 +263,16 @@ async def rename_device_process(
         },
     )
 
-    config_ready = can_show_config_actions(profile)
-    show_delete = can_show_delete_action(profile)
-
-    await render_hub(
+    await render_device_screen(
         message.bot,
         message.chat.id,
-        texts.DEVICE_RENAMED_SUCCESS.format(
+        profile,
+        db_user,
+        session,
+        message_effect_id=EFFECT_LIKE,
+        notice=texts.DEVICE_RENAMED_SUCCESS.format(
             device_name=safe(new_name),
         ),
-        get_device_keyboard(
-            profile.id,
-            config_ready=config_ready,
-            show_delete=show_delete,
-        ),
-        message_effect_id=EFFECT_LIKE,
-        force_new=True,
     )
 
     await state.clear()

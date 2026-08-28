@@ -137,6 +137,7 @@ async def render_device_screen(
     user: User,
     session: AsyncSession,
     message_effect_id: str | None = None,
+    notice: str | None = None,
 ):
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.EMOJI_GLOBE
@@ -144,7 +145,7 @@ async def render_device_screen(
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
 
-    rendered = texts.DEVICE_MANAGE_HEADER.format(
+    header = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         country_display=safe(country_display),
         traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
@@ -154,6 +155,8 @@ async def render_device_screen(
             else texts.DEVICE_DATA_NONE
         ),
     )
+
+    rendered = f"{notice}\n\n{header}" if notice else header
 
     status = getattr(profile, "provisioning_status", "")
     if status == "pending_create":
