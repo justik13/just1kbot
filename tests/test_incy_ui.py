@@ -1,6 +1,7 @@
 import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+from bot import texts
 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -223,7 +224,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         await rotate_incy_subscription(callback, state, session, db_user=db_user)
 
-        callback.answer.assert_any_await("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
+        callback.answer.assert_any_await(texts.ALERT_INCY_ROTATE_SUCCESS, show_alert=True)
         mock_rotate_token.assert_awaited_once_with(session, db_user)
         mock_render_hub.assert_awaited_once()
 
@@ -264,7 +265,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
 
         await rotate_incy_subscription(callback, state, session, db_user=db_user)
 
-        callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        callback.answer.assert_any_await(texts.ALERT_INCY_ROTATE_ERROR, show_alert=True)
         mock_render_hub.assert_not_awaited()
 
     @patch("integrations.incy.bot_routes.SubscriptionService.check_access")
@@ -294,7 +295,7 @@ class INCYUITests(unittest.IsolatedAsyncioTestCase):
         await rotate_incy_subscription(callback, state, session, db_user=db_user)
 
         # If commit fails, render_hub must NOT be called with the uncommitted token
-        callback.answer.assert_any_await("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        callback.answer.assert_any_await(texts.ALERT_INCY_ROTATE_ERROR, show_alert=True)
         mock_render_hub.assert_not_awaited()
 
 
