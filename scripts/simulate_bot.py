@@ -435,9 +435,10 @@ class SimulationAutoSeedMiddleware:
                         reconciliation_status="ok",
                         checkout_status="active",
                         ui_visible=True,
-                        created_at=now_utc(),
-                        paid_at=now_utc(),
-                        credited_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
+                        paid_at=now_utc() - timedelta(days=2),
+                        credited_at=now_utc() - timedelta(days=2),
+                        credit_notified_at=now_utc() - timedelta(days=2),
                     )
                     session.add(seed_pay)
                     await session.flush()
@@ -452,7 +453,7 @@ class SimulationAutoSeedMiddleware:
                         payment_id=seed_pay.id,
                         idempotency_key=f"seed_real_{uuid.uuid4().hex}",
                         metadata_={"note": "Initial simulation balance"},
-                        created_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
                     )
                     entry_bonus = AccountLedgerEntry(
                         id=ts + 2,
@@ -465,7 +466,7 @@ class SimulationAutoSeedMiddleware:
                             "source_type": "referral_referrer_bonus",
                             "reason": "welcome_bonus",
                         },
-                        created_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
                     )
 
                     # Initial quote, entitlement and paid value ledger
@@ -485,6 +486,7 @@ class SimulationAutoSeedMiddleware:
                         rounding_loss_value_rub=Decimal(0),
                         status="consumed",
                         consumed_at=now_utc() - timedelta(days=2),
+                        purchase_notified_at=now_utc() - timedelta(days=2),
                         expires_at=now_utc(),
                         created_at=now_utc() - timedelta(days=2),
                     )
