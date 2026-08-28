@@ -428,7 +428,7 @@ async def request_custom_amount(
             minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
             maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
         ),
-        get_back_button("menu_balance"),
+        get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
     )
 
 
@@ -453,27 +453,50 @@ async def accept_custom_amount(
 
     raw = (message.text or "").strip()
     if not raw.isascii() or not raw.isdigit():
+        prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
+            minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
+            maximum=get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB,
+        )
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.TOPUP_INVALID_AMOUNT,
-            get_back_button("menu_balance"),
+            f"{texts.TOPUP_INVALID_AMOUNT}\n\n{prompt}",
+            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
     if db_user is None:
         await state.clear()
         return
+
     data = await state.get_data()
     minimum = int(data.get("balance_minimum") or get_settings().BALANCE_MIN_TOPUP_RUB)
+    maximum = get_settings().BALANCE_MAX_CUSTOM_TOPUP_RUB
+    prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
+        minimum=minimum,
+        maximum=maximum,
+    )
+
     amount = int(raw)
     if amount < minimum:
+        err = texts.TOPUP_OPERATION_MINIMUM.format(minimum=minimum)
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.TOPUP_OPERATION_MINIMUM.format(minimum=minimum),
-            get_back_button("menu_balance"),
+            f"{err}\n\n{prompt}",
+            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
+
+    if amount > maximum:
+        err = texts.TOPUP_ERROR_MAXIMUM.format(maximum=maximum)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            f"{err}\n\n{prompt}",
+            get_back_button("menu_balance", text=texts.BTN_PAYMENT_CANCEL),
+        )
+        return
+
     await state.clear()
     await _create_and_render_topup(
         message,

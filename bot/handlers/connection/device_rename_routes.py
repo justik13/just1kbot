@@ -77,7 +77,7 @@ async def rename_device_start(
         callback.bot,
         callback.message.chat.id,
         texts.DEVICE_RENAME_PROMPT,
-        get_back_button(f"manage_device:{profile_id}"),
+        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_PAYMENT_CANCEL),
     )
 
 
@@ -171,29 +171,32 @@ async def rename_device_process(
     # Strip any user-typed trailing #... to get the clean base name
     cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
     if not cleaned_base:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED,
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
 
     if len(cleaned_base) > 16:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base))
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
 
     if not DEVICE_NAME_REGEX.match(cleaned_base):
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI,
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
 
@@ -207,11 +210,12 @@ async def rename_device_process(
             and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
+            err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
-                get_back_button(f"manage_device:{profile.id}"),
+                f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+                get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
             )
             return
 
@@ -241,11 +245,12 @@ async def rename_device_process(
                 device_name=new_name,
             )
     except IntegrityError:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
         )
         return
 

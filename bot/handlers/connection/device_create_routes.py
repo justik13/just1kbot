@@ -178,18 +178,6 @@ async def start_add_device(
         )
         return
 
-    if len(servers) == 1:
-        if user_id in _creating_devices:
-            await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
-            return
-        _creating_devices[user_id] = True
-        try:
-            await callback.answer(show_alert=False)
-            await state.set_state(DeviceCreationStates.choose_server)
-            return await _process_server_selection(callback, state, session, servers[0].id, user)
-        finally:
-            _creating_devices.pop(user_id, None)
-
     builder = InlineKeyboardBuilder()
 
     for server in servers:
