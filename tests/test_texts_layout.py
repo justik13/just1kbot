@@ -104,24 +104,32 @@ def _find_missing_text_format_args() -> list[str]:
 
         def visit_Call(self, node: ast.Call) -> None:
             func = node.func
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "format"
-                and isinstance(func.value, ast.Attribute)
-                and isinstance(func.value.value, ast.Name)
-                and func.value.value.id == "texts"
-            ):
-                key = func.value.attr
-                required = expected.get(key, set())
-                if required:
-                    provided = {kw.arg for kw in node.keywords if kw.arg is not None}
-                    has_dynamic_kwargs = any(kw.arg is None for kw in node.keywords)
-                    if not has_dynamic_kwargs:
-                        missing = sorted(required - provided)
-                        if missing:
-                            violations.append(
-                                f"{self.path.relative_to(ROOT)}:{node.lineno}: texts.{key}.format() missing {missing}"
-                            )
+            if isinstance(func, ast.Attribute) and func.attr == "format":
+                key = None
+                call_repr = None
+                if (
+                    isinstance(func.value, ast.Attribute)
+                    and isinstance(func.value.value, ast.Name)
+                    and func.value.value.id == "texts"
+                ):
+                    key = func.value.attr
+                    call_repr = f"texts.{key}.format()"
+                elif isinstance(func.value, ast.Name) and func.value.id in expected:
+                    key = func.value.id
+                    call_repr = f"{key}.format()"
+
+                if key is not None:
+                    required = expected.get(key, set())
+                    if required:
+                        provided = {kw.arg for kw in node.keywords if kw.arg is not None}
+                        has_dynamic_kwargs = any(kw.arg is None for kw in node.keywords)
+                        has_pos_args = len(node.args) > 0
+                        if not has_dynamic_kwargs and not has_pos_args:
+                            missing = sorted(required - provided)
+                            if missing:
+                                violations.append(
+                                    f"{self.path.relative_to(ROOT)}:{node.lineno}: {call_repr} missing {missing}"
+                                )
             self.generic_visit(node)
 
     for base_dir in PRODUCTION_DIRS:

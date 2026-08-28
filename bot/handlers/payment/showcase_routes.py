@@ -555,9 +555,7 @@ async def select_tariff_type(
         )
         return
 
-    description = texts.get_text("PAYMENT_TARIFF_DESCRIPTION", {}).get(device_limit)
-    if not description:
-        description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
+    description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
     text = description + texts.PAYMENT_DURATION_HEADER
 
     keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)

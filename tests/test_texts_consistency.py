@@ -239,31 +239,77 @@ class TextsConsistencyTests(unittest.TestCase):
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Attribute)
                         and node.func.attr == "format"
-                        and isinstance(node.func.value, ast.Attribute)
-                        and isinstance(node.func.value.value, ast.Name)
-                        and node.func.value.value.id == "texts"
                     ):
-                        text_key = node.func.value.attr
-                        template = getattr(texts, text_key, None)
-                        if isinstance(template, str):
-                            placeholders = set(placeholder_pattern.findall(template))
-                            call_kwargs = {kw.arg for kw in node.keywords if kw.arg}
-                            call_args_count = len(node.args)
+                        text_key = None
+                        if (
+                            isinstance(node.func.value, ast.Attribute)
+                            and isinstance(node.func.value.value, ast.Name)
+                            and node.func.value.value.id == "texts"
+                        ):
+                            text_key = node.func.value.attr
+                        elif isinstance(node.func.value, ast.Name) and hasattr(texts, node.func.value.id):
+                            text_key = node.func.value.id
 
-                            if placeholders:
-                                if call_args_count == 0 and call_kwargs:
-                                    missing = placeholders - call_kwargs
-                                    extra = call_kwargs - placeholders
-                                    if missing or extra:
-                                        mismatches.append(
-                                            f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} {text_key}: missing={missing} extra={extra}"
-                                        )
+                        if text_key:
+                            template = getattr(texts, text_key, None)
+                            if isinstance(template, str):
+                                placeholders = set(placeholder_pattern.findall(template))
+                                call_kwargs = {kw.arg for kw in node.keywords if kw.arg}
+                                call_args_count = len(node.args)
+
+                                if placeholders:
+                                    if call_args_count == 0 and call_kwargs:
+                                        missing = placeholders - call_kwargs
+                                        extra = call_kwargs - placeholders
+                                        if missing or extra:
+                                            mismatches.append(
+                                                f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} {text_key}: missing={missing} extra={extra}"
+                                            )
 
         self.assertEqual(
             mismatches,
             [],
             "Placeholder mismatch found between .format(...) call sites and text templates:\n"
             + "\n".join(mismatches),
+        )
+
+    def test_get_text_literal_keys_exist_in_catalogue(self):
+        """Verify statically that any literal string key passed to texts.get_text('KEY') exists in catalogue."""
+        missing_keys = []
+        all_keys = set(dir(texts))
+        scanned_dirs = [
+            PROJECT_ROOT / "bot",
+            PROJECT_ROOT / "services",
+            PROJECT_ROOT / "integrations",
+        ]
+
+        for base_dir in scanned_dirs:
+            for py_file in base_dir.rglob("*.py"):
+                if "texts" in py_file.parts:
+                    continue
+                content = py_file.read_text(encoding="utf-8")
+                tree = ast.parse(content, filename=str(py_file))
+
+                for node in ast.walk(tree):
+                    if (
+                        isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "get_text"
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "texts"
+                    ):
+                        if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                            key_name = node.args[0].value
+                            if key_name not in all_keys:
+                                missing_keys.append(
+                                    f"{py_file.relative_to(PROJECT_ROOT)}:{node.lineno} texts.get_text({key_name!r}) references missing key"
+                                )
+
+        self.assertEqual(
+            missing_keys,
+            [],
+            "Found texts.get_text() calls referencing non-existent catalogue keys:\n"
+            + "\n".join(missing_keys),
         )
 
     def test_html_markup_nesting_and_validity(self):
@@ -582,6 +628,27 @@ class TextsConsistencyTests(unittest.TestCase):
                     found,
                     f"AST guard failed to detect deliberate violation in: {sample!r}",
                 )
+
+    def test_ast_guard_detects_deliberate_placeholder_mismatches(self):
+        """Negative test proving that placeholder scanner catches missing placeholders in facade and direct calls."""
+        template_sample = "{foo} and {bar}"
+        placeholder_pattern = re.compile(r"\{([a-zA-Z0-9_]+)")
+        required = set(placeholder_pattern.findall(template_sample))
+
+        bad_calls = [
+            "texts.SOME_KEY.format(foo='1')",  # missing bar
+            "SOME_KEY.format(bar='2')",        # missing foo
+            "texts.SOME_KEY.format()",         # missing all
+        ]
+
+        for sample in bad_calls:
+            with self.subTest(call=sample):
+                tree = ast.parse(sample)
+                call_node = tree.body[0].value
+                provided = {kw.arg for kw in call_node.keywords if kw.arg}
+                missing = required - provided
+                self.assertTrue(bool(missing), f"Failed to detect missing placeholder in {sample}")
+
 
 if __name__ == "__main__":
     unittest.main()
