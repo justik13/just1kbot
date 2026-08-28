@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.formatters import format_plural
 from bot.keyboards import (
     get_history_keyboard,
     get_referral_keyboard,
@@ -174,7 +175,9 @@ async def show_referrals_list(
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
             rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 
-        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(count=total_count)
+        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(
+            count=format_plural(total_count, texts.NOUN_USERS)
+        )
 
     await render_hub(
         callback.bot,

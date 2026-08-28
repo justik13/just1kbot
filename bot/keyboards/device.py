@@ -78,7 +78,7 @@ def get_device_delete_confirm_keyboard(
     )
 
     builder.button(
-        text=texts.BTN_CANCEL,
+        text=texts.BTN_PAYMENT_CANCEL,
         callback_data=f"cancel_delete_device:{profile_id}",
     )
 

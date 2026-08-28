@@ -13,7 +13,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = PROJECT_ROOT / "bot" / "texts"
 
 # Explicit canonical alias registry for intentional aliases (e.g. backward compat or semantic alias)
-CANONICAL_ALIASES: dict[str, str] = {}
+CANONICAL_ALIASES: dict[str, str] = {
+    "NOTIF_OPEN_CONNECTIONS_BUTTON": "BTN_CONNECTIONS",
+    "NOTIF_OPEN_SUBSCRIPTION_BUTTON": "BTN_MY_SUBSCRIPTION",
+    "NOTIF_BUY_NEW_SUBSCRIPTION_BUTTON": "BTN_BUY_ACCESS",
+}
 
 
 class TextsConsistencyTests(unittest.TestCase):

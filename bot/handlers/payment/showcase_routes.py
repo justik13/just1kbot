@@ -28,6 +28,7 @@ from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from bot.formatters import (
+    format_plural,
     format_subscription_date,
     get_tariff_display_name,
     get_tariff_group_name,
@@ -290,7 +291,7 @@ async def select_tariff(
                 shortage_line=shortage,
             ),
             get_balance_change_start_keyboard(
-                str(intent.quote.public_id), "payment_change_tariff"
+                str(intent.quote.public_id), "payment_change_tariff", is_shortage=intent.shortage > 0
             ),
         )
         await callback.answer(show_alert=False)
@@ -349,7 +350,7 @@ async def select_tariff(
         callback.message.chat.id,
         text,
         get_balance_purchase_start_keyboard(
-            str(intent.quote.public_id), back_to
+            str(intent.quote.public_id), back_to, is_shortage=intent.shortage > 0
         ),
     )
 
@@ -530,8 +531,8 @@ async def select_tariff_type(
                 callback.bot,
                 callback.message.chat.id,
                 texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=profiles_count,
-                    new_limit=device_limit,
+                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
                 ),
                 get_back_button(back_to),
             )

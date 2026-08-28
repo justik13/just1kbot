@@ -136,13 +136,14 @@ async def _build_connections_screen(
 
             flag = server.country_flag if server else texts.EMOJI_GLOBE
             server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
-            location_label = f"{flag} {safe(server_name)}"
-
-            btn_text = f"{location_label} — {safe(profile.device_name)}"
+            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
+            btn_text = f"{flag} {server_name} — {raw_device_name}"
             builder.button(
                 text=btn_text,
                 callback_data=f"manage_device:{profile.id}",
             )
+
+            location_label = f"{flag} {safe(server_name)}"
 
             traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
             last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
@@ -170,7 +171,6 @@ async def _build_connections_screen(
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,
         url="https://stats.uptimerobot.com/de5q3DNc95",
-        style="primary",
     )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,

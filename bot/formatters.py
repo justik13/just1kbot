@@ -70,6 +70,24 @@ def format_admin_breadcrumbs(*crumbs: str) -> str:
 
 
 
+def pluralize(count: int, forms: tuple[str, str, str]) -> str:
+    """Russian noun pluralization: forms = (one, few, many)."""
+    n = abs(count) % 100
+    n1 = n % 10
+    if 11 <= n <= 19:
+        return forms[2]
+    if n1 == 1:
+        return forms[0]
+    if 2 <= n1 <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def format_plural(count: int, forms: tuple[str, str, str]) -> str:
+    """Format count with pluralized noun, e.g. '1 день', '2 дня', '5 дней'."""
+    return f"{count} {pluralize(count, forms)}"
+
+
 def get_tariff_display_name(device_limit: int) -> str:
     if device_limit <= 2:
         return texts.TARIFF_DISPLAY_BASIC

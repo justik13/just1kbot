@@ -121,7 +121,7 @@ class TestBotKeyboardsFullCoverage(unittest.TestCase):
         self.assertIsNotNone(kb_history)
         self.assertEqual(
             [button.callback_data for row in kb_history.inline_keyboard for button in row],
-            ["back_to_main_menu"],
+            ["menu_balance", "back_to_main_menu"],
         )
 
         kb_ref = user_kb.get_referral_keyboard(referral_link="https://t.me/bot?start=123")

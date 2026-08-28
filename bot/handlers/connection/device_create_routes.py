@@ -85,7 +85,7 @@ async def _await_profile_ready(
 def _get_no_subscription_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
-    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 

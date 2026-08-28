@@ -2,7 +2,7 @@ import logging
 import re
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import (
     CallbackQuery,
@@ -166,7 +166,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
     return text, kb
 
 
-@router.message(CommandStart())
+@router.message(CommandStart(), StateFilter("*"))
 async def cmd_start(
     message: Message,
     state: FSMContext,
@@ -220,7 +220,7 @@ async def cmd_start(
 
     if is_new_user:
         builder = InlineKeyboardBuilder()
-        builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
 
         await render_hub(
             message.bot,

@@ -223,7 +223,7 @@ def get_balance_history_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_BACK, callback_data=f"balance_history:{page - 1}")
+            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"balance_history:{page - 1}")
         else:
             builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 
@@ -311,11 +311,12 @@ def get_topup_payment_keyboard(
 
 
 def get_balance_purchase_start_keyboard(
-    quote_public_id: str, _back_callback: str | None = None
+    quote_public_id: str, _back_callback: str | None = None, is_shortage: bool = False
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_BUY_FROM_BALANCE
     builder.button(
-        text=texts.BTN_PAYMENT_BUY_FROM_BALANCE,
+        text=action_text,
         callback_data=f"balance_purchase_review:{quote_public_id}",
         style="success",
     )
@@ -345,11 +346,12 @@ def get_balance_purchase_confirm_keyboard(
 
 
 def get_balance_change_start_keyboard(
-    quote_public_id: str, back_callback: str
+    quote_public_id: str, back_callback: str, is_shortage: bool = False
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE
     builder.button(
-        text=texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE,
+        text=action_text,
         callback_data=f"balance_change_review:{quote_public_id}",
         style="success",
     )

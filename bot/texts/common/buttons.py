@@ -119,6 +119,8 @@ BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION = "📖 Инструкция по Раздел
 
 BTN_OPEN_USER_CARD = "👤 Открыть карточку"
 
+BTN_PAGINATION_PREV = "◀️ Назад"
+
 BTN_PAGINATION_NEXT = "Вперед ▶️"
 
 BTN_PAYMENT_CANCEL = "❌ Отмена"

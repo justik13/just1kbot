@@ -225,7 +225,7 @@ async def render_device_screen(
         if show_delete:
             builder.button(text=texts.BTN_DELETE_DEVICE, callback_data=f"request_delete_device:{profile.id}")
         builder.button(text=texts.BTN_BACK_TO_DEVICES, callback_data="back_to_connections")
-        builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+        builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
         builder.adjust(1)
         keyboard = builder.as_markup()
 

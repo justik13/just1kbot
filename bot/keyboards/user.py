@@ -6,9 +6,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot import texts
 
 
-def get_history_keyboard() -> InlineKeyboardMarkup:
+def get_history_keyboard(back_callback: str = "menu_balance") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=back_callback,
+    )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
@@ -63,7 +67,7 @@ def get_referrals_list_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_BACK, callback_data=f"referrals_list:{page - 1}")
+            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
         else:
             builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 

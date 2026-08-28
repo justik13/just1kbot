@@ -452,6 +452,10 @@ async def accept_custom_amount(
         return
 
     raw = (message.text or "").strip()
+    if not raw or raw.startswith("/"):
+        await state.clear()
+        return
+
     if not raw.isascii() or not raw.isdigit():
         prompt = texts.TOPUP_CUSTOM_AMOUNT_PROMPT.format(
             minimum=get_settings().BALANCE_MIN_TOPUP_RUB,
