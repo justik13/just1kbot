@@ -56,16 +56,8 @@ def get_device_keyboard(
 
 def get_alt_connection_keyboard(
     profile_id: int,
-    amnezia_bridge_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
-    if amnezia_bridge_url:
-        builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA,
-            url=amnezia_bridge_url,
-            style="primary",
-        )
 
     builder.button(
         text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE,

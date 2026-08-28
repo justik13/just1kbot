@@ -13,7 +13,6 @@ from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
-from integrations.incy import SubscriptionTokenService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
@@ -26,15 +25,6 @@ DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 _PROTOCOL_DISPLAY = {
     AMNEZIA_PROTOCOL: "AmneziaWG",
 }
-
-
-def can_show_incy_subscription(read_only: bool = False) -> bool:
-    """Check if INCY subscription button should be displayed."""
-    if read_only:
-        return False
-    return SubscriptionTokenService.is_enabled()
-
-
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
@@ -131,6 +121,13 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
+    if not read_only and quota_profiles_count < device_limit:
+        builder.button(
+            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
+            callback_data="add_device",
+            style="success",
+        )
+
     if visible_profiles_count == 0:
         rendered += texts.CONNECTION_EMPTY
     else:
@@ -169,19 +166,6 @@ async def _build_connections_screen(
                 rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
-
-    if not read_only and quota_profiles_count < device_limit:
-        builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
-            callback_data="add_device",
-            style="success",
-        )
-
-    if can_show_incy_subscription(read_only=read_only):
-        builder.button(
-            text=texts.CONNECTION_CONFIG_COMMON_ADD_V_INCY_IOS_ANDROID,
-            callback_data="menu_incy_subscription",
-        )
 
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,

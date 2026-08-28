@@ -55,8 +55,8 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
 
 async def _await_profile_ready(
     profile_id: int,
-    timeout_seconds: float = 4.0,
-    poll_interval: float = 0.25,
+    timeout_seconds: float = 6.0,
+    poll_interval: float = 0.1,
 ) -> VPNProfile | None:
     """Poll for profile to become active or fail within a monotonic UI wait window.
 

@@ -77,7 +77,6 @@ DEVICE_KEY_TOO_LONG_CAPTION = """🔑 <b>Ключ подключения для 
 DEVICE_MANAGE_HEADER = """📱 <b>{device_name}</b>
 
 🌍 Локация: <b>{country_display}</b>
-📡 Протокол: <b>{protocol}</b>
 📊 Трафик: <b>{traffic_total}</b>
 ⏱ Активность: <b>{last_connected}</b>"""
 

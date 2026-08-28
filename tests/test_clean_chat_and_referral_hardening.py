@@ -98,7 +98,8 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
 
         dummy_user = User(id=1, telegram_id=12345, username="testuser", first_name="Test")
 
-        with patch("services.subscription.SubscriptionService.process_onboarding", AsyncMock(return_value=dummy_user)), \
+        with patch("bot.handlers.start.get_user_by_telegram_id", AsyncMock(return_value=None)), \
+             patch("services.subscription.SubscriptionService.process_onboarding", AsyncMock(return_value=dummy_user)), \
              patch("bot.handlers.start._update_user_profile_if_changed", AsyncMock(return_value=dummy_user)), \
              patch("bot.handlers.start._ensure_bot_unblocked", AsyncMock()), \
              patch("bot.handlers.start.render_hub", AsyncMock()):

@@ -4,6 +4,7 @@ from __future__ import annotations
 from bot.texts.user.hub import (
     BOT_START_DESCRIPTION,
     CURRENCY_RUB_SYMBOL,
+    HUB_BONUS_LINE_FORMAT,
     HUB_HEADER,
     PAYMENT_STATUS_PENDING_ICON,
     USER_HUB_START,
@@ -45,6 +46,7 @@ __all__ = [
     "BTN_TOS",
     "CURRENCY_RUB_SYMBOL",
     "FAQ_TEXT",
+    "HUB_BONUS_LINE_FORMAT",
     "HUB_HEADER",
     "PAYMENT_STATUS_PENDING_ICON",
     "PRIVACY_POLICY_URL",

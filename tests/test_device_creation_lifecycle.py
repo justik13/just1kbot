@@ -38,8 +38,6 @@ def _make_valid_vpn_uri() -> str:
 class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         super().setUp()
-        self.bridge_patch = patch("services.amnezia_bridge_token_service.AmneziaBridgeTokenService.is_enabled", return_value=False)
-        self.bridge_patch.start()
         self.admin_patch = patch("utils.admin.is_admin", return_value=False)
         self.admin_patch.start()
         self.maint_patch = patch("services.maintenance_service.MaintenanceService.can_user_perform_action", return_value=True)
@@ -63,7 +61,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
         self.sub_patch.stop()
         self.maint_patch.stop()
         self.admin_patch.stop()
-        self.bridge_patch.stop()
         super().tearDown()
 
     async def test_1_create_fast_success_renders_ready_device(self):
@@ -1600,24 +1597,6 @@ class TestDeviceCreationLifecycle(unittest.IsolatedAsyncioTestCase):
             callback.answer.assert_called_once_with(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
         finally:
             _creating_devices.pop(999, None)
-
-    async def test_44_show_incy_subscription_missing_user_renders_hub(self):
-        """show_incy_subscription renders error hub when db_user is None."""
-        from bot.handlers.connection.incy_routes import show_incy_subscription
-
-        callback = MagicMock()
-        callback.from_user.id = 100
-        callback.bot = MagicMock()
-        callback.message.chat.id = 100
-        callback.answer = AsyncMock()
-        state = AsyncMock()
-        session = AsyncMock()
-        with patch("integrations.incy.bot_routes.render_hub", new=AsyncMock()) as mock_render:
-            await show_incy_subscription(callback, state, session, db_user=None)
-
-            callback.answer.assert_called_once_with(show_alert=False)
-            mock_render.assert_called_once()
-            self.assertEqual(mock_render.call_args.args[2], texts.ERROR_USER_NOT_FOUND)
 
     async def test_51_admin_server_filter_includes_create_failed_and_excludes_deleting(self):
         """_apply_user_filters for server uses PROFILE_LIST_HIDDEN_STATUSES."""

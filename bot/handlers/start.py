@@ -136,6 +136,12 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         else:
             inviter_line = texts.INVITED_BY_ID_LINE.format(referrer_id=db_user.referred_by)
 
+    bonus_line = (
+        texts.HUB_BONUS_LINE_FORMAT.format(bonus_balance=int(balance.bonus_available))
+        if balance.bonus_available > 0
+        else ""
+    )
+
     text = texts.HUB_HEADER.format(
         name=name,
         telegram_id=db_user.telegram_id,
@@ -145,7 +151,7 @@ async def _build_hub_text_and_kb(session: AsyncSession, db_user: User) -> tuple[
         devices_count=len(profiles),
         device_limit=db_user.device_limit or 0,
         real_balance=int(balance.real_available),
-        bonus_balance=int(balance.bonus_available),
+        bonus_line=bonus_line,
         inviter_line=inviter_line,
     )
 
@@ -183,6 +189,8 @@ async def cmd_start(
         pass
 
     telegram_id = message.from_user.id
+    existing_user = await get_user_by_telegram_id(session, telegram_id)
+    is_new = existing_user is None or getattr(existing_user, "is_deleted", False)
 
     ref_id = parse_referral_id(command.args) if command.args else None
 
@@ -213,16 +221,26 @@ async def cmd_start(
 
     await _ensure_bot_unblocked(session, telegram_id)
 
-    builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+    if is_new:
+        builder = InlineKeyboardBuilder()
+        builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
 
-    await render_hub(
-        message.bot,
-        message.chat.id,
-        texts.WELCOME_TEXT,
-        builder.as_markup(),
-        force_new=True,
-    )
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            texts.WELCOME_TEXT,
+            builder.as_markup(),
+            force_new=True,
+        )
+    else:
+        text, kb = await _build_hub_text_and_kb(session, user)
+        await render_hub(
+            message.bot,
+            message.chat.id,
+            text,
+            kb,
+            force_new=True,
+        )
 
 
 @router.message(F.text & F.text.in_(texts.LEGACY_REPLY_BUTTON_TRIGGER_TEXTS))

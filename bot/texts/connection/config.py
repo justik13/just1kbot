@@ -17,27 +17,30 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE = """1. Сохра�
 CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = """1. В приложении статус сменится на <b>«Подключено»</b>;
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = "• В приложении статус изменится на <b>«Подключено»</b>;"
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = """2. В строке состояния появится значок подключения (или 🔑);
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В строке состояния появится значок соединения (или 🔑);"
 
 CONNECTION_CONFIG_DEVICE_VIEW_3_LIBO_NAZHMITE_KNOPKU_OTKRYT = """
 3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."""
 
-CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = """3. На сайте <code>2ip.ru</code> страна сменится на локацию сервера;
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
 
-CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "4. Популярные сервисы и зарубежные сайты открываются быстро и стабильно."
+CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "• <b>AmneziaVPN / DefaultVPN</b>: нажмите «🔄 Другой способ подключения» ниже, "
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "Нажмите «🔄 Другой способ подключения» ниже, чтобы получить файлы (.vpn / .conf) или ссылку быстрого импорта."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = "• <b>AmneziaVPN / DefaultVPN</b>: скопируйте ключ выше → "
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
+<b>2. Откройте приложение:</b>
+   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → нажмите «У меня есть данные для подключения» (или «+») → «Вставить ключ».
+   • <b>DefaultVPN</b> (iOS) → нажмите «+» → «Import from Clipboard».
+<b>3. Нажмите «Подключиться».</b>
 
-CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = "чтобы получить файл конфигурации или ключ."
+💡 <i>Для роутеров (Keenetic, OpenWrt), клиента AmneziaWG или скачивания файлов (.vpn / .conf) нажмите <b>«🔄 Другой способ подключения»</b> ниже.</i>"""
+
+CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = ""
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
@@ -84,13 +87,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инс
 
 CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO = "• <b>📖 Инструкция</b> — пошаговое руководство по настройке"
 
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = """
+CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться (по шагам):</b>"
 
-🚀 <b>Как подключиться и проверить работу:</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = """✅ <b>Как понять, что всё работает:</b>
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = "✅ <b>Как понять, что всё работает:</b>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 
@@ -100,11 +99,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN = """🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA = """
+CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA = ""
 
-💡 <b>Кнопки управления:</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>👆 Нажмите на моноширинный ключ выше, чтобы скопировать его.</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>📋 Нажмите на поле с ключом, чтобы скопировать.</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T = """• <b>Не рекомендуется использовать торренты/P2P.</b>
 """

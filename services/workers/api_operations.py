@@ -14,6 +14,20 @@ logger = logging.getLogger(__name__)
 PROCESS_ID = uuid.uuid4()
 MAX_CONCURRENCY = 5
 
+_wake_event: asyncio.Event | None = None
+
+
+def get_wake_event() -> asyncio.Event:
+    global _wake_event
+    if _wake_event is None:
+        _wake_event = asyncio.Event()
+    return _wake_event
+
+
+def notify_api_operation_enqueued() -> None:
+    event = get_wake_event()
+    event.set()
+
 
 async def api_operations_loop(shutdown_event: asyncio.Event) -> None:
     worker_id = f"api-operations-{PROCESS_ID}"
@@ -57,10 +71,22 @@ async def api_operations_loop(shutdown_event: asyncio.Event) -> None:
                 if shutdown_task not in done:
                     shutdown_task.cancel()
             else:
+                wake_event = get_wake_event()
+                wake_task = asyncio.create_task(wake_event.wait())
+                shutdown_task = asyncio.create_task(shutdown_event.wait())
                 try:
-                    await asyncio.wait_for(shutdown_event.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    pass
+                    done, _ = await asyncio.wait(
+                        {wake_task, shutdown_task},
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if wake_task in done:
+                        wake_event.clear()
+                finally:
+                    if not wake_task.done():
+                        wake_task.cancel()
+                    if not shutdown_task.done():
+                        shutdown_task.cancel()
     finally:
         if in_flight:
             await asyncio.gather(*in_flight, return_exceptions=True)

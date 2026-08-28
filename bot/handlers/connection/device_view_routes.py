@@ -29,9 +29,6 @@ from database.repositories.profiles_repo import (
     get_profile_by_id,
 )
 from database.repositories.servers_repo import get_server_by_id
-from integrations.amnezia_bridge import (
-    AmneziaBridgeTokenService,
-)
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime, format_traffic
@@ -98,17 +95,6 @@ def can_show_config_actions(profile) -> bool:
     return getattr(profile, "provisioning_status", "") in ("active", "pending_update", "update_failed")
 
 
-def can_show_amnezia_bridge(profile, server) -> bool:
-    """Check if 1-click 'Open in Amnezia' button should be displayed."""
-    if not can_show_config_actions(profile) or not server:
-        return False
-    return (
-        getattr(server, "is_active", False) is True
-        and getattr(server, "protocol", "") == AMNEZIA_PROTOCOL
-        and AmneziaBridgeTokenService.is_enabled()
-    )
-
-
 def can_show_delete_action(profile) -> bool:
     """Check if device deletion is permissible in the current state (Fail-Closed)."""
     if not profile:
@@ -156,14 +142,12 @@ async def render_device_screen(
     server = await get_server_by_id(session, profile.server_id)
     flag = server.country_flag if server else texts.EMOJI_GLOBE
     server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
-    protocol = _format_protocol(server.protocol if server else None)
 
     country_display = f"{flag} {server_name}".strip() if flag else server_name
 
     rendered = texts.DEVICE_MANAGE_HEADER.format(
         device_name=safe(profile.device_name),
         country_display=safe(country_display),
-        protocol=protocol,
         traffic_total=format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0)),
         last_connected=(
             format_datetime(profile.last_connected)
@@ -214,41 +198,20 @@ async def render_device_screen(
                 )
 
         if display_key:
-            amnezia_howto = (
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE
-            )
+            amnezia_howto = texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY
         else:
-            amnezia_howto = (
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA
-            )
+            amnezia_howto = texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE
         guide_block = (
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT+
-            f"{amnezia_howto}\n"+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_INCY_IOS_ANDROID_OTKROYTE_PODK+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI+
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE
+            f"\n\n<blockquote expandable>{texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT.strip()}\n"
+            f"{amnezia_howto.strip()}</blockquote>\n\n"
+            f"<blockquote expandable>{texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET.strip()}\n"
+            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS.strip()}\n"
+            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT.strip()}\n"
+            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI.strip()}\n"
+            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE.strip()}</blockquote>"
         )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
-
-        btn_info_lines = [
-            texts.CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA,
-        ]
-        if config_ready:
-            btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V)
-        btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE)
-        btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO)
-        if show_delete:
-            btn_info_lines.append(texts.CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO)
-
-        btn_info = "\n".join(btn_info_lines)
-        if len(rendered) + len(btn_info) <= 4000:
-            rendered += btn_info
 
         keyboard = get_device_keyboard(
             profile.id,
@@ -511,15 +474,6 @@ async def alt_connection(
         )
         return
 
-    amnezia_bridge_url = None
-    if can_show_amnezia_bridge(profile, server):
-        settings = get_settings()
-        amnezia_bridge_url = AmneziaBridgeTokenService.build_bridge_url(
-            domain=settings.DOMAIN,
-            profile_id=profile.id,
-            user_id=db_user.id,
-        )
-
     vpn_file = BufferedInputFile(vpn_content.encode("utf-8"), filename=f"{safe_device_name}.vpn")
     conf_file = BufferedInputFile(conf_content.encode("utf-8"), filename=f"{safe_device_name}.conf")
 
@@ -612,20 +566,18 @@ async def alt_connection(
                     f"{key_block}"
                 )
 
-            bridge_hint = texts.CONNECTION_CONFIG_DEVICE_VIEW_3_LIBO_NAZHMITE_KNOPKU_OTKRYT if amnezia_bridge_url else ""
             alt_guide_text = (
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA.format(safe_profile_device_name=safe(profile.device_name))+
                 texts.CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY+
                 f"{files_info}"+
-                texts.CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER+
-                f"{bridge_hint}"
+                texts.CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER
             )
 
             try:
                 await _append_hub_message_unlocked(
                     callback.bot, callback.message.chat.id,
                     text=alt_guide_text,
-                    reply_markup=get_alt_connection_keyboard(profile.id, amnezia_bridge_url),
+                    reply_markup=get_alt_connection_keyboard(profile.id),
                     parse_mode="HTML",
                 )
                 guide_sent = True

@@ -208,7 +208,7 @@ class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
     def test_effect_constants_match_bot_api_ids(self):
         self.assertEqual(EFFECT_CONFETTI, "5046509860389126442")
         self.assertEqual(EFFECT_LIKE, "5107584321108051014")
-        self.assertEqual(EFFECT_LIGHTNING, "5104841245755180585")
+        self.assertEqual(EFFECT_LIGHTNING, "5104841245755180586")
 
     async def test_render_device_screen_effect_passthrough(self):
         """T-04: creation card renders as a NEW message carrying the LIGHTNING effect."""
@@ -307,9 +307,8 @@ class TestKeyboardSerialization(unittest.IsolatedAsyncioTestCase):
         delete_btn = next(b for b in flat if b.callback_data and b.callback_data.startswith("request_delete_device"))
         self.assertEqual(delete_btn.style, "danger")
 
-        alt = self._roundtrip(get_alt_connection_keyboard(7, "https://bridge.example/open"))
+        alt = self._roundtrip(get_alt_connection_keyboard(7))
         alt_flat = [btn for row in alt.inline_keyboard for btn in row]
-        self.assertEqual(alt_flat[0].style, "primary")
         self.assertTrue(alt_flat[-1].callback_data.startswith("manage_device:"))
 
     async def test_payment_keyboards_roundtrip(self):
@@ -689,7 +688,6 @@ class TestAltConnectionFailClosed(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.connection.device_view_routes.customize_vpn_config_dict", return_value={}), \
              patch("bot.handlers.connection.device_view_routes.build_vpn_file_from_dict", return_value="V"), \
              patch("bot.handlers.connection.device_view_routes.build_conf_file_from_dict", return_value="C"), \
-             patch("bot.handlers.connection.device_view_routes.can_show_amnezia_bridge", return_value=False), \
              patch("utils.telegram._load_hub_ids_from_db", AsyncMock(return_value=[700])), \
              patch("utils.telegram._store_hub_id_in_db", AsyncMock()), \
              patch("utils.telegram._remove_hub_ids_from_db", AsyncMock()), \

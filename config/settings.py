@@ -67,12 +67,6 @@ class Settings(BaseSettings):
     DOMAIN: str
     SSL_EMAIL: str
 
-    # ── Amnezia Bridge ──
-    AMNEZIA_BRIDGE_HMAC_SECRET: str | None = Field(default=None, repr=False)
-
-    # ── INCY / Subscription Feed ──
-    INCY_SUBSCRIPTION_ENABLED: bool = Field(default=True)
-
     # Removed greenfield settings are declared only so stale .env files fail.
     AMNEZIA_API_URL: str | None = None
     AMNEZIA_API_KEY: str | None = None
@@ -131,13 +125,20 @@ class Settings(BaseSettings):
     @field_validator("ADMIN_IDS", mode="before")
     @classmethod
     def validate_admin_ids(cls, value: Any) -> list[int]:
-        if isinstance(value, str):
+        if isinstance(value, int):
+            value = [value]
+        elif isinstance(value, str):
             value = value.strip().strip("'").strip('"')
             import json
             try:
-                value = json.loads(value)
+                parsed = json.loads(value)
+                if isinstance(parsed, int):
+                    value = [parsed]
+                elif isinstance(parsed, list):
+                    value = parsed
             except Exception:
-                pass
+                if value.isdigit():
+                    value = [int(value)]
         if not isinstance(value, list) or not value or any(not isinstance(item, int) or item <= 0 for item in value):
             raise ValueError("ADMIN_IDS must contain positive Telegram IDs")
         return value
@@ -274,29 +275,6 @@ class Settings(BaseSettings):
         ):
             raise ValueError("SUPPORT_USERNAME must be a real Telegram username")
         return username
-
-    @field_validator("AMNEZIA_BRIDGE_HMAC_SECRET", mode="before")
-    @classmethod
-    def validate_amnezia_bridge_hmac_secret(cls, value: Any) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError("AMNEZIA_BRIDGE_HMAC_SECRET must be a string")
-        if not value:
-            return None
-        if value != value.strip():
-            raise ValueError(
-                "AMNEZIA_BRIDGE_HMAC_SECRET must not contain leading or trailing whitespace"
-            )
-        if re.fullmatch(r"^[0-9a-fA-F]{64}$", value) is None:
-            raise ValueError(
-                "AMNEZIA_BRIDGE_HMAC_SECRET must be exactly 64 hexadecimal characters"
-            )
-        if value.lower() in {"0" * 64, "a" * 64, "f" * 64, "1" * 64}:
-            raise ValueError(
-                "AMNEZIA_BRIDGE_HMAC_SECRET cannot be a trivial repeating placeholder"
-            )
-        return value
 
 
 @lru_cache

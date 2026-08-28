@@ -74,14 +74,6 @@ class HttpRateLimiter:
         self.buckets.clear()
 
 
-amnezia_bridge_rate_limiter = HttpRateLimiter()
-subscription_feed_rate_limiter = HttpRateLimiter(
-    rate_per_minute=RATE_LIMIT_REQUESTS_PER_MINUTE,
-    burst=RATE_LIMIT_BURST,
-    max_entries=10000,
-)
-
-
 def _is_trusted_proxy_peer(
     peer_ip: str,
     trusted_proxies: str | set | list | None = None,
