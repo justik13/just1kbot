@@ -10,6 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from config.enums import TariffQuoteOperation
 from database.models import AuditLog, TariffQuote, TariffVersion, User
 
 
@@ -110,16 +111,16 @@ async def get_purchase_logs_paginated(
             if target_ver.tariff and target_ver.tariff.name:
                 tariff_name = target_ver.tariff.name
             dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_hours // 24
+            dur_days = target_ver.duration_days
         else:
             tariff_name = "Тариф"
             dev_limit = 1
             dur_days = 30
 
         op_title_map = {
-            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
-            "renew": texts.PAYMENT_OP_TITLE_RENEW,
-            "change": texts.PAYMENT_OP_TITLE_CHANGE,
+            TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
+            TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
+            TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
         }
         op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
 
@@ -248,15 +249,15 @@ async def get_purchase_log_by_id(
             if target_ver.tariff and target_ver.tariff.name:
                 tariff_name = target_ver.tariff.name
             dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_hours // 24
+            dur_days = target_ver.duration_days
         else:
             tariff_name = "Тариф"
             dev_limit = 1
             dur_days = 30
         op_title_map = {
-            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
-            "renew": texts.PAYMENT_OP_TITLE_RENEW,
-            "change": texts.PAYMENT_OP_TITLE_CHANGE,
+            TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
+            TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
+            TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
         }
         op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
 

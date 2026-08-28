@@ -25,6 +25,14 @@ from bot.texts.user.referral import (
 )
 
 from bot.texts.user.support import (
+    AMNEZIA_DOCS,
+    AMNEZIA_DOWNLOAD_MIRROR,
+    AMNEZIA_GITHUB_LATEST,
+    AMNEZIA_IOS_RU,
+    AMNEZIA_OFFICIAL_SITE,
+    AMNEZIA_SPLIT_TUNNELING,
+    AMNEZIA_WIN_INSTALL,
+    AMNEZIA_WIN_UPDATE,
     BTN_PRIVACY_POLICY,
     BTN_TOS,
     FAQ_TEXT,
@@ -41,6 +49,14 @@ from bot.texts.user.support import (
 )
 
 __all__ = [
+    "AMNEZIA_DOCS",
+    "AMNEZIA_DOWNLOAD_MIRROR",
+    "AMNEZIA_GITHUB_LATEST",
+    "AMNEZIA_IOS_RU",
+    "AMNEZIA_OFFICIAL_SITE",
+    "AMNEZIA_SPLIT_TUNNELING",
+    "AMNEZIA_WIN_INSTALL",
+    "AMNEZIA_WIN_UPDATE",
     "BOT_START_DESCRIPTION",
     "BTN_PRIVACY_POLICY",
     "BTN_TOS",

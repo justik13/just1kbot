@@ -11,16 +11,6 @@ from utils.telegram import render_hub
 router = Router()
 
 
-AMNEZIA_DOWNLOAD_MIRROR = "https://storage.googleapis.com/amnezia/amnezia.org?m-path=/downloads"
-AMNEZIA_GITHUB_LATEST = "https://github.com/amnezia-vpn/amnezia-client/releases/latest"
-AMNEZIA_OFFICIAL_SITE = "https://storage.googleapis.com/amnezia/amnezia.org"
-AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
-AMNEZIA_SPLIT_TUNNELING = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/vpn-split-tunneling/"
-AMNEZIA_IOS_RU = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-amneziavpn-on-ios/"
-AMNEZIA_WIN_INSTALL = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/installing-app-on-windows/"
-AMNEZIA_WIN_UPDATE = "https://storage.googleapis.com/amnezia/docs?m-path=/documentation/instructions/application-update-on-windows/"
-
-
 def _support_keyboard(username: str, telegram_id: int | None = None):
     builder = InlineKeyboardBuilder()
 
@@ -118,7 +108,7 @@ async def show_support_help(callback: CallbackQuery):
     )
     builder.button(
         text=texts.BTN_AMNEZIA_DOCS,
-        url=AMNEZIA_DOCS,
+        url=texts.AMNEZIA_DOCS,
     )
     builder.button(
         text=texts.BTN_BACK,
@@ -145,15 +135,15 @@ async def show_help_download(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_DOWNLOAD_MIRROR,
-        url=AMNEZIA_DOWNLOAD_MIRROR,
+        url=texts.AMNEZIA_DOWNLOAD_MIRROR,
     )
     builder.button(
         text=texts.BTN_LATEST_VERSION_GITHUB,
-        url=AMNEZIA_GITHUB_LATEST,
+        url=texts.AMNEZIA_GITHUB_LATEST,
     )
     builder.button(
         text=texts.BTN_OFFICIAL_SITE_AMNEZIA,
-        url=AMNEZIA_OFFICIAL_SITE,
+        url=texts.AMNEZIA_OFFICIAL_SITE,
     )
     builder.button(
         text=texts.BTN_BACK,
@@ -180,7 +170,7 @@ async def show_help_ios(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_OPEN_IOS_INSTRUCTION,
-        url=AMNEZIA_IOS_RU,
+        url=texts.AMNEZIA_IOS_RU,
     )
     builder.button(
         text=texts.BTN_BACK,
@@ -207,11 +197,11 @@ async def show_help_windows(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_INSTALL_WINDOWS,
-        url=AMNEZIA_WIN_INSTALL,
+        url=texts.AMNEZIA_WIN_INSTALL,
     )
     builder.button(
         text=texts.BTN_UPDATE_WINDOWS,
-        url=AMNEZIA_WIN_UPDATE,
+        url=texts.AMNEZIA_WIN_UPDATE,
     )
     builder.button(
         text=texts.BTN_BACK,
@@ -238,7 +228,7 @@ async def show_help_split(callback: CallbackQuery):
     builder = InlineKeyboardBuilder()
     builder.button(
         text=texts.BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION,
-        url=AMNEZIA_SPLIT_TUNNELING,
+        url=texts.AMNEZIA_SPLIT_TUNNELING,
     )
     builder.button(
         text=texts.BTN_BACK,

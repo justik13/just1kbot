@@ -20,6 +20,9 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_config_constants_import(self):
         self._assert_isolated_code("import config.constants")
 
+    def test_config_enums_import(self):
+        self._assert_isolated_code("import config.enums")
+
     def test_services_user_cache_import(self):
         self._assert_isolated_code("import services.user_cache")
 

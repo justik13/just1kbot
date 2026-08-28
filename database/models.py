@@ -26,36 +26,36 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from config.constants import AMNEZIA_PROTOCOL, ServerHealthState
+from config.constants import AMNEZIA_PROTOCOL
+from config.enums import (
+    AccountLedgerEntryType,
+    AccountReservationStatus,
+    AccountReservationType,
+    ApiOperationStatus,
+    ApiOperationType,
+    EntitlementEntryType,
+    PaidValueEntryType,
+    PaymentCheckoutStatus,
+    PaymentDisputeStatus,
+    PaymentFulfillmentStatus,
+    PaymentProviderStatus,
+    PaymentReconciliationStatus,
+    ProviderRefundOperationStatus,
+    ServerHealthState,
+    TariffQuoteOperation,
+    TariffQuoteStatus,
+    WebhookInboxStatus,
+)
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
 
-API_OPERATION_TYPES = (
-    "create_peer",
-    "update_peer",
-    "delete_peer",
-)
-
-API_OPERATION_STATUSES = (
-    "pending",
-    "processing",
-    "retry",
-    "succeeded",
-    "dead",
-    "cancelled",
-)
-PAYMENT_PROVIDER_STATUSES = ("not_created", "creating", "pending", "waiting_for_capture", "succeeded", "canceled", "refunded", "unknown", "manual_review")
-PAYMENT_FULFILLMENT_STATUSES = ("not_ready", "processing", "succeeded", "failed", "reversed", "manual_review")
-PAYMENT_RECONCILIATION_STATUSES = ("ok", "required", "mismatch", "manual_review")
-PAYMENT_QUEUE_STATUSES = ("pending", "processing", "retry", "succeeded", "dead", "cancelled")
-ACCOUNT_LEDGER_ENTRY_TYPES = (
-    "payment_credit",
-    "purchase_debit",
-    "purchase_reversal",
-    "refund_debit",
-    "chargeback_debit",
-    "admin_adjustment",
-)
+API_OPERATION_TYPES = tuple(s.value for s in ApiOperationType)
+API_OPERATION_STATUSES = tuple(s.value for s in ApiOperationStatus)
+PAYMENT_PROVIDER_STATUSES = tuple(s.value for s in PaymentProviderStatus)
+PAYMENT_FULFILLMENT_STATUSES = tuple(s.value for s in PaymentFulfillmentStatus)
+PAYMENT_RECONCILIATION_STATUSES = tuple(s.value for s in PaymentReconciliationStatus)
+PAYMENT_QUEUE_STATUSES = tuple(s.value for s in ApiOperationStatus)
+ACCOUNT_LEDGER_ENTRY_TYPES = tuple(s.value for s in AccountLedgerEntryType)
 
 
 class Base(DeclarativeBase):
@@ -341,6 +341,10 @@ class TariffVersion(Base):
         server_default=text("now()")
     )
     tariff = relationship("Tariff", foreign_keys=[tariff_id])
+
+    @property
+    def duration_days(self) -> int:
+        return self.duration_hours // 24
 
 
 class TariffQuote(Base):

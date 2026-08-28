@@ -3,6 +3,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from config.enums import PaymentProviderStatus
 from database.models import Payment, PaymentEvent
 
 
@@ -82,8 +83,11 @@ async def mark_payment_as_cancelled(
 ) -> bool:
     result = await session.execute(
         update(Payment)
-        .where(Payment.id == payment_id, Payment.provider_status == "pending")
-        .values(provider_status="canceled")
+        .where(
+            Payment.id == payment_id,
+            Payment.provider_status == PaymentProviderStatus.PENDING,
+        )
+        .values(provider_status=PaymentProviderStatus.CANCELED)
     )
     await session.flush()
     return result.rowcount > 0
