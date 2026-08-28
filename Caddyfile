@@ -17,7 +17,7 @@
         Cross-Origin-Opener-Policy "same-origin"
         -Server
     }
-    @limited_body_paths path /amnezia/open/* /sub/* /sub/open/* /subscription/* /subscription/open/* /health
+    @limited_body_paths path /health
     handle @limited_body_paths {
         request_body {
             max_size 2KB

@@ -703,5 +703,32 @@ class TestAltConnectionFailClosed(unittest.IsolatedAsyncioTestCase):
         mock_del.assert_not_awaited()                         # old hub [700] preserved
 
 
+class TestIntegrationsAndCleanupVerification(unittest.TestCase):
+    def test_integrations_all_matches_defined_attributes(self):
+        """Verify integrations.__all__ contains only actual attributes and imports cleanly."""
+        import integrations
+        for name in integrations.__all__:
+            self.assertTrue(
+                hasattr(integrations, name),
+                f"integrations.__all__ contains missing attribute '{name}'",
+            )
+
+    def test_caddyfile_has_no_legacy_endpoints(self):
+        """Verify Caddyfile does not contain deleted legacy endpoints."""
+        from pathlib import Path
+        caddyfile_path = Path(__file__).resolve().parent.parent / "Caddyfile"
+        content = caddyfile_path.read_text(encoding="utf-8")
+        self.assertNotIn("/amnezia/open", content)
+        self.assertNotIn("/sub/", content)
+        self.assertNotIn("/subscription/", content)
+
+    def test_device_rename_routes_does_not_use_payment_cancel(self):
+        """Verify device_rename_routes does not use BTN_PAYMENT_CANCEL."""
+        from pathlib import Path
+        routes_path = Path(__file__).resolve().parent.parent / "bot" / "handlers" / "connection" / "device_rename_routes.py"
+        content = routes_path.read_text(encoding="utf-8")
+        self.assertNotIn("BTN_PAYMENT_CANCEL", content)
+
+
 if __name__ == "__main__":
     unittest.main()

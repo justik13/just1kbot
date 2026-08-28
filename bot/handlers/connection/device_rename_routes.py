@@ -77,7 +77,7 @@ async def rename_device_start(
         callback.bot,
         callback.message.chat.id,
         texts.DEVICE_RENAME_PROMPT,
-        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_PAYMENT_CANCEL),
+        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_BACK_TO_DEVICE),
     )
 
 
@@ -176,7 +176,7 @@ async def rename_device_process(
             message.bot,
             message.chat.id,
             f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
@@ -186,7 +186,7 @@ async def rename_device_process(
             message.bot,
             message.chat.id,
             f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
@@ -196,7 +196,7 @@ async def rename_device_process(
             message.bot,
             message.chat.id,
             f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
@@ -215,7 +215,7 @@ async def rename_device_process(
                 message.bot,
                 message.chat.id,
                 f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-                get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
+                get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
             )
             return
 
@@ -250,7 +250,7 @@ async def rename_device_process(
             message.bot,
             message.chat.id,
             f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
-            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_PAYMENT_CANCEL),
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 

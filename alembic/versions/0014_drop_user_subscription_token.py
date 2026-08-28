@@ -28,14 +28,8 @@ def upgrade() -> None:
 
     has_col = False
     if bind:
-        has_col = bool(
-            bind.execute(
-                sa.text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name = 'users' AND column_name = 'subscription_token'"
-                )
-            ).scalar()
-        )
+        insp = sa.inspect(bind)
+        has_col = any(c["name"] == "subscription_token" for c in insp.get_columns("users"))
     if has_col:
         op.drop_column("users", "subscription_token")
 
@@ -45,14 +39,8 @@ def downgrade() -> None:
     bind = op.get_bind()
     has_col = False
     if bind:
-        has_col = bool(
-            bind.execute(
-                sa.text(
-                    "SELECT 1 FROM information_schema.columns "
-                    "WHERE table_name = 'users' AND column_name = 'subscription_token'"
-                )
-            ).scalar()
-        )
+        insp = sa.inspect(bind)
+        has_col = any(c["name"] == "subscription_token" for c in insp.get_columns("users"))
     if not has_col:
         op.add_column(
             "users",
