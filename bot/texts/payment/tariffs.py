@@ -157,7 +157,7 @@ PAYMENT_SUBSCRIPTION_INACTIVE = """⚠️ Смена тарифа с перер�
 
 Ваша подписка неактивна. Перейдите в раздел «Купить подписку» для оформления нового тарифа."""
 
-PAYMENT_TARIFFS_SERVICES_WORKERS_PAYMENTS = "🧪"
+PAYMENT_TARIFFS_TEST_ICON = "🧪"
 
 PAYMENT_TARIFF_CHANGE_HEADER_CARD = """💱 <b>Смена тарифа</b>
 
@@ -193,3 +193,13 @@ PAYMENT_OP_TITLE_PURCHASE = '🛒 Покупка тарифа'
 PAYMENT_OP_TITLE_RENEW = '⏳ Продление тарифа'
 PAYMENT_OP_TITLE_CHANGE = '🔄 Смена тарифа'
 PAYMENT_OP_TITLE_DEFAULT = '🛒 Покупка'
+
+DEFAULT_TARIFFS_SEEDS = [
+    {"name": "Базовый", "description": "Для смартфонов и ПК", "duration_days": 7, "device_limit": 2, "price_rub": 35, "sort_order": 10},
+    {"name": "Базовый", "description": "Для смартфонов и ПК", "duration_days": 30, "device_limit": 2, "price_rub": 90, "sort_order": 11},
+    {"name": "Базовый", "description": "Для смартфонов и ПК", "duration_days": 90, "device_limit": 2, "price_rub": 240, "sort_order": 12},
+    {"name": "Семейный", "description": "Для всей семьи", "duration_days": 30, "device_limit": 5, "price_rub": 180, "sort_order": 20},
+    {"name": "Семейный", "description": "Для всей семьи", "duration_days": 90, "device_limit": 5, "price_rub": 480, "sort_order": 21},
+    {"name": "Pro", "description": "Для ТВ, роутеров, смарт приставок", "duration_days": 30, "device_limit": 10, "price_rub": 320, "sort_order": 30},
+    {"name": "Pro", "description": "Для ТВ, роутеров, смарт приставок", "duration_days": 90, "device_limit": 10, "price_rub": 850, "sort_order": 31},
+]

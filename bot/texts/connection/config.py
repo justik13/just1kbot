@@ -9,133 +9,11 @@ CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY = "⏱ не было активно
 
 CONNECTION_CONFIG_COMMON_STATUS_SERVEROV = "🌐 Статус серверов"
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE = """1. Сохраните один из прикреплённых файлов конфигурации:
-"""
+CONNECTION_TIME_DAYS_HOURS_FORMAT = "{v0} дн. {v1} ч."
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).
-"""
+CONNECTION_TIME_HOURS_MINUTES_FORMAT = "{v0} ч. {v1} мин."
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = "• В приложении статус изменится на <b>«Подключено»</b>;"
-
-CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
-
-CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В строке состояния появится значок соединения (или 🔑);"
-
-CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
-
-CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
-
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
-<b>2. Откройте приложение:</b>
-   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → «+» (или «У меня есть данные») → «Вставить ключ».
-   • <b>DefaultVPN</b> (iOS) → «+» → «Import from Clipboard».
-<b>3. Нажмите «Подключиться».</b>
-
-✅ <b>Как понять, что всё работает:</b>
-• В приложении статус сменится на <b>«Подключено»</b> (значок соединения или 🔑 вверху);
-• На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
-
-CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
-
-🔄 <b>Конфигурация устройства обновляется...</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_DELETE_OTOZVAT_KEY_I_OSVOBO = "• <b>🗑 Удалить</b> — отозвать ключ и освободить слот"
-
-CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_NE_NAYDENO_ILI_BYLO = "Устройство не найдено или было удалено"
-
-CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_SOZDAETSYA_NA_SERVE = """
-
-⏳ <b>Устройство создаётся на сервере...</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_UDALYAETSYA_S_SERVE = """
-
-🗑 <b>Устройство удаляется с сервера...</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """🔄 <b>Другой способ подключения: {safe_profile_device_name}</b>
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY = """Если прямая вставка ключа не сработала или ваше приложение требует файл:
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_IDET_AVTOMATICHESKOE_VOSSTANOV = """
-
-⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инструкции и справка AmneziaVPN</b>
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO = "• <b>📖 Инструкция</b> — пошаговое руководство по настройке"
-
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться и проверить:</b>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = "✅ <b>Как понять, что всё работает:</b>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
-
-🔑 <b>Ключ подключения:</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN = """🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>📋 Нажмите на поле с ключом, чтобы скопировать.</i>"
-
-CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T = """• <b>Не рекомендуется использовать торренты/P2P.</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_DELETE_DEVICE_NA = """
-
-⚠️ <b>Не удалось удалить устройство на сервере. Попробуйте повторить.</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_OBNOVIT_KONFIGURATSI = """
-
-⚠️ <b>Не удалось обновить конфигурацию на сервере (действует текущая версия).</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_PRIKREPIT_FAYLY_KONF = """⚠️ <i>Не удалось прикрепить файлы конфигурации.</i>
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NE_UDALOS_SOZDAT_DEVICE_NA = """
-
-❌ <b>Не удалось создать устройство на сервере.</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_OTKROYTE_PRILOZHENIE_NAZHMITE = "откройте приложение → нажмите «Вставить» → «Подключиться»."
-
-CONNECTION_CONFIG_DEVICE_VIEW_PRAVILA_I_OSOBENNOSTI_RABOTY = """⚠️ <b>Правила и особенности работы:</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_REKOMENDUEM_ISPOLZOVAT_PROTOKO = """• <b>Рекомендуем использовать протокол AmneziaWG для максимальной защиты от блокировок.</b>
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_RENAME_IZMENIT_NAZVANIE = "• <b>✏️ Переименовать</b> — изменить название устройства"
-
-CONNECTION_CONFIG_DEVICE_VIEW_SELECT_NUZHNUYU_TEMU_BELOW = "Выберите нужную тему ниже:"
-
-CONNECTION_CONFIG_DEVICE_VIEW_SKACHIVANIYU_KLIENTA_I_NASTROY = """скачиванию клиента и настройке сервиса.
-
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_VPN_FOR_PRILOZHENIYA_AMNEZIAV = """   • <code>.vpn</code> — для приложения <b>AmneziaVPN</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_V_ETOM_RAZDELE_VY_NAYDETE_RUKO = "В этом разделе вы найдёте руководства по подключению, "
-
-CONNECTION_CONFIG_ESTIMATED_TIME_HOURS = "{v0} дн. {v1} ч."
-
-CONNECTION_CONFIG_PROTOCOL_FORMAT = "{v0} ч. {v1} мин."
-
-CONNECTION_CONFIG_UNKNOWN_PROTOCOL = "➕ Добавить устройство"
+CONNECTION_ADD_DEVICE_BUTTON = "➕ Добавить устройство"
 
 CONNECTION_EMPTY = "<i>У вас пока нет подключённых устройств.</i>"
 
@@ -186,6 +64,4 @@ DEVICE_STATUS_UPDATE_ERROR = "ошибка обновления"
 EMOJI_GLOBE = "🌍"
 
 LABEL_UNKNOWN_CAP = "Неизвестно"
-
-CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
 

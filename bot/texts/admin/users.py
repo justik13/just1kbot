@@ -407,10 +407,11 @@ STATUS_EXPIRED_LABEL = "истекла"
 TIME_DAYS_FULL_FORMAT = "{days} дней"
 
 
-ADMIN_USERS_DEVICE_ROW_HEADER = "  • 📱 <b>{name}</b>\n"
-
-
 ADMIN_USERS_FILTER_SERVER_BUTTON = "🖥 {flag} {server_name}"
 ADMIN_USERS_FILTER_COUNTRY_BUTTON = "🌐 {country}"
 ADMIN_USERS_FILTER_TARIFF_BUTTON = "💎 {tariff_group}"
 ADMIN_FILTER_FLAG_FALLBACK = "🌐"
+
+ADMIN_USER_AUDIT_ROW_FORMAT = "  <code>[{dt}]</code> {action_text}{details_text}"
+
+ADMIN_USER_DEVICE_ROW_FORMAT = "  🖥 <b>{name}</b>\n"

@@ -39,7 +39,6 @@ from bot.texts.admin.users import (
 )
 from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
 from bot.texts.connection.config import (
-    CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE as CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE,
     )
 from bot.texts.runtime.alerts import (
     ALERT_QUEUE_RECOVERED as ALERT_QUEUE_RECOVERED,
@@ -88,23 +87,24 @@ def get_all_text_keys() -> set[str]:
 
 
 def get_text(key: str, default=None, **kwargs):
-    """Return a text by key and optionally format it with keyword arguments.
-
-    Missing keys return *default* (None by default) to preserve the historical
-    "probe" API. Formatting errors are surfaced loudly instead of silently
-    returning the unformatted template, so placeholder typos cannot hide.
-    """
+    """Return a text by key and optionally format it with keyword arguments."""
     value = globals().get(key, default)
-    if kwargs and isinstance(value, str):
+    if value is None:
+        if kwargs and default is None:
+            raise ValueError(f"Missing text key {key!r} but kwargs were provided.")
+        return default
+        
+    if not isinstance(value, str):
+        return value
+        
+    if kwargs:
         try:
             return value.format(**kwargs)
         except (KeyError, IndexError, ValueError) as exc:
-            raise ValueError(
-                f"Invalid placeholders for text key {key!r}: {exc}."
-            ) from exc
+            raise ValueError(f"Invalid placeholders for text key {key!r}: {exc}.") from exc
+    elif "{" in value and "}" in value:
+        import string
+        if any(fname is not None for _, fname, _, _ in string.Formatter().parse(value)):
+            raise ValueError(f"Missing kwargs for text key {key!r} which requires formatting.")
+            
     return value
-
-
-def reload_texts() -> None:
-    """No-op backwards compatibility helper for static text catalogue."""
-    return None

@@ -183,7 +183,7 @@ async def start_add_device(
     for server in servers:
         flag = server.country_flag or texts.EMOJI_GLOBE
         builder.button(
-            text=texts.DEVICE_CREATING_SPINNER_NOTICE.format(v0=flag, value_1=server.name),
+            text=texts.DEVICE_SERVER_SELECTION_LABEL.format(v0=flag, value_1=server.name),
             callback_data=f"select_server:{server.id}",
         )
 

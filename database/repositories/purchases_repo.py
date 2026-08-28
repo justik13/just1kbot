@@ -145,14 +145,14 @@ async def get_purchase_logs_paginated(
 
     # Map AuditLog manual admin actions
     op_audit_map = {
-        "GRANT": ("grant", "🎁 Выдача админом"),
-        "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
-        "EXTEND": ("extend", "⏳ Продление админом"),
-        "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
-        "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
-        "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
-        "REDUCE": ("reduce", "✂️ Сокращение админом"),
-        "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
+        "GRANT": ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", "")),
+        "ADMIN_SUB_GRANT": ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", "")),
+        "EXTEND": ("extend", AUDIT_ACTIONS.get("ADMIN_SUB_EXTEND", "")),
+        "ADMIN_SUB_EXTEND": ("extend", AUDIT_ACTIONS.get("ADMIN_SUB_EXTEND", "")),
+        "CHANGE_TARIFF": ("change", AUDIT_ACTIONS.get("ADMIN_SUB_CHANGE", "")),
+        "ADMIN_SUB_CHANGE": ("change", AUDIT_ACTIONS.get("ADMIN_SUB_CHANGE", "")),
+        "REDUCE": ("reduce", AUDIT_ACTIONS.get("ADMIN_SUB_REDUCE", "")),
+        "ADMIN_SUB_REDUCE": ("reduce", AUDIT_ACTIONS.get("ADMIN_SUB_REDUCE", "")),
     }
     for log in audit_results:
         u = users_by_tg_id.get(log.target_id) or users_by_id.get(log.target_id)
@@ -161,7 +161,7 @@ async def get_purchase_logs_paginated(
         user_label = f"@{username}" if username else f"ID: {tg_id}"
 
         op_type, op_title = op_audit_map.get(
-            log.action, ("grant", "🎁 Выдача админом")
+            log.action, ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", ""))
         )
 
         tariff_name = "Подписка"
@@ -295,17 +295,17 @@ async def get_purchase_log_by_id(
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
         op_audit_map = {
-            "GRANT": ("grant", "🎁 Выдача админом"),
-            "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
-            "EXTEND": ("extend", "⏳ Продление админом"),
-            "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
-            "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
-            "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
-            "REDUCE": ("reduce", "✂️ Сокращение админом"),
-            "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
+            "GRANT": ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", "")),
+            "ADMIN_SUB_GRANT": ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", "")),
+            "EXTEND": ("extend", AUDIT_ACTIONS.get("ADMIN_SUB_EXTEND", "")),
+            "ADMIN_SUB_EXTEND": ("extend", AUDIT_ACTIONS.get("ADMIN_SUB_EXTEND", "")),
+            "CHANGE_TARIFF": ("change", AUDIT_ACTIONS.get("ADMIN_SUB_CHANGE", "")),
+            "ADMIN_SUB_CHANGE": ("change", AUDIT_ACTIONS.get("ADMIN_SUB_CHANGE", "")),
+            "REDUCE": ("reduce", AUDIT_ACTIONS.get("ADMIN_SUB_REDUCE", "")),
+            "ADMIN_SUB_REDUCE": ("reduce", AUDIT_ACTIONS.get("ADMIN_SUB_REDUCE", "")),
         }
         op_type, op_title = op_audit_map.get(
-            log.action, ("grant", "🎁 Выдача админом")
+            log.action, ("grant", AUDIT_ACTIONS.get("ADMIN_SUB_GRANT", ""))
         )
         tariff_name = "Подписка"
         dev_limit = 1

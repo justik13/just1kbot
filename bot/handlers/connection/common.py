@@ -67,10 +67,10 @@ def _format_grace_countdown(deletion_time) -> str:
     hours = delta.seconds // 3600
 
     if days > 0:
-        return texts.CONNECTION_CONFIG_ESTIMATED_TIME_HOURS.format(v0=days, v1=hours)
+        return texts.CONNECTION_TIME_DAYS_HOURS_FORMAT.format(v0=days, v1=hours)
 
     minutes = (delta.seconds % 3600) // 60
-    return texts.CONNECTION_CONFIG_PROTOCOL_FORMAT.format(v0=hours, v1=minutes)
+    return texts.CONNECTION_TIME_HOURS_MINUTES_FORMAT.format(v0=hours, v1=minutes)
 
 
 async def _render_maintenance(
@@ -123,7 +123,7 @@ async def _build_connections_screen(
 
     if not read_only and quota_profiles_count < device_limit:
         builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
+            text=texts.CONNECTION_ADD_DEVICE_BUTTON,
             callback_data="add_device",
             style="success",
         )

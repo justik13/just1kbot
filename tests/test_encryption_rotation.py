@@ -34,8 +34,7 @@ BASE_MOCK_ENV = {
     "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
     "YOOKASSA_WEBHOOK_PORT": "8080",
     "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-    "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-    "TRUSTED_PROXIES": "127.0.0.1,::1,172.16.0.0/12",
+    "TRUSTED_PROXIES": "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
     "DATABASE_URL": "postgresql+asyncpg://user:pass@localhost:5432/db",
 }
 

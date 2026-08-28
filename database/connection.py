@@ -117,24 +117,21 @@ async def _seed_default_data() -> None:
         # Seed tariffs
         result = await session.execute(select(func.count(Tariff.id)))
         if result.scalar_one() == 0:
-            for tariff in DEFAULT_TARIFFS:
+            for tariff in texts.DEFAULT_TARIFFS_SEEDS:
                 session.add(Tariff(**tariff, is_active=True))
             await session.commit()
             logging.info("Default tariffs seeded successfully.")
 
         # Seed maintenance mode
         from database.models import MaintenanceMode
+        from bot import texts
         result = await session.execute(select(func.count(MaintenanceMode.id)))
         if result.scalar_one() == 0:
             session.add(
                 MaintenanceMode(
                     id=1,
                     is_enabled=False,
-                    message=(
-                        "⚠️ Ведутся технические работы. "
-                        "Некоторые действия временно недоступны. "
-                        "Попробуйте позже."
-                    ),
+                    message=texts.MAINTENANCE_DEFAULT_MESSAGE,
                 )
             )
             await session.commit()

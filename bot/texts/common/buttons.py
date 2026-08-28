@@ -23,8 +23,6 @@ BTN_BACK = "← Назад"
 
 BTN_BACK_TO_DEVICE = "← Назад в устройство"
 
-BTN_BACK_TO_SUPPORT = "← Назад в поддержку"
-
 BTN_BALANCE = "💰 Баланс"
 
 BTN_BROADCAST_ACTIVE = "🟢 Активным подпискам"
@@ -175,7 +173,6 @@ BUTTON_CUSTOM_AMOUNT = "Другая сумма"
 
 BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
-BUTTON_REFERRAL_LIST = "👥 Список рефералов"
 BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 
 BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"
