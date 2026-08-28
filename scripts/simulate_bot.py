@@ -92,7 +92,7 @@ from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
 from config.constants import AMNEZIA_PROTOCOL
-from config.settings import Settings, get_settings
+from config.settings import Settings
 import database.connection as db_conn
 from database.connection import DEFAULT_TARIFFS, session_scope
 from database.models import (
@@ -609,7 +609,7 @@ async def run_simulation(args: argparse.Namespace):
     for mod in list(sys.modules.values()):
         if mod and hasattr(mod, "get_settings"):
             try:
-                setattr(mod, "get_settings", lambda: mock_settings)
+                mod.get_settings = lambda: mock_settings
             except Exception:
                 pass
 

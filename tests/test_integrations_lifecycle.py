@@ -4,9 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from aiogram import Router
 from aiohttp import web
-from aiohttp.test_utils import make_mocked_request
 
 from config.settings import get_settings
 from integrations import (

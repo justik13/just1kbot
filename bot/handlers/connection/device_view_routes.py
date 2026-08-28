@@ -16,13 +16,12 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import AMNEZIA_PROTOCOL, TELEGRAM_MESSAGE_LIMIT
+from bot.constants import TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import (
     get_alt_connection_keyboard,
     get_back_button,
     get_device_keyboard,
 )
-from config.settings import get_settings
 from database.models import User
 from database.repositories.profiles_repo import (
     ALLOWED_DELETE_STATES,
@@ -51,7 +50,7 @@ from utils.vpn_parser import (
     decode_vpn_uri_to_json,
 )
 
-from .common import _format_protocol, _render_connections
+from .common import _render_connections
 
 # Kept in sync with bot/handlers/support.py::AMNEZIA_DOCS
 _AMNEZIA_DOCS = "https://storage.googleapis.com/amnezia/docs?m-path=/"
