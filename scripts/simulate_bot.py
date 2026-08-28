@@ -396,13 +396,17 @@ class SimulationAutoSeedMiddleware:
                 select(User).where(User.telegram_id == user.id)
             )
             if not db_user:
+                    tariff = await session.scalar(
+                        select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.id.asc()).limit(1)
+                    )
+                    tariff_id = tariff.id if tariff else None
                     # Create user record
                     db_user = User(
                         telegram_id=user.id,
                         username=user.username or f"user_{user.id}",
                         first_name=user.first_name or "Tester",
                         device_limit=5,
-                        current_tariff_id=4,  # Family (5 devices, 30 days)
+                        current_tariff_id=tariff_id,
                         subscription_end=now_utc() + timedelta(days=28),
                         created_at=now_utc() - timedelta(days=2),
                     )
@@ -668,12 +672,15 @@ async def run_simulation(args: argparse.Namespace):
 
     # Seed baseline tariffs and servers if not present
     async with session_factory() as session:
-        existing_tariff = await session.scalar(select(Tariff.id).limit(1))
-        if not existing_tariff:
-            tariff_id_seq = 1
-            for t_data in DEFAULT_TARIFFS:
+        for t_data in DEFAULT_TARIFFS:
+            existing = await session.scalar(
+                select(Tariff).where(
+                    Tariff.duration_days == t_data["duration_days"],
+                    Tariff.device_limit == t_data["device_limit"],
+                )
+            )
+            if not existing:
                 t = Tariff(
-                    id=tariff_id_seq,
                     name=t_data["name"],
                     description=t_data.get("description"),
                     duration_days=t_data["duration_days"],
@@ -683,26 +690,33 @@ async def run_simulation(args: argparse.Namespace):
                     is_active=True,
                 )
                 session.add(t)
-                tariff_id_seq += 1
-            await session.commit()
-
-        existing_tv = await session.scalar(select(TariffVersion.id).limit(1))
-        if not existing_tv:
-            tariff_id_seq = 1
-            for t_data in DEFAULT_TARIFFS:
+                await session.flush()
                 tv = TariffVersion(
-                    id=tariff_id_seq,
-                    tariff_id=tariff_id_seq,
+                    tariff_id=t.id,
                     version_number=1,
-                    name_snapshot=t_data["name"],
-                    duration_hours=t_data["duration_days"] * 24,
-                    device_limit=t_data["device_limit"],
-                    price_rub=Decimal(t_data["price_rub"]),
+                    name_snapshot=t.name,
+                    duration_hours=t.duration_days * 24,
+                    device_limit=t.device_limit,
+                    price_rub=Decimal(t.price_rub),
                     currency="RUB",
                 )
                 session.add(tv)
-                tariff_id_seq += 1
-            await session.commit()
+            else:
+                existing_tv = await session.scalar(
+                    select(TariffVersion).where(TariffVersion.tariff_id == existing.id)
+                )
+                if not existing_tv:
+                    tv = TariffVersion(
+                        tariff_id=existing.id,
+                        version_number=1,
+                        name_snapshot=existing.name,
+                        duration_hours=existing.duration_days * 24,
+                        device_limit=existing.device_limit,
+                        price_rub=Decimal(existing.price_rub),
+                        currency="RUB",
+                    )
+                    session.add(tv)
+        await session.commit()
 
         existing_server = await session.scalar(select(Server.id).limit(1))
         if not existing_server:
