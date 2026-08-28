@@ -225,6 +225,10 @@ class TextsConsistencyTests(unittest.TestCase):
 
         for base_dir in scanned_dirs:
             for py_file in base_dir.rglob("*.py"):
+                if "integrations" in base_dir.parts:
+                    with open(py_file, 'r', encoding='utf-8') as f:
+                        if 'aiogram' not in f.read():
+                            continue
                 if "texts" in py_file.parts:
                     continue
                 content = py_file.read_text(encoding="utf-8")
@@ -380,6 +384,7 @@ class TextsConsistencyTests(unittest.TestCase):
             PROJECT_ROOT / "bot" / "handlers",
             PROJECT_ROOT / "bot" / "keyboards",
             PROJECT_ROOT / "services" / "workers",
+            PROJECT_ROOT / "integrations",
         ]
 
         
@@ -500,6 +505,10 @@ class TextsConsistencyTests(unittest.TestCase):
                 
         for base_dir in scanned_dirs:
             for py_file in base_dir.rglob("*.py"):
+                if "integrations" in base_dir.parts:
+                    with open(py_file, 'r', encoding='utf-8') as f:
+                        if 'aiogram' not in f.read():
+                            continue
                 content = py_file.read_text(encoding="utf-8")
                 tree = ast.parse(content, filename=str(py_file))
 
@@ -519,7 +528,7 @@ class TextsConsistencyTests(unittest.TestCase):
         self.assertEqual(
             violations,
             [],
-            "Found hardcoded user-facing strings across handlers/keyboards/workers:\n"
+            "Found hardcoded user-facing strings across handlers/keyboards/workers/integrations:\n"
             + "\n".join(violations),
         )
 

@@ -206,3 +206,28 @@ INCY_SUBSCRIPTION_UNAVAILABLE = "⚠️ Подписка INCY временно �
 LABEL_UNKNOWN_CAP = "Неизвестно"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
+
+CONNECTION_INCY_SUBSCRIPTION_INFO = """🖥 <b>Подключение через профиль INCY [⚠️ Экспериментально]</b>
+
+Это отдельный сервер, не привязанный к вашим постоянным маскам устройств. Он работает <b>только</b> в приложении INCY (<b>iOS / Android</b>).
+
+<b>🌐 Как настроить на телефоне (iOS / Android):</b>
+1. Установите приложение <b>INCY</b> (App Store / Google Play).
+2. Вернитесь в <b>«🤖 Бот INCY»</b> и нажмите кнопку ниже.
+3. Если приложение не открылось, то <b>«🔗 Скопируйте ссылку»</b> - INCY автоматически перехватит скопированную ссылку из буфера обмена.
+4. Выберите нужный сервер в приложении.
+
+<b>Ваша персональная ссылка:</b>
+<code>{sub_url}</code>
+
+<i>⚠️ Обратите внимание: на Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (скачав .vpn файл), а на других версиях (Windows 7/8/ARM, macOS 12/13) - <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>
+
+<i>⚠️ При создании или удалении обычного устройства оно обновится в списке серверов приложения INCY автоматически.</i>"""
+
+BTN_INCY_OPEN = "🤖 Открыть INCY"
+BTN_INCY_COPY_LINK = "🔗 Скопировать ссылку"
+BTN_INCY_ROTATE_LINK = "🔄 Обновить ссылку"
+BTN_INCY_BACK_TO_DEVICES = "🔙 Назад к устройствам"
+ALERT_INCY_ROTATE_SUCCESS = "🔄 Ссылка успешно обновлена! Старая ссылка аннулирована."
+ALERT_INCY_ROTATE_ERROR = "Ошибка при обновлении ссылки. Попробуйте позже."
+
