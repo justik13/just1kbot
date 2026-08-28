@@ -78,11 +78,11 @@ PAYMENT_PURCHASE_CONFIRMATION_CARD = """✅ <b>Подтверждение: {oper
 
 Тариф: <b>{tariff_name}</b>
 Срок: <b>{duration_days} дней</b>
-Лимит устройств: <b>{value_3}</b>
-Цена: <b>{value_4} ₽</b>
+Лимит устройств: <b>{device_limit}</b>
+Цена: <b>{price} ₽</b>
 
-Баланс до покупки: <b>{value_5} ₽</b>
-Баланс после покупки: <b>{value_6} ₽</b>"""
+Баланс до покупки: <b>{balance_before} ₽</b>
+Баланс после покупки: <b>{balance_after} ₽</b>"""
 
 PAYMENT_PURCHASE_EXPIRED_RETRY = "Операция устарела. Выберите тариф заново."
 
@@ -104,13 +104,13 @@ PAYMENT_PURCHASE_RENEW_COMPLETED = "Продление выполнено"
 
 PAYMENT_PURCHASE_STATE_CHANGED_RETRY = "Состояние подписки изменилось. Начните операцию заново."
 
-PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{amount_rub}</b>
+PAYMENT_PURCHASE_SUCCESS_CARD = """🎉 <b>{operation_title}</b>
 
 Тариф: <b>{tariff_name}</b>
 Срок: {duration_days} дней
-Списано: <b>{value_3} ₽</b>
-💰 Баланс: <b>{value_4} ₽</b>
-🎁 Бонусный баланс: <b>{value_5} ₽</b>"""
+Списано: <b>{charged} ₽</b>
+💰 Баланс: <b>{real_balance} ₽</b>
+🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 
 PAYMENT_QUICK_RENEW_HEADER = """🔄 <b>Продление доступа</b>
 
@@ -161,13 +161,13 @@ PAYMENT_TARIFFS_SERVICES_WORKERS_PAYMENTS = "🧪"
 
 PAYMENT_TARIFF_CHANGE_HEADER_CARD = """💱 <b>Смена тарифа</b>
 
-Новый тариф: <b>{amount_rub}</b>
-Лимит устройств: <b>{tariff_name}</b>
+Новый тариф: <b>{tariff_name}</b>
+Лимит устройств: <b>{device_limit}</b>
 Срок после конвертации: <b>{duration_days}</b>
-Доплата: <b>{value_3} ₽</b>
+Доплата: <b>{due} ₽</b>
 
-Баланс: <b>{value_4} ₽</b>
-После смены: <b>{value_5} ₽</b>{value_6}
+Баланс: <b>{balance_before} ₽</b>
+После смены: <b>{balance_after} ₽</b>{shortage_line}
 
 Остаточная стоимость подписки используется только в этом расчёте и не зачисляется на свободный баланс."""
 

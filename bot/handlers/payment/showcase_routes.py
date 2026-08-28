@@ -277,7 +277,15 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(amount_rub=get_tariff_display_name(device_limit), tariff_name=device_limit, duration_days=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
+            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(
+                tariff_name=get_tariff_display_name(device_limit),
+                device_limit=device_limit,
+                duration_days=_hours_text(resulting_hours),
+                due=due,
+                balance_before=before,
+                balance_after=after,
+                shortage_line=shortage,
+            ),
             get_balance_change_start_keyboard(
                 str(intent.quote.public_id), "payment_change_tariff"
             ),

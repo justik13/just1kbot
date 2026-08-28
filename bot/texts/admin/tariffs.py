@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 ADMIN_TARIFF_BTN_BACK_TO_LIST = "← К списку тарифов"
+ADMIN_TARIFF_BTN_DISABLE = "🔴 Выключить"
 ADMIN_TARIFF_BTN_EDIT_PRICE = "✏️ Изменить цену ₽"
+ADMIN_TARIFF_BTN_ENABLE = "🟢 Включить"
 
 ADMIN_TARIFF_CARD_TEMPLATE = """🛠 Админка › 💰 Тарифы › <b>Тариф</b>
 <b>ID:</b> {tariff_id}

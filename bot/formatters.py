@@ -6,6 +6,7 @@ can read canonical texts from ``bot.texts`` (the SSOT catalogue). The lower
 """
 
 from bot import texts
+from utils.telegram import safe
 
 
 def format_audit_details(details: str | None) -> str:
@@ -33,7 +34,7 @@ def format_audit_details(details: str | None) -> str:
                 kv_pairs[k.strip()] = v.strip()
 
     if not kv_pairs:
-        return f" ({details})"
+        return f" ({safe(details)})"
 
     labels = texts.AUDIT_DETAIL_LABELS
 
@@ -48,10 +49,12 @@ def format_audit_details(details: str | None) -> str:
         elif k == "text":
             text_str = str(v)
             val = f'"{text_str[:40]}..."' if len(text_str) > 40 else f'"{text_str}"'
+            val = safe(val)
         elif k == "username":
             val = f"@{v}" if v and not str(v).startswith("@") else str(v or texts.PLACEHOLDER_DASH)
+            val = safe(val)
         else:
-            val = str(v)
+            val = safe(str(v))
 
         label = labels.get(k, k)
         formatted_parts.append(f"{label}: {val}")

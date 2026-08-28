@@ -24,9 +24,9 @@ def get_admin_tariff_card_keyboard(
     )
 
     if is_active:
-        status_text = texts.BTN_DISABLE_SERVER
+        status_text = texts.ADMIN_TARIFF_BTN_DISABLE
     else:
-        status_text = texts.BTN_ENABLE_SERVER_CARD
+        status_text = texts.ADMIN_TARIFF_BTN_ENABLE
     builder.button(
         text=status_text,
         callback_data=f"admin_tariff_toggle:{tariff_id}",

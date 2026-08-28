@@ -20,9 +20,12 @@ class MaintenanceService:
         return await is_maintenance_enabled(session)
 
     @staticmethod
-    async def get_message(session: AsyncSession) -> str | None:
+    async def get_message(session: AsyncSession) -> str:
         maintenance = await get_maintenance_mode(session)
-        return maintenance.message if maintenance is not None else None
+        if maintenance is not None and maintenance.message:
+            return maintenance.message
+        from bot import texts
+        return texts.MAINTENANCE_DEFAULT_MESSAGE
 
     @staticmethod
     async def can_user_perform_action(

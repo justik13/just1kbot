@@ -23,10 +23,7 @@ EXPECTED_FILES = {
     "runtime/__init__.py", "runtime/alerts.py", "runtime/notifications.py",
 }
 
-PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "utils")
-# integrations/ — автономные веб-приложения (incy, amnezia_bridge) с собственным
-# презентационным слоем и HTML-шаблонами. Они не являются текстами Telegram-бота
-# и сознательно выведены за границы SSOT-каталога bot/texts/ (см. ТЗ по SSOT).
+PRODUCTION_DIRS = (ROOT / "bot", ROOT / "services", ROOT / "utils", ROOT / "integrations")
 
 
 def _collect_docstring_node_ids(tree: ast.AST) -> set[int]:
@@ -131,6 +128,10 @@ def _find_missing_text_format_args() -> list[str]:
         for path in base_dir.rglob("*.py"):
             if TEXTS_DIR in path.parents:
                 continue
+            if "integrations" in path.parts:
+                content = path.read_text(encoding="utf-8")
+                if "aiogram" not in content:
+                    continue
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except SyntaxError as exc:
@@ -210,6 +211,10 @@ class TestTextsLayout(unittest.TestCase):
             for path in base_dir.rglob("*.py"):
                 if TEXTS_DIR in path.parents:
                     continue
+                if "integrations" in path.parts:
+                    content = path.read_text(encoding="utf-8")
+                    if "aiogram" not in content:
+                        continue
                 tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
                 violations.extend(
                     _find_cyrillic_literals(path, tree, _collect_docstring_node_ids(tree))

@@ -104,8 +104,14 @@ async def _render_purchase_review(
     after = max(0, before - price)
     tariff_name = get_tariff_display_name(intent.version.device_limit)
     operation = texts.PAYMENT_PURCHASE_OPERATION_RENEW_TITLE if quote.operation_type == "renew" else texts.WORD_PURCHASE
-    text = (
-        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(operation_label=operation.lower(), tariff_name=tariff_name, duration_days=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
+    text = texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(
+        operation_label=operation.lower(),
+        tariff_name=tariff_name,
+        duration_days=intent.version.duration_hours // 24,
+        device_limit=intent.version.device_limit,
+        price=price,
+        balance_before=before,
+        balance_after=after,
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -281,12 +287,12 @@ async def confirm_purchase(
         callback.bot,
         callback.message.chat.id,
         texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
-            amount_rub=operation,
+            operation_title=operation,
             tariff_name=get_tariff_display_name(intent.version.device_limit),
             duration_days=intent.version.duration_hours // 24,
-            value_3=charged,
-            value_4=int(result.balance_after.real_available),
-            value_5=int(result.balance_after.bonus_available),
+            charged=charged,
+            real_balance=int(result.balance_after.real_available),
+            bonus_balance=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
         message_effect_id=EFFECT_CONFETTI,
