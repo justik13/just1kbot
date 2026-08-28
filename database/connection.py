@@ -29,17 +29,6 @@ def _get_db_lock() -> asyncio.Lock:
     return _db_lock
 
 
-DEFAULT_TARIFFS = [
-    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 7,  "device_limit": 2,  "price_rub": 35, "sort_order": 10},
-    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 30, "device_limit": 2,  "price_rub": 90, "sort_order": 11},
-    {"name": "Базовый",  "description": "Телефон и ноутбук",                    "duration_days": 90, "device_limit": 2,  "price_rub": 240, "sort_order": 12},
-    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 30, "device_limit": 5, "price_rub": 180, "sort_order": 20},
-    {"name": "Семейный", "description": "Подключите всю семью",                 "duration_days": 90, "device_limit": 5, "price_rub": 480, "sort_order": 21},
-    {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 30, "device_limit": 10, "price_rub": 320, "sort_order": 30},
-    {"name": "Pro",      "description": "Для офиса или большого парка гаджетов", "duration_days": 90, "device_limit": 10, "price_rub": 850, "sort_order": 31},
-]
-
-
 def _asyncpg_connect_args() -> dict:
     return {
         "timeout": 15,
@@ -120,7 +109,7 @@ async def _seed_default_data() -> None:
         # Seed tariffs
         result = await session.execute(select(func.count(Tariff.id)))
         if result.scalar_one() == 0:
-            for tariff in DEFAULT_TARIFFS:
+            for tariff in texts.DEFAULT_TARIFFS_SEEDS:
                 session.add(Tariff(**tariff, is_active=True))
             await session.commit()
             logging.info("Default tariffs seeded successfully.")
