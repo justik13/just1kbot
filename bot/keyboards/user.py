@@ -6,9 +6,13 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot import texts
 
 
-def get_history_keyboard() -> InlineKeyboardMarkup:
+def get_history_keyboard(back_callback: str = "menu_balance") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    builder.button(
+        text=texts.BTN_BACK,
+        callback_data=back_callback,
+    )
     builder.button(
         text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
@@ -21,14 +25,17 @@ def get_history_keyboard() -> InlineKeyboardMarkup:
 
 def get_referral_keyboard(
     referral_link: str,
+    count: int = 0,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    has_copy = False
     if referral_link and 1 <= len(referral_link) <= 256:
         builder.button(
             text=texts.BUTTON_COPY_REFERRAL,
             copy_text=CopyTextButton(text=referral_link),
         )
+        has_copy = True
     share_text = texts.REFERRAL_SHARE_TEXT
     share_url = f"https://t.me/share/url?url={quote(referral_link, safe='')}&text={quote(share_text, safe='')}"
     builder.button(
@@ -36,7 +43,7 @@ def get_referral_keyboard(
         url=share_url,
     )
     builder.button(
-        text=texts.BUTTON_REFERRAL_LIST,
+        text=texts.BUTTON_REFERRAL_LIST_COUNT.format(count=count),
         callback_data="referrals_list",
     )
     builder.button(
@@ -44,7 +51,10 @@ def get_referral_keyboard(
         callback_data="back_to_main_menu",
     )
 
-    builder.adjust(1, 1, 1, 1)
+    if has_copy:
+        builder.adjust(2, 1, 1)
+    else:
+        builder.adjust(1, 1, 1)
 
     return builder.as_markup()
 
@@ -57,7 +67,7 @@ def get_referrals_list_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_BACK, callback_data=f"referrals_list:{page - 1}")
+            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"referrals_list:{page - 1}")
         else:
             builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 

@@ -119,9 +119,12 @@ BTN_OPEN_SPLIT_TUNNEL_INSTRUCTION = "📖 Инструкция по Раздел
 
 BTN_OPEN_USER_CARD = "👤 Открыть карточку"
 
+BTN_PAGINATION_PREV = "◀️ Назад"
+
 BTN_PAGINATION_NEXT = "Вперед ▶️"
 
-BTN_PAYMENT_CANCEL = "❌ Отмена"
+BTN_CANCEL_ACTION = "❌ Отмена"
+BTN_PAYMENT_CANCEL = BTN_CANCEL_ACTION
 
 BTN_PAYMENT_CHECK = "🔄 Проверить оплату"
 
@@ -166,13 +169,14 @@ BUTTON_CHECK_TOPUP = "🔄 Проверить статус"
 
 BUTTON_CLOSE_TOPUP = "🗂 Закрыть эту ссылку"
 
-BUTTON_COPY_REFERRAL = "📋 Скопировать ссылку"
+BUTTON_COPY_REFERRAL = "📋 Скопировать"
 
 BUTTON_CUSTOM_AMOUNT = "Другая сумма"
 
 BUTTON_OPEN_PAYMENT = "💳 Перейти к оплате"
 
 BUTTON_REFERRAL_LIST = "👥 Список рефералов"
+BUTTON_REFERRAL_LIST_COUNT = "👥 Мои рефералы ({count})"
 
 BUTTON_RESUME_TOPUP = "💳 Продолжить пополнение"
 

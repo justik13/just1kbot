@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards import get_back_button, get_device_keyboard
+from bot.keyboards import get_back_button
 from bot.states import DeviceManagementStates
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import (
@@ -20,7 +20,7 @@ from utils.callbacks import parse_callback_id
 from utils.telegram import EFFECT_LIKE, render_hub, safe
 
 from .common import DEVICE_NAME_REGEX
-from .device_view_routes import can_show_config_actions, can_show_delete_action
+from .device_view_routes import render_device_screen
 
 router = Router()
 
@@ -77,7 +77,7 @@ async def rename_device_start(
         callback.bot,
         callback.message.chat.id,
         texts.DEVICE_RENAME_PROMPT,
-        get_back_button(f"manage_device:{profile_id}"),
+        get_back_button(f"manage_device:{profile_id}", text=texts.BTN_BACK_TO_DEVICE),
     )
 
 
@@ -171,29 +171,32 @@ async def rename_device_process(
     # Strip any user-typed trailing #... to get the clean base name
     cleaned_base = re.sub(r'\s*#\d+$', '', raw_text).strip()
     if not cleaned_base:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED,
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
     if len(cleaned_base) > 16:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base))
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
     if not DEVICE_NAME_REGEX.match(cleaned_base):
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI,
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
@@ -207,11 +210,12 @@ async def rename_device_process(
             and p.server_id == profile.server_id
             and p.device_name.lower() == new_name.lower()
         ):
+            err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
-                get_back_button(f"manage_device:{profile.id}"),
+                f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+                get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
             )
             return
 
@@ -241,11 +245,12 @@ async def rename_device_process(
                 device_name=new_name,
             )
     except IntegrityError:
+        err = texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name))
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
-            get_back_button(f"manage_device:{profile.id}"),
+            f"{err}\n\n{texts.DEVICE_RENAME_PROMPT}",
+            get_back_button(f"manage_device:{profile.id}", text=texts.BTN_BACK_TO_DEVICE),
         )
         return
 
@@ -263,22 +268,16 @@ async def rename_device_process(
         },
     )
 
-    config_ready = can_show_config_actions(profile)
-    show_delete = can_show_delete_action(profile)
-
-    await render_hub(
+    await render_device_screen(
         message.bot,
         message.chat.id,
-        texts.DEVICE_RENAMED_SUCCESS.format(
+        profile,
+        db_user,
+        session,
+        message_effect_id=EFFECT_LIKE,
+        notice=texts.DEVICE_RENAMED_SUCCESS.format(
             device_name=safe(new_name),
         ),
-        get_device_keyboard(
-            profile.id,
-            config_ready=config_ready,
-            show_delete=show_delete,
-        ),
-        message_effect_id=EFFECT_LIKE,
-        force_new=True,
     )
 
     await state.clear()

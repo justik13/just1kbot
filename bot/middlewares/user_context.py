@@ -71,6 +71,7 @@ class UserContextMiddleware(BaseMiddleware):
             if user is None:
                 invalidate_user_cache(telegram_id)
 
+        is_new_user = False
         if user is None:
             stmt = select(User).where(
                 User.telegram_id == telegram_id,
@@ -87,6 +88,7 @@ class UserContextMiddleware(BaseMiddleware):
                 if existing_any is not None and existing_any.is_deleted:
                     user = None
                     set_cached_user_id(telegram_id, None)
+                    is_new_user = True
                 elif existing_any is not None and not existing_any.is_deleted:
                     user = existing_any
                     set_cached_user_id(telegram_id, user.id)
@@ -101,6 +103,7 @@ class UserContextMiddleware(BaseMiddleware):
                                 referred_by=None,
                             )
                         set_cached_user_id(telegram_id, user.id)
+                        is_new_user = True
                         logger.info(
                             "Auto-registered user %s on %s",
                             telegram_id,
@@ -117,9 +120,11 @@ class UserContextMiddleware(BaseMiddleware):
                         else:
                             user = None
                             set_cached_user_id(telegram_id, None)
+                            is_new_user = True
             else:
                 set_cached_user_id(telegram_id, user.id)
 
         data["db_user"] = user
+        data["is_new_user"] = is_new_user
         return await handler(event, data)
 

@@ -43,7 +43,6 @@ jobs:
           YOOKASSA_WEBHOOK_PORT='8080'
           DOMAIN='vpn.example.test'
           SSL_EMAIL='ci@example.test'
-          AMNEZIA_BRIDGE_HMAC_SECRET='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
           BACKUP_AGE_RECIPIENT='$PUBKEY'
           EOF
           echo "DB_PASS=$DB_PASS" >> "$GITHUB_ENV"

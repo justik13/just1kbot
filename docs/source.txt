@@ -1,0 +1,44 @@
+работа с проектом 
+https://github.com/justik13/just1kbot
+https://github.com/kyoresuas/amnezia-api
+https://github.com/amnezia-vpn/amnezia-client
+https://github.com/amnezia-vpn/DefaultVPN
+https://amnezia.org/
+https://docs.amnezia.org/
+
+https://yookassa.ru/developers
+https://yookassa.ru/docs
+
+tg
+https://telegram.org/
+https://telegram.org/faq
+https://core.telegram.org/api
+https://core.telegram.org/bots
+https://core.telegram.org/bots/api
+https://telegram.org/blog
+
+очень полезное
+https://github.com/Vadim-Khristenko/Any-Tech-ARCHITECT
+https://github.com/orgs/amnezia-vpn/repositories
+https://github.com/amnezia-vpn/amneziawg-windows
+https://github.com/amnezia-vpn/amneziawg-windows-client
+https://github.com/amnezia-vpn/amneziawg-android
+https://github.com/amnezia-vpn/amneziawg-apple
+https://www.reddit.com/r/AmneziaVPN/
+https://architect.vai-rice.space/
+
+
+
+то что может помочь в развитие проекта полезная информация(
+https://github.com/PRVTPRO/Amnezia-Web-Panel
+https://github.com/coinman-dev/3ax-ui
+https://github.com/fqof/amneziatgbot
+https://github.com/Vadim-Khristenko/awg-containers-and-tools
+https://github.com/mihsergeev/amnezia-control
+https://github.com/hoaxisr/awg-manager
+https://github.com/fqof/amneziatgbot
+https://github.com/bivlked/amneziawg-installer
+https://github.com/ekuraev/awgram
+https://github.com/kuzzrus/3x-ui-awg
+https://github.com/MHSanaei/3x-ui
+https://github.com/BoriskaGlebov/vpn_bot)

@@ -38,12 +38,6 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_integrations_package_import(self):
         self._assert_isolated_code("import integrations")
 
-    def test_amnezia_bridge_web_routes_import(self):
-        self._assert_isolated_code("import integrations.amnezia_bridge.web_routes")
-
-    def test_services_amnezia_bridge_constants_import(self):
-        self._assert_isolated_code("import services.amnezia_bridge_constants")
-
     def test_database_repositories_clean_imports(self):
         self._assert_isolated_code("import database.repositories.users_repo; import database.repositories.servers_repo")
 
@@ -55,10 +49,6 @@ class CircularImportRegressionTests(unittest.TestCase):
             "import integrations; import utils.vpn_helpers; import bot.main",
             "import utils.vpn_helpers; import integrations; import bot.main",
             "import bot.handlers.webhook; import utils.http_rate_limiter; import integrations",
-            "import services.amnezia_bridge_constants; import utils.http_rate_limiter; import bot.main",
-            "import integrations.amnezia_bridge.constants; import bot.constants; import utils.vpn_helpers",
-            "import config.constants; import utils.http_rate_limiter; import integrations.amnezia_bridge.constants",
-            "import integrations.amnezia_bridge.web_routes; import bot.constants; import utils.http_rate_limiter",
         ]
         for code in permutations:
             with self.subTest(code=code):
@@ -67,8 +57,6 @@ class CircularImportRegressionTests(unittest.TestCase):
     def test_architectural_single_source_of_truth(self):
         import bot.constants
         import config.constants
-        import integrations.amnezia_bridge.constants
-        import services.amnezia_bridge_constants
         import utils.http_rate_limiter
         import utils.vpn_helpers
 
@@ -80,19 +68,11 @@ class CircularImportRegressionTests(unittest.TestCase):
         # Config Size limit
         self.assertEqual(config.constants.MAX_RAW_CONFIG_BYTES, 65536)
         self.assertEqual(bot.constants.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
-        self.assertEqual(integrations.amnezia_bridge.constants.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
-        self.assertEqual(services.amnezia_bridge_constants.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
         self.assertEqual(utils.vpn_helpers.MAX_RAW_CONFIG_BYTES, config.constants.MAX_RAW_CONFIG_BYTES)
 
         # Rate limiter defaults
         self.assertEqual(config.constants.RATE_LIMIT_REQUESTS_PER_MINUTE, 30.0)
         self.assertEqual(config.constants.RATE_LIMIT_BURST, 10)
-        self.assertEqual(integrations.amnezia_bridge.constants.RATE_LIMIT_REQUESTS_PER_MINUTE, 30.0)
-        self.assertEqual(integrations.amnezia_bridge.constants.RATE_LIMIT_BURST, 10)
-        self.assertEqual(services.amnezia_bridge_constants.RATE_LIMIT_REQUESTS_PER_MINUTE, 30.0)
-        self.assertEqual(services.amnezia_bridge_constants.RATE_LIMIT_BURST, 10)
-        self.assertEqual(utils.http_rate_limiter.amnezia_bridge_rate_limiter.burst, 10.0)
-        self.assertEqual(utils.http_rate_limiter.amnezia_bridge_rate_limiter.rate, 0.5)  # 30.0 / 60.0
 
     @staticmethod
     def _find_ast_import_violations(tree: ast.AST, forbidden_prefixes: tuple[str, ...]) -> list[tuple[int, str]]:

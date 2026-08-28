@@ -13,7 +13,6 @@ from database.repositories.profiles_repo import (
     PROFILE_QUOTA_EXCLUDED_STATUSES,
     get_user_profiles,
 )
-from integrations.incy import SubscriptionTokenService
 from services.subscription import SubscriptionService
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime, format_traffic
@@ -26,15 +25,6 @@ DEVICE_NAME_REGEX = re.compile(r"^[a-zA-Z\u0400-\u04FF0-9\s_#-]+$")
 _PROTOCOL_DISPLAY = {
     AMNEZIA_PROTOCOL: "AmneziaWG",
 }
-
-
-def can_show_incy_subscription(read_only: bool = False) -> bool:
-    """Check if INCY subscription button should be displayed."""
-    if read_only:
-        return False
-    return SubscriptionTokenService.is_enabled()
-
-
 
 
 def _format_protocol(raw_protocol: str | None) -> str:
@@ -131,6 +121,13 @@ async def _build_connections_screen(
 
     builder = InlineKeyboardBuilder()
 
+    if not read_only and quota_profiles_count < device_limit:
+        builder.button(
+            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
+            callback_data="add_device",
+            style="success",
+        )
+
     if visible_profiles_count == 0:
         rendered += texts.CONNECTION_EMPTY
     else:
@@ -139,13 +136,14 @@ async def _build_connections_screen(
 
             flag = server.country_flag if server else texts.EMOJI_GLOBE
             server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
-            location_label = f"{flag} {safe(server_name)}"
-
-            btn_text = f"{location_label} — {safe(profile.device_name)}"
+            raw_device_name = profile.device_name or texts.DEVICE_DEFAULT_NAME_TEMPLATE.format(slot=1)
+            btn_text = f"{flag} {server_name} — {raw_device_name}"
             builder.button(
                 text=btn_text,
                 callback_data=f"manage_device:{profile.id}",
             )
+
+            location_label = f"{flag} {safe(server_name)}"
 
             traffic_str = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
             last_conn_str = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.CONNECTION_CONFIG_COMMON_NE_BYLO_AKTIVNOSTEY
@@ -169,19 +167,6 @@ async def _build_connections_screen(
                 rendered += texts.DEVICE_STATUS_LINE_FORMAT.format(v0=labels[profile.provisioning_status])
 
         rendered += texts.CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D
-
-    if not read_only and quota_profiles_count < device_limit:
-        builder.button(
-            text=texts.CONNECTION_CONFIG_UNKNOWN_PROTOCOL,
-            callback_data="add_device",
-            style="success",
-        )
-
-    if can_show_incy_subscription(read_only=read_only):
-        builder.button(
-            text=texts.CONNECTION_CONFIG_COMMON_ADD_V_INCY_IOS_ANDROID,
-            callback_data="menu_incy_subscription",
-        )
 
     builder.button(
         text=texts.CONNECTION_CONFIG_COMMON_STATUS_SERVEROV,

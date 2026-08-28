@@ -36,6 +36,27 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+# Setup safe simulation environment defaults before importing any application modules
+from cryptography.fernet import Fernet
+
+_dummy_fernet = os.getenv("DB_ENCRYPTION_KEY") or Fernet.generate_key().decode()
+os.environ.setdefault("BOT_TOKEN", "123456789:AABBCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqR")
+os.environ.setdefault("ADMIN_IDS", "[999999999]")
+os.environ.setdefault("SUPPORT_USERNAME", "just1k_support")
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
+os.environ.setdefault("DB_ENCRYPTION_KEY", _dummy_fernet)
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("REDIS_PASSWORD", "sim_redis_pass_123")
+os.environ.setdefault("YOOKASSA_SHOP_ID", "mock_shop")
+os.environ.setdefault("YOOKASSA_SECRET_KEY", "live_sim_secret_key_123")
+os.environ.setdefault("YOOKASSA_RETURN_URL", "https://t.me/{bot_username}?start=pay_success")
+os.environ.setdefault("YOOKASSA_WEBHOOK_PORT", "8080")
+os.environ.setdefault("DOMAIN", "sim.just1k.net")
+os.environ.setdefault("SSL_EMAIL", "sim@just1k.net")
+os.environ.setdefault("CHANNEL_URL", "https://t.me/just1k_channel")
+os.environ.setdefault("RULES_URL", "https://just1k.net/rules")
+os.environ.setdefault("FAQ_URL", "https://just1k.net/faq")
+
 import aiosqlite
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -71,7 +92,7 @@ from bot.middlewares.correlation import CorrelationMiddleware
 from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
 from config.constants import AMNEZIA_PROTOCOL
-from config.settings import Settings, get_settings
+from config.settings import Settings
 import database.connection as db_conn
 from database.connection import DEFAULT_TARIFFS, session_scope
 from database.models import (
@@ -172,9 +193,11 @@ def generate_mock_amnezia_vpn_uri(
     host: str = "nl1.just1k.net",
 ) -> str:
     """Generate a realistic AmneziaWG 2.0 configuration URI with obfuscation parameters."""
+    client_priv = f"MOCK_PRIVKEY_{peer_id[:8]}=="
+    server_pub = "MOCK_PUBKEY_SERVER_NL=="
     conf_str = (
         f"[Interface]\n"
-        f"PrivateKey = MOCK_PRIVKEY_{peer_id[:8]}==\n"
+        f"PrivateKey = {client_priv}\n"
         f"Address = 10.8.0.2/32\n"
         f"DNS = 1.1.1.1, 8.8.8.8\n"
         f"Jc = 4\n"
@@ -189,7 +212,7 @@ def generate_mock_amnezia_vpn_uri(
         f"H3 = 3\n"
         f"H4 = 4\n\n"
         f"[Peer]\n"
-        f"PublicKey = MOCK_PUBKEY_SERVER_NL==\n"
+        f"PublicKey = {server_pub}\n"
         f"Endpoint = {host}:51820\n"
         f"AllowedIPs = 0.0.0.0/0, ::/0\n"
         f"PersistentKeepalive = 25\n"
@@ -198,6 +221,8 @@ def generate_mock_amnezia_vpn_uri(
         "hostName": host,
         "port": 51820,
         "client_ip": "10.8.0.2/32",
+        "client_priv_key": client_priv,
+        "server_pub_key": server_pub,
         "Jc": 4, "Jmin": 40, "Jmax": 70,
         "S1": 15, "S2": 30, "S3": 10, "S4": 20,
         "H1": 1, "H2": 2, "H3": 3, "H4": 4,
@@ -210,7 +235,8 @@ def generate_mock_amnezia_vpn_uri(
         "containers": [
             {
                 "awg": {
-                    "last_config": json.dumps(last_cfg, ensure_ascii=False)
+                    "last_config": json.dumps(last_cfg, ensure_ascii=False),
+                    "protocol_version": "2",
                 }
             }
         ],
@@ -219,6 +245,7 @@ def generate_mock_amnezia_vpn_uri(
         "dns1": "1.1.1.1",
         "dns2": "8.8.8.8",
         "hostName": host,
+        "port": 51820,
     }
     return encode_json_to_vpn_uri(data)
 
@@ -317,10 +344,25 @@ async def mock_request_topup_status_refresh(
     return payment
 
 
+async def mock_amnezia_healthcheck(self) -> bool:
+    return True
+
+
+async def mock_amnezia_get_server_load(self, timeout: float = 10.0) -> dict | None:
+    return {
+        "cpu_percent": 12.5,
+        "ram_percent": 34.0,
+        "disk_percent": 25.0,
+        "active_peers": 3,
+    }
+
+
 # Apply monkeypatches to external service clients
 AmneziaClient.create_user_result = mock_amnezia_create_user_result
 AmneziaClient.delete_user_result = mock_amnezia_delete_user_result
 AmneziaClient.get_all_clients = mock_amnezia_get_all_clients
+AmneziaClient.healthcheck = mock_amnezia_healthcheck
+AmneziaClient.get_server_load = mock_amnezia_get_server_load
 YooKassaService.create_payment_result = classmethod(mock_yookassa_create_payment_result)
 YooKassaService.get_payment_result = classmethod(mock_yookassa_get_payment_result)
 topup_refresh.request_topup_status_refresh = mock_request_topup_status_refresh
@@ -354,13 +396,27 @@ class SimulationAutoSeedMiddleware:
                 select(User).where(User.telegram_id == user.id)
             )
             if not db_user:
+                    tariff = await session.scalar(
+                        select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.id.asc()).limit(1)
+                    )
+                    tariff_id = tariff.id if tariff else None
+                    tv = await session.scalar(
+                        select(TariffVersion).where(TariffVersion.tariff_id == tariff_id).limit(1)
+                    ) if tariff_id else None
+                    tv_id = tv.id if tv else None
+
+                    server = await session.scalar(
+                        select(Server).where(Server.is_active.is_(True)).order_by(Server.id.asc()).limit(1)
+                    )
+                    server_id = server.id if server else 1
+
                     # Create user record
                     db_user = User(
                         telegram_id=user.id,
                         username=user.username or f"user_{user.id}",
                         first_name=user.first_name or "Tester",
                         device_limit=5,
-                        current_tariff_id=4,  # Family (5 devices, 30 days)
+                        current_tariff_id=tariff_id,
                         subscription_end=now_utc() + timedelta(days=28),
                         created_at=now_utc() - timedelta(days=2),
                     )
@@ -379,9 +435,10 @@ class SimulationAutoSeedMiddleware:
                         reconciliation_status="ok",
                         checkout_status="active",
                         ui_visible=True,
-                        created_at=now_utc(),
-                        paid_at=now_utc(),
-                        credited_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
+                        paid_at=now_utc() - timedelta(days=2),
+                        credited_at=now_utc() - timedelta(days=2),
+                        credit_notified_at=now_utc() - timedelta(days=2),
                     )
                     session.add(seed_pay)
                     await session.flush()
@@ -396,7 +453,7 @@ class SimulationAutoSeedMiddleware:
                         payment_id=seed_pay.id,
                         idempotency_key=f"seed_real_{uuid.uuid4().hex}",
                         metadata_={"note": "Initial simulation balance"},
-                        created_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
                     )
                     entry_bonus = AccountLedgerEntry(
                         id=ts + 2,
@@ -409,14 +466,14 @@ class SimulationAutoSeedMiddleware:
                             "source_type": "referral_referrer_bonus",
                             "reason": "welcome_bonus",
                         },
-                        created_at=now_utc(),
+                        created_at=now_utc() - timedelta(days=2),
                     )
 
                     # Initial quote, entitlement and paid value ledger
                     init_quote = TariffQuote(
                         public_id=uuid.uuid4(),
                         user_id=db_user.id,
-                        target_tariff_version_id=4,
+                        target_tariff_version_id=tv_id,
                         operation_type="purchase",
                         current_paid_hours=0,
                         current_paid_value_rub=Decimal(0),
@@ -429,6 +486,7 @@ class SimulationAutoSeedMiddleware:
                         rounding_loss_value_rub=Decimal(0),
                         status="consumed",
                         consumed_at=now_utc() - timedelta(days=2),
+                        purchase_notified_at=now_utc() - timedelta(days=2),
                         expires_at=now_utc(),
                         created_at=now_utc() - timedelta(days=2),
                     )
@@ -443,7 +501,7 @@ class SimulationAutoSeedMiddleware:
                         days_delta=30,
                         hours_delta=720,
                         device_limit_snapshot=5,
-                        tariff_id_snapshot=4,
+                        tariff_id_snapshot=tariff_id,
                         created_at=now_utc() - timedelta(days=2),
                     )
                     init_pvl = PaidValueLedgerEntry(
@@ -455,7 +513,7 @@ class SimulationAutoSeedMiddleware:
                         paid_hours_delta=720,
                         paid_value_rub_delta=Decimal(180),
                         currency="RUB",
-                        tariff_version_id=4,
+                        tariff_version_id=tv_id,
                         created_at=now_utc() - timedelta(days=2),
                     )
                     session.add_all([entry_real, entry_bonus, init_ent, init_pvl])
@@ -463,7 +521,7 @@ class SimulationAutoSeedMiddleware:
                     # Create 1 Active Device (iPhone)
                     prof = VPNProfile(
                         user_id=db_user.id,
-                        server_id=1,  # NL
+                        server_id=server_id,
                         device_name="iPhone 16 Pro",
                         client_name="iPhone 16 Pro",
                         peer_id="peer_sim_nl_iphone",
@@ -536,98 +594,147 @@ async def run_simulation(args: argparse.Namespace):
     if not admin_ids:
         admin_ids = [999999999]  # Dummy non-existent admin ID to satisfy validator
 
+    os.environ["BOT_TOKEN"] = args.token
+    os.environ["ADMIN_IDS"] = json.dumps(admin_ids)
+    os.environ["DATABASE_URL"] = args.db_url
+    os.environ["DB_ENCRYPTION_KEY"] = sim_fernet_key
+
     # Override application settings
     mock_settings = Settings(
         BOT_TOKEN=args.token,
         DATABASE_URL=args.db_url,
         DB_ENCRYPTION_KEY=sim_fernet_key,
         REDIS_URL="redis://localhost:6379/0",
+        REDIS_PASSWORD="sim_redis_pass_123",
         ADMIN_IDS=admin_ids,
         YOOKASSA_SHOP_ID="mock_shop",
-        YOOKASSA_API_KEY="mock_key",
+        YOOKASSA_SECRET_KEY="live_sim_secret_key_123",
+        YOOKASSA_RETURN_URL="https://t.me/{bot_username}?start=pay_success",
+        YOOKASSA_WEBHOOK_PORT=8080,
+        DOMAIN="sim.just1k.net",
+        SSL_EMAIL="sim@just1k.net",
         SUPPORT_USERNAME="just1k_support",
         CHANNEL_URL="https://t.me/just1k_channel",
         RULES_URL="https://just1k.net/rules",
         FAQ_URL="https://just1k.net/faq",
-        INCY_URL="https://incy.me/just1k",
     )
-    get_settings.cache_clear()
     import config.settings
+    config.settings.get_settings.cache_clear()
     config.settings.get_settings = lambda: mock_settings
 
-    # Initialize SQLite database engine
-    engine = create_async_engine(
-        args.db_url,
-        echo=False,
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-    )
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
-    db_conn._engine = engine
-    db_conn._sessionmaker = session_factory
-
-    # Prepare SQLite Schema
-    for table in Base.metadata.tables.values():
-        table.constraints = {
-            c for c in table.constraints if not isinstance(c, CheckConstraint)
-        }
-        is_single_pk = len(table.primary_key.columns) == 1
-        for col in table.columns:
-            if isinstance(col.type, DateTime):
-                col.type = UTCDateTime()
-            if col.primary_key:
-                col.type = Integer()
-                col.autoincrement = is_single_pk
-            if col.server_default is not None:
-                sd = str(getattr(col.server_default, "arg", ""))
-                if "::" in sd or "now()" in sd.lower():
-                    col.server_default = None
-        table.indexes.clear()
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Ensure partial unique indexes required by ON CONFLICT clauses
-        await conn.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_conversion_quote "
-                "ON paid_value_ledger (quote_id) WHERE entry_type='tariff_conversion'"
+    for mod in list(sys.modules.values()):
+        if (
+            mod
+            and getattr(mod, "__name__", "").startswith(
+                ("bot", "config", "services", "database", "utils", "integrations")
             )
-        )
-        await conn.execute(
-            text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_account_purchase "
-                "ON paid_value_ledger (quote_id) WHERE entry_type='account_purchase'"
-            )
-        )
-    logger.info("Database schema initialized.")
+            and hasattr(mod, "get_settings")
+        ):
+            try:
+                mod.get_settings = lambda: mock_settings
+            except Exception:
+                pass
 
-    # Seed baseline tariffs and servers
+    # Database initialization (SQLite or real PostgreSQL)
+    is_sqlite = args.db_url.startswith("sqlite")
+    if is_sqlite:
+        engine = create_async_engine(
+            args.db_url,
+            echo=False,
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        db_conn._engine = engine
+        db_conn._sessionmaker = session_factory
+
+        # Prepare SQLite Schema
+        for table in Base.metadata.tables.values():
+            table.constraints = {
+                c for c in table.constraints if not isinstance(c, CheckConstraint)
+            }
+            is_single_pk = len(table.primary_key.columns) == 1
+            for col in table.columns:
+                if isinstance(col.type, DateTime):
+                    col.type = UTCDateTime()
+                if col.primary_key:
+                    col.type = Integer()
+                    col.autoincrement = is_single_pk
+                if col.server_default is not None:
+                    sd = str(getattr(col.server_default, "arg", ""))
+                    if "::" in sd or "now()" in sd.lower():
+                        col.server_default = None
+            table.indexes.clear()
+
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            # Ensure partial unique indexes required by ON CONFLICT clauses
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_conversion_quote "
+                    "ON paid_value_ledger (quote_id) WHERE entry_type='tariff_conversion'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_paid_value_account_purchase "
+                    "ON paid_value_ledger (quote_id) WHERE entry_type='account_purchase'"
+                )
+            )
+        logger.info("SQLite database schema initialized.")
+    else:
+        logger.info("Connecting to real PostgreSQL database: %s", args.db_url.split("@")[-1])
+        from database.connection import init_db
+        engine, session_factory = await init_db()
+        logger.info("PostgreSQL connection pool initialized.")
+
+    # Seed baseline tariffs and servers if not present
     async with session_factory() as session:
-        tariff_id_seq = 1
         for t_data in DEFAULT_TARIFFS:
-            t = Tariff(
-                id=tariff_id_seq,
-                name=t_data["name"],
-                description=t_data.get("description"),
-                duration_days=t_data["duration_days"],
-                device_limit=t_data["device_limit"],
-                price_rub=t_data["price_rub"],
-                sort_order=t_data.get("sort_order", 0),
-                is_active=True,
+            existing = await session.scalar(
+                select(Tariff).where(
+                    Tariff.duration_days == t_data["duration_days"],
+                    Tariff.device_limit == t_data["device_limit"],
+                )
             )
-            tv = TariffVersion(
-                id=tariff_id_seq,
-                tariff_id=tariff_id_seq,
-                version_number=1,
-                name_snapshot=t_data["name"],
-                duration_hours=t_data["duration_days"] * 24,
-                device_limit=t_data["device_limit"],
-                price_rub=Decimal(t_data["price_rub"]),
-                currency="RUB",
-            )
-            session.add(t)
-            session.add(tv)
-            tariff_id_seq += 1
+            if not existing:
+                t = Tariff(
+                    name=t_data["name"],
+                    description=t_data.get("description"),
+                    duration_days=t_data["duration_days"],
+                    device_limit=t_data["device_limit"],
+                    price_rub=t_data["price_rub"],
+                    sort_order=t_data.get("sort_order", 0),
+                    is_active=True,
+                )
+                session.add(t)
+                await session.flush()
+                tv = TariffVersion(
+                    tariff_id=t.id,
+                    version_number=1,
+                    name_snapshot=t.name,
+                    duration_hours=t.duration_days * 24,
+                    device_limit=t.device_limit,
+                    price_rub=Decimal(t.price_rub),
+                    currency="RUB",
+                )
+                session.add(tv)
+            else:
+                existing_tv = await session.scalar(
+                    select(TariffVersion).where(TariffVersion.tariff_id == existing.id)
+                )
+                if not existing_tv:
+                    tv = TariffVersion(
+                        tariff_id=existing.id,
+                        version_number=1,
+                        name_snapshot=existing.name,
+                        duration_hours=existing.duration_days * 24,
+                        device_limit=existing.device_limit,
+                        price_rub=Decimal(existing.price_rub),
+                        currency="RUB",
+                    )
+                    session.add(tv)
+        await session.commit()
 
         servers = [
             Server(
@@ -671,7 +778,15 @@ async def run_simulation(args: argparse.Namespace):
                 max_clients=100,
             ),
         ]
-        session.add_all(servers)
+        for s in servers:
+            existing_s = await session.scalar(
+                select(Server.id).where(
+                    (Server.id == s.id) | (Server.api_url == s.api_url)
+                )
+            )
+            if not existing_s:
+                session.add(s)
+        await session.commit()
     logger.info("Tariffs and high-speed simulation servers seeded successfully.")
 
     if args.maintenance:
@@ -685,7 +800,16 @@ async def run_simulation(args: argparse.Namespace):
     me = await bot.get_me()
     logger.info("Connected to Telegram Bot API: @%s (%s)", me.username, me.id)
 
-    dp = Dispatcher(storage=MemoryStorage())
+    redis_url = getattr(args, "redis_url", None) or os.getenv("REDIS_URL")
+    if redis_url and not is_sqlite:
+        from aiogram.fsm.storage.redis import RedisStorage
+        storage = RedisStorage.from_url(redis_url)
+        logger.info("Using real Redis FSM storage: %s", redis_url.split("@")[-1])
+    else:
+        storage = MemoryStorage()
+        logger.info("Using in-memory FSM storage")
+
+    dp = Dispatcher(storage=storage)
 
     from bot.middlewares.db_session import DBSessionMiddleware
 
@@ -746,16 +870,32 @@ async def run_simulation(args: argparse.Namespace):
 
     # Clear pending updates
     await bot.delete_webhook(drop_pending_updates=True)
+
+    # Start background workers
+    from services.workers import start_background_workers, stop_background_workers
+    await start_background_workers(bot)
+    logger.info("Real enterprise background workers started successfully.")
+
     logger.info("=" * 60)
     logger.info("BOT IS RUNNING IN LIVE PROD SIMULATION: @%s", me.username)
-    logger.info("All tariffs, servers, device creation & payments are 100%% active.")
+    logger.info("All tariffs, servers, device creation, background workers & payments are 100%% active.")
     logger.info("=" * 60)
 
     try:
         await dp.start_polling(bot, handle_signals=False)
     finally:
+        try:
+            await stop_background_workers()
+        except Exception:
+            pass
+        if hasattr(dp.storage, "close"):
+            try:
+                await dp.storage.close()
+            except Exception:
+                pass
         await bot.session.close()
-        await engine.dispose()
+        from database.connection import close_db
+        await close_db()
         logger.info("Simulation stopped cleanly.")
 
 
@@ -780,6 +920,12 @@ def main():
         type=str,
         default=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///:memory:"),
         help="Database URL (default: sqlite+aiosqlite:///:memory:)",
+    )
+    parser.add_argument(
+        "--redis-url",
+        type=str,
+        default=os.getenv("REDIS_URL"),
+        help="Redis URL (default: None for in-memory FSM storage)",
     )
     parser.add_argument(
         "--seed-balance-real",

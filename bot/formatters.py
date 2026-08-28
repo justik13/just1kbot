@@ -70,6 +70,24 @@ def format_admin_breadcrumbs(*crumbs: str) -> str:
 
 
 
+def pluralize(count: int, forms: tuple[str, str, str]) -> str:
+    """Russian noun pluralization: forms = (one, few, many)."""
+    n = abs(count) % 100
+    n1 = n % 10
+    if 11 <= n <= 19:
+        return forms[2]
+    if n1 == 1:
+        return forms[0]
+    if 2 <= n1 <= 4:
+        return forms[1]
+    return forms[2]
+
+
+def format_plural(count: int, forms: tuple[str, str, str]) -> str:
+    """Format count with pluralized noun, e.g. '1 день', '2 дня', '5 дней'."""
+    return f"{count} {pluralize(count, forms)}"
+
+
 def get_tariff_display_name(device_limit: int) -> str:
     if device_limit <= 2:
         return texts.TARIFF_DISPLAY_BASIC
@@ -84,6 +102,25 @@ def get_tariff_group_name(device_limit: int) -> str:
     elif device_limit <= 5:
         return texts.TARIFF_DISPLAY_FAMILY_GROUP
     return texts.TARIFF_DISPLAY_PRO_GROUP.format(limit=device_limit)
+
+
+def format_subscription_date(dt) -> str:
+    from utils.datetime_helpers import is_permanent_subscription, now_msk, to_msk
+
+    if dt is None:
+        return texts.PLACEHOLDER_DASH
+    if is_permanent_subscription(dt):
+        return texts.TIME_FOREVER
+
+    msk_dt = to_msk(dt)
+    if msk_dt is None:
+        return texts.PLACEHOLDER_DASH
+
+    month_name = texts.MONTH_NAMES_LABELS[msk_dt.month - 1]
+    now_dt = now_msk()
+    if msk_dt.year == now_dt.year:
+        return texts.DATE_DAY_MONTH_FORMAT.format(day=msk_dt.day, month=month_name)
+    return texts.DATE_DAY_MONTH_YEAR_FORMAT.format(day=msk_dt.day, month=month_name, year=msk_dt.year)
 
 
 def format_days_left(dt) -> str:
@@ -104,5 +141,5 @@ def format_days_left(dt) -> str:
     days = diff.days
     hours = diff.seconds // 3600
     if days > 0:
-        return texts.TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
+        return texts.TIME_DAYS_FORMAT.format(days=days)
     return texts.TIME_HOURS_LEFT.format(hours=hours)

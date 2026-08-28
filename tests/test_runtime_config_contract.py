@@ -23,7 +23,6 @@ BASE = {
     "YOOKASSA_WEBHOOK_PORT": 8080,
     "DOMAIN": "vpn.example.test",
     "SSL_EMAIL": "owner@example.test",
-    "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 }
 
 
@@ -53,12 +52,6 @@ class RuntimeConfigContractTests(unittest.TestCase):
                 data.pop(key)
                 with self.assertRaises(ValidationError):
                     self.build(data)
-
-    def test_amnezia_bridge_secret_is_optional_for_safe_upgrade(self):
-        data = dict(BASE)
-        data.pop("AMNEZIA_BRIDGE_HMAC_SECRET")
-        settings = self.build(data)
-        self.assertIsNone(settings.AMNEZIA_BRIDGE_HMAC_SECRET)
 
     def test_empty_payment_contract_fails(self):
         for key in (

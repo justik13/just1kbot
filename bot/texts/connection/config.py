@@ -1,8 +1,6 @@
 """Domain texts for connection/config.py."""
 from __future__ import annotations
 
-CONNECTION_CONFIG_COMMON_ADD_V_INCY_IOS_ANDROID = "🔗 Добавить в INCY (iOS / Android) [🧪]"
-
 CONNECTION_CONFIG_COMMON_NAZHMITE_NA_DEVICE_BELOW_D = """
 
 <i>Нажмите на устройство ниже для просмотра статуса и управления:</i>"""
@@ -17,27 +15,27 @@ CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_ODIN_IZ_PRIKREPLE = """1. Сохра�
 CONNECTION_CONFIG_DEVICE_VIEW_1_SOKHRANITE_PRIKREPLENNYY_FAY = """1. Сохраните прикреплённый файл <code>.vpn</code> (для приложения <b>AmneziaVPN</b>).
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = """1. В приложении статус сменится на <b>«Подключено»</b>;
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS = "• В приложении статус изменится на <b>«Подключено»</b>;"
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Откройте приложение и выберите <b>«Импорт файла / Добавить туннель»</b>."
 
-CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = """2. В строке состояния появится значок подключения (или 🔑);
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В строке состояния появится значок соединения (или 🔑);"
 
-CONNECTION_CONFIG_DEVICE_VIEW_3_LIBO_NAZHMITE_KNOPKU_OTKRYT = """
-3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."""
+CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
 
-CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = """3. На сайте <code>2ip.ru</code> страна сменится на локацию сервера;
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
 
-CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "4. Популярные сервисы и зарубежные сайты открываются быстро и стабильно."
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Нажмите кнопку ниже:</i>"
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "• <b>AmneziaVPN / DefaultVPN</b>: нажмите «🔄 Другой способ подключения» ниже, "
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
+<b>2. Откройте приложение:</b>
+   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → «+» (или «У меня есть данные») → «Вставить ключ».
+   • <b>DefaultVPN</b> (iOS) → «+» → «Import from Clipboard».
+<b>3. Нажмите «Подключиться».</b>
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = "• <b>AmneziaVPN / DefaultVPN</b>: скопируйте ключ выше → "
-
-CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = "чтобы получить файл конфигурации или ключ."
+✅ <b>Как понять, что всё работает:</b>
+• В приложении статус сменится на <b>«Подключено»</b> (значок соединения или 🔑 вверху);
+• На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
@@ -64,8 +62,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """🔄 <b>Друг
 
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V = "• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик"
-
 CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY = """Если прямая вставка ключа не сработала или ваше приложение требует файл:
 
 """
@@ -74,23 +70,15 @@ CONNECTION_CONFIG_DEVICE_VIEW_IDET_AVTOMATICHESKOE_VOSSTANOV = """
 
 ⚠️ <b>Идёт автоматическое восстановление после сбоя...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_INCY_IOS_ANDROID_OTKROYTE_PODK = """• <b>INCY (iOS / Android)</b>: откройте «🔌 Подключения» → «🔗 Добавить в INCY» для добавления всех серверов сразу.
-
-"""
-
 CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инструкции и справка AmneziaVPN</b>
 
 """
 
 CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO = "• <b>📖 Инструкция</b> — пошаговое руководство по настройке"
 
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = """
+CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться и проверить:</b>"
 
-🚀 <b>Как подключиться и проверить работу:</b>
-"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = """✅ <b>Как понять, что всё работает:</b>
-"""
+CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = "✅ <b>Как понять, что всё работает:</b>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 
@@ -100,11 +88,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN = """🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.
 """
 
-CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA = """
-
-💡 <b>Кнопки управления:</b>"""
-
-CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>👆 Нажмите на моноширинный ключ выше, чтобы скопировать его.</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>📋 Нажмите на поле с ключом, чтобы скопировать.</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_NE_REKOMENDUETSYA_ISPOLZOVAT_T = """• <b>Не рекомендуется использовать торренты/P2P.</b>
 """
@@ -201,33 +185,7 @@ DEVICE_STATUS_UPDATE_ERROR = "ошибка обновления"
 
 EMOJI_GLOBE = "🌍"
 
-INCY_SUBSCRIPTION_UNAVAILABLE = "⚠️ Подписка INCY временно недоступна."
-
 LABEL_UNKNOWN_CAP = "Неизвестно"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_BLOCKQUOTE = "<blockquote expandable><code>{key}</code></blockquote>\n"
-
-CONNECTION_INCY_SUBSCRIPTION_INFO = """🖥 <b>Подключение через профиль INCY [⚠️ Экспериментально]</b>
-
-Это отдельный сервер, не привязанный к вашим постоянным маскам устройств. Он работает <b>только</b> в приложении INCY (<b>iOS / Android</b>).
-
-<b>🌐 Как настроить на телефоне (iOS / Android):</b>
-1. Установите приложение <b>INCY</b> (App Store / Google Play).
-2. Вернитесь в <b>«🤖 Бот INCY»</b> и нажмите кнопку ниже.
-3. Если приложение не открылось, то <b>«🔗 Скопируйте ссылку»</b> - INCY автоматически перехватит скопированную ссылку из буфера обмена.
-4. Выберите нужный сервер в приложении.
-
-<b>Ваша персональная ссылка:</b>
-<code>{sub_url}</code>
-
-<i>⚠️ Обратите внимание: на Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (скачав .vpn файл), а на других версиях (Windows 7/8/ARM, macOS 12/13) - <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>
-
-<i>⚠️ При создании или удалении обычного устройства оно обновится в списке серверов приложения INCY автоматически.</i>"""
-
-BTN_INCY_OPEN = "🤖 Открыть INCY"
-BTN_INCY_COPY_LINK = "🔗 Скопировать ссылку"
-BTN_INCY_ROTATE_LINK = "🔄 Обновить ссылку"
-BTN_INCY_BACK_TO_DEVICES = "🔙 Назад к устройствам"
-ALERT_INCY_ROTATE_SUCCESS = "🔄 Ссылка успешно обновлена! Старая ссылка аннулирована."
-ALERT_INCY_ROTATE_ERROR = "Ошибка при обновлении ссылки. Попробуйте позже."
 

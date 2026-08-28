@@ -6,7 +6,7 @@ from bot.texts.common import BTN_BROADCAST_EXPIRING, BTN_BROADCAST_NO_SUB
 ADMIN_BROADCAST = "Всего"
 
 
-BROADCAST_AUDIENCE_LABEL_EXPIRING_3D = 'Подписки истекают < 3 дней'
+BROADCAST_AUDIENCE_LABEL_EXPIRING_3D = 'Подписки истекают менее чем за 3 дня'
 BROADCAST_AUDIENCE_LABEL_EXPIRED = 'Истекшие подписки'
 BROADCAST_AUDIENCE_LABEL_NEVER = 'Без подписок'
 BROADCAST_AUDIENCE_LABEL_TEST = 'Тестовая отправка админу'

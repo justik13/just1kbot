@@ -13,8 +13,6 @@ CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "🔄 Другой способ по�
 
 CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE = "← К устройству"
 
-CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA = "🚀 Открыть в Amnezia"
-
 CONNECTION_DEVICE_CREATE_CREATING_SCREEN = """⏳ <b>Настраиваем подключение...</b>
 
 🌍 Сервер: <b>{v0}</b>
@@ -77,7 +75,6 @@ DEVICE_KEY_TOO_LONG_CAPTION = """🔑 <b>Ключ подключения для 
 DEVICE_MANAGE_HEADER = """📱 <b>{device_name}</b>
 
 🌍 Локация: <b>{country_display}</b>
-📡 Протокол: <b>{protocol}</b>
 📊 Трафик: <b>{traffic_total}</b>
 ⏱ Активность: <b>{last_connected}</b>"""
 
@@ -91,7 +88,7 @@ DEVICE_RENAMED_SUCCESS = "✅ Устройство переименовано в
 
 DEVICE_RENAME_PROMPT = """✏️ <b>Переименование устройства</b>
 
-Введите новое имя (латиница, цифры, пробелы, дефисы, подчёркивания, до 16 символов):"""
+Введите новое имя (буквы, цифры, пробелы, дефисы, подчёркивания, до 16 символов):"""
 
 DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name}:</b>
 
@@ -99,7 +96,7 @@ DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name
 
 <i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 
-DEVICE_STATUS_CREATING_LABEL = "✅ Да, удалить"
+DEVICE_STATUS_CREATING_LABEL = "🗑 Да, удалить"
 
 DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 

@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.formatters import format_plural
 from bot.keyboards import (
     get_history_keyboard,
     get_referral_keyboard,
@@ -60,7 +61,7 @@ async def show_history(
         )
         return
 
-    payments = await get_user_payments(session, db_user.id)
+    payments = await get_user_payments(session, db_user.id, limit=10)
 
     if not payments:
         rendered = texts.HISTORY_HEADER + texts.HISTORY_EMPTY
@@ -113,7 +114,9 @@ async def show_referral(
 
     inviter_line = await _get_inviter_line(session, db_user)
     if inviter_line:
-        inviter_line = f"\n{inviter_line}\n"
+        inviter_line = f"\n\n{inviter_line}"
+    else:
+        inviter_line = ""
 
     await render_hub(
         callback.bot,
@@ -124,7 +127,7 @@ async def show_referral(
             bonus_balance=int(bonus_balance),
             inviter_line=inviter_line,
         ),
-        get_referral_keyboard(referral_link),
+        get_referral_keyboard(referral_link, count=invited_count),
         trigger_message_id=callback.message.message_id if callback.message else None,
     )
 
@@ -172,7 +175,9 @@ async def show_referrals_list(
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
             rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 
-        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(count=total_count)
+        rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(
+            count=format_plural(total_count, texts.NOUN_USERS)
+        )
 
     await render_hub(
         callback.bot,

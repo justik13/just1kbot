@@ -76,14 +76,17 @@ def get_hub_keyboard(
 
 def get_back_button(
     callback_data: str = "back_to_main_menu",
+    text: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
-    if callback_data == "back_to_main_menu":
-        text = texts.BTN_MAIN_MENU
+    if text is not None:
+        button_text = text
+    elif callback_data == "back_to_main_menu":
+        button_text = texts.BTN_MAIN_MENU_NAV
     else:
-        text = texts.BTN_BACK
+        button_text = texts.BTN_BACK
 
-    builder.button(text=text, callback_data=callback_data)
+    builder.button(text=button_text, callback_data=callback_data)
 
     return builder.as_markup()

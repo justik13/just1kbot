@@ -54,7 +54,7 @@ def _support_keyboard(username: str, telegram_id: int | None = None):
     )
 
     builder.button(
-        text=texts.BTN_MAIN_MENU,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
 

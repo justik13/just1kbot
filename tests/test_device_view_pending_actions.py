@@ -6,15 +6,6 @@ from bot.handlers.connection.device_view_routes import device_help, manage_devic
 
 
 class TestDeviceViewPendingActions(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        super().setUp()
-        self.bridge_patch = patch("services.amnezia_bridge_token_service.AmneziaBridgeTokenService.is_enabled", return_value=False)
-        self.bridge_patch.start()
-
-    def tearDown(self):
-        self.bridge_patch.stop()
-        super().tearDown()
-
     async def test_pending_create_profile_hides_config_and_delete_actions_while_ready_shows_them(self):
         from utils.vpn_parser import encode_json_to_vpn_uri
         valid_raw_config = encode_json_to_vpn_uri({

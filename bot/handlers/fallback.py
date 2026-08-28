@@ -40,7 +40,7 @@ async def fsm_media_guard(message: Message, state: FSMContext):
         pass
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
 
     try:
@@ -78,7 +78,7 @@ async def handle_unknown_text(message: Message, state: FSMContext):
         pass
 
     builder = InlineKeyboardBuilder()
-    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
 
     try:

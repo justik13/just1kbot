@@ -37,13 +37,15 @@ BTN_PAYMENT_TO_SUBSCRIPTION = "⏳ К подписке"
 
 BTN_PAYMENT_TO_TARIFF_CHOICE = "← К выбору тарифа"
 
+BTN_TARIFF_SHOWCASE_ITEM = "{group_name} — от {min_price} ₽"
+
 PAYMENT = " 🔽"
 
-PAYMENT_ACTIVE_CHECKOUT_EXISTS = "⚠️ У вас уже есть не завершённая операция покупки. Завершите её или попробуйте чуть позже."
+PAYMENT_ACTIVE_CHECKOUT_EXISTS = "У вас уже есть незавершённая оплата. Завершите её или отмените перед сменой тарифа."
 
 PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE = "Сначала завершите или отмените смену тарифа."
 
-PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE = "Безопасная смена тарифа временно недоступна. Продление текущего тарифа продолжает работать."
+PAYMENT_CHANGE_TARIFF_TEMPORARILY_UNAVAILABLE = "Безопасная смена тарифа временно недоступна. Продление текущего тарифа работает в обычном режиме."
 
 PAYMENT_COMMON = "Не удалось надёжно определить текущий тариф. Покупка временно недоступна — обратитесь в поддержку для проверки подписки."
 
@@ -60,9 +62,7 @@ PAYMENT_HUB_HEADER = """⏳ <b>Ваша подписка</b>
 📅 <b>Действует до:</b> {valid_until} <i>(осталось {days_left})</i>
 
 💎 <b>Тариф:</b> {tariff_name}
-🔌 <b>Устройства:</b> {devices_count} / {device_limit}
-
-Выберите действие:"""
+🔌 <b>Устройства:</b> {devices_count} / {device_limit}"""
 
 PAYMENT_NO_TARIFFS = """💳 В данный момент нет доступных тарифов.
 

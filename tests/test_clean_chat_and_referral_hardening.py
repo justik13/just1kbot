@@ -102,7 +102,7 @@ class TestCleanChatMessageDeletion(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.start._update_user_profile_if_changed", AsyncMock(return_value=dummy_user)), \
              patch("bot.handlers.start._ensure_bot_unblocked", AsyncMock()), \
              patch("bot.handlers.start.render_hub", AsyncMock()):
-            await cmd_start(message, state, command, session)
+            await cmd_start(message, state, command, session, is_new_user=True)
 
         message.delete.assert_awaited_once()
         state.clear.assert_awaited_once()

@@ -28,7 +28,6 @@ ALLOWED_USER_UPDATE_FIELDS = {
     "notified_grace_12h",
     "notification_retry_count",
     "last_notification_attempt",
-    "subscription_token",
 }
 
 
@@ -392,17 +391,4 @@ async def get_filtered_users_paginated_with_profiles(
     return await get_filtered_users_paginated(
         session, filter_type=filter_type, page=page, per_page=per_page, filter_param=filter_param
     )
-
-
-async def get_user_by_subscription_token(
-    session: AsyncSession, token: str
-) -> User | None:
-    if not token:
-        return None
-    stmt = select(User).where(
-        User.subscription_token == token,
-        User.is_deleted.is_(False),
-    )
-    result = await session.execute(stmt)
-    return result.scalar_one_or_none()
 

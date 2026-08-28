@@ -96,7 +96,6 @@ jobs:
       YOOKASSA_WEBHOOK_PORT: "8080"
       DOMAIN: "vpn.example.test"
       SSL_EMAIL: "ci@example.test"
-      AMNEZIA_BRIDGE_HMAC_SECRET: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
       CI_TEST_MODE: "true"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

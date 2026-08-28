@@ -18,8 +18,14 @@ def get_tariff_showcase_keyboard(
     builder = InlineKeyboardBuilder()
     for limit in sorted(grouped_tariffs.keys()):
         group_name = get_tariff_group_name(limit)
+        tariffs_in_group = grouped_tariffs.get(limit) or []
+        if tariffs_in_group:
+            min_price = min(int(t.price_rub) for t in tariffs_in_group)
+            btn_text = texts.BTN_TARIFF_SHOWCASE_ITEM.format(group_name=group_name, min_price=min_price)
+        else:
+            btn_text = group_name
         builder.button(
-            text=group_name,
+            text=btn_text,
             callback_data=f"select_tariff_type:{limit}:showcase",
         )
     builder.button(
@@ -156,8 +162,9 @@ def get_change_tariff_keyboard(
             text=group_name,
             callback_data=f"select_tariff:{best_tariff.id}:change",
         )
+    back_target = "menu_subscription" if is_subscription_active else "back_to_main_menu"
     builder.button(
-        text=texts.BTN_BACK, callback_data="back_to_main_menu"
+        text=texts.BTN_BACK, callback_data=back_target
     )
     builder.adjust(1)
     return builder.as_markup()
@@ -200,7 +207,9 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
+    )
     builder.adjust(1, 2, 1)
     return builder.as_markup()
 
@@ -214,7 +223,7 @@ def get_balance_history_keyboard(
 
     if total_pages > 1:
         if page > 1:
-            builder.button(text=texts.BTN_BACK, callback_data=f"balance_history:{page - 1}")
+            builder.button(text=texts.BTN_PAGINATION_PREV, callback_data=f"balance_history:{page - 1}")
         else:
             builder.button(text=texts.BTN_PAGINATION_EMPTY, callback_data="ignore")
 
@@ -302,11 +311,12 @@ def get_topup_payment_keyboard(
 
 
 def get_balance_purchase_start_keyboard(
-    quote_public_id: str, _back_callback: str | None = None
+    quote_public_id: str, _back_callback: str | None = None, is_shortage: bool = False
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_BUY_FROM_BALANCE
     builder.button(
-        text=texts.BTN_PAYMENT_BUY_FROM_BALANCE,
+        text=action_text,
         callback_data=f"balance_purchase_review:{quote_public_id}",
         style="success",
     )
@@ -336,11 +346,12 @@ def get_balance_purchase_confirm_keyboard(
 
 
 def get_balance_change_start_keyboard(
-    quote_public_id: str, back_callback: str
+    quote_public_id: str, back_callback: str, is_shortage: bool = False
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
+    action_text = texts.BTN_PAYMENT_PAY if is_shortage else texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE
     builder.button(
-        text=texts.BTN_PAYMENT_CHANGE_TARIFF_FROM_BALANCE,
+        text=action_text,
         callback_data=f"balance_change_review:{quote_public_id}",
         style="success",
     )

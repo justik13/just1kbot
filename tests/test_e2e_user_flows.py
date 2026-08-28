@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.main import setup_bot
 from database.models import Tariff, TariffVersion
-from database.models import User as DBUser
 
 DB = os.getenv("TEST_DATABASE_URL")
 
@@ -88,7 +87,6 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                     "RESTART IDENTITY CASCADE"
                 )
             )
-            self.db_user = DBUser(telegram_id=123456789)
             self.tariff = Tariff(
                 name="E2E Basic",
                 duration_days=30,
@@ -96,7 +94,7 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 price_rub=150,
                 is_active=True,
             )
-            session.add_all((self.db_user, self.tariff))
+            session.add(self.tariff)
             await session.flush()
             version = TariffVersion(
                 tariff_id=self.tariff.id,
@@ -251,6 +249,13 @@ class E2EUserFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("150", req.text)
         # Here they should see "Не хватает" (insufficient funds)
         self.assertIn("Не хватает", req.text)
+
+        # 4. Existing user sends /start again -> gets Hub directly without welcome
+        update = self._create_message_update("/start")
+        await self.dp.feed_update(bot=self.bot, update=update)
+        req = next(r for r in reversed(self.session.requests) if r.__class__.__name__ == "SendMessage")
+        self.assertIn("Главное меню", req.text)
+        self.assertNotIn("Добро пожаловать", req.text)
 
 
 if __name__ == "__main__":

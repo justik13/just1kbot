@@ -247,7 +247,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     from bot.handlers.start import router as start_router
     from bot.handlers.support import router as support_router
     from integrations import get_all_bot_routers
-    from integrations.incy import incy_router
 
     # Clean parent router state on all known module-level routers (core & integrations)
     # so setup_bot is strictly idempotent across multiple invocations and dynamic state transitions.
@@ -255,7 +254,6 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
         start_router,
         profile_router,
         connection_router,
-        incy_router,
         support_router,
         payment_router,
         admin_router,

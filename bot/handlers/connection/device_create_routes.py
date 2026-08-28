@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import EFFECT_LIGHTNING, render_hub, safe
+from utils.telegram import EFFECT_FIRE, render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
@@ -55,8 +55,8 @@ _creating_devices: TTLCache[int, bool] = TTLCache(
 
 async def _await_profile_ready(
     profile_id: int,
-    timeout_seconds: float = 4.0,
-    poll_interval: float = 0.25,
+    timeout_seconds: float = 6.0,
+    poll_interval: float = 0.1,
 ) -> VPNProfile | None:
     """Poll for profile to become active or fail within a monotonic UI wait window.
 
@@ -85,7 +85,7 @@ async def _await_profile_ready(
 def _get_no_subscription_keyboard():
     builder = InlineKeyboardBuilder()
     builder.button(text=texts.BTN_BUY_ACCESS, callback_data="menu_buy")
-    builder.button(text=texts.BTN_MAIN_MENU, callback_data="back_to_main_menu")
+    builder.button(text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu")
     builder.adjust(1)
     return builder.as_markup()
 
@@ -177,18 +177,6 @@ async def start_add_device(
             get_back_button("back_to_connections"),
         )
         return
-
-    if len(servers) == 1:
-        if user_id in _creating_devices:
-            await callback.answer(texts.DEVICE_CREATE_IN_PROGRESS, show_alert=True)
-            return
-        _creating_devices[user_id] = True
-        try:
-            await callback.answer(show_alert=False)
-            await state.set_state(DeviceCreationStates.choose_server)
-            return await _process_server_selection(callback, state, session, servers[0].id, user)
-        finally:
-            _creating_devices.pop(user_id, None)
 
     builder = InlineKeyboardBuilder()
 
@@ -477,7 +465,7 @@ async def _process_server_selection(
                     ready_profile,
                     user,
                     session,
-                    message_effect_id=EFFECT_LIGHTNING if ready_profile.provisioning_status == "active" else None,
+                    message_effect_id=EFFECT_FIRE if ready_profile.provisioning_status == "active" else None,
                 )
             else:
                 # Timeout reached or creation still pending -> render connections

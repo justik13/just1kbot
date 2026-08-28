@@ -125,7 +125,6 @@ class User(Base):
     first_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     subscription_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    subscription_token: Mapped[str | None] = mapped_column(String(64), unique=True, index=True, nullable=True)
     device_limit: Mapped[int] = mapped_column(Integer, default=0)
 
     current_tariff_id: Mapped[int | None] = mapped_column(

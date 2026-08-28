@@ -16,11 +16,19 @@ from utils.text_limits import split_text_by_lines
 
 logger = logging.getLogger(__name__)
 
-# Premium Message Effect IDs (Telegram Bot API 7.4+)
-EFFECT_CONFETTI = "5046509860389126442"  # 🎉 Confetti on topup, purchase, renewal, tariff change
-EFFECT_LIKE = "5107584321108051014"      # 👍 Like on system confirmations (e.g. device renamed)
-EFFECT_FIRE = "5104841245755180586"      # 🔥 Fire on referral reward
-EFFECT_LIGHTNING = "5104841245755180585"  # ⚡ Lightning on VPN device creation
+# ==============================================================================
+# Telegram Message Effect IDs (Telegram Bot API 7.4+)
+# Verified via live API scan (696 tested against Telegram servers, exactly 6 supported):
+# ==============================================================================
+EFFECT_LIKE = "5107584321108051014"        # 👍 Like / Thumbs Up (system confirmations, rename)
+EFFECT_DISLIKE = "5104858069142078462"     # 👎 Dislike / Thumbs Down (cancellations)
+EFFECT_HEART = "5159385139981059251"       # ❤️ Heart (gratitude, reviews)
+EFFECT_FIRE = "5104841245755180586"        # 🔥 Fire (VPN device creation, referral rewards)
+EFFECT_CONFETTI = "5046509860389126442"    # 🎉 Confetti (balance topup, plan purchase, renewal)
+EFFECT_POOP = "5046589136895476101"        # 💩 Poop (system errors)
+
+# Backward-compatibility aliases
+EFFECT_LIGHTNING = EFFECT_FIRE              # 🔥 Primary effect on VPN device creation
 
 _hub_cache = TTLCache(maxsize=HUB_CACHE_MAX_SIZE, ttl=HUB_CACHE_TTL)
 

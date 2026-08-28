@@ -205,7 +205,17 @@ async def enqueue_api_operation(
             raise APIOperationIdempotencyConflict(
                 "idempotency key is already associated with a different command"
             )
+        try:
+            from services.workers.api_operations import notify_api_operation_enqueued
+            notify_api_operation_enqueued()
+        except Exception:
+            pass
         return existing
+    try:
+        from services.workers.api_operations import notify_api_operation_enqueued
+        notify_api_operation_enqueued()
+    except Exception:
+        pass
     return await session.get(APIOperation, operation_id)
 
 

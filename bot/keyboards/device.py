@@ -14,14 +14,6 @@ def get_device_keyboard(
 
     adjustments = []
 
-    if config_ready:
-        builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
-            callback_data=f"alt_connection:{profile_id}",
-            style="primary",
-        )
-        adjustments.append(1)
-
     builder.button(
         text=texts.BTN_CHANGE_NAME,
         callback_data=f"rename_device:{profile_id}",
@@ -31,6 +23,13 @@ def get_device_keyboard(
         callback_data=f"support_help:device_{profile_id}",
     )
     adjustments.append(2)
+
+    if config_ready:
+        builder.button(
+            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
+            callback_data=f"alt_connection:{profile_id}",
+        )
+        adjustments.append(1)
 
     if show_delete:
         builder.button(
@@ -56,16 +55,8 @@ def get_device_keyboard(
 
 def get_alt_connection_keyboard(
     profile_id: int,
-    amnezia_bridge_url: str | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-
-    if amnezia_bridge_url:
-        builder.button(
-            text=texts.CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA,
-            url=amnezia_bridge_url,
-            style="primary",
-        )
 
     builder.button(
         text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE,
@@ -87,7 +78,7 @@ def get_device_delete_confirm_keyboard(
     )
 
     builder.button(
-        text=texts.BTN_CANCEL,
+        text=texts.BTN_CANCEL_ACTION,
         callback_data=f"cancel_delete_device:{profile_id}",
     )
 

@@ -27,8 +27,12 @@ from services.maintenance_service import MaintenanceService
 from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_datetime
-from bot.formatters import get_tariff_display_name, get_tariff_group_name
+from bot.formatters import (
+    format_plural,
+    format_subscription_date,
+    get_tariff_display_name,
+    get_tariff_group_name,
+)
 from utils.telegram import render_hub
 
 from .common import (
@@ -287,7 +291,7 @@ async def select_tariff(
                 shortage_line=shortage,
             ),
             get_balance_change_start_keyboard(
-                str(intent.quote.public_id), "payment_change_tariff"
+                str(intent.quote.public_id), "payment_change_tariff", is_shortage=intent.shortage > 0
             ),
         )
         await callback.answer(show_alert=False)
@@ -346,35 +350,38 @@ async def select_tariff(
         callback.message.chat.id,
         text,
         get_balance_purchase_start_keyboard(
-            str(intent.quote.public_id), back_to
+            str(intent.quote.public_id), back_to, is_shortage=intent.shortage > 0
         ),
     )
 
     await callback.answer(show_alert=False)
 
 
-@router.callback_query(F.data.in_(["payment_quick_renew", "payment_renew"]))
-async def show_quick_renew(
-    callback: CallbackQuery,
+async def render_quick_renew(
+    bot,
+    chat_id: int,
     session: AsyncSession,
     db_user=None,
 ) -> None:
-    await callback.answer(show_alert=False)
-
     if not db_user:
         await render_hub(
-            callback.bot,
-            callback.message.chat.id,
+            bot,
+            chat_id,
             texts.PAYMENT_USER_NOT_REGISTERED,
             _START_KEYBOARD,
         )
         return
 
+    user_tg_id = getattr(db_user, "telegram_id", None) or chat_id
     if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id
+        session, user_tg_id
     ):
-        await _render_maintenance(
-            callback, session, back_to="menu_subscription"
+        message = await MaintenanceService.get_message(session) or texts.MAINTENANCE_DEFAULT_MESSAGE
+        await render_hub(
+            bot,
+            chat_id,
+            message,
+            get_back_button("menu_subscription"),
         )
         return
 
@@ -389,8 +396,8 @@ async def show_quick_renew(
 
     if not renew_tariffs:
         await render_hub(
-            callback.bot,
-            callback.message.chat.id,
+            bot,
+            chat_id,
             texts.PAYMENT_NO_TARIFFS,
             get_back_button("menu_subscription"),
         )
@@ -400,13 +407,28 @@ async def show_quick_renew(
 
     text = texts.PAYMENT_QUICK_RENEW_HEADER.format(
         tariff_name=tariff_name,
-        valid_until=format_datetime(db_user.subscription_end),
+        valid_until=format_subscription_date(db_user.subscription_end),
     )
 
     keyboard = get_renew_keyboard(renew_tariffs)
 
     await render_hub(
-        callback.bot, callback.message.chat.id, text, keyboard
+        bot, chat_id, text, keyboard
+    )
+
+
+@router.callback_query(F.data.in_(["payment_quick_renew", "payment_renew"]))
+async def show_quick_renew(
+    callback: CallbackQuery,
+    session: AsyncSession,
+    db_user=None,
+) -> None:
+    await callback.answer(show_alert=False)
+    await render_quick_renew(
+        callback.bot,
+        callback.message.chat.id,
+        session,
+        db_user,
     )
 
 
@@ -465,7 +487,7 @@ async def show_change_tariff(
 
     text = texts.PAYMENT_CHANGE_TARIFF_HEADER.format(
         tariff_name=tariff_name,
-        valid_until=format_datetime(db_user.subscription_end),
+        valid_until=format_subscription_date(db_user.subscription_end),
     )
 
     current_tariff = await get_tariff_by_id(session, db_user.current_tariff_id) if getattr(db_user, "current_tariff_id", None) else None
@@ -481,6 +503,75 @@ async def show_change_tariff(
 
     await render_hub(
         callback.bot, callback.message.chat.id, text, keyboard
+    )
+
+
+async def render_tariff_duration_selection(
+    bot,
+    chat_id: int,
+    session: AsyncSession,
+    db_user,
+    device_limit: int,
+    source: str = "showcase",
+) -> None:
+    back_to = {
+        "change": "payment_change_tariff",
+        "renew": "menu_subscription",
+    }.get(source, "payment_showcase")
+
+    user_tg_id = getattr(db_user, "telegram_id", None) or chat_id
+    if not await MaintenanceService.can_user_perform_action(
+        session, user_tg_id
+    ):
+        message = await MaintenanceService.get_message(session) or texts.MAINTENANCE_DEFAULT_MESSAGE
+        await render_hub(bot, chat_id, message, get_back_button(back_to))
+        return
+
+    if db_user:
+        profiles_count = await get_user_profiles_count(
+            session, db_user.id
+        )
+
+        if profiles_count > device_limit:
+            await render_hub(
+                bot,
+                chat_id,
+                texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
+                    profiles_count=format_plural(profiles_count, texts.NOUN_DEVICES),
+                    new_limit=format_plural(device_limit, texts.NOUN_DEVICES),
+                ),
+                get_back_button(back_to),
+            )
+            return
+
+    tariffs = await get_active_tariffs(session)
+
+    type_tariffs = [
+        t
+        for t in tariffs
+        if getattr(t, "device_limit", 2) == device_limit
+        and not (
+            source == "change"
+            and t.id == getattr(db_user, "current_tariff_id", None)
+        )
+    ]
+
+    if not type_tariffs:
+        await render_hub(
+            bot,
+            chat_id,
+            texts.PAYMENT_NO_TARIFFS,
+            get_back_button(back_to),
+        )
+        return
+
+    description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
+    text = description + texts.PAYMENT_DURATION_HEADER
+
+    keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
+
+    await render_hub(
+        bot, chat_id, text, keyboard
     )
 
 
@@ -505,61 +596,11 @@ async def select_tariff_type(
         return
 
     source = parts[2] if len(parts) > 2 else "showcase"
-
-    back_to = {
-        "change": "payment_change_tariff",
-        "renew": "menu_subscription",
-    }.get(source, "payment_showcase")
-
-    if not await MaintenanceService.can_user_perform_action(
-        session, callback.from_user.id
-    ):
-        await _render_maintenance(callback, session, back_to=back_to)
-        return
-
-    if db_user:
-        profiles_count = await get_user_profiles_count(
-            session, db_user.id
-        )
-
-        if profiles_count > device_limit:
-            await render_hub(
-                callback.bot,
-                callback.message.chat.id,
-                texts.PAYMENT_DOWNGRADE_BLOCKED_PROFILES.format(
-                    profiles_count=profiles_count,
-                    new_limit=device_limit,
-                ),
-                get_back_button(back_to),
-            )
-            return
-
-    tariffs = await get_active_tariffs(session)
-
-    type_tariffs = [
-        t
-        for t in tariffs
-        if getattr(t, "device_limit", 2) == device_limit
-        and not (
-            source == "change"
-            and t.id == getattr(db_user, "current_tariff_id", None)
-        )
-    ]
-
-    if not type_tariffs:
-        await render_hub(
-            callback.bot,
-            callback.message.chat.id,
-            texts.PAYMENT_NO_TARIFFS,
-            get_back_button(back_to),
-        )
-        return
-
-    description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
-    text = description + texts.PAYMENT_DURATION_HEADER
-
-    keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)
-
-    await render_hub(
-        callback.bot, callback.message.chat.id, text, keyboard
+    await render_tariff_duration_selection(
+        callback.bot,
+        callback.message.chat.id,
+        session,
+        db_user,
+        device_limit,
+        source=source,
     )

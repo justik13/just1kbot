@@ -44,7 +44,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.SubscriptionService.check_access', new=AsyncMock(return_value=True)), \
              patch('bot.handlers.connection.device_view_routes.can_show_config_actions', return_value=True), \
              patch('bot.handlers.connection.device_view_routes.can_show_delete_action', return_value=True), \
-             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('bot.handlers.connection.device_view_routes.render_hub', new=AsyncMock()) as mock_hub:
 
             await render_device_screen(bot, chat_id=12345, profile=profile, user=user, session=session)
@@ -54,7 +53,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             # Must not exceed Telegram 4096 character limit
             self.assertLessEqual(len(rendered_text), 4096)
             self.assertIn('Локация: <b>🇩🇪 Germany</b>', rendered_text)
-            self.assertIn('Другой способ подключения', rendered_text)
+            self.assertIn('.vpn / .conf', rendered_text)
 
 
     async def test_alt_connection_preserves_old_hub_if_guide_send_fails(self):
@@ -82,7 +81,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
              patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
-             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[99, 100])), \
              patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=[101, 102])), \
              patch('bot.handlers.connection.device_view_routes._append_hub_message_unlocked', new=AsyncMock(side_effect=RuntimeError('Network dropped'))), \
@@ -131,7 +129,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
              patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
-             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('utils.telegram._load_hub_ids_from_db', new=AsyncMock(return_value=[49, 50])), \
              patch('utils.telegram._store_hub_id_in_db', new=AsyncMock()), \
              patch('utils.telegram._remove_hub_ids_from_db', new=AsyncMock()):
@@ -196,7 +193,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
              patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
              patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
              patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
-             patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
              patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=bad_req_exc)), \
              patch('bot.handlers.connection.device_view_routes._append_hub_message_unlocked', new=AsyncMock(return_value=55)) as mock_msg, \
              patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[50])), \
@@ -239,7 +235,6 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
                  patch('bot.handlers.connection.device_view_routes.customize_vpn_config_dict', return_value={}), \
                  patch('bot.handlers.connection.device_view_routes.build_vpn_file_from_dict', return_value='vpn_data'), \
                  patch('bot.handlers.connection.device_view_routes.build_conf_file_from_dict', return_value='conf_data'), \
-                 patch('bot.handlers.connection.device_view_routes.can_show_amnezia_bridge', return_value=False), \
                  patch('bot.handlers.connection.device_view_routes._append_hub_document_unlocked', new=AsyncMock(side_effect=err)), \
                  patch('bot.handlers.connection.device_view_routes.get_hub_ids', new=AsyncMock(return_value=[50])):
 

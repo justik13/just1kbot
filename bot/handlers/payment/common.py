@@ -14,9 +14,11 @@ from database.repositories.tariffs_repo import (
     get_active_tariffs,
 )
 from utils.datetime_helpers import is_expired
-from utils.formatters import format_datetime
-from bot.formatters import format_days_left
-from bot.formatters import get_tariff_display_name
+from bot.formatters import (
+    format_days_left,
+    format_subscription_date,
+    get_tariff_display_name,
+)
 from utils.telegram import render_hub
 
 logger = logging.getLogger(__name__)
@@ -68,14 +70,14 @@ async def _check_tariff_change_allowed(
     return None
 
 
-async def _show_showcase(
-    callback: CallbackQuery, session: AsyncSession
+async def render_tariff_showcase(
+    bot, chat_id: int, session: AsyncSession
 ) -> None:
     tariffs = await get_active_tariffs(session)
     if not tariffs:
         await render_hub(
-            callback.bot,
-            callback.message.chat.id,
+            bot,
+            chat_id,
             texts.PAYMENT_NO_TARIFFS,
             get_back_button("back_to_main_menu"),
         )
@@ -88,11 +90,17 @@ async def _show_showcase(
         grouped[limit].append(tariff)
     keyboard = get_tariff_showcase_keyboard(grouped)
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
+        bot,
+        chat_id,
         texts.PAYMENT_SHOWCASE_HEADER,
         keyboard,
     )
+
+
+async def _show_showcase(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    await render_tariff_showcase(callback.bot, callback.message.chat.id, session)
 
 
 async def _show_hub(
@@ -102,34 +110,18 @@ async def _show_hub(
     device_limit = await _get_effective_device_limit(session, user)
     tariff_name = get_tariff_display_name(device_limit)
     text = texts.PAYMENT_HUB_HEADER.format(
-        valid_until=format_datetime(user.subscription_end),
+        valid_until=format_subscription_date(user.subscription_end),
         days_left=format_days_left(user.subscription_end),
         tariff_name=tariff_name,
         devices_count=len(profiles),
         device_limit=device_limit,
     )
 
-    tariffs = await get_active_tariffs(session)
-    if tariffs:
-        grouped: dict[int, list] = {}
-        for t in tariffs:
-            limit = getattr(t, "device_limit", 2)
-            if limit not in grouped:
-                grouped[limit] = []
-            grouped[limit].append(t)
-
-        tariff_lines = []
-        for limit in sorted(grouped.keys()):
-            min_price = min(int(t.price_rub) for t in grouped[limit])
-            name = get_tariff_display_name(limit)
-            tariff_lines.append(texts.PAYMENT_STATUS_COMMON_UST_OT.format(name=name, limit=limit, min_price=min_price))
-
-        if tariff_lines:
-            text += texts.PAYMENT_STATUS_COMMON_DOSTUPNYE_VARIANTY_TARIFOV + "\n".join(tariff_lines)
-
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION, callback_data="payment_quick_renew"
+        text=texts.BTN_PAYMENT_RENEW_SUBSCRIPTION,
+        callback_data="payment_quick_renew",
+        style="success",
     )
     builder.button(
         text=texts.BTN_CHANGE_TARIFF, callback_data="payment_change_tariff"

@@ -210,13 +210,27 @@ async def cancel_purchase(
     await callback.answer(show_alert=False)
 
     if quote.operation_type == "renew":
-        from .showcase_routes import show_quick_renew
+        from .showcase_routes import render_quick_renew
 
-        await show_quick_renew(callback, session, db_user)
+        await render_quick_renew(callback.bot, callback.message.chat.id, session, db_user)
     else:
-        from .showcase_routes import show_tariff_showcase_callback
+        from database.models import TariffVersion
+        from .common import render_tariff_showcase
+        from .showcase_routes import render_tariff_duration_selection
 
-        await show_tariff_showcase_callback(callback, session)
+        target_version_id = getattr(quote, "target_tariff_version_id", None)
+        version = await session.get(TariffVersion, target_version_id) if target_version_id else None
+        if version and getattr(version, "device_limit", None):
+            await render_tariff_duration_selection(
+                callback.bot,
+                callback.message.chat.id,
+                session,
+                db_user,
+                device_limit=version.device_limit,
+                source="showcase",
+            )
+        else:
+            await render_tariff_showcase(callback.bot, callback.message.chat.id, session)
 
 
 @router.callback_query(F.data.startswith("balance_purchase_confirm:"))
