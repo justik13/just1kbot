@@ -13,6 +13,7 @@ from aiogram.types import InlineKeyboardMarkup
 
 from utils.telegram import (
     EFFECT_CONFETTI,
+    EFFECT_FIRE,
     EFFECT_LIKE,
     EFFECT_LIGHTNING,
     _send_with_resilience,
@@ -208,10 +209,11 @@ class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
     def test_effect_constants_match_bot_api_ids(self):
         self.assertEqual(EFFECT_CONFETTI, "5046509860389126442")
         self.assertEqual(EFFECT_LIKE, "5107584321108051014")
-        self.assertEqual(EFFECT_LIGHTNING, "5104841245755180586")
+        self.assertEqual(EFFECT_FIRE, "5104841245755180586")
+        self.assertEqual(EFFECT_LIGHTNING, EFFECT_FIRE)
 
     async def test_render_device_screen_effect_passthrough(self):
-        """T-04: creation card renders as a NEW message carrying the LIGHTNING effect."""
+        """T-04: creation card renders as a NEW message carrying the FIRE effect."""
         from bot.handlers.connection.device_view_routes import render_device_screen
 
         profile = SimpleNamespace(
@@ -229,11 +231,11 @@ class TestEffectsWiring(unittest.IsolatedAsyncioTestCase):
              patch("bot.handlers.connection.device_view_routes.render_hub", new=AsyncMock()) as mock_hub:
             await render_device_screen(
                 MagicMock(), 12345, profile, user, AsyncMock(),
-                message_effect_id=EFFECT_LIGHTNING,
+                message_effect_id=EFFECT_FIRE,
             )
 
         kwargs = mock_hub.call_args.kwargs
-        self.assertEqual(kwargs.get("message_effect_id"), EFFECT_LIGHTNING)
+        self.assertEqual(kwargs.get("message_effect_id"), EFFECT_FIRE)
         self.assertTrue(kwargs.get("force_new"))
 
 
@@ -715,13 +717,14 @@ class TestIntegrationsAndCleanupVerification(unittest.TestCase):
             )
 
     def test_caddyfile_has_no_legacy_endpoints(self):
-        """Verify Caddyfile does not contain deleted legacy endpoints."""
+        """Verify Caddyfile and Caddyfile.ci do not contain deleted legacy endpoints."""
         from pathlib import Path
-        caddyfile_path = Path(__file__).resolve().parent.parent / "Caddyfile"
-        content = caddyfile_path.read_text(encoding="utf-8")
-        self.assertNotIn("/amnezia/open", content)
-        self.assertNotIn("/sub/", content)
-        self.assertNotIn("/subscription/", content)
+        for fname in ("Caddyfile", "Caddyfile.ci"):
+            caddyfile_path = Path(__file__).resolve().parent.parent / fname
+            content = caddyfile_path.read_text(encoding="utf-8")
+            self.assertNotIn("/amnezia/open", content, f"{fname} contains /amnezia/open")
+            self.assertNotIn("/sub/", content, f"{fname} contains /sub/")
+            self.assertNotIn("/subscription/", content, f"{fname} contains /subscription/")
 
     def test_device_rename_routes_does_not_use_payment_cancel(self):
         """Verify device_rename_routes does not use BTN_PAYMENT_CANCEL."""

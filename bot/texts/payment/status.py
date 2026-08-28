@@ -3,13 +3,6 @@ from __future__ import annotations
 
 from bot.texts.common import BTN_BUY_ACCESS, BTN_CONNECTIONS, BTN_MY_SUBSCRIPTION
 
-PAYMENT_STATUS_COMMON_DOSTUPNYE_VARIANTY_TARIFOV = """
-
-💡 <b>Доступные варианты тарифов:</b>
-"""
-
-PAYMENT_STATUS_COMMON_UST_OT = "• <b>{name}</b> ({limit} уст.) — от <b>{min_price} ₽</b>"
-
 PAYMENT_STATUS_ICONS = {'cancelled': '❌', 'completed': '✅', 'failed': '⚠️', 'paid_processing': '🔄', 'pending': '⏳', 'refunded': '↩️', 'requires_manual_review': '🧪'}
 
 PAYMENT_STATUS_NAMES = {'cancelled': 'Отменен', 'completed': 'Выполнен', 'failed': 'Ошибка', 'paid_processing': 'Обработка', 'pending': 'Ожидание', 'refunded': 'Возврат', 'requires_manual_review': 'Ручная проверка'}

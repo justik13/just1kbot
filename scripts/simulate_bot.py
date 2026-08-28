@@ -623,7 +623,13 @@ async def run_simulation(args: argparse.Namespace):
     config.settings.get_settings = lambda: mock_settings
 
     for mod in list(sys.modules.values()):
-        if mod and hasattr(mod, "get_settings"):
+        if (
+            mod
+            and getattr(mod, "__name__", "").startswith(
+                ("bot", "config", "services", "database", "utils", "integrations")
+            )
+            and hasattr(mod, "get_settings")
+        ):
             try:
                 mod.get_settings = lambda: mock_settings
             except Exception:
@@ -730,52 +736,57 @@ async def run_simulation(args: argparse.Namespace):
                     session.add(tv)
         await session.commit()
 
-        existing_server = await session.scalar(select(Server.id).limit(1))
-        if not existing_server:
-            servers = [
-                Server(
-                    id=1,
-                    name="Нидерланды #1 (Амстердам)",
-                    country_flag="🇳🇱",
-                    api_url="http://nl1.just1k.net:8080",
-                    api_key="enc_key_nl",
-                    protocol=AMNEZIA_PROTOCOL,
-                    is_active=True,
-                    max_clients=100,
-                ),
-                Server(
-                    id=2,
-                    name="Германия #1 (Франкфурт)",
-                    country_flag="🇩🇪",
-                    api_url="http://de1.just1k.net:8080",
-                    api_key="enc_key_de",
-                    protocol=AMNEZIA_PROTOCOL,
-                    is_active=True,
-                    max_clients=100,
-                ),
-                Server(
-                    id=3,
-                    name="Швеция #1 (Стокгольм)",
-                    country_flag="🇸🇪",
-                    api_url="http://se1.just1k.net:8080",
-                    api_key="enc_key_se",
-                    protocol=AMNEZIA_PROTOCOL,
-                    is_active=True,
-                    max_clients=100,
-                ),
-                Server(
-                    id=4,
-                    name="Финляндия #1 (Хельсинки)",
-                    country_flag="🇫🇮",
-                    api_url="http://fi1.just1k.net:8080",
-                    api_key="enc_key_fi",
-                    protocol=AMNEZIA_PROTOCOL,
-                    is_active=True,
-                    max_clients=100,
-                ),
-            ]
-            session.add_all(servers)
-            await session.commit()
+        servers = [
+            Server(
+                id=1,
+                name="Нидерланды #1 (Амстердам)",
+                country_flag="🇳🇱",
+                api_url="http://nl1.just1k.net:8080",
+                api_key="enc_key_nl",
+                protocol=AMNEZIA_PROTOCOL,
+                is_active=True,
+                max_clients=100,
+            ),
+            Server(
+                id=2,
+                name="Германия #1 (Франкфурт)",
+                country_flag="🇩🇪",
+                api_url="http://de1.just1k.net:8080",
+                api_key="enc_key_de",
+                protocol=AMNEZIA_PROTOCOL,
+                is_active=True,
+                max_clients=100,
+            ),
+            Server(
+                id=3,
+                name="Швеция #1 (Стокгольм)",
+                country_flag="🇸🇪",
+                api_url="http://se1.just1k.net:8080",
+                api_key="enc_key_se",
+                protocol=AMNEZIA_PROTOCOL,
+                is_active=True,
+                max_clients=100,
+            ),
+            Server(
+                id=4,
+                name="Финляндия #1 (Хельсинки)",
+                country_flag="🇫🇮",
+                api_url="http://fi1.just1k.net:8080",
+                api_key="enc_key_fi",
+                protocol=AMNEZIA_PROTOCOL,
+                is_active=True,
+                max_clients=100,
+            ),
+        ]
+        for s in servers:
+            existing_s = await session.scalar(
+                select(Server.id).where(
+                    (Server.id == s.id) | (Server.api_url == s.api_url)
+                )
+            )
+            if not existing_s:
+                session.add(s)
+        await session.commit()
     logger.info("Tariffs and high-speed simulation servers seeded successfully.")
 
     if args.maintenance:

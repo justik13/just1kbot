@@ -70,14 +70,14 @@ async def _check_tariff_change_allowed(
     return None
 
 
-async def _show_showcase(
-    callback: CallbackQuery, session: AsyncSession
+async def render_tariff_showcase(
+    bot, chat_id: int, session: AsyncSession
 ) -> None:
     tariffs = await get_active_tariffs(session)
     if not tariffs:
         await render_hub(
-            callback.bot,
-            callback.message.chat.id,
+            bot,
+            chat_id,
             texts.PAYMENT_NO_TARIFFS,
             get_back_button("back_to_main_menu"),
         )
@@ -90,11 +90,17 @@ async def _show_showcase(
         grouped[limit].append(tariff)
     keyboard = get_tariff_showcase_keyboard(grouped)
     await render_hub(
-        callback.bot,
-        callback.message.chat.id,
+        bot,
+        chat_id,
         texts.PAYMENT_SHOWCASE_HEADER,
         keyboard,
     )
+
+
+async def _show_showcase(
+    callback: CallbackQuery, session: AsyncSession
+) -> None:
+    await render_tariff_showcase(callback.bot, callback.message.chat.id, session)
 
 
 async def _show_hub(

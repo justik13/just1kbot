@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --no-deps --require-hashes -r requirements.lock && \
-    pip install --no-cache-dir "aiosqlite>=0.21.0,<1.0.0"
+    pip install --no-cache-dir "aiosqlite==0.21.0"
 
 COPY . .
 

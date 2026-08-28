@@ -123,7 +123,8 @@ BTN_PAGINATION_PREV = "◀️ Назад"
 
 BTN_PAGINATION_NEXT = "Вперед ▶️"
 
-BTN_PAYMENT_CANCEL = "❌ Отмена"
+BTN_CANCEL_ACTION = "❌ Отмена"
+BTN_PAYMENT_CANCEL = BTN_CANCEL_ACTION
 
 BTN_PAYMENT_CHECK = "🔄 Проверить оплату"
 

@@ -61,7 +61,7 @@ async def show_history(
         )
         return
 
-    payments = await get_user_payments(session, db_user.id)
+    payments = await get_user_payments(session, db_user.id, limit=10)
 
     if not payments:
         rendered = texts.HISTORY_HEADER + texts.HISTORY_EMPTY

@@ -144,7 +144,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         show_dashboard.assert_not_awaited()
 
     async def test_balance_purchase_back_cancels_commits_and_then_navigates(self):
-        from bot.handlers.payment import purchase_routes, showcase_routes
+        from bot.handlers.payment import purchase_routes
 
         quote_id = uuid.uuid4()
         user = SimpleNamespace(id=42)
@@ -161,9 +161,8 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
                 "cancel_account_purchase_quote",
                 new=AsyncMock(return_value=quote),
             ) as cancel_quote,
-            patch.object(
-                showcase_routes,
-                "show_tariff_showcase_callback",
+            patch(
+                "bot.handlers.payment.common.render_tariff_showcase",
                 new=AsyncMock(),
             ) as show_showcase,
         ):
@@ -176,7 +175,7 @@ class TestPr160Regressions(unittest.IsolatedAsyncioTestCase):
         )
         session.commit.assert_awaited_once()
         callback.answer.assert_awaited_once_with(show_alert=False)
-        show_showcase.assert_awaited_once_with(callback, session)
+        show_showcase.assert_awaited_once_with(callback.bot, callback.message.chat.id, session)
 
     async def test_balance_purchase_back_does_not_navigate_when_cancel_fails(self):
         from bot.handlers.payment import purchase_routes, showcase_routes

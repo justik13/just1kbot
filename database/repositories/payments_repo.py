@@ -26,12 +26,16 @@ async def has_successful_topup(
 
 
 
-async def get_user_payments(session: AsyncSession, user_id: int) -> list[Payment]:
+async def get_user_payments(
+    session: AsyncSession, user_id: int, limit: int | None = None
+) -> list[Payment]:
     stmt = (
         select(Payment)
         .where(Payment.user_id == user_id)
         .order_by(Payment.created_at.desc())
     )
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await session.execute(stmt)
     return result.scalars().all()
 

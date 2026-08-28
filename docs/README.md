@@ -11,7 +11,7 @@
 * **Назначение:** Спецификация используемого протокола AmneziaWG 2.0 (`amneziawg2`), форматы файлов `.conf` и `.vpn`, схема URI `vpn://...`, обфускационные параметры (`Jc`, `Jmin`, `Jmax`, `S1-S4`, `H1-H4`, `I1-I5`), особенности интеграции с `kyoresuas/amnezia-api` и чеклист валидации.
 
 ### 2. [Architecture & Security Reference](architecture_and_security.md)
-* **Назначение:** Архитектура бэкенда, база данных PostgreSQL и модели SQLAlchemy, MultiFernet шифрование данных, защита веб-мостов через HMAC-SHA256, фоновые воркеры уведомлений и платежей, Rate Limiting и руководство по обновлению продакшена через `just1kbot update`.
+* **Назначение:** Архитектура бэкенда, база данных PostgreSQL и модели SQLAlchemy, MultiFernet шифрование данных, фоновые воркеры уведомлений и платежей, Rate Limiting и руководство по обновлению продакшена через `just1kbot update`.
 
 ---
 
