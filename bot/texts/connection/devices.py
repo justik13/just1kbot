@@ -13,8 +13,6 @@ CONNECTION_DEVICES_DEVICE_ALT_CONNECTION = "📁 Скачать файлы (.vpn
 
 CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE = "← К устройству"
 
-CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA = "🚀 Открыть в Amnezia"
-
 CONNECTION_DEVICE_CREATE_CREATING_SCREEN = """⏳ <b>Настраиваем подключение...</b>
 
 🌍 Сервер: <b>{v0}</b>

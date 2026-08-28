@@ -35,7 +35,7 @@ from services.maintenance_service import MaintenanceService
 from services.slots_cache import capture_server_peer_snapshot
 from services.subscription import SubscriptionService
 from utils.callbacks import parse_callback_id
-from utils.telegram import EFFECT_LIGHTNING, render_hub, safe
+from utils.telegram import EFFECT_FIRE, render_hub, safe
 
 from .common import (
     _get_effective_device_limit,
@@ -465,7 +465,7 @@ async def _process_server_selection(
                     ready_profile,
                     user,
                     session,
-                    message_effect_id=EFFECT_LIGHTNING if ready_profile.provisioning_status == "active" else None,
+                    message_effect_id=EFFECT_FIRE if ready_profile.provisioning_status == "active" else None,
                 )
             else:
                 # Timeout reached or creation still pending -> render connections

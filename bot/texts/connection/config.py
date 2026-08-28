@@ -21,9 +21,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_2_OTKROYTE_PRILOZHENIE_I_VYBER = "2. Открой�
 
 CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT = "• В строке состояния появится значок соединения (или 🔑);"
 
-CONNECTION_CONFIG_DEVICE_VIEW_3_LIBO_NAZHMITE_KNOPKU_OTKRYT = """
-3. Либо нажмите кнопку <b>«🚀 Открыть в Amnezia»</b> ниже для авто-настройки."""
-
 CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сайте <b>2ip.io</b> страна сменится на локацию сервера;"
 
 CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
@@ -40,13 +37,11 @@ CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скоп
 • В приложении статус сменится на <b>«Подключено»</b> (значок соединения или 🔑 вверху);
 • На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
 
-CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = ""
-
 CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DEVICES_OBNO = """
 
 🔄 <b>Конфигурация устройства обновляется...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «🔄 Другой способ подключения» ниже.</i>"
+CONNECTION_CONFIG_DEVICE_VIEW_CONFIG_DOSTUPNA_CHEREZ = "<i>Конфигурация доступна через кнопку «📁 Скачать файлы» ниже.</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_CONF_FOR_AMNEZIAWG_DEFAULTVPN = """   • <code>.conf</code> — для <b>AmneziaWG</b>, <b>DefaultVPN</b> или роутеров с поддержкой AmneziaWG (Keenetic AWG)
 """
@@ -63,11 +58,9 @@ CONNECTION_CONFIG_DEVICE_VIEW_DEVICE_UDALYAETSYA_S_SERVE = """
 
 🗑 <b>Устройство удаляется с сервера...</b>"""
 
-CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """🔄 <b>Другой способ подключения: {safe_profile_device_name}</b>
+CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_PODKLYUCHENIYA = """📁 <b>Файлы подключения: {safe_profile_device_name}</b>
 
 """
-
-CONNECTION_CONFIG_DEVICE_VIEW_DRUGOY_SPOSOB_SKACHAT_FAYLOM_V = "• <b>🔄 Другой способ</b> — скачать файлом (.vpn / .conf) или открыть в 1 клик"
 
 CONNECTION_CONFIG_DEVICE_VIEW_ESLI_PRYAMAYA_VSTAVKA_KEY = """Если прямая вставка ключа не сработала или ваше приложение требует файл:
 
@@ -94,8 +87,6 @@ CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA = """
 
 CONNECTION_CONFIG_DEVICE_VIEW_KEY_PODKLYUCHENIYA_DOSTUPEN = """🔑 <b>Ключ подключения:</b> доступен на главном экране устройства.
 """
-
-CONNECTION_CONFIG_DEVICE_VIEW_KNOPKI_UPRAVLENIYA = ""
 
 CONNECTION_CONFIG_DEVICE_VIEW_NAZHMITE_NA_MONOSHIRINNYY_KLYU = "<i>📋 Нажмите на поле с ключом, чтобы скопировать.</i>"
 
