@@ -53,7 +53,7 @@ class TestTelegramLengthGuards(unittest.IsolatedAsyncioTestCase):
             # Must not exceed Telegram 4096 character limit
             self.assertLessEqual(len(rendered_text), 4096)
             self.assertIn('Локация: <b>🇩🇪 Germany</b>', rendered_text)
-            self.assertIn('Другой способ подключения', rendered_text)
+            self.assertIn('.vpn / .conf', rendered_text)
 
 
     async def test_alt_connection_preserves_old_hub_if_guide_send_fails(self):

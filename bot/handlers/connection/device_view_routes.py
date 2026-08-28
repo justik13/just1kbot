@@ -198,17 +198,15 @@ async def render_device_screen(
 
         if display_key:
             amnezia_howto = texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY
+            guide_block = (
+                f"\n\n<blockquote expandable>{texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT.strip()}\n"
+                f"{amnezia_howto.strip()}</blockquote>\n\n"
+                f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE.strip()}"
+            )
         else:
-            amnezia_howto = texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE
-        guide_block = (
-            f"\n\n<blockquote expandable>{texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT.strip()}\n"
-            f"{amnezia_howto.strip()}</blockquote>\n\n"
-            f"<blockquote expandable>{texts.CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET.strip()}\n"
-            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_1_V_PRILOZHENII_STATUS_SMENITS.strip()}\n"
-            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_2_V_STROKE_SOSTOYANIYA_POYAVIT.strip()}\n"
-            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI.strip()}\n"
-            f"{texts.CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE.strip()}</blockquote>"
-        )
+            guide_block = (
+                f"\n\n{texts.CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE.strip()}"
+            )
         if len(rendered) + len(guide_block) <= 4000:
             rendered += guide_block
 

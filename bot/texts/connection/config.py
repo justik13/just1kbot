@@ -30,15 +30,17 @@ CONNECTION_CONFIG_DEVICE_VIEW_3_NA_SAYTE_2IP_RU_STRANA_SMENI = "• На сай�
 
 CONNECTION_CONFIG_DEVICE_VIEW_4_POPULYARNYE_SERVISY_I_ZARUBE = "• Заблокированные сервисы и зарубежные сайты станут доступны."
 
-CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "Нажмите «🔄 Другой способ подключения» ниже, чтобы получить файлы (.vpn / .conf) или ссылку быстрого импорта."
+CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_NAZHMITE = "📁 <i>Нужен файл .vpn / .conf для роутера или ПК? Скачайте ниже:</i>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_AMNEZIAVPN_DEFAULTVPN_SKOPIRUY = """<b>1. Скопируйте ключ</b> — нажмите на блок с ключом выше.
 <b>2. Откройте приложение:</b>
-   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → нажмите «У меня есть данные для подключения» (или «+») → «Вставить ключ».
-   • <b>DefaultVPN</b> (iOS) → нажмите «+» → «Import from Clipboard».
+   • <b>AmneziaVPN</b> (iOS / Android / Win / Mac) → «+» (или «У меня есть данные») → «Вставить ключ».
+   • <b>DefaultVPN</b> (iOS) → «+» → «Import from Clipboard».
 <b>3. Нажмите «Подключиться».</b>
 
-💡 <i>Для роутеров (Keenetic, OpenWrt), клиента AmneziaWG или скачивания файлов (.vpn / .conf) нажмите <b>«🔄 Другой способ подключения»</b> ниже.</i>"""
+✅ <b>Как понять, что всё работает:</b>
+• В приложении статус сменится на <b>«Подключено»</b> (значок соединения или 🔑 вверху);
+• На сайте <b>2ip.io</b> страна сменится на локацию сервера."""
 
 CONNECTION_CONFIG_DEVICE_VIEW_CHTOBY_POLUCHIT_FAYL_KONFIGURA = ""
 
@@ -87,7 +89,7 @@ CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSII_I_SPRAVKA_AMNEZIAV = """📖 <b>Инс
 
 CONNECTION_CONFIG_DEVICE_VIEW_INSTRUKTSIYA_POSHAGOVOE_RUKOVO = "• <b>📖 Инструкция</b> — пошаговое руководство по настройке"
 
-CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться (по шагам):</b>"
+CONNECTION_CONFIG_DEVICE_VIEW_KAK_PODKLYUCHITSYA_I_PROVERIT = "🚀 <b>Как подключиться и проверить:</b>"
 
 CONNECTION_CONFIG_DEVICE_VIEW_KAK_PONYAT_CHTO_VSE_RABOTAET = "✅ <b>Как понять, что всё работает:</b>"
 
