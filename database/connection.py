@@ -120,7 +120,7 @@ async def _seed_default_data() -> None:
         # Seed tariffs
         result = await session.execute(select(func.count(Tariff.id)))
         if result.scalar_one() == 0:
-            for tariff in texts.DEFAULT_TARIFFS_SEEDS:
+            for tariff in DEFAULT_TARIFFS:
                 session.add(Tariff(**tariff, is_active=True))
             await session.commit()
             logging.info("Default tariffs seeded successfully.")

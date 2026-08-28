@@ -50,7 +50,7 @@ DEVICE_CONFIG_VPN_CAPTION = """📁 <b>Файл для AmneziaVPN</b>
 
 DEVICE_CREATE_IN_PROGRESS = "⏳ Уже обрабатываем запрос..."
 
-DEVICE_SERVER_SELECTION_LABEL = "{v0} {value_1}"
+DEVICE_CREATING_SPINNER_NOTICE = "{v0} {value_1}"
 
 DEVICE_DATA_NONE = "Нет данных"
 
@@ -96,7 +96,7 @@ DEVICE_SHOW_KEY = """🔑 <b>Ключ подключения для {device_name
 
 <i>💡 Нажмите на моноширинный текст выше, чтобы скопировать ключ в буфер обмена.</i>"""
 
-DEVICE_DELETE_CONFIRM_BUTTON = "🗑 Да, удалить"
+DEVICE_STATUS_CREATING_LABEL = "🗑 Да, удалить"
 
 DOWNLOAD_CONF_FALLBACK = """⚠️ <b>Не удалось сформировать файл</b> для устройства <b>{device_name}</b>.
 

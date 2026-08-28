@@ -72,7 +72,7 @@ def get_device_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.DEVICE_DELETE_CONFIRM_BUTTON,
+        text=texts.DEVICE_STATUS_CREATING_LABEL,
         callback_data=f"confirm_delete_device:{profile_id}",
         style="danger",
     )
