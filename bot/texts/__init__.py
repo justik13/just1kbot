@@ -106,10 +106,5 @@ def get_text(key: str, default=None, **kwargs):
 
 
 def reload_texts() -> None:
-    """Reload text modules for backwards compatibility."""
-    import importlib
-    import sys
-
-    for mod_name in list(sys.modules.keys()):
-        if mod_name.startswith("bot.texts"):
-            importlib.reload(sys.modules[mod_name])
+    """No-op backwards compatibility helper for static text catalogue."""
+    return None
