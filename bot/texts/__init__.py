@@ -38,8 +38,6 @@ from bot.texts.admin.users import (
     ADMIN_USER_ID_NO_COLON_FORMAT as ADMIN_USER_ID_NO_COLON_FORMAT,
 )
 from bot.texts.common.status import MAINTENANCE_DEFAULT_MESSAGE as MAINTENANCE_DEFAULT_MESSAGE
-from bot.texts.connection.config import (
-    )
 from bot.texts.runtime.alerts import (
     ALERT_QUEUE_RECOVERED as ALERT_QUEUE_RECOVERED,
     ALERT_QUEUE_UNHEALTHY as ALERT_QUEUE_UNHEALTHY,

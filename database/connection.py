@@ -113,6 +113,9 @@ async def _run_alembic_migrations(database_url: str) -> None:
 
 async def _seed_default_data() -> None:
     """Seed default tariffs and maintenance mode after migrations."""
+    from bot import texts
+    from database.models import MaintenanceMode
+
     async with session_scope() as session:
         # Seed tariffs
         result = await session.execute(select(func.count(Tariff.id)))
@@ -123,8 +126,6 @@ async def _seed_default_data() -> None:
             logging.info("Default tariffs seeded successfully.")
 
         # Seed maintenance mode
-        from database.models import MaintenanceMode
-        from bot import texts
         result = await session.execute(select(func.count(MaintenanceMode.id)))
         if result.scalar_one() == 0:
             session.add(
