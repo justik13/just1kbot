@@ -28,9 +28,9 @@ ADMIN_SERVER_ADDED = """🛠 Админка › 🖥 <b>Серверы</b>
 
 ADMIN_SERVER_BTN_DELETE = "🗑 Удалить сервер"
 
-ADMIN_SERVER_BTN_EDIT = "👥 Изменить лимит"
+ADMIN_SERVER_BTN_CHANGE_LIMIT = "👥 Изменить лимит"
 
-ADMIN_SERVER_BTN_PING = "🔑 Изменить ключ"
+ADMIN_SERVER_BTN_CHANGE_KEY = "🔑 Изменить ключ"
 
 ADMIN_SERVER_CHECKING = "🔄 Проверка сервера..."
 
@@ -62,7 +62,7 @@ ADMIN_SERVER_EDIT_KEY_PROMPT = "Введите новый ключ для сер
 
 ADMIN_SERVER_EDIT_MAX_CLIENTS_PROMPT = "Введите максимальное количество клиентов для сервера:"
 
-ADMIN_SERVER_EDIT_PORT_PROMPT = "✅ Да, удалить полностью"
+ADMIN_SERVER_BTN_CONFIRM_DELETE = "✅ Да, удалить полностью"
 
 ADMIN_SERVER_EDIT_URL_BLOCKED = """❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.
 
@@ -114,9 +114,9 @@ ADMIN_SERVER_STATE_DISABLED = "🔴 Отключен"
 
 ADMIN_SERVER_STATE_ENABLED = "🟢 Включен"
 
-ADMIN_SERVER_STATUS_DISABLED_BADGE = "🔗 Изменить URL"
+ADMIN_SERVER_BTN_CHANGE_URL = "🔗 Изменить URL"
 
-ADMIN_SERVER_STATUS_OFFLINE_BADGE = "🏳 Изменить флаг"
+ADMIN_SERVER_BTN_CHANGE_FLAG = "🏳 Изменить флаг"
 
 ADMIN_SERVER_TOGGLE_DISABLE_CONFIRM = "Вы уверены, что хотите отключить сервер {flag} <b>{name}</b>?"
 

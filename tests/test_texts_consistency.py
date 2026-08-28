@@ -13,10 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEXTS_DIR = PROJECT_ROOT / "bot" / "texts"
 
 # Explicit canonical alias registry for intentional aliases (e.g. backward compat or semantic alias)
-CANONICAL_ALIASES: dict[str, str] = {
-    # Alias Key -> Canonical Key
-    "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT_ALIAS": "BTN_PAYMENT_SPECIFY_OTHER_AMOUNT",
-}
+CANONICAL_ALIASES: dict[str, str] = {}
 
 
 class TextsConsistencyTests(unittest.TestCase):
@@ -105,7 +102,7 @@ class TextsConsistencyTests(unittest.TestCase):
                 return res
             return []
 
-        for py_file in Path('bot/texts').rglob("*.py"):
+        for py_file in TEXTS_DIR.rglob("*.py"):
             if py_file.name == "__init__.py":
                 continue
 

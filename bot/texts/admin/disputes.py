@@ -7,7 +7,7 @@ DISPUTE_CARD_TEMPLATE = """⚠️ <b>Спор #{dispute_id}</b>
 Статус: <b>{status}</b>
 Case ID: <code>{case_id}</code>
 YooKassa payment: <code>{payment_id}</code>
-Сумма: <b>{amount_rub} RUB</b>
+Сумма: <b>{effect_description} RUB</b>
 Дата спора: <code>{disputed_at}</code>
 Reservation: <code>{reservation_id}</code> ({reservation_status})
 Chargeback entry: <code>{chargeback_entry_id}</code>
@@ -49,7 +49,7 @@ DISPUTE_CONFIRM_RESULT_NOTE = """⚠️ <b>Подтвердите исход с�
 
 Спор: <code>#{dispute_id}</code>
 Исход: <b>{status}</b>
-Эффект: {amount_rub}."""
+Эффект: {effect_description}."""
 
 DISPUTE_SET_RESULT_SUCCESS = "Исход спора зафиксирован"
 
@@ -105,7 +105,7 @@ DISPUTE_EFFECT_RESERVATION_RELEASED = "reservation будет освобожде
 
 DISPUTE_EFFECT_CHARGEBACK_DEBIT = "будет создан exactly-once chargeback debit; возможен долг"
 
-DISPUTE_LIST_ROW_FORMAT = "#{dispute_id} · {status} · {amount_rub} ₽ · case={case}"
+DISPUTE_LIST_ROW_FORMAT = "#{dispute_id} · {status} · {effect_description} ₽ · case={case}"
 
 BTN_REFRESH_ACTION = "🔄 Обновить"
 

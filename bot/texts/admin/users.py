@@ -50,7 +50,8 @@ ADMIN_USER_PAREN_ID_FORMAT = " (ID: {telegram_id})"
 ADMIN_MASS_BONUS_AUDIENCE_LABELS = {
     "all": COMMON_ALL_USERS_LABEL,
     "active": "Только активные подписки",
-    "inactive": "Только без активной подписки"
+    "inactive": "Только неактивные подписки",
+    "expired": "Истекшие подписки"
 }
 
 ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS = "Granted +{amount} RUB bonus to {count} users (batch {batch_id}). Reason: {reason}"
@@ -405,7 +406,6 @@ STATUS_EXPIRED_LABEL = "истекла"
 
 TIME_DAYS_FULL_FORMAT = "{days} дней"
 
-ADMIN_AUDIT_LOG_LIST_ROW_FORMAT = "  <code>[{dt}]</code> {action_text}{details_text}"
 
 ADMIN_USERS_DEVICE_ROW_HEADER = "  • 📱 <b>{name}</b>\n"
 

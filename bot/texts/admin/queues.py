@@ -103,11 +103,8 @@ QUEUE_HEALTH_EXAMPLE = "<code>id={operation_id}{payment} type={operation_type} s
 
 QUEUE_HEALTH_PAYMENT_FRAGMENT = " payment={payment_id}"
 
-QUEUE_HEALTH_PROBLEM_DEAD = "dead={count} oldest={age}s"
 
-QUEUE_HEALTH_PROBLEM_OVERDUE = "overdue={count} oldest={age}s"
 
-QUEUE_HEALTH_PROBLEM_STALE = "stale_processing={count} oldest={age}s"
 
 QUEUE_OPERATION_NOT_FOUND = "Операция не найдена"
 

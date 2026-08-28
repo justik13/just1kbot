@@ -10,7 +10,6 @@ from bot.texts.user.hub import (
 )
 
 from bot.texts.user.onboarding import (
-    START_REGISTERED,
     WELCOME_TEXT,
 )
 
@@ -56,7 +55,6 @@ __all__ = [
     "REFERRAL_SHARE_TEXT",
     "REFERRAL_TEXT_BALANCE",
     "REFERRAL_TOPUP_NOTIFY_TEMPLATE",
-    "START_REGISTERED",
     "SUPPORT",
     "SUPPORT_DOWNLOAD_CLIENT_TEXT",
     "SUPPORT_GREETING_TEMPLATE",

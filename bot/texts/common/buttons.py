@@ -129,7 +129,6 @@ BTN_PAYMENT_PAY = "💳 Оплатить"
 
 BTN_RENEW_ACCESS = "💳 Продлить доступ"
 
-BTN_RESUME_PURCHASE = "🛒 Продолжить оформление"
 
 BTN_SERVERS = "🖥 Серверы"
 

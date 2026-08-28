@@ -16,16 +16,16 @@ ADMIN_BROADCAST_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMM
 
 ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS = {'all': COMMON_ALL_USERS_LABEL, 'active': COMMON_ACTIVE_SUBSCRIPTIONS_LABEL, 'expiring_3d': BTN_BROADCAST_EXPIRING, 'expired': BROADCAST_PROGRESS_LABEL_EXPIRED, 'never': BTN_BROADCAST_NO_SUB}
 
-BROADCAST_ERR_TEXT_TOO_LONG = "⚠️ Текст рассылки слишком длинный. Максимум {max_chars} символов."
+BROADCAST_ERR_TEXT_TOO_LONG = "⚠️ Текст рассылки слишком длинный. Максимум {error_summary} символов."
 
 BROADCAST_STOPPED_ERROR_ALERT = """🚨 <b>Рассылка остановлена из-за ошибки</b>
-<code>{max_chars}</code>"""
+<code>{error_summary}</code>"""
 
 BROADCAST_BTN_DISMISS = "✅ Ок (Убрать)"
 
 BROADCAST_NOT_STARTED_STATUS = "Рассылка не запущена"
 
-BROADCAST_ERR_CAPTION_TOO_LONG = "⚠️ Подпись к медиа слишком длинная. Максимум {max_chars} символов."
+BROADCAST_ERR_CAPTION_TOO_LONG = "⚠️ Подпись к медиа слишком длинная. Максимум {error_summary} символов."
 
 BROADCAST_ACTIVE_LABEL = "Активных"
 
@@ -35,7 +35,6 @@ BROADCAST_AUDIENCE = """👥 <b>Аудитория:</b> {aud_label}
 """
 
 ADMIN_BROADCAST_TITLE_BROADCAST = "📢 Управление рассылками"
-BROADCAST_PROMPT_ENTER_TEXT = "📝 Введите текст для рассылки"
 
 ADMIN_AUDIT_LOG_DETAILS_BROADCAST = "to {label}: {success} success, {fail} fail, status={status}"
 

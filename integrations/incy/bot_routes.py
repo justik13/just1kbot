@@ -1,5 +1,6 @@
 import logging
 
+from bot import texts
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def _build_back_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="◀️ Назад к устройствам", callback_data="back_to_connections")
+    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
     return builder.as_markup()
 
 
@@ -80,12 +81,12 @@ async def show_incy_subscription(
         return
 
     if not SubscriptionTokenService.is_enabled():
-        await callback.answer("⚠️ Подписка INCY временно недоступна.", show_alert=True)
+        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer("⚠️ Доступ неактивен. Продлите подписку.", show_alert=True)
+        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -114,16 +115,16 @@ async def rotate_incy_subscription(
     await state.clear()
 
     if not db_user:
-        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
     if not SubscriptionTokenService.is_enabled():
-        await callback.answer("⚠️ Подписка INCY временно недоступна.", show_alert=True)
+        await callback.answer(texts.INCY_SUBSCRIPTION_UNAVAILABLE, show_alert=True)
         return
 
     has_access = await SubscriptionService.check_access(session, db_user.telegram_id)
     if not has_access:
-        await callback.answer("⚠️ Доступ неактивен. Продлите подписку.", show_alert=True)
+        await callback.answer(texts.DEVICE_ACCESS_INACTIVE, show_alert=True)
         return
 
     try:

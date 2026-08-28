@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
+from bot import texts
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -116,11 +117,11 @@ async def get_purchase_logs_paginated(
             dur_days = 30
 
         op_title_map = {
-            "purchase": "🛒 Покупка тарифа",
-            "renew": "⏳ Продление тарифа",
-            "change": "🔄 Смена тарифа",
+            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
+            "renew": texts.PAYMENT_OP_TITLE_RENEW,
+            "change": texts.PAYMENT_OP_TITLE_CHANGE,
         }
-        op_title = op_title_map.get(quote.operation_type, "🛒 Покупка")
+        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
 
         created_at = quote.consumed_at or quote.created_at
 
@@ -253,11 +254,11 @@ async def get_purchase_log_by_id(
             dev_limit = 1
             dur_days = 30
         op_title_map = {
-            "purchase": "🛒 Покупка тарифа",
-            "renew": "⏳ Продление тарифа",
-            "change": "🔄 Смена тарифа",
+            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
+            "renew": texts.PAYMENT_OP_TITLE_RENEW,
+            "change": texts.PAYMENT_OP_TITLE_CHANGE,
         }
-        op_title = op_title_map.get(quote.operation_type, "🛒 Покупка")
+        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
 
         return PurchaseLogEntry(
             id=f"quote_{quote.id}",

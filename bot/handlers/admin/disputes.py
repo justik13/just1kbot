@@ -111,7 +111,7 @@ async def _render_card(
                 status=STATUS_LABELS.get(dispute.status, safe(dispute.status)),
                 case_id=safe(dispute.provider_case_id),
                 payment_id=safe(payment.external_id if payment else texts.PLACEHOLDER_DASH),
-                amount_rub=int(dispute.amount),
+                effect_description=int(dispute.amount),
                 disputed_at=dispute.disputed_at.date().isoformat(),
                 reservation_id=reservation.id if reservation else texts.PLACEHOLDER_DASH,
                 reservation_status=safe(reservation.status) if reservation else texts.DISPUTE_RESERVATION_MISSING,
@@ -147,7 +147,7 @@ async def show_disputes(
     builder = _list_keyboard()
     for dispute in rows:
         lines.append(
-            texts.DISPUTE_LIST_ROW_FORMAT.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status), amount_rub=int(dispute.amount), case=safe(dispute.provider_case_id))
+            texts.DISPUTE_LIST_ROW_FORMAT.format(dispute_id=dispute.id, status=STATUS_LABELS.get(dispute.status, dispute.status), effect_description=int(dispute.amount), case=safe(dispute.provider_case_id))
         )
         builder.button(
             text=(
@@ -350,7 +350,7 @@ async def confirm_dispute_resolution(
         else texts.DISPUTE_EFFECT_CHARGEBACK_DEBIT
     )
     await callback.message.edit_text(
-        texts.DISPUTE_CONFIRM_RESULT_NOTE.format(dispute_id=dispute.id, status=STATUS_LABELS[parts[1]], amount_rub=effect),
+        texts.DISPUTE_CONFIRM_RESULT_NOTE.format(dispute_id=dispute.id, status=STATUS_LABELS[parts[1]], effect_description=effect),
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

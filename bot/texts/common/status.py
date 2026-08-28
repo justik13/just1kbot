@@ -13,7 +13,6 @@ PROVISIONING_DELETE_FAILED = "ошибка удаления"
 
 PROVISIONING_UPDATING = "обновляется"
 
-SEPARATOR_LINE = "─"
 
 STATUS_ACTIVE_BADGE = "🟢 Активен"
 

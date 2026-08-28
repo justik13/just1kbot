@@ -72,9 +72,9 @@ PAYMENT_PRICE_RUB_FORMAT = "{amount_rub} ₽"
 
 PAYMENT_PURCHASE = """
 
-Не хватает {amount_rub} ₽. Минимальное пополнение — {tariff_name} ₽; после покупки останется {duration_days} ₽."""
+Не хватает {shortage} ₽. Минимальное пополнение — {minimum} ₽; после покупки останется {remainder} ₽."""
 
-PAYMENT_PURCHASE_CONFIRMATION_CARD = """✅ <b>Подтверждение: {amount_rub}</b>
+PAYMENT_PURCHASE_CONFIRMATION_CARD = """✅ <b>Подтверждение: {operation_label}</b>
 
 Тариф: <b>{tariff_name}</b>
 Срок: <b>{duration_days} дней</b>
@@ -133,13 +133,13 @@ PAYMENT_SHOWCASE_HEADER = """🛡 <b>Выберите формат подпис�
 
 PAYMENT_SHOWCASE_ORDER_CARD = """💳 <b>Оформление заказа</b>
 
-📦 Тариф: <b>{amount_rub}</b>
-⏱ Срок: {tariff_name} дней
-🔌 Устройства: до {duration_days}
-💰 Цена: <b>{value_3} ₽</b>
+📦 Тариф: <b>{tariff_label}</b>
+⏱ Срок: {days} дней
+🔌 Устройства: до {device_limit}
+💰 Цена: <b>{price} ₽</b>
 
-Баланс: <b>{value_4} ₽</b>
-После покупки: <b>{value_5} ₽</b>{value_6}
+Баланс: <b>{balance_before} ₽</b>
+После покупки: <b>{balance_after} ₽</b>{shortage_line}
 
 Покупка выполняется только после отдельного подтверждения."""
 
@@ -188,3 +188,8 @@ TARIFF_DISPLAY_PRO = "🚀 Pro"
 TARIFF_DISPLAY_BASIC_GROUP = "📱 Базовый (2 устр.)"
 TARIFF_DISPLAY_FAMILY_GROUP = "👨‍👩‍👧‍👦 Семейный (5 устр.)"
 TARIFF_DISPLAY_PRO_GROUP = "🚀 Pro ({limit} устр.)"
+
+PAYMENT_OP_TITLE_PURCHASE = '🛒 Покупка тарифа'
+PAYMENT_OP_TITLE_RENEW = '⏳ Продление тарифа'
+PAYMENT_OP_TITLE_CHANGE = '🔄 Смена тарифа'
+PAYMENT_OP_TITLE_DEFAULT = '🛒 Покупка'

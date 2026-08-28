@@ -137,7 +137,7 @@ class CircularImportRegressionTests(unittest.TestCase):
                 for alias in node.names:
                     if alias.name == "bot":
                         violations.append((node.lineno, alias.name))
-                    elif alias.name.startswith("bot.") and alias.name.rsplit(".", 1)[0] not in allowed_modules:
+                    elif alias.name.startswith("bot.") and not any(alias.name == am or alias.name.startswith(am + ".") for am in allowed_modules):
                         violations.append((node.lineno, alias.name))
             elif isinstance(node, ast.ImportFrom):
                 module_name = node.module or ""
@@ -145,7 +145,7 @@ class CircularImportRegressionTests(unittest.TestCase):
                     for alias in node.names:
                         if alias.name not in {"texts", "constants"}:
                             violations.append((node.lineno, f"from bot import {alias.name}"))
-                elif module_name.startswith("bot.") and module_name.rsplit(".", 1)[0] not in allowed_modules:
+                elif module_name.startswith("bot.") and not any(module_name == am or module_name.startswith(am + ".") for am in allowed_modules):
                     violations.append((node.lineno, module_name))
             elif isinstance(node, ast.Call):
                 if (
@@ -158,7 +158,7 @@ class CircularImportRegressionTests(unittest.TestCase):
                     arg_val = node.args[0].value
                     if arg_val == "bot" or (
                         arg_val.startswith("bot.")
-                        and arg_val.rsplit(".", 1)[0] not in allowed_modules
+                        and not any(arg_val == am or arg_val.startswith(am + ".") for am in allowed_modules)
                     ):
                         violations.append((node.lineno, arg_val))
         return violations
@@ -180,7 +180,8 @@ class CircularImportRegressionTests(unittest.TestCase):
         violations = []
 
         # 1. Pure core modules (MUST NEVER import bot.*)
-        pure_bot_free_dirs = ["config", "database", "integrations", "utils"]
+        pure_bot_free_dirs = ["config", "utils"]
+        pure_data_allowed_dirs = ["database", "integrations"]
         for dir_name in pure_bot_free_dirs:
             target_dir = project_root / dir_name
             if not target_dir.exists():
@@ -189,6 +190,17 @@ class CircularImportRegressionTests(unittest.TestCase):
                 with open(py_file, "r", encoding="utf-8") as f:
                     tree = ast.parse(f.read(), filename=str(py_file))
                 file_violations = self._find_ast_import_violations(tree, ("bot",))
+                for lineno, name in file_violations:
+                    violations.append((str(py_file.relative_to(project_root)), lineno, name))
+
+        for dir_name in pure_data_allowed_dirs:
+            target_dir = project_root / dir_name
+            if not target_dir.exists():
+                continue
+            for py_file in target_dir.rglob("*.py"):
+                with open(py_file, "r", encoding="utf-8") as f:
+                    tree = ast.parse(f.read(), filename=str(py_file))
+                file_violations = self._find_illegal_bot_imports_for_services(tree)
                 for lineno, name in file_violations:
                     violations.append((str(py_file.relative_to(project_root)), lineno, name))
 

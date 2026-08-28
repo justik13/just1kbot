@@ -60,9 +60,6 @@ ALERT_STALE_PAYMENTS_MORE = """• ...и ещё {more_count} платежей
 ALERT_STALE_PAYMENT_ROW = """• {icon} #{payment_id} (user {telegram_id}): {amount} {currency} via {method}
 """
 
-ALERT_STALE_TOPUP = """⚠️ <b>Зависшие пополнения баланса:</b>
-
-{details}"""
 
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 

@@ -33,11 +33,6 @@ DEVICE_ACCESS_INACTIVE_NOTICE = """
 
 DEVICE_ACTION_UNAVAILABLE_STATE = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
 
-DEVICE_CARD = """📱 <b>{device_name}</b> ({flag} {server_name})
-{last_connected_text}
-
-↓ {traffic_down}  ↑ {traffic_up}  Σ {traffic_total}
-"""
 
 DEVICE_CONFIG_CONF_CAPTION = """📁 <b>Файл для AmneziaWG</b>
 

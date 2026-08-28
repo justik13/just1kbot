@@ -158,7 +158,7 @@ async def process_broadcast_message(
             message.bot,
             message.chat.id,
             texts.BROADCAST_ERR_TEXT_TOO_LONG.format(
-                max_chars=TELEGRAM_MESSAGE_LIMIT
+                error_summary=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -168,7 +168,7 @@ async def process_broadcast_message(
             message.bot,
             message.chat.id,
             texts.BROADCAST_ERR_CAPTION_TOO_LONG.format(
-                max_chars=TELEGRAM_CAPTION_LIMIT
+                error_summary=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -527,7 +527,7 @@ async def _send_broadcast_to_users_with_resume(
             await bot.send_message(
                 admin_id,
                 texts.BROADCAST_STOPPED_ERROR_ALERT.format(
-                    max_chars=html.escape(
+                    error_summary=html.escape(
                         type(e).__name__ + ": " + str(e)[:200]
                     )
                 ),

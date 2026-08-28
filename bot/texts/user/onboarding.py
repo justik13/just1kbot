@@ -1,7 +1,6 @@
 """Domain texts for user/onboarding.py."""
 from __future__ import annotations
 
-START_REGISTERED = "Вы уже зарегистрированы в системе."
 
 WELCOME_TEXT = """👋 <b>Добро пожаловать!</b>
 

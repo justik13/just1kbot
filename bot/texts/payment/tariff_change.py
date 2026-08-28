@@ -36,7 +36,7 @@ PAYMENT_CHANGE_TARIFF_STATE_CHANGED = "Состояние подписки из�
 
 PAYMENT_CHANGE_TARIFF_SUB_CHANGED = "Подписка изменилась. Создайте новый расчёт."
 
-PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB = """⚠️ <b>Смена тарифа недоступна</b>
+PAYMENT_CHANGE_TARIFF_UNAVAILABLE_NO_SUB = """⚠️ <b>Операция недоступна</b>
 
 Смена тарифа с перерасчётом доступна только при наличии действующей подписки.
 У вас сейчас нет активной подписки. Для оформления подписки воспользуйтесь кнопкой ниже."""
@@ -45,11 +45,11 @@ PAYMENT_CREATING_LINK_NOTICE = "Создаём ссылку…"
 
 PAYMENT_CUSTOM_AMOUNT_PROMPT = "Введите целую сумму от <b>{amount_rub} ₽</b> до 5000 ₽."
 
-PAYMENT_DEBT_BLOCKED_NOTICE = "Смена тарифа недоступна до погашения задолженности."
+PAYMENT_DEBT_BLOCKED_NOTICE = "Операция недоступна до погашения задолженности."
 
 PAYMENT_DEVICES_BLOCKED_NOTICE = "Сначала удалите лишние устройства."
 
-PAYMENT_DISPUTE_BLOCKED_NOTICE = "Смена тарифа заблокирована из-за финансового спора."
+PAYMENT_DISPUTE_BLOCKED_NOTICE = "Операция заблокирована из-за финансового спора."
 
 PAYMENT_DOWNGRADE_BLOCKED_PROFILES = """⚠️ <b>Смена тарифа невозможна</b>
 
@@ -63,7 +63,7 @@ PAYMENT_DOWNGRADE_COOLDOWN_ALERT = "Смена тарифа на меньший 
 
 PAYMENT_INSUFFICIENT_FUNDS_ALERT = "На балансе недостаточно средств."
 
-PAYMENT_OPERATION_NOT_ACTIVE_NOTICE = "Эта смена тарифа больше не активна."
+PAYMENT_OPERATION_NOT_ACTIVE_NOTICE = "Эта операция больше не активна."
 
 PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE = "Котировка устарела"
 
@@ -79,20 +79,20 @@ PAYMENT_TARIFF_CHANGE = """
 
 PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD = """✅ <b>Подтверждение смены тарифа</b>
 
-Новый тариф: <b>{amount_rub}</b>
-Лимит устройств: <b>{value_1}</b>
-Срок после конвертации: <b>{value_2}</b>
-Доплата: <b>{value_3} ₽</b>
+Новый тариф: <b>{tariff_label}</b>
+Лимит устройств: <b>{devices}</b>
+Срок после конвертации: <b>{duration}</b>
+Доплата: <b>{due} ₽</b>
 
-Баланс до операции: <b>{value_4} ₽</b>
-Баланс после операции: <b>{value_5} ₽</b>"""
+Баланс до операции: <b>{before} ₽</b>
+Баланс после операции: <b>{after} ₽</b>"""
 
 PAYMENT_TARIFF_CHANGE_SUCCESS_CARD = """🎉 <b>Тариф изменён</b>
 
-Новый тариф: <b>{amount_rub}</b>
-Срок: {value_1}
-Списано: <b>{value_2} ₽</b>
-💰 Баланс: <b>{value_3} ₽</b>
-🎁 Бонусный баланс: <b>{value_4} ₽</b>"""
+Новый тариф: <b>{tariff_label}</b>
+Срок: {duration}
+Списано: <b>{charged} ₽</b>
+💰 Баланс: <b>{real_balance} ₽</b>
+🎁 Бонусный баланс: <b>{bonus_balance} ₽</b>"""
 
 PAYMENT_TARIFF_UNAVAILABLE_NOTICE = "Выбранный тариф больше недоступен."

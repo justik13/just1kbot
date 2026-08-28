@@ -19,19 +19,19 @@ def get_admin_server_card_keyboard(
         callback_data=f"admin_server_edit_name:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_STATUS_OFFLINE_BADGE,
+        text=texts.ADMIN_SERVER_BTN_CHANGE_FLAG,
         callback_data=f"admin_server_edit_flag:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_STATUS_DISABLED_BADGE,
+        text=texts.ADMIN_SERVER_BTN_CHANGE_URL,
         callback_data=f"admin_server_edit_url:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_BTN_PING,
+        text=texts.ADMIN_SERVER_BTN_CHANGE_KEY,
         callback_data=f"admin_server_edit_key:{server_id}",
     )
     builder.button(
-        text=texts.ADMIN_SERVER_BTN_EDIT,
+        text=texts.ADMIN_SERVER_BTN_CHANGE_LIMIT,
         callback_data=f"admin_server_edit_max_clients:{server_id}",
     )
 
@@ -64,7 +64,7 @@ def get_server_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.ADMIN_SERVER_EDIT_PORT_PROMPT,
+        text=texts.ADMIN_SERVER_BTN_CONFIRM_DELETE,
         callback_data=f"confirm_server_delete:{server_id}",
     )
     builder.button(

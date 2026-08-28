@@ -110,14 +110,12 @@ async def render_tariff_change_review(
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
     text = texts.PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD.format(
-        amount_rub=get_tariff_display_name(intent.target_version.device_limit),
-        value_1=intent.target_version.device_limit,
-        value_2=_hours_text(
-            quote.resulting_paid_hours + quote.resulting_bonus_hours
-        ),
-        value_3=due,
-        value_4=before,
-        value_5=after,
+        tariff_label=get_tariff_display_name(intent.target_version.device_limit),
+        devices=intent.target_version.device_limit,
+        duration=_hours_text(quote.resulting_paid_hours + quote.resulting_bonus_hours),
+        due=due,
+        before=before,
+        after=after
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -243,14 +241,14 @@ async def confirm_tariff_change(
         callback.bot,
         callback.message.chat.id,
         texts.PAYMENT_TARIFF_CHANGE_SUCCESS_CARD.format(
-            amount_rub=get_tariff_display_name(intent.target_version.device_limit),
-            value_1=_hours_text(
+            tariff_label=get_tariff_display_name(intent.target_version.device_limit),
+            duration=_hours_text(
                 result.quote.resulting_paid_hours
                 + result.quote.resulting_bonus_hours
             ),
-            value_2=charged,
-            value_3=int(result.balance_after.real_available),
-            value_4=int(result.balance_after.bonus_available),
+            charged=charged,
+            real_balance=int(result.balance_after.real_available),
+            bonus_balance=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
         message_effect_id=EFFECT_CONFETTI,

@@ -330,7 +330,7 @@ async def select_tariff(
         else ""
     )
     text = (
-        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(amount_rub=tariff_name, tariff_name=tariff.duration_days, duration_days=device_limit, value_3=price, value_4=balance_before, value_5=balance_after, value_6=shortage_line)
+        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(tariff_label=tariff_name, days=tariff.duration_days, device_limit=device_limit, price=price, balance_before=balance_before, balance_after=balance_after, shortage_line=shortage_line)
     )
 
     await render_hub(

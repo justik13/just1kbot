@@ -105,7 +105,7 @@ async def _render_purchase_review(
     tariff_name = get_tariff_display_name(intent.version.device_limit)
     operation = texts.PAYMENT_PURCHASE_OPERATION_RENEW_TITLE if quote.operation_type == "renew" else texts.WORD_PURCHASE
     text = (
-        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(amount_rub=operation.lower(), tariff_name=tariff_name, duration_days=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
+        texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(operation_label=operation.lower(), tariff_name=tariff_name, duration_days=intent.version.duration_hours // 24, value_3=intent.version.device_limit, value_4=price, value_5=before, value_6=after)
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
@@ -113,7 +113,7 @@ async def _render_purchase_review(
         remainder = exact - int(intent.shortage)
         if remainder:
             text += (
-                texts.PAYMENT_PURCHASE.format(amount_rub=int(intent.shortage), tariff_name=minimum, duration_days=remainder)
+                texts.PAYMENT_PURCHASE.format(shortage=int(intent.shortage), minimum=minimum, remainder=remainder)
             )
         else:
             text += texts.PAYMENT_SHORTAGE_LINE.format(amount_rub=int(intent.shortage))
