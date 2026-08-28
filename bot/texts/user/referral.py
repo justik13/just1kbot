@@ -1,5 +1,21 @@
-REFERRAL_TEXTS = {
-    "REFERRAL_TEXT_BALANCE": """🎁 <b>Пригласи друга — получайте бонусы вместе!</b>
+"""Domain texts for user/referral.py."""
+from __future__ import annotations
+
+REFERRAL_LIST_EMPTY = """<i>Список рефералов пока пуст.</i>
+
+Пригласите друзей по вашей ссылке, чтобы они появились здесь."""
+
+REFERRAL_LIST_FOOTER = """
+Всего приглашено: {count} пользователей"""
+
+REFERRAL_LIST_HEADER = """👥 <b>Ваши рефералы</b>
+"""
+
+REFERRAL_LIST_ITEM_FORMAT = "\n{idx}. <b>{user}</b> ({date})"
+
+REFERRAL_SHARE_TEXT = "🎁 Приглашаю в just1kbot! При первом пополнении получишь +10% бонуса на баланс:"
+
+REFERRAL_TEXT_BALANCE = """🎁 <b>Пригласи друга — получайте бонусы вместе!</b>
 
 Делитесь ссылкой с друзьями:
 • Вы получаете <b>10% от суммы каждого пополнения</b> вашего друга на ваш бонусный баланс!
@@ -19,6 +35,7 @@ REFERRAL_TEXTS = {
 4. Бонусный баланс автоматически расходуется на покупку и продление подписки.
 
 👥 Приглашено друзей: <b>{invited_count}</b>
-🎁 Доступный бонус: <b>{bonus_balance} ₽</b>""",
-    "REFERRAL_SHARE_TEXT": "🎁 Приглашаю в just1kbot! При первом пополнении получишь +10% бонуса на баланс:",
-}
+🎁 Доступный бонус: <b>{bonus_balance} ₽</b>"""
+
+
+REFERRAL_TOPUP_NOTIFY_TEMPLATE = '🎉 <b>Ваш реферал пополнил баланс!</b>\n\nВам зачислено <b>+{amount} ₽</b> бонусов на баланс.'

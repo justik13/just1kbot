@@ -19,21 +19,21 @@ def get_admin_tariff_card_keyboard(
     #   • вкл / выкл (видимость на витрине).
     # ──────────────────────────────────────────────────
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_TARIFFS_L20_1,
+        text=texts.ADMIN_TARIFF_BTN_EDIT_PRICE,
         callback_data=f"admin_tariff_edit_rub:{tariff_id}",
     )
 
     if is_active:
-        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_TARIFFS_L26_1
+        status_text = texts.ADMIN_TARIFF_BTN_DISABLE
     else:
-        status_text = texts.RUNTIME_BOT_KEYBOARDS_ADMIN_TARIFFS_L28_1
+        status_text = texts.ADMIN_TARIFF_BTN_ENABLE
     builder.button(
         text=status_text,
         callback_data=f"admin_tariff_toggle:{tariff_id}",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_TARIFFS_L34_1,
+        text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
         callback_data="admin_tariffs",
     )
     builder.adjust(1)

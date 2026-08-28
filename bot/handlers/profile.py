@@ -35,9 +35,12 @@ async def _get_inviter_line(session: AsyncSession, user: User) -> str:
         name = safe(referrer.first_name) if referrer.first_name else ""
         username_str = f" (@{safe(referrer.username)})" if referrer.username else ""
         if name or username_str:
-            return f"\n🤝 Вас пригласил: {name}{username_str} (ID: <code>{referrer.telegram_id}</code>)"
-        return f"\n🤝 Вас пригласил: ID <code>{referrer.telegram_id}</code>"
-    return f"\n🤝 Вас пригласил: ID <code>{user.referred_by}</code>"
+            return texts.INVITED_BY_NAMED_LINE.format(
+                name=f"{name}{username_str}",
+                referrer_id=referrer.telegram_id,
+            )
+        return texts.INVITED_BY_ID_LINE.format(referrer_id=referrer.telegram_id)
+    return texts.INVITED_BY_ID_LINE.format(referrer_id=user.referred_by)
 
 
 @router.callback_query(F.data == "user_history")
@@ -67,10 +70,10 @@ async def show_history(
             display_status = payment_display_status(payment)
             status_icon = texts.PAYMENT_STATUS_ICONS.get(
                 display_status,
-                texts.RUNTIME_BOT_HANDLERS_PROFILE_L208_1,
+                texts.PAYMENT_STATUS_PENDING_ICON,
             )
             date = format_datetime(payment.paid_at or payment.created_at)
-            currency = texts.RUNTIME_BOT_HANDLERS_PROFILE_L213_1
+            currency = texts.CURRENCY_RUB_SYMBOL
             rendered += (
                 f"{status_icon} {date} | "
                 f"{payment.amount} {currency}\n"
@@ -167,7 +170,7 @@ async def show_referrals_list(
                 else texts.USER_ID_LABEL.format(user_id=referral.telegram_id)
             )
             created_str = referral.created_at.strftime("%d.%m.%Y") if referral.created_at else ""
-            rendered += f"\n{idx}. <b>{safe_user}</b> ({created_str})"
+            rendered += texts.REFERRAL_LIST_ITEM_FORMAT.format(idx=idx, user=safe_user, date=created_str)
 
         rendered += "\n" + texts.REFERRAL_LIST_FOOTER.format(count=total_count)
 

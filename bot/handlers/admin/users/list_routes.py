@@ -19,7 +19,7 @@ from database.repositories.users_repo import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_audit_details
+from bot.formatters import format_audit_details
 from utils.telegram import render_hub, safe
 
 from .common import (
@@ -78,15 +78,15 @@ async def show_extended_filter_menu(
     if filter_type == "server":
         rows = (await session.scalars(select(Server).order_by(Server.name))).all()
         if not rows:
-            await callback.answer("Серверов нет", show_alert=True)
+            await callback.answer(texts.ADMIN_USERS_LIST_SERVEROV_NET, show_alert=True)
             return
         for server in rows:
-            flag = server.country_flag or "🌐"
+            flag = server.country_flag or texts.ADMIN_FILTER_FLAG_FALLBACK
             builder.button(
-                text=f"🖥 {flag} {server.name}",
+                text=texts.ADMIN_USERS_FILTER_SERVER_BUTTON.format(flag=flag, server_name=server.name),
                 callback_data=f"admin_users_filter:server:{server.id}:1",
             )
-        title = "🖥 <b>Выберите сервер:</b>"
+        title = texts.ADMIN_USERS_LIST_SELECT_SERVER
     elif filter_type == "country":
         rows = (
             await session.execute(
@@ -97,20 +97,20 @@ async def show_extended_filter_menu(
             )
         ).scalars().all()
         if not rows:
-            await callback.answer("Стран нет", show_alert=True)
+            await callback.answer(texts.ADMIN_USERS_LIST_STRAN_NET, show_alert=True)
             return
         for country in rows:
             builder.button(
-                text=f"🌐 {country}",
+                text=texts.ADMIN_USERS_FILTER_COUNTRY_BUTTON.format(country=country),
                 callback_data=f"admin_users_filter:country:{country}:1",
             )
-        title = "🌐 <b>Выберите страну:</b>"
+        title = texts.ADMIN_USERS_LIST_SELECT_STRANU
     elif filter_type == "tariff":
         rows = (await session.scalars(select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.device_limit, Tariff.id))).all()
         if not rows:
-            await callback.answer("Тарифов нет", show_alert=True)
+            await callback.answer(texts.ADMIN_USERS_LIST_TARIFOV_NET, show_alert=True)
             return
-        from utils.tariff_names import get_tariff_group_name
+        from bot.formatters import get_tariff_group_name
         seen_limits = set()
         for tariff in rows:
             limit = tariff.device_limit
@@ -119,15 +119,15 @@ async def show_extended_filter_menu(
             seen_limits.add(limit)
             label = get_tariff_group_name(limit)
             builder.button(
-                text=f"💎 {label}",
+                text=texts.ADMIN_USERS_FILTER_TARIFF_BUTTON.format(tariff_group=label),
                 callback_data=f"admin_users_filter:tariff:{limit}:1",
             )
-        title = "💎 <b>Выберите тариф:</b>"
+        title = texts.ADMIN_USERS_LIST_SELECT_TARIFF
     else:
-        await callback.answer("Неизвестный фильтр", show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_LIST_NEIZVESTNYY_FILTR, show_alert=True)
         return
 
-    builder.button(text="🔙 Назад", callback_data="admin_users")
+    builder.button(text=texts.ADMIN_USERS_LIST_NAZAD, callback_data="admin_users")
     builder.adjust(1)
     await callback.answer(show_alert=False)
     try:
@@ -168,7 +168,7 @@ async def users_filter_pagination(
 
     param_val = None if filter_param == "none" else filter_param
     if filter_type in {"server", "tariff"} and param_val is not None and not str(param_val).isdigit():
-        await callback.answer("Некорректный параметр фильтра", show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_LIST_NEKORREKTNYY_PARAMETR_FILTRA, show_alert=True)
         return
 
     total_users = await get_filtered_users_count(
@@ -176,7 +176,7 @@ async def users_filter_pagination(
     )
 
     if total_users == 0:
-        await callback.answer("Пользователи не найдены по фильтру", show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_LIST_USERS_NE_NAYDENY_PO_FILT, show_alert=True)
     else:
         await callback.answer(show_alert=False)
     await state.clear()
@@ -284,7 +284,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Введите @username, Telegram ID или ID пользователя для поиска.",
+            texts.ADMIN_USERS_LIST_ENTER_USERNAME_TELEGRAM_ID_I,
             get_back_button("admin_users"),
         )
         return
@@ -300,7 +300,7 @@ async def process_search_user(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"🔍 Пользователь по запросу <b>{safe(message.text)}</b> не найден.",
+            texts.ADMIN_USERS_LIST_USER_PO_ZAPROSU_NE_NAYDE.format(safe_message_text=safe(message.text)),
             get_back_button("admin_users"),
             parse_mode="HTML",
         )
@@ -324,7 +324,7 @@ async def show_user_card(
     telegram_id = parse_callback_id(callback.data, 1)
 
     if telegram_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_ADMIN_USERS_LIST_ROUTES_L234_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     await callback.answer(show_alert=False)
@@ -379,82 +379,33 @@ async def show_user_audit(
     page = min(max(1, page), total_pages)
     offset = (page - 1) * page_size
     logs = await get_user_audit_logs(session, user_id=user.id, telegram_id=user.telegram_id, offset=offset, limit=page_size)
-
-    action_map = {
-        # User lifecycle
-        "USER_REGISTER": "👋 Регистрация",
-        "REFERRAL_ATTACHED": "🤝 Привязка реферала",
-        "USER_RESTORED": "♻️ Восстановление аккаунта",
-        # Balance & payments
-        "PAYMENT_SUCCESS": "💳 Пополнение баланса",
-        "TOPUP_USER_BALANCE": "💳 Начисление баланса",
-        "ADMIN_BALANCE_TOPUP": "➕ Начисление баланса админом",
-        "ADMIN_BALANCE_DEDUCT": "➖ Списание баланса админом",
-        "DEDUCT_USER_BALANCE": "➖ Списание баланса админом",
-        "MASS_BONUS_GRANTED": "🎁 Массовый бонус",
-        "REFERRAL_BONUS_GRANTED": "🎁 Реферальный бонус",
-        "WELCOME_BONUS_GRANTED": "🎁 Приветственный бонус",
-        # Subscriptions
-        "ACCOUNT_PURCHASE_SETTLED": "🛒 Покупка тарифа",
-        "ACCOUNT_TARIFF_CHANGE_SETTLED": "🔄 Смена тарифа",
-        "ADMIN_SUB_GRANT": "🎁 Выдача подписки админом",
-        "GRANT": "🎁 Выдача подписки админом",
-        "ADMIN_SUB_EXTEND": "⏳ Продление подписки админом",
-        "EXTEND": "⏳ Продление подписки админом",
-        "ADMIN_SUB_REDUCE": "✂️ Сокращение подписки админом",
-        "REDUCE": "✂️ Сокращение подписки админом",
-        "ADMIN_SUB_CHANGE": "⚙️ Изменение тарифа админом",
-        "CHANGE_TARIFF": "⚙️ Изменение тарифа",
-        "SUB_EXPIRED": "⌛ Истечение срока подписки",
-        # Devices
-        "DEVICE_CREATE": "📱 Создание устройства",
-        "DEVICE_CREATED": "📱 Создание устройства",
-        "DEVICE_DELETE": "🗑 Удаление устройства",
-        "DEVICE_DELETED": "🗑 Удаление устройства",
-        "DEVICE_RENAME": "✏️ Переименование устройства",
-        "ADMIN_DEVICE_DELETE": "🗑 Удаление устройства админом",
-        "CLEANUP_DEVICE_DELETE": "🧹 Автоудаление устройства",
-        # Moderation
-        "BAN": "🚫 Блокировка пользователя",
-        "BAN_USER": "🚫 Блокировка пользователя",
-        "UNBAN": "✅ Разблокировка пользователя",
-        "UNBAN_USER": "✅ Разблокировка пользователя",
-        "ADMIN_DIRECT_MESSAGE_SENT": "✉️ Сообщение от админа",
-        "ADMIN_DIRECT_MESSAGE": "✉️ Сообщение от админа",
-        # Disputes & refunds
-        "PAYMENT_DISPUTE_OPENED": "⚠️ Открыт спор по платежу",
-        "PAYMENT_DISPUTE_RESOLVED": "⚖️ Спор по платежу разрешён",
-        "PAYMENT_DISPUTE_MANUAL_REVIEW": "🧪 Спор на проверке",
-        "BALANCE_REFUND_REQUESTED": "↩️ Запрос возврата средств",
-        "PAYMENT_FAILED": "❌ Ошибка оплаты",
-        "REFUND": "↩️ Возврат средств",
-    }
+    action_map = texts.AUDIT_ACTIONS
 
     lines = [
-        f"📜 <b>История действий пользователя ID {user.telegram_id}:</b>",
-        f"<i>Всего записей: {total_count}</i>\n",
+        texts.ADMIN_USERS_LIST_HISTORY_DEYSTVIY_POLZOVATELYA.format(user_telegram_id=user.telegram_id),
+        texts.ADMIN_USERS_LIST_TOTAL_ZAPISEY.format(total_count=total_count),
     ]
     if not logs:
-        lines.append("<i>История действий пуста.</i>")
+        lines.append(texts.ADMIN_USERS_LIST_HISTORY_DEYSTVIY_PUSTA)
     else:
         for item in logs:
             dt = format_datetime(item.created_at)
-            action_text = safe(action_map.get(item.action, item.action or "Действие"))
+            action_text = safe(action_map.get(item.action, item.action or texts.ADMIN_USERS_LIST_ACTION))
             details_text = safe(format_audit_details(item.details))
             lines.append(f"• <code>[{dt}]</code> {action_text}{details_text}")
 
     builder = InlineKeyboardBuilder()
     if total_pages > 1:
         if page > 1:
-            builder.button(text="◀️ Назад", callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
+            builder.button(text=texts.BTN_BACK, callback_data=f"admin_user_audit:{telegram_id}:{page - 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-        builder.button(text=f"Стр {page}/{total_pages}", callback_data="ignore")
+        builder.button(text=texts.PAGE_INDEX_FORMAT.format(page=page, total_pages=total_pages), callback_data="ignore")
         if page < total_pages:
-            builder.button(text="Вперед ▶️", callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
+            builder.button(text=texts.BTN_PAGINATION_NEXT, callback_data=f"admin_user_audit:{telegram_id}:{page + 1}")
         else:
             builder.button(text=" ⏹ ", callback_data="ignore")
-    builder.button(text="🔙 К карточке пользователя", callback_data=f"admin_user_card:{telegram_id}")
+    builder.button(text=texts.ADMIN_USERS_LIST_K_KARTOCHKE_POLZOVATELYA, callback_data=f"admin_user_card:{telegram_id}")
     if total_pages > 1:
         builder.adjust(3, 1)
     else:

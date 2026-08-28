@@ -16,36 +16,36 @@ def get_device_keyboard(
 
     if config_ready:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_DEVICE_ALT_CONNECTION,
+            text=texts.CONNECTION_DEVICES_DEVICE_ALT_CONNECTION,
             callback_data=f"alt_connection:{profile_id}",
             style="primary",
         )
         adjustments.append(1)
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L9_1,
+        text=texts.BTN_CHANGE_NAME,
         callback_data=f"rename_device:{profile_id}",
     )
     builder.button(
-        text="📖 Инструкция и помощь",
+        text=texts.BTN_HELP_INSTRUCTIONS,
         callback_data=f"support_help:device_{profile_id}",
     )
     adjustments.append(2)
 
     if show_delete:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_DEVICE_L18_1,
+            text=texts.BTN_DELETE_DEVICE,
             callback_data=f"request_delete_device:{profile_id}",
             style="danger",
         )
         adjustments.append(1)
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L23_1,
+        text=texts.BTN_BACK_TO_DEVICES,
         callback_data="back_to_connections",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L28_1,
+        text=texts.BTN_MAIN_MENU_NAV,
         callback_data="back_to_main_menu",
     )
     adjustments.append(2)
@@ -62,13 +62,13 @@ def get_alt_connection_keyboard(
 
     if amnezia_bridge_url:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_DEVICE_OPEN_IN_AMNEZIA,
+            text=texts.CONNECTION_DEVICES_DEVICE_OPEN_IN_AMNEZIA,
             url=amnezia_bridge_url,
             style="primary",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_BACK_TO_DEVICE,
+        text=texts.CONNECTION_DEVICES_DEVICE_BACK_TO_DEVICE,
         callback_data=f"manage_device:{profile_id}",
     )
     builder.adjust(1)
@@ -81,13 +81,13 @@ def get_device_delete_confirm_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L43_1,
+        text=texts.DEVICE_STATUS_CREATING_LABEL,
         callback_data=f"confirm_delete_device:{profile_id}",
         style="danger",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_DEVICE_L48_1,
+        text=texts.BTN_CANCEL,
         callback_data=f"cancel_delete_device:{profile_id}",
     )
 

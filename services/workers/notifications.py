@@ -4,12 +4,24 @@ from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 from cachetools import TTLCache
 from sqlalchemy import or_, select
 
-from bot import texts
-from bot.constants import (
+from bot.keyboards.notifications import (
+    get_post_expiry_keyboard,
+    get_pre_expiry_keyboard,
+)
+from bot.texts.runtime.notifications import (
+    NOTIFY_1D,
+    NOTIFY_2H,
+    NOTIFY_3D,
+    NOTIFY_EXPIRED,
+    NOTIFY_GRACE_12H,
+    TIME_DAYS_HOURS_FORMAT,
+    TIME_HOURS_MINUTES_FORMAT,
+    TIME_SOON_LABEL,
+)
+from config.constants import (
     GRACE_PERIOD_HOURS,
     NOTIFICATION_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
@@ -34,22 +46,23 @@ _last_notification_type: TTLCache[int, str] = TTLCache(
 
 def _get_backoff_delay(retry_count: int) -> int:
     capped = min(retry_count, MAX_RETRY_COUNT)
-
     return BACKOFF_BASE_INTERVAL * (2**capped)
+
 
 def _format_countdown(delta: timedelta) -> str:
     if delta.total_seconds() <= 0:
-        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L43_1
+        return TIME_SOON_LABEL
 
     days = delta.days
     hours = delta.seconds // 3600
 
     if days > 0:
-        return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L49_1.format(value_0=days, value_1=hours)
+        return TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L53_1.format(value_0=hours, value_1=minutes)
+    return TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
+
 
 def _maybe_reset_retry_on_type_change(
     user: User,
@@ -64,6 +77,7 @@ def _maybe_reset_retry_on_type_change(
         user.last_notification_attempt = None
 
     _last_notification_type[user.id] = notification_type
+
 
 def _infer_last_notification_type(user: User) -> str | None:
     if user.notified_grace_12h:
@@ -116,7 +130,7 @@ async def subscription_notifications_loop(
 
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_NOTIFICATIONS_L122_1,
+                "Критическая ошибка в цикле уведомлений: %s",
                 e,
                 exc_info=True,
             )
@@ -223,15 +237,15 @@ async def _send_pre_expiry_notifications(
                 notification_type = None
 
                 if time_left <= timedelta(hours=2) and not user.notified_2h:
-                    msg = texts.NOTIFY_2H
+                    msg = NOTIFY_2H
                     notification_type = "2h"
 
                 elif time_left <= timedelta(days=1) and not user.notified_1d:
-                    msg = texts.NOTIFY_1D
+                    msg = NOTIFY_1D
                     notification_type = "1d"
 
                 elif time_left <= timedelta(days=3) and not user.notified_3d:
-                    msg = texts.NOTIFY_3D
+                    msg = NOTIFY_3D
                     notification_type = "3d"
 
                 if not msg:
@@ -247,24 +261,10 @@ async def _send_pre_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    builder = InlineKeyboardBuilder()
-
-                    builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L251_1,
-                        callback_data="menu_subscription",
-                    )
-
-                    builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L256_1,
-                        callback_data="dismiss_notification",
-                    )
-
-                    builder.adjust(1)
-
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=builder.as_markup(),
+                        reply_markup=get_pre_expiry_keyboard(),
                         parse_mode="HTML",
                     )
 
@@ -389,13 +389,13 @@ async def _send_post_expiry_notifications(
                     not user.notified_grace_12h
                     and current_time >= deletion_time - timedelta(hours=12)
                 ):
-                    msg = texts.NOTIFY_GRACE_12H
+                    msg = NOTIFY_GRACE_12H
                     notification_type = "grace_12h"
 
                 elif not user.notified_expired:
                     countdown = _format_countdown(time_until_delete)
 
-                    msg = texts.NOTIFY_EXPIRED.format(
+                    msg = NOTIFY_EXPIRED.format(
                         countdown=countdown,
                     )
 
@@ -414,29 +414,10 @@ async def _send_post_expiry_notifications(
                 try:
                     await global_send_limiter.acquire()
 
-                    builder = InlineKeyboardBuilder()
-
-                    builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L410_1,
-                        callback_data="menu_buy",
-                    )
-
-                    builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L415_1,
-                        callback_data="menu_support",
-                    )
-
-                    builder.button(
-                        text=texts.UI_SERVICES_WORKERS_NOTIFICATIONS_L420_1,
-                        callback_data="dismiss_notification",
-                    )
-
-                    builder.adjust(1)
-
                     await bot.send_message(
                         user.telegram_id,
                         msg,
-                        reply_markup=builder.as_markup(),
+                        reply_markup=get_post_expiry_keyboard(),
                         parse_mode="HTML",
                     )
 

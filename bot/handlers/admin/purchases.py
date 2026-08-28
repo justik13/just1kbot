@@ -15,7 +15,8 @@ from database.repositories.purchases_repo import (
 )
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
-from utils.formatters import format_admin_breadcrumbs, format_datetime
+from bot.formatters import format_admin_breadcrumbs
+from utils.formatters import format_datetime
 from utils.telegram import safe
 from utils.text_limits import truncate_button_text
 
@@ -36,29 +37,37 @@ async def _show_purchases_list(
     total_pages = max(1, math.ceil(total / PURCHASES_PER_PAGE))
     page = min(max(1, page), total_pages)
 
-    header = format_admin_breadcrumbs("🛒 Покупки", f"Стр. {page}/{total_pages}")
+    header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_PAGE_INDICATOR.format(page=page, total_pages=total_pages))
     rendered = (
-        f"{header}"
-        f"🛒 <b>Логи покупок пользователей</b> (Стр. {page}/{total_pages}, всего: {total})\n\n"
+        f"{header}"+
+        texts.ADMIN_PURCHASES_LOGS_TITLE.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not entries:
-        rendered += "<i>Покупки не найдены.</i>"
+        rendered += texts.ADMIN_PURCHASES_EMPTY_NOTICE
     else:
         for idx, entry in enumerate(entries, start=1):
             dt_str = format_datetime(entry.created_at)
-            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else "0 ₽ (Бонус)"
+            amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS
             rendered += (
-                f"<b>{idx}. {safe(entry.user_label)}</b> | {safe(entry.operation_title)}\n"
-                f"   💎 {safe(entry.tariff_name)} ({entry.duration_days} дн., {entry.device_limit} устр.) — <b>{amount_str}</b>\n"
-                f"   🕒 {dt_str}\n\n"
+                texts.ADMIN_PURCHASES_ROW_FORMAT.format(
+                    idx=idx, 
+                    user_label=safe(entry.user_label), 
+                    operation_title=safe(entry.operation_title), 
+                    tariff_info=texts.ADMIN_PURCHASES_TARIFF_ROW.format(safe_entry_tariff_name=safe(entry.tariff_name), entry_duration_days=entry.duration_days, entry_device_limit=entry.device_limit, amount_str=amount_str), 
+                    dt_str=dt_str
+                )
             )
 
 
             button_text = truncate_button_text(
-                f"🛒 #{entry.numeric_id} | {entry.user_label} | {amount_str}"
+                texts.ADMIN_PURCHASES_ROW_BUTTON_TEMPLATE.format(
+                    numeric_id=entry.numeric_id,
+                    user_label=entry.user_label,
+                    amount=amount_str,
+                )
             )
             builder.button(
                 text=button_text,
@@ -68,20 +77,20 @@ async def _show_purchases_list(
     nav_buttons = 0
     if page > 1:
         builder.button(
-            text="◀️ Назад",
+            text=texts.BTN_BACK,
             callback_data=f"admin_purchases_page:{page - 1}",
         )
         nav_buttons += 1
 
     if page < total_pages:
         builder.button(
-            text="Вперед ▶️",
+            text=texts.BTN_PAGINATION_NEXT,
             callback_data=f"admin_purchases_page:{page + 1}",
         )
         nav_buttons += 1
 
-    builder.button(text="💳 К платежам", callback_data="admin_payments")
-    builder.button(text="🔙 В админ-меню", callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_PURCHASES_PAYMENTS_BUTTON, callback_data="admin_payments")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
 
     adjust_pattern = [1] * len(entries)
     if nav_buttons > 0:
@@ -143,43 +152,43 @@ async def show_purchase_card(
 
     parts = callback.data.split(":", 1)
     if len(parts) < 2:
-        await callback.answer("Запись покупки не найдена", show_alert=True)
+        await callback.answer(texts.ADMIN_PURCHASES_RECORD_NOT_FOUND_ALERT, show_alert=True)
         return
 
     entry_id = parts[1]
     entry = await get_purchase_log_by_id(session, entry_id)
     if not entry:
-        await callback.answer("Покупка не найдена", show_alert=True)
+        await callback.answer(texts.ADMIN_PURCHASES_NOT_FOUND_ALERT, show_alert=True)
         return
 
     await state.clear()
     await callback.answer(show_alert=False)
 
-    header = format_admin_breadcrumbs("🛒 Покупки", f"Детали #{entry.numeric_id}")
-    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else "0 ₽ (Бонус/Выдача)"
+    header = format_admin_breadcrumbs(texts.ADMIN_PURCHASES_TAB_TITLE, texts.ADMIN_PURCHASES_DETAILS_LINK.format(entry_numeric_id=entry.numeric_id))
+    amount_str = f"{int(entry.amount_rub)} ₽" if entry.amount_rub > 0 else texts.ADMIN_PURCHASES_AMOUNT_ZERO_BONUS_GRANT
     dt_str = format_datetime(entry.created_at)
 
     rendered = (
-        f"{header}"
-        f"🛒 <b>Детали покупки / транзакции #{entry.numeric_id}</b>\n\n"
-        f"👤 <b>Пользователь:</b> {safe(entry.user_label)} (Telegram ID: <code>{entry.telegram_id}</code>)\n"
-        f"💎 <b>Тариф:</b> {safe(entry.tariff_name)}\n"
-        f"📱 <b>Лимит устройств:</b> {entry.device_limit} шт.\n"
-        f"⏳ <b>Длительность:</b> {entry.duration_days} дней\n"
-        f"💳 <b>Сумма:</b> <b>{amount_str}</b>\n"
-        f"⚙️ <b>Тип операции:</b> {safe(entry.operation_title)}\n"
-        f"🕒 <b>Дата и время:</b> {dt_str}\n"
+        f"{header}"+
+        texts.ADMIN_PURCHASES_ENTRY_TITLE.format(entry_numeric_id=entry.numeric_id)+
+        texts.ADMIN_PURCHASES_ENTRY_USER_LINE.format(safe_entry_user_label=safe(entry.user_label), entry_telegram_id=entry.telegram_id)+
+        texts.ADMIN_PURCHASES_ENTRY_TARIFF_LINE.format(safe_entry_tariff_name=safe(entry.tariff_name))+
+        texts.ADMIN_PURCHASES_ENTRY_DEVICE_LIMIT_LINE.format(entry_device_limit=entry.device_limit)+
+        texts.ADMIN_PURCHASES_ENTRY_DURATION_LINE.format(entry_duration_days=entry.duration_days)+
+        texts.ADMIN_PURCHASES_ENTRY_SUMMARY_LINE.format(amount_str=amount_str)+
+        texts.ADMIN_PURCHASES_ENTRY_OPERATION_TYPE_LINE.format(safe_entry_operation_title=safe(entry.operation_title))+
+        texts.ADMIN_PURCHASES_ENTRY_DATETIME_LINE.format(dt_str=dt_str)
 
     )
 
     builder = InlineKeyboardBuilder()
     if entry.telegram_id:
         builder.button(
-            text="👤 Карточка пользователя",
+            text=texts.ADMIN_PURCHASES_USER_CARD_LINK,
             callback_data=f"admin_user_card:{entry.telegram_id}",
         )
-    builder.button(text="🛒 К списку покупок", callback_data="admin_purchases")
-    builder.button(text="🔙 В админ-меню", callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_PURCHASES_LIST_BUTTON, callback_data="admin_purchases")
+    builder.button(text=texts.BTN_ADMIN_MENU, callback_data="admin_menu")
     builder.adjust(1)
 
     try:

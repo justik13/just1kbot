@@ -22,7 +22,7 @@ from utils.callbacks import (
     parse_callback_int,
     parse_callback_parts,
 )
-from utils.tariff_names import get_tariff_group_name
+from bot.formatters import get_tariff_group_name
 
 from .common import (
     _get_representative_tariff,
@@ -51,7 +51,7 @@ async def admin_sub_change_tariff(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L53_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -70,7 +70,7 @@ async def admin_sub_change_tariff(
 
     profiles_count = await get_user_profiles_count(session, user.id)
 
-    current_tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L76_1
+    current_tariff_name = texts.PLACEHOLDER_DASH
 
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(
@@ -121,7 +121,7 @@ async def admin_sub_select_group(
 
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L127_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -131,7 +131,7 @@ async def admin_sub_select_group(
 
     if telegram_id is None or device_limit is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L137_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -192,7 +192,7 @@ async def admin_sub_select_group(
         )
         return
 
-    old_tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L202_1
+    old_tariff_name = texts.PLACEHOLDER_DASH
 
     if user.current_tariff_id:
         old_tariff = await get_tariff_by_id(
@@ -251,7 +251,7 @@ async def admin_sub_apply_tariff(
 
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L261_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -261,7 +261,7 @@ async def admin_sub_apply_tariff(
 
     if telegram_id is None or tariff_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_CHANGE_ROUTES_L271_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return

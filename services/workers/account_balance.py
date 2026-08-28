@@ -6,12 +6,30 @@ import uuid
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select, or_, text
+from sqlalchemy import or_, select, text
 
-from bot import texts
-from bot.constants import WORKER_ERROR_SLEEP_INTERVAL
-from bot.keyboards import get_topup_credit_keyboard, get_topup_payment_keyboard
+from bot.keyboards.notifications import (
+    get_purchase_completed_notification_keyboard,
+    get_referral_bonus_keyboard,
+)
+from bot.keyboards.payment import (
+    get_topup_credit_keyboard,
+    get_topup_payment_keyboard,
+)
+from bot.texts.runtime.alerts import ALERT_BALANCE_LIMIT_EXCEEDED
+from bot.texts.runtime.notifications import (
+    BALANCE_PURCHASE_SUCCESS_NOTIFICATION,
+    BALANCE_TOPUP_CREDITED,
+    BALANCE_TOPUP_RESUME_HINT,
+    BALANCE_TOPUP_WELCOME_BONUS,
+    REFERRAL_BONUS_ACCREDITED,
+    TIME_DAYS_FORMAT,
+    TIME_DAYS_HOURS_FORMAT,
+    TITLE_SUBSCRIPTION_EXTENDED,
+    TITLE_TARIFF_CHANGED,
+    TOPUP_LINK_CARD,
+)
+from config.constants import WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, TariffQuote, TariffVersion, User
@@ -74,39 +92,24 @@ async def process_balance_purchase_notifications(bot: Bot) -> int:
                 else duration_hours
             )
             days, remainder = divmod(hours, 24)
-            duration = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L223_1.format(
-                value_0=days
-            ) + (
-                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L224_1.format(
-                    value_0=remainder
-                )
+            duration = (
+                TIME_DAYS_HOURS_FORMAT.format(days=days, hours=remainder)
                 if remainder
-                else ""
+                else TIME_DAYS_FORMAT.format(days=days)
             )
             title = (
-                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L227_1
+                TITLE_TARIFF_CHANGED
                 if operation_type == "change"
-                else texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L229_1
+                else TITLE_SUBSCRIPTION_EXTENDED
             )
-            builder = InlineKeyboardBuilder()
-            builder.button(
-                text="🏠 Главное меню",
-                callback_data="back_to_main_menu",
-            )
-            builder.button(
-                text="✅ Прочитано",
-                callback_data="dismiss_notification",
-            )
-            builder.adjust(2)
-
             await bot.send_message(
                 telegram_id,
-                texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L232_1.format(
-                    value_0=title,
-                    value_1=duration,
-                    value_2=device_limit,
+                BALANCE_PURCHASE_SUCCESS_NOTIFICATION.format(
+                    title=title,
+                    duration=duration,
+                    device_limit=device_limit,
                 ),
-                reply_markup=builder.as_markup(),
+                reply_markup=get_purchase_completed_notification_keyboard(),
                 parse_mode="HTML",
             )
         except TelegramForbiddenError:
@@ -169,9 +172,7 @@ async def process_topup_link_presentations(bot: Bot) -> int:
                 await render_hub(
                     bot,
                     chat_id,
-                    texts.UI_SERVICES_WORKERS_ACCOUNT_BALANCE_L295_1.format(
-                        value_0=int(payment.amount)
-                    ),
+                    TOPUP_LINK_CARD.format(amount=int(payment.amount)),
                     get_topup_payment_keyboard(payment.payment_url, payment.id),
                 )
             except TelegramForbiddenError:
@@ -287,13 +288,8 @@ async def process_balance_notifications(bot: Bot) -> int:
                 ref_blocked = False
                 try:
                     await global_send_limiter.acquire()
-                    b_builder = InlineKeyboardBuilder()
-                    b_builder.button(text="🎁 Мой баланс", callback_data="menu_balance")
-                    ref_text = (
-                        f"🎉 <b>Ваш реферал пополнил баланс!</b>\n\n"
-                        f"Вам зачислено <b>+{ref_bonus} ₽</b> бонусов на баланс."
-                    )
-                    await render_hub(bot, ref_id, ref_text, b_builder.as_markup())
+                    ref_text = REFERRAL_BONUS_ACCREDITED.format(bonus=ref_bonus)
+                    await render_hub(bot, ref_id, ref_text, get_referral_bonus_keyboard())
                     ref_sent = True
                 except TelegramForbiddenError:
                     ref_blocked = True
@@ -325,24 +321,19 @@ async def process_balance_notifications(bot: Bot) -> int:
             continue
 
         if balance_snapshot is not None:
-            resume = bool(ctx.get("operation"))
-            suffix = (
-                texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L340_1
-                if resume
-                else ""
-            )
-            message = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L345_1.format(
-                value_0=int(payment_amount),
-                value_1=int(balance_snapshot.real_available),
-                value_2=int(balance_snapshot.bonus_available),
-                value_3=suffix,
-            )
+            resume_hint = BALANCE_TOPUP_RESUME_HINT if bool(ctx.get("operation")) else ""
+            welcome_bonus = ""
             if ctx.get("purchaser_welcome_bonus", 0) > 0:
                 wb = ctx["purchaser_welcome_bonus"]
-                message += (
-                    f"\n\n🎁 <b>Вам начислен приветственный бонус +{wb} ₽ "
-                    f"за первое пополнение по приглашению!</b>"
-                )
+                welcome_bonus = BALANCE_TOPUP_WELCOME_BONUS.format(bonus=wb)
+
+            message = BALANCE_TOPUP_CREDITED.format(
+                amount=int(payment_amount),
+                real_balance=int(balance_snapshot.real_available),
+                bonus_balance=int(balance_snapshot.bonus_available),
+                resume_hint=resume_hint,
+                welcome_bonus=welcome_bonus,
+            )
 
             user_sent = False
             user_blocked = False
@@ -355,10 +346,10 @@ async def process_balance_notifications(bot: Bot) -> int:
                     get_topup_credit_keyboard(ctx),
                 )
                 if balance_snapshot.real_position > get_settings().BALANCE_MAX_AVAILABLE_RUB:
-                    diagnostic = texts.RUNTIME_SERVICES_WORKERS_ACCOUNT_BALANCE_L361_1.format(
-                        value_0=payment_id,
-                        value_1=telegram_id,
-                        value_2=int(balance_snapshot.real_position),
+                    diagnostic = ALERT_BALANCE_LIMIT_EXCEEDED.format(
+                        payment_id=payment_id,
+                        telegram_id=telegram_id,
+                        real_position=int(balance_snapshot.real_position),
                     )
                     for admin_id in get_settings().ADMIN_IDS:
                         await global_send_limiter.acquire()

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import APIOperation, VPNProfile
 from database.repositories.servers_repo import (
     get_server_by_api_url,
@@ -47,7 +48,7 @@ async def start_edit_server_name(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L50_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -140,7 +141,7 @@ async def process_edit_server_name(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"name -> {new_name}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="name", value=new_name),
     )
 
     await render_hub(
@@ -179,7 +180,7 @@ async def start_edit_server_flag(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L182_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -196,7 +197,7 @@ async def start_edit_server_flag(
         )
         return
 
-    current_flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L199_1
+    current_flag = server.country_flag or texts.EMOJI_GLOBE
 
     await state.update_data(
         server_id=server_id,
@@ -285,7 +286,7 @@ async def process_edit_server_flag(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"flag -> {new_flag}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="flag", value=new_flag),
     )
 
     await render_hub(
@@ -321,7 +322,7 @@ async def start_edit_server_url(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L324_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -467,7 +468,7 @@ async def process_edit_server_url(
 
         return
 
-    if "amneziawg2" not in server_info.protocols:
+    if AMNEZIA_PROTOCOL not in server_info.protocols:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -475,7 +476,7 @@ async def process_edit_server_url(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
+                    else texts.LABEL_UNKNOWN_LOWER
                 ),
             ),
             get_back_button("admin_servers"),
@@ -555,10 +556,10 @@ async def process_edit_server_url(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"❌ Нельзя изменить адрес сервера, пока на нём есть устройства или активные операции.\n\n"
-                f"• Связанных устройств: {profiles_count}\n"
-                f"• Операций в обработке: {active_ops_count}\n\n"
-                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                texts.ADMIN_SERVER_EDIT_URL_BLOCKED.format(
+                    devices_count=profiles_count,
+                    operations_count=active_ops_count,
+                ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
             )
@@ -580,7 +581,7 @@ async def process_edit_server_url(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"api_url -> {new_url}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="api_url", value=new_url),
     )
 
     await render_hub(
@@ -618,7 +619,7 @@ async def start_edit_server_key(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L537_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -733,7 +734,7 @@ async def process_edit_server_key(
 
         return
 
-    if "amneziawg2" not in server_info.protocols:
+    if AMNEZIA_PROTOCOL not in server_info.protocols:
         await render_hub(
             message.bot,
             message.chat.id,
@@ -741,7 +742,7 @@ async def process_edit_server_key(
                 protocols=safe(
                     ", ".join(server_info.protocols)
                     if server_info.protocols
-                    else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L476_1
+                    else texts.LABEL_UNKNOWN_LOWER
                 ),
             ),
             get_back_button("admin_servers"),
@@ -809,10 +810,10 @@ async def process_edit_server_key(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"❌ Нельзя изменить ключ API сервера, пока на нём есть устройства или активные операции.\n\n"
-                f"• Связанных устройств: {profiles_count}\n"
-                f"• Операций в обработке: {active_ops_count}\n\n"
-                "Для подключения нового узла добавьте новый сервер в панели управления.",
+                texts.ADMIN_SERVER_EDIT_KEY_BLOCKED.format(
+                    devices_count=profiles_count,
+                    operations_count=active_ops_count,
+                ),
                 get_back_button(f"admin_server_card:{server_id}"),
                 parse_mode="HTML",
             )
@@ -830,7 +831,7 @@ async def process_edit_server_key(
         "EDIT_SERVER",
         "Server",
         server_id,
-        "api_key -> [REDACTED]",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED.format(field="api_key"),
     )
 
     await render_hub(
@@ -866,7 +867,7 @@ async def start_edit_server_max_clients(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_EDIT_ROUTES_L707_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -975,7 +976,7 @@ async def process_edit_server_max_clients(
         "EDIT_SERVER",
         "Server",
         server_id,
-        f"max_clients: {server.max_clients} -> {new_value}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="max_clients", value=f"{server.max_clients} -> {new_value}"),
     )
 
     await render_hub(

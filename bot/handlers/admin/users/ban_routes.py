@@ -20,6 +20,8 @@ from .common import (
 router = Router()
 logger = logging.getLogger(__name__)
 
+BAN_STATUS_LABELS: dict[str, str] = texts.ADMIN_USER_BAN_STATUS_LABELS
+
 
 @router.callback_query(F.data.startswith("admin_ban:"))
 async def admin_ban_confirm(
@@ -37,7 +39,7 @@ async def admin_ban_confirm(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L40_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -84,7 +86,7 @@ async def admin_ban_apply(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L87_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -106,15 +108,16 @@ async def admin_ban_apply(
         telegram_id,
     )
 
+    status_label = BAN_STATUS_LABELS.get(str(message).lower(), str(message).lower())
     if not success:
         await callback.answer(
-            texts.ADMIN_BAN_FAILED.format(message=message),
+            texts.ADMIN_BAN_FAILED.format(message=status_label),
             show_alert=True,
         )
         return
 
     await callback.answer(
-        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        texts.ADMIN_BAN_SUCCESS.format(message=status_label),
         show_alert=True,
     )
 
@@ -140,7 +143,7 @@ async def admin_unban_confirm(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L143_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -178,7 +181,7 @@ async def admin_unban_apply(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_BAN_ROUTES_L181_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -191,15 +194,16 @@ async def admin_unban_apply(
         telegram_id,
     )
 
+    status_label = BAN_STATUS_LABELS.get(str(message).lower(), str(message).lower())
     if not success:
         await callback.answer(
-            texts.ADMIN_BAN_FAILED.format(message=message),
+            texts.ADMIN_BAN_FAILED.format(message=status_label),
             show_alert=True,
         )
         return
 
     await callback.answer(
-        texts.ADMIN_BAN_SUCCESS.format(message=message),
+        texts.ADMIN_BAN_SUCCESS.format(message=status_label),
         show_alert=True,
     )
 

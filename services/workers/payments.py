@@ -5,11 +5,15 @@ import logging
 from datetime import timedelta
 
 from aiogram import Bot
+from bot.texts.common.status import STATUS_NOT_SPECIFIED
+from bot.texts.runtime.alerts import (
+    ALERT_STALE_PAYMENT_ROW,
+    ALERT_STALE_PAYMENTS_HEADER,
+    ALERT_STALE_PAYMENTS_MORE,
+)
 from cachetools import TTLCache
 from sqlalchemy import and_, or_, select
-
-from bot import texts
-from bot.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
+from config.constants import STALE_PAYMENT_THRESHOLD, WORKER_ERROR_SLEEP_INTERVAL
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Payment, User
@@ -228,25 +232,25 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         return
     details = []
     for payment, telegram_id in new_rows[:10]:
+        icon = "⚠️" if payment_display_status(payment) == "requires_manual_review" else "⏳"
+        method = payment.payment_method or STATUS_NOT_SPECIFIED
         details.append(
-            texts.STALE_TOPUP_ALERT_ROW.format(
-                icon=(
-                    texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L139_1
-                    if payment_display_status(payment) == "requires_manual_review"
-                    else texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L141_1
-                ),
+            ALERT_STALE_PAYMENT_ROW.format(
+                icon=icon,
                 payment_id=payment.id,
                 telegram_id=telegram_id,
                 amount=payment.amount,
                 currency=payment.currency,
-                method=payment.payment_method or texts.RUNTIME_SERVICES_WORKERS_PAYMENTS_L147_1,
+                method=method,
             )
         )
     if len(new_rows) > 10:
         details.append(
-            texts.STALE_TOPUP_ALERT_MORE.format(count=len(new_rows) - 10)
+            ALERT_STALE_PAYMENTS_MORE.format(
+                more_count=len(new_rows) - 10,
+            )
         )
-    message = texts.STALE_TOPUP_ALERT.format(
+    message = ALERT_STALE_PAYMENTS_HEADER.format(
         count=len(new_rows),
         details="".join(details),
     )

@@ -38,7 +38,7 @@ async def request_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L42_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -52,13 +52,13 @@ async def request_delete_device(
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif status == "create_cleanup_pending":
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+            msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
         await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
         return
@@ -85,7 +85,7 @@ async def cancel_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L71_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -116,7 +116,7 @@ async def confirm_delete_device(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_DELETE_ROUTES_L100_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -130,13 +130,13 @@ async def confirm_delete_device(
     if not can_show_delete_action(profile):
         status = getattr(profile, "provisioning_status", "")
         if status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif status == "create_cleanup_pending":
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         elif status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Это действие сейчас недоступно для текущего состояния устройства."
+            msg = texts.DEVICE_ACTION_UNAVAILABLE_STATE
         await callback.answer(msg, show_alert=True)
         await render_device_screen(callback.bot, callback.message.chat.id, profile, db_user, session)
         return
@@ -164,7 +164,7 @@ async def confirm_delete_device(
             answered = True
             return
         except DeviceCreationError:
-            await callback.answer("⚠️ Идёт автоматическое восстановление или действие недоступно.", show_alert=True)
+            await callback.answer(texts.CONNECTION_ACTIONS_DEVICE_DELETE_IDET_AVTOMATICHESKOE_VOSSTANOV, show_alert=True)
             answered = True
             return
 

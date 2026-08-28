@@ -26,6 +26,7 @@ from sqlalchemy.orm import (
     relationship,
 )
 
+from config.constants import AMNEZIA_PROTOCOL, ServerHealthState
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
 
@@ -270,7 +271,7 @@ class Server(Base):
     api_url: Mapped[str] = mapped_column(String(500), nullable=False)
     api_key: Mapped[str] = mapped_column(EncryptedString(critical=True), nullable=False)
 
-    protocol: Mapped[str] = mapped_column(String(50), default="amneziawg2")
+    protocol: Mapped[str] = mapped_column(String(50), default=AMNEZIA_PROTOCOL)
     max_clients: Mapped[int] = mapped_column(Integer, default=50)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -278,7 +279,9 @@ class Server(Base):
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_successful_check: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    health_state: Mapped[str] = mapped_column(String(30), default="ONLINE", server_default="ONLINE")
+    health_state: Mapped[str] = mapped_column(
+        String(30), default=ServerHealthState.ONLINE, server_default=ServerHealthState.ONLINE
+    )
     problem_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consecutive_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")

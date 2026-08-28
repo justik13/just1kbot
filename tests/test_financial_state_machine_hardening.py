@@ -369,8 +369,8 @@ class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):
     async def test_cache_hits_fetch_fresh_user_from_current_session(self):
         from bot.middlewares.user_context import (
             UserContextMiddleware,
-            _user_cache,
             clear_user_cache,
+            get_cached_user_id,
             invalidate_user_cache,
         )
 
@@ -407,7 +407,9 @@ class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(handler_called)
         self.assertIsNotNone(result_user1)
         self.assertEqual(result_user1.id, 42)
-        self.assertEqual(_user_cache.get(99999), 42)
+        is_cached, cached_uid = get_cached_user_id(99999)
+        self.assertTrue(is_cached)
+        self.assertEqual(cached_uid, 42)
 
         # Second invocation with session2 -> cache hit, queries session2 with user_id=42
         user_in_session2 = User(
@@ -427,20 +429,22 @@ class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):
 
         # Invalidate cache
         invalidate_user_cache(99999)
-        self.assertNotIn(99999, _user_cache)
+        is_cached, _ = get_cached_user_id(99999)
+        self.assertFalse(is_cached)
 
     async def test_stale_cache_miss_falls_back_to_telegram_id_in_same_request(self):
         """When cached user.id misses in DB, middleware must fall back to telegram_id in same request."""
         from bot.middlewares.user_context import (
             UserContextMiddleware,
-            _user_cache,
             clear_user_cache,
+            get_cached_user_id,
+            set_cached_user_id,
         )
 
         clear_user_cache()
 
         # Seed cache with stale user_id = 999
-        _user_cache[88888] = 999
+        set_cached_user_id(88888, 999)
 
         real_user = User(
             id=77,
@@ -479,7 +483,9 @@ class UserContextMiddlewareCacheTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNotNone(result)
         self.assertEqual(result.id, 77)
-        self.assertEqual(_user_cache.get(88888), 77)
+        is_cached, cached_uid = get_cached_user_id(88888)
+        self.assertTrue(is_cached)
+        self.assertEqual(cached_uid, 77)
 
 
 class TopupContextDefensiveParsingTests(unittest.TestCase):

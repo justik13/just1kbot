@@ -35,7 +35,7 @@ async def rename_device_start(
     profile_id = parse_callback_id(callback.data, 1)
 
     if profile_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_CONNECTION_DEVICE_RENAME_ROUTES_L36_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     profile = await get_profile_by_id(session, profile_id)
@@ -49,11 +49,11 @@ async def rename_device_start(
 
     if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         if profile.provisioning_status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif profile.provisioning_status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         await callback.answer(msg, show_alert=True)
         return
 
@@ -133,11 +133,11 @@ async def rename_device_process(
     if profile.provisioning_status in ("deleting", "create_cleanup_pending", "pending_create"):
         await state.clear()
         if profile.provisioning_status == "deleting":
-            msg = "🗑 Устройство уже удаляется с сервера."
+            msg = texts.DEVICE_DELETE_ALREADY_IN_PROGRESS
         elif profile.provisioning_status == "pending_create":
             msg = texts.DEVICE_CREATE_IN_PROGRESS
         else:
-            msg = "⚠️ Идёт автоматическое восстановление после сбоя. Попробуйте позже."
+            msg = texts.DEVICE_SELF_HEALING_IN_PROGRESS
         await render_hub(
             message.bot,
             message.chat.id,
@@ -174,7 +174,7 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Имя не может быть пустым. Введите корректное имя:",
+            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_NE_MOZHET_BYT_PUSTYM_VVED,
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
@@ -183,7 +183,7 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"⚠️ Имя слишком длинное ({len(cleaned_base)} из 16 символов).\n\nПожалуйста, введите имя покороче (максимум 16 символов):",
+            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SLISHKOM_DLINNOE_IZ_16_SI.format(len_cleaned_base=len(cleaned_base)),
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
@@ -192,7 +192,7 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Имя содержит недопустимые символы.\n\nРазрешены только буквы, цифры, пробелы, дефисы, подчёркивания и знак #.\n\nПопробуйте ещё раз:",
+            texts.CONNECTION_ACTIONS_DEVICE_RENAME_IMYA_SODERZHIT_NEDOPUSTIMYE_SI,
             get_back_button(f"manage_device:{profile.id}"),
         )
         return
@@ -210,7 +210,7 @@ async def rename_device_process(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
+                texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
                 get_back_button(f"manage_device:{profile.id}"),
             )
             return
@@ -244,7 +244,7 @@ async def rename_device_process(
         await render_hub(
             message.bot,
             message.chat.id,
-            f"⚠️ Устройство с именем «<b>{safe(new_name)}</b>» уже существует.\n\nПожалуйста, введите другое имя:",
+            texts.CONNECTION_ACTIONS_DEVICE_RENAME_DEVICE_S_IMENEM_UZHE_SUSHC.format(safe_new_name=safe(new_name)),
             get_back_button(f"manage_device:{profile.id}"),
         )
         return

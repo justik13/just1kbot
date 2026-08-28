@@ -51,15 +51,15 @@ async def prompt_send_user_message(
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="❌ Отмена",
+        text=texts.BTN_CANCEL,
         callback_data=f"admin_user_card:{user.telegram_id}",
     )
 
     text = (
-        f"✉️ <b>Отправка сообщения пользователю</b>\n\n"
-        f"Пользователь: <b>{safe(user.username or str(user.telegram_id))}</b> (ID: <code>{user.telegram_id}</code>)\n\n"
-        f"Введите текст сообщения, которое бот доставит пользователю от имени администрации.\n\n"
-        f"<i>Поддерживается HTML-разметка. Для отмены нажмите кнопку ниже.</i>"
+        texts.ADMIN_USERS_MESSAGE_SENDING_MESSAGE_POLZOVA.format()+
+        texts.ADMIN_USERS_MESSAGE_USER_ID.format(safe_user_username_or_str_user_telegram_id=safe(user.username or str(user.telegram_id)), user_telegram_id=user.telegram_id)+
+        texts.ADMIN_USERS_MESSAGE_ENTER_TEXT_MESSAGE_KO.format()+
+        texts.ADMIN_USERS_MESSAGE_PODDERZHIVAETSYA_HTML_RAZMETKA.format()
     )
 
     try:
@@ -97,7 +97,7 @@ async def process_send_user_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            "❌ Ошибка: не найден целевой пользователь.",
+            texts.ADMIN_USERS_MESSAGE_ERROR_NE_NAYDEN_TSELEVOY_POL,
             get_back_button("admin_users"),
             trigger_message_id=message.message_id,
         )
@@ -122,7 +122,7 @@ async def process_send_user_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Пожалуйста, отправьте текстовое сообщение или медиа с подписью.",
+            texts.ADMIN_USERS_MESSAGE_POZHALUYSTA_OTPRAVTE_TEKSTOVOE,
             get_back_button(f"admin_user_card:{target_telegram_id}"),
             trigger_message_id=message.message_id,
         )
@@ -134,7 +134,7 @@ async def process_send_user_message(
     error_reason = None
     from aiogram.utils.keyboard import InlineKeyboardBuilder
     dismiss_builder = InlineKeyboardBuilder()
-    dismiss_builder.button(text="✅ Прочитано", callback_data="dismiss_notification")
+    dismiss_builder.button(text=texts.BTN_DISMISS, callback_data="dismiss_notification")
     reply_markup = dismiss_builder.as_markup()
 
     try:
@@ -144,7 +144,7 @@ async def process_send_user_message(
                 await message.bot.send_photo(
                     target_telegram_id,
                     photo=photo_id,
-                    caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                    caption=texts.ADMIN_USERS_MESSAGE_MESSAGE_OT_ADMINISTRATSII.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
@@ -152,7 +152,7 @@ async def process_send_user_message(
                 await message.bot.send_photo(
                     target_telegram_id,
                     photo=photo_id,
-                    caption=f"📨 Сообщение от администрации:\n\n{text_to_send or ''}",
+                    caption=texts.ADMIN_DIRECT_MESSAGE_BODY_FORMAT.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                 )
         elif message.document:
@@ -161,7 +161,7 @@ async def process_send_user_message(
                 await message.bot.send_document(
                     target_telegram_id,
                     document=doc_id,
-                    caption=f"📨 <b>Сообщение от администрации:</b>\n\n{text_to_send or ''}",
+                    caption=texts.ADMIN_USERS_MESSAGE_MESSAGE_OT_ADMINISTRATSII.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
@@ -169,12 +169,12 @@ async def process_send_user_message(
                 await message.bot.send_document(
                     target_telegram_id,
                     document=doc_id,
-                    caption=f"📨 Сообщение от администрации:\n\n{text_to_send or ''}",
+                    caption=texts.ADMIN_DIRECT_MESSAGE_BODY_FORMAT.format(text_to_send_or=text_to_send or ''),
                     reply_markup=reply_markup,
                 )
         else:
             try:
-                header = "📨 <b>Сообщение от администрации:</b>\n\n"
+                header = texts.ADMIN_DIRECT_MESSAGE_HEADER_HTML
                 await message.bot.send_message(
                     target_telegram_id,
                     f"{header}{text_to_send}",
@@ -182,7 +182,7 @@ async def process_send_user_message(
                     parse_mode="HTML",
                 )
             except TelegramBadRequest:
-                header = "📨 Сообщение от администрации:\n\n"
+                header = texts.ADMIN_DIRECT_MESSAGE_HEADER_PLAIN
                 await message.bot.send_message(
                     target_telegram_id,
                     f"{header}{text_to_send}",
@@ -190,7 +190,7 @@ async def process_send_user_message(
                 )
         msg_sent = True
     except TelegramForbiddenError:
-        error_reason = "Пользователь заблокировал бота"
+        error_reason = texts.ADMIN_USERS_MESSAGE_USER_ZABLOKIROVAL_BOTA
     except Exception as exc:
         error_reason = str(exc)
         logger.warning(f"Failed to send admin direct message to {target_telegram_id}: {exc}")
@@ -208,9 +208,9 @@ async def process_send_user_message(
                 "text": text_to_send[:500] if text_to_send else "",
             }, ensure_ascii=False),
         )
-        notice = f"✅ <b>Сообщение пользователю ID {target_telegram_id} успешно отправлено!</b>"
+        notice = texts.ADMIN_USERS_MESSAGE_MESSAGE_POLZOVATELYU_ID_U.format(target_telegram_id=target_telegram_id)
     else:
-        notice = f"❌ <b>Не удалось отправить сообщение:</b> {safe(error_reason)}"
+        notice = texts.ADMIN_USERS_MESSAGE_NE_UDALOS_OTPRAVIT_SOOBSHCHENI.format(safe_error_reason=safe(error_reason))
 
     await _show_user_card_edit(message, user, session, notice=notice)
 

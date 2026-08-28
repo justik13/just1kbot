@@ -16,7 +16,7 @@ from database.repositories.account_ledger_repo import create_admin_adjustment
 from services.audit_service import AuditService
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_admin_breadcrumbs
+from bot.formatters import format_admin_breadcrumbs
 from utils.telegram import render_hub, safe
 
 router = Router()
@@ -54,29 +54,29 @@ async def start_mass_bonus(
         return
 
     await state.clear()
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Выбор аудитории")
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_SELECT_AUDIENCE)
 
     text = (
-        f"{header}"
-        f"🎁 <b>Массовое начисление бонусного баланса</b>\n\n"
-        f"Выберите целевую группу пользователей для получения компенсации/бонусов:"
+        f"{header}"+
+        texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUS.format()+
+        texts.ADMIN_USERS_MASS_BONUS_SELECT_TSELEVUYU_GRUPPU_POLZ.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="👥 Всем пользователям",
+        text=texts.ADMIN_USERS_MASS_BONUS_ALL_POLZOVATELYAM,
         callback_data="mass_bonus_aud:all",
     )
     builder.button(
-        text="⚡ Только с активной подпиской",
+        text=texts.ADMIN_USERS_MASS_BONUS_TOLKO_S_AKTIVNOY_PODPISKOY,
         callback_data="mass_bonus_aud:active",
     )
     builder.button(
-        text="⏳ Только без подписки",
+        text=texts.ADMIN_USERS_MASS_BONUS_TOLKO_BEZ_SUBSCRIPTION,
         callback_data="mass_bonus_aud:expired",
     )
     builder.button(
-        text="🔙 В админ-меню",
+        text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -107,11 +107,11 @@ async def select_mass_bonus_audience(
     await state.update_data(target_aud=target_aud)
     await state.set_state(AdminStates.entering_mass_bonus_amount)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Ввод суммы")
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_SUMMY)
     text = (
-        f"{header}"
-        f"💰 <b>Сумма бонусного начисления на каждого пользователя:</b>\n\n"
-        f"Введите сумму бонусов в рублях (целое число, например <code>100</code>):"
+        f"{header}"+
+        texts.ADMIN_USERS_MASS_BONUS_AMOUNT_BONUS_GRANT_N.format()+
+        texts.ADMIN_USERS_MASS_BONUS_ENTER_AMOUNT_BONUSOV_V_RUBLYA.format()
     )
 
     try:
@@ -143,7 +143,7 @@ async def process_mass_bonus_amount(
         await render_hub(
             message.bot,
             message.chat.id,
-            "⚠️ Введите корректную сумму начисления от 1 до 100 000 ₽",
+            texts.ADMIN_USERS_MASS_BONUS_ENTER_KORREKTNUYU_AMOUNT_NACH,
             get_back_button("admin_mass_bonus"),
             trigger_message_id=message.message_id,
         )
@@ -152,12 +152,12 @@ async def process_mass_bonus_amount(
     await state.update_data(amount=amount)
     await state.set_state(AdminStates.entering_mass_bonus_reason)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Ввод причины")
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_VVOD_PRICHINY)
     text = (
-        f"{header}"
-        f"📝 <b>Причина массового начисления (+{amount} ₽):</b>\n\n"
-        f"Введите сообщение для пользователей и лога аудита\n"
-        f"(например: <i>Компенсация за сбой на серверах 09.08</i>):"
+        f"{header}"+
+        texts.ADMIN_USERS_MASS_BONUS_REASON_MASSOVOGO_NACHISLENIY.format(amount=amount)+
+        texts.ADMIN_USERS_MASS_BONUS_ENTER_MESSAGE_FOR_POLZ.format()+
+        texts.ADMIN_USERS_MASS_BONUS_NAPRIMER_KOMPENSATSIYA_ZA_SBOY.format()
     )
 
     await render_hub(
@@ -180,7 +180,7 @@ async def process_mass_bonus_reason(
         await state.clear()
         return
 
-    reason = message.text.strip() if message.text else "Массовая компенсация"
+    reason = message.text.strip() if message.text else texts.ADMIN_USERS_MASS_BONUS_MASSOVAYA_KOMPENSATSIYA
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)
@@ -199,27 +199,27 @@ async def process_mass_bonus_reason(
     await state.update_data(reason=reason, user_count=user_count)
     await state.set_state(AdminStates.confirming_mass_bonus)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Подтверждение")
-    aud_label = {"all": "Всем пользователям", "active": "Только с активной подпиской", "expired": "Только без подписки"}.get(target_aud, target_aud)
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_CONFIRM)
+    aud_label = texts.ADMIN_MASS_BONUS_AUDIENCE_LABELS.get(target_aud, target_aud)
 
     text = (
-        f"{header}"
-        f"⚠️ <b>Подтверждение массового начисления бонусов:</b>\n\n"
-        f"• Аудитория: <b>{aud_label}</b>\n"
-        f"• Получателей: <b>{user_count} чел.</b>\n"
-        f"• Бонус каждому: <b>+{amount} ₽</b>\n"
-        f"• Общий бюджет бонусов: <b>{total_budget} ₽</b>\n"
-        f"• Причина: <i>{safe(reason)}</i>\n\n"
-        f"Вы уверены, что хотите запустить начисление?"
+        f"{header}"+
+        texts.ADMIN_USERS_MASS_BONUS_CONFIRM_MASSOVOGO_NACHI.format()+
+        texts.ADMIN_USERS_MASS_BONUS_AUDIENCE.format(aud_label=aud_label)+
+        texts.ADMIN_USERS_MASS_BONUS_RECIPIENTS_CHEL.format(user_count=user_count)+
+        texts.ADMIN_USERS_MASS_BONUS_BONUS_KAZHDOMU.format(amount=amount)+
+        texts.ADMIN_USERS_MASS_BONUS_OBSHCHIY_BYUDZHET_BONUSOV.format(total_budget=total_budget)+
+        texts.ADMIN_USERS_MASS_BONUS_REASON.format(safe_reason=safe(reason))+
+        texts.ADMIN_USERS_MASS_BONUS_VY_UVERENY_CHTO_KHOTITE_ZAPUST.format()
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="🚀 Запустить начисление",
+        text=texts.ADMIN_USERS_MASS_BONUS_ZAPUSTIT_GRANT,
         callback_data="confirm_mass_bonus_apply",
     )
     builder.button(
-        text="❌ Отмена",
+        text=texts.BTN_CANCEL,
         callback_data="admin_mass_bonus",
     )
     builder.adjust(1)
@@ -246,7 +246,7 @@ async def apply_mass_bonus(
         return
 
     if admin_id in _mass_bonus_in_progress:
-        await callback.answer("⚠️ Массовое начисление уже выполняется!", show_alert=True)
+        await callback.answer(texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_UZHE_VYPO, show_alert=True)
         return
 
     _mass_bonus_in_progress.add(admin_id)
@@ -254,16 +254,16 @@ async def apply_mass_bonus(
     data = await state.get_data()
     target_aud = data.get("target_aud", "all")
     amount = data.get("amount", 0)
-    reason = data.get("reason", "Массовый бонус")
+    reason = data.get("reason", texts.ADMIN_MASS_BONUS_DEFAULT_REASON)
 
     await state.clear()
-    await callback.answer("🚀 Массовое начисление запущено в фоне!", show_alert=True)
+    await callback.answer(texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_ZAPUSHCHE, show_alert=True)
 
-    header = format_admin_breadcrumbs("🎁 Массовый бонус", "Результат")
+    header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_REZULTAT)
     try:
         await callback.message.edit_text(
-            f"{header}⏳ <b>Массовое начисление бонусов (по +{amount} ₽) запущено в фоновом режиме!</b>\n\n"
-            f"По завершении операции вам придет уведомление со статистикой.",
+            texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_P.format(header=header, amount=amount)+
+            texts.ADMIN_USERS_MASS_BONUS_PO_ZAVERSHENII_OPERATIONS_VAM_P.format(),
             parse_mode="HTML",
         )
     except Exception:
@@ -359,8 +359,8 @@ async def _run_mass_bonus_background(
                         await global_send_limiter.acquire()
                         await bot.send_message(
                             tg_id,
-                            f"🎁 <b>Вам начислен бонусный баланс: +{amount} ₽!</b>\n"
-                            f"Причина: <i>{safe(reason)}</i>",
+                            texts.ADMIN_USER_BONUS_ACCREDITED_NOTIFICATION.format(amount=amount)+
+                            texts.ADMIN_BONUS_REASON_LINE_FORMAT.format(safe_reason=safe(reason)),
                             parse_mode="HTML",
                         )
                     except TelegramForbiddenError:
@@ -383,23 +383,25 @@ async def _run_mass_bonus_background(
                 "MASS_BONUS_GRANTED",
                 "User",
                 0,
-                f"Granted +{amount} RUB bonus to {success_count} users (batch {batch_id}). Reason: {reason}",
+                texts.ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS.format(
+                    amount=amount, count=success_count, batch_id=batch_id, reason=reason
+                ),
             )
 
         try:
-            header = format_admin_breadcrumbs("🎁 Массовый бонус", "Итоги")
+            header = format_admin_breadcrumbs(texts.BTN_MASS_BONUS, texts.ADMIN_USERS_MASS_BONUS_ITOGI)
             builder = InlineKeyboardBuilder()
-            builder.button(text="🎁 Новый массовый бонус", callback_data="admin_mass_bonus")
-            builder.button(text="🏠 В админ-меню", callback_data="admin_menu")
+            builder.button(text=texts.ADMIN_USERS_MASS_BONUS_NEW_MASS_BONUS, callback_data="admin_mass_bonus")
+            builder.button(text=texts.ADMIN_USERS_MASS_BONUS_V_ADMIN_MENYU, callback_data="admin_menu")
             builder.adjust(1)
 
             await render_hub(
                 bot,
                 admin_id,
-                f"{header}✅ <b>Массовое начисление бонусов завершено!</b>\n\n"
-                f"• Зачислено: <b>{success_count} чел.</b> (+{amount} ₽ каждому)\n"
-                f"• Ошибок: <b>{fail_count}</b>\n"
-                f"• Заблокировали бота: <b>{blocked_count}</b>",
+                texts.ADMIN_USERS_MASS_BONUS_MASSOVOE_GRANT_BONUSOV_Z.format(header=header)+
+                texts.ADMIN_USERS_MASS_BONUS_ZACHISLENO_CHEL_KAZHDOMU.format(success_count=success_count, amount=amount)+
+                texts.ADMIN_USERS_MASS_BONUS_OSHIBOK.format(fail_count=fail_count)+
+                texts.ADMIN_USERS_MASS_BONUS_ZABLOKIROVALI_BOTA.format(blocked_count=blocked_count),
                 reply_markup=builder.as_markup(),
                 parse_mode="HTML",
             )

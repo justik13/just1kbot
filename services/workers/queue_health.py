@@ -9,14 +9,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from aiogram import Bot
-
-from bot import texts
 from config.settings import get_settings
 from database.connection import session_scope
 from services.payment_queue_health import (
     QueueSnapshot,
     get_payment_queue_health_snapshot,
 )
+from bot import texts
 
 logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SECONDS = 60.0
@@ -194,10 +193,8 @@ class QueueHealthMonitor:
             logger.warning("Queue health alert has no configured recipients")
             return False
 
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-        builder = InlineKeyboardBuilder()
-        builder.button(text="✖ Скрыть", callback_data="dismiss_notification")
-        reply_markup = builder.as_markup()
+        from bot.keyboards.notifications import get_dismiss_alert_keyboard
+        reply_markup = get_dismiss_alert_keyboard()
 
         async def send_one(admin_id: int) -> bool:
             try:
@@ -219,40 +216,35 @@ class QueueHealthMonitor:
     def _unhealthy_message(queue: QueueSnapshot) -> str:
         problems = []
         if queue.dead:
-            problems.append(texts.QUEUE_HEALTH_PROBLEM_DEAD.format(count=queue.dead, age=queue.oldest_dead_age_seconds))
+            problems.append(texts.QUEUE_HEALTH_DEAD_PROBLEM.format(count=queue.dead, oldest_age=queue.oldest_dead_age_seconds))
         if queue.overdue:
-            problems.append(texts.QUEUE_HEALTH_PROBLEM_OVERDUE.format(count=queue.overdue, age=queue.oldest_due_age_seconds))
+            problems.append(texts.QUEUE_HEALTH_OVERDUE_PROBLEM.format(count=queue.overdue, oldest_age=queue.oldest_due_age_seconds))
         if queue.stale_processing:
-            problems.append(
-                texts.QUEUE_HEALTH_PROBLEM_STALE.format(
-                count=queue.stale_processing,
-                age=queue.oldest_stale_age_seconds,
-            )
-            )
+            problems.append(texts.QUEUE_HEALTH_STALE_PROBLEM.format(count=queue.stale_processing, oldest_age=queue.oldest_stale_age_seconds))
         examples = []
         for item in queue.examples:
             payment = texts.QUEUE_HEALTH_PAYMENT_FRAGMENT.format(payment_id=item.payment_id) if item.payment_id is not None else ""
             code = texts.QUEUE_HEALTH_CODE_FRAGMENT.format(code=html.escape(item.last_error_code)) if item.last_error_code else ""
-            examples.append(
-                texts.QUEUE_HEALTH_EXAMPLE.format(
-                    operation_id=item.operation_id,
-                    payment=payment,
-                    operation_type=html.escape(item.operation_type),
-                    status=item.status,
-                    attempts=item.attempts,
-                    max_attempts=item.max_attempts,
-                    age=item.age_seconds,
-                    code=code,
-                )
-            )
+            examples.append(texts.QUEUE_HEALTH_EXAMPLE.format(
+                operation_id=item.operation_id,
+                payment=payment,
+                operation_type=html.escape(item.operation_type),
+                status=item.status,
+                attempts=item.attempts,
+                max_attempts=item.max_attempts,
+                age=item.age_seconds,
+                code=code
+            ))
         suffix = "\n" + "\n".join(examples) if examples else ""
-        return (
-            texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L230_1.format(value_0=queue.name, value_1=', '.join(problems), value_2=suffix)
+        return texts.ALERT_QUEUE_UNHEALTHY.format(
+            queue_name=queue.name,
+            problems=', '.join(problems),
+            suffix=suffix
         )
 
     @staticmethod
     def _recovery_message(queue: QueueSnapshot) -> str:
-        return texts.RUNTIME_SERVICES_WORKERS_QUEUE_HEALTH_L237_1.format(value_0=queue.name)
+        return texts.ALERT_QUEUE_RECOVERED.format(queue_name=queue.name)
 
     async def close(self) -> None:
         tasks = list(self.alert_tasks)

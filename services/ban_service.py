@@ -1,9 +1,10 @@
+from enum import StrEnum
 import logging
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.middlewares.user_context import invalidate_user_cache
+from services.user_cache import invalidate_user_cache
 from database.models import Payment, User
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
@@ -15,6 +16,14 @@ from services.profile_deletion_service import ProfileDeletionService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger(__name__)
+
+
+class BanStatus(StrEnum):
+    USER_NOT_FOUND = "USER_NOT_FOUND"
+    ALREADY_BANNED = "ALREADY_BANNED"
+    BANNED = "BANNED"
+    ALREADY_UNBANNED = "ALREADY_UNBANNED"
+    UNBANNED = "UNBANNED"
 
 
 class BanService:
@@ -37,9 +46,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, "Пользователь не найден"
+            return False, BanStatus.USER_NOT_FOUND
         if user.is_banned:
-            return True, "уже забанен"
+            return True, BanStatus.ALREADY_BANNED
         return await BanService._ban_user(
             session=session,
             admin_id=admin_id,
@@ -55,9 +64,9 @@ class BanService:
     ) -> tuple:
         user = await get_user_by_telegram_id(session, telegram_id)
         if not user:
-            return False, "Пользователь не найден"
+            return False, BanStatus.USER_NOT_FOUND
         if not user.is_banned:
-            return True, "уже разбанен"
+            return True, BanStatus.ALREADY_UNBANNED
         return await BanService._unban_user(
             session=session,
             admin_id=admin_id,
@@ -74,7 +83,7 @@ class BanService:
         user = await get_user_by_telegram_id(session, telegram_id)
 
         if not user:
-            return False, "Пользователь не найден"
+            return False, BanStatus.USER_NOT_FOUND
 
         new_status = not user.is_banned
 
@@ -127,7 +136,7 @@ class BanService:
             .with_for_update()
         )
         if locked_user is None or locked_user.is_deleted:
-            return False, "Пользователь не найден"
+            return False, BanStatus.USER_NOT_FOUND
 
         payments_closed = 0
         reconciliations_queued = 0
@@ -185,8 +194,8 @@ class BanService:
         invalidate_user_cache(telegram_id)
 
         logger.info(
-            "User %s banned by admin %s. "
-            "Deleted profiles: %s, closed top-ups: %s, "
+            "User %s banned by admin %s. "+
+            "Deleted profiles: %s, closed top-ups: %s, "+
             "queued reconciliations: %s",
             telegram_id,
             admin_id,
@@ -195,7 +204,7 @@ class BanService:
             reconciliations_queued,
         )
 
-        return True, "забанен"
+        return True, BanStatus.BANNED
 
     @staticmethod
     async def _unban_user(
@@ -226,4 +235,4 @@ class BanService:
             admin_id,
         )
 
-        return True, "разбанен"
+        return True, BanStatus.UNBANNED

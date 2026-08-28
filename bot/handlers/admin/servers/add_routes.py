@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot import texts
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
+from config.constants import AMNEZIA_PROTOCOL
 from database.repositories.servers_repo import (
     create_server,
     get_server_by_api_url,
@@ -111,7 +112,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L114_1,
+                texts.ADMIN_SERVER_FLAG_TOO_LONG,
                 get_back_button("admin_servers"),
             )
             return
@@ -154,7 +155,7 @@ async def process_add_server(
             await render_hub(
                 message.bot,
                 message.chat.id,
-                texts.UI_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L157_1,
+                texts.ADMIN_SERVER_URL_FORBIDDEN,
                 get_back_button("admin_servers"),
                 parse_mode="HTML",
             )
@@ -248,13 +249,13 @@ async def process_add_server(
 
         protocols = server_info.protocols
 
-        if "amneziawg2" not in protocols:
+        if AMNEZIA_PROTOCOL not in protocols:
             await render_hub(
                 message.bot,
                 message.chat.id,
                 texts.ERROR_PROTOCOL_NOT_SUPPORTED.format(
                     protocols=safe(
-                        ", ".join(protocols) if protocols else texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_ADD_ROUTES_L254_1
+                        ", ".join(protocols) if protocols else texts.LABEL_UNKNOWN_LOWER
                     ),
                 ),
                 get_back_button("admin_servers"),
@@ -306,7 +307,7 @@ async def process_add_server(
             country_flag=all_data["country_flag"],
             api_url=all_data["api_url"],
             api_key=api_key,
-            protocol="amneziawg2",
+            protocol=AMNEZIA_PROTOCOL,
             max_clients=api_max_peers,
         )
 
@@ -325,7 +326,7 @@ async def process_add_server(
             texts.ADMIN_SERVER_ADDED.format(
                 flag=all_data["country_flag"],
                 name=safe(api_server_name),
-                protocol="amneziawg2",
+                protocol=AMNEZIA_PROTOCOL,
                 max_clients=api_max_peers,
                 api_url=safe(all_data["api_url"]),
             ),

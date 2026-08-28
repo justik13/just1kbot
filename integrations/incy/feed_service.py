@@ -5,6 +5,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import AMNEZIA_PROTOCOL
 from config.settings import get_settings
 from database.models import User, VPNProfile
 from database.repositories.profiles_repo import get_user_profiles
@@ -14,9 +15,9 @@ from utils.vpn_parser import build_conf_file
 
 logger = logging.getLogger(__name__)
 
-# В текущей реализации проекта поддерживается только AmneziaWG 2.0 ("amneziawg2"); стандартный WireGuard не используется.
+# В текущей реализации проекта поддерживается только AmneziaWG 2.0 (AMNEZIA_PROTOCOL); стандартный WireGuard не используется.
 # Планы развития (Roadmap): поддержка AWG 3.0 ("amneziawg3") и стека Xray (VLESS-Reality и др.).
-SUPPORTED_SUBSCRIPTION_PROTOCOLS = {"amneziawg2"}
+SUPPORTED_SUBSCRIPTION_PROTOCOLS = {AMNEZIA_PROTOCOL}
 
 
 class SubscriptionFeedService:

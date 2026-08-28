@@ -23,11 +23,11 @@ logger = logging.getLogger(__name__)
 SERVERS_PER_PAGE = 10
 
 URL_REGEX = re.compile(
-    r"^https?://"
-    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"
-    r"localhost|"
-    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"
-    r"(?::\d+)?"
+    r"^https?://"+
+    r"(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|"+
+    r"localhost|"+
+    r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"+
+    r"(?::\d+)?"+
     r"(?:/?|[/?]\S+)$",
     re.IGNORECASE,
 )
@@ -46,17 +46,17 @@ async def _build_servers_list_text_and_kb(
     servers, page: int, total_pages: int, total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L48_1.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_SERVERS_COMMON.format(v0=page, v1=total_pages, v2=total)
     )
     builder = InlineKeyboardBuilder()
     if not servers:
-        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L53_1
+        rendered += texts.ADMIN_SERVERS_EMPTY
     else:
         for server in servers:
-            flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L56_1
-            status = texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L57_1 if server.is_active else texts.STATUS_INACTIVE_ICON
+            flag = server.country_flag or texts.EMOJI_GLOBE
+            status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L59_1.format(value_0=status, value_1=flag, value_2=server.name, value_3=server.protocol)
+                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=server.protocol)
             )
             builder.button(
                 text=button_text,
@@ -64,16 +64,16 @@ async def _build_servers_list_text_and_kb(
             )
     if page > 1:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L67_1,
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
             callback_data=f"admin_servers_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L72_1,
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_servers_page:{page + 1}",
         )
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L75_1, callback_data="admin_server_add")
-    builder.button(text=texts.UI_BOT_HANDLERS_ADMIN_SERVERS_COMMON_L76_1, callback_data="admin_menu")
+    builder.button(text=texts.ADMIN_BTN_ADD_SERVER, callback_data="admin_server_add")
+    builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
     builder.adjust(1)
     return rendered, builder
 
@@ -102,24 +102,24 @@ async def _show_server_card(
     callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
 ):
     from utils.datetime_helpers import format_datetime_msk
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
 
     flag = server.country_flag or "🌐"
 
     if server.is_active:
-        status_line = "🟢 <b>Активен</b>"
+        status_line = texts.COMMON_AKTIVEN
         extra_status_info = ""
     elif server.disabled_reason == "AUTO_UNAVAILABLE":
-        status_line = "🔴 <b>Автоматически отключён</b>"
+        status_line = texts.COMMON_AVTOMATICHESKI_OTKLYUCHEN
         disabled_at_str = format_datetime_msk(server.disabled_at) if server.disabled_at else "—"
         last_check_str = format_datetime_msk(server.last_successful_check) if server.last_successful_check else "—"
         extra_status_info = (
-            f"• Причина: <b>API недоступен / нестабильное соединение</b>\n"
-            f"• Отключён: <code>{disabled_at_str}</code>\n"
-            f"• Последний отклик: <code>{last_check_str}</code>\n"
+            texts.COMMON_REASON_API_NEDOSTUPEN_NESTAB.format()+
+            texts.COMMON_OTKLYUCHEN.format(disabled_at_str=disabled_at_str)+
+            texts.COMMON_POSLEDNIY_OTKLIK.format(last_check_str=last_check_str)
         )
     else:
-        status_line = "🔴 <b>Отключён вручную</b>"
+        status_line = texts.COMMON_OTKLYUCHEN_VRUCHNUYU
         extra_status_info = ""
 
     from services.slots_cache import get_cached_peer_count
@@ -129,25 +129,31 @@ async def _show_server_card(
     cached_used = get_cached_peer_count(server.id)
     used_clients = cached_used if cached_used is not None else db_used
     max_clients = server.max_clients or 240
-    header = format_admin_breadcrumbs("🖥 Серверы", f"{flag} {server.name}")
+    header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
     if cached_used is not None and cached_used != db_used:
-        slots_text = f"<b>{used_clients} / {max_clients}</b> <i>(в БД: {db_used})</i>"
+        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
+            used_clients=used_clients, max_clients=max_clients
+        ) + texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
     else:
-        slots_text = f"<b>{used_clients} / {max_clients}</b>"
+        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
+            used_clients=used_clients, max_clients=max_clients
+        )
 
     rendered = (
         f"{header}"
-        f"🖥 <b>Карточка VPN-сервера {flag} {safe(server.name)}</b> (ID: {server.id})\n\n"
-        f"• Статус в боте: {status_line}\n"
-        f"{extra_status_info}"
-        f"• Протокол: <code>{safe(server.protocol)}</code>\n"
-        f"• Заполненность слотов: {slots_text}\n"
-        f"• API URL: <code>{safe(server.api_url)}</code>\n"
+        + texts.COMMON_KARTOCHKA_VPN_SERVER_ID.format(
+            flag=flag, safe_server_name=safe(server.name), server_id=server.id
+        )
+        + texts.COMMON_STATUS_V_BOTE.format(status_line=status_line)
+        + f"{extra_status_info}"
+        + texts.COMMON_PROTOKOL.format(safe_server_protocol=safe(server.protocol))
+        + texts.COMMON_ZAPOLNENNOST_SLOTOV.format(slots_text=slots_text)
+        + texts.ADMIN_SERVER_API_URL.format(api_url=safe(server.api_url))
     )
 
     if ping_result:
-        rendered += f"\n⚡ <b>Результат проверки связи:</b>\n{ping_result}\n"
+        rendered += texts.COMMON_REZULTAT_PROVERKI_SVYAZI.format(ping_result=ping_result)
 
     try:
         await callback.message.edit_text(

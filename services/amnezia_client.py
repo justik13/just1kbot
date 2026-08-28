@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from pydantic import BaseModel, Field
 
-from bot.constants import (
+from config.constants import (
     AMNEZIA_PROTOCOL,
     API_CONCURRENCY_LIMIT,
     API_RETRY_COUNT,

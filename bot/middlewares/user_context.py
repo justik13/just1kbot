@@ -6,35 +6,32 @@ from typing import Any
 
 from aiogram import BaseMiddleware
 from aiogram.types import CallbackQuery, Message
-from cachetools import TTLCache
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import USER_CONTEXT_CACHE_MAX_SIZE, USER_CONTEXT_CACHE_TTL
 from database.models import User
 from database.repositories.users_repo import (
     create_user,
     get_user_by_telegram_id_any,
 )
+from services.user_cache import (
+    clear_user_cache,
+    get_cached_user_id,
+    invalidate_user_cache,
+    set_cached_user_id,
+)
 
 logger = logging.getLogger(__name__)
 
-_user_cache: TTLCache[int, int | None] = TTLCache(
-    maxsize=USER_CONTEXT_CACHE_MAX_SIZE,
-    ttl=USER_CONTEXT_CACHE_TTL,
-)
+__all__ = [
+    "UserContextMiddleware",
+    "clear_user_cache",
+    "get_cached_user_id",
+    "invalidate_user_cache",
+    "set_cached_user_id",
+]
 
-_SENTINEL = object()
-
-
-def invalidate_user_cache(telegram_id: int) -> None:
-    _user_cache.pop(telegram_id, None)
-
-
-def clear_user_cache() -> None:
-    """Полная очистка кэша пользователей."""
-    _user_cache.clear()
 
 
 class UserContextMiddleware(BaseMiddleware):
@@ -59,9 +56,9 @@ class UserContextMiddleware(BaseMiddleware):
             return await handler(event, data)
 
         user: User | None = None
-        cached_user_id = _user_cache.get(telegram_id, _SENTINEL)
+        is_cached, cached_user_id = get_cached_user_id(telegram_id)
 
-        if cached_user_id is not _SENTINEL:
+        if is_cached:
             if cached_user_id is None:
                 data["db_user"] = None
                 return await handler(event, data)
@@ -72,7 +69,7 @@ class UserContextMiddleware(BaseMiddleware):
             result = await session.execute(stmt)
             user = result.scalar_one_or_none()
             if user is None:
-                _user_cache.pop(telegram_id, None)
+                invalidate_user_cache(telegram_id)
 
         if user is None:
             stmt = select(User).where(
@@ -89,10 +86,10 @@ class UserContextMiddleware(BaseMiddleware):
                 )
                 if existing_any is not None and existing_any.is_deleted:
                     user = None
-                    _user_cache[telegram_id] = None
+                    set_cached_user_id(telegram_id, None)
                 elif existing_any is not None and not existing_any.is_deleted:
                     user = existing_any
-                    _user_cache[telegram_id] = user.id
+                    set_cached_user_id(telegram_id, user.id)
                 else:
                     try:
                         async with session.begin_nested():
@@ -103,7 +100,7 @@ class UserContextMiddleware(BaseMiddleware):
                                 first_name=event.from_user.first_name,
                                 referred_by=None,
                             )
-                        _user_cache[telegram_id] = user.id
+                        set_cached_user_id(telegram_id, user.id)
                         logger.info(
                             "Auto-registered user %s on %s",
                             telegram_id,
@@ -116,12 +113,12 @@ class UserContextMiddleware(BaseMiddleware):
                         )
                         if existing_any is not None and not existing_any.is_deleted:
                             user = existing_any
-                            _user_cache[telegram_id] = user.id
+                            set_cached_user_id(telegram_id, user.id)
                         else:
                             user = None
-                            _user_cache[telegram_id] = None
+                            set_cached_user_id(telegram_id, None)
             else:
-                _user_cache[telegram_id] = user.id
+                set_cached_user_id(telegram_id, user.id)
 
         data["db_user"] = user
         return await handler(event, data)

@@ -1,13 +1,12 @@
 import logging
 
+from bot import texts
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, CopyTextButton
+from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot import texts
-from bot.keyboards import get_back_button
 from config.settings import get_settings
 from database.models import User
 from integrations.incy.token_service import SubscriptionTokenService
@@ -18,38 +17,32 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 
+def _build_back_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text=texts.BTN_BACK, callback_data="back_to_connections")
+    return builder.as_markup()
+
+
 def _build_incy_text(sub_url: str) -> str:
-    return (
-        "🔗 <b>Подключение через приложение INCY [🧪 Экспериментально]</b>\n\n"
-        "Все ваши серверы и устройства в одной самообновляемой подписке для мобильных устройств (<b>iOS / Android</b>).\n\n"
-        "<b>📖 Как настроить на телефоне (iOS / Android):</b>\n"
-        "1. Установите приложение <b>INCY</b> (App Store / Google Play).\n"
-        "2. Нажмите <b>«📱 Открыть в INCY»</b> для мгновенного добавления.\n"
-        "3. Если приложение не открылось, нажмите <b>«📋 Скопировать ссылку»</b> — INCY автоматически предложит импортировать её при открытии.\n"
-        "4. Включите подключение в приложении.\n\n"
-        "<b>Ваша персональная ссылка:</b>\n"
-        f"<code>{sub_url}</code>\n\n"
-        "<i>💻 Для компьютеров: для Windows 10/11 (x64) и macOS 14+ используйте <b>AmneziaVPN</b> (ключ или файл), для других версий (Windows 7/8/ARM, macOS 12/13) — <b>AmneziaWG</b> с файлом <code>.conf</code>.</i>\n\n"
-        "<i>💡 При создании или удалении устройств в боте список в приложении обновится автоматически.</i>"
-    )
+    return texts.CONNECTION_INCY_SUBSCRIPTION_INFO.format(sub_url=sub_url)
 
 
-def _build_incy_keyboard(sub_url: str, open_url: str):
+def _build_incy_keyboard(sub_url: str, open_url: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="📱 Открыть в INCY",
+        text=texts.BTN_INCY_OPEN,
         url=open_url,
     )
     builder.button(
-        text="📋 Скопировать ссылку",
+        text=texts.BTN_INCY_COPY_LINK,
         copy_text=CopyTextButton(text=sub_url),
     )
     builder.button(
-        text="🔄 Сбросить ссылку",
+        text=texts.BTN_INCY_ROTATE_LINK,
         callback_data="rotate_incy_token",
     )
     builder.button(
-        text="⬅️ Назад к устройствам",
+        text=texts.BTN_INCY_BACK_TO_DEVICES,
         callback_data="back_to_connections",
     )
     builder.adjust(1)
@@ -71,7 +64,7 @@ async def show_incy_subscription(
             callback.bot,
             callback.message.chat.id,
             texts.ERROR_USER_NOT_FOUND,
-            get_back_button("back_to_connections"),
+            _build_back_keyboard(),
         )
         return
 
@@ -136,8 +129,8 @@ async def rotate_incy_subscription(
             _build_incy_text(sub_url),
             _build_incy_keyboard(sub_url, open_url),
         )
-        await callback.answer("✅ Ссылка успешно сброшена! Старая ссылка аннулирована.", show_alert=True)
+        await callback.answer(texts.ALERT_INCY_ROTATE_SUCCESS, show_alert=True)
     except Exception as e:
         logger.exception("Failed to rotate subscription token for user %s: %s", db_user.id, type(e).__name__)
-        await callback.answer("Ошибка при сбросе ссылки. Попробуйте позже.", show_alert=True)
+        await callback.answer(texts.ALERT_INCY_ROTATE_ERROR, show_alert=True)
         return

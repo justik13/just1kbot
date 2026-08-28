@@ -1,6 +1,5 @@
 from utils.datetime_helpers import (
     MSK_TZ,
-    days_left_msk,
     format_datetime_msk,
     is_expired,
     now_msk,
@@ -9,11 +8,8 @@ from utils.datetime_helpers import (
 )
 from utils.encryption import EncryptedString
 from utils.formatters import (
-    format_connection_device_card,
     format_datetime,
-    format_days_left,
     format_traffic,
-    format_user_card_text,
 )
 from utils.vpn_parser import (
     build_conf_file,
@@ -25,14 +21,10 @@ __all__ = [
     "MSK_TZ",
     "EncryptedString",
     "build_conf_file",
-    "days_left_msk",
     "decode_vpn_uri_to_json",
-    "format_connection_device_card",
     "format_datetime",
     "format_datetime_msk",
-    "format_days_left",
     "format_traffic",
-    "format_user_card_text",
     "is_expired",
     "is_valid_vpn_uri",
     "now_msk",

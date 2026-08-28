@@ -13,7 +13,7 @@ from database.repositories.users_repo import get_user_by_telegram_id
 from utils.admin import is_admin
 from utils.callbacks import parse_callback_id
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name
+from bot.formatters import get_tariff_display_name
 
 from .common import (
     _format_time_left,
@@ -40,7 +40,7 @@ async def admin_subscription_menu(
 
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L43_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -62,7 +62,7 @@ async def admin_subscription_menu(
         user.id,
     )
 
-    tariff_name = texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L65_1
+    tariff_name = texts.PLACEHOLDER_DASH
     device_limit = user.device_limit or 0
 
     if user.current_tariff_id:
@@ -75,7 +75,7 @@ async def admin_subscription_menu(
             device_limit = tariff.device_limit
 
             tariff_name = (
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_SUBSCRIPTION_MENU_ROUTES_L78_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit)
+                texts.ADMIN_SUB_MENU_DEVICE_COUNT_FORMAT.format(v0=get_tariff_display_name(device_limit), v1=device_limit)
             )
 
     if has_active:

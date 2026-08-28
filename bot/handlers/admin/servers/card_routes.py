@@ -40,7 +40,7 @@ async def show_server_card(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L43_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -77,7 +77,7 @@ async def toggle_server_confirm(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L80_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -96,7 +96,7 @@ async def toggle_server_confirm(
 
     new_status = not server.is_active
 
-    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L99_1
+    flag = server.country_flag or texts.EMOJI_GLOBE
 
     if new_status:
         text = texts.ADMIN_SERVER_TOGGLE_ENABLE_CONFIRM.format(
@@ -139,7 +139,7 @@ async def toggle_server_apply(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_CARD_ROUTES_L142_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -158,11 +158,9 @@ async def toggle_server_apply(
 
     new_status = not server.is_active
 
+    from config.constants import ServerHealthState
     from services.amnezia_client import cleanup_server_circuit_breakers
-    from services.workers.node_monitor import (
-        ServerHealthState,
-        reset_server_monitor_state,
-    )
+    from services.workers.node_monitor import reset_server_monitor_state
     from utils.datetime_helpers import now_utc
 
     if new_status:
@@ -236,7 +234,7 @@ async def ping_server(
 
     server_id = parse_callback_id(callback.data, 1)
     if server_id is None:
-        await callback.answer("Ошибка: ID сервера не указан", show_alert=True)
+        await callback.answer(texts.ERROR_SERVER_ID_REQUIRED, show_alert=True)
         return
 
     server = await get_server_by_id(session, server_id)
@@ -244,7 +242,7 @@ async def ping_server(
         await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
         return
 
-    await callback.answer("⚡ Проверка связи...", show_alert=False)
+    await callback.answer(texts.ADMIN_SERVER_PING_CHECKING, show_alert=False)
 
     import time
 
@@ -256,11 +254,11 @@ async def ping_server(
         is_healthy = await client.healthcheck()
         duration_ms = int((time.monotonic() - start_t) * 1000)
         if is_healthy:
-            ping_res = f"🟢 <b>API сервер доступен</b> (Latency: {duration_ms} ms)"
+            ping_res = texts.ADMIN_SERVER_PING_ONLINE.format(latency_ms=duration_ms)
         else:
-            ping_res = "🔴 <b>API сервер НЕ отвечает на /healthz!</b>"
+            ping_res = texts.ADMIN_SERVER_PING_NO_HEALTHZ
     except Exception as exc:
-        ping_res = f"🔴 <b>API недоступен / ошибка соединения</b> ({type(exc).__name__})"
+        ping_res = texts.ADMIN_SERVER_PING_ERROR.format(error=type(exc).__name__)
 
     await _show_server_card(callback, session, server, ping_result=ping_res)
 
@@ -270,7 +268,7 @@ async def dismiss_admin_alert(callback: CallbackQuery):
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
-    await callback.answer("Удалено", show_alert=False)
+    await callback.answer(texts.ADMIN_SERVER_DELETED_BADGE, show_alert=False)
     try:
         await callback.message.delete()
     except Exception as e:

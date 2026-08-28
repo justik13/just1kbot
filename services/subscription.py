@@ -5,11 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.constants import (
+from config.constants import (
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
 )
-from bot.middlewares.user_context import invalidate_user_cache
 from database.models import User
 from database.repositories.profiles_repo import (
     get_user_profiles,
@@ -22,6 +21,7 @@ from database.repositories.users_repo import (
     get_user_by_telegram_id_any,
 )
 from services.api_operations_queue import enqueue_api_operation
+from services.user_cache import invalidate_user_cache
 from utils.datetime_helpers import (
     is_expired,
     is_permanent_subscription,

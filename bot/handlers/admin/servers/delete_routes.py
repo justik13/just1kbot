@@ -68,7 +68,7 @@ async def request_delete_server(
 
     if server_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L68_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -92,7 +92,7 @@ async def request_delete_server(
 
     profiles_count = len(result.all())
 
-    flag = server.country_flag or texts.RUNTIME_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L92_1
+    flag = server.country_flag or texts.EMOJI_GLOBE
 
     await state.update_data(delete_server_id=server_id)
     await state.set_state(AdminStates.confirming_server_delete)
@@ -125,7 +125,7 @@ async def confirm_delete_server(
 
     if current_state != AdminStates.confirming_server_delete:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L125_1,
+            texts.ADMIN_SERVER_CONFIRMATION_EXPIRED,
             show_alert=True,
         )
         return
@@ -136,7 +136,7 @@ async def confirm_delete_server(
 
     if server_id is None or server_id != expected_server_id:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L134_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         await state.clear()
@@ -177,12 +177,12 @@ async def confirm_delete_server(
     if _has_unfinished_create_cleanup(profiles, operations) or processing_update:
         await session.rollback()
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L177_1,
+            texts.ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT,
             show_alert=True,
         )
         try:
             await callback.message.edit_text(
-                "⚠️ <b>Удаление сервера отменено:</b>\n\nНа сервере присутствуют незавершенные операции создания или фоновые обновления. Дождитесь их завершения.",
+                texts.ADMIN_SERVER_DELETE_BLOCKED_PENDING,
                 reply_markup=get_back_button(f"admin_server_card:{server.id}"),
                 parse_mode="HTML",
             )
@@ -230,11 +230,11 @@ async def confirm_delete_server(
         "DELETE_SERVER",
         "Server",
         server_id,
-        f"{server_name}: {deleted_profiles} profiles deleted",
+        texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=deleted_profiles),
     )
 
     await callback.answer(
-        texts.UI_BOT_HANDLERS_ADMIN_SERVERS_DELETE_ROUTES_L216_1.format(value_0=server_name, value_1=deleted_profiles),
+        texts.ADMIN_SERVER_DELETE_SUCCESS_NOTICE.format(v0=server_name, v1=deleted_profiles),
         show_alert=True,
     )
 

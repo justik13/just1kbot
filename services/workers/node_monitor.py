@@ -9,8 +9,16 @@ import time
 from datetime import datetime, timezone
 
 from aiogram import Bot
-from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.keyboards.notifications import get_node_monitor_alert_keyboard
+from bot.texts.runtime.alerts import (
+    ALERT_SERVER_AUTO_DISABLED,
+    ALERT_SERVER_AUTO_DISABLED_RECOVERED,
+    ALERT_SERVER_DISK_CRITICAL,
+    ALERT_SERVER_PROBLEM,
+    ALERT_SERVER_RESTORED,
+)
+from config.constants import ServerHealthState
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import Server
@@ -24,6 +32,8 @@ from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
 from utils.telegram import safe
 
+_build_alert_keyboard = get_node_monitor_alert_keyboard
+
 logger = logging.getLogger(__name__)
 
 CHECK_INTERVAL_SECONDS = 15.0  # Частота тиков фонового воркера
@@ -32,14 +42,6 @@ PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения з
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
-
-
-class ServerHealthState:
-    ONLINE = "ONLINE"
-    WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
-    PROBLEM = "PROBLEM"
-    AUTO_DISABLED = "AUTO_DISABLED"
-    MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
 class ServerMonitorState:
@@ -116,29 +118,6 @@ def reset_server_monitor_state(server_id: int, new_state: str = ServerHealthStat
 
 def clear_monitor_states():
     _monitor_states.clear()
-
-
-def _build_alert_keyboard(server_id: int, include_enable_button: bool = False) -> InlineKeyboardBuilder:
-    kb = InlineKeyboardBuilder()
-    if include_enable_button:
-        kb.button(
-            text="🔘 Включить сервер",
-            callback_data=f"admin_server_toggle_apply:{server_id}",
-        )
-    kb.button(
-        text="⚙️ К серверу",
-        callback_data=f"admin_server_card:{server_id}",
-    )
-    kb.button(
-        text="📋 Список серверов",
-        callback_data="admin_servers",
-    )
-    kb.button(
-        text="🗑 Прочитано",
-        callback_data=f"admin_dismiss_alert:{server_id}",
-    )
-    kb.adjust(1)
-    return kb
 
 
 async def _send_admin_alert_msg(bot: Bot, text: str, reply_markup=None) -> bool:
@@ -235,14 +214,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.problem_started_at = None
 
                 if st.last_alert_sent_state in (ServerHealthState.PROBLEM, ServerHealthState.AUTO_DISABLED):
-                    kb = _build_alert_keyboard(server.id).as_markup()
                     alerts_to_send.append({
-                        "text": (
-                            f"✅ <b>VPN-сервер восстановлен</b>\n\n"
-                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                            f"API снова стабильно доступен."
+                        "text": ALERT_SERVER_RESTORED.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
                         ),
-                        "reply_markup": kb,
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -262,15 +239,13 @@ async def check_node_resources_and_alerts(bot: Bot):
                                     should_alert = True
 
                                 if should_alert:
-                                    kb = _build_alert_keyboard(server.id).as_markup()
                                     alerts_to_send.append({
-                                        "text": (
-                                            f"⚠️ <b>ВНИМАНИЕ: Диск VPN-ноды забит > 85%!</b>\n\n"
-                                            f"Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                                            f"Использование диска: <b>{disk_percent:.1f}%</b>\n"
-                                            f"Рекомендуется очистить логи или расширить диск."
+                                        "text": ALERT_SERVER_DISK_CRITICAL.format(
+                                            server_name=safe(server.name),
+                                            server_id=server.id,
+                                            disk_percent=disk_percent,
                                         ),
-                                        "reply_markup": kb,
+                                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                                     })
                                     st.disk_alert_last_sent = now_m
                             elif disk_percent <= 80.0:
@@ -287,14 +262,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                     st.problem_started_at = None
                     st.next_check_at = None
 
-                    kb = _build_alert_keyboard(server.id).as_markup()
                     alerts_to_send.append({
-                        "text": (
-                            f"✅ <b>VPN-сервер восстановлен</b>\n\n"
-                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                            f"API снова стабильно доступен."
+                        "text": ALERT_SERVER_RESTORED.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
                         ),
-                        "reply_markup": kb,
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
@@ -304,15 +277,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
 
                 if st.consecutive_successes >= REQUIRED_STABLE_SUCCESSES and not st.recovery_notice_sent:
-                    kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
                     alerts_to_send.append({
-                        "text": (
-                            f"✅ <b>Сервер восстановлен</b>\n\n"
-                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                            f"API стабильно отвечает.\n\n"
-                            f"Сервер остаётся отключённым. При необходимости включите его вручную."
+                        "text": ALERT_SERVER_AUTO_DISABLED_RECOVERED.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
                         ),
-                        "reply_markup": kb,
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
                         "is_recovery_notice": True,
                     })
 
@@ -333,17 +303,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                 st.problem_started_at = now_m
                 st.next_check_at = None
 
-                kb = _build_alert_keyboard(server.id).as_markup()
                 alerts_to_send.append({
-                    "text": (
-                        f"⚠️ <b>Проблема с VPN-сервером</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"API не отвечает после повторной проверки.\n\n"
-                        f"Возможна недоступность или нестабильное соединение.\n\n"
-                        f"🔍 <b>Проверьте сервер.</b>\n"
-                        f"Автоматический мониторинг продолжается."
+                    "text": ALERT_SERVER_PROBLEM.format(
+                        server_name=safe(server.name),
+                        server_id=server.id,
                     ),
-                    "reply_markup": kb,
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
 
@@ -357,18 +322,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                 if elapsed_problem_sec >= PROBLEM_OBSERVATION_TIMEOUT:
                     st.health_state = ServerHealthState.AUTO_DISABLED
                     st.next_check_at = now_m + AUTO_DISABLED_CHECK_INTERVAL
-                    kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
                     alerts_to_send.append({
-                        "text": (
-                            f"🔴 <b>Сервер автоматически отключён</b>\n\n"
-                            f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                            f"Сервер не восстановил стабильное соединение в течение 15 минут.\n\n"
-                            f"Причина: API недоступен / соединение нестабильно.\n"
-                            f"Сервер исключён из работы.\n\n"
-                            f"🔕 Повторных уведомлений не будет.\n"
-                            f"Доступность будет проверяться автоматически каждые 15 минут."
+                        "text": ALERT_SERVER_AUTO_DISABLED.format(
+                            server_name=safe(server.name),
+                            server_id=server.id,
                         ),
-                        "reply_markup": kb,
+                        "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
                         "target_alert_state": ServerHealthState.AUTO_DISABLED,
                     })
 
@@ -378,32 +337,21 @@ async def check_node_resources_and_alerts(bot: Bot):
         # Повторная попытка отправки не доставленных алертов
         if not alerts_to_send:
             if st.health_state == ServerHealthState.PROBLEM and st.last_alert_sent_state != ServerHealthState.PROBLEM:
-                kb = _build_alert_keyboard(server.id).as_markup()
                 alerts_to_send.append({
-                    "text": (
-                        f"⚠️ <b>Проблема с VPN-сервером</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"API не отвечает после повторной проверки.\n\n"
-                        f"Возможна недоступность или нестабильное соединение.\n\n"
-                        f"🔍 <b>Проверьте сервер.</b>\n"
-                        f"Автоматический мониторинг продолжается."
+                    "text": ALERT_SERVER_PROBLEM.format(
+                        server_name=safe(server.name),
+                        server_id=server.id,
                     ),
-                    "reply_markup": kb,
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
                     "target_alert_state": ServerHealthState.PROBLEM,
                 })
             elif st.health_state == ServerHealthState.AUTO_DISABLED and st.last_alert_sent_state != ServerHealthState.AUTO_DISABLED:
-                kb = _build_alert_keyboard(server.id, include_enable_button=True).as_markup()
                 alerts_to_send.append({
-                    "text": (
-                        f"🔴 <b>Сервер автоматически отключён</b>\n\n"
-                        f"🌍 Сервер: <b>{safe(server.name)}</b> (ID: {server.id})\n"
-                        f"Сервер не восстановил стабильное соединение в течение 15 минут.\n\n"
-                        f"Причина: API недоступен / соединение нестабильно.\n"
-                        f"Сервер исключён из работы.\n\n"
-                        f"🔕 Повторных уведомлений не будет.\n"
-                        f"Доступность будет проверяться автоматически каждые 15 минут."
+                    "text": ALERT_SERVER_AUTO_DISABLED.format(
+                        server_name=safe(server.name),
+                        server_id=server.id,
                     ),
-                    "reply_markup": kb,
+                    "reply_markup": get_node_monitor_alert_keyboard(server.id, include_enable_button=True).as_markup(),
                     "target_alert_state": ServerHealthState.AUTO_DISABLED,
                 })
 

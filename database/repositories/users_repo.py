@@ -4,6 +4,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from config.constants import PERMANENT_END_DATE, PERMANENT_SUBSCRIPTION_DAYS
 from database.models import Server, Tariff, User, VPNProfile
 from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from utils.datetime_helpers import now_utc
@@ -102,9 +103,7 @@ async def extend_subscription(session: AsyncSession, user: User, days: int) -> U
     else:
         current_end = now
 
-    if days >= 36500:
-        from bot.constants import PERMANENT_END_DATE
-
+    if days >= PERMANENT_SUBSCRIPTION_DAYS:
         new_end = PERMANENT_END_DATE
     else:
         new_end = current_end + timedelta(days=days)

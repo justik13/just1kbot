@@ -20,11 +20,53 @@ from database.repositories.users_repo import (
     get_user_referrals_count,
 )
 from utils.datetime_helpers import is_expired, now_utc
-from utils.formatters import format_days_left, format_user_card_text
+from utils.formatters import format_datetime
+from bot.formatters import format_days_left
 from utils.telegram import render_hub
 from utils.text_limits import truncate_button_text
 
 logger = logging.getLogger(__name__)
+
+
+def format_user_card_text(
+    user,
+    profiles: list,
+    referrals,
+    now,
+    real_balance: int = 0,
+    bonus_balance: int = 0,
+    tariff_info: str = "—",
+    referrer_info: str = "—",
+) -> str:
+    from datetime import timezone
+    from utils.telegram import safe
+
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    has_access = user.subscription_end and user.subscription_end > now
+    referrals_count = len(referrals) if isinstance(referrals, list) else int(referrals or 0)
+
+    status_str = texts.STATUS_ACTIVE_BADGE if has_access else texts.STATUS_INACTIVE_BADGE
+    ban_str = texts.STATUS_BANNED_BADGE if user.is_banned else texts.STATUS_NOT_BANNED_BADGE
+
+    return texts.ADMIN_USER_CARD.format(
+        telegram_id=user.telegram_id,
+        username=safe(user.username),
+        first_name=safe(user.first_name),
+        status=status_str,
+        ban=ban_str,
+        tariff_info=safe(tariff_info),
+        referrer_info=safe(referrer_info),
+        real_balance=real_balance,
+        bonus_balance=bonus_balance,
+        valid_until=format_datetime(user.subscription_end),
+        days_left=format_days_left(user.subscription_end),
+        devices_count=len(profiles),
+        device_limit=user.device_limit or 0,
+        referrals_count=referrals_count,
+        created_at=format_datetime(user.created_at),
+    )
 
 USERS_PER_PAGE = 10
 
@@ -59,7 +101,7 @@ def _is_subscription_active(user: User) -> bool:
 
 def _format_time_left(subscription_end) -> str:
     if not subscription_end:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L55_1
+        return texts.PLACEHOLDER_DASH
 
     from utils.datetime_helpers import is_permanent_subscription
     if is_permanent_subscription(subscription_end):
@@ -69,7 +111,7 @@ def _format_time_left(subscription_end) -> str:
     delta = subscription_end - current_time
 
     if delta.total_seconds() <= 0:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L64_1
+        return texts.STATUS_EXPIRED_LABEL
 
     days = delta.days
     hours = delta.seconds // 3600
@@ -78,11 +120,11 @@ def _format_time_left(subscription_end) -> str:
         return texts.ADMIN_SUB_PERMANENT_LABEL
 
     if days > 0:
-        return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L73_1.format(value_0=days, value_1=hours)
+        return texts.TIME_DAYS_HOURS_FORMAT.format(days=days, hours=hours)
 
     minutes = (delta.seconds % 3600) // 60
 
-    return texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_COMMON_L77_1.format(value_0=hours, value_1=minutes)
+    return texts.TIME_HOURS_MINUTES_FORMAT.format(hours=hours, minutes=minutes)
 
 
 async def _get_active_tariffs(session: AsyncSession) -> list[Tariff]:
@@ -134,49 +176,40 @@ async def _get_user_with_profiles(
 
 
 async def _build_users_list_text_and_kb(
-    users,
+    users: list[User],
     page: int,
     total_pages: int,
     total: int,
     filter_type: str = "all",
     filter_param: str = "none",
 ) -> tuple[str, InlineKeyboardBuilder]:
-    from utils.formatters import format_admin_breadcrumbs
+    from bot.formatters import format_admin_breadcrumbs
 
-    filter_labels = {
-        "all": "Все",
-        "new": "🆕 Новые (7д)",
-        "new_24h": "🆕 Новые (7д)",
-        "new_7d": "🆕 Новые (7д)",
-        "expiring_3d": "⏳ < 3 дней",
-        "active": "⚡ С подпиской",
-        "expired": "🔴 Без подписки",
-        "no_sub": "🔴 Без подписки",
-        "banned": "🚫 Забаненные",
-        "problem": "🚫 Забаненные",
-        "server": f"Сервер #{filter_param}",
-        "tariff": f"Тариф #{filter_param}",
-    }
-    cur_filter_name = filter_labels.get(filter_type, filter_type)
+    raw_label = texts.ADMIN_USER_FILTER_LABELS.get(filter_type, filter_type)
+    if "{filter_param}" in raw_label:
+        cur_filter_name = raw_label.format(filter_param=filter_param)
+    else:
+        cur_filter_name = raw_label
+
     if filter_type == "tariff" and filter_param != "none" and str(filter_param).isdigit():
-        from utils.tariff_names import get_tariff_group_name
+        from bot.formatters import get_tariff_group_name
         cur_filter_name = get_tariff_group_name(int(filter_param))
-    header = format_admin_breadcrumbs("👥 Пользователи", f"Фильтр: {cur_filter_name}")
+    header = format_admin_breadcrumbs(texts.BTN_USERS, texts.COMMON_FILTR.format(f_name=cur_filter_name))
 
     rendered = (
-        f"{header}"
-        f"👥 <b>Управление пользователями</b> (Стр. {page}/{total_pages}, всего: {total})\n\n"
+        f"{header}"+
+        texts.COMMON_MANAGE_POLZOVATELYAMI_STR.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     filters = [
-        ("all", "Все", "none"),
-        ("new_7d", "🆕 Новые (7д)", "none"),
-        ("expiring_3d", "⏳ < 3 дней", "none"),
-        ("active", "⚡ Активные", "none"),
-        ("expired", "🔴 Без подписки", "none"),
-        ("banned", "🚫 Забаненные", "none"),
+        ("all", texts.COMMON_VSE, "none"),
+        ("new_7d", texts.COMMON_NOVYE_7D, "none"),
+        ("expiring_3d", texts.COMMON_3_DAYS, "none"),
+        ("active", texts.COMMON_AKTIVNYE, "none"),
+        ("expired", texts.COMMON_BEZ_SUBSCRIPTION, "none"),
+        ("banned", texts.COMMON_ZABANENNYE, "none"),
     ]
 
     for f_code, f_name, f_param in filters:
@@ -186,14 +219,14 @@ async def _build_users_list_text_and_kb(
             callback_data=f"admin_users_filter:{f_code}:{f_param}:1",
         )
 
-    server_label = "• 🖥 По VPN серверам •" if filter_type == "server" else "🖥 По VPN серверам"
-    tariff_label = "• 💎 По тарифам •" if filter_type == "tariff" else "💎 По тарифам"
+    server_label = texts.BTN_FILTER_BY_SERVER_ACTIVE if filter_type == "server" else texts.BTN_FILTER_BY_SERVER
+    tariff_label = texts.BTN_FILTER_BY_TARIFF_ACTIVE if filter_type == "tariff" else texts.BTN_FILTER_BY_TARIFF
 
     builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
 
     if not users:
-        rendered += "<i>Пользователи не найдены.</i>"
+        rendered += texts.ADMIN_USERS_LIST_EMPTY_NOTICE
     else:
         current_time = now_utc()
 
@@ -203,9 +236,9 @@ async def _build_users_list_text_and_kb(
                 if user.subscription_end and user.subscription_end > current_time
                 else "🔴"
             )
-            ban = " [БАН]" if user.is_banned else (" [Блок бота]" if user.is_bot_blocked else "")
+            ban = texts.COMMON_BAN if user.is_banned else (texts.COMMON_BLOK_BOTA if user.is_bot_blocked else "")
             username = (
-                f"@{user.username}" if user.username else f"ID: {user.telegram_id}"
+                f"@{user.username}" if user.username else texts.ADMIN_USER_ID_FORMAT.format(telegram_id=user.telegram_id)
             )
             days = format_days_left(user.subscription_end)
             profiles_count = (
@@ -215,7 +248,7 @@ async def _build_users_list_text_and_kb(
             )
 
             button_text = truncate_button_text(
-                f"{status}{ban} {username} | {days} | {profiles_count} устр."
+                texts.COMMON_USTR.format(status=status, ban=ban, username=username, days=days, profiles_count=profiles_count)
             )
 
             builder.button(
@@ -226,25 +259,25 @@ async def _build_users_list_text_and_kb(
     nav_buttons = 0
     if page > 1:
         builder.button(
-            text="◀️ Назад",
+            text=texts.BTN_BACK,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page - 1}",
         )
         nav_buttons += 1
 
     if page < total_pages:
         builder.button(
-            text="Вперед ▶️",
+            text=texts.BTN_PAGINATION_NEXT,
             callback_data=f"admin_users_filter:{filter_type}:{filter_param}:{page + 1}",
         )
         nav_buttons += 1
 
     builder.button(
-        text="🔍 Поиск по @username / ID",
+        text=texts.COMMON_SEARCH_PO_USERNAME_ID,
         callback_data="admin_users_search",
     )
 
     builder.button(
-        text="🔙 В админ-меню",
+        text=texts.BTN_ADMIN_MENU,
         callback_data="admin_menu",
     )
 
@@ -260,18 +293,18 @@ async def _build_users_list_text_and_kb(
 
 
 async def _get_user_card_details(session: AsyncSession, user: User) -> tuple[str, str]:
-    from utils.tariff_names import get_tariff_display_name
+    from bot.formatters import get_tariff_display_name
 
-    tariff_info = "Не активирован"
+    tariff_info = texts.COMMON_NE_AKTIVIROVAN
     if user.current_tariff_id:
         tariff = await get_tariff_by_id(session, user.current_tariff_id)
         if tariff:
-            tariff_info = f"{tariff.name} (до {tariff.device_limit} устр.)"
+            tariff_info = texts.COMMON_DO_USTR.format(tariff_name=tariff.name, tariff_device_limit=tariff.device_limit)
     elif user.device_limit:
         t_name = get_tariff_display_name(user.device_limit)
-        tariff_info = f"{t_name} (до {user.device_limit} устр.)"
+        tariff_info = texts.ADMIN_DEVICE_LIMIT_SLOT_LABEL.format(t_name=t_name, user_device_limit=user.device_limit)
 
-    referrer_info = "Прямой переход"
+    referrer_info = texts.COMMON_PRYAMOY_PEREKHOD
     if user.referred_by:
         referrer = await get_user_by_telegram_id(session, user.referred_by)
         if referrer:

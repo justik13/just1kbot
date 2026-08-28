@@ -25,7 +25,7 @@ from services.account_tariff_change import (
 )
 from services.maintenance_service import MaintenanceService
 from utils.datetime_helpers import now_utc
-from utils.tariff_names import get_tariff_display_name
+from bot.formatters import get_tariff_display_name
 from utils.telegram import EFFECT_CONFETTI, render_hub
 
 from .balance_routes import _create_and_render_topup
@@ -36,30 +36,30 @@ logger = logging.getLogger(__name__)
 
 
 CHANGE_ERRORS = {
-    "quote_not_found": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L36_1,
-    "quote_expired": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L37_1,
-    "quote_not_active": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
-    "tariff_unavailable": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L39_1,
-    "tariff_price_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L40_1,
-    "quote_source_history_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L41_1,
-    "quote_economics_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L42_1,
-    "quote_economics_invalid": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L42_1,
-    "subscription_state_changed": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L43_1,
-    "subscription_balance_untracked": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L44_1,
-    "insufficient_balance": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L45_1,
-    "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L46_1,
-    "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L47_1,
-    "too_many_devices": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L48_1,
-    "change_user_ineligible": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L44_1,
-    "quote_operation_mismatch": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
-    "quote_amount_invalid": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L40_1,
-    "consumed_quote_incomplete": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L37_1,
-    "quote_tariff_version_invalid": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L39_1,
-    "quote_currency_invalid": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L40_1,
-    "active_quote_has_existing_debit": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
-    "paid_value_ledger_conflict": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L44_1,
-    "active_quote_has_existing_entitlement": texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L38_1,
-    "change_cooldown_active": "Смена тарифа на меньший доступна не чаще одного раза в 24 часа. Попробуйте позже.",
+    "quote_not_found": texts.PAYMENT_QUOTE_NOT_FOUND_NOTICE,
+    "quote_expired": texts.PAYMENT_CHANGE_TARIFF_CALC_EXPIRED,
+    "quote_not_active": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "tariff_unavailable": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
+    "tariff_price_changed": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
+    "quote_source_history_changed": texts.PAYMENT_CHANGE_TARIFF_SUB_CHANGED,
+    "quote_economics_changed": texts.PAYMENT_CHANGE_TARIFF_ECONOMY_CHANGED,
+    "quote_economics_invalid": texts.PAYMENT_CHANGE_TARIFF_ECONOMY_CHANGED,
+    "subscription_state_changed": texts.PAYMENT_CHANGE_TARIFF_STATE_CHANGED,
+    "subscription_balance_untracked": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
+    "insufficient_balance": texts.PAYMENT_INSUFFICIENT_FUNDS_ALERT,
+    "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+    "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+    "too_many_devices": texts.PAYMENT_DEVICES_BLOCKED_NOTICE,
+    "change_user_ineligible": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
+    "quote_operation_mismatch": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "quote_amount_invalid": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
+    "consumed_quote_incomplete": texts.PAYMENT_CHANGE_TARIFF_CALC_EXPIRED,
+    "quote_tariff_version_invalid": texts.PAYMENT_TARIFF_UNAVAILABLE_NOTICE,
+    "quote_currency_invalid": texts.PAYMENT_CHANGE_TARIFF_PRICE_CHANGED,
+    "active_quote_has_existing_debit": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "paid_value_ledger_conflict": texts.PAYMENT_CHANGE_TARIFF_CALC_FAILED,
+    "active_quote_has_existing_entitlement": texts.PAYMENT_OPERATION_NOT_ACTIVE_NOTICE,
+    "change_cooldown_active": texts.PAYMENT_DOWNGRADE_COOLDOWN_ALERT,
 }
 
 
@@ -72,8 +72,8 @@ def _uuid_from_callback(data: str) -> uuid.UUID | None:
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L61_1.format(
-        value_0=days
+    return texts.TIME_DAYS_FORMAT.format(
+        days=days
     ) + (
         texts.DURATION_HOURS_SUFFIX.format(hours=remainder)
         if remainder
@@ -99,7 +99,7 @@ async def render_tariff_change_review(
             callback.message.chat.id,
             CHANGE_ERRORS.get(
                 exc.code,
-                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L80_1,
+                texts.PAYMENT_CHANGE_TARIFF_OPEN_FAILED,
             ),
             get_back_button("payment_change_tariff"),
         )
@@ -109,29 +109,27 @@ async def render_tariff_change_review(
     before = int(intent.balance.available)
     after = max(0, before - due)
     back = f"select_tariff:{intent.target_tariff.id}:change"
-    text = texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L90_1.format(
-        value_0=get_tariff_display_name(intent.target_version.device_limit),
-        value_1=intent.target_version.device_limit,
-        value_2=_hours_text(
-            quote.resulting_paid_hours + quote.resulting_bonus_hours
-        ),
-        value_3=due,
-        value_4=before,
-        value_5=after,
+    text = texts.PAYMENT_TARIFF_CHANGE_CONFIRMATION_CARD.format(
+        tariff_label=get_tariff_display_name(intent.target_version.device_limit),
+        devices=intent.target_version.device_limit,
+        duration=_hours_text(quote.resulting_paid_hours + quote.resulting_bonus_hours),
+        due=due,
+        before=before,
+        after=after
     )
     if intent.shortage > 0:
         minimum = get_settings().BALANCE_MIN_TOPUP_RUB
         exact = max(int(intent.shortage), minimum)
         remainder = exact - int(intent.shortage)
         if remainder:
-            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L104_1.format(
-                value_0=int(intent.shortage),
+            text += texts.PAYMENT_TARIFF_CHANGE.format(
+                amount_rub=int(intent.shortage),
                 value_1=minimum,
                 value_2=remainder,
             )
         else:
-            text += texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L109_1.format(
-                value_0=int(intent.shortage)
+            text += texts.PAYMENT_SHORTAGE_LINE.format(
+                amount_rub=int(intent.shortage)
             )
         keyboard = get_balance_change_shortage_keyboard(
             str(quote.public_id), exact, back
@@ -158,7 +156,7 @@ async def review_tariff_change(
     quote_id = _uuid_from_callback(callback.data)
     if db_user is None or quote_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L133_1,
+            texts.PAYMENT_CHANGE_TARIFF_INVALID_OPERATION,
             show_alert=True,
         )
         return
@@ -178,7 +176,7 @@ async def confirm_tariff_change(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L145_1,
+        texts.PAYMENT_CHANGE_TARIFF_PROCESSING_NOTICE,
         show_alert=False,
     )
     await state.clear()
@@ -226,7 +224,7 @@ async def confirm_tariff_change(
             callback.message.chat.id,
             CHANGE_ERRORS.get(
                 exc.code,
-                texts.RUNTIME_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L167_1,
+                texts.PAYMENT_CANCELLED_NO_DEBIT_NOTICE,
             ),
             get_back_button("payment_change_tariff"),
         )
@@ -242,15 +240,15 @@ async def confirm_tariff_change(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L180_1.format(
-            value_0=get_tariff_display_name(intent.target_version.device_limit),
-            value_1=_hours_text(
+        texts.PAYMENT_TARIFF_CHANGE_SUCCESS_CARD.format(
+            tariff_label=get_tariff_display_name(intent.target_version.device_limit),
+            duration=_hours_text(
                 result.quote.resulting_paid_hours
                 + result.quote.resulting_bonus_hours
             ),
-            value_2=charged,
-            value_3=int(result.balance_after.real_available),
-            value_4=int(result.balance_after.bonus_available),
+            charged=charged,
+            real_balance=int(result.balance_after.real_available),
+            bonus_balance=int(result.balance_after.bonus_available),
         ),
         get_payment_success_keyboard(),
         message_effect_id=EFFECT_CONFETTI,
@@ -281,7 +279,7 @@ async def topup_exact_change_shortage(
     db_user: User | None = None,
 ) -> None:
     await callback.answer(
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L210_1,
+        texts.PAYMENT_CREATING_LINK_NOTICE,
         show_alert=False,
     )
     quote_id = _uuid_from_callback(callback.data)
@@ -293,7 +291,7 @@ async def topup_exact_change_shortage(
         )
     except AccountTariffChangeError:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L219_1,
+            texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE,
             show_alert=True,
         )
         return
@@ -335,7 +333,7 @@ async def topup_custom_change_shortage(
         )
     except AccountTariffChangeError:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L252_1,
+            texts.PAYMENT_QUOTE_EXPIRED_RETRY_NOTICE,
             show_alert=True,
         )
         return
@@ -349,8 +347,8 @@ async def topup_custom_change_shortage(
     await render_hub(
         callback.bot,
         callback.message.chat.id,
-        texts.UI_BOT_HANDLERS_PAYMENT_TARIFF_CHANGE_ROUTES_L264_1.format(
-            value_0=minimum
+        texts.PAYMENT_CUSTOM_AMOUNT_PROMPT.format(
+            amount_rub=minimum
         ),
         get_back_button(f"balance_change_review:{intent.quote.public_id}"),
     )

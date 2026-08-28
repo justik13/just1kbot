@@ -5,13 +5,12 @@ from datetime import timedelta
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramForbiddenError
-from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.keyboards.notifications import get_devices_deleted_keyboard
+from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from bot import texts
-from bot.constants import GRACE_PERIOD_HOURS
+from config.constants import GRACE_PERIOD_HOURS
 from database.connection import session_scope
 from database.models import (
     APIOperation,
@@ -95,7 +94,7 @@ async def cleanup_dangling_peers_loop(
             break
         except Exception as e:
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L90_1,
+                "Error in cleanup worker: %s",
                 e,
                 exc_info=True,
             )
@@ -197,21 +196,10 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     # Уведомить пользователя об удалении устройств
                     if bot:
                         try:
-                            builder = InlineKeyboardBuilder()
-                            builder.button(
-                                text="🛒 Купить подписку",
-                                callback_data="menu_buy",
-                            )
-                            builder.button(
-                                text="✅ Прочитано",
-                                callback_data="dismiss_notification",
-                            )
-                            builder.adjust(1)
-
                             await bot.send_message(
                                 user.telegram_id,
-                                texts.UI_SERVICES_WORKERS_CLEANUP_L184_1,
-                                reply_markup=builder.as_markup(),
+                                NOTIFY_DEVICES_DELETED,
+                                reply_markup=get_devices_deleted_keyboard(),
                                 parse_mode="HTML",
                             )
                         except TelegramForbiddenError:
@@ -422,7 +410,7 @@ async def _cleanup_dangling_peers():
         except Exception as e:
             t_done = time.monotonic()
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_CLEANUP_L255_1,
+                "Failed to fetch clients from server %s: %s",
                 server_info["name"],
                 e,
             )

@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot import texts
-from utils.tariff_names import get_tariff_group_name
+from bot.formatters import get_tariff_group_name
 from utils.text_limits import truncate_button_text
 
 
@@ -13,43 +13,43 @@ def get_admin_user_card_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L15_1,
+        text=texts.ADMIN_BTN_SUBSCRIPTION,
         callback_data=f"admin_subscription:{user_id}",
     )
 
     builder.button(
-        text="💳 Баланс пользователя",
+        text=texts.BTN_ADMIN_USER_BALANCE,
         callback_data=f"admin_user_balance:{user_id}",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L20_1,
+        text=texts.ADMIN_BTN_USER_DEVICES,
         callback_data=f"admin_user_devices:{user_id}",
     )
 
     builder.button(
-        text="📜 История действий (Логи)",
+        text=texts.BTN_ADMIN_USER_LOGS,
         callback_data=f"admin_user_audit:{user_id}",
     )
 
     builder.button(
-        text="✉️ Написать пользователю",
+        text=texts.BTN_ADMIN_USER_MESSAGE,
         callback_data=f"admin_send_msg:{user_id}",
     )
 
     if is_banned:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L26_1,
+            text=texts.ADMIN_BTN_UNBAN,
             callback_data=f"admin_unban:{user_id}",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L31_1,
+            text=texts.ADMIN_BTN_BAN,
             callback_data=f"admin_ban:{user_id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L36_1,
+        text=texts.ADMIN_BTN_BACK_TO_USERS_LIST,
         callback_data="admin_users",
     )
 
@@ -64,15 +64,15 @@ def get_admin_user_balance_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text="➕ Начислить баланс (Бонус)",
+        text=texts.BTN_ADMIN_USER_ADD_BALANCE,
         callback_data=f"admin_balance_topup:{user_id}",
     )
     builder.button(
-        text="➖ Списать баланс",
+        text=texts.BTN_ADMIN_USER_DEDUCT_BALANCE,
         callback_data=f"admin_balance_deduct:{user_id}",
     )
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{user_id}",
     )
 
@@ -90,27 +90,27 @@ def get_admin_subscription_keyboard(
 
     if has_active_sub:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L53_1,
+            text=texts.ADMIN_BTN_CHANGE_TARIFF,
             callback_data=f"admin_sub_change_tariff:{telegram_id}",
         )
 
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L58_1,
+            text=texts.ADMIN_BTN_EXTEND_SUBSCRIPTION,
             callback_data=f"admin_sub_extend:{telegram_id}",
         )
 
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L63_1,
+            text=texts.ADMIN_BTN_REDUCE_SUBSCRIPTION,
             callback_data=f"admin_sub_reduce:{telegram_id}",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L68_1,
+            text=texts.ADMIN_BTN_GRANT_SUBSCRIPTION,
             callback_data=f"admin_sub_grant:{telegram_id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L73_1,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 
@@ -139,7 +139,7 @@ def get_admin_change_tariff_keyboard(
         label = get_tariff_group_name(device_limit)
 
         if device_limit == current_device_limit:
-            label += texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L103_1
+            label += texts.PAYMENT_STATUS_ACTIVE_BADGE
 
         builder.button(
             text=truncate_button_text(label),
@@ -149,7 +149,7 @@ def get_admin_change_tariff_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L112_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -175,7 +175,7 @@ def get_admin_grant_tariff_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L138_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -192,7 +192,7 @@ def get_admin_grant_days_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L155_1.format(value_0=days),
+            text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
                 f"admin_sub_grant_confirm:"
                 f"{telegram_id}:{tariff_id}:{days}"
@@ -200,7 +200,7 @@ def get_admin_grant_days_keyboard(
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L163_1,
+        text=texts.LABEL_FOREVER,
         callback_data=(
             f"admin_sub_grant_confirm:"
             f"{telegram_id}:{tariff_id}:36500"
@@ -208,14 +208,14 @@ def get_admin_grant_days_keyboard(
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L171_1,
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
         callback_data=(
             f"admin_sub_grant_custom:{telegram_id}:{tariff_id}"
         ),
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L178_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -231,26 +231,26 @@ def get_admin_extend_days_new_keyboard(
 
     for days in (7, 30, 90):
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L194_1.format(value_0=days),
+            text=texts.TIME_DAYS_FULL_FORMAT.format(days=days),
             callback_data=(
                 f"admin_sub_confirm_extend:{telegram_id}:{days}"
             ),
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L201_1,
+        text=texts.LABEL_FOREVER,
         callback_data=(
             f"admin_sub_confirm_extend:{telegram_id}:36500"
         ),
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L208_1,
+        text=texts.ADMIN_BTN_INPUT_MANUALLY,
         callback_data=f"admin_sub_extend_custom:{telegram_id}",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L213_1,
+        text=texts.BTN_BACK,
         callback_data=f"admin_subscription:{telegram_id}",
     )
 
@@ -266,12 +266,12 @@ def get_admin_confirm_action_keyboard(
     builder = InlineKeyboardBuilder()
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L229_1,
+        text=texts.BTN_CONFIRM,
         callback_data=confirm_callback,
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L234_1,
+        text=texts.BTN_CANCEL,
         callback_data=cancel_callback,
     )
 
@@ -289,18 +289,18 @@ def get_admin_user_devices_keyboard(
     for profile in profiles:
         name = (
             getattr(profile, "device_name", None)
-            or texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L253_1.format(value_0=profile.id)
+            or texts.ADMIN_DEVICE_NAME_TEMPLATE.format(v0=profile.id)
         )
 
         builder.button(
-            text=truncate_button_text(texts.RUNTIME_BOT_KEYBOARDS_ADMIN_USERS_L257_1.format(value_0=name)),
+            text=truncate_button_text(texts.ADMIN_DEVICE_DELETE_BUTTON_LABEL.format(v0=name)),
             callback_data=(
                 f"admin_delete_device:{telegram_id}:{profile.id}"
             ),
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_ADMIN_USERS_L263_1,
+        text=texts.ADMIN_BTN_BACK_TO_CARD,
         callback_data=f"admin_user_card:{telegram_id}",
     )
 

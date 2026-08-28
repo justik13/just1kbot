@@ -85,12 +85,12 @@ async def start_broadcast(
     await callback.answer(show_alert=False)
     await state.clear()
 
-    from utils.formatters import format_admin_breadcrumbs
-    header = format_admin_breadcrumbs("📢 Рассылка", "Шаг 1: Выбор аудитории")
+    from bot.formatters import format_admin_breadcrumbs
+    header = format_admin_breadcrumbs(texts.BROADCAST_BROADCAST, texts.BROADCAST_STEP_1_SELECT_AUDIENCE)
 
     try:
         await callback.message.edit_text(
-            f"{header}<b>Выберите аудиторию для рассылки:</b>\n\nКому отправить сообщение?",
+            texts.BROADCAST_SELECT_AUDIENCE_PROMPT.format(header=header),
             reply_markup=get_broadcast_audience_keyboard(),
             parse_mode="HTML",
         )
@@ -157,8 +157,8 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L116_1.format(
-                value_0=TELEGRAM_MESSAGE_LIMIT
+            texts.BROADCAST_ERR_TEXT_TOO_LONG.format(
+                error_summary=TELEGRAM_MESSAGE_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -167,8 +167,8 @@ async def process_broadcast_message(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L125_1.format(
-                value_0=TELEGRAM_CAPTION_LIMIT
+            texts.BROADCAST_ERR_CAPTION_TOO_LONG.format(
+                error_summary=TELEGRAM_CAPTION_LIMIT
             ),
             get_back_button("admin_menu"),
         )
@@ -204,21 +204,13 @@ async def process_broadcast_message(
         except Exception as e:
             logger.warning(f"Failed to count recipients in session: {e}")
 
-    label_map = {
-        "all": "Все пользователи",
-        "active": "Активные подписки",
-        "expiring_3d": "Подписки истекают < 3 дней",
-        "expired": "Истекшие подписки",
-        "never": "Без подписок",
-        "test": "Тестовая отправка админу",
-    }
-    aud_label = label_map.get(target_audience, target_audience)
+    aud_label = texts.ADMIN_BROADCAST_AUDIENCE_LABELS.get(target_audience, target_audience)
 
     preview_summary = (
-        f"✅ <b>Тестовое сообщение отправлено вам для проверки!</b>\n\n"
-        f"👥 <b>Аудитория:</b> {aud_label}\n"
-        f"📊 <b>Получателей:</b> {total_count} чел.\n\n"
-        f"Ознакомьтесь с предпросмотром выше и подтвердите запуск рассылки."
+        texts.BROADCAST_TEST_SENT_NOTICE.format()+
+        texts.BROADCAST_AUDIENCE.format(aud_label=aud_label)+
+        texts.BROADCAST_RECIPIENTS_COUNT_LINE.format(total_count=total_count)+
+        texts.BROADCAST_PREVIEW_CONFIRM_HINT.format()
     )
 
     try:
@@ -534,8 +526,8 @@ async def _send_broadcast_to_users_with_resume(
         try:
             await bot.send_message(
                 admin_id,
-                texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L423_1.format(
-                    value_0=html.escape(
+                texts.BROADCAST_STOPPED_ERROR_ALERT.format(
+                    error_summary=html.escape(
                         type(e).__name__ + ": " + str(e)[:200]
                     )
                 ),
@@ -582,11 +574,11 @@ async def _send_broadcast_to_users_with_resume(
                     session,
                     admin_id,
                     "BROADCAST",
-                    details=(
-                        f"to {final_progress.label if final_progress else '?'}: "
-                        f"{final_progress.success_count if final_progress else 0} success, "
-                        f"{final_progress.fail_count if final_progress else 0} fail, "
-                        f"status={final_progress.status if final_progress else 'unknown'}"
+                    details=texts.ADMIN_AUDIT_LOG_DETAILS_BROADCAST.format(
+                        label=final_progress.label if final_progress else '?',
+                        success=final_progress.success_count if final_progress else 0,
+                        fail=final_progress.fail_count if final_progress else 0,
+                        status=final_progress.status if final_progress else 'unknown'
                     ),
                 )
         except Exception as e:
@@ -739,14 +731,7 @@ async def _start_broadcast_process(
             await state.clear()
             return
 
-        label_map = {
-            "all": texts.RUNTIME_BOT_HANDLERS_ADMIN_BROADCAST_L628_1,
-            "active": texts.BROADCAST_ACTIVE_LABEL,
-            "expiring_3d": "⏳ Истекают < 3 дней",
-            "expired": "🔴 Истекшие подписки",
-            "never": "🆕 Без подписок",
-        }
-        label = label_map.get(audience, "🧪 Тест мне (Админу)" if audience.startswith("test_") else audience)
+        label = texts.ADMIN_BROADCAST_PROGRESS_AUDIENCE_LABELS.get(audience, texts.BROADCAST_BTN_TEST_ME if audience.startswith("test_") else audience)
 
         async with session_scope() as sess:
             progress = BroadcastProgress(
@@ -934,7 +919,7 @@ async def stop_broadcast(callback: CallbackQuery):
     admin_id = callback.from_user.id
     if admin_id not in _broadcast_in_progress:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_BROADCAST_L709_1,
+            texts.BROADCAST_NOT_STARTED_STATUS,
             show_alert=True,
         )
         return

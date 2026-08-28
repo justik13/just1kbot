@@ -4,6 +4,7 @@ from typing import TypedDict
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.constants import AMNEZIA_PROTOCOL
 from database.models import Server, VPNProfile
 from services.slots_cache import get_cached_peer_count
 
@@ -124,7 +125,7 @@ async def create_server(
     api_url: str,
     api_key: str,
     country_flag: str = None,
-    protocol: str = "amneziawg2",
+    protocol: str = AMNEZIA_PROTOCOL,
     max_clients: int = 50,
 ) -> Server:
     server = Server(

@@ -43,18 +43,18 @@ async def _build_tariffs_list_text_and_kb(
     total: int,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L45_1.format(value_0=page, value_1=total_pages, value_2=total)
+        texts.ADMIN_TARIFF_LIST_TITLE.format(page=page, total_pages=total_pages, total=total)
     )
 
     builder = InlineKeyboardBuilder()
 
     if not tariffs:
-        rendered += texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L52_1
+        rendered += texts.ADMIN_TARIFF_LIST_EMPTY
     else:
         for tariff in tariffs:
-            status = texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L55_1 if tariff.is_active else texts.STATUS_INACTIVE_ICON
+            status = texts.STATUS_ACTIVE_ICON if tariff.is_active else texts.STATUS_INACTIVE_ICON
             button_text = truncate_button_text(
-                texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L57_1.format(value_0=status, value_1=tariff.name, value_2=tariff.duration_days, value_3=tariff.price_rub)
+                texts.ADMIN_TARIFF_ROW_FORMAT.format(status=status, name=tariff.name, duration_days=tariff.duration_days, price_rub=tariff.price_rub)
             )
             builder.button(
                 text=button_text,
@@ -63,17 +63,17 @@ async def _build_tariffs_list_text_and_kb(
 
     if page > 1:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L68_1,
+            text=texts.ADMIN_BTN_PAGINATION_PREV,
             callback_data=f"admin_tariffs_page:{page - 1}",
         )
     if page < total_pages:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L73_1,
+            text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_tariffs_page:{page + 1}",
         )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L78_1,
+        text=texts.ADMIN_BTN_BACK_TO_ADMIN,
         callback_data="admin_menu",
     )
     builder.adjust(1)
@@ -154,7 +154,7 @@ async def tariffs_pagination(
     page = parse_callback_id(callback.data, 1)
     if page is None or page < 1:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L176_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -169,34 +169,42 @@ async def _show_tariff_card(
     tariff,
 ):
     status = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L191_1
+        texts.STATUS_ACTIVE_BADGE
         if tariff.is_active
-        else texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L193_1
+        else texts.ADMIN_TARIFF_STATUS_DISABLED_BADGE
     )
 
     rendered = (
-        texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L197_1.format(value_0=tariff.id, value_1=safe(tariff.name), value_2=safe(tariff.description or texts.PLACEHOLDER_DASH), value_3=tariff.duration_days, value_4=tariff.device_limit, value_5=tariff.price_rub, value_6=status)
+        texts.ADMIN_TARIFF_CARD_TEMPLATE.format(
+            tariff_id=tariff.id,
+            name=safe(tariff.name),
+            description=safe(tariff.description or texts.PLACEHOLDER_DASH),
+            duration_days=tariff.duration_days,
+            device_limit=tariff.device_limit,
+            price_rub=tariff.price_rub,
+            status=status,
+        )
     )
 
     builder = InlineKeyboardBuilder()
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L209_1,
+        text=texts.ADMIN_TARIFF_BTN_EDIT_PRICE,
         callback_data=f"admin_tariff_edit_rub:{tariff.id}",
     )
 
     if tariff.is_active:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L215_1,
+            text=texts.BTN_DISABLE_SERVER,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L220_1,
+            text=texts.BTN_ENABLE_SERVER_CARD,
             callback_data=f"admin_tariff_toggle:{tariff.id}",
         )
 
     builder.button(
-        text=texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L225_1,
+        text=texts.ADMIN_TARIFF_BTN_BACK_TO_LIST,
         callback_data="admin_tariffs",
     )
     builder.adjust(1)
@@ -229,7 +237,7 @@ async def show_tariff_card(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L258_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -264,7 +272,7 @@ async def toggle_tariff_confirm(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L293_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -283,11 +291,11 @@ async def toggle_tariff_confirm(
 
     if new_status:
         text = (
-            texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L312_1.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
+            texts.ADMIN_TARIFF_ENABLE_CONFIRM.format(name=safe(tariff.name), duration_days=tariff.duration_days, device_limit=tariff.device_limit)
         )
     else:
         text = (
-            texts.RUNTIME_BOT_HANDLERS_ADMIN_TARIFFS_L323_1.format(value_0=safe(tariff.name), value_1=tariff.duration_days, value_2=tariff.device_limit)
+            texts.ADMIN_TARIFF_DISABLE_CONFIRM.format(name=safe(tariff.name), duration_days=tariff.duration_days, device_limit=tariff.device_limit)
         )
 
     try:
@@ -329,7 +337,7 @@ async def toggle_tariff_apply(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L372_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -372,7 +380,7 @@ async def toggle_tariff_apply(
         "EDIT_TARIFF",
         "Tariff",
         tariff_id,
-        f"toggled to {'active' if new_status else 'inactive'}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED.format(status='active' if new_status else 'inactive'),
     )
 
     if new_status:
@@ -407,7 +415,7 @@ async def start_edit_tariff_rub(
     tariff_id = parse_callback_id(callback.data, 1)
     if tariff_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L450_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -418,7 +426,7 @@ async def start_edit_tariff_rub(
 
     try:
         await callback.message.edit_text(
-            texts.ADMIN_TARIFF_EDIT_RUB_PROMPT,
+            texts.ADMIN_TARIFF_EDIT_PRICE_PROMPT,
             reply_markup=get_back_button(f"admin_tariff_card:{tariff_id}"),
         )
     except TelegramBadRequest as e:
@@ -478,7 +486,7 @@ async def process_edit_tariff_rub(
         await render_hub(
             message.bot,
             message.chat.id,
-            texts.UI_BOT_HANDLERS_ADMIN_TARIFFS_L516_1.format(value_0=MAX_TARIFF_PRICE),
+            texts.ADMIN_TARIFF_ERR_PRICE_RANGE.format(max_price=MAX_TARIFF_PRICE),
             get_back_button("admin_tariffs"),
         )
         return
@@ -511,14 +519,14 @@ async def process_edit_tariff_rub(
         "EDIT_TARIFF",
         "Tariff",
         tariff_id,
-        f"RUB: {old_value} -> {new_value}",
+        texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB.format(old_value=old_value, new_value=new_value),
     )
 
     await render_hub(
         message.bot,
         message.chat.id,
-        texts.ADMIN_TARIFF_EDIT_RUB_SUCCESS.format(
-            value=new_value
+        texts.ADMIN_TARIFF_EDIT_PRICE_SUCCESS.format(
+            price_rub=new_value
         ),
         get_back_button("admin_tariffs"),
     )

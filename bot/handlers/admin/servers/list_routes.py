@@ -48,7 +48,7 @@ async def servers_pagination(
 
     if page is None or page < 1:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_SERVERS_LIST_ROUTES_L51_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return

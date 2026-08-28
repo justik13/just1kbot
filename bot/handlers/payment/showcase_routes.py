@@ -28,7 +28,7 @@ from services.tariff_change_quote import create_tariff_change_quote
 from utils.callbacks import parse_callback_id, parse_callback_parts
 from utils.datetime_helpers import now_utc
 from utils.formatters import format_datetime
-from utils.tariff_names import get_tariff_display_name, get_tariff_group_name
+from bot.formatters import get_tariff_display_name, get_tariff_group_name
 from utils.telegram import render_hub
 
 from .common import (
@@ -47,11 +47,11 @@ router = Router()
 
 def _hours_text(hours: int) -> str:
     days, remainder = divmod(hours, 24)
-    return texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L46_1.format(value_0=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
+    return texts.TIME_DAYS_FORMAT.format(days=days) + (texts.DURATION_HOURS_SUFFIX.format(hours=remainder) if remainder else "")
 
 _START_KEYBOARD_BUILDER = InlineKeyboardBuilder()
 _START_KEYBOARD_BUILDER.button(
-    text=texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L50_1, callback_data="back_to_main_menu"
+    text=texts.BTN_PAYMENT_START_ONBOARDING, callback_data="back_to_main_menu"
 )
 _START_KEYBOARD_BUILDER.adjust(1)
 _START_KEYBOARD = _START_KEYBOARD_BUILDER.as_markup()
@@ -120,13 +120,13 @@ async def select_tariff(
     parts = parse_callback_parts(callback.data, 2)
 
     if parts is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L119_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     tariff_id = parse_callback_id(callback.data, 1)
 
     if tariff_id is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L125_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     source = parts[2] if len(parts) > 2 else "showcase"
@@ -176,7 +176,7 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L165_1,
+            texts.PAYMENT_SHOWCASE,
             get_same_tariff_keyboard(),
         )
         await callback.answer(show_alert=False)
@@ -209,19 +209,19 @@ async def select_tariff(
                     )
                 ),
                 "same_tariff_requires_renew": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L197_1
+                    texts.PAYMENT_SHOWCASE
                 ),
                 "financial_hold": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L201_1
+                    texts.PAYMENT_DISPUTE_BLOCKED_NOTICE
                 ),
                 "account_debt": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L204_1
+                    texts.PAYMENT_DEBT_BLOCKED_NOTICE
                 ),
                 "subscription_balance_untracked": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
+                    texts.PAYMENT_SHOWCASE_CALC_FAILED
                 ),
                 "mixed_source_tariffs": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
+                    texts.PAYMENT_SHOWCASE_CALC_FAILED
                 ),
                 "target_tariff_not_found": (
                     texts.ERROR_TARIFF_UNAVAILABLE
@@ -230,7 +230,7 @@ async def select_tariff(
                     texts.ERROR_TARIFF_UNAVAILABLE
                 ),
                 "user_ineligible": (
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L207_1
+                    texts.PAYMENT_SHOWCASE_CALC_FAILED
                 ),
                 "subscription_inactive": texts.PAYMENT_SUBSCRIPTION_INACTIVE,
                 "current_tariff_unknown": texts.PAYMENT_CURRENT_TARIFF_UNKNOWN,
@@ -249,7 +249,7 @@ async def select_tariff(
                 callback.message.chat.id,
                 errors.get(
                     quote_result.failure_code,
-                    texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L216_1,
+                    texts.PAYMENT_SHOWCASE_PREPARE_CHANGE_FAILED,
                 ),
                 get_same_tariff_keyboard()
                 if quote_result.failure_code == "same_tariff_requires_renew"
@@ -266,7 +266,7 @@ async def select_tariff(
         before = int(intent.balance.available)
         after = max(0, before - due)
         shortage = (
-            texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L233_1.format(value_0=int(intent.shortage))
+            texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
             if intent.shortage > 0
             else ""
         )
@@ -277,7 +277,15 @@ async def select_tariff(
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L245_1.format(value_0=get_tariff_display_name(device_limit), value_1=device_limit, value_2=_hours_text(resulting_hours), value_3=due, value_4=before, value_5=after, value_6=shortage),
+            texts.PAYMENT_TARIFF_CHANGE_HEADER_CARD.format(
+                tariff_name=get_tariff_display_name(device_limit),
+                device_limit=device_limit,
+                duration_days=_hours_text(resulting_hours),
+                due=due,
+                balance_before=before,
+                balance_after=after,
+                shortage_line=shortage,
+            ),
             get_balance_change_start_keyboard(
                 str(intent.quote.public_id), "payment_change_tariff"
             ),
@@ -307,15 +315,15 @@ async def select_tariff(
         )
     except AccountPurchaseError as exc:
         errors = {
-            "financial_hold": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L274_1,
-            "account_debt": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L275_1,
-            "tariff_change_required": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L276_1,
-            "active_tariff_change_quote_exists": texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L277_1,
+            "financial_hold": texts.PAYMENT_DISPUTE_BLOCKED_NOTICE,
+            "account_debt": texts.PAYMENT_DEBT_BLOCKED_NOTICE,
+            "tariff_change_required": texts.PAYMENT_SHOWCASE_USE_CHANGE_SECTION,
+            "active_tariff_change_quote_exists": texts.PAYMENT_CHANGE_TARIFF_IN_PROGRESS_NOTICE,
         }
         await render_hub(
             callback.bot,
             callback.message.chat.id,
-            errors.get(exc.code, texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L282_1),
+            errors.get(exc.code, texts.PAYMENT_SHOWCASE_PREPARE_FAILED),
             get_back_button(back_to),
         )
         await callback.answer(show_alert=False)
@@ -325,12 +333,12 @@ async def select_tariff(
     balance_before = int(intent.balance.available)
     balance_after = max(0, balance_before - price)
     shortage_line = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L292_1.format(value_0=int(intent.shortage))
+        texts.PAYMENT_SHORTAGE_WARNING.format(amount_rub=int(intent.shortage))
         if intent.shortage > 0
         else ""
     )
     text = (
-        texts.RUNTIME_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L297_1.format(value_0=tariff_name, value_1=tariff.duration_days, value_2=device_limit, value_3=price, value_4=balance_before, value_5=balance_after, value_6=shortage_line)
+        texts.PAYMENT_SHOWCASE_ORDER_CARD.format(tariff_label=tariff_name, days=tariff.duration_days, device_limit=device_limit, price=price, balance_before=balance_before, balance_after=balance_after, shortage_line=shortage_line)
     )
 
     await render_hub(
@@ -487,13 +495,13 @@ async def select_tariff_type(
     parts = parse_callback_parts(callback.data, 2)
 
     if parts is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L458_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     device_limit = parse_callback_id(callback.data, 1)
 
     if device_limit is None:
-        await callback.answer(texts.UI_BOT_HANDLERS_PAYMENT_SHOWCASE_ROUTES_L464_1, show_alert=True)
+        await callback.answer(texts.ERROR_INVALID_REQUEST, show_alert=True)
         return
 
     source = parts[2] if len(parts) > 2 else "showcase"
@@ -547,9 +555,7 @@ async def select_tariff_type(
         )
         return
 
-    description = texts.get_text("PAYMENT_TARIFF_DESCRIPTION", {}).get(device_limit)
-    if not description:
-        description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
+    description = f"<b>{get_tariff_group_name(device_limit)}</b>\n\n"
     text = description + texts.PAYMENT_DURATION_HEADER
 
     keyboard = get_tariff_duration_keyboard(type_tariffs, source=source)

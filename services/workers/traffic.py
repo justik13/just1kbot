@@ -4,11 +4,12 @@ import time
 from datetime import datetime, timezone
 
 from aiogram import Bot
+from bot.keyboards.notifications import get_traffic_alert_keyboard
+from bot.texts.runtime.alerts import ALERT_TRAFFIC_OVERUSAGE
 from cachetools import TTLCache
 from sqlalchemy import select, update
 
-from bot import texts
-from bot.constants import (
+from config.constants import (
     TRAFFIC_SYNC_INTERVAL,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
@@ -77,7 +78,7 @@ async def traffic_sync_loop(
                 TRAFFIC_MAX_BACKOFF,
             )
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L67_1,
+                "Traffic sync worker crashed (attempt %s), backing off for %ss: %s",
                 _consecutive_crashes,
                 backoff,
                 e,
@@ -148,7 +149,7 @@ async def _traffic_sync_once(bot: Bot | None = None):
         except Exception as e:
             t_done = time.monotonic()
             logger.error(
-                texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L128_1, server_info["name"], e
+                "Failed to fetch traffic from server %s: %s", server_info["name"], e
             )
             return server_info["id"], None, t_done, gen
 
@@ -344,25 +345,20 @@ async def _send_quota_alert(
             return
 
         tib = total_bytes / (1024**4)
-        msg = (
-            texts.RUNTIME_SERVICES_WORKERS_TRAFFIC_L304_1.format(value_0=texts.SEPARATOR_LINE * 20, value_1=telegram_id, value_2=server_name, value_3=tib, value_4=profile_id, value_5=texts.SEPARATOR_LINE * 20)
+        msg = ALERT_TRAFFIC_OVERUSAGE.format(
+            telegram_id=telegram_id,
+            server_name=server_name,
+            tib=tib,
+            profile_id=profile_id,
         )
-
-        from aiogram.utils.keyboard import InlineKeyboardBuilder
-
-        builder = InlineKeyboardBuilder()
-        builder.button(
-            text=texts.UI_SERVICES_WORKERS_TRAFFIC_L319_1,
-            callback_data=f"admin_user_card:{telegram_id}",
-        )
-        builder.adjust(1)
+        reply_markup = get_traffic_alert_keyboard(telegram_id)
 
         for admin_id in admin_ids:
             try:
                 await bot.send_message(
                     admin_id,
                     msg,
-                    reply_markup=builder.as_markup(),
+                    reply_markup=reply_markup,
                     parse_mode="HTML",
                 )
             except Exception as e:

@@ -13,51 +13,51 @@ def get_hub_keyboard(
 
     if is_active:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_COMMON_L13_1,
+            text=texts.BTN_MY_SUBSCRIPTION,
             callback_data="menu_subscription",
             style="success",
         )
     else:
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_COMMON_L18_1,
+            text=texts.BTN_BUY_ACCESS,
             callback_data="menu_buy",
             style="success",
         )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_COMMON_L23_1,
+        text=texts.BTN_CONNECTIONS,
         callback_data="menu_connections",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_COMMON_L28_1,
+        text=texts.BTN_BALANCE,
         callback_data="menu_balance",
     )
 
     builder.button(
-        text="🤝 Пригласить друга",
+        text=texts.BTN_INVITE_FRIEND,
         callback_data="menu_referral",
     )
 
     builder.button(
-        text=texts.UI_BOT_KEYBOARDS_COMMON_L38_1,
+        text=texts.BTN_SUPPORT,
         callback_data="menu_support",
     )
 
     if mtproto_url:
         builder.button(
-            text="🚀 MTProto Proxy",
+            text=texts.BTN_MTPROTO_PROXY,
             url=mtproto_url,
         )
 
     if is_admin:
         # White Internet is under development and visible only to administrators
         builder.button(
-            text="⚪️ Белый Интернет",
+            text=texts.BTN_WHITE_INTERNET,
             callback_data="white_internet",
         )
         builder.button(
-            text=texts.UI_BOT_KEYBOARDS_COMMON_L44_1,
+            text=texts.BTN_ADMIN,
             callback_data="menu_admin",
         )
 
@@ -80,9 +80,9 @@ def get_back_button(
     builder = InlineKeyboardBuilder()
 
     if callback_data == "back_to_main_menu":
-        text = texts.RUNTIME_BOT_KEYBOARDS_COMMON_L63_1
+        text = texts.BTN_MAIN_MENU
     else:
-        text = texts.RUNTIME_BOT_KEYBOARDS_COMMON_L65_1
+        text = texts.BTN_BACK
 
     builder.button(text=text, callback_data=callback_data)
 

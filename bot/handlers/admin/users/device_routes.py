@@ -20,7 +20,8 @@ from utils.callbacks import (
     parse_callback_parts,
 )
 from utils.datetime_helpers import now_utc
-from utils.formatters import format_admin_breadcrumbs, format_datetime, format_traffic
+from bot.formatters import format_admin_breadcrumbs
+from utils.formatters import format_datetime, format_traffic
 from utils.telegram import safe
 
 from .common import _get_user_with_profiles
@@ -44,7 +45,7 @@ async def admin_user_devices(
     telegram_id = parse_callback_id(callback.data, 1)
     if telegram_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L46_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -61,26 +62,26 @@ async def admin_user_devices(
 
     profiles = await get_user_profiles(session, user.id)
 
-    header = format_admin_breadcrumbs("👥 Пользователи", f"ID {telegram_id}", "📱 Устройства")
+    header = format_admin_breadcrumbs(texts.BTN_USERS, f"ID {telegram_id}", texts.ADMIN_USERS_DEVICE_DEVICES)
     now = now_utc()
 
     if not profiles:
         text = (
-            f"{header}"
-            f"📱 <b>Устройства пользователя ID {telegram_id}:</b>\n\n"
-            f"<i>У пользователя пока нет созданных устройств.</i>"
+            f"{header}"+
+            texts.ADMIN_USERS_DEVICE_DEVICES_POLZOVATELYA_ID.format(telegram_id=telegram_id)+
+            texts.ADMIN_USERS_DEVICE_U_POLZOVATELYA_POKA_NET_SOZDAN.format()
         )
     else:
-        lines = [f"{header}📱 <b>Устройства пользователя ID {telegram_id}:</b>\n"]
+        lines = [texts.ADMIN_USER_DEVICES_HEADER.format(header=header, telegram_id=telegram_id)]
         for profile in profiles:
             name = (
                 getattr(profile, "device_name", None)
-                or f"Устройство #{profile.id}"
+                or texts.ADMIN_USERS_DEVICE_DEVICE.format(profile_id=profile.id)
             )
             # get_user_profiles() eagerly loads VPNProfile.server, so this does
             # not add a query per device and keeps the device list efficient.
             server = getattr(profile, "server", None)
-            server_name = safe(server.name) if server else "Неизвестный сервер"
+            server_name = safe(server.name) if server else texts.ADMIN_USERS_DEVICE_NEIZVESTNYY_SERVER
             server_flag = safe(server.country_flag) if server and server.country_flag else "🌐"
 
             # VPNProfile does not have a last_handshake_at column. The traffic
@@ -97,17 +98,17 @@ async def admin_user_devices(
                 if 0 <= delta_sec <= 180:
                     is_online = True
 
-            status_hs = "🟢 <b>В сети (активность ≤ 3 мин)</b>" if is_online else "🔴 <b>Офлайн</b>"
+            status_hs = texts.ADMIN_USERS_DEVICE_V_SETI_AKTIVNOST_3_MIN if is_online else texts.ADMIN_USERS_DEVICE_OFLAYN
             traffic_total = format_traffic((getattr(profile, "traffic_down", 0) or 0) + (getattr(profile, "traffic_up", 0) or 0))
-            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else "⏱ не было подключения"
+            last_conn = format_datetime(profile.last_connected) if getattr(profile, "last_connected", None) else texts.ADMIN_USERS_DEVICE_NE_BYLO_PODKLYUCHENIYA
 
             lines.append(
-                f"• 📱 <b>{safe(name)}</b>\n"
-                f"   🆔 ID устройства: <code>{profile.id}</code>\n"
-                f"   🖥 Сервер: {server_flag} <b>{server_name}</b>\n"
-                f"   Состояние: {status_hs}\n"
-                f"   Трафик: <code>{traffic_total}</code>\n"
-                f"   Активность: <i>{last_conn}</i>\n"
+                f"• 📱 <b>{safe(name)}</b>\n"+
+                texts.ADMIN_USERS_DEVICE_ID_DEVICES.format(profile_id=profile.id)+
+                texts.ADMIN_USERS_DEVICE_SERVER.format(server_flag=server_flag, server_name=server_name)+
+                texts.ADMIN_USERS_DEVICE_SOSTOYANIE.format(status_hs=status_hs)+
+                texts.ADMIN_USERS_DEVICE_TRAFIK.format(traffic_total=traffic_total)+
+                texts.ADMIN_USERS_DEVICE_AKTIVNOST.format(last_conn=last_conn)
             )
         text = "\n".join(lines)
 
@@ -139,7 +140,7 @@ async def admin_delete_device_confirm(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L109_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -149,7 +150,7 @@ async def admin_delete_device_confirm(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L119_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -176,8 +177,8 @@ async def admin_delete_device_confirm(
         return
 
     server = getattr(profile, "server", None)
-    flag = server.country_flag if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L135_1
-    server_name = server.name if server else texts.RUNTIME_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L136_1
+    flag = server.country_flag if server else texts.EMOJI_GLOBE
+    server_name = server.name if server else texts.LABEL_UNKNOWN_CAP
 
     text = texts.ADMIN_DELETE_DEVICE_CONFIRM.format(
         telegram_id=telegram_id,
@@ -191,7 +192,7 @@ async def admin_delete_device_confirm(
             text,
             reply_markup=get_admin_confirm_action_keyboard(
                 confirm_callback=(
-                    f"admin_delete_device_apply:"
+                    "admin_delete_device_apply:"+
                     f"{telegram_id}:{profile_id}"
                 ),
                 cancel_callback=(
@@ -221,7 +222,7 @@ async def admin_delete_device_apply(
     parts = parse_callback_parts(callback.data, 3)
     if parts is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L180_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
@@ -231,7 +232,7 @@ async def admin_delete_device_apply(
 
     if telegram_id is None or profile_id is None:
         await callback.answer(
-            texts.UI_BOT_HANDLERS_ADMIN_USERS_DEVICE_ROUTES_L190_1,
+            texts.ERROR_INVALID_REQUEST,
             show_alert=True,
         )
         return
