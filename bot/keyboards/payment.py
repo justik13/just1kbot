@@ -207,7 +207,9 @@ def get_balance_keyboard(*, has_visible_topup: bool = False) -> InlineKeyboardMa
         text=texts.BTN_ISTORIYA_OPERATSIJ,
         callback_data="balance_history",
     )
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
+    builder.button(
+        text=texts.BTN_MAIN_MENU_NAV, callback_data="back_to_main_menu"
+    )
     builder.adjust(1, 2, 1)
     return builder.as_markup()
 
