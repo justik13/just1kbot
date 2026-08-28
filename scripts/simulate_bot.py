@@ -400,6 +400,16 @@ class SimulationAutoSeedMiddleware:
                         select(Tariff).where(Tariff.is_active.is_(True)).order_by(Tariff.id.asc()).limit(1)
                     )
                     tariff_id = tariff.id if tariff else None
+                    tv = await session.scalar(
+                        select(TariffVersion).where(TariffVersion.tariff_id == tariff_id).limit(1)
+                    ) if tariff_id else None
+                    tv_id = tv.id if tv else None
+
+                    server = await session.scalar(
+                        select(Server).where(Server.is_active.is_(True)).order_by(Server.id.asc()).limit(1)
+                    )
+                    server_id = server.id if server else 1
+
                     # Create user record
                     db_user = User(
                         telegram_id=user.id,
@@ -462,7 +472,7 @@ class SimulationAutoSeedMiddleware:
                     init_quote = TariffQuote(
                         public_id=uuid.uuid4(),
                         user_id=db_user.id,
-                        target_tariff_version_id=4,
+                        target_tariff_version_id=tv_id,
                         operation_type="purchase",
                         current_paid_hours=0,
                         current_paid_value_rub=Decimal(0),
@@ -489,7 +499,7 @@ class SimulationAutoSeedMiddleware:
                         days_delta=30,
                         hours_delta=720,
                         device_limit_snapshot=5,
-                        tariff_id_snapshot=4,
+                        tariff_id_snapshot=tariff_id,
                         created_at=now_utc() - timedelta(days=2),
                     )
                     init_pvl = PaidValueLedgerEntry(
@@ -501,7 +511,7 @@ class SimulationAutoSeedMiddleware:
                         paid_hours_delta=720,
                         paid_value_rub_delta=Decimal(180),
                         currency="RUB",
-                        tariff_version_id=4,
+                        tariff_version_id=tv_id,
                         created_at=now_utc() - timedelta(days=2),
                     )
                     session.add_all([entry_real, entry_bonus, init_ent, init_pvl])
@@ -509,7 +519,7 @@ class SimulationAutoSeedMiddleware:
                     # Create 1 Active Device (iPhone)
                     prof = VPNProfile(
                         user_id=db_user.id,
-                        server_id=1,  # NL
+                        server_id=server_id,
                         device_name="iPhone 16 Pro",
                         client_name="iPhone 16 Pro",
                         peer_id="peer_sim_nl_iphone",
