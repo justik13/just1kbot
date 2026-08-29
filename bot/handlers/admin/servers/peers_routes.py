@@ -269,16 +269,16 @@ async def show_server_peers(
         elif item["type"] == "pending":
             p_status = item.get("provisioning_status", "pending_create")
             if p_status == "pending_create":
-                badge = "⏳ <b>[Создаётся]</b>"
+                badge = texts.ADMIN_SERVER_PEER_BADGE_PENDING
                 icon = "⏳"
             elif p_status == "create_cleanup_pending":
-                badge = "🧹 <b>[Очистка сбоя]</b>"
+                badge = texts.ADMIN_SERVER_PEER_BADGE_CLEANUP
                 icon = "🧹"
             elif p_status == "create_failed":
-                badge = "❌ <b>[Сбой создания]</b>"
+                badge = texts.ADMIN_SERVER_PEER_BADGE_FAILED
                 icon = "❌"
             else:
-                badge = f"⏳ <b>[{p_status}]</b>"
+                badge = texts.ADMIN_SERVER_PEER_BADGE_DEFAULT.format(status=p_status)
                 icon = "⏳"
 
             rendered += texts.ADMIN_SERVER_PEER_PENDING_ROW.format(
