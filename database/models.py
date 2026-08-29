@@ -26,8 +26,6 @@ from sqlalchemy.orm import (
     relationship,
 )
 
-from enum import StrEnum
-
 from config.constants import AMNEZIA_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
@@ -50,16 +48,9 @@ from config.enums import (
     VPNProvisioningStatus,
     WebhookInboxStatus,
 )
+from database.sql_helpers import sql_enum_in
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
-
-
-def sql_enum_in(column: str, enum_cls: type[StrEnum]) -> str:
-    """Build a SQL CheckConstraint IN clause strictly derived from a canonical StrEnum."""
-    if not isinstance(column, str) or not column.isidentifier():
-        raise ValueError(f"Invalid SQL column identifier: {column!r}")
-    escaped = ", ".join(f"'{str(s.value).replace("'", "''")}'" for s in enum_cls)
-    return f"{column} IN ({escaped})"
 
 
 API_OPERATION_TYPES = tuple(s.value for s in ApiOperationType)

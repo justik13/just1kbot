@@ -176,7 +176,7 @@ do_uninstall() {
     rm -f "$conf_file"
 
     # Удаляем rate limit только если не осталось других активных сайтов just1kbot-amnezia
-    if ! ls /etc/nginx/sites-available/just1kbot-amnezia-* >/dev/null 2>&1; then
+    if ! ls /etc/nginx/sites-enabled/just1kbot-amnezia-* >/dev/null 2>&1; then
         rm -f /etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf
     fi
 

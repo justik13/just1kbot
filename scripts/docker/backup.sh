@@ -24,9 +24,17 @@ PG_HOST="${POSTGRES_HOST:-db}"
 PG_USER="${POSTGRES_USER:-just1kbot}"
 PG_DB="${POSTGRES_DB:-just1kbot_bot}"
 
-pg_dump -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" | gzip > "$BACKUP_FILE"
+if ! pg_dump -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" | gzip > "$BACKUP_FILE"; then
+    echo "ERROR: pg_dump or gzip pipeline failed."
+    exit 1
+fi
 
 unset PGPASSWORD
+
+if [ ! -s "$BACKUP_FILE" ] || ! gzip -t "$BACKUP_FILE" 2>/dev/null; then
+    echo "ERROR: Backup archive is empty or failed gzip integrity check."
+    exit 1
+fi
 
 echo "Шифрование backup (atomic write)..."
 age -r "$BACKUP_AGE_RECIPIENT" -o "${ENCRYPTED_FILE}.tmp" "$BACKUP_FILE"
@@ -50,7 +58,7 @@ fi
 
 echo "Backup создан: ${ENCRYPTED_FILE}"
 
-# Keep a short local recovery window; independent remote retention is managed
-# by the remote storage policy.
-find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +7 -delete
+# Keep local recovery window aligned with cli.sh policy (14 days); independent
+# remote retention is managed by the remote storage policy.
+find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +14 -delete
 echo "Старые локальные бекапы удалены."

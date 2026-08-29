@@ -38,6 +38,19 @@ class CliBehaviouralTests(unittest.TestCase):
         # Create dummy docker-compose.yml so cli.sh recognizes PROJECT_DIR
         (self.project_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
 
+        # Create bin dir with docker stub for preflight docker daemon checks in test environment
+        self.bin_dir = self.root / "bin"
+        self.bin_dir.mkdir(parents=True, exist_ok=True)
+        docker_stub = self.bin_dir / "docker"
+        docker_stub.write_text(
+            '#!/bin/bash\n'
+            'if [[ "$1" == "info" ]]; then exit 0; fi\n'
+            'if [[ "$1" == "compose" && "$2" == "version" ]]; then echo "Docker Compose version v2.27.0"; exit 0; fi\n'
+            'exit 1\n',
+            encoding="utf-8",
+        )
+        docker_stub.chmod(0o755)
+
     def tearDown(self):
         self.test_dir.cleanup()
 
@@ -46,6 +59,7 @@ class CliBehaviouralTests(unittest.TestCase):
         proc_env = os.environ.copy()
         proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
         proc_env["JUST1KBOT_DIR"] = self.project_dir.as_posix()
+        proc_env["PATH"] = f"{self.bin_dir.as_posix()}:{proc_env.get('PATH', '')}"
         if env_vars:
             proc_env.update(env_vars)
 
@@ -247,44 +261,80 @@ fi
         branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
         self.assertIn("backup-diverged-", branches)
 
+    def test_preflight_fails_when_admin_ids_non_numeric(self):
+        """cmd_preflight rejects ADMIN_IDS if non-numeric, negative, or malformed."""
+        for bad_val in ["[abc]", "[-1]", "[123,,456]"]:
+            with self.subTest(bad_val=bad_val):
+                env_content = (
+                    "BOT_TOKEN=token123\n"
+                    "POSTGRES_USER=user\n"
+                    "POSTGRES_PASSWORD=pass\n"
+                    "POSTGRES_DB=db\n"
+                    "DB_ENCRYPTION_KEY=key\n"
+                    "BACKUP_AGE_RECIPIENT=age1test\n"
+                    f"ADMIN_IDS={bad_val}\n"
+                    "DOMAIN=vpn.example.com\n"
+                    "SSL_EMAIL=admin@example.com\n"
+                    "SUPPORT_USERNAME=support\n"
+                    "YOOKASSA_SHOP_ID=123\n"
+                    "YOOKASSA_SECRET_KEY=sec\n"
+                )
+                (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+                (self.project_dir / ".env").chmod(0o600)
+
+                proc = self._run_cli_command("preflight")
+                self.assertEqual(proc.returncode, 1)
+                self.assertIn("Некорректный ID администратора", proc.stdout + proc.stderr)
+
+    def test_update_aborts_immediately_when_preflight_fails(self):
+        """cmd_update fails closed and halts immediately if preflight fails."""
+        proc = self._run_cli_command("update")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("предварительная проверка не пройдена", proc.stdout + proc.stderr)
+        self.assertNotIn("Шаг 2/6", proc.stdout + proc.stderr)
+
+    def test_update_aborts_when_backup_fails(self):
+        """cmd_update fails closed and halts if backup cannot be created."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("update")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("не удалось создать страховочный бэкап", proc.stdout + proc.stderr)
+        self.assertNotIn("Шаг 3/6", proc.stdout + proc.stderr)
+
     # -------------------------------------------------------------------------
     # 3. Setup Apt Lock Timeout Behavioural Test
     # -------------------------------------------------------------------------
 
     def test_setup_wait_for_apt_locks_times_out_and_returns_error(self):
-        """wait_for_apt_locks with exceeded timeout outputs error and terminates loop with return 1."""
+        """Production wait_for_apt_locks with exceeded timeout outputs error and terminates loop with return 1."""
         test_script = f"""
-set -u
 source "{self.project_dir.as_posix()}/scripts/setup.sh" >/dev/null 2>&1 || true
 
-# Mock check_apt_locked to always return 0 (locked)
 check_apt_locked() {{
     return 0
 }}
 
-# Override wait_for_apt_locks with a 1s max_wait for fast testing
-wait_for_apt_locks_test() {{
-    local waited=0 max_wait=2
-    while check_apt_locked; do
-        sleep 1
-        waited=$((waited + 1))
-        if (( waited >= max_wait )); then
-            echo "TIMEOUT_EXCEEDED"
-            return 1
-        fi
-    done
-}}
-
-if wait_for_apt_locks_test; then
-    echo "UNEXPECTED_SUCCESS"
-else
-    echo "EXPECTED_TIMEOUT_RETURN_1"
-fi
+wait_for_apt_locks 1
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
-        self.assertIn("TIMEOUT_EXCEEDED", proc.stdout)
-        self.assertIn("EXPECTED_TIMEOUT_RETURN_1", proc.stdout)
-        self.assertNotIn("UNEXPECTED_SUCCESS", proc.stdout)
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Не удалось дождаться освобождения apt/dpkg lock", proc.stdout + proc.stderr)
 
     # -------------------------------------------------------------------------
     # 4. Restore Confirmation Safety

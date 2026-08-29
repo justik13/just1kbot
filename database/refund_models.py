@@ -24,7 +24,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from config.enums import ProviderRefundOperationStatus
-from database.models import Base, sql_enum_in
+from database.models import Base
+from database.sql_helpers import sql_enum_in
 from utils.datetime_helpers import now_utc
 
 

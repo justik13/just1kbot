@@ -175,11 +175,20 @@ cmd_preflight() {
     done
 
     # 3.1. Проверка идентификаторов администратора (ADMIN_IDS или ADMIN_TELEGRAM_ID)
-    local admin_ids
-    admin_ids=$(grep -E "^(ADMIN_IDS|ADMIN_TELEGRAM_ID)=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"[]" || true)
-    if [[ -z "$admin_ids" ]]; then
+    local admin_raw
+    admin_raw=$(grep -E "^(ADMIN_IDS|ADMIN_TELEGRAM_ID)=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"[]" || true)
+    if [[ -z "$admin_raw" ]]; then
         error "В .env отсутствует обязательная переменная администратора: ADMIN_IDS='[123456789]'"
         has_errors=true
+    else
+        IFS=',' read -ra id_tokens <<< "$admin_raw"
+        for token in "${id_tokens[@]}"; do
+            token="$(echo "$token" | tr -d ' ')"
+            if [[ -z "$token" ]] || [[ ! "$token" =~ ^[0-9]+$ ]] || [[ "$token" -le 0 ]]; then
+                error "Некорректный ID администратора в .env: '$token'. Должен быть положительным целым числом (Telegram user ID)."
+                has_errors=true
+            fi
+        done
     fi
 
     # 4. Проверка устаревших/неподдерживаемых переменных
@@ -240,7 +249,10 @@ cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
 
     info "Шаг 1/6. Предварительная проверка конфигурации (Preflight Check)..."
-    cmd_preflight
+    if ! cmd_preflight; then
+        error "Обновление остановлено: предварительная проверка не пройдена."
+        return 1
+    fi
 
     # Проверка наличия локальных незакоммиченных изменений
     local did_stash=false
@@ -266,13 +278,19 @@ cmd_update() {
 
     info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
     LAST_BACKUP_FILE=""
-    cmd_backup
+    if ! cmd_backup || [[ -z "$LAST_BACKUP_FILE" ]] || [[ ! -f "$LAST_BACKUP_FILE" ]]; then
+        error "Обновление остановлено: не удалось создать страховочный бэкап базы данных."
+        return 1
+    fi
     local pre_update_backup="$LAST_BACKUP_FILE"
 
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
-    git fetch origin "$current_branch"
+    if ! git fetch origin "$current_branch"; then
+        error "Обновление остановлено: не удалось связаться с origin/$current_branch."
+        return 1
+    fi
 
     local local_hash remote_hash base_hash
     local_hash=$(git rev-parse HEAD 2>/dev/null || true)
@@ -510,7 +528,7 @@ rotate_backups() {
     local backups=()
     while IFS= read -r f; do
         [[ -n "$f" ]] && backups+=("$f")
-    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r)
+    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' || find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r)
 
     local total="${#backups[@]}"
     if (( total > keep_count )); then
@@ -551,7 +569,9 @@ cmd_backup() {
             pg_user="${pg_user:-just1kbot}"
             pg_db="${pg_db:-just1kbot_bot}"
 
-            if docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"; then
+            docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"
+            local dump_status=("${PIPESTATUS[@]}")
+            if [[ "${dump_status[0]}" -eq 0 ]] && [[ "${dump_status[1]}" -eq 0 ]]; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
                         rm -rf "$tmp_backup_dir"
@@ -561,10 +581,14 @@ cmd_backup() {
                         LAST_BACKUP_FILE="$backup_file"
                         rotate_backups 14
                         return 0
+                    else
+                        warn "Ошибка шифрования дампа утилитой age."
                     fi
                 else
                     warn "Дамп PostgreSQL пуст или поврежден (gzip integrity check failed)."
                 fi
+            else
+                warn "Ошибка выполнения pg_dump в контейнере db (pg_dump code=${dump_status[0]}, gzip code=${dump_status[1]})."
             fi
 
             if [[ -s "$dump_err" ]]; then
@@ -577,8 +601,8 @@ cmd_backup() {
     # Способ 2: Через отдельный контейнер backup (compose profile tools)
     if docker compose --profile tools run --rm backup; then
         local latest_backup
-        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
-        if [[ -n "$latest_backup" ]]; then
+        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f -exec stat -c "%Y %n" {} + 2>/dev/null | sort -rn | awk '{print $2}' | head -1 || find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
+        if [[ -n "$latest_backup" ]] && [[ -f "$latest_backup" ]] && [[ -s "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             # shellcheck disable=SC2012
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
@@ -689,18 +713,23 @@ cmd_restore() {
     info "3/5. Остановка бота перед восстановлением..."
     docker compose stop bot
 
-    info "4/5. Полная переинициализация базы данных и накат дампа..."
-    local pg_user pg_db
-    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_user="${pg_user:-just1kbot}"
-    pg_db="${pg_db:-just1kbot_bot}"
+    info "3.1/5. Создание предварительного страховочного дампа текущей БД..."
+    local pre_restore_backup_file="${tmp_dir}/pre_restore_safety.sql"
+    docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" > "$pre_restore_backup_file" 2>/dev/null || true
 
+    info "4/5. Полная переинициализация базы данных и накат дампа..."
     docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
     docker compose exec -T db createdb -U "$pg_user" "$pg_db"
 
     if ! docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$tmp_sql"; then
         error "Ошибка при накате SQL дампа в PostgreSQL!"
+        if [[ -s "$pre_restore_backup_file" ]]; then
+            warn "Попытка отката к состоянию базы данных до начала операции восстановления..."
+            docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
+            docker compose exec -T db createdb -U "$pg_user" "$pg_db"
+            docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$pre_restore_backup_file" >/dev/null 2>&1 || true
+            warn "Исходное состояние базы данных возвращено."
+        fi
         return 1
     fi
 

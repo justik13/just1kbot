@@ -76,29 +76,32 @@ check_existing_install() {
     fi
 }
 
-# --- Ожидание освобождения apt/dpkg блокировок ---
-wait_for_apt_locks() {
-    local waited=0 max_wait=300
+# --- Проверка занятости apt/dpkg блокировок ---
+check_apt_locked() {
     local lock_files=(
         /var/lib/dpkg/lock-frontend
         /var/lib/dpkg/lock
         /var/lib/apt/lists/lock
         /var/cache/apt/archives/lock
     )
+    if command -v fuser >/dev/null 2>&1; then
+        if fuser "${lock_files[@]}" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -f '(apt-get|dpkg|unattended-upgrade|apt\.systemd\.daily)' >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
 
-    check_apt_locked() {
-        if command -v fuser >/dev/null 2>&1; then
-            if fuser "${lock_files[@]}" >/dev/null 2>&1; then
-                return 0
-            fi
-        fi
-        if command -v pgrep >/dev/null 2>&1; then
-            if pgrep -f '(apt-get|dpkg|unattended-upgrade|apt\.systemd\.daily)' >/dev/null 2>&1; then
-                return 0
-            fi
-        fi
-        return 1
-    }
+# --- Ожидание освобождения apt/dpkg блокировок ---
+# shellcheck disable=SC2120
+wait_for_apt_locks() {
+    local max_wait="${1:-300}"
+    local waited=0
 
     while check_apt_locked; do
         if (( waited == 0 )); then
@@ -165,10 +168,11 @@ install_dependencies() {
 
     # Настройка брандмауэра UFW (если активен)
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        info "Брандмауэр UFW активен. Открытие портов 80 и 443 для веб-сервера Caddy и webhooks..."
+        info "Брандмауэр UFW активен. Открытие портов 80/tcp, 443/tcp и 443/udp (QUIC/HTTP3) для Caddy..."
         ufw allow 80/tcp >/dev/null 2>&1 || true
         ufw allow 443/tcp >/dev/null 2>&1 || true
-        log "Порты 80/tcp и 443/tcp разрешены в UFW."
+        ufw allow 443/udp >/dev/null 2>&1 || true
+        log "Порты 80/tcp, 443/tcp и 443/udp разрешены в UFW."
     fi
 
     # Проверка занятости портов 80 и 443 сторонними процессами
