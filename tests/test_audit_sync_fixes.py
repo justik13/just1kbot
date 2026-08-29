@@ -61,6 +61,9 @@ class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
         with open("scripts/cli.sh", "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn("config", content)
+        self.assertIn("preflight", content)
+        self.assertIn("cmd_preflight", content)
+        self.assertIn("cmd_restore", content)
 
 
 if __name__ == "__main__":

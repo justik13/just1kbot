@@ -31,16 +31,18 @@ class PurchaseLogEntry:
     created_at: datetime
 
 
-AUDIT_PURCHASE_ACTIONS = [
-    AdminAuditAction.GRANT.value,
-    AdminAuditAction.ADMIN_SUB_GRANT.value,
-    AdminAuditAction.EXTEND.value,
-    AdminAuditAction.ADMIN_SUB_EXTEND.value,
-    AdminAuditAction.CHANGE_TARIFF.value,
-    AdminAuditAction.ADMIN_SUB_CHANGE.value,
-    AdminAuditAction.REDUCE.value,
-    AdminAuditAction.ADMIN_SUB_REDUCE.value,
-]
+_AUDIT_ACTION_TO_OP: dict[AdminAuditAction, tuple[str, AdminAuditAction]] = {
+    AdminAuditAction.GRANT: ("grant", AdminAuditAction.ADMIN_SUB_GRANT),
+    AdminAuditAction.ADMIN_SUB_GRANT: ("grant", AdminAuditAction.ADMIN_SUB_GRANT),
+    AdminAuditAction.EXTEND: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND),
+    AdminAuditAction.ADMIN_SUB_EXTEND: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND),
+    AdminAuditAction.CHANGE_TARIFF: ("change", AdminAuditAction.ADMIN_SUB_CHANGE),
+    AdminAuditAction.ADMIN_SUB_CHANGE: ("change", AdminAuditAction.ADMIN_SUB_CHANGE),
+    AdminAuditAction.REDUCE: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE),
+    AdminAuditAction.ADMIN_SUB_REDUCE: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE),
+}
+
+AUDIT_PURCHASE_ACTIONS: list[str] = [a.value for a in _AUDIT_ACTION_TO_OP]
 
 
 def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
@@ -53,20 +55,17 @@ def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
 
 
 def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
-    action_val = str(action.value if hasattr(action, "value") else action)
-    mapping = {
-        AdminAuditAction.GRANT.value: ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value),
-        AdminAuditAction.ADMIN_SUB_GRANT.value: ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value),
-        AdminAuditAction.EXTEND.value: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND.value),
-        AdminAuditAction.ADMIN_SUB_EXTEND.value: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND.value),
-        AdminAuditAction.CHANGE_TARIFF.value: ("change", AdminAuditAction.ADMIN_SUB_CHANGE.value),
-        AdminAuditAction.ADMIN_SUB_CHANGE.value: ("change", AdminAuditAction.ADMIN_SUB_CHANGE.value),
-        AdminAuditAction.REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
-        AdminAuditAction.ADMIN_SUB_REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
-    }
-    if action_val in mapping:
-        op_type, canonical_action = mapping[action_val]
-        title = texts.AUDIT_ACTIONS.get(action_val) or texts.AUDIT_ACTIONS.get(canonical_action) or action_val
+    action_val = action.value if isinstance(action, AdminAuditAction) else str(action)
+    action_enum = getattr(AdminAuditAction, action_val, None) or next(
+        (a for a in AdminAuditAction if a.value == action_val), None
+    )
+    if action_enum and action_enum in _AUDIT_ACTION_TO_OP:
+        op_type, canonical_enum = _AUDIT_ACTION_TO_OP[action_enum]
+        title = (
+            texts.AUDIT_ACTIONS.get(action_val)
+            or texts.AUDIT_ACTIONS.get(canonical_enum.value)
+            or action_val
+        )
     else:
         op_type = "grant"
         title = texts.AUDIT_ACTIONS.get(action_val) or action_val

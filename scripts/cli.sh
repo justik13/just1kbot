@@ -127,9 +127,91 @@ cmd_logs() {
     )
 }
 
+# --- 2.5. Предварительная проверка конфигурации (Pre-flight Check) ---
+cmd_preflight() {
+    echo -e "\n${BOLD}${BLUE}=== 🔍 ПРЕДВАРИТЕЛЬНАЯ ПРОВЕРКА (PRE-FLIGHT CHECK) ===${NC}\n"
+    local has_errors=false
+
+    # 1. Проверка наличия .env
+    if [[ ! -f "${PROJECT_DIR}/.env" ]]; then
+        error "Файл конфигурации ${PROJECT_DIR}/.env не найден!"
+        return 1
+    fi
+
+    # 2. Проверка прав .env (не должен быть доступен всем)
+    local env_perms
+    env_perms=$(stat -c "%a" "${PROJECT_DIR}/.env" 2>/dev/null || stat -f "%Lp" "${PROJECT_DIR}/.env" 2>/dev/null || echo "")
+    if [[ -n "$env_perms" ]] && [[ "$env_perms" =~ [4567]$ ]]; then
+        warn "Файл .env имеет небезопасные права доступа ($env_perms). Устанавливаем: chmod 600 ${PROJECT_DIR}/.env"
+        chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
+    fi
+
+    # 3. Обязательные переменные окружения
+    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY ADMIN_TELEGRAM_ID BACKUP_AGE_RECIPIENT)
+    for var_name in "${req_vars[@]}"; do
+        local val
+        val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+        if [[ -z "$val" ]]; then
+            error "В .env отсутствует или пуста обязательная переменная: $var_name"
+            has_errors=true
+        fi
+    done
+
+    # 4. Проверка устаревших/неподдерживаемых переменных
+    local legacy_vars=(INCY_HOST INCY_API_KEY AMNEZIA_BRIDGE_HMAC_SECRET)
+    for legacy_name in "${legacy_vars[@]}"; do
+        if grep -Eq "^${legacy_name}=" "${PROJECT_DIR}/.env"; then
+            warn "Обнаружена устаревшая переменная $legacy_name в .env. Она больше не используется проектом."
+        fi
+    done
+
+    # 5. Проверка формата SSL_EMAIL (если задан)
+    local ssl_email
+    ssl_email=$(grep -E "^SSL_EMAIL=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+    if [[ -n "$ssl_email" ]] && [[ ! "$ssl_email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        error "Некорректный email для Let's Encrypt в SSL_EMAIL: '$ssl_email'"
+        has_errors=true
+    fi
+
+    # 6. Проверка формата DOMAIN (если задан)
+    local domain
+    domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+    if [[ -n "$domain" ]] && [[ "$domain" =~ ^https?:// ]]; then
+        error "DOMAIN не должен содержать протокол 'http://' или 'https://' (укажите только имя хоста, например: vpn.example.com)"
+        has_errors=true
+    fi
+
+    # 7. Проверка доступности Docker и Docker Compose
+    if ! command -v docker >/dev/null 2>&1; then
+        error "Docker не установлен в системе!"
+        has_errors=true
+    elif ! docker compose version >/dev/null 2>&1; then
+        error "Docker Compose (v2) не установлен или недоступен!"
+        has_errors=true
+    fi
+
+    # 8. Проверка свободного места на диске (минимум 500 МБ)
+    local free_kb
+    free_kb=$(df -k "${PROJECT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || echo "")
+    if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb < 512000 )); then
+        warn "Мало свободного места на диске: $(( free_kb / 1024 )) МБ. Рекомендуется минимум 500 МБ для сборки и бэкапов."
+    fi
+
+    if [ "$has_errors" = "true" ]; then
+        error "Предварительная проверка (preflight) завершилась с ошибками. Исправьте конфигурацию перед продолжением."
+        return 1
+    fi
+
+    log "Предварительная проверка (preflight) успешно пройдена: конфигурация корректна."
+    return 0
+}
+
 # --- 3. Безопасное обновление ---
 cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
+
+    info "Шаг 1/6. Предварительная проверка конфигурации (Preflight Check)..."
+    cmd_preflight
 
     # Проверка наличия локальных незакоммиченных изменений
     local dirty_changes
@@ -148,25 +230,61 @@ cmd_update() {
         fi
     fi
 
-    info "Шаг 1/5. Создание страховочного бэкапа базы данных..."
     local rollback_commit=""
     rollback_commit="$(git rev-parse HEAD 2>/dev/null || true)"
+
+    info "Шаг 2/6. Создание страховочного бэкапа базы данных..."
+    LAST_BACKUP_FILE=""
     cmd_backup
+    local pre_update_backup="$LAST_BACKUP_FILE"
 
     local current_branch
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    info "Шаг 2/5. Получение обновлений из Git (ветка: $current_branch)..."
+    info "Шаг 3/6. Получение обновлений из Git (ветка: $current_branch)..."
     git fetch origin "$current_branch"
 
-    if git merge-base --is-ancestor HEAD "origin/$current_branch" 2>/dev/null; then
+    local local_hash remote_hash base_hash
+    local_hash=$(git rev-parse HEAD 2>/dev/null || true)
+    remote_hash=$(git rev-parse "origin/$current_branch" 2>/dev/null || true)
+    base_hash=$(git merge-base HEAD "origin/$current_branch" 2>/dev/null || true)
+
+    if [[ "$local_hash" == "$remote_hash" ]]; then
+        info "Установлена актуальная версия ($local_hash). Новых коммитов в remote нет."
+    elif [[ "$base_hash" == "$local_hash" ]]; then
+        info "Обнаружены новые коммиты в origin/$current_branch. Выполняем безопасное обновление (fast-forward pull)..."
         git pull --ff-only origin "$current_branch"
+    elif [[ "$base_hash" == "$remote_hash" ]]; then
+        local ahead_count
+        ahead_count=$(git rev-list --count "origin/$current_branch..HEAD" 2>/dev/null || echo "несколько")
+        warn "Локальная ветка опережает origin/$current_branch на $ahead_count коммит(ов)."
+        warn "Автоматическая перезапись отменена во избежание потери локальных коммитов или hotfix."
+        echo ""
+        read -r -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite
+        if [[ "$force_overwrite" =~ ^[Yy]$ ]]; then
+            local backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
+            git branch "$backup_branch"
+            log "Локальные коммиты сохранены в резервной ветке: $backup_branch"
+            git reset --hard "origin/$current_branch"
+        else
+            info "Обновление отменено пользователем."
+            return 0
+        fi
     else
-        warn "Прямое слияние (fast-forward) невозможно из-за расхождения истории коммитов."
-        info "Выполняем безопасную синхронизацию рабочей копии с origin/$current_branch..."
-        git reset --hard "origin/$current_branch"
+        warn "Обнаружено расхождение истории коммитов между локальной версией и origin/$current_branch."
+        echo ""
+        read -r -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge
+        if [[ "$confirm_diverge" =~ ^[Yy]$ ]]; then
+            local backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
+            git branch "$backup_branch"
+            log "Локальная история сохранена в ветке $backup_branch"
+            git reset --hard "origin/$current_branch"
+        else
+            info "Обновление отменено пользователем."
+            return 0
+        fi
     fi
 
-    info "Шаг 3/5. Сборка образов и запуск миграций..."
+    info "Шаг 4/6. Сборка образов и применение миграций..."
     if ! docker compose build; then
         error "Ошибка при сборке Docker-образов!"
         if [[ -n "$rollback_commit" ]]; then
@@ -187,10 +305,10 @@ cmd_update() {
         return 1
     fi
 
-    info "Запуск обновлённых сервисов..."
+    info "Шаг 5/6. Запуск обновлённых сервисов..."
     docker compose up -d
 
-    info "Шаг 4/5. Проверка статуса здоровья сервисов (Healthcheck)..."
+    info "Шаг 6/6. Проверка статуса здоровья сервисов (Healthcheck)..."
     local timeout=60
     local elapsed=0
     local update_ok=false
@@ -265,14 +383,18 @@ cmd_update() {
             else
                 error "КРИТИЧЕСКАЯ ОШИБКА: Сервисы не смогли подняться даже после отката кода!"
                 warn "Вероятная причина: применённая миграция изменила схему БД и несовместима со старой версией кода."
-                warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+                if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+                    warn "Для восстановления исходного состояния базы данных выполните: just1kbot restore $pre_update_backup"
+                else
+                    warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+                fi
                 docker compose logs --tail=50 bot
             fi
         fi
         return 1
     fi
 
-    info "Шаг 5/5. Просмотр последних логов бота:"
+    info "Просмотр последних логов бота:"
     echo -e "${CYAN}Нажмите Ctrl+C для возврата в меню...${NC}\n"
     cmd_logs "bot"
 }
@@ -320,6 +442,7 @@ cmd_backup() {
                         rm -f "$tmp_gz" "$dump_err"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
                         ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+                        LAST_BACKUP_FILE="$backup_file"
                         rotate_backups 14
                         return 0
                     fi
@@ -343,6 +466,7 @@ cmd_backup() {
         if [[ -n "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+            LAST_BACKUP_FILE="$latest_backup"
             rotate_backups 14
             return 0
         fi
@@ -354,6 +478,7 @@ cmd_backup() {
 
 # --- 5. Безопасное восстановление из бэкапа ---
 cmd_restore() {
+    local direct_backup_file="${1:-}"
     echo -e "\n${BOLD}${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${BOLD}${RED}║                 ⚠️  ВНИМАНИЕ: ВОССТАНОВЛЕНИЕ БАЗЫ ДАННЫХ                    ║${NC}"
     echo -e "${BOLD}${RED}╠══════════════════════════════════════════════════════════════════════════════╣${NC}"
@@ -367,35 +492,41 @@ cmd_restore() {
         return 0
     fi
 
-    # Поиск доступных бэкапов
-    local backups_list=()
-    while IFS= read -r f; do
-        [[ -n "$f" ]] && backups_list+=("$f")
-    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r)
+    local selected_backup=""
+    if [[ -n "$direct_backup_file" ]] && [[ -f "$direct_backup_file" ]]; then
+        selected_backup="$direct_backup_file"
+        info "Выбран файл для восстановления: $selected_backup"
+    else
+        # Поиск доступных бэкапов
+        local backups_list=()
+        while IFS= read -r f; do
+            [[ -n "$f" ]] && backups_list+=("$f")
+        done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r)
 
-    if [ "${#backups_list[@]}" -eq 0 ]; then
-        error "В директории ./backups/ не найдено файлов .sql.gz.age для восстановления."
-        return 1
+        if [ "${#backups_list[@]}" -eq 0 ]; then
+            error "В директории ./backups/ не найдено файлов .sql.gz.age для восстановления."
+            return 1
+        fi
+
+        echo -e "\nДоступные резервные копии:"
+        local i=1
+        for b in "${backups_list[@]}"; do
+            local sz
+            sz=$(ls -lh "$b" | awk '{print $5}')
+            echo -e "  [${BOLD}$i${NC}] $b ($sz)"
+            i=$((i+1))
+        done
+
+        echo ""
+        read -r -p "Выберите номер файла для восстановления [1-${#backups_list[@]}]: " choice_idx
+        if ! [[ "$choice_idx" =~ ^[0-9]+$ ]] || [ "$choice_idx" -lt 1 ] || [ "$choice_idx" -gt "${#backups_list[@]}" ]; then
+            error "Неверный выбор."
+            return 1
+        fi
+
+        selected_backup="${backups_list[$((choice_idx-1))]}"
+        info "Выбран файл для восстановления: $selected_backup"
     fi
-
-    echo -e "\nДоступные резервные копии:"
-    local i=1
-    for b in "${backups_list[@]}"; do
-        local sz
-        sz=$(ls -lh "$b" | awk '{print $5}')
-        echo -e "  [${BOLD}$i${NC}] $b ($sz)"
-        i=$((i+1))
-    done
-
-    echo ""
-    read -r -p "Выберите номер файла для восстановления [1-${#backups_list[@]}]: " choice_idx
-    if ! [[ "$choice_idx" =~ ^[0-9]+$ ]] || [ "$choice_idx" -lt 1 ] || [ "$choice_idx" -gt "${#backups_list[@]}" ]; then
-        error "Неверный выбор."
-        return 1
-    fi
-
-    local selected_backup="${backups_list[$((choice_idx-1))]}"
-    info "Выбран файл для восстановления: $selected_backup"
 
     # Запрос приватного ключа age
     local age_key_file=""
@@ -721,11 +852,14 @@ main() {
             doctor|check)
                 cmd_doctor
                 ;;
+            preflight|check-env)
+                cmd_preflight
+                ;;
             clean|prune)
                 cmd_clean
                 ;;
             help|-h|--help)
-                echo -e "Использование: just1kbot [status|logs|update|backup|restore|restart|start|stop|config|doctor|clean]"
+                echo -e "Использование: just1kbot [status|logs|update|preflight|backup|restore|restart|start|stop|config|doctor|clean]"
                 ;;
             *)
                 error "Неизвестная команда: $1. Используйте 'just1kbot help'."

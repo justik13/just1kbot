@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # ── Security ──
     ALLOW_LOCAL_HTTP: bool = False
     ALLOW_LOCAL_HTTPS: bool = False
-    TRUSTED_PROXIES: str = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+    TRUSTED_PROXIES: str = "127.0.0.1,::1,172.16.0.0/12"
 
     LOG_LEVEL: str = "INFO"
 
