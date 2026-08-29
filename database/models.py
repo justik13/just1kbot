@@ -40,6 +40,7 @@ from config.enums import (
     PaymentCheckoutStatus,
     PaymentDisputeStatus,
     PaymentFulfillmentStatus,
+    PaymentProviderOperationStatus,
     PaymentProviderStatus,
     PaymentQueueStatus,
     PaymentReconciliationStatus,
@@ -66,6 +67,7 @@ API_OPERATION_STATUSES = tuple(s.value for s in ApiOperationStatus)
 PAYMENT_PROVIDER_STATUSES = tuple(s.value for s in PaymentProviderStatus)
 PAYMENT_FULFILLMENT_STATUSES = tuple(s.value for s in PaymentFulfillmentStatus)
 PAYMENT_RECONCILIATION_STATUSES = tuple(s.value for s in PaymentReconciliationStatus)
+PAYMENT_PROVIDER_OPERATION_STATUSES = tuple(s.value for s in PaymentProviderOperationStatus)
 PAYMENT_QUEUE_STATUSES = tuple(s.value for s in PaymentQueueStatus)
 ACCOUNT_LEDGER_ENTRY_TYPES = tuple(s.value for s in AccountLedgerEntryType)
 ACCOUNT_RESERVATION_TYPES = tuple(s.value for s in AccountReservationType)
@@ -834,7 +836,7 @@ class PaymentProviderOperation(Base):
     __tablename__ = "payment_provider_operations"
     __table_args__ = (
         CheckConstraint("operation_type IN ('create_payment','reconcile_payment')", name="ck_payment_provider_operations_type"),
-        CheckConstraint(sql_enum_in("status", PaymentQueueStatus), name="ck_payment_provider_operations_status"),
+        CheckConstraint(sql_enum_in("status", PaymentProviderOperationStatus), name="ck_payment_provider_operations_status"),
         Index("ix_payment_provider_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_payment_provider_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
         Index("uq_payment_provider_create", "payment_id", unique=True, postgresql_where=text("operation_type='create_payment'")),
@@ -1134,6 +1136,12 @@ class APIOperation(Base):
         server_default=text("now()"),
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+DEFAULT_MAINTENANCE_MESSAGE = (
+    "🛠 Бот находится на техническом обслуживании. "
+    "Пожалуйста, попробуйте позже."
+)
 
 
 class MaintenanceMode(Base):

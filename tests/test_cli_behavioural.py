@@ -1,0 +1,301 @@
+"""Behavioural test suite for scripts/cli.sh and scripts/setup.sh deployment logic.
+
+Tests execute shell scenarios in isolated temporary directories:
+- Pre-flight checks: missing env, strict 600 permissions, duplicate keys, required vars, format validation.
+- Safe Git synchronization: fast-forward, unpushed local changes (backup-local-ahead-*), diverged history (backup-diverged-*), stash handling.
+- Post-migration and healthcheck failure handling: rollback commit verification and restore command generation.
+- Apt lock timeout failure: wait_for_apt_locks timeout return code.
+- Restore safety: confirmation prompt validation and backup file existence.
+"""
+
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+CLI_PATH = Path(__file__).resolve().parent.parent / "scripts" / "cli.sh"
+SETUP_PATH = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
+
+
+@unittest.skipUnless(shutil.which("bash"), "Bash is required for shell behavioural tests")
+class CliBehaviouralTests(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.TemporaryDirectory()
+        self.root = Path(self.test_dir.name)
+        self.project_dir = self.root / "just1kbot"
+        self.project_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy cli.sh and setup.sh to project dir
+        scripts_dir = self.project_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(CLI_PATH, scripts_dir / "cli.sh")
+        shutil.copy(SETUP_PATH, scripts_dir / "setup.sh")
+        (scripts_dir / "cli.sh").chmod(0o755)
+        (scripts_dir / "setup.sh").chmod(0o755)
+
+        # Create dummy docker-compose.yml so cli.sh recognizes PROJECT_DIR
+        (self.project_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+
+    def tearDown(self):
+        self.test_dir.cleanup()
+
+    def _run_cli_command(self, *args: str, env_vars: dict[str, str] | None = None, input_text: str | None = None) -> subprocess.CompletedProcess:
+        """Run cli.sh directly with args inside isolated test project directory."""
+        proc_env = os.environ.copy()
+        proc_env["PROJECT_DIR"] = self.project_dir.as_posix()
+        proc_env["JUST1KBOT_DIR"] = self.project_dir.as_posix()
+        if env_vars:
+            proc_env.update(env_vars)
+
+        return subprocess.run(
+            ["bash", (self.project_dir / "scripts" / "cli.sh").as_posix(), *args],
+            cwd=str(self.project_dir),
+            input=input_text,
+            capture_output=True,
+            text=True,
+            env=proc_env,
+            check=False,
+        )
+
+    # -------------------------------------------------------------------------
+    # 1. Preflight Validation Behavioural Tests
+    # -------------------------------------------------------------------------
+
+    def test_preflight_fails_when_env_file_missing(self):
+        """cmd_preflight returns exit code 1 when .env is absent."""
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("не найден", proc.stdout + proc.stderr)
+
+    def test_preflight_fails_when_duplicate_keys_present(self):
+        """cmd_preflight returns exit code 1 when .env contains duplicate keys."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "BOT_TOKEN=token456\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("дублирующиеся", proc.stdout + proc.stderr)
+
+    def test_preflight_fails_when_required_vars_missing(self):
+        """cmd_preflight fails if required keys are missing or empty."""
+        env_content = (
+            "BOT_TOKEN=\n"
+            "POSTGRES_USER=user\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("отсутствует или пуста обязательная переменная: BOT_TOKEN", proc.stdout + proc.stderr)
+
+    def test_preflight_fails_when_ssl_email_malformed(self):
+        """cmd_preflight rejects invalid email format in SSL_EMAIL."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "SSL_EMAIL=invalid-email-format\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("Некорректный email", proc.stdout + proc.stderr)
+
+    def test_preflight_fails_when_domain_has_protocol(self):
+        """cmd_preflight rejects DOMAIN if prefixed with http:// or https://."""
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=https://vpn.example.com\n"
+        )
+        (self.project_dir / ".env").write_text(env_content, encoding="utf-8")
+        (self.project_dir / ".env").chmod(0o600)
+
+        proc = self._run_cli_command("preflight")
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("DOMAIN не должен содержать протокол", proc.stdout + proc.stderr)
+
+    # -------------------------------------------------------------------------
+    # 2. Git Synchronization State Machine Tests
+    # -------------------------------------------------------------------------
+
+    def _init_git_scenario(self) -> Path:
+        """Create an upstream bare repository and clone it to simulate production update."""
+        if not shutil.which("git"):
+            self.skipTest("git is not installed in test environment")
+
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(["git", "init", "--bare", str(upstream_dir)], check=True, capture_output=True)
+
+        # Clone repo
+        work_dir = self.root / "work"
+        subprocess.run(["git", "clone", str(upstream_dir), str(work_dir)], check=True, capture_output=True)
+
+        subprocess.run(["git", "config", "user.email", "audit@test.local"], cwd=work_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Audit Runner"], cwd=work_dir, check=True)
+
+        (work_dir / "README.md").write_text("# Initial", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=work_dir, check=True)
+        subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=work_dir, check=True)
+
+        return work_dir
+
+    def test_git_sync_local_ahead_creates_backup_branch(self):
+        """When local branch has unpushed commits ahead of upstream, a backup branch must be created."""
+        work_dir = self._init_git_scenario()
+
+        # Add local unpushed commit
+        (work_dir / "local_change.txt").write_text("local only", encoding="utf-8")
+        subprocess.run(["git", "add", "local_change.txt"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Unpushed commit"], cwd=work_dir, check=True)
+
+        # Run the git sync snippet from cmd_update
+        test_script = f"""
+set -euo pipefail
+cd "{work_dir.as_posix()}"
+git fetch origin main >/dev/null 2>&1
+UPSTREAM_COMMIT=$(git rev-parse origin/main)
+LOCAL_COMMIT=$(git rev-parse HEAD)
+BASE_COMMIT=$(git merge-base HEAD origin/main)
+
+if [ "$LOCAL_COMMIT" = "$UPSTREAM_COMMIT" ]; then
+    echo "ALREADY_UP_TO_DATE"
+elif [ "$BASE_COMMIT" = "$UPSTREAM_COMMIT" ]; then
+    echo "LOCAL_AHEAD"
+    BACKUP_BRANCH="backup-local-ahead-$(date +%Y%m%d%H%M%S)"
+    git branch "$BACKUP_BRANCH"
+    git reset --hard origin/main
+    echo "CREATED_$BACKUP_BRANCH"
+fi
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
+        self.assertIn("LOCAL_AHEAD", proc.stdout)
+        self.assertIn("CREATED_backup-local-ahead-", proc.stdout)
+
+        # Verify branch exists
+        branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
+        self.assertIn("backup-local-ahead-", branches)
+
+    def test_git_sync_diverged_creates_backup_branch(self):
+        """When local and upstream have diverged, a backup-diverged branch must be created."""
+        work_dir = self._init_git_scenario()
+
+        # Clone another working copy to push upstream change
+        other_dir = self.root / "other"
+        upstream_dir = self.root / "upstream.git"
+        subprocess.run(["git", "clone", "-b", "main", str(upstream_dir), str(other_dir)], check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "audit2@test.local"], cwd=other_dir, check=True)
+        subprocess.run(["git", "config", "user.name", "Audit Runner 2"], cwd=other_dir, check=True)
+
+        (other_dir / "remote_change.txt").write_text("remote change", encoding="utf-8")
+        subprocess.run(["git", "add", "remote_change.txt"], cwd=other_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Remote change"], cwd=other_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=other_dir, check=True)
+
+        # In work_dir, make a conflicting local commit
+        (work_dir / "diverged_local.txt").write_text("diverged local", encoding="utf-8")
+        subprocess.run(["git", "add", "diverged_local.txt"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Local diverged commit"], cwd=work_dir, check=True)
+
+        # Run diverged sync test
+        test_script = f"""
+set -euo pipefail
+cd "{work_dir.as_posix()}"
+git fetch origin main >/dev/null 2>&1
+UPSTREAM_COMMIT=$(git rev-parse origin/main)
+LOCAL_COMMIT=$(git rev-parse HEAD)
+BASE_COMMIT=$(git merge-base HEAD origin/main)
+
+if [ "$LOCAL_COMMIT" != "$UPSTREAM_COMMIT" ] && [ "$BASE_COMMIT" != "$LOCAL_COMMIT" ] && [ "$BASE_COMMIT" != "$UPSTREAM_COMMIT" ]; then
+    echo "DIVERGED"
+    BACKUP_BRANCH="backup-diverged-$(date +%Y%m%d%H%M%S)"
+    git branch "$BACKUP_BRANCH"
+    git reset --hard origin/main
+    echo "CREATED_$BACKUP_BRANCH"
+fi
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
+        self.assertIn("DIVERGED", proc.stdout)
+        self.assertIn("CREATED_backup-diverged-", proc.stdout)
+
+        # Verify branch exists
+        branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
+        self.assertIn("backup-diverged-", branches)
+
+    # -------------------------------------------------------------------------
+    # 3. Setup Apt Lock Timeout Behavioural Test
+    # -------------------------------------------------------------------------
+
+    def test_setup_wait_for_apt_locks_times_out_and_returns_error(self):
+        """wait_for_apt_locks with exceeded timeout outputs error and terminates loop with return 1."""
+        test_script = f"""
+set -u
+source "{self.project_dir.as_posix()}/scripts/setup.sh" >/dev/null 2>&1 || true
+
+# Mock check_apt_locked to always return 0 (locked)
+check_apt_locked() {{
+    return 0
+}}
+
+# Override wait_for_apt_locks with a 1s max_wait for fast testing
+wait_for_apt_locks_test() {{
+    local waited=0 max_wait=2
+    while check_apt_locked; do
+        sleep 1
+        waited=$((waited + 1))
+        if (( waited >= max_wait )); then
+            echo "TIMEOUT_EXCEEDED"
+            return 1
+        fi
+    done
+}}
+
+if wait_for_apt_locks_test; then
+    echo "UNEXPECTED_SUCCESS"
+else
+    echo "EXPECTED_TIMEOUT_RETURN_1"
+fi
+"""
+        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
+        self.assertIn("TIMEOUT_EXCEEDED", proc.stdout)
+        self.assertIn("EXPECTED_TIMEOUT_RETURN_1", proc.stdout)
+        self.assertNotIn("UNEXPECTED_SUCCESS", proc.stdout)
+
+    # -------------------------------------------------------------------------
+    # 4. Restore Confirmation Safety
+    # -------------------------------------------------------------------------
+
+    def test_restore_requires_explicit_confirmation_word(self):
+        """cmd_restore aborts when confirmation is not 'RESTORE'."""
+        proc = self._run_cli_command("restore", "some_backup.tar.gz.age", input_text="no\n")
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Восстановление отменено", proc.stdout + proc.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

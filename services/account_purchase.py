@@ -213,7 +213,7 @@ async def _get_or_create_entitlement(
     version: TariffVersion,
     debit_id: int,
 ) -> tuple[EntitlementEntry, bool]:
-    days = version.duration_hours // 24
+    days = version.duration_days
     entry_id = await session.scalar(
         insert(EntitlementEntry)
         .values(

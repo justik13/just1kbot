@@ -164,7 +164,7 @@ cmd_preflight() {
     fi
 
     # 3. Обязательные переменные окружения
-    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT)
+    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT SUPPORT_USERNAME YOOKASSA_SHOP_ID YOOKASSA_SECRET_KEY DOMAIN SSL_EMAIL)
     for var_name in "${req_vars[@]}"; do
         local val
         val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
@@ -227,11 +227,11 @@ cmd_preflight() {
     fi
 
     if [ "$has_errors" = "true" ]; then
-        error "Предварительная проверка (preflight) завершилась с ошибками. Исправьте конфигурацию перед продолжением."
+        error "Предварительная проверка окружения завершилась с ошибками. Исправьте конфигурацию перед продолжением."
         return 1
     fi
 
-    log "Предварительная проверка (preflight) успешно пройдена: конфигурация корректна."
+    log "Предварительная проверка базового окружения (preflight) успешно пройдена."
     return 0
 }
 
@@ -440,14 +440,15 @@ cmd_update() {
         log "Все сервисы успешно обновлены и работают (Healthy)!"
     else
         error "Сервисы не смогли перейти в состояние Healthy после обновления!"
+        warn "ВАЖНО: Миграции базы данных уже были применены к PostgreSQL."
         docker compose logs --tail=50 bot
         if [[ -n "$rollback_commit" ]]; then
             echo ""
-            warn "🚨 ВНИМАНИЕ: Начинаем автоматический откат исходного кода к предыдущей рабочей версии ($rollback_commit)..."
+            warn "🚨 Выполняем возврат исходного кода к предыдущему коммиту ($rollback_commit)..."
             git reset --hard "$rollback_commit"
             docker compose up -d --build
 
-            info "Проверка работоспособности сервисов после отката..."
+            info "Проверка работоспособности сервисов после отката кода..."
             local rb_timeout=60
             local rb_elapsed=0
             local rb_healthy=false
@@ -470,12 +471,18 @@ cmd_update() {
             echo ""
 
             if [ "$rb_healthy" = "true" ]; then
-                log "Откат кода завершён. Предыдущая версия сервисов восстановлена и полностью здорова (Healthy)."
+                warn "⚠️ Исходный код возвращён к коммиту $rollback_commit. Сервисы запущены."
+                warn "Обратите внимание: схема базы данных осталась в обновлённом состоянии."
+                if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+                    warn "Для полного возврата схемы БД к исходному состоянию перед обновлением выполните:"
+                    echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
+                fi
             else
-                error "КРИТИЧЕСКАЯ ОШИБКА: Сервисы не смогли подняться даже после отката кода!"
+                error "КРИТИЧЕСКАЯ ОШИБКА: Сервисы не смогли подняться после отката кода!"
                 warn "Вероятная причина: применённая миграция изменила схему БД и несовместима со старой версией кода."
                 if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
-                    warn "Для восстановления исходного состояния базы данных выполните: just1kbot restore $pre_update_backup"
+                    warn "Для полного восстановления рабочей базы данных выполните:"
+                    echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
                 else
                     warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
                 fi
@@ -978,4 +985,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

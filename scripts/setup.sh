@@ -108,6 +108,8 @@ wait_for_apt_locks() {
         waited=$((waited + 5))
         if (( waited >= max_wait )); then
             error "Не удалось дождаться освобождения apt/dpkg lock за ${max_wait} секунд. Попробуйте снова позже."
+            # shellcheck disable=SC2317
+            return 1
         fi
     done
 }
@@ -621,4 +623,6 @@ main() {
     start_project
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

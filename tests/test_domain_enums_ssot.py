@@ -48,7 +48,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertEqual(len(config.enums.__all__), 20)
+        self.assertEqual(len(config.enums.__all__), 21)
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -85,6 +85,10 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(
             models.PAYMENT_RECONCILIATION_STATUSES,
             tuple(s.value for s in config.enums.PaymentReconciliationStatus),
+        )
+        self.assertEqual(
+            models.PAYMENT_PROVIDER_OPERATION_STATUSES,
+            tuple(s.value for s in config.enums.PaymentProviderOperationStatus),
         )
         self.assertEqual(
             models.PAYMENT_QUEUE_STATUSES,
@@ -208,7 +212,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         # 9. PaymentProviderOperation status
         self.assertEqual(
             _extract_check_constraint_in(models.PaymentProviderOperation.__table__, "ck_payment_provider_operations_status"),
-            set(config.enums.PaymentQueueStatus),
+            set(config.enums.PaymentProviderOperationStatus),
         )
 
         # 10. APIOperation operation_type & status
@@ -226,6 +230,13 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(
             _extract_check_constraint_in(ProviderRefundOperation.__table__, "ck_provider_refund_operations_status"),
             set(config.enums.ProviderRefundOperationStatus),
+        )
+
+        # 12. PaymentDispute status
+        from database.dispute_models import PaymentDispute
+        self.assertEqual(
+            _extract_check_constraint_in(PaymentDispute.__table__, "ck_payment_disputes_status"),
+            set(config.enums.PaymentDisputeStatus),
         )
 
     def test_exact_spelling_and_serialization_integrity(self):

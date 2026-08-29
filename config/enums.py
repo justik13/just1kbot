@@ -134,13 +134,17 @@ class ServerHealthState(StrEnum):
     MANUAL_DISABLED = "MANUAL_DISABLED"
 
 
-class PaymentQueueStatus(StrEnum):
+class PaymentProviderOperationStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     RETRY = "retry"
     SUCCEEDED = "succeeded"
     DEAD = "dead"
     CANCELLED = "cancelled"
+
+
+# Backward-compatible alias for payment outbox queue status
+PaymentQueueStatus = PaymentProviderOperationStatus
 
 
 class VPNProvisioningStatus(StrEnum):
@@ -224,6 +228,7 @@ __all__ = [
     "PaymentCheckoutStatus",
     "PaymentDisputeStatus",
     "PaymentFulfillmentStatus",
+    "PaymentProviderOperationStatus",
     "PaymentProviderStatus",
     "PaymentQueueStatus",
     "PaymentReconciliationStatus",

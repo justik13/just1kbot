@@ -74,6 +74,7 @@ AUDIT_ACTIONS = {
     'BAN': '🚫 Блокировка пользователя',
     'BAN_USER': '🚫 Блокировка пользователя',
     'BROADCAST': '📢 Сделал рассылку',
+    'BROADCAST_COMPLETED': '📢 Рассылка завершена',
     'CHANGE_TARIFF': '⚙️ Изменение тарифа',
     'CLEANUP_DEVICE_DELETE': '🧹 Автоудаление устройства',
     'DEDUCT_USER_BALANCE': '➖ Списание баланса админом',

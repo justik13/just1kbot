@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from bot import texts
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -46,15 +45,19 @@ AUDIT_PURCHASE_ACTIONS: list[str] = [a.value for a in _AUDIT_ACTION_TO_OP]
 
 
 def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
+    from bot import texts
+
     op_title_map = {
-        TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
-        TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
-        TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
+        TariffQuoteOperation.PURCHASE: getattr(texts, "PAYMENT_OP_TITLE_PURCHASE", "Покупка"),
+        TariffQuoteOperation.RENEW: getattr(texts, "PAYMENT_OP_TITLE_RENEW", "Продление"),
+        TariffQuoteOperation.CHANGE: getattr(texts, "PAYMENT_OP_TITLE_CHANGE", "Смена тарифа"),
     }
-    return op_title_map.get(op, texts.PAYMENT_OP_TITLE_DEFAULT)
+    return op_title_map.get(op, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция"))
 
 
 def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
+    from bot import texts
+
     action_val = action.value if isinstance(action, AdminAuditAction) else str(action)
     action_enum = getattr(AdminAuditAction, action_val, None) or next(
         (a for a in AdminAuditAction if a.value == action_val), None
