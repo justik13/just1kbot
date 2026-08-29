@@ -68,17 +68,14 @@ HISTORY_LABELS = texts.BALANCE_ENTRY_LABELS
 
 def topup_presets(tariffs: list, settings=None) -> list[int]:
     cfg = settings or get_settings()
-    min_topup = getattr(cfg, "BALANCE_MIN_TOPUP_RUB", 10)
-    max_preset = getattr(cfg, "BALANCE_MAX_PRESET_RUB", 1000)
-    max_options = getattr(cfg, "BALANCE_MAX_PRESET_OPTIONS", 6)
     prices = {
         int(tariff.price_rub)
         for tariff in tariffs
         if tariff.is_active
-        and int(tariff.price_rub) >= min_topup
-        and int(tariff.price_rub) <= max_preset
+        and int(tariff.price_rub) >= cfg.BALANCE_MIN_TOPUP_RUB
+        and int(tariff.price_rub) <= cfg.BALANCE_MAX_PRESET_RUB
     }
-    return sorted(prices)[: max_options]
+    return sorted(prices)[: cfg.BALANCE_MAX_PRESET_OPTIONS]
 
 
 def _history_lines(entries: list) -> str:

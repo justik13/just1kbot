@@ -93,6 +93,7 @@ from bot.middlewares.throttling import ThrottlingMiddleware
 from bot.middlewares.user_context import UserContextMiddleware
 from config.constants import AMNEZIA_PROTOCOL
 from config.settings import Settings
+from config.tariffs import DEFAULT_TARIFFS_SEEDS
 import database.connection as db_conn
 from database.connection import session_scope
 from database.models import (
@@ -690,7 +691,7 @@ async def run_simulation(args: argparse.Namespace):
 
     # Seed baseline tariffs and servers if not present
     async with session_factory() as session:
-        for t_data in texts.DEFAULT_TARIFFS_SEEDS:
+        for t_data in DEFAULT_TARIFFS_SEEDS:
             existing = await session.scalar(
                 select(Tariff).where(
                     Tariff.duration_days == t_data["duration_days"],

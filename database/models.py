@@ -33,6 +33,7 @@ from config.enums import (
     ApiOperationType,
     PaymentFulfillmentStatus,
     PaymentProviderStatus,
+    PaymentQueueStatus,
     PaymentReconciliationStatus,
     ServerHealthState,
 )
@@ -44,7 +45,7 @@ API_OPERATION_STATUSES = tuple(s.value for s in ApiOperationStatus)
 PAYMENT_PROVIDER_STATUSES = tuple(s.value for s in PaymentProviderStatus)
 PAYMENT_FULFILLMENT_STATUSES = tuple(s.value for s in PaymentFulfillmentStatus)
 PAYMENT_RECONCILIATION_STATUSES = tuple(s.value for s in PaymentReconciliationStatus)
-PAYMENT_QUEUE_STATUSES = tuple(s.value for s in ApiOperationStatus)
+PAYMENT_QUEUE_STATUSES = tuple(s.value for s in PaymentQueueStatus)
 ACCOUNT_LEDGER_ENTRY_TYPES = tuple(s.value for s in AccountLedgerEntryType)
 
 
