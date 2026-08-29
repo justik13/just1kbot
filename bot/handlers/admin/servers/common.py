@@ -61,8 +61,8 @@ async def _build_servers_list_text_and_kb(
             db_used = db_counts.get(server.id, 0)
             cached_used = get_cached_peer_count(server.id)
             total = server.max_clients or 240
-            used = cached_used if cached_used is not None else db_used
-            cap_str = f"{used}/{total}"
+            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+            cap_str = f"{effective_used}/{total}"
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=cap_str)
             )
@@ -160,17 +160,20 @@ async def _show_server_card(
     db_counts = await get_server_peer_counts(session)
     db_used = db_counts.get(server.id, 0)
     cached_used = get_cached_peer_count(server.id)
-    used_clients = cached_used if cached_used is not None else db_used
+    effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
+    actual_peers = cached_used if cached_used is not None else db_used
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
     if cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=used_clients, max_clients=max_clients
-        ) + texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
+            used_clients=effective_capacity, max_clients=max_clients
+        ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
+            cached_used=cached_used, db_used=db_used
+        )
     else:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=used_clients, max_clients=max_clients
+            used_clients=effective_capacity, max_clients=max_clients
         )
 
     rendered = (
@@ -194,7 +197,7 @@ async def _show_server_card(
             reply_markup=get_admin_server_card_keyboard(
                 server.id,
                 server.is_active,
-                used_clients=used_clients,
+                used_clients=actual_peers,
                 max_clients=max_clients,
             ),
             parse_mode="HTML",

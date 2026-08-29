@@ -46,7 +46,8 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("Netherlands", summary)
             self.assertIn("23/240", summary)
-            self.assertIn("(в БД: 21)", summary)
+            self.assertIn("на узле: 23", summary)
+            self.assertIn("в БД: 21", summary)
 
     async def test_dashboard_server_capacity_summary_normal_when_matching(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
@@ -298,7 +299,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("На узле: <b>0</b>", rendered_text)
 
     async def test_server_list_shows_actual_count_without_misleading_minus(self):
-        """When cached_used < db_used, server list button shows actual live count cleanly without false minus math."""
+        """When cached_used < db_used, server list button shows effective allocation capacity cleanly without false minus math."""
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
         session = AsyncMock()
 
@@ -310,8 +311,8 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
             labels = [b.text for b in buttons]
 
-            # cached=18, db=21 → should show clean 18/240 without misleading (-3) math
-            self.assertTrue(any("18/240" in lbl for lbl in labels))
+            # cached=18, db=21 → effective capacity max(18, 21)=21 → shows clean 21/240
+            self.assertTrue(any("21/240" in lbl for lbl in labels))
             self.assertFalse(any("(-3)" in lbl for lbl in labels))
 
     async def test_users_list_filter_labels_clean_when_counts_fail(self):
@@ -369,3 +370,116 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Внешние: 0", rendered_text)
         self.assertIn("@dan", rendered_text)
         self.assertNotIn("Внешний пир", rendered_text)
+
+    async def test_show_server_peers_distinguishes_pending_from_missing_peers(self):
+        """Profile in pending_create with peer_id=None must be classified as [Создаётся], not [Не на узле]."""
+        server = SimpleNamespace(id=6, name="Germany", country_flag="🇩🇪", api_url="https://de.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        bot_user = SimpleNamespace(id=60, telegram_id=99999, username="elena", first_name="Elena")
+        pending_profile = SimpleNamespace(
+            id=601, server_id=6, peer_id=None, user=bot_user,
+            device_name="Work Laptop", allocated_ip=None,
+            last_connected=None, provisioning_status="pending_create",
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [pending_profile]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:6:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(return_value=[])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        # Must show [Создаётся], NOT [Не на узле]
+        self.assertIn("[Создаётся]", rendered_text)
+        self.assertIn("pending_create", rendered_text)
+        self.assertNotIn("[Не на узле]", rendered_text)
+        self.assertIn("Создаются: <b>1</b>", rendered_text)
+
+    async def test_show_server_peers_full_reconciliation_suite(self):
+        """Full reconciliation across active, deleting, missing, pending, and external peers."""
+        server = SimpleNamespace(id=7, name="Finland", country_flag="🇫🇮", api_url="https://fi.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        u1 = SimpleNamespace(id=1, telegram_id=111, username="user_active", first_name="Active")
+        u2 = SimpleNamespace(id=2, telegram_id=222, username="user_deleting", first_name="Deleting")
+        u3 = SimpleNamespace(id=3, telegram_id=333, username="user_missing", first_name="Missing")
+        u4 = SimpleNamespace(id=4, telegram_id=444, username="user_pending", first_name="Pending")
+
+        p_active = SimpleNamespace(
+            id=10, server_id=7, peer_id="key-active", user=u1,
+            device_name="Phone", allocated_ip="10.8.0.2",
+            last_connected=now_utc(), provisioning_status="active",
+        )
+        p_deleting = SimpleNamespace(
+            id=20, server_id=7, peer_id="key-deleting", user=u2,
+            device_name="Tablet", allocated_ip="10.8.0.3",
+            last_connected=None, provisioning_status="deleting",
+        )
+        p_missing = SimpleNamespace(
+            id=30, server_id=7, peer_id="key-missing", user=u3,
+            device_name="Laptop", allocated_ip="10.8.0.4",
+            last_connected=None, provisioning_status="active",
+        )
+        p_pending = SimpleNamespace(
+            id=40, server_id=7, peer_id=None, user=u4,
+            device_name="PC", allocated_ip=None,
+            last_connected=None, provisioning_status="pending_create",
+        )
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [p_active, p_deleting, p_missing, p_pending]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        # Node has p_active, p_deleting, and an external peer
+        node_c1 = SimpleNamespace(id="key-active", client_name="Phone")
+        node_c2 = SimpleNamespace(id="key-deleting", client_name="Tablet")
+        node_c_ext = SimpleNamespace(id="key-external", client_name="Manual Client")
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:7:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(return_value=[node_c1, node_c2, node_c_ext])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered = callback.message.edit_text.call_args[0][0]
+
+        # Live peers on node = 3 (2 bot + 1 external)
+        self.assertIn("На узле: <b>3</b>", rendered)
+        self.assertIn("Бот: 2", rendered)
+        self.assertIn("Внешние: 1", rendered)
+        self.assertIn("Не на узле: <b>1</b>", rendered)
+        self.assertIn("Создаются: <b>1</b>", rendered)
+
+        # Content checks
+        self.assertIn("@user_active", rendered)
+        self.assertIn("⏳ Удаляется", rendered)
+        self.assertIn("[Не на узле]", rendered)
+        self.assertIn("@user_missing", rendered)
+        self.assertIn("[Создаётся]", rendered)
+        self.assertIn("@user_pending", rendered)
+        self.assertIn("[Внешний пир]", rendered)
+        self.assertIn("Manual Client", rendered)

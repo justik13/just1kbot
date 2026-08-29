@@ -82,9 +82,10 @@ async def show_server_peers(
     real_peer_ids: set[str] = {c.id for c in real_clients if getattr(c, "id", None)}
     db_profiles_by_peer_id = {p.peer_id: p for p in profiles if p.peer_id}
 
-    # 3. Classify bot profiles: on-node vs missing
+    # 3. Classify bot profiles: on-node vs missing vs pending
     bot_items_on_node = []
     bot_items_missing = []
+    bot_items_pending = []
     now = now_utc()
     for p in profiles:
         is_on_node = (p.peer_id in real_peer_ids) if (p.peer_id and api_available) else False
@@ -122,11 +123,20 @@ async def show_server_peers(
             "ip": ip,
             "is_on_node": is_on_node,
             "status_online": status_online,
+            "provisioning_status": p.provisioning_status,
         }
-        if is_on_node or not api_available:
+        if not api_available:
             bot_items_on_node.append(item)
-        else:
+        elif is_on_node:
+            bot_items_on_node.append(item)
+        elif p.peer_id:
+            # Had a peer_id in DB, but physically absent from node!
+            item["type"] = "missing"
             bot_items_missing.append(item)
+        else:
+            # No peer_id yet (e.g. pending_create, create_cleanup_pending)
+            item["type"] = "pending"
+            bot_items_pending.append(item)
 
     # 4. External (admin) peers: on node but not in DB
     external_items = []
@@ -146,11 +156,12 @@ async def show_server_peers(
                 "ip": texts.PLACEHOLDER_DASH,
             })
 
-    # 5. Page layout: bot (on-node) first, then external, then missing (DB only)
-    # Semantics: live_peers = peers confirmed on node; missing = DB-only profiles
+    # 5. Page layout: bot (on-node) first, then external, then missing, then pending
+    # Semantics: live_peers = peers confirmed on node; missing = DB-only profiles; pending = unprovisioned
     live_peers = len(bot_items_on_node) + len(external_items)
     missing_count = len(bot_items_missing)
-    all_items = bot_items_on_node + external_items + bot_items_missing
+    pending_count = len(bot_items_pending)
+    all_items = bot_items_on_node + external_items + bot_items_missing + bot_items_pending
 
     total_items = len(all_items)
     total_pages = max(1, math.ceil(total_items / PEERS_PER_PAGE))
@@ -168,6 +179,11 @@ async def show_server_peers(
         if (api_available and missing_count > 0)
         else ""
     )
+    pending_note = (
+        texts.ADMIN_SERVER_PEERS_PENDING_NOTE.format(pending_count=pending_count)
+        if (api_available and pending_count > 0)
+        else ""
+    )
 
     rendered = texts.ADMIN_SERVER_PEERS_HEADER.format(
         header=header,
@@ -178,6 +194,7 @@ async def show_server_peers(
         bot_peers=len(bot_items_on_node) if api_available else len(profiles),
         external_peers=len(external_items),
         missing_note=missing_note,
+        pending_note=pending_note,
         page=page,
         total_pages=total_pages,
     )
@@ -187,34 +204,51 @@ async def show_server_peers(
 
     peer_buttons: list[tuple[str, str]] = []
     for item in page_items:
-        if item["type"] == "bot":
-            if not api_available:
-                rendered += texts.ADMIN_SERVER_PEER_UNKNOWN_ROW.format(
-                    username=item["username"],
-                    first_name=item["first_name"],
-                    device_name=item["device_name"],
-                    ip=item["ip"],
-                )
-            elif item["is_on_node"]:
-                rendered += texts.ADMIN_SERVER_PEER_BOT_ROW.format(
-                    username=item["username"],
-                    first_name=item["first_name"],
-                    device_name=item["device_name"],
-                    ip=item["ip"],
-                    status_online=item["status_online"],
-                )
-            else:
-                rendered += texts.ADMIN_SERVER_PEER_MISSING_ROW.format(
-                    username=item["username"],
-                    device_name=item["device_name"],
-                    ip=item["ip"],
-                )
-
+        if not api_available:
+            rendered += texts.ADMIN_SERVER_PEER_UNKNOWN_ROW.format(
+                username=item["username"],
+                first_name=item["first_name"],
+                device_name=item["device_name"],
+                ip=item["ip"],
+            )
             if item["user"]:
                 btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_BOT.format(username=item["username"], device_name=item["device_name"]))
                 btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
                 peer_buttons.append((btn_label, btn_cb))
-        else:
+        elif item["type"] == "bot":
+            rendered += texts.ADMIN_SERVER_PEER_BOT_ROW.format(
+                username=item["username"],
+                first_name=item["first_name"],
+                device_name=item["device_name"],
+                ip=item["ip"],
+                status_online=item["status_online"],
+            )
+            if item["user"]:
+                btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_BOT.format(username=item["username"], device_name=item["device_name"]))
+                btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
+                peer_buttons.append((btn_label, btn_cb))
+        elif item["type"] == "missing":
+            rendered += texts.ADMIN_SERVER_PEER_MISSING_ROW.format(
+                username=item["username"],
+                device_name=item["device_name"],
+                ip=item["ip"],
+            )
+            if item["user"]:
+                btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_BOT.format(username=item["username"], device_name=item["device_name"]))
+                btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
+                peer_buttons.append((btn_label, btn_cb))
+        elif item["type"] == "pending":
+            rendered += texts.ADMIN_SERVER_PEER_PENDING_ROW.format(
+                username=item["username"],
+                device_name=item["device_name"],
+                ip=item["ip"],
+                status=item.get("provisioning_status", "pending"),
+            )
+            if item["user"]:
+                btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_PENDING.format(username=item["username"], device_name=item["device_name"]))
+                btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
+                peer_buttons.append((btn_label, btn_cb))
+        else:  # external
             rendered += texts.ADMIN_SERVER_PEER_EXTERNAL_ROW.format(
                 device_name=item["device_name"],
                 ip=item["ip"],
