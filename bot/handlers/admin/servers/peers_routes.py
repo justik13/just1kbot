@@ -2,6 +2,7 @@ import asyncio
 import logging
 import math
 
+import aiohttp
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
@@ -74,8 +75,12 @@ async def show_server_peers(
             # API returned None — node responded but data is unavailable
             api_available = False
             real_clients = []
-    except Exception as e:
+    except (asyncio.TimeoutError, TimeoutError, aiohttp.ClientError, OSError) as e:
         logger.warning("Failed to fetch live clients for server %s: %s", server.id, e)
+        api_available = False
+        real_clients = []
+    except Exception as e:
+        logger.exception("Unexpected error fetching live clients for server %s: %s", server.id, e)
         api_available = False
         real_clients = []
 
@@ -90,10 +95,21 @@ async def show_server_peers(
     for p in profiles:
         is_on_node = (p.peer_id in real_peer_ids) if (p.peer_id and api_available) else False
         user = getattr(p, "user", None)
-        username = f"@{user.username}" if (user and user.username) else (f"ID {user.telegram_id}" if user else "—")
-        first_name = safe(user.first_name) if (user and user.first_name) else ""
+        u_name = f"@{user.username}" if (user and user.username) else (f"ID {user.telegram_id}" if user else "—")
+        if len(u_name) > 32:
+            u_name = u_name[:31] + "…"
+        username = safe(u_name)
+
+        f_name = user.first_name if (user and user.first_name) else ""
+        if len(f_name) > 32:
+            f_name = f_name[:31] + "…"
+        first_name = safe(f_name)
+
         fallback_device = texts.ADMIN_USERS_DEVICE_DEVICE.format(profile_id=p.id)
-        device_name = safe(p.device_name or fallback_device)
+        raw_dev = p.device_name or fallback_device
+        if len(raw_dev) > 40:
+            raw_dev = raw_dev[:39] + "…"
+        device_name = safe(raw_dev)
         ip = safe(p.allocated_ip or texts.PLACEHOLDER_DASH)
 
         last_activity = getattr(p, "last_connected", None)
@@ -138,20 +154,22 @@ async def show_server_peers(
             item["type"] = "pending"
             bot_items_pending.append(item)
 
-    # 4. External (admin) peers: on node but not in DB
+    # 4. External (untracked) peers: on node but not in DB
     external_items = []
     for c in real_clients:
         if c.id not in db_profiles_by_peer_id:
-            c_name = (
+            raw_c_name = (
                 getattr(c, "client_name", None)
                 or getattr(c, "peer_name", None)
                 or getattr(c, "username", None)
                 or texts.ADMIN_SERVER_PEERS_FALLBACK_DEVICE
             )
+            if len(raw_c_name) > 40:
+                raw_c_name = raw_c_name[:39] + "…"
             external_items.append({
                 "type": "external",
                 "client": c,
-                "device_name": safe(c_name),
+                "device_name": safe(raw_c_name),
                 "key": safe(c.id),
                 "ip": texts.PLACEHOLDER_DASH,
             })
@@ -173,31 +191,42 @@ async def show_server_peers(
     flag = server.country_flag or texts.EMOJI_GLOBE
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", texts.ADMIN_SERVER_PEERS_BREADCRUMB)
 
-    status_banner = texts.ADMIN_SERVER_PEERS_API_ERROR_BANNER if not api_available else ""
-    missing_note = (
-        texts.ADMIN_SERVER_PEERS_MISSING_NOTE.format(missing_count=missing_count)
-        if (api_available and missing_count > 0)
-        else ""
-    )
-    pending_note = (
-        texts.ADMIN_SERVER_PEERS_PENDING_NOTE.format(pending_count=pending_count)
-        if (api_available and pending_count > 0)
-        else ""
-    )
-
-    rendered = texts.ADMIN_SERVER_PEERS_HEADER.format(
-        header=header,
-        flag=flag,
-        server_name=safe(server.name),
-        status_banner=status_banner,
-        live_peers=live_peers if api_available else "?",
-        bot_peers=len(bot_items_on_node) if api_available else len(profiles),
-        external_peers=len(external_items),
-        missing_note=missing_note,
-        pending_note=pending_note,
-        page=page,
-        total_pages=total_pages,
-    )
+    if not api_available:
+        status_banner = texts.ADMIN_SERVER_PEERS_API_ERROR_BANNER
+        rendered = texts.ADMIN_SERVER_PEERS_HEADER_DEGRADED.format(
+            header=header,
+            flag=flag,
+            server_name=safe(server.name),
+            status_banner=status_banner,
+            db_profiles_count=len(profiles),
+            page=page,
+            total_pages=total_pages,
+        )
+    else:
+        status_banner = ""
+        missing_note = (
+            texts.ADMIN_SERVER_PEERS_MISSING_NOTE.format(missing_count=missing_count)
+            if missing_count > 0
+            else ""
+        )
+        pending_note = (
+            texts.ADMIN_SERVER_PEERS_PENDING_NOTE.format(pending_count=pending_count)
+            if pending_count > 0
+            else ""
+        )
+        rendered = texts.ADMIN_SERVER_PEERS_HEADER.format(
+            header=header,
+            flag=flag,
+            server_name=safe(server.name),
+            status_banner=status_banner,
+            live_peers=live_peers,
+            bot_peers=len(bot_items_on_node),
+            external_peers=len(external_items),
+            missing_note=missing_note,
+            pending_note=pending_note,
+            page=page,
+            total_pages=total_pages,
+        )
 
     if not all_items:
         rendered += texts.ADMIN_SERVER_PEERS_EMPTY
@@ -238,14 +267,35 @@ async def show_server_peers(
                 btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
                 peer_buttons.append((btn_label, btn_cb))
         elif item["type"] == "pending":
+            p_status = item.get("provisioning_status", "pending_create")
+            if p_status == "pending_create":
+                badge = "⏳ <b>[Создаётся]</b>"
+                icon = "⏳"
+            elif p_status == "create_cleanup_pending":
+                badge = "🧹 <b>[Очистка сбоя]</b>"
+                icon = "🧹"
+            elif p_status == "create_failed":
+                badge = "❌ <b>[Сбой создания]</b>"
+                icon = "❌"
+            else:
+                badge = f"⏳ <b>[{p_status}]</b>"
+                icon = "⏳"
+
             rendered += texts.ADMIN_SERVER_PEER_PENDING_ROW.format(
+                badge=badge,
                 username=item["username"],
                 device_name=item["device_name"],
                 ip=item["ip"],
-                status=item.get("provisioning_status", "pending"),
+                status=p_status,
             )
             if item["user"]:
-                btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_PENDING.format(username=item["username"], device_name=item["device_name"]))
+                btn_label = truncate_button_text(
+                    texts.ADMIN_SERVER_PEER_BTN_PENDING.format(
+                        icon=icon,
+                        username=item["username"],
+                        device_name=item["device_name"],
+                    )
+                )
                 btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
                 peer_buttons.append((btn_label, btn_cb))
         else:  # external

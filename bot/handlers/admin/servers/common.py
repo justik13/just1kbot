@@ -161,7 +161,7 @@ async def _show_server_card(
     db_used = db_counts.get(server.id, 0)
     cached_used = get_cached_peer_count(server.id)
     effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
-    actual_peers = cached_used if cached_used is not None else db_used
+    actual_peers = cached_used
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 

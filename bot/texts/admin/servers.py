@@ -121,9 +121,15 @@ ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {s
 Стр. {page}/{total_pages}:
 
 """
+ADMIN_SERVER_PEERS_HEADER_DEGRADED = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
+• На узле: <b>?</b> (API недоступен)
+• Профилей бота в БД: <b>{db_profiles_count}</b>
+Стр. {page}/{total_pages}:
+
+"""
 ADMIN_SERVER_PEERS_API_ERROR_BANNER = "\n⚠️ <i>API узла недоступен (показаны данные из базы бота)</i>"
 ADMIN_SERVER_PEERS_MISSING_NOTE = " | ⚠️ Не на узле: <b>{missing_count}</b>"
-ADMIN_SERVER_PEERS_PENDING_NOTE = " | ⏳ Создаются: <b>{pending_count}</b>"
+ADMIN_SERVER_PEERS_PENDING_NOTE = " | ⏳ В процессе: <b>{pending_count}</b>"
 ADMIN_SERVER_PEERS_EMPTY = "<i>На этом сервере пока нет зарегистрированных пиров.</i>\n"
 ADMIN_SERVER_PEERS_BREADCRUMB = "Пиры"
 ADMIN_SERVER_PEERS_FALLBACK_DEVICE = "Внешнее устройство"
@@ -131,14 +137,14 @@ ADMIN_SERVER_PEER_BOT_ROW = "• 🟢 <b>{username}</b> ({first_name}) — 📱 
 ADMIN_SERVER_PEER_UNKNOWN_ROW = "• ⚪ <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | ⚠️ Состояние на узле неизвестно\n"
 ADMIN_SERVER_PEER_EXTERNAL_ROW = "• 👤 <b>[Внешний пир]</b> \"{device_name}\"\n  IP: <code>{ip}</code> | AmneziaWG Key: <code>{key}</code>\n"
 ADMIN_SERVER_PEER_MISSING_ROW = "• ⚠️ <b>[Не на узле]</b> {username} — 📱 \"{device_name}\"\n  IP: <code>{ip}</code>\n"
-ADMIN_SERVER_PEER_PENDING_ROW = "• ⏳ <b>[Создаётся]</b> {username} — 📱 \"{device_name}\"\n  Статус: <code>{status}</code> | IP: <code>{ip}</code>\n"
+ADMIN_SERVER_PEER_PENDING_ROW = "• {badge} {username} — 📱 \"{device_name}\"\n  Статус: <code>{status}</code> | IP: <code>{ip}</code>\n"
 ADMIN_SERVER_PEER_BTN_BOT = "🟢 {username} • {device_name}"
-ADMIN_SERVER_PEER_BTN_PENDING = "⏳ {username} • {device_name}"
+ADMIN_SERVER_PEER_BTN_PENDING = "{icon} {username} • {device_name}"
 ADMIN_SERVER_PEER_BTN_EXTERNAL = "👤 Внешний: {device_name}"
 ADMIN_SERVER_PEER_STATUS_ONLINE = "🟢 В сети"
 ADMIN_SERVER_PEER_STATUS_OFFLINE = "⚪ Офлайн"
 ADMIN_SERVER_PEER_STATUS_DELETING = "⏳ Удаляется"
-ADMIN_SERVER_PEER_INFO_ALERT = "👤 Внешний пир:\nНаходится на узле AmneziaVPN, но не привязан к пользователям Telegram-бота (например, создан вручную)."
+ADMIN_SERVER_PEER_INFO_ALERT = "👤 Внешний пир:\nНаходится на узле AmneziaVPN, но не привязан к профилям Telegram-бота (не отслеживается ботом)."
 ADMIN_SERVER_BTN_BACK_TO_CARD = "« Назад в карточку сервера"
 ADMIN_SERVER_BTN_RESET_FILTER = "❌ Сбросить фильтр"
 
