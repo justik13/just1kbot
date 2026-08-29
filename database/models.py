@@ -26,19 +26,40 @@ from sqlalchemy.orm import (
     relationship,
 )
 
+from enum import StrEnum
+
 from config.constants import AMNEZIA_PROTOCOL
 from config.enums import (
     AccountLedgerEntryType,
+    AccountReservationStatus,
+    AccountReservationType,
+    AdminAuditAction,
     ApiOperationStatus,
     ApiOperationType,
+    EntitlementEntryType,
+    PaidValueEntryType,
+    PaymentCheckoutStatus,
+    PaymentDisputeStatus,
     PaymentFulfillmentStatus,
     PaymentProviderStatus,
     PaymentQueueStatus,
     PaymentReconciliationStatus,
+    ProviderRefundOperationStatus,
     ServerHealthState,
+    TariffQuoteOperation,
+    TariffQuoteStatus,
+    VPNProvisioningStatus,
+    WebhookInboxStatus,
 )
 from utils.datetime_helpers import now_utc
 from utils.encryption import EncryptedString
+
+
+def sql_enum_in(column: str, enum_cls: type[StrEnum]) -> str:
+    """Build a SQL CheckConstraint IN clause strictly derived from a canonical StrEnum."""
+    escaped = ", ".join(f"'{s.value}'" for s in enum_cls)
+    return f"{column} IN ({escaped})"
+
 
 API_OPERATION_TYPES = tuple(s.value for s in ApiOperationType)
 API_OPERATION_STATUSES = tuple(s.value for s in ApiOperationStatus)
@@ -47,6 +68,16 @@ PAYMENT_FULFILLMENT_STATUSES = tuple(s.value for s in PaymentFulfillmentStatus)
 PAYMENT_RECONCILIATION_STATUSES = tuple(s.value for s in PaymentReconciliationStatus)
 PAYMENT_QUEUE_STATUSES = tuple(s.value for s in PaymentQueueStatus)
 ACCOUNT_LEDGER_ENTRY_TYPES = tuple(s.value for s in AccountLedgerEntryType)
+ACCOUNT_RESERVATION_TYPES = tuple(s.value for s in AccountReservationType)
+ACCOUNT_RESERVATION_STATUSES = tuple(s.value for s in AccountReservationStatus)
+PAID_VALUE_ENTRY_TYPES = tuple(s.value for s in PaidValueEntryType)
+ENTITLEMENT_ENTRY_TYPES = tuple(s.value for s in EntitlementEntryType)
+TARIFF_QUOTE_OPERATIONS = tuple(s.value for s in TariffQuoteOperation)
+TARIFF_QUOTE_STATUSES = tuple(s.value for s in TariffQuoteStatus)
+VPN_PROVISIONING_STATUSES = tuple(s.value for s in VPNProvisioningStatus)
+WEBHOOK_INBOX_STATUSES = tuple(s.value for s in WebhookInboxStatus)
+PAYMENT_DISPUTE_STATUSES = tuple(s.value for s in PaymentDisputeStatus)
+PAYMENT_CHECKOUT_STATUSES = tuple(s.value for s in PaymentCheckoutStatus)
 
 
 class Base(DeclarativeBase):
@@ -179,9 +210,7 @@ class VPNProfile(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "provisioning_status IN ('pending_create', 'active', 'pending_update', "
-            "'deleting', 'create_failed', 'create_cleanup_pending', "
-            "'update_failed', 'delete_failed')",
+            sql_enum_in("provisioning_status", VPNProvisioningStatus),
             name="ck_vpn_profiles_provisioning_status",
         ),
         CheckConstraint("desired_version > 0", name="ck_vpn_profiles_desired_version_positive"),
@@ -341,8 +370,8 @@ class TariffVersion(Base):
 class TariffQuote(Base):
     __tablename__ = "tariff_quotes"
     __table_args__ = (
-        CheckConstraint("operation_type IN ('purchase','renew','change')", name="ck_tariff_quotes_operation"),
-        CheckConstraint("status IN ('active','consumed','expired','cancelled','manual_review')", name="ck_tariff_quotes_status"),
+        CheckConstraint(sql_enum_in("operation_type", TariffQuoteOperation), name="ck_tariff_quotes_operation"),
+        CheckConstraint(sql_enum_in("status", TariffQuoteStatus), name="ck_tariff_quotes_status"),
         CheckConstraint("currency = 'RUB'", name="ck_tariff_quotes_currency_rub"),
         CheckConstraint("current_paid_hours >= 0 AND bonus_hours >= 0 AND resulting_paid_hours >= 0 AND resulting_bonus_hours >= 0", name="ck_tariff_quotes_hours_nonnegative"),
         CheckConstraint("current_paid_value_rub >= 0 AND amount_due_rub >= 0 AND resulting_paid_value_rub >= 0 AND rounding_loss_value_rub >= 0", name="ck_tariff_quotes_values_nonnegative"),
@@ -402,7 +431,7 @@ class PaidValueLedgerEntry(Base):
     __tablename__ = "paid_value_ledger"
     __table_args__ = (
         CheckConstraint(
-            "entry_type IN ('account_purchase','tariff_conversion','manual_adjustment')",
+            sql_enum_in("entry_type", PaidValueEntryType),
             name="ck_paid_value_ledger_entry_type",
         ),
         CheckConstraint("currency = 'RUB'", name="ck_paid_value_ledger_currency_rub"),
@@ -524,22 +553,19 @@ class Payment(Base):
             ),
         ),
         CheckConstraint(
-            "provider_status IN ('not_created','creating','pending',"
-            "'waiting_for_capture','succeeded','canceled','refunded',"
-            "'unknown','manual_review')",
+            sql_enum_in("provider_status", PaymentProviderStatus),
             name="ck_payments_provider_status",
         ),
         CheckConstraint(
-            "fulfillment_status IN ('not_ready','processing','succeeded',"
-            "'failed','reversed','manual_review')",
+            sql_enum_in("fulfillment_status", PaymentFulfillmentStatus),
             name="ck_payments_fulfillment_status",
         ),
         CheckConstraint(
-            "reconciliation_status IN ('ok','required','mismatch','manual_review')",
+            sql_enum_in("reconciliation_status", PaymentReconciliationStatus),
             name="ck_payments_reconciliation_status",
         ),
         CheckConstraint(
-            "checkout_status IN ('active','abandoned')",
+            sql_enum_in("checkout_status", PaymentCheckoutStatus),
             name="ck_payments_checkout_status",
         ),
         CheckConstraint(
@@ -622,9 +648,7 @@ class AccountLedgerEntry(Base):
     __tablename__ = "account_ledger_entries"
     __table_args__ = (
         CheckConstraint(
-            "entry_type IN ('payment_credit','purchase_debit',"
-            "'purchase_reversal','refund_debit','chargeback_debit',"
-            "'admin_adjustment')",
+            sql_enum_in("entry_type", AccountLedgerEntryType),
             name="ck_account_ledger_entry_type",
         ),
         CheckConstraint("currency = 'RUB'", name="ck_account_ledger_currency_rub"),
@@ -754,11 +778,11 @@ class AccountBalanceReservation(Base):
     __tablename__ = "account_balance_reservations"
     __table_args__ = (
         CheckConstraint(
-            "reservation_type IN ('refund','dispute')",
+            sql_enum_in("reservation_type", AccountReservationType),
             name="ck_account_reservations_type",
         ),
         CheckConstraint(
-            "status IN ('active','released','consumed')",
+            sql_enum_in("status", AccountReservationStatus),
             name="ck_account_reservations_status",
         ),
         CheckConstraint(
@@ -810,7 +834,7 @@ class PaymentProviderOperation(Base):
     __tablename__ = "payment_provider_operations"
     __table_args__ = (
         CheckConstraint("operation_type IN ('create_payment','reconcile_payment')", name="ck_payment_provider_operations_type"),
-        CheckConstraint("status IN ('pending','processing','retry','succeeded','dead','cancelled')", name="ck_payment_provider_operations_status"),
+        CheckConstraint(sql_enum_in("status", PaymentQueueStatus), name="ck_payment_provider_operations_status"),
         Index("ix_payment_provider_operations_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_payment_provider_operations_lease", "locked_at", postgresql_where=text("status = 'processing'")),
         Index("uq_payment_provider_create", "payment_id", unique=True, postgresql_where=text("operation_type='create_payment'")),
@@ -837,7 +861,7 @@ class WebhookInbox(Base):
     __tablename__ = "webhook_inbox"
     __table_args__ = (
         UniqueConstraint("provider", "event_key", name="uq_webhook_inbox_provider_event_key"),
-        CheckConstraint("status IN ('pending','processing','retry','succeeded','dead')", name="ck_webhook_inbox_status"),
+        CheckConstraint(sql_enum_in("status", WebhookInboxStatus), name="ck_webhook_inbox_status"),
         Index("ix_webhook_inbox_claim", "next_attempt_at", "id", postgresql_where=text("status IN ('pending','retry')")),
         Index("ix_webhook_inbox_lease", "locked_at", postgresql_where=text("status = 'processing'")),
         Index("ix_webhook_inbox_retention", "received_at", "id", postgresql_where=text("status IN ('succeeded', 'dead')")),
@@ -870,9 +894,7 @@ class EntitlementEntry(Base):
             name="uq_entitlement_entries_source",
         ),
         CheckConstraint(
-            "entry_type IN ('account_purchase_grant','referral_user_bonus',"
-            "'referral_referrer_bonus','referral_reversal','manual_grant',"
-            "'tariff_change')",
+            sql_enum_in("entry_type", EntitlementEntryType),
             name="ck_entitlement_entries_type",
         ),
         CheckConstraint(
@@ -1025,12 +1047,11 @@ class APIOperation(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "operation_type IN ('create_peer', 'update_peer', 'delete_peer')",
+            sql_enum_in("operation_type", ApiOperationType),
             name="ck_api_operations_operation_type",
         ),
         CheckConstraint(
-            "status IN ('pending', 'processing', 'retry', 'succeeded', "
-            "'dead', 'cancelled')",
+            sql_enum_in("status", ApiOperationStatus),
             name="ck_api_operations_status",
         ),
         CheckConstraint(

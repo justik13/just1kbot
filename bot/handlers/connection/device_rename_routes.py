@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import DeviceManagementStates
 from database.models import User, VPNProfile
@@ -258,7 +259,7 @@ async def rename_device_process(
     await AuditService.log_action(
         session,
         admin_id=0,
-        action="DEVICE_RENAME",
+        action=AdminAuditAction.DEVICE_RENAME,
         target_type="user",
         target_id=db_user.id,
         details={

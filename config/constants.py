@@ -26,6 +26,7 @@ from config.enums import (
     ServerHealthState,
     TariffQuoteOperation,
     TariffQuoteStatus,
+    VPNProvisioningStatus,
     WebhookInboxStatus,
 )
 
@@ -108,6 +109,7 @@ __all__ = [
     "TariffQuoteStatus",
     "USER_CONTEXT_CACHE_MAX_SIZE",
     "USER_CONTEXT_CACHE_TTL",
+    "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
 ]

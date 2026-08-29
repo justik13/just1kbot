@@ -96,6 +96,9 @@ class PaidValueEntryType(StrEnum):
 
 class EntitlementEntryType(StrEnum):
     ACCOUNT_PURCHASE_GRANT = "account_purchase_grant"
+    REFERRAL_USER_BONUS = "referral_user_bonus"
+    REFERRAL_REFERRER_BONUS = "referral_referrer_bonus"
+    REFERRAL_REVERSAL = "referral_reversal"
     MANUAL_GRANT = "manual_grant"
     TARIFF_CHANGE = "tariff_change"
 
@@ -140,6 +143,17 @@ class PaymentQueueStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class VPNProvisioningStatus(StrEnum):
+    PENDING_CREATE = "pending_create"
+    ACTIVE = "active"
+    PENDING_UPDATE = "pending_update"
+    DELETING = "deleting"
+    CREATE_FAILED = "create_failed"
+    CREATE_CLEANUP_PENDING = "create_cleanup_pending"
+    UPDATE_FAILED = "update_failed"
+    DELETE_FAILED = "delete_failed"
+
+
 class AdminAuditAction(StrEnum):
     ACCOUNT_PURCHASE_SETTLED = "ACCOUNT_PURCHASE_SETTLED"
     ACCOUNT_TARIFF_CHANGE_SETTLED = "ACCOUNT_TARIFF_CHANGE_SETTLED"
@@ -158,6 +172,7 @@ class AdminAuditAction(StrEnum):
     BAN = "BAN"
     BAN_USER = "BAN_USER"
     BROADCAST = "BROADCAST"
+    BROADCAST_COMPLETED = "BROADCAST_COMPLETED"
     CHANGE_TARIFF = "CHANGE_TARIFF"
     CLEANUP_DEVICE_DELETE = "CLEANUP_DEVICE_DELETE"
     DEDUCT_USER_BALANCE = "DEDUCT_USER_BALANCE"
@@ -182,7 +197,17 @@ class AdminAuditAction(StrEnum):
     PAYMENT_CHARGEBACK = "PAYMENT_CHARGEBACK"
     PAYMENT_DISPUTE_MANUAL_REVIEW = "PAYMENT_DISPUTE_MANUAL_REVIEW"
     PAYMENT_DISPUTE_OPENED = "PAYMENT_DISPUTE_OPENED"
+    PAYMENT_DISPUTE_RESOLVED = "PAYMENT_DISPUTE_RESOLVED"
+    PAYMENT_QUEUE_MANUAL_RETRY = "PAYMENT_QUEUE_MANUAL_RETRY"
+    PAYMENT_SUCCESS = "PAYMENT_SUCCESS"
     REDUCE = "REDUCE"
+    REFERRAL_ATTACHED = "REFERRAL_ATTACHED"
+    REFERRAL_BONUS_GRANTED = "REFERRAL_BONUS_GRANTED"
+    UNBAN = "UNBAN"
+    UNBAN_USER = "UNBAN_USER"
+    USER_REGISTER = "USER_REGISTER"
+    USER_RESTORED = "USER_RESTORED"
+    WELCOME_BONUS_GRANTED = "WELCOME_BONUS_GRANTED"
 
 
 __all__ = [
@@ -204,5 +229,6 @@ __all__ = [
     "ServerHealthState",
     "TariffQuoteOperation",
     "TariffQuoteStatus",
+    "VPNProvisioningStatus",
     "WebhookInboxStatus",
 ]

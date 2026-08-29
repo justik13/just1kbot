@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from bot.constants import (
+    AdminAuditAction,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
 )
@@ -524,7 +525,7 @@ async def admin_sub_grant_apply(
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,
-            action="ADMIN_SUB_GRANT",
+            action=AdminAuditAction.ADMIN_SUB_GRANT,
             target_type="user",
             target_id=user.id,
             details={

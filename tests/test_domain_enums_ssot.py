@@ -1,14 +1,26 @@
-"""Unit tests asserting Single Source of Truth invariants for domain enums, models, and constraints."""
+import re
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 import unittest
+from sqlalchemy import CheckConstraint
 
 import bot.constants
 import config.constants
 import config.enums
 import config.tariffs
 from database import models
+
+
+def _extract_check_constraint_in(table, constraint_name: str) -> set[str]:
+    for constraint in table.constraints:
+        if isinstance(constraint, CheckConstraint) and constraint.name == constraint_name:
+            sql_text = str(constraint.sqltext)
+            match = re.search(r"\bIN\s*\(([^)]+)\)", sql_text, re.IGNORECASE)
+            if match:
+                raw_items = match.group(1).split(",")
+                return {item.strip().strip("'\"") for item in raw_items}
+    raise AssertionError(f"CheckConstraint '{constraint_name}' not found on table {table.name}")
 
 
 class DomainEnumsSSOTTests(unittest.TestCase):
@@ -36,7 +48,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
 
     def test_all_enums_declared_are_strenums_with_values(self):
         """Every exported enum in config.enums must be a valid StrEnum with non-empty members."""
-        self.assertGreaterEqual(len(config.enums.__all__), 17)
+        self.assertEqual(len(config.enums.__all__), 20)
         for enum_name in config.enums.__all__:
             enum_cls = getattr(config.enums, enum_name)
             self.assertTrue(
@@ -82,67 +94,131 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             models.ACCOUNT_LEDGER_ENTRY_TYPES,
             tuple(s.value for s in config.enums.AccountLedgerEntryType),
         )
+        self.assertEqual(
+            models.ACCOUNT_RESERVATION_TYPES,
+            tuple(s.value for s in config.enums.AccountReservationType),
+        )
+        self.assertEqual(
+            models.ACCOUNT_RESERVATION_STATUSES,
+            tuple(s.value for s in config.enums.AccountReservationStatus),
+        )
+        self.assertEqual(
+            models.PAID_VALUE_ENTRY_TYPES,
+            tuple(s.value for s in config.enums.PaidValueEntryType),
+        )
+        self.assertEqual(
+            models.ENTITLEMENT_ENTRY_TYPES,
+            tuple(s.value for s in config.enums.EntitlementEntryType),
+        )
+        self.assertEqual(
+            models.TARIFF_QUOTE_OPERATIONS,
+            tuple(s.value for s in config.enums.TariffQuoteOperation),
+        )
+        self.assertEqual(
+            models.TARIFF_QUOTE_STATUSES,
+            tuple(s.value for s in config.enums.TariffQuoteStatus),
+        )
+        self.assertEqual(
+            models.VPN_PROVISIONING_STATUSES,
+            tuple(s.value for s in config.enums.VPNProvisioningStatus),
+        )
+        self.assertEqual(
+            models.WEBHOOK_INBOX_STATUSES,
+            tuple(s.value for s in config.enums.WebhookInboxStatus),
+        )
+        self.assertEqual(
+            models.PAYMENT_DISPUTE_STATUSES,
+            tuple(s.value for s in config.enums.PaymentDisputeStatus),
+        )
+        self.assertEqual(
+            models.PAYMENT_CHECKOUT_STATUSES,
+            tuple(s.value for s in config.enums.PaymentCheckoutStatus),
+        )
 
     def test_database_model_constraints_match_enums(self):
         """Extract CheckConstraint IN (...) definitions on SQLAlchemy models and ensure 0 drift against Enums."""
-        # 1. TariffQuote operation & status
+        # 1. VPNProfile provisioning_status
         self.assertEqual(
+            _extract_check_constraint_in(models.VPNProfile.__table__, "ck_vpn_profiles_provisioning_status"),
+            set(config.enums.VPNProvisioningStatus),
+        )
+
+        # 2. TariffQuote operation & status
+        self.assertEqual(
+            _extract_check_constraint_in(models.TariffQuote.__table__, "ck_tariff_quotes_operation"),
             set(config.enums.TariffQuoteOperation),
-            {"purchase", "renew", "change"},
         )
         self.assertEqual(
+            _extract_check_constraint_in(models.TariffQuote.__table__, "ck_tariff_quotes_status"),
             set(config.enums.TariffQuoteStatus),
-            {"active", "consumed", "expired", "cancelled", "manual_review"},
         )
 
-        # 2. PaymentCheckout status
+        # 3. PaidValueLedgerEntry entry_type
         self.assertEqual(
-            set(config.enums.PaymentCheckoutStatus),
-            {"active", "abandoned"},
-        )
-
-        # 3. PaymentDispute status
-        self.assertEqual(
-            set(config.enums.PaymentDisputeStatus),
-            {"open", "won_by_merchant", "lost_by_merchant", "manual_review"},
-        )
-
-        # 4. ProviderRefundOperation status
-        self.assertEqual(
-            set(config.enums.ProviderRefundOperationStatus),
-            {"pending", "processing", "retry", "completed", "failed"},
-        )
-
-        # 5. AccountReservation type & status
-        self.assertEqual(
-            set(config.enums.AccountReservationType),
-            {"refund", "dispute"},
-        )
-        self.assertEqual(
-            set(config.enums.AccountReservationStatus),
-            {"active", "released", "consumed"},
-        )
-
-        # 6. PaidValueEntry & EntitlementEntry
-        self.assertEqual(
+            _extract_check_constraint_in(models.PaidValueLedgerEntry.__table__, "ck_paid_value_ledger_entry_type"),
             set(config.enums.PaidValueEntryType),
-            {"account_purchase", "tariff_conversion", "manual_adjustment"},
-        )
-        self.assertEqual(
-            set(config.enums.EntitlementEntryType),
-            {"account_purchase_grant", "manual_grant", "tariff_change"},
         )
 
-        # 7. WebhookInboxStatus
+        # 4. Payment provider_status, fulfillment_status, reconciliation_status, checkout_status
         self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_provider_status"),
+            set(config.enums.PaymentProviderStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_fulfillment_status"),
+            set(config.enums.PaymentFulfillmentStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_reconciliation_status"),
+            set(config.enums.PaymentReconciliationStatus),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.Payment.__table__, "ck_payments_checkout_status"),
+            set(config.enums.PaymentCheckoutStatus),
+        )
+
+        # 5. AccountLedgerEntry entry_type
+        self.assertEqual(
+            _extract_check_constraint_in(models.AccountLedgerEntry.__table__, "ck_account_ledger_entry_type"),
+            set(config.enums.AccountLedgerEntryType),
+        )
+
+        # 6. AccountBalanceReservation reservation_type & status
+        self.assertEqual(
+            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_type"),
+            set(config.enums.AccountReservationType),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.AccountBalanceReservation.__table__, "ck_account_reservations_status"),
+            set(config.enums.AccountReservationStatus),
+        )
+
+        # 7. WebhookInbox status
+        self.assertEqual(
+            _extract_check_constraint_in(models.WebhookInbox.__table__, "ck_webhook_inbox_status"),
             set(config.enums.WebhookInboxStatus),
-            {"pending", "processing", "retry", "succeeded", "dead"},
         )
 
-        # 8. PaymentQueueStatus
+        # 8. EntitlementEntry entry_type
         self.assertEqual(
+            _extract_check_constraint_in(models.EntitlementEntry.__table__, "ck_entitlement_entries_type"),
+            set(config.enums.EntitlementEntryType),
+        )
+
+        # 9. PaymentProviderOperation status
+        self.assertEqual(
+            _extract_check_constraint_in(models.PaymentProviderOperation.__table__, "ck_payment_provider_operations_status"),
             set(config.enums.PaymentQueueStatus),
-            {"pending", "processing", "retry", "succeeded", "dead", "cancelled"},
+        )
+
+        # 10. APIOperation operation_type & status
+        self.assertEqual(
+            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_operation_type"),
+            set(config.enums.ApiOperationType),
+        )
+        self.assertEqual(
+            _extract_check_constraint_in(models.APIOperation.__table__, "ck_api_operations_status"),
+            set(config.enums.ApiOperationStatus),
         )
 
     def test_exact_spelling_and_serialization_integrity(self):

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from config.enums import AdminAuditAction
 from config.settings import get_settings
 from database.models import Payment, PaymentEvent
 from database.repositories.account_ledger_repo import (
@@ -374,7 +375,7 @@ async def settle_succeeded_topup(
         await AuditService.log_action(
             session,
             admin_id=0,
-            action="PAYMENT_SUCCESS",
+            action=AdminAuditAction.PAYMENT_SUCCESS,
             target_type="user",
             target_id=payment.user_id,
             details={

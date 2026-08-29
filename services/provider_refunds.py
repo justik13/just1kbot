@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy import func, or_, select
 
 from bot import texts
+from config.enums import AdminAuditAction
 from database.dispute_models import PaymentDispute
 from database.models import (
     AccountBalanceReservation,
@@ -170,7 +171,7 @@ async def request_balance_topup_refund(
     await AuditService.log_action(
         session,
         admin_id=requested_by_admin_id or 0,
-        action="BALANCE_REFUND_REQUESTED",
+        action=AdminAuditAction.BALANCE_REFUND_REQUESTED,
         target_type="Payment",
         target_id=payment.id,
         details=(

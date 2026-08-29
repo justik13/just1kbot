@@ -42,6 +42,7 @@ from config.constants import (
     TariffQuoteStatus,
     USER_CONTEXT_CACHE_MAX_SIZE,
     USER_CONTEXT_CACHE_TTL,
+    VPNProvisioningStatus,
     WebhookInboxStatus,
     WORKER_ERROR_SLEEP_INTERVAL,
 )
@@ -85,6 +86,7 @@ __all__ = [
     "TariffQuoteStatus",
     "USER_CONTEXT_CACHE_MAX_SIZE",
     "USER_CONTEXT_CACHE_TTL",
+    "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
 ]

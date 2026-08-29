@@ -8,7 +8,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import PERMANENT_SUBSCRIPTION_DAYS
+from bot.constants import AdminAuditAction, PERMANENT_SUBSCRIPTION_DAYS
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -234,7 +234,7 @@ async def admin_sub_apply_reduce(
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,
-            action="ADMIN_SUB_REDUCE",
+            action=AdminAuditAction.ADMIN_SUB_REDUCE,
             target_type="user",
             target_id=user.id,
             details={

@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_change_tariff_keyboard,
@@ -333,7 +334,7 @@ async def admin_sub_apply_tariff(
         await AuditService.log_action(
             session,
             admin_id=callback.from_user.id,
-            action="ADMIN_SUB_CHANGE",
+            action=AdminAuditAction.ADMIN_SUB_CHANGE,
             target_type="user",
             target_id=user.id,
             details={
