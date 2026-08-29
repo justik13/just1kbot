@@ -127,9 +127,50 @@ cmd_logs() {
     )
 }
 
-# --- 3. Безопасное обновление ---
+# --- Pre-flight проверка перед обновлением ---
+cmd_preflight() {
+    info "Выполнение предварительной проверки окружения (Pre-flight)..."
+
+    if [[ ! -f "${PROJECT_DIR}/.env" ]]; then
+        error "Файл .env не найден в ${PROJECT_DIR}!"
+        return 1
+    fi
+
+    # 1. Проверка SSL_EMAIL
+    local ssl_email
+    ssl_email=$(grep -E "^SSL_EMAIL=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"" | tr '[:upper:]' '[:lower:]' || true)
+    if [[ "$ssl_email" =~ ^(admin@example\.com|owner@example\.com|change_me@example\.com)$ ]] || [[ -z "$ssl_email" ]]; then
+        error "SSL_EMAIL в .env установлен в '$ssl_email'! Укажите реальный рабочий email для выпуска SSL-сертификатов."
+        return 1
+    fi
+
+    # 2. Проверка устаревших удаленных переменных
+    local legacy_vars
+    legacy_vars=$(grep -nE "^(AMNEZIA_API_URL|AMNEZIA_API_KEY|WEBHOOK_URL)=" "${PROJECT_DIR}/.env" || true)
+    if [[ -n "$legacy_vars" ]]; then
+        error "В .env найдены устаревшие переменные, которые блокируют запуск приложения:"
+        echo "$legacy_vars"
+        warn "Пожалуйста, удалите или закомментируйте эти строки в .env перед обновлением."
+        return 1
+    fi
+
+    log "Предварительная проверка (Pre-flight) успешно пройдена."
+    return 0
+}
+
+# --- 3. Безопасное обновление с авто-откатом ---
 cmd_update() {
     echo -e "\n${BOLD}${BLUE}=== 🔄 БЕЗОПАСНОЕ ОБНОВЛЕНИЕ JUST1KBOT ===${NC}\n"
+
+    # Шаг 0: Pre-flight проверка
+    if ! cmd_preflight; then
+        error "Pre-flight проверка не пройдена. Обновление отменено до внесения изменений."
+        return 1
+    fi
+
+    # Сохранение точки возврата (commit SHA) для автоматического отката
+    local rollback_commit
+    rollback_commit=$(git rev-parse HEAD 2>/dev/null || echo "")
 
     # Проверка наличия локальных незакоммиченных изменений
     local dirty_changes
@@ -165,11 +206,22 @@ cmd_update() {
     fi
 
     info "Шаг 3/5. Сборка образов и запуск миграций..."
-    docker compose build
+    if ! docker compose build; then
+        error "Ошибка при сборке Docker-образов!"
+        if [[ -n "$rollback_commit" ]]; then
+            warn "🚨 Выполняем автоматический откат исходного кода к коммиту $rollback_commit..."
+            git reset --hard "$rollback_commit"
+        fi
+        return 1
+    fi
 
     info "Применение миграций базы данных..."
     if ! docker compose run --rm migrate; then
         error "Ошибка при применении миграций базы данных! Запуск новых контейнеров отменён."
+        if [[ -n "$rollback_commit" ]]; then
+            warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
+            git reset --hard "$rollback_commit"
+        fi
         warn "Предыдущая версия сервисов продолжает работать."
         return 1
     fi
@@ -199,7 +251,8 @@ cmd_update() {
             echo ""
             error "Ошибка миграции базы данных после обновления: $migrate_s"
             docker compose logs migrate
-            return 1
+            update_ok=false
+            break
         fi
 
         if [ "$db_h" = "healthy" ] && [ "$redis_h" = "healthy" ] && [ "$bot_h" = "healthy" ] && [ "$caddy_s" = "running" ]; then
@@ -216,8 +269,16 @@ cmd_update() {
     if [ "$update_ok" = "true" ]; then
         log "Все сервисы успешно обновлены и работают (Healthy)!"
     else
-        warn "Таймаут ожидания статуса healthy. Проверьте состояние:"
-        docker compose ps
+        error "Сервисы не смогли перейти в состояние Healthy после обновления!"
+        docker compose logs --tail=50 bot
+        if [[ -n "$rollback_commit" ]]; then
+            echo ""
+            warn "🚨 ВНИМАНИЕ: Начинаем автоматический откат к предыдущей рабочей версии ($rollback_commit)..."
+            git reset --hard "$rollback_commit"
+            docker compose up -d --build
+            log "Откат завершён. Предыдущая версия сервисов восстановлена."
+        fi
+        return 1
     fi
 
     info "Шаг 5/5. Просмотр последних логов бота:"
