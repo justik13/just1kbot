@@ -2,7 +2,6 @@
 from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
-import re
 import unittest
 
 import bot.constants
