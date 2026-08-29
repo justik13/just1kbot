@@ -1,9 +1,11 @@
+import inspect
 import json
 import logging
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.enums import AdminAuditAction
 from database.repositories.audit_repo import create_audit_log
 
 logger = logging.getLogger(__name__)
@@ -14,17 +16,26 @@ class AuditService:
     async def log_action(
         session: AsyncSession,
         admin_id: int,
-        action: str,
+        action: str | AdminAuditAction,
         target_type: str | None = None,
         target_id: int | None = None,
         details: Any = None,
     ):
         """Universal audit logger supporting string and dictionary details."""
-        if callable(getattr(session, "in_transaction", None)) and session.in_transaction():
-            # Flush pending business changes BEFORE entering the silent audit try-block
-            # so that business constraint violations bubble up to the caller and aren't
-            # swallowed as "audit failures", which would leave the transaction poisoned.
-            await session.flush()
+        in_tx_fn = getattr(session, "in_transaction", None)
+        if callable(in_tx_fn):
+            in_tx = in_tx_fn()
+            if inspect.isawaitable(in_tx):
+                in_tx = await in_tx
+            if in_tx:
+                # Flush pending business changes BEFORE entering the silent audit try-block
+                # so that business constraint violations bubble up to the caller and aren't
+                # swallowed as "audit failures", which would leave the transaction poisoned.
+                flush_fn = getattr(session, "flush", None)
+                if callable(flush_fn):
+                    flush_res = flush_fn()
+                    if inspect.isawaitable(flush_res):
+                        await flush_res
 
         try:
             formatted_details = None
@@ -35,16 +46,33 @@ class AuditService:
                     formatted_details = str(details)
 
             normalized_target_type = target_type.lower() if target_type else None
+            action_val = action.value if hasattr(action, "value") else str(action)
 
-            async with session.begin_nested():
-                await create_audit_log(
-                    session=session,
-                    admin_id=admin_id,
-                    action=action,
-                    target_type=normalized_target_type,
-                    target_id=target_id,
-                    details=formatted_details,
-                )
+            begin_nested_fn = getattr(session, "begin_nested", None)
+            if callable(begin_nested_fn):
+                nested = begin_nested_fn()
+                if inspect.isawaitable(nested):
+                    nested = await nested
+                if hasattr(nested, "__aenter__"):
+                    async with nested:
+                        await create_audit_log(
+                            session=session,
+                            admin_id=admin_id,
+                            action=action_val,
+                            target_type=normalized_target_type,
+                            target_id=target_id,
+                            details=formatted_details,
+                        )
+                    return
+
+            await create_audit_log(
+                session=session,
+                admin_id=admin_id,
+                action=action_val,
+                target_type=normalized_target_type,
+                target_id=target_id,
+                details=formatted_details,
+            )
         except Exception as e:
             logger.error("Failed to write audit log action %s: %s", action, e)
 
@@ -53,7 +81,7 @@ class AuditService:
         session: AsyncSession,
         *,
         user_id: int,
-        action: str,
+        action: str | AdminAuditAction,
         details: Any = None,
         admin_id: int = 0,
     ):
@@ -72,7 +100,7 @@ class AuditService:
         session: AsyncSession,
         *,
         admin_id: int,
-        action: str,
+        action: str | AdminAuditAction,
         target_type: str,
         target_id: int | None = None,
         details: Any = None,

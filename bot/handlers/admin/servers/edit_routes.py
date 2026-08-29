@@ -7,6 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.constants import AMNEZIA_PROTOCOL
@@ -138,7 +139,7 @@ async def process_edit_server_name(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_SERVER",
+        AdminAuditAction.EDIT_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="name", value=new_name),
@@ -283,7 +284,7 @@ async def process_edit_server_flag(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_SERVER",
+        AdminAuditAction.EDIT_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="flag", value=new_flag),
@@ -578,7 +579,7 @@ async def process_edit_server_url(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_SERVER",
+        AdminAuditAction.EDIT_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="api_url", value=new_url),
@@ -828,7 +829,7 @@ async def process_edit_server_key(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_SERVER",
+        AdminAuditAction.EDIT_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER_REDACTED.format(field="api_key"),
@@ -973,7 +974,7 @@ async def process_edit_server_max_clients(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_SERVER",
+        AdminAuditAction.EDIT_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_EDIT_SERVER.format(field="max_clients", value=f"{server.max_clients} -> {new_value}"),

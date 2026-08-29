@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.servers import get_server_delete_confirm_keyboard
 from bot.states import AdminStates
@@ -227,7 +228,7 @@ async def confirm_delete_server(
     await AuditService.log_action(
         session,
         callback.from_user.id,
-        "DELETE_SERVER",
+        AdminAuditAction.DELETE_SERVER,
         "Server",
         server_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_DELETE_SERVER.format(server_name=server_name, count=deleted_profiles),

@@ -458,13 +458,17 @@ async def settle_succeeded_topup(
                 auto_action = payment.topup_context.get("auto_fulfill_action")
                 quote_raw = payment.topup_context.get("quote_public_id")
                 if auto_action and quote_raw:
+                    import inspect
                     import logging
                     from contextlib import asynccontextmanager
 
                     @asynccontextmanager
                     async def _safe_begin_nested(s):
-                        if callable(getattr(s, "begin_nested", None)):
-                            nested = s.begin_nested()
+                        begin_nested_fn = getattr(s, "begin_nested", None)
+                        if callable(begin_nested_fn):
+                            nested = begin_nested_fn()
+                            if inspect.isawaitable(nested):
+                                nested = await nested
                             if hasattr(nested, "__aenter__"):
                                 async with nested:
                                     yield

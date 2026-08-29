@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.handlers.admin.disputes import router as disputes_router
 from bot.keyboards import (
     get_admin_cat_finance_keyboard,
@@ -409,7 +410,7 @@ async def toggle_admin_maintenance(
     await AuditService.log_action(
         session,
         callback.from_user.id,
-        "TOGGLE_MAINTENANCE",
+        AdminAuditAction.TOGGLE_MAINTENANCE,
         "MaintenanceMode",
         1,
         "enabled" if enabled else "disabled",

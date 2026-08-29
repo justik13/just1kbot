@@ -372,7 +372,7 @@ class DeviceService:
         else:
             await session.delete(profile)
 
-        action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
+        action = AdminAuditAction.ADMIN_DEVICE_DELETE if (actor_id and is_admin(actor_id)) else AdminAuditAction.DEVICE_DELETE
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
         await AuditService.log_action(
             session,

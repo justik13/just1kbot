@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import (
     get_admin_confirm_action_keyboard,
@@ -377,7 +378,7 @@ async def toggle_tariff_apply(
     await AuditService.log_action(
         session,
         callback.from_user.id,
-        "EDIT_TARIFF",
+        AdminAuditAction.EDIT_TARIFF,
         "Tariff",
         tariff_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_TOGGLED.format(status='active' if new_status else 'inactive'),
@@ -516,7 +517,7 @@ async def process_edit_tariff_rub(
     await AuditService.log_action(
         session,
         message.from_user.id,
-        "EDIT_TARIFF",
+        AdminAuditAction.EDIT_TARIFF,
         "Tariff",
         tariff_id,
         texts.ADMIN_AUDIT_LOG_DETAILS_TARIFF_EDIT_RUB.format(old_value=old_value, new_value=new_value),

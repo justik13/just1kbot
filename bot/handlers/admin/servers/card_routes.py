@@ -7,6 +7,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards.admin.users import get_admin_confirm_action_keyboard
 from database.repositories.servers_repo import (
     get_server_by_id,
@@ -196,7 +197,7 @@ async def toggle_server_apply(
     await AuditService.log_action(
         session,
         callback.from_user.id,
-        "TOGGLE_SERVER",
+        AdminAuditAction.TOGGLE_SERVER,
         "Server",
         server_id,
         "enabled" if new_status else "disabled",
