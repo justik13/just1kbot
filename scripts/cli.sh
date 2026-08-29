@@ -226,16 +226,6 @@ cmd_preflight() {
         has_errors=true
     fi
 
-    # 9. Глубокая валидация конфигурации через Pydantic Settings (если Docker доступен)
-    if [ "$has_errors" = "false" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-        local pydantic_err=""
-        if ! pydantic_err=$(docker compose run --rm --no-deps bot python -c "from config.settings import get_settings; get_settings()" 2>&1); then
-            error "Ошибка валидации конфигурации Pydantic Settings:"
-            echo "$pydantic_err" | tail -n 5 >&2
-            has_errors=true
-        fi
-    fi
-
     if [ "$has_errors" = "true" ]; then
         error "Предварительная проверка (preflight) завершилась с ошибками. Исправьте конфигурацию перед продолжением."
         return 1
@@ -290,7 +280,18 @@ cmd_update() {
     base_hash=$(git merge-base HEAD "origin/$current_branch" 2>/dev/null || true)
 
     if [[ "$local_hash" == "$remote_hash" ]]; then
-        info "Установлена актуальная версия ($local_hash). Новых коммитов в remote нет."
+        info "Установлена актуальная версия ($local_hash). Новых коммитов в origin/$current_branch нет."
+        read -r -p "Пересобрать образы и перезапустить контейнеры без обновления кода? (y/N): " force_rebuild
+        if [[ ! "$force_rebuild" =~ ^[Yy]$ ]]; then
+            log "Обновление завершено (код уже актуален)."
+            if [ "$did_stash" = "true" ]; then
+                echo ""
+                warn "⚠️ ВНИМАНИЕ: Ваши локальные изменения сохранены в git stash (stash@{0}) и НЕ были восстановлены автоматически."
+                info "Для просмотра сохранённых изменений: git stash show -p"
+                info "Для применения изменений: git stash pop"
+            fi
+            return 0
+        fi
     elif [[ "$base_hash" == "$local_hash" ]]; then
         info "Обнаружены новые коммиты в origin/$current_branch. Выполняем безопасное обновление (fast-forward pull)..."
         git pull --ff-only origin "$current_branch"
@@ -325,11 +326,23 @@ cmd_update() {
         fi
     fi
 
-    info "Шаг 4/6. Сборка образов и применение миграций..."
+    info "Шаг 4/6. Сборка образов, валидация конфигурации и применение миграций..."
     if ! docker compose build; then
-        error "Ошибка при сборке Docker-образов!"
+        error "Ошибка при сборке Docker-образов новой версии!"
         if [[ -n "$rollback_commit" ]]; then
             warn "🚨 Выполняем автоматический откат исходного кода к коммиту $rollback_commit..."
+            git reset --hard "$rollback_commit"
+        fi
+        return 1
+    fi
+
+    info "Валидация конфигурации через Pydantic Settings в обновлённом образе..."
+    local pydantic_err=""
+    if ! pydantic_err=$(docker compose run --rm --no-deps bot python -c "from config.settings import get_settings; get_settings()" 2>&1); then
+        error "Ошибка валидации конфигурации Pydantic Settings в новой версии кода!"
+        echo "$pydantic_err" | tail -n 5 >&2
+        if [[ -n "$rollback_commit" ]]; then
+            warn "🚨 Отменяем обновление и возвращаем исходный код к коммиту $rollback_commit..."
             git reset --hard "$rollback_commit"
         fi
         return 1
@@ -341,8 +354,43 @@ cmd_update() {
         if [[ -n "$rollback_commit" ]]; then
             warn "🚨 Выполняем откат исходного кода к коммиту $rollback_commit..."
             git reset --hard "$rollback_commit"
+            docker compose up -d --build
+
+            info "Проверка работоспособности сервисов старой версии..."
+            local mig_timeout=60
+            local mig_elapsed=0
+            local mig_healthy=false
+
+            while [ "$mig_elapsed" -lt "$mig_timeout" ]; do
+                local m_db m_redis m_bot m_caddy
+                m_db="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_db 2>/dev/null || echo starting)"
+                m_redis="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_redis 2>/dev/null || echo starting)"
+                m_bot="$(docker inspect --format='{{.State.Health.Status}}' just1kbot_app 2>/dev/null || echo starting)"
+                m_caddy="$(docker inspect --format='{{.State.Status}}' just1kbot_caddy 2>/dev/null || echo starting)"
+
+                if [ "$m_db" = "healthy" ] && [ "$m_redis" = "healthy" ] && [ "$m_bot" = "healthy" ] && [ "$m_caddy" = "running" ]; then
+                    mig_healthy=true
+                    break
+                fi
+                printf "."
+                sleep 2
+                mig_elapsed=$((mig_elapsed + 2))
+            done
+            echo ""
+
+            if [ "$mig_healthy" = "true" ]; then
+                log "Старая версия сервисов восстановлена и работает в штатном режиме."
+            else
+                error "КРИТИЧЕСКАЯ ОШИБКА: Старая версия сервисов не смогла запуститься (возможно, из-за частично применённых миграций)!"
+                if [[ -n "$pre_update_backup" ]] && [[ -f "$pre_update_backup" ]]; then
+                    warn "Для полного восстановления базы данных к исходному состоянию перед обновлением выполните:"
+                    echo -e "${BOLD}${YELLOW}    just1kbot restore $pre_update_backup${NC}"
+                else
+                    warn "Для полного восстановления рабочей базы данных выполните: just1kbot restore"
+                fi
+                docker compose logs --tail=50 bot
+            fi
         fi
-        warn "Предыдущая версия сервисов продолжает работать."
         return 1
     fi
 
@@ -450,15 +498,17 @@ cmd_update() {
 # Вспомогательная функция ротации бэкапов
 rotate_backups() {
     local keep_count="${1:-14}"
-    local total_count
-    # shellcheck disable=SC2012
-    total_count=$(ls -1 backups/*.sql.gz.age 2>/dev/null | wc -l | tr -d '[:space:]')
+    local backups=()
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && backups+=("$f")
+    done < <(find backups/ -maxdepth 1 -name "*.sql.gz.age" -type f 2>/dev/null | sort -r)
 
-    if [[ "$total_count" =~ ^[0-9]+$ ]] && (( total_count > keep_count )); then
-        local to_delete=$((total_count - keep_count))
-        info "Ротация бэкапов: найдено $total_count копий (лимит хранения: $keep_count). Удаление $to_delete устаревших бэкапов..."
-        # shellcheck disable=SC2012
-        ls -t backups/*.sql.gz.age 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_file; do
+    local total="${#backups[@]}"
+    if (( total > keep_count )); then
+        local to_delete=$(( total - keep_count ))
+        info "Ротация бэкапов: найдено $total копий (лимит хранения: $keep_count). Удаление $to_delete устаревших бэкапов..."
+        for (( i=keep_count; i<total; i++ )); do
+            local old_file="${backups[$i]}"
             if [[ -f "$old_file" ]]; then
                 rm -f "$old_file"
                 log "Удален устаревший бэкап: $(basename "$old_file")"
