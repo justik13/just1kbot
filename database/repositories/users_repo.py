@@ -66,9 +66,9 @@ async def get_user_by_id(
 async def create_user(
     session: AsyncSession,
     telegram_id: int,
-    username: str = None,
-    first_name: str = None,
-    referred_by: int = None,
+    username: str | None = None,
+    first_name: str | None = None,
+    referred_by: int | None = None,
 ) -> User:
     user = User(
         telegram_id=telegram_id,

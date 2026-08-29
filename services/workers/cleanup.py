@@ -24,10 +24,11 @@ from database.models import (
 )
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
+from services.audit_service import AuditService
 from services.profile_deletion_service import ProfileDeletionService
-from utils.datetime_helpers import now_utc
+from utils.datetime_helpers import is_permanent_subscription, now_utc
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 
 _unmanaged_peers_log_cache: TTLCache[tuple[int, str], float] = TTLCache(
     maxsize=5000, ttl=3600.0
@@ -148,7 +149,6 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     continue
                 if user.subscription_end is None:
                     continue
-                from utils.datetime_helpers import is_permanent_subscription
                 if is_permanent_subscription(user.subscription_end):
                     continue
                 if not user.financial_hold and user.subscription_end >= threshold:
@@ -173,7 +173,6 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                 if deleted > 0:
                     deleted_users_count += 1
                     deleted_profiles_count += deleted
-                    from services.audit_service import AuditService
                     await AuditService.log_action(
                         session,
                         admin_id=0,

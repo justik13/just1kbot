@@ -20,7 +20,7 @@ from services.amnezia_client import AmneziaClient
 from services.slots_cache import update_cached_peer_count
 from utils.datetime_helpers import now_utc
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 100
 TRAFFIC_QUOTA_BYTES = 1 * 1024 * 1024 * 1024 * 1024

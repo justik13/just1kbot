@@ -1,5 +1,4 @@
 import logging
-import re
 from datetime import datetime, timezone
 
 from aiogram import BaseMiddleware
@@ -107,39 +106,13 @@ STALE_MAX_AGE_SECONDS = 600
 
 def _validate_callback_params(callback_data: str) -> bool:
     """
-    Validate callback data parameters to prevent injection attacks.
-    Returns True if valid, False if suspicious patterns detected.
+    Validate callback data parameters for structural correctness.
+    Returns True if valid, False if unexpected parameter format detected.
+
+    Note: SQL/command injection via callback_data is not possible — SQLAlchemy
+    uses parameterized queries. This function validates numeric ID parameters only.
     """
     if not callback_data:
-        return False
-
-    # Check for SQL injection patterns
-    dangerous_patterns = [
-        r";\s*DROP\s+",
-        r";\s*DELETE\s+",
-        r";\s*UPDATE\s+",
-        r";\s*INSERT\s+",
-        r"--",
-        r"/\*",
-        r"\*/",
-        r"\bOR\b\s+\d+\s*=\s*\d+",
-        r"\bAND\b\s+\d+\s*=\s*\d+",
-        r"\bUNION\b",
-        r"\bSELECT\b",
-    ]
-
-    for pattern in dangerous_patterns:
-        if re.search(pattern, callback_data, re.IGNORECASE):
-            logger.warning(
-                "Potential SQL injection in callback data: %s", callback_data[:100]
-            )
-            return False
-
-    # Check for command injection patterns
-    if any(char in callback_data for char in ["|", "`", "$", "&", ";", "<", ">"]):
-        logger.warning(
-            "Potential command injection in callback data: %s", callback_data[:100]
-        )
         return False
 
     # Validate numeric parameters match expected patterns

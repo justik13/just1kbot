@@ -31,7 +31,7 @@ from database.models import User
 from utils.datetime_helpers import now_utc
 from utils.rate_limiter import global_send_limiter
 
-logger = logging.getLogger("BackgroundWorker")
+logger = logging.getLogger(__name__)
 
 MAX_RETRY_COUNT = 4
 BACKOFF_BASE_INTERVAL = NOTIFICATION_INTERVAL

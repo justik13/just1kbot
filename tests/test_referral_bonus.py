@@ -151,7 +151,7 @@ class TestReferralBonusLedgerEntryShape(unittest.TestCase):
         session.flush = AsyncMock()
 
         with patch(
-            "services.referral_bonus._credit_capacity",
+            "services.referral_bonus.credit_capacity",
             AsyncMock(return_value=Decimal(10)),
         ):
             reversed_amount = asyncio.run(
@@ -333,7 +333,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         session.flush = AsyncMock()
 
         with patch(
-            "services.referral_bonus._credit_capacity",
+            "services.referral_bonus.credit_capacity",
             AsyncMock(return_value=Decimal(50)),
         ):
             reversed_amount = asyncio.run(
@@ -401,7 +401,7 @@ class TestGrantReferralBonusForTopup(unittest.TestCase):
         session.flush = AsyncMock()
 
         with patch(
-            "services.referral_bonus._credit_capacity",
+            "services.referral_bonus.credit_capacity",
             AsyncMock(return_value=Decimal(0)),
         ):
             reversed_amount = asyncio.run(

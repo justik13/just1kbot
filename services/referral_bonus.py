@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.enums import AdminAuditAction
 from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
-    _credit_capacity,
+    credit_capacity,
     get_account_balance,
 )
 
@@ -342,7 +342,7 @@ async def reverse_referral_bonus_for_topup(
                 )
                 session.add(entry)
                 await session.flush()
-                reversal_capacity = await _credit_capacity(session, matching_credit)
+                reversal_capacity = await credit_capacity(session, matching_credit)
                 allocation_amount = min(abs(reversal_amount), reversal_capacity)
                 if allocation_amount > 0:
                     session.add(
@@ -412,7 +412,7 @@ async def reverse_referral_bonus_for_topup(
             )
             session.add(p_entry)
             await session.flush()
-            p_reversal_capacity = await _credit_capacity(
+            p_reversal_capacity = await credit_capacity(
                 session, matching_purchaser_credit
             )
             p_allocation_amount = min(abs(p_reversal_amount), p_reversal_capacity)
