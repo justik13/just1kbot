@@ -155,10 +155,27 @@ cmd_update() {
     current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
     info "Шаг 2/5. Получение обновлений из Git (ветка: $current_branch)..."
     git fetch origin "$current_branch"
-    git pull origin "$current_branch"
 
-    info "Шаг 3/5. Пересборка и запуск контейнеров..."
-    docker compose up -d --build
+    if git merge-base --is-ancestor HEAD "origin/$current_branch" 2>/dev/null; then
+        git pull --ff-only origin "$current_branch"
+    else
+        warn "Прямое слияние (fast-forward) невозможно из-за расхождения истории коммитов."
+        info "Выполняем безопасную синхронизацию рабочей копии с origin/$current_branch..."
+        git reset --hard "origin/$current_branch"
+    fi
+
+    info "Шаг 3/5. Сборка образов и запуск миграций..."
+    docker compose build
+
+    info "Применение миграций базы данных..."
+    if ! docker compose run --rm migrate; then
+        error "Ошибка при применении миграций базы данных! Запуск новых контейнеров отменён."
+        warn "Предыдущая версия сервисов продолжает работать."
+        return 1
+    fi
+
+    info "Запуск обновлённых сервисов..."
+    docker compose up -d
 
     info "Шаг 4/5. Проверка статуса здоровья сервисов (Healthcheck)..."
     local timeout=60
