@@ -392,3 +392,38 @@ async def get_filtered_users_paginated_with_profiles(
         session, filter_type=filter_type, page=page, per_page=per_page, filter_param=filter_param
     )
 
+
+async def get_user_filter_counts(session: AsyncSession) -> dict[str, int]:
+    """Return aggregated counts for main user filter categories in a single query."""
+    now = now_utc()
+    stmt = select(
+        func.count(User.id).label("total"),
+        func.count(User.id).filter(
+            User.created_at >= now - timedelta(days=7),
+        ).label("new_7d"),
+        func.count(User.id).filter(
+            User.subscription_end.is_not(None),
+            User.subscription_end > now,
+        ).label("active"),
+        func.count(User.id).filter(
+            User.subscription_end.is_not(None),
+            User.subscription_end > now,
+            User.subscription_end <= now + timedelta(days=3),
+        ).label("expiring_3d"),
+        func.count(User.id).filter(
+            (User.subscription_end.is_(None)) | (User.subscription_end <= now)
+        ).label("expired"),
+        func.count(User.id).filter(
+            (User.is_banned.is_(True)) | (User.is_bot_blocked.is_(True))
+        ).label("banned"),
+    ).where(User.is_deleted.is_(False))
+    result = (await session.execute(stmt)).one()
+    return {
+        "all": int(result.total or 0),
+        "new_7d": int(result.new_7d or 0),
+        "active": int(result.active or 0),
+        "expiring_3d": int(result.expiring_3d or 0),
+        "expired": int(result.expired or 0),
+        "banned": int(result.banned or 0),
+    }
+

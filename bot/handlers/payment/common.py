@@ -80,6 +80,7 @@ async def render_tariff_showcase(
             chat_id,
             texts.PAYMENT_NO_TARIFFS,
             get_back_button("back_to_main_menu"),
+            session=session,
         )
         return
     grouped: dict[int, list] = {}
@@ -94,6 +95,7 @@ async def render_tariff_showcase(
         chat_id,
         texts.PAYMENT_SHOWCASE_HEADER,
         keyboard,
+        session=session,
     )
 
 
@@ -131,5 +133,9 @@ async def _show_hub(
     )
     builder.adjust(1, 1, 1)
     await render_hub(
-        callback.bot, callback.message.chat.id, text, builder.as_markup()
+        callback.bot,
+        callback.message.chat.id,
+        text,
+        builder.as_markup(),
+        session=session,
     )

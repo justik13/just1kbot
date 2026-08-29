@@ -12,6 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert
 
 from bot.middlewares.correlation import set_request_id
+from config.constants import YOOKASSA_IP_RANGES
 from config.settings import get_settings
 from database.connection import session_scope
 from database.models import WebhookInbox
@@ -19,16 +20,6 @@ from utils.http_rate_limiter import get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 _healthcheck_redis = None
-
-YOOKASSA_IP_RANGES = [
-    "185.71.76.0/27",
-    "185.71.77.0/27",
-    "77.75.153.0/25",
-    "77.75.154.128/25",
-    "77.75.156.11/32",
-    "77.75.156.35/32",
-    "2a02:5180::/32",
-]
 
 OFFICIAL_YOOKASSA_EVENTS = {
     "payment.waiting_for_capture",

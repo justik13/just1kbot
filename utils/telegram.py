@@ -219,17 +219,26 @@ async def _load_hub_ids_from_db(chat_id: int, session: AsyncSession | None = Non
 
 
 async def _store_hub_id_in_db(
-    chat_id: int, message_id: int, *, is_effect: bool = False
+    chat_id: int,
+    message_id: int,
+    *,
+    is_effect: bool = False,
+    session: AsyncSession | None = None,
 ) -> None:
     """
     Persist a delivered hub message id. Raises on DB failure so callers can
     abort the current render and clean up already-sent messages — otherwise a
     delivered-but-untracked message becomes an uncleanable orphan.
     """
-    async with session_scope() as sess:
+    if session is not None:
         await hub_repo.add_hub_message_id(
-            sess, chat_id, message_id, is_effect=is_effect
+            session, chat_id, message_id, is_effect=is_effect
         )
+    else:
+        async with session_scope() as sess:
+            await hub_repo.add_hub_message_id(
+                sess, chat_id, message_id, is_effect=is_effect
+            )
     cached = _hub_cache.get(chat_id)
     if cached and "ids" in cached:
         if message_id not in cached["ids"]:
@@ -241,13 +250,20 @@ async def _store_hub_id_in_db(
         }
 
 
-async def _remove_hub_ids_from_db(chat_id: int, message_ids: list[int]) -> None:
+async def _remove_hub_ids_from_db(
+    chat_id: int,
+    message_ids: list[int],
+    session: AsyncSession | None = None,
+) -> None:
     if not message_ids:
         return
 
     try:
-        async with session_scope() as sess:
-            await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
+        if session is not None:
+            await hub_repo.remove_hub_message_ids(session, chat_id, message_ids)
+        else:
+            async with session_scope() as sess:
+                await hub_repo.remove_hub_message_ids(sess, chat_id, message_ids)
     except Exception as e:
         # Telegram-side deletion may have succeeded while the durable cleanup
         # did not. Invalidate the cache so the next load re-reads DB truth —
@@ -271,14 +287,19 @@ async def get_hub_ids(chat_id: int, session: AsyncSession | None = None) -> list
     return await _load_hub_ids_from_db(chat_id, session=session)
 
 
-async def _delete_hub_messages(bot, chat_id: int, msg_ids: list[int]) -> list[int]:
+async def _delete_hub_messages(
+    bot,
+    chat_id: int,
+    msg_ids: list[int],
+    session: AsyncSession | None = None,
+) -> list[int]:
     if not msg_ids:
         return []
 
     deleted_ids, failed_ids = await _safe_delete_batch(bot, chat_id, msg_ids)
 
     if deleted_ids:
-        await _remove_hub_ids_from_db(chat_id, deleted_ids)
+        await _remove_hub_ids_from_db(chat_id, deleted_ids, session=session)
 
     if failed_ids:
         logger.warning(
@@ -316,6 +337,40 @@ def _is_message_effect_error(exc: Exception) -> bool:
     )
 
 
+async def _dispatch_load_hub_ids_from_db(
+    chat_id: int, session: AsyncSession | None = None
+) -> list[int]:
+    if session is not None:
+        return await _load_hub_ids_from_db(chat_id, session=session)
+    return await _load_hub_ids_from_db(chat_id)
+
+
+async def _dispatch_store_hub_id_in_db(
+    chat_id: int,
+    message_id: int,
+    *,
+    is_effect: bool | None = None,
+    session: AsyncSession | None = None,
+) -> None:
+    kwargs = {}
+    if is_effect is not None:
+        kwargs["is_effect"] = is_effect
+    if session is not None:
+        kwargs["session"] = session
+    await _store_hub_id_in_db(chat_id, message_id, **kwargs)
+
+
+async def _dispatch_delete_hub_messages(
+    bot,
+    chat_id: int,
+    msg_ids: list[int],
+    session: AsyncSession | None = None,
+) -> list[int]:
+    if session is not None:
+        return await _delete_hub_messages(bot, chat_id, msg_ids, session=session)
+    return await _delete_hub_messages(bot, chat_id, msg_ids)
+
+
 async def render_hub(
     bot,
     chat_id: int,
@@ -326,6 +381,7 @@ async def render_hub(
     trigger_message_id: int | None = None,
     disable_web_page_preview: bool = True,
     message_effect_id: str | None = None,
+    session: AsyncSession | None = None,
 ) -> int:
     """Render a single navigable hub, editing the target text message first."""
     _maybe_cleanup_cache()
@@ -334,7 +390,7 @@ async def render_hub(
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        old_ids = await _load_hub_ids_from_db(chat_id)
+        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
         text_parts = split_text_by_lines(text, limit=4096) or ["—"]
         cached_effect_id = _hub_cache.get(chat_id, {}).get("effect_msg_id")
 
@@ -369,7 +425,7 @@ async def render_hub(
                 stale_failed: list[int] = []
                 if stale_ids:
                     try:
-                        stale_failed = await _delete_hub_messages(bot, chat_id, stale_ids)
+                        stale_failed = await _dispatch_delete_hub_messages(bot, chat_id, stale_ids, session=session)
                     except Exception:
                         # Durable cleanup of stale ids failed; an ADOPTED trigger
                         # was never persisted -> remove it before escaping.
@@ -382,7 +438,7 @@ async def render_hub(
                                 pass
                         raise
                 try:
-                    await _store_hub_id_in_db(chat_id, target_edit_id)
+                    await _dispatch_store_hub_id_in_db(chat_id, target_edit_id, session=session)
                 except Exception:
                     if target_edit_id not in old_ids:
                         # Adopted an untracked trigger message as the hub; its id
@@ -408,7 +464,7 @@ async def render_hub(
                     stale_failed_nm: list[int] = []
                     if stale_ids:
                         try:
-                            stale_failed_nm = await _delete_hub_messages(bot, chat_id, stale_ids)
+                            stale_failed_nm = await _dispatch_delete_hub_messages(bot, chat_id, stale_ids, session=session)
                         except Exception:
                             if target_edit_id not in old_ids:
                                 try:
@@ -419,7 +475,7 @@ async def render_hub(
                                     pass
                             raise
                     try:
-                        await _store_hub_id_in_db(chat_id, target_edit_id)
+                        await _dispatch_store_hub_id_in_db(chat_id, target_edit_id, session=session)
                     except Exception:
                         if target_edit_id not in old_ids:
                             try:
@@ -542,24 +598,24 @@ async def render_hub(
                 sent_ids.append(message.message_id)
                 # Append BEFORE storing: if the store raises, the id is already
                 # in sent_ids so the BaseException cleanup deletes the delivered
-                # message instead of orphaning it. The first part carries the
                 # durable effect marker (if any).
-                await _store_hub_id_in_db(
+                await _dispatch_store_hub_id_in_db(
                     chat_id,
                     message.message_id,
                     is_effect=bool(effect),
+                    session=session,
                 )
         except BaseException:
             if sent_ids:
                 try:
-                    await asyncio.shield(_delete_hub_messages(bot, chat_id, sent_ids))
+                    await asyncio.shield(_dispatch_delete_hub_messages(bot, chat_id, sent_ids, session=session))
                 except Exception:
                     pass
             raise
 
         old_failed: list[int] = []
         if old_ids:
-            old_failed = await _delete_hub_messages(bot, chat_id, old_ids)
+            old_failed = await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
         _hub_cache[chat_id] = {
             "ids": sent_ids + old_failed,
             "effect_msg_id": sent_ids[0] if message_effect_id and sent_ids else None,
@@ -575,12 +631,13 @@ async def send_hub_photo(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        old_ids = await _load_hub_ids_from_db(chat_id)
+        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
 
         if caption:
             caption = caption[:1024]
@@ -620,7 +677,7 @@ async def send_hub_photo(
                 raise
 
         try:
-            await _store_hub_id_in_db(chat_id, msg.message_id)
+            await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
         except Exception:
             # Store BEFORE deleting the old hub: on failure we remove only the
             # NEW message and leave the OLD hub fully intact (no user-visible
@@ -634,7 +691,7 @@ async def send_hub_photo(
             raise
 
         if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
+            await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
 
         return msg.message_id
 
@@ -646,12 +703,13 @@ async def send_hub_document(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()
 
     lock = _get_hub_render_lock(chat_id)
     async with lock:
-        old_ids = await _load_hub_ids_from_db(chat_id)
+        old_ids = await _dispatch_load_hub_ids_from_db(chat_id, session=session)
 
         if caption:
             caption = caption[:1024]
@@ -691,7 +749,7 @@ async def send_hub_document(
                 raise
 
         try:
-            await _store_hub_id_in_db(chat_id, msg.message_id)
+            await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
         except Exception:
             # Store BEFORE deleting the old hub (see send_hub_photo): on
             # persistence failure we remove only the NEW document and keep the
@@ -705,7 +763,7 @@ async def send_hub_document(
             raise
 
         if old_ids:
-            await _delete_hub_messages(bot, chat_id, old_ids)
+            await _dispatch_delete_hub_messages(bot, chat_id, old_ids, session=session)
 
         return msg.message_id
 
@@ -717,6 +775,7 @@ async def _append_hub_document_unlocked(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     if caption:
         caption = caption[:1024]
@@ -756,7 +815,7 @@ async def _append_hub_document_unlocked(
             raise
 
     try:
-        await _store_hub_id_in_db(chat_id, msg.message_id)
+        await _dispatch_store_hub_id_in_db(chat_id, msg.message_id, session=session)
     except Exception:
         try:
             await asyncio.shield(
@@ -776,17 +835,19 @@ async def append_hub_document(
     caption: str | None = None,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = "HTML",
+    session: AsyncSession | None = None,
 ) -> int:
     _maybe_cleanup_cache()
     lock = _get_hub_render_lock(chat_id)
     async with lock:
         return await _append_hub_document_unlocked(
-            bot,
+            bot=bot,
             chat_id=chat_id,
             document=document,
             caption=caption,
             reply_markup=reply_markup,
             parse_mode=parse_mode,
+            session=session,
         )
 
 

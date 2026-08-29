@@ -75,9 +75,10 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("admin_servers", callbacks)
 
     def test_get_real_ip_forwarded_for(self):
-        # Loopback remote -> trusted by default -> reads X-Forwarded-For first element
+        # Loopback remote with trusted proxy chain -> resolves rightmost untrusted client IP
         request_mock = MagicMock(spec=web.Request)
         request_mock.remote = "127.0.0.1"
+        request_mock.app = {"trusted_proxies": "127.0.0.1,::1,10.0.0.0/8"}
         request_mock.headers = {
             "X-Forwarded-For": "185.71.76.10, 10.0.0.2",
         }
@@ -112,6 +113,15 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
             "X-Forwarded-For": "2.2.2.2",
         }
         self.assertEqual(_get_real_ip(request_public), "8.8.8.8")
+
+        # Rightmost untrusted resolution defeats spoofed first IP in X-Forwarded-For
+        request_spoofed = MagicMock(spec=web.Request)
+        request_spoofed.remote = "127.0.0.1"
+        request_spoofed.app = {"trusted_proxies": "127.0.0.1,::1,10.0.0.0/8"}
+        request_spoofed.headers = {
+            "X-Forwarded-For": "185.71.76.10, 203.0.113.50, 10.0.0.2",
+        }
+        self.assertEqual(_get_real_ip(request_spoofed), "203.0.113.50")
 
     def test_needs_recovery_expression_structure(self):
         expr = _needs_recovery()

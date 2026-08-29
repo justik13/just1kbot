@@ -182,6 +182,7 @@ async def _build_users_list_text_and_kb(
     total: int,
     filter_type: str = "all",
     filter_param: str = "none",
+    session: AsyncSession | None = None,
 ) -> tuple[str, InlineKeyboardBuilder]:
     from bot.formatters import format_admin_breadcrumbs
 
@@ -203,13 +204,27 @@ async def _build_users_list_text_and_kb(
 
     builder = InlineKeyboardBuilder()
 
+    filter_counts: dict[str, int] = {}
+    if session is not None:
+        from database.repositories.users_repo import get_user_filter_counts
+        try:
+            filter_counts = await get_user_filter_counts(session)
+        except Exception as e:
+            logger.warning("Failed to get user filter counts: %s", e)
+
+    def _cnt_label(fmt_str: str, f_name: str, key: str) -> str:
+        cnt = filter_counts.get(key)
+        if cnt is None:
+            return f_name
+        return fmt_str.format(f_name=f_name, count=cnt)
+
     filters = [
-        ("all", texts.COMMON_VSE, "none"),
-        ("new_7d", texts.COMMON_NOVYE_7D, "none"),
-        ("expiring_3d", texts.COMMON_3_DAYS, "none"),
-        ("active", texts.COMMON_AKTIVNYE, "none"),
-        ("expired", texts.COMMON_BEZ_SUBSCRIPTION, "none"),
-        ("banned", texts.COMMON_ZABANENNYE, "none"),
+        ("all", _cnt_label(texts.ADMIN_USER_FILTER_ALL_COUNT, texts.COMMON_VSE, "all"), "none"),
+        ("new_7d", _cnt_label(texts.ADMIN_USER_FILTER_NEW_7D_COUNT, texts.COMMON_NOVYE_7D, "new_7d"), "none"),
+        ("active", _cnt_label(texts.ADMIN_USER_FILTER_ACTIVE_COUNT, texts.COMMON_AKTIVNYE, "active"), "none"),
+        ("expiring_3d", _cnt_label(texts.ADMIN_USER_FILTER_EXPIRING_COUNT, texts.COMMON_3_DAYS, "expiring_3d"), "none"),
+        ("expired", _cnt_label(texts.ADMIN_USER_FILTER_EXPIRED_COUNT, texts.COMMON_BEZ_SUBSCRIPTION, "expired"), "none"),
+        ("banned", _cnt_label(texts.ADMIN_USER_FILTER_BANNED_COUNT, texts.COMMON_ZABANENNYE, "banned"), "none"),
     ]
 
     for f_code, f_name, f_param in filters:
@@ -224,6 +239,11 @@ async def _build_users_list_text_and_kb(
 
     builder.button(text=server_label, callback_data="admin_users_filter_menu:server")
     builder.button(text=tariff_label, callback_data="admin_users_filter_menu:tariff")
+
+    has_reset = False
+    if filter_type not in ("all", "new_7d", "active", "expiring_3d", "expired", "banned"):
+        builder.button(text=texts.ADMIN_SERVER_BTN_RESET_FILTER, callback_data="admin_users_filter:all:none:1")
+        has_reset = True
 
     if not users:
         rendered += texts.ADMIN_USERS_LIST_EMPTY_NOTICE
@@ -253,7 +273,7 @@ async def _build_users_list_text_and_kb(
 
             builder.button(
                 text=button_text,
-                callback_data=f"admin_user_card:{user.telegram_id}",
+                callback_data=f"admin_user_card:{user.telegram_id}:users:{filter_type}:{filter_param}:{page}",
             )
 
     nav_buttons = 0
@@ -282,7 +302,8 @@ async def _build_users_list_text_and_kb(
     )
 
     item_count = len(users) if users else 0
-    adjust_pattern = [3, 3, 2] + ([1] * item_count)
+    filter_pattern = [2, 2, 2, 2] if not has_reset else [2, 2, 2, 2, 1]
+    adjust_pattern = filter_pattern + ([1] * item_count)
     if nav_buttons > 0:
         adjust_pattern.append(nav_buttons)
     adjust_pattern.extend([1, 1])
@@ -321,6 +342,7 @@ async def _render_user_card(
     callback: CallbackQuery,
     user: User,
     session: AsyncSession,
+    back_callback: str = "admin_users",
 ):
     from database.repositories.account_ledger_repo import get_account_balance
     profiles = await get_user_profiles(session, user.id)
@@ -351,6 +373,7 @@ async def _render_user_card(
             reply_markup=get_admin_user_card_keyboard(
                 user.telegram_id,
                 user.is_banned,
+                back_callback=back_callback,
             ),
             parse_mode="HTML",
         )

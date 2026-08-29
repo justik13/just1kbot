@@ -137,14 +137,23 @@ def get_trusted_client_ip(request: web.Request) -> str:
             except ValueError:
                 pass
 
-        # 2. Fallback to first IP in X-Forwarded-For
+        # 2. Fallback to rightmost untrusted IP in X-Forwarded-For
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            candidate = forwarded.split(",")[0].strip()
-            try:
-                ipaddress.ip_address(candidate)
-                return candidate
-            except ValueError:
-                pass
+            ips = [item.strip() for item in forwarded.split(",") if item.strip()]
+            for raw_ip in reversed(ips):
+                try:
+                    ipaddress.ip_address(raw_ip)
+                    if not _is_trusted_proxy_peer(raw_ip, trusted_proxies):
+                        return raw_ip
+                except ValueError:
+                    continue
+            # If all forwarded IPs are trusted proxies, fall back to first valid IP
+            for raw_ip in ips:
+                try:
+                    ipaddress.ip_address(raw_ip)
+                    return raw_ip
+                except ValueError:
+                    continue
 
     return peer_ip

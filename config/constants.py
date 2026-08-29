@@ -45,6 +45,18 @@ RATE_LIMIT_BURST = 10
 PERMANENT_SUBSCRIPTION_DAYS = 36500
 PERMANENT_END_DATE = datetime(2100, 1, 1, tzinfo=timezone.utc)
 GRACE_PERIOD_HOURS = 24
+VPN_ACCESS_GRACE_HOURS = 4
+
+# YooKassa Official Webhook IP Ranges
+YOOKASSA_IP_RANGES = (
+    "185.71.76.0/27",
+    "185.71.77.0/27",
+    "77.75.153.0/25",
+    "77.75.154.128/25",
+    "77.75.156.11/32",
+    "77.75.156.35/32",
+    "2a02:5180::/32",
+)
 
 # Device limits
 DEVICE_DAILY_LIMIT = 25
@@ -111,7 +123,9 @@ __all__ = [
     "TariffQuoteStatus",
     "USER_CONTEXT_CACHE_MAX_SIZE",
     "USER_CONTEXT_CACHE_TTL",
+    "VPN_ACCESS_GRACE_HOURS",
     "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
+    "YOOKASSA_IP_RANGES",
 ]

@@ -107,8 +107,53 @@ ADMIN_SERVER_RENAMED = "✅ Сервер успешно переименован
 ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
 ADMIN_SERVER_SLOTS_DB_NOTE = " <i>(в БД: {db_used})</i>"
+ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД: {db_used})</i>"
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
+
+ADMIN_SERVER_BTN_PEERS = "👥 Пиры на узле ({used}/{total})"
+ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Пиры на узле"
+ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
+ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
+• На узле: <b>{live_peers}</b> (Бот: {bot_peers}, Внешние: {external_peers}){deleting_note}{missing_note}{pending_note}
+Стр. {page}/{total_pages}:
+
+"""
+ADMIN_SERVER_PEERS_HEADER_DEGRADED = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
+• На узле: <b>?</b> (API недоступен)
+• Профилей бота в БД: <b>{db_profiles_count}</b>
+Стр. {page}/{total_pages}:
+
+"""
+ADMIN_SERVER_PEERS_API_ERROR_BANNER = "\n⚠️ <i>API узла недоступен (показаны данные из базы бота)</i>"
+ADMIN_SERVER_PEERS_DELETING_NOTE = " | ⏳ Удаляются: <b>{deleting_count}</b>"
+ADMIN_SERVER_PEERS_MISSING_NOTE = " | ⚠️ Не на узле: <b>{missing_count}</b>"
+ADMIN_SERVER_PEERS_PENDING_NOTE = " | ⏳ В процессе: <b>{pending_count}</b>"
+ADMIN_SERVER_PEERS_EMPTY = "<i>На этом сервере пока нет зарегистрированных пиров.</i>\n"
+ADMIN_SERVER_PEERS_BREADCRUMB = "Пиры"
+ADMIN_SERVER_PEERS_FALLBACK_DEVICE = "Внешнее устройство"
+ADMIN_SERVER_PEER_BOT_ROW = "• 🟢 <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | {status_online}\n"
+ADMIN_SERVER_PEER_UNKNOWN_ROW = "• ⚪ <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | ⚠️ Состояние на узле неизвестно\n"
+ADMIN_SERVER_PEER_EXTERNAL_ROW = "• 👤 <b>[Внешний пир]</b> \"{device_name}\"\n  IP: <code>{ip}</code> | AmneziaWG Key: <code>{key}</code>\n"
+ADMIN_SERVER_PEER_MISSING_ROW = "• ⚠️ <b>[Не на узле]</b> {username} — 📱 \"{device_name}\"\n  IP: <code>{ip}</code>\n"
+ADMIN_SERVER_PEER_PENDING_ROW = "• {badge} {username} — 📱 \"{device_name}\"\n  Статус: <code>{status}</code> | IP: <code>{ip}</code>\n"
+ADMIN_SERVER_PEER_BADGE_PENDING = "⏳ <b>[Создаётся]</b>"
+ADMIN_SERVER_PEER_BADGE_CLEANUP = "🧹 <b>[Очистка сбоя]</b>"
+ADMIN_SERVER_PEER_BADGE_FAILED = "❌ <b>[Сбой создания]</b>"
+ADMIN_SERVER_PEER_BADGE_DEFAULT = "⏳ <b>[{status}]</b>"
+ADMIN_SERVER_PEER_ICON_PENDING = "⏳"
+ADMIN_SERVER_PEER_ICON_CLEANUP = "🧹"
+ADMIN_SERVER_PEER_ICON_FAILED = "❌"
+PEER_ONLINE_THRESHOLD_SECONDS = 180
+ADMIN_SERVER_PEER_BTN_BOT = "🟢 {username} • {device_name}"
+ADMIN_SERVER_PEER_BTN_PENDING = "{icon} {username} • {device_name}"
+ADMIN_SERVER_PEER_BTN_EXTERNAL = "👤 Внешний: {device_name}"
+ADMIN_SERVER_PEER_STATUS_ONLINE = "🟢 В сети"
+ADMIN_SERVER_PEER_STATUS_OFFLINE = "⚪ Офлайн"
+ADMIN_SERVER_PEER_STATUS_DELETING = "⏳ Удаляется"
+ADMIN_SERVER_PEER_INFO_ALERT = "👤 Внешний пир:\nНаходится на узле AmneziaVPN, но не привязан к профилям Telegram-бота (не отслеживается ботом)."
+ADMIN_SERVER_BTN_BACK_TO_CARD = "« Назад в карточку сервера"
+ADMIN_SERVER_BTN_RESET_FILTER = "❌ Сбросить фильтр"
 
 ADMIN_SERVER_STATE_DISABLED = "🔴 Отключен"
 

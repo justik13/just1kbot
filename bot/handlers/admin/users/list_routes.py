@@ -54,7 +54,7 @@ async def show_users_list(
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
-        users, 1, total_pages, total_users, filter_type="all", filter_param="none"
+        users, 1, total_pages, total_users, filter_type="all", filter_param="none", session=session
     )
 
     try:
@@ -199,6 +199,7 @@ async def users_filter_pagination(
         total_users,
         filter_type=filter_type,
         filter_param=filter_param,
+        session=session,
     )
 
     try:
@@ -234,7 +235,7 @@ async def users_pagination(
     )
 
     rendered, kb = await _build_users_list_text_and_kb(
-        users, page, total_pages, total_users, filter_type="all", filter_param="none"
+        users, page, total_pages, total_users, filter_type="all", filter_param="none", session=session
     )
 
     try:
@@ -335,7 +336,16 @@ async def show_user_card(
         await callback.answer(texts.ERROR_USER_NOT_FOUND, show_alert=True)
         return
 
-    await _render_user_card(callback, user, session)
+    parts = callback.data.split(":")
+    back_cb = "admin_users"
+    if len(parts) >= 6 and parts[2] == "users":
+        f_type, f_param, page_num = parts[3], parts[4], parts[5]
+        back_cb = f"admin_users_filter:{f_type}:{f_param}:{page_num}"
+    elif len(parts) >= 5 and parts[2] == "server_peers":
+        srv_id, page_num = parts[3], parts[4]
+        back_cb = f"admin_server_peers:{srv_id}:{page_num}"
+
+    await _render_user_card(callback, user, session, back_callback=back_cb)
 
 
 @router.callback_query(F.data.startswith("admin_user_audit:"))

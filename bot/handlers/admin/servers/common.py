@@ -1,6 +1,7 @@
 import logging
 import math
 import re
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from aiogram.exceptions import TelegramBadRequest
@@ -43,7 +44,7 @@ def normalize_api_url(url: str) -> str:
 
 
 async def _build_servers_list_text_and_kb(
-    servers, page: int, total_pages: int, total: int,
+    servers, page: int, total_pages: int, total: int, session: AsyncSession | None = None,
 ) -> tuple[str, InlineKeyboardBuilder]:
     rendered = (
         texts.ADMIN_SERVERS_COMMON.format(v0=page, v1=total_pages, v2=total)
@@ -52,11 +53,18 @@ async def _build_servers_list_text_and_kb(
     if not servers:
         rendered += texts.ADMIN_SERVERS_EMPTY
     else:
+        from services.slots_cache import get_cached_peer_count
+        db_counts = await get_server_peer_counts(session) if session is not None else {}
         for server in servers:
             flag = server.country_flag or texts.EMOJI_GLOBE
             status = texts.STATUS_ACTIVE_ICON if server.is_active else texts.STATUS_INACTIVE_ICON
+            db_used = db_counts.get(server.id, 0)
+            cached_used = get_cached_peer_count(server.id)
+            total = server.max_clients or 240
+            effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+            cap_str = f"{effective_used}/{total}"
             button_text = truncate_button_text(
-                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=server.protocol)
+                texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=cap_str)
             )
             builder.button(
                 text=button_text,
@@ -72,9 +80,23 @@ async def _build_servers_list_text_and_kb(
             text=texts.ADMIN_BTN_PAGINATION_NEXT,
             callback_data=f"admin_servers_page:{page + 1}",
         )
-    builder.button(text=texts.ADMIN_BTN_ADD_SERVER, callback_data="admin_server_add")
-    builder.button(text=texts.ADMIN_BTN_BACK_TO_ADMIN, callback_data="admin_menu")
-    builder.adjust(1)
+    builder.button(
+        text=texts.ADMIN_BTN_ADD_SERVER,
+        callback_data="admin_server_add",
+    )
+    builder.button(
+        text=texts.BTN_ADMIN_MENU,
+        callback_data="admin_menu",
+    )
+
+    item_count = len(servers) if servers else 0
+    adjust_pattern = [1] * item_count
+    nav_buttons = (1 if page > 1 else 0) + (1 if page < total_pages else 0)
+    if nav_buttons > 0:
+        adjust_pattern.append(nav_buttons)
+    adjust_pattern.extend([1, 1])
+
+    builder.adjust(*adjust_pattern)
     return rendered, builder
 
 
@@ -88,7 +110,7 @@ async def _show_servers_list(
         session, page=page, per_page=SERVERS_PER_PAGE,
     )
     rendered, kb = await _build_servers_list_text_and_kb(
-        servers, page, total_pages, total_servers,
+        servers, page, total_pages, total_servers, session
     )
     try:
         await callback.message.edit_text(
@@ -99,12 +121,23 @@ async def _show_servers_list(
 
 
 async def _show_server_card(
-    callback: CallbackQuery, session: AsyncSession, server, ping_result: str | None = None
-):
-    from utils.datetime_helpers import format_datetime_msk
+    callback: CallbackQuery,
+    session: AsyncSession,
+    server: Any,
+    ping_result: str | None = None,
+) -> None:
     from bot.formatters import format_admin_breadcrumbs
+    from database.models import Server
 
-    flag = server.country_flag or "🌐"
+    if isinstance(server, int):
+        server = await session.get(Server, server)
+    if not server:
+        await callback.answer(texts.ERROR_SERVER_NOT_FOUND, show_alert=True)
+        return
+
+    flag = server.country_flag or texts.EMOJI_GLOBE
+
+    from utils.datetime_helpers import format_datetime_msk
 
     if server.is_active:
         status_line = texts.COMMON_AKTIVEN
@@ -127,17 +160,20 @@ async def _show_server_card(
     db_counts = await get_server_peer_counts(session)
     db_used = db_counts.get(server.id, 0)
     cached_used = get_cached_peer_count(server.id)
-    used_clients = cached_used if cached_used is not None else db_used
+    effective_capacity = max(cached_used, db_used) if cached_used is not None else db_used
+    actual_peers = cached_used
     max_clients = server.max_clients or 240
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
     if cached_used is not None and cached_used != db_used:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=used_clients, max_clients=max_clients
-        ) + texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
+            used_clients=effective_capacity, max_clients=max_clients
+        ) + texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
+            cached_used=cached_used, db_used=db_used
+        )
     else:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-            used_clients=used_clients, max_clients=max_clients
+            used_clients=effective_capacity, max_clients=max_clients
         )
 
     rendered = (
@@ -159,9 +195,15 @@ async def _show_server_card(
         await callback.message.edit_text(
             rendered,
             reply_markup=get_admin_server_card_keyboard(
-                server.id, server.is_active,
+                server.id,
+                server.is_active,
+                used_clients=actual_peers,
+                max_clients=max_clients,
             ),
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug(f"_show_server_card edit_text failed: {e}")
+        if "not_modified" in str(e).lower().replace(" ", "_"):
+            logger.debug("_show_server_card message not modified: %s", e)
+        else:
+            logger.warning("TelegramBadRequest in _show_server_card: %s", e)

@@ -80,7 +80,7 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
         ]
         labels = {button.text for button in buttons}
 
-        self.assertIn("🖥 По VPN серверам", labels)
+        self.assertIn("🖥 По серверам", labels)
         self.assertNotIn("🌐 По странам", labels)
 
     async def test_server_card_uses_database_peer_count_not_missing_model_field(self):
@@ -190,7 +190,7 @@ class TestAdminUsersImportsAndServerUsage(unittest.IsolatedAsyncioTestCase):
             for row in builder.as_markup().inline_keyboard
             for button in row
         ]
-        user_button = next(b for b in buttons if b.callback_data == "admin_user_card:700")
+        user_button = next(b for b in buttons if b.callback_data.startswith("admin_user_card:700"))
         # 4 profiles count toward quota: active, pending_create, create_cleanup_pending, delete_failed
         # (create_cleanup_pending and delete_failed still have real server peers)
         # Only deleting (in-flight delete) and create_failed (no peer) are excluded

@@ -120,14 +120,21 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
     lines = []
     for s in servers:
         flag = s.country_flag or "🌐"
-        used = get_cached_peer_count(s.id)
-        if used is None:
-            used = db_counts.get(s.id, 0)
+        db_used = db_counts.get(s.id, 0)
+        cached_used = get_cached_peer_count(s.id)
+        effective_used = max(cached_used, db_used) if cached_used is not None else db_used
+        if cached_used is not None and cached_used != db_used:
+            extra_info = texts.ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE.format(
+                cached_used=cached_used, db_used=db_used
+            )
+        else:
+            extra_info = ""
+
         total = s.max_clients or 240
-        pct = int((used / total) * 100) if total > 0 else 0
+        pct = int((effective_used / total) * 100) if total > 0 else 0
         status_icon = "🟢" if pct < 80 else ("🟡" if pct < 90 else "🔴")
         lines.append(texts.ADMIN_DASHBOARD_SERVER_ROW_FORMAT.format(
-            status_icon=status_icon, flag=flag, name=safe(s.name), used=used, total=total, pct=pct
+            status_icon=status_icon, flag=flag, name=safe(s.name), used=effective_used, total=total, pct=pct, extra_info=extra_info
         ))
     return "\n".join(lines)
 
