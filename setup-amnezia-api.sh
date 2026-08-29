@@ -146,18 +146,22 @@ do_uninstall() {
     info "=== Удаление конфигурации Amnezia API Nginx ==="
     echo ""
 
-    # Определяем домен из существующего конфига
+    # Определяем домен из аргумента или существующего конфига
     local conf_file=""
-    for f in /etc/nginx/sites-available/just1kbot-amnezia-*; do
-        if [[ -f "$f" ]]; then
-            conf_file="$f"
-            break
-        fi
-    done
+    if [[ -n "$DOMAIN" && -f "/etc/nginx/sites-available/just1kbot-amnezia-${DOMAIN}" ]]; then
+        conf_file="/etc/nginx/sites-available/just1kbot-amnezia-${DOMAIN}"
+    else
+        for f in /etc/nginx/sites-available/just1kbot-amnezia-*; do
+            if [[ -f "$f" ]]; then
+                conf_file="$f"
+                break
+            fi
+        done
+    fi
 
     if [[ -z "$conf_file" ]]; then
         warn "Конфигурация не найдена. Нечего удалять."
-        exit 0
+        return 0
     fi
 
     local domain_name
@@ -166,7 +170,7 @@ do_uninstall() {
     read -r -p "Удалить конфигурацию для $domain_name? (yes/N): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Отменено."
-        exit 0
+        return 0
     fi
 
     log "Удаление конфигурации для $domain_name..."
@@ -191,7 +195,7 @@ do_uninstall() {
     log "Конфигурация удалена"
     echo ""
     info "Amnezia API продолжает работать на 127.0.0.1:$AMNEZIA_PORT"
-    exit 0
+    return 0
 }
 
 # --- Проверки ---
@@ -549,6 +553,7 @@ main() {
     # Обработка --uninstall
     if [[ "$UNINSTALL" == true ]]; then
         do_uninstall
+        exit 0
     fi
 
     echo ""

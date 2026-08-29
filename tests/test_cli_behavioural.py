@@ -373,6 +373,23 @@ wait_for_apt_locks 1
         self.assertEqual(proc.returncode, 0)
         self.assertIn("Восстановление отменено", proc.stdout + proc.stderr)
 
+    # -------------------------------------------------------------------------
+    # 5. Amnezia API Installer / Uninstaller Safety
+    # -------------------------------------------------------------------------
+
+    def test_setup_amnezia_uninstall_exits_without_running_setup(self):
+        """setup-amnezia-api.sh --uninstall terminates immediately and never continues into setup."""
+        amnezia_script = Path(__file__).resolve().parent.parent / "setup-amnezia-api.sh"
+        proc = subprocess.run(
+            ["bash", str(amnezia_script), "--uninstall"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("=== Удаление конфигурации Amnezia API Nginx ===", proc.stdout)
+        self.assertNotIn("=== Настройка Amnezia API: Nginx + SSL ===", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
