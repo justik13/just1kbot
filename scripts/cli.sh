@@ -138,12 +138,29 @@ cmd_preflight() {
         return 1
     fi
 
-    # 2. Проверка прав .env (не должен быть доступен всем)
+    # 2. Проверка прав .env (строго 600)
     local env_perms
     env_perms=$(stat -c "%a" "${PROJECT_DIR}/.env" 2>/dev/null || stat -f "%Lp" "${PROJECT_DIR}/.env" 2>/dev/null || echo "")
-    if [[ -n "$env_perms" ]] && [[ "$env_perms" =~ [4567]$ ]]; then
-        warn "Файл .env имеет небезопасные права доступа ($env_perms). Устанавливаем: chmod 600 ${PROJECT_DIR}/.env"
-        chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null || true
+    if [[ "$env_perms" != "600" ]]; then
+        warn "Файл .env имеет права ($env_perms). Устанавливаем строго 600: chmod 600 ${PROJECT_DIR}/.env"
+        if ! chmod 600 "${PROJECT_DIR}/.env" 2>/dev/null; then
+            error "Не удалось применить chmod 600 к ${PROJECT_DIR}/.env!"
+            has_errors=true
+        else
+            env_perms=$(stat -c "%a" "${PROJECT_DIR}/.env" 2>/dev/null || stat -f "%Lp" "${PROJECT_DIR}/.env" 2>/dev/null || echo "")
+            if [[ "$env_perms" != "600" ]]; then
+                error "Права файла ${PROJECT_DIR}/.env ($env_perms) не равны 600!"
+                has_errors=true
+            fi
+        fi
+    fi
+
+    # 2.1. Проверка отсутствия дублирующихся переменных в .env
+    local duplicate_keys
+    duplicate_keys=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "${PROJECT_DIR}/.env" | cut -d'=' -f1 | sort | uniq -d | tr '\n' ' ' || true)
+    if [[ -n "${duplicate_keys// }" ]]; then
+        error "Обнаружены дублирующиеся переменные в .env: $duplicate_keys"
+        has_errors=true
     fi
 
     # 3. Обязательные переменные окружения
@@ -181,9 +198,12 @@ cmd_preflight() {
         has_errors=true
     fi
 
-    # 7. Проверка доступности Docker и Docker Compose
+    # 7. Проверка доступности Docker daemon и Docker Compose
     if ! command -v docker >/dev/null 2>&1; then
-        error "Docker не установлен в системе!"
+        error "Docker CLI не установлен в системе!"
+        has_errors=true
+    elif ! docker info >/dev/null 2>&1; then
+        error "Docker daemon недоступен или служба Docker не запущена!"
         has_errors=true
     elif ! docker compose version >/dev/null 2>&1; then
         error "Docker Compose (v2) не установлен или недоступен!"
@@ -194,7 +214,8 @@ cmd_preflight() {
     local free_kb
     free_kb=$(df -k "${PROJECT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || echo "")
     if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb < 512000 )); then
-        warn "Мало свободного места на диске: $(( free_kb / 1024 )) МБ. Рекомендуется минимум 500 МБ для сборки и бэкапов."
+        error "Недостаточно свободного места на диске: $(( free_kb / 1024 )) МБ. Требуется минимум 500 МБ для безопасной сборки и создания бэкапов."
+        has_errors=true
     fi
 
     if [ "$has_errors" = "true" ]; then
@@ -214,6 +235,7 @@ cmd_update() {
     cmd_preflight
 
     # Проверка наличия локальных незакоммиченных изменений
+    local did_stash=false
     local dirty_changes
     dirty_changes=$(git status --porcelain 2>/dev/null || true)
     if [[ -n "$dirty_changes" ]]; then
@@ -223,6 +245,7 @@ cmd_update() {
         read -r -p "Временно спрятать изменения (git stash) и продолжить обновление? (y/N): " stash_confirm
         if [[ "$stash_confirm" =~ ^[Yy]$ ]]; then
             git stash
+            did_stash=true
             log "Локальные изменения сохранены в git stash."
         else
             info "Обновление отменено пользователем."
@@ -392,6 +415,13 @@ cmd_update() {
             fi
         fi
         return 1
+    fi
+
+    if [ "$did_stash" = "true" ]; then
+        echo ""
+        warn "⚠️ ВНИМАНИЕ: Ваши локальные изменения сохранены в git stash (stash@{0}) и НЕ были восстановлены автоматически."
+        info "Для просмотра сохранённых изменений: git stash show -p"
+        info "Для применения изменений поверх новой версии: git stash pop"
     fi
 
     info "Просмотр последних логов бота:"
