@@ -67,10 +67,13 @@ class Settings(BaseSettings):
     DOMAIN: str
     SSL_EMAIL: str
 
-    # Removed greenfield settings are declared only so stale .env files fail.
+    # Removed legacy and unsupported settings are declared so stale .env files fail fast.
     AMNEZIA_API_URL: str | None = None
     AMNEZIA_API_KEY: str | None = None
     WEBHOOK_URL: str | None = None
+    INCY_HOST: str | None = None
+    INCY_API_KEY: str | None = None
+    AMNEZIA_BRIDGE_HMAC_SECRET: str | None = None
 
     # ── Account balance product limits ──
     BALANCE_MIN_TOPUP_RUB: int = 10
@@ -105,6 +108,9 @@ class Settings(BaseSettings):
             "AMNEZIA_API_URL": self.AMNEZIA_API_URL,
             "AMNEZIA_API_KEY": self.AMNEZIA_API_KEY,
             "WEBHOOK_URL": self.WEBHOOK_URL,
+            "INCY_HOST": self.INCY_HOST,
+            "INCY_API_KEY": self.INCY_API_KEY,
+            "AMNEZIA_BRIDGE_HMAC_SECRET": self.AMNEZIA_BRIDGE_HMAC_SECRET,
         }
         configured = [name for name, value in removed.items() if value]
         if configured:

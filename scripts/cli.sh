@@ -164,7 +164,7 @@ cmd_preflight() {
     fi
 
     # 3. Обязательные переменные окружения
-    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY ADMIN_TELEGRAM_ID BACKUP_AGE_RECIPIENT)
+    local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT)
     for var_name in "${req_vars[@]}"; do
         local val
         val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
@@ -174,11 +174,19 @@ cmd_preflight() {
         fi
     done
 
+    # 3.1. Проверка идентификаторов администратора (ADMIN_IDS или ADMIN_TELEGRAM_ID)
+    local admin_ids
+    admin_ids=$(grep -E "^(ADMIN_IDS|ADMIN_TELEGRAM_ID)=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"[]")
+    if [[ -z "$admin_ids" ]]; then
+        error "В .env отсутствует обязательная переменная администратора: ADMIN_IDS='[123456789]'"
+        has_errors=true
+    fi
+
     # 4. Проверка устаревших/неподдерживаемых переменных
-    local legacy_vars=(INCY_HOST INCY_API_KEY AMNEZIA_BRIDGE_HMAC_SECRET)
+    local legacy_vars=(AMNEZIA_API_URL AMNEZIA_API_KEY WEBHOOK_URL INCY_HOST INCY_API_KEY AMNEZIA_BRIDGE_HMAC_SECRET)
     for legacy_name in "${legacy_vars[@]}"; do
         if grep -Eq "^${legacy_name}=" "${PROJECT_DIR}/.env"; then
-            warn "Обнаружена устаревшая переменная $legacy_name в .env. Она больше не используется проектом."
+            warn "Обнаружена устаревшая переменная $legacy_name в .env. Она больше не поддерживается проектом."
         fi
     done
 
@@ -216,6 +224,16 @@ cmd_preflight() {
     if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb < 512000 )); then
         error "Недостаточно свободного места на диске: $(( free_kb / 1024 )) МБ. Требуется минимум 500 МБ для безопасной сборки и создания бэкапов."
         has_errors=true
+    fi
+
+    # 9. Глубокая валидация конфигурации через Pydantic Settings (если Docker доступен)
+    if [ "$has_errors" = "false" ] && command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+        local pydantic_err=""
+        if ! pydantic_err=$(docker compose run --rm --no-deps bot python -c "from config.settings import get_settings; get_settings()" 2>&1); then
+            error "Ошибка валидации конфигурации Pydantic Settings:"
+            echo "$pydantic_err" | tail -n 5 >&2
+            has_errors=true
+        fi
     fi
 
     if [ "$has_errors" = "true" ]; then

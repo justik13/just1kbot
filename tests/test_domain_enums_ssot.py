@@ -330,9 +330,15 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(title, "SOME_UNKNOWN_ACTION")
 
     def test_no_active_code_references_to_legacy_incy_or_bridge(self):
-        """Active python source files must contain zero references to deprecated INCY or AMNEZIA_BRIDGE_HMAC_SECRET."""
+        """Active codebase must contain zero operational references to deprecated INCY or AMNEZIA_BRIDGE_HMAC_SECRET."""
         root = Path(__file__).parents[1]
-        active_dirs = [root / "bot", root / "config", root / "database", root / "services", root / "utils"]
+        active_dirs = [
+            root / "bot",
+            root / "database",
+            root / "services",
+            root / "utils",
+            root / "scripts",
+        ]
 
         for d in active_dirs:
             for py_file in d.rglob("*.py"):
