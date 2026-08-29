@@ -45,6 +45,7 @@ from bot.middlewares.clean_chat import stop_clean_chat_worker
 from config.settings import get_settings
 from database.connection import close_db, init_db
 from services.amnezia_client import close_http_session
+from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 from services.workers import (
     shutdown_event,
     start_background_workers,
@@ -303,12 +304,31 @@ async def _http_correlation_middleware(request: web.Request, handler):
         set_request_id("system")
 
 
+_http_limiter = HttpRateLimiter()
+
+
+async def _http_rate_limit_middleware(request: web.Request, handler):
+    """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
+    if request.path == "/health":
+        return await handler(request)
+    client_ip = get_trusted_client_ip(request)
+    is_allowed, retry_after = _http_limiter.check(client_ip)
+    if not is_allowed:
+        return web.Response(
+            status=429,
+            text="Too Many Requests",
+            headers={"Retry-After": str(retry_after)},
+        )
+    return await handler(request)
+
+
 async def start_webhook_server(port: int):
     # YooKassa payloads are small. Reject unexpectedly large request bodies
     # before JSON parsing to limit memory use on the public endpoint.
     app = web.Application(client_max_size=64 * 1024)
     app["trusted_proxies"] = get_settings().TRUSTED_PROXIES
     app.middlewares.append(_http_correlation_middleware)
+    app.middlewares.append(_http_rate_limit_middleware)
     setup_webhook_routes(app)
 
     runner = web.AppRunner(app, access_log_class=HealthcheckAccessLogger)

@@ -10,26 +10,6 @@ from utils.user_locks import get_user_action_lock
 
 logger = logging.getLogger(__name__)
 
-# Regex patterns for validating callback data parameters
-CALLBACK_PARAM_PATTERNS = {
-    # Device IDs: positive integers
-    r"device_id=(\d+)": r"^\d+$",
-    r"devices/(\d+)": r"^\d+$",
-    r":(\d+):": r"^\d+$",
-    r":(\d+)$": r"^\d+$",
-    # Server IDs: positive integers
-    r"server:(\d+)": r"^\d+$",
-    r"servers/(\d+)": r"^\d+$",
-    # Tariff IDs: positive integers
-    r"tariff:(\d+)": r"^\d+$",
-    r"tariffs/(\d+)": r"^\d+$",
-    # User IDs: positive integers
-    r"user:(\d+)": r"^\d+$",
-    r"users/(\d+)": r"^\d+$",
-    # Payment amounts: decimal numbers
-    r"amount:(\d+(?:\.\d+)?)": r"^\d+(?:\.\d+)?$",
-}
-
 LOCKED_ACTION_PREFIXES = (
     # Создание устройства пользователем.
     "add_device",

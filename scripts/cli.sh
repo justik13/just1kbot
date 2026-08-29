@@ -723,6 +723,12 @@ cmd_restore() {
     docker compose stop bot
 
     info "3.1/5. Создание предварительного страховочного дампа текущей БД..."
+    local pg_user pg_db
+    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_user="${pg_user:-just1kbot}"
+    pg_db="${pg_db:-just1kbot_bot}"
+
     local pre_restore_backup_file="${tmp_dir}/pre_restore_safety.sql"
     docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" > "$pre_restore_backup_file" 2>/dev/null || true
 

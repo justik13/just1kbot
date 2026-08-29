@@ -43,9 +43,11 @@ from config.constants import (
     TariffQuoteStatus,
     USER_CONTEXT_CACHE_MAX_SIZE,
     USER_CONTEXT_CACHE_TTL,
+    VPN_ACCESS_GRACE_HOURS,
     VPNProvisioningStatus,
     WebhookInboxStatus,
     WORKER_ERROR_SLEEP_INTERVAL,
+    YOOKASSA_IP_RANGES,
 )
 
 __all__ = [
@@ -88,7 +90,9 @@ __all__ = [
     "TariffQuoteStatus",
     "USER_CONTEXT_CACHE_MAX_SIZE",
     "USER_CONTEXT_CACHE_TTL",
+    "VPN_ACCESS_GRACE_HOURS",
     "VPNProvisioningStatus",
     "WebhookInboxStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
+    "YOOKASSA_IP_RANGES",
 ]

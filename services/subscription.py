@@ -9,6 +9,7 @@ from config.constants import (
     AdminAuditAction,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
+    VPN_ACCESS_GRACE_HOURS,
 )
 from database.models import User
 from database.repositories.profiles_repo import (
@@ -61,7 +62,7 @@ class SubscriptionService:
     def check_vpn_access(user: User | None) -> bool:
         if not user or user.is_deleted or user.is_banned or user.financial_hold or not user.subscription_end:
             return False
-        return not is_vpn_access_expired(user.subscription_end, grace_hours=4)
+        return not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
 
     @staticmethod
     async def check_access(session: AsyncSession, telegram_id: int) -> bool:
@@ -429,7 +430,7 @@ class SubscriptionService:
     async def _sync_access_state(session: AsyncSession, user: User) -> None:
         target_active = bool(
             user.subscription_end
-            and not is_vpn_access_expired(user.subscription_end, grace_hours=4)
+            and not is_vpn_access_expired(user.subscription_end, grace_hours=VPN_ACCESS_GRACE_HOURS)
             and not user.is_banned
             and not user.financial_hold
         )

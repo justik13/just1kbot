@@ -113,6 +113,14 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         }
         self.assertEqual(_get_real_ip(request_public), "8.8.8.8")
 
+        # Rightmost untrusted resolution defeats spoofed first IP in X-Forwarded-For
+        request_spoofed = MagicMock(spec=web.Request)
+        request_spoofed.remote = "127.0.0.1"
+        request_spoofed.headers = {
+            "X-Forwarded-For": "185.71.76.10, 203.0.113.50, 10.0.0.2",
+        }
+        self.assertEqual(_get_real_ip(request_spoofed), "203.0.113.50")
+
     def test_needs_recovery_expression_structure(self):
         expr = _needs_recovery()
         self.assertIsNotNone(expr)

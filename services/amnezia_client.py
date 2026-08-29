@@ -1,5 +1,6 @@
 import asyncio
 import collections
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from config.constants import (
 from utils.security import SafeResolver, allow_local_networks
 
 logger = logging.getLogger(__name__)
+
+MAX_AMNEZIA_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MB limit to prevent OOM on node responses
 
 _http_session: aiohttp.ClientSession | None = None
 
@@ -452,7 +455,42 @@ class AmneziaClient:
                         await cb.record_success()
                         return self._success(status_code=204)
                     elif 200 <= response.status < 300:
-                        value = await response.json()
+                        content_len = getattr(response, "content_length", None)
+                        if (
+                            content_len is not None
+                            and content_len > MAX_AMNEZIA_RESPONSE_BYTES
+                        ):
+                            logger.error(
+                                "API %s%s response Content-Length %s exceeds limit %s",
+                                self._log_target,
+                                path,
+                                content_len,
+                                MAX_AMNEZIA_RESPONSE_BYTES,
+                            )
+                            return self._failure(
+                                AmneziaErrorKind.INVALID_RESPONSE,
+                                semantics,
+                                status_code=response.status,
+                                ambiguous=False,
+                            )
+                        if hasattr(response, "content") and hasattr(response.content, "read"):
+                            raw_body = await response.content.read(MAX_AMNEZIA_RESPONSE_BYTES + 1)
+                            if len(raw_body) > MAX_AMNEZIA_RESPONSE_BYTES:
+                                logger.error(
+                                    "API %s%s response body exceeded %s bytes limit",
+                                    self._log_target,
+                                    path,
+                                    MAX_AMNEZIA_RESPONSE_BYTES,
+                                )
+                                return self._failure(
+                                    AmneziaErrorKind.INVALID_RESPONSE,
+                                    semantics,
+                                    status_code=response.status,
+                                    ambiguous=False,
+                                )
+                            value = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+                        else:
+                            value = await response.json()
                         await cb.record_success()
                         return self._success(value, response.status)
                     elif 300 <= response.status < 400:
