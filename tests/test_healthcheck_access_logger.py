@@ -123,7 +123,7 @@ class TestSlotsCacheAndServerCardSync(unittest.IsolatedAsyncioTestCase):
 
         rendered = callback.message.edit_text.call_args.args[0]
         self.assertIn("6 / 240", rendered)
-        self.assertIn("(в БД: 8)", rendered)
+        self.assertIn("(в боте: 8", rendered)
 
     async def test_show_server_card_shows_clean_slots_when_counts_match(self):
         from types import SimpleNamespace
