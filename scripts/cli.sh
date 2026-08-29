@@ -286,6 +286,26 @@ cmd_update() {
     cmd_logs "bot"
 }
 
+# Вспомогательная функция ротации бэкапов
+rotate_backups() {
+    local keep_count="${1:-14}"
+    local total_count
+    # shellcheck disable=SC2012
+    total_count=$(ls -1 backups/*.sql.gz.age 2>/dev/null | wc -l | tr -d '[:space:]')
+
+    if [[ "$total_count" =~ ^[0-9]+$ ]] && (( total_count > keep_count )); then
+        local to_delete=$((total_count - keep_count))
+        info "Ротация бэкапов: найдено $total_count копий (лимит хранения: $keep_count). Удаление $to_delete устаревших бэкапов..."
+        # shellcheck disable=SC2012
+        ls -t backups/*.sql.gz.age 2>/dev/null | tail -n "+$((keep_count + 1))" | while IFS= read -r old_file; do
+            if [[ -f "$old_file" ]]; then
+                rm -f "$old_file"
+                log "Удален устаревший бэкап: $(basename "$old_file")"
+            fi
+        done
+    fi
+}
+
 # --- 4. Создание бэкапа ---
 cmd_backup() {
     echo -e "\n${BOLD}${BLUE}=== 💾 СОЗДАНИЕ ЗАШИФРОВАННОГО БЭКАПА БД ===${NC}\n"
@@ -309,6 +329,7 @@ cmd_backup() {
                         rm -f "$tmp_gz" "$dump_err"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
                         ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+                        rotate_backups 14
                         return 0
                     fi
                 else
@@ -331,6 +352,7 @@ cmd_backup() {
         if [[ -n "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
+            rotate_backups 14
             return 0
         fi
     fi
@@ -497,6 +519,21 @@ cmd_config() {
 # --- 8. Доктор (Диагностика) ---
 cmd_doctor() {
     echo -e "\n${BOLD}${BLUE}=== 🩺 ДИАГНОСТИКА СИСТЕМЫ JUST1KBOT ===${NC}\n"
+
+    # 0. Проверка версии ядра Linux
+    local kernel_ver
+    kernel_ver="$(uname -r 2>/dev/null || echo 'unknown')"
+    if [[ "$kernel_ver" =~ ^([0-9]+)\.([0-9]+) ]]; then
+        local k_major="${BASH_REMATCH[1]}"
+        local k_minor="${BASH_REMATCH[2]}"
+        if (( k_major > 5 || (k_major == 5 && k_minor >= 6) )); then
+            log "Ядро Linux ($kernel_ver): поддержка AmneziaWG на уровне ядра (OK)."
+        else
+            warn "Ядро Linux ($kernel_ver) старше 5.6. Для оптимальной работы AmneziaWG рекомендуется ядро >= 5.6."
+        fi
+    else
+        info "Версия ядра Linux: $kernel_ver"
+    fi
 
     # 1. Docker демон и сокет
     if docker info >/dev/null 2>&1; then

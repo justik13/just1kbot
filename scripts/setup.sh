@@ -66,6 +66,23 @@ check_existing_install() {
     fi
 }
 
+# --- Ожидание освобождения apt/dpkg блокировок ---
+wait_for_apt_locks() {
+    local waited=0 max_wait=300
+    if command -v fuser >/dev/null 2>&1; then
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+            if (( waited == 0 )); then
+                warn "apt/dpkg занят другим процессом (например, автоматическим обновлением). Ожидаем освобождения блокировки..."
+            fi
+            sleep 5
+            waited=$((waited + 5))
+            if (( waited >= max_wait )); then
+                error "Не удалось дождаться освобождения apt/dpkg lock за ${max_wait} секунд. Попробуйте снова позже."
+            fi
+        done
+    fi
+}
+
 # --- Проверка ОС и установка системных пакетов ---
 install_dependencies() {
     title "1/6. Проверка окружения и зависимостей"
@@ -85,14 +102,16 @@ install_dependencies() {
 
     log "Определена операционная система: ${PRETTY_NAME:-$os_id}"
 
+    wait_for_apt_locks
     log "Обновление списков пакетов и установка системных утилит..."
     apt-get update -qq
-    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 >/dev/null 2>&1
-    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3)."
+    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 psmisc >/dev/null 2>&1
+    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3, psmisc)."
 
     # Проверка / установка Docker
     if ! command -v docker >/dev/null 2>&1; then
         info "Docker не обнаружен. Начинаем автоматическую установку Docker Engine..."
+        wait_for_apt_locks
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
         sh /tmp/get-docker.sh >/dev/null 2>&1
         rm -f /tmp/get-docker.sh
@@ -106,6 +125,7 @@ install_dependencies() {
     # Проверка Docker Compose
     if ! docker compose version >/dev/null 2>&1; then
         info "Установка плагина docker-compose-plugin..."
+        wait_for_apt_locks
         apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || {
             error "Не удалось установить docker-compose-plugin. Установите Docker Compose вручную."
         }
