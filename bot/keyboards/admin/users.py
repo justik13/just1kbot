@@ -9,6 +9,7 @@ from utils.text_limits import truncate_button_text
 def get_admin_user_card_keyboard(
     user_id: int,
     is_banned: bool,
+    back_callback: str = "admin_users",
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -50,7 +51,7 @@ def get_admin_user_card_keyboard(
 
     builder.button(
         text=texts.ADMIN_BTN_BACK_TO_USERS_LIST,
-        callback_data="admin_users",
+        callback_data=back_callback,
     )
 
     builder.adjust(1)

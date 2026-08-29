@@ -7,9 +7,24 @@ from bot import texts
 def get_admin_server_card_keyboard(
     server_id: int,
     is_active: bool,
+    used_clients: int | None = None,
+    max_clients: int | None = None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
+    if used_clients is not None and max_clients is not None:
+        peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS.format(used=used_clients, total=max_clients)
+    else:
+        peers_btn_text = texts.ADMIN_SERVER_BTN_PEERS_NO_COUNT
+
+    builder.button(
+        text=peers_btn_text,
+        callback_data=f"admin_server_peers:{server_id}:1",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
+        callback_data=f"admin_users_filter:server:{server_id}:1",
+    )
     builder.button(
         text=texts.BTN_ADMIN_SERVER_PING,
         callback_data=f"admin_server_ping:{server_id}",
@@ -54,6 +69,48 @@ def get_admin_server_card_keyboard(
     )
 
     builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_admin_server_peers_keyboard(
+    server_id: int,
+    page: int,
+    total_pages: int,
+    peers_buttons: list[tuple[str, str]],
+) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for btn_text, btn_cb in peers_buttons:
+        builder.button(text=btn_text, callback_data=btn_cb)
+
+    nav_count = 0
+    if page > 1:
+        builder.button(
+            text=texts.BTN_BACK,
+            callback_data=f"admin_server_peers:{server_id}:{page - 1}",
+        )
+        nav_count += 1
+    if page < total_pages:
+        builder.button(
+            text=texts.BTN_PAGINATION_NEXT,
+            callback_data=f"admin_server_peers:{server_id}:{page + 1}",
+        )
+        nav_count += 1
+
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_SERVER_USERS,
+        callback_data=f"admin_users_filter:server:{server_id}:1",
+    )
+    builder.button(
+        text=texts.ADMIN_SERVER_BTN_BACK_TO_CARD,
+        callback_data=f"admin_server_card:{server_id}",
+    )
+
+    item_count = len(peers_buttons)
+    pattern = ([1] * item_count)
+    if nav_count > 0:
+        pattern.append(nav_count)
+    pattern.extend([1, 1])
+    builder.adjust(*pattern)
     return builder.as_markup()
 
 

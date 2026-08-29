@@ -107,8 +107,32 @@ ADMIN_SERVER_RENAMED = "✅ Сервер успешно переименован
 ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
 ADMIN_SERVER_SLOTS_DB_NOTE = " <i>(в БД: {db_used})</i>"
+ADMIN_SERVER_SLOTS_EXTRA_NOTE = " <i>(в боте: {db_used}, внешних: +{extra})</i>"
+ADMIN_SERVER_SLOTS_MISSING_NOTE = " <i>(в боте: {db_used}, ⚠️ не на узле: {missing})</i>"
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
+
+ADMIN_SERVER_BTN_PEERS = "👥 Подключенные пиры ({used}/{total})"
+ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Подключенные пиры"
+ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
+ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b> (Всего: {total_peers})
+• Пользователи бота: <b>{bot_peers}</b> | Внешние / Admin: <b>{external_peers}</b>
+Стр. {page}/{total_pages}:
+
+"""
+ADMIN_SERVER_PEERS_EMPTY = "<i>На этом сервере пока нет зарегистрированных пиров.</i>\n"
+ADMIN_SERVER_PEERS_BREADCRUMB = "Пиры"
+ADMIN_SERVER_PEERS_FALLBACK_DEVICE = "Внешнее устройство"
+ADMIN_SERVER_PEER_BOT_ROW = "• 🟢 <b>{username}</b> ({first_name}) — 📱 \"{device_name}\"\n  IP: <code>{ip}</code> | {status_online}\n"
+ADMIN_SERVER_PEER_EXTERNAL_ROW = "• 👤 <b>[Внешний / Admin]</b> \"{device_name}\"\n  IP: <code>{ip}</code> | AmneziaWG Key: <code>{key}</code>\n"
+ADMIN_SERVER_PEER_MISSING_ROW = "• ⚠️ <b>[Не на узле]</b> {username} — 📱 \"{device_name}\"\n  IP: <code>{ip}</code>\n"
+ADMIN_SERVER_PEER_BTN_BOT = "🟢 {username} • {device_name}"
+ADMIN_SERVER_PEER_BTN_EXTERNAL = "👤 Admin: {device_name}"
+ADMIN_SERVER_PEER_STATUS_ONLINE = "🟢 В сети"
+ADMIN_SERVER_PEER_STATUS_OFFLINE = "⚪ Офлайн"
+ADMIN_SERVER_PEER_INFO_ALERT = "👤 Внешний / Admin пир:\nСоздан напрямую на узле AmneziaVPN (например, через официальное приложение) и не привязан к пользователям Telegram-бота."
+ADMIN_SERVER_BTN_BACK_TO_CARD = "« Назад в карточку сервера"
+ADMIN_SERVER_BTN_RESET_FILTER = "❌ Сбросить фильтр"
 
 ADMIN_SERVER_STATE_DISABLED = "🔴 Отключен"
 

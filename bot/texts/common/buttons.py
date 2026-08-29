@@ -65,9 +65,9 @@ BTN_DOWNLOAD_MIRROR = "🌐 Скачать клиент (Зеркало)"
 
 BTN_ENABLE_SERVER = "🔘 Включить сервер"
 
-BTN_FILTER_BY_SERVER = "🖥 По VPN серверам"
+BTN_FILTER_BY_SERVER = "🖥 По серверам"
 
-BTN_FILTER_BY_SERVER_ACTIVE = "• 🖥 По VPN серверам •"
+BTN_FILTER_BY_SERVER_ACTIVE = "• 🖥 По серверам •"
 
 BTN_FILTER_BY_TARIFF = "💎 По тарифам"
 

@@ -256,7 +256,9 @@ DASHBOARD_VY_MOZHETE_IZMENIT_SSYLKU_NA_M = "Вы можете изменить �
 PAGE_INDEX_FORMAT = "Стр {page}/{total_pages}"
 
 ADMIN_DASHBOARD_PROXY_TAB_LABEL = "MTProto Proxy"
-ADMIN_DASHBOARD_SERVER_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {used}/{total} ({pct}%)"
+ADMIN_DASHBOARD_SERVER_ROW_FORMAT = "{status_icon} {flag} <b>{name}</b>: {used}/{total} ({pct}%){extra_info}"
+ADMIN_DASHBOARD_SERVER_EXTRA_ADMIN = " <i>(+{extra} админ)</i>"
+ADMIN_DASHBOARD_SERVER_MISSING = " <i>(⚠️ {missing} не на узле)</i>"
 
 
 AUDIT_DETAIL_CURRENCY_SUFFIX = " ₽"
