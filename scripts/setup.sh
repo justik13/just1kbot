@@ -46,6 +46,18 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+# --- Очистка временных ресурсов при сбое ---
+cleanup_on_exit() {
+    local exit_code=$?
+    if (( exit_code != 0 )); then
+        warn "Скрипт установки завершился с ошибкой (код $exit_code)."
+        rm -f /tmp/get-docker.sh 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 # --- Проверка root прав ---
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -64,6 +76,47 @@ check_existing_install() {
         fi
         log "Будет создана новая конфигурация .env."
     fi
+}
+
+# --- Проверка занятости apt/dpkg блокировок ---
+check_apt_locked() {
+    local lock_files=(
+        /var/lib/dpkg/lock-frontend
+        /var/lib/dpkg/lock
+        /var/lib/apt/lists/lock
+        /var/cache/apt/archives/lock
+    )
+    if command -v fuser >/dev/null 2>&1; then
+        if fuser "${lock_files[@]}" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    if command -v pgrep >/dev/null 2>&1; then
+        if pgrep -f '(apt-get|dpkg|unattended-upgrade|apt\.systemd\.daily)' >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# --- Ожидание освобождения apt/dpkg блокировок ---
+# shellcheck disable=SC2120
+wait_for_apt_locks() {
+    local max_wait="${1:-300}"
+    local waited=0
+
+    while check_apt_locked; do
+        if (( waited == 0 )); then
+            warn "apt/dpkg занят другим процессом (например, автоматическим обновлением). Ожидаем освобождения блокировки..."
+        fi
+        sleep 5
+        waited=$((waited + 5))
+        if (( waited >= max_wait )); then
+            error "Не удалось дождаться освобождения apt/dpkg lock за ${max_wait} секунд. Попробуйте снова позже."
+            # shellcheck disable=SC2317
+            return 1
+        fi
+    done
 }
 
 # --- Проверка ОС и установка системных пакетов ---
@@ -85,14 +138,16 @@ install_dependencies() {
 
     log "Определена операционная система: ${PRETTY_NAME:-$os_id}"
 
+    wait_for_apt_locks
     log "Обновление списков пакетов и установка системных утилит..."
     apt-get update -qq
-    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 >/dev/null 2>&1
-    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3)."
+    apt-get install -y -qq curl openssl age dnsutils cron git ca-certificates gnupg python3 psmisc >/dev/null 2>&1
+    log "Системные утилиты установлены (curl, openssl, age, dnsutils, cron, git, python3, psmisc)."
 
     # Проверка / установка Docker
     if ! command -v docker >/dev/null 2>&1; then
         info "Docker не обнаружен. Начинаем автоматическую установку Docker Engine..."
+        wait_for_apt_locks
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
         sh /tmp/get-docker.sh >/dev/null 2>&1
         rm -f /tmp/get-docker.sh
@@ -106,11 +161,21 @@ install_dependencies() {
     # Проверка Docker Compose
     if ! docker compose version >/dev/null 2>&1; then
         info "Установка плагина docker-compose-plugin..."
+        wait_for_apt_locks
         apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || {
             error "Не удалось установить docker-compose-plugin. Установите Docker Compose вручную."
         }
     fi
     log "Docker Compose готов к работе: $(docker compose version)"
+
+    # Настройка брандмауэра UFW (если активен)
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        info "Брандмауэр UFW активен. Открытие портов 80/tcp, 443/tcp и 443/udp (QUIC/HTTP3) для Caddy..."
+        ufw allow 80/tcp >/dev/null 2>&1 || true
+        ufw allow 443/tcp >/dev/null 2>&1 || true
+        ufw allow 443/udp >/dev/null 2>&1 || true
+        log "Порты 80/tcp, 443/tcp и 443/udp разрешены в UFW."
+    fi
 
     # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do
@@ -564,4 +629,6 @@ main() {
     start_project
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

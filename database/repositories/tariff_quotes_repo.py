@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.enums import TariffQuoteOperation, TariffQuoteStatus
 from database.models import Tariff, TariffQuote, TariffVersion, User
 from utils.datetime_helpers import now_utc
 
@@ -77,14 +78,14 @@ async def expire_quotes(session: AsyncSession, user_id: int, as_of=None) -> None
             select(TariffQuote)
             .where(
                 TariffQuote.user_id == user_id,
-                TariffQuote.status == "active",
+                TariffQuote.status == TariffQuoteStatus.ACTIVE,
                 TariffQuote.expires_at <= now,
             )
             .with_for_update()
         )
     ).all()
     for quote in rows:
-        quote.status = "expired"
+        quote.status = TariffQuoteStatus.EXPIRED
 
 
 async def get_active_financial_quotes_for_update(
@@ -101,8 +102,12 @@ async def get_active_financial_quotes_for_update(
                 select(TariffQuote)
                 .where(
                     TariffQuote.user_id == user_id,
-                    TariffQuote.status == "active",
-                    TariffQuote.operation_type.in_(("purchase", "renew", "change")),
+                    TariffQuote.status == TariffQuoteStatus.ACTIVE,
+                    TariffQuote.operation_type.in_((
+                        TariffQuoteOperation.PURCHASE,
+                        TariffQuoteOperation.RENEW,
+                        TariffQuoteOperation.CHANGE,
+                    )),
                 )
                 .order_by(TariffQuote.id)
                 .with_for_update()
@@ -118,17 +123,17 @@ async def get_or_create_checkout_quote(
     tariff: Tariff,
     operation_type: str,
 ) -> tuple[TariffQuote, TariffVersion]:
-    if operation_type not in {"purchase", "renew"}:
+    if operation_type not in {TariffQuoteOperation.PURCHASE, TariffQuoteOperation.RENEW}:
         raise ValueError("checkout quote must be purchase or renew")
     active = await get_active_financial_quotes_for_update(session, user_id=user_id)
-    if any(row.operation_type == "change" for row in active):
+    if any(row.operation_type == TariffQuoteOperation.CHANGE for row in active):
         raise CheckoutQuoteConflictError("active_tariff_change_quote_exists")
     version = await get_or_create_current_version(session, tariff)
     existing = next(
         (
             row
             for row in active
-            if row.operation_type in {"purchase", "renew"}
+            if row.operation_type in {TariffQuoteOperation.PURCHASE, TariffQuoteOperation.RENEW}
             and row.target_tariff_version_id == version.id
         ),
         None,
@@ -159,7 +164,7 @@ async def get_or_create_checkout_quote(
         rounding_loss_hours=Decimal(0),
         rounding_loss_value_rub=Decimal(0),
         currency="RUB",
-        status="active",
+        status=TariffQuoteStatus.ACTIVE,
         created_at=now,
         expires_at=now + QUOTE_LIFETIME,
     )

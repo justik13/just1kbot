@@ -9,6 +9,7 @@ from decimal import ROUND_DOWN, Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.enums import AdminAuditAction
 from database.models import AccountLedgerAllocation, AccountLedgerEntry, User
 from database.repositories.account_ledger_repo import (
     _credit_capacity,
@@ -190,7 +191,7 @@ async def grant_referral_bonus_for_topup(
         await AuditService.log_action(
             session,
             admin_id=0,
-            action="REFERRAL_BONUS_GRANTED",
+            action=AdminAuditAction.REFERRAL_BONUS_GRANTED,
             target_type="user",
             target_id=referrer.id,
             details={
@@ -249,7 +250,7 @@ async def grant_referral_bonus_for_topup(
             await AuditService.log_action(
                 session,
                 admin_id=0,
-                action="WELCOME_BONUS_GRANTED",
+                action=AdminAuditAction.WELCOME_BONUS_GRANTED,
                 target_type="user",
                 target_id=purchaser.id,
                 details={

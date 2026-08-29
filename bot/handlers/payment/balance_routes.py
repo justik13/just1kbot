@@ -72,7 +72,7 @@ def topup_presets(tariffs: list, settings=None) -> list[int]:
         int(tariff.price_rub)
         for tariff in tariffs
         if tariff.is_active
-        and int(tariff.price_rub) > 0
+        and int(tariff.price_rub) >= cfg.BALANCE_MIN_TOPUP_RUB
         and int(tariff.price_rub) <= cfg.BALANCE_MAX_PRESET_RUB
     }
     return sorted(prices)[: cfg.BALANCE_MAX_PRESET_OPTIONS]
@@ -350,9 +350,15 @@ async def choose_topup_amount(
         )
         return
     tariffs = await get_active_tariffs(session)
+    cfg = get_settings()
     preset_defaults = [100, 250, 500, 1000]
-    tariff_amounts = topup_presets(tariffs)
-    amounts = sorted(list(set(preset_defaults + tariff_amounts)))
+    valid_defaults = [
+        amt
+        for amt in preset_defaults
+        if cfg.BALANCE_MIN_TOPUP_RUB <= amt <= cfg.BALANCE_MAX_PRESET_RUB
+    ]
+    tariff_amounts = topup_presets(tariffs, cfg)
+    amounts = sorted(list(set(valid_defaults + tariff_amounts)))[: cfg.BALANCE_MAX_PRESET_OPTIONS]
     balance = await get_account_balance(session, user_id=db_user.id)
     balance_lines = texts.BALANCE_TOTAL_AVAILABLE_LABEL.format(int_balance_real_available=int(balance.real_available))
     if balance.bonus_available > 0:

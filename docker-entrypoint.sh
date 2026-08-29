@@ -54,8 +54,10 @@ if [ "${#_runtime_urls[@]}" -ne 2 ]; then
     exit 1
 fi
 
-export DATABASE_URL="$(printf '%s' "${_runtime_urls[0]}" | base64 -d)"
-export REDIS_URL="$(printf '%s' "${_runtime_urls[1]}" | base64 -d)"
+DATABASE_URL="$(printf '%s' "${_runtime_urls[0]}" | base64 -d)"
+export DATABASE_URL
+REDIS_URL="$(printf '%s' "${_runtime_urls[1]}" | base64 -d)"
+export REDIS_URL
 unset _runtime_urls
 
 # Migrations are deliberately executed by the dedicated Compose `migrate`

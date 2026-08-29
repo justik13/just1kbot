@@ -16,7 +16,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.constants import TELEGRAM_MESSAGE_LIMIT
+from bot.constants import AdminAuditAction, TELEGRAM_MESSAGE_LIMIT
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.broadcast import (
     get_broadcast_audience_keyboard,
@@ -573,7 +573,7 @@ async def _send_broadcast_to_users_with_resume(
                 await AuditService.log_action(
                     session,
                     admin_id,
-                    "BROADCAST",
+                    AdminAuditAction.BROADCAST,
                     details=texts.ADMIN_AUDIT_LOG_DETAILS_BROADCAST.format(
                         label=final_progress.label if final_progress else '?',
                         success=final_progress.success_count if final_progress else 0,

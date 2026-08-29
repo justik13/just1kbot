@@ -107,7 +107,7 @@ async def _render_purchase_review(
     text = texts.PAYMENT_PURCHASE_CONFIRMATION_CARD.format(
         operation_label=operation.lower(),
         tariff_name=tariff_name,
-        duration_days=intent.version.duration_hours // 24,
+        duration_days=intent.version.duration_days,
         device_limit=intent.version.device_limit,
         price=price,
         balance_before=before,
@@ -303,7 +303,7 @@ async def confirm_purchase(
         texts.PAYMENT_PURCHASE_SUCCESS_CARD.format(
             operation_title=operation,
             tariff_name=get_tariff_display_name(intent.version.device_limit),
-            duration_days=intent.version.duration_hours // 24,
+            duration_days=intent.version.duration_days,
             charged=charged,
             real_balance=int(result.balance_after.real_available),
             bonus_balance=int(result.balance_after.bonus_available),

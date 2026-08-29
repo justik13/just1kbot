@@ -9,6 +9,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from database.models import User
@@ -380,7 +381,7 @@ async def _run_mass_bonus_background(
             await AuditService.log_action(
                 session,
                 admin_id,
-                "MASS_BONUS_GRANTED",
+                AdminAuditAction.MASS_BONUS_GRANTED,
                 "User",
                 0,
                 texts.ADMIN_AUDIT_LOG_DETAILS_MASS_BONUS.format(

@@ -193,3 +193,4 @@ PAYMENT_OP_TITLE_PURCHASE = '🛒 Покупка тарифа'
 PAYMENT_OP_TITLE_RENEW = '⏳ Продление тарифа'
 PAYMENT_OP_TITLE_CHANGE = '🔄 Смена тарифа'
 PAYMENT_OP_TITLE_DEFAULT = '🛒 Покупка'
+

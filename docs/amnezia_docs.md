@@ -22,7 +22,7 @@
 | Формат | Расширение | Совместимость с приложениями | Содержимое |
 |---|---|---|---|
 | **AmneziaVPN native** | `.vpn` | **AmneziaVPN** (официальный универсальный клиент) | Полный JSON с `containers`, `awg`, `last_config` |
-| **AmneziaWG / WireGuard conf** | `.conf` | **AmneziaWG** (нативное приложение), **AmneziaVPN** (импорт файла), **INCY** (мобильные) | Текстовый WireGuard INI + AWG 2.0 параметры |
+| **AmneziaWG / WireGuard conf** | `.conf` | **AmneziaWG** (нативное приложение), **AmneziaVPN** (импорт файла) | Текстовый WireGuard INI + AWG 2.0 параметры |
 | **vpn:// URI** | — (строка) | **Только AmneziaVPN** (вставка ключа из буфера/QR) | `base64url(4-byte BE length + zlib(JSON))` |
 
 ### ⚠️ Важные правила совместимости:

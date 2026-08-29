@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.constants import (
+    AdminAuditAction,
     PERMANENT_END_DATE,
     PERMANENT_SUBSCRIPTION_DAYS,
 )
@@ -142,7 +143,7 @@ class SubscriptionService:
             await AuditService.log_action(
                 session,
                 admin_id=0,
-                action="USER_RESTORED",
+                action=AdminAuditAction.USER_RESTORED,
                 target_type="user",
                 target_id=user.id,
                 details={"telegram_id": telegram_id},
@@ -189,7 +190,7 @@ class SubscriptionService:
                         await AuditService.log_action(
                             session,
                             admin_id=0,
-                            action="REFERRAL_ATTACHED",
+                            action=AdminAuditAction.REFERRAL_ATTACHED,
                             target_type="user",
                             target_id=user.id,
                             details={"referrer_telegram_id": ref_id},
@@ -251,7 +252,7 @@ class SubscriptionService:
                 await AuditService.log_action(
                     session,
                     admin_id=0,
-                    action="USER_RESTORED",
+                    action=AdminAuditAction.USER_RESTORED,
                     target_type="user",
                     target_id=user.id,
                     details={"telegram_id": telegram_id},
@@ -274,7 +275,7 @@ class SubscriptionService:
             await AuditService.log_action(
                 session,
                 admin_id=0,
-                action="USER_REGISTER",
+                action=AdminAuditAction.USER_REGISTER,
                 target_type="user",
                 target_id=user.id,
                 details={

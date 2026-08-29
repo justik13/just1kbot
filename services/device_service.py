@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT
+from config.constants import AMNEZIA_PROTOCOL, DEVICE_DAILY_LIMIT, AdminAuditAction
 from database.models import APIOperation, Server, User, VPNProfile
 from database.repositories.profiles_repo import ALLOWED_DELETE_STATES
 from services.amnezia_capacity import (
@@ -239,7 +239,7 @@ class DeviceService:
         await AuditService.log_action(
             session,
             admin_id=0,
-            action="DEVICE_CREATE",
+            action=AdminAuditAction.DEVICE_CREATE,
             target_type="user",
             target_id=user.id,
             details={
@@ -372,7 +372,7 @@ class DeviceService:
         else:
             await session.delete(profile)
 
-        action = "ADMIN_DEVICE_DELETE" if (actor_id and is_admin(actor_id)) else "DEVICE_DELETE"
+        action = AdminAuditAction.ADMIN_DEVICE_DELETE if (actor_id and is_admin(actor_id)) else AdminAuditAction.DEVICE_DELETE
         admin_id = actor_id if (actor_id and is_admin(actor_id)) else 0
         await AuditService.log_action(
             session,

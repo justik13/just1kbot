@@ -9,6 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.keyboards.admin.users import get_admin_user_balance_keyboard
 from bot.states import AdminStates
@@ -416,7 +417,7 @@ async def apply_user_balance_change(
         await state.clear()
         return
 
-    audit_action = "ADMIN_BALANCE_TOPUP" if action_type == "topup" else "ADMIN_BALANCE_DEDUCT"
+    audit_action = AdminAuditAction.ADMIN_BALANCE_TOPUP if action_type == "topup" else AdminAuditAction.ADMIN_BALANCE_DEDUCT
     await AuditService.log_action(
         session,
         admin_id=callback.from_user.id,

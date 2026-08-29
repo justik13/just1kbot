@@ -10,7 +10,7 @@ from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from config.constants import GRACE_PERIOD_HOURS
+from config.constants import AdminAuditAction, GRACE_PERIOD_HOURS
 from database.connection import session_scope
 from database.models import (
     APIOperation,
@@ -177,7 +177,7 @@ async def _cleanup_expired_profiles_grace(bot: Bot | None = None):
                     await AuditService.log_action(
                         session,
                         admin_id=0,
-                        action="CLEANUP_DEVICE_DELETE",
+                        action=AdminAuditAction.CLEANUP_DEVICE_DELETE,
                         target_type="user",
                         target_id=user.id,
                         details={

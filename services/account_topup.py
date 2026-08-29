@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from config.enums import AdminAuditAction
 from config.settings import get_settings
 from database.models import Payment, PaymentEvent
 from database.repositories.account_ledger_repo import (
@@ -374,7 +375,7 @@ async def settle_succeeded_topup(
         await AuditService.log_action(
             session,
             admin_id=0,
-            action="PAYMENT_SUCCESS",
+            action=AdminAuditAction.PAYMENT_SUCCESS,
             target_type="user",
             target_id=payment.user_id,
             details={
@@ -457,13 +458,17 @@ async def settle_succeeded_topup(
                 auto_action = payment.topup_context.get("auto_fulfill_action")
                 quote_raw = payment.topup_context.get("quote_public_id")
                 if auto_action and quote_raw:
+                    import inspect
                     import logging
                     from contextlib import asynccontextmanager
 
                     @asynccontextmanager
                     async def _safe_begin_nested(s):
-                        if callable(getattr(s, "begin_nested", None)):
-                            nested = s.begin_nested()
+                        begin_nested_fn = getattr(s, "begin_nested", None)
+                        if callable(begin_nested_fn):
+                            nested = begin_nested_fn()
+                            if inspect.isawaitable(nested):
+                                nested = await nested
                             if hasattr(nested, "__aenter__"):
                                 async with nested:
                                     yield

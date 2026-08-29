@@ -10,6 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.states import AdminStates
 from database.repositories.users_repo import get_user_by_telegram_id
 from services.audit_service import AuditService
@@ -200,7 +201,7 @@ async def process_send_user_message(
         await AuditService.log_action(
             session,
             admin_id=message.from_user.id,
-            action="ADMIN_DIRECT_MESSAGE_SENT",
+            action=AdminAuditAction.ADMIN_DIRECT_MESSAGE_SENT,
             target_type="user",
             target_id=user.id,
             details=json.dumps({

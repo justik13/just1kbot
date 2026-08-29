@@ -3,6 +3,12 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from config.enums import (
+    PaymentCheckoutStatus,
+    PaymentFulfillmentStatus,
+    PaymentProviderStatus,
+    PaymentReconciliationStatus,
+)
 from database.models import PaymentEvent
 from services.payment_provider_validation import validate_provider_payment
 from utils.datetime_helpers import now_utc
@@ -31,8 +37,8 @@ def parse_provider_captured_at(value) -> datetime:
 
 
 def _manual_review(session, payment, reason: str, source: str, observed: str):
-    payment.reconciliation_status = "manual_review"
-    payment.fulfillment_status = "manual_review"
+    payment.reconciliation_status = PaymentReconciliationStatus.MANUAL_REVIEW
+    payment.fulfillment_status = PaymentFulfillmentStatus.MANUAL_REVIEW
     payment.manual_review_reason = reason
     payment.fulfillment_last_error_code = reason
     session.add(
@@ -49,10 +55,15 @@ def _manual_review(session, payment, reason: str, source: str, observed: str):
 async def apply_provider_transition(session, payment, data, *, source, event_type=None):
     observed = str((data or {}).get("status") or "unknown")
     current = payment.provider_status
-    if observed not in {"pending", "waiting_for_capture", "succeeded", "canceled"}:
+    if observed not in {
+        PaymentProviderStatus.PENDING,
+        PaymentProviderStatus.WAITING_FOR_CAPTURE,
+        PaymentProviderStatus.SUCCEEDED,
+        PaymentProviderStatus.CANCELED,
+    }:
         return ProviderTransition("retry", observed, "unknown_provider_status")
 
-    if observed == "succeeded":
+    if observed == PaymentProviderStatus.SUCCEEDED:
         if source == "provider_create_payment_post":
             return ProviderTransition("retry", observed, "captured_at_requires_verified_get")
         try:
@@ -63,7 +74,7 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             # retry after a verified GET instead.
             return ProviderTransition("retry", observed, str(exc))
         if payment.provider_confirmed_at and payment.provider_confirmed_at != captured_at:
-            payment.provider_status = "succeeded"
+            payment.provider_status = PaymentProviderStatus.SUCCEEDED
             payment.paid_at = payment.paid_at or now_utc()
             _manual_review(session, payment, "captured_at_changed", source, observed)
             return ProviderTransition("conflict", observed, "captured_at_changed")
@@ -71,10 +82,10 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
         payment.paid_at = payment.paid_at or captured_at
         mismatch = validate_provider_payment(payment, data)
         if mismatch:
-            payment.provider_status = "succeeded"
-            payment.reconciliation_status = "mismatch"
-            payment.fulfillment_status = "manual_review"
+            payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
+            payment.fulfillment_status = PaymentFulfillmentStatus.MANUAL_REVIEW
             payment.manual_review_reason = mismatch
+            payment.fulfillment_last_error_code = mismatch
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -85,8 +96,11 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                 )
             )
             return ProviderTransition("conflict", observed, mismatch)
-        if current == "refunded" or payment.fulfillment_status == "reversed":
-            payment.reconciliation_status = "mismatch"
+        if (
+            current == PaymentProviderStatus.REFUNDED
+            or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+        ):
+            payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -98,15 +112,15 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             )
             return ProviderTransition("conflict", observed, "succeeded_after_refund")
         if (
-            payment.reconciliation_status in ("manual_review", "mismatch")
-            or payment.fulfillment_status in ("manual_review", "reversed")
+            payment.reconciliation_status in (PaymentReconciliationStatus.MANUAL_REVIEW, PaymentReconciliationStatus.MISMATCH)
+            or payment.fulfillment_status in (PaymentFulfillmentStatus.MANUAL_REVIEW, PaymentFulfillmentStatus.REVERSED)
         ):
-            payment.provider_status = "succeeded"
+            payment.provider_status = PaymentProviderStatus.SUCCEEDED
             return ProviderTransition("conflict", observed, "manual_review_locked")
-        payment.provider_status = "succeeded"
-        if current == "canceled":
-            payment.reconciliation_status = "mismatch"
-            payment.fulfillment_status = "manual_review"
+        payment.provider_status = PaymentProviderStatus.SUCCEEDED
+        if current == PaymentProviderStatus.CANCELED:
+            payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
+            payment.fulfillment_status = PaymentFulfillmentStatus.MANUAL_REVIEW
             payment.manual_review_reason = "canceled_to_succeeded"
             session.add(
                 PaymentEvent(
@@ -118,8 +132,8 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
                 )
             )
             return ProviderTransition("conflict", observed, "canceled_to_succeeded")
-        elif payment.checkout_status == "abandoned":
-            payment.reconciliation_status = "ok"
+        elif payment.checkout_status == PaymentCheckoutStatus.ABANDONED:
+            payment.reconciliation_status = PaymentReconciliationStatus.OK
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -131,11 +145,14 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             )
         return ProviderTransition("applied", observed)
 
-    if current in {"succeeded", "refunded"} or payment.fulfillment_status == "reversed":
+    if (
+        current in {PaymentProviderStatus.SUCCEEDED, PaymentProviderStatus.REFUNDED}
+        or payment.fulfillment_status == PaymentFulfillmentStatus.REVERSED
+    ):
         if observed != current:
-            payment.reconciliation_status = "mismatch"
-            if payment.fulfillment_status != "reversed":
-                payment.fulfillment_status = "manual_review"
+            payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
+            if payment.fulfillment_status != PaymentFulfillmentStatus.REVERSED:
+                payment.fulfillment_status = PaymentFulfillmentStatus.MANUAL_REVIEW
             session.add(
                 PaymentEvent(
                     payment_id=payment.id,
@@ -148,13 +165,13 @@ async def apply_provider_transition(session, payment, data, *, source, event_typ
             return ProviderTransition("conflict", observed, "terminal_regression")
         return ProviderTransition("applied", observed)
 
-    if current == "canceled" and observed != "canceled":
-        payment.reconciliation_status = "mismatch"
+    if current == PaymentProviderStatus.CANCELED and observed != PaymentProviderStatus.CANCELED:
+        payment.reconciliation_status = PaymentReconciliationStatus.MISMATCH
         return ProviderTransition("conflict", observed, "terminal_regression")
 
     payment.provider_status = observed
-    if observed == "canceled":
-        payment.checkout_status = "abandoned"
+    if observed == PaymentProviderStatus.CANCELED:
+        payment.checkout_status = PaymentCheckoutStatus.ABANDONED
         payment.ui_visible = False
         payment.payment_url = None
     return ProviderTransition("applied", observed)

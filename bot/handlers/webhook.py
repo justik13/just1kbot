@@ -226,6 +226,6 @@ def setup_webhook_routes(app: web.Application):
     logger.info("YooKassa webhook route registered: POST /webhook/yookassa & POST /yookassa/webhook")
     logger.info("Healthcheck endpoint registered: GET /health")
 
-    # Register all enabled modular integrations (INCY, Amnezia Bridge, etc.)
+    # Register all enabled modular integrations
     register_all_web_routes(app)
 

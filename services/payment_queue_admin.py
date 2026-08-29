@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import case, func, or_, select
 
+from config.enums import AdminAuditAction
 from database.models import (
     AuditLog,
     Payment,
@@ -245,7 +246,7 @@ async def _audit(session, *, admin_id: int, queue: str, operation_id: int,
         "reason": sanitized_reason,
         "rejection_code": sanitize_short(rejection_code, 100)[:100] or None,
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    session.add(AuditLog(admin_id=admin_id, action="PAYMENT_QUEUE_MANUAL_RETRY",
+    session.add(AuditLog(admin_id=admin_id, action=AdminAuditAction.PAYMENT_QUEUE_MANUAL_RETRY,
                          target_type=queue, target_id=operation_id, details=details))
     await session.flush()
 

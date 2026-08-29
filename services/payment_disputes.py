@@ -6,9 +6,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-
 from sqlalchemy import func, select
 
+from config.enums import AdminAuditAction
 from database.dispute_models import PaymentDispute
 from database.models import (
     AccountBalanceReservation,
@@ -231,7 +231,7 @@ async def open_payment_dispute(
     await AuditService.log_action(
         session,
         admin_id=admin_id,
-        action="PAYMENT_DISPUTE_OPENED",
+        action=AdminAuditAction.PAYMENT_DISPUTE_OPENED,
         target_type="PaymentDispute",
         target_id=dispute.id,
         details=(
@@ -266,7 +266,7 @@ async def mark_payment_dispute_manual_review(
     await AuditService.log_action(
         session,
         admin_id=admin_id,
-        action="PAYMENT_DISPUTE_MANUAL_REVIEW",
+        action=AdminAuditAction.PAYMENT_DISPUTE_MANUAL_REVIEW,
         target_type="PaymentDispute",
         target_id=dispute.id,
         details=dispute.note,
@@ -379,7 +379,7 @@ async def resolve_payment_dispute(
     await AuditService.log_action(
         session,
         admin_id=admin_id,
-        action="PAYMENT_DISPUTE_RESOLVED",
+        action=AdminAuditAction.PAYMENT_DISPUTE_RESOLVED,
         target_type="PaymentDispute",
         target_id=dispute.id,
         details=f"outcome={outcome}, note={dispute.note or ''}",

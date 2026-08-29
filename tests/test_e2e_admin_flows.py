@@ -77,7 +77,6 @@ class E2EAdminFlowsPostgresTests(unittest.IsolatedAsyncioTestCase):
                 "YOOKASSA_RETURN_URL": "https://t.me/{bot_username}",
                 "YOOKASSA_WEBHOOK_PORT": "8080",
                 "DB_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
-                "AMNEZIA_BRIDGE_HMAC_SECRET": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                 "DATABASE_URL": os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://projectx:projectx@localhost:5432/projectx_test"),
             },
         )

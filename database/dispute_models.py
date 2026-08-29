@@ -18,7 +18,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
+from config.enums import PaymentDisputeStatus
 from database.models import Base
+from database.sql_helpers import sql_enum_in
 from utils.datetime_helpers import now_utc
 
 
@@ -26,7 +28,7 @@ class PaymentDispute(Base):
     __tablename__ = "payment_disputes"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('open','won_by_merchant','lost_by_merchant','manual_review')",
+            sql_enum_in("status", PaymentDisputeStatus),
             name="ck_payment_disputes_status",
         ),
         CheckConstraint(

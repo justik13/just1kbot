@@ -7,6 +7,30 @@ integrations, services, and bot layers without architectural cycles.
 
 from datetime import datetime, timezone
 
+from config.enums import (
+    AccountLedgerEntryType,
+    AccountReservationStatus,
+    AccountReservationType,
+    AdminAuditAction,
+    ApiOperationStatus,
+    ApiOperationType,
+    EntitlementEntryType,
+    PaidValueEntryType,
+    PaymentCheckoutStatus,
+    PaymentDisputeStatus,
+    PaymentFulfillmentStatus,
+    PaymentProviderOperationStatus,
+    PaymentProviderStatus,
+    PaymentQueueStatus,
+    PaymentReconciliationStatus,
+    ProviderRefundOperationStatus,
+    ServerHealthState,
+    TariffQuoteOperation,
+    TariffQuoteStatus,
+    VPNProvisioningStatus,
+    WebhookInboxStatus,
+)
+
 # Protocol
 AMNEZIA_PROTOCOL = "amneziawg2"
 
@@ -47,20 +71,19 @@ USER_CONTEXT_CACHE_MAX_SIZE = 2000
 USER_CONTEXT_CACHE_TTL = 15.0
 
 
-class ServerHealthState:
-    ONLINE = "ONLINE"
-    WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
-    PROBLEM = "PROBLEM"
-    AUTO_DISABLED = "AUTO_DISABLED"
-    MANUAL_DISABLED = "MANUAL_DISABLED"
-
-
 __all__ = [
     "AMNEZIA_PROTOCOL",
     "API_CONCURRENCY_LIMIT",
     "API_RETRY_COUNT",
     "API_TIMEOUT",
+    "AccountLedgerEntryType",
+    "AccountReservationStatus",
+    "AccountReservationType",
+    "AdminAuditAction",
+    "ApiOperationStatus",
+    "ApiOperationType",
     "DEVICE_DAILY_LIMIT",
+    "EntitlementEntryType",
     "GRACE_PERIOD_HOURS",
     "HUB_CACHE_MAX_SIZE",
     "HUB_CACHE_TTL",
@@ -68,6 +91,15 @@ __all__ = [
     "NOTIFICATION_INTERVAL",
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
+    "PaidValueEntryType",
+    "PaymentCheckoutStatus",
+    "PaymentDisputeStatus",
+    "PaymentFulfillmentStatus",
+    "PaymentProviderOperationStatus",
+    "PaymentProviderStatus",
+    "PaymentQueueStatus",
+    "PaymentReconciliationStatus",
+    "ProviderRefundOperationStatus",
     "RATE_LIMIT_BURST",
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "SELF_HEALING_MAX_PER_CYCLE",
@@ -75,7 +107,11 @@ __all__ = [
     "STALE_PAYMENT_THRESHOLD",
     "TELEGRAM_MESSAGE_LIMIT",
     "TRAFFIC_SYNC_INTERVAL",
+    "TariffQuoteOperation",
+    "TariffQuoteStatus",
     "USER_CONTEXT_CACHE_MAX_SIZE",
     "USER_CONTEXT_CACHE_TTL",
+    "VPNProvisioningStatus",
+    "WebhookInboxStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
 ]

@@ -6,6 +6,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from bot import texts
+from config.enums import PaymentProviderStatus
 from database.models import Payment, PaymentEvent, PaymentProviderOperation
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
@@ -39,7 +40,12 @@ class ProviderRetryDecision:
     operation_id: int
 
 
-VALID_PROVIDER_STATUSES = {"pending", "waiting_for_capture", "succeeded", "canceled"}
+VALID_PROVIDER_STATUSES = {
+    PaymentProviderStatus.PENDING,
+    PaymentProviderStatus.WAITING_FOR_CAPTURE,
+    PaymentProviderStatus.SUCCEEDED,
+    PaymentProviderStatus.CANCELED,
+}
 
 
 def provider_transition_source(claim):

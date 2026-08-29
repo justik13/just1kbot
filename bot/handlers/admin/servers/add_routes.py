@@ -6,6 +6,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
+from bot.constants import AdminAuditAction
 from bot.keyboards import get_back_button
 from bot.states import AdminStates
 from config.constants import AMNEZIA_PROTOCOL
@@ -314,7 +315,7 @@ async def process_add_server(
         await AuditService.log_action(
             session,
             message.from_user.id,
-            "ADD_SERVER",
+            AdminAuditAction.ADD_SERVER,
             "Server",
             server.id,
             api_server_name,

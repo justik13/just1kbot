@@ -38,6 +38,7 @@ class BalanceTelegramUXTests(unittest.TestCase):
         ]
         tariffs[4].is_active = False
         settings = SimpleNamespace(
+            BALANCE_MIN_TOPUP_RUB=10,
             BALANCE_MAX_PRESET_RUB=1000,
             BALANCE_MAX_PRESET_OPTIONS=6,
         )
@@ -130,6 +131,48 @@ class BalanceTelegramUXTests(unittest.TestCase):
         self.assertFalse(
             (Path(__file__).parents[1] / "services" / "payment_service").exists()
         )
+
+    def test_topup_presets_boundaries_and_edge_cases(self):
+        from types import SimpleNamespace
+        from bot.handlers.payment.balance_routes import topup_presets
+
+        cfg = SimpleNamespace(
+            BALANCE_MIN_TOPUP_RUB=50,
+            BALANCE_MAX_PRESET_RUB=500,
+            BALANCE_MAX_PRESET_OPTIONS=4,
+        )
+
+        t1 = SimpleNamespace(price_rub=30, is_active=True)   # below min (50) -> excluded
+        t2 = SimpleNamespace(price_rub=50, is_active=True)   # exact min -> included
+        t3 = SimpleNamespace(price_rub=100, is_active=True)  # normal -> included
+        t4 = SimpleNamespace(price_rub=100, is_active=True)  # duplicate -> deduplicated
+        t5 = SimpleNamespace(price_rub=250, is_active=False) # inactive -> excluded
+        t6 = SimpleNamespace(price_rub=300, is_active=True)  # normal -> included
+        t7 = SimpleNamespace(price_rub=500, is_active=True)  # exact max -> included
+        t8 = SimpleNamespace(price_rub=600, is_active=True)  # above max -> excluded
+
+        # Included candidates: [50, 100, 300, 500] (sorted), length = 4 (matches max_options)
+        result = topup_presets([t1, t2, t3, t4, t5, t6, t7, t8], settings=cfg)
+        self.assertEqual(result, [50, 100, 300, 500])
+
+        # Test truncation with smaller max_options
+        cfg.BALANCE_MAX_PRESET_OPTIONS = 2
+        result_truncated = topup_presets([t2, t3, t6, t7], settings=cfg)
+        self.assertEqual(result_truncated, [50, 100])
+
+        # Test max_options = 1
+        cfg.BALANCE_MAX_PRESET_OPTIONS = 1
+        self.assertEqual(topup_presets([t2, t3], settings=cfg), [50])
+
+        # Test empty tariffs
+        self.assertEqual(topup_presets([], settings=cfg), [])
+
+        # Test all tariffs out of bounds
+        out_of_bounds = [
+            SimpleNamespace(price_rub=10, is_active=True),
+            SimpleNamespace(price_rub=9999, is_active=True),
+        ]
+        self.assertEqual(topup_presets(out_of_bounds, settings=cfg), [])
 
 
 class BalanceTelegramUXAsyncTests(unittest.IsolatedAsyncioTestCase):

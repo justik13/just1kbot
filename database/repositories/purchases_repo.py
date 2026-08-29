@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
-from bot import texts
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from config.enums import AdminAuditAction, TariffQuoteOperation
 from database.models import AuditLog, TariffQuote, TariffVersion, User
 
 
@@ -28,6 +28,51 @@ class PurchaseLogEntry:
     duration_days: int
     amount_rub: Decimal
     created_at: datetime
+
+
+_AUDIT_ACTION_TO_OP: dict[AdminAuditAction, tuple[str, AdminAuditAction]] = {
+    AdminAuditAction.GRANT: ("grant", AdminAuditAction.ADMIN_SUB_GRANT),
+    AdminAuditAction.ADMIN_SUB_GRANT: ("grant", AdminAuditAction.ADMIN_SUB_GRANT),
+    AdminAuditAction.EXTEND: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND),
+    AdminAuditAction.ADMIN_SUB_EXTEND: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND),
+    AdminAuditAction.CHANGE_TARIFF: ("change", AdminAuditAction.ADMIN_SUB_CHANGE),
+    AdminAuditAction.ADMIN_SUB_CHANGE: ("change", AdminAuditAction.ADMIN_SUB_CHANGE),
+    AdminAuditAction.REDUCE: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE),
+    AdminAuditAction.ADMIN_SUB_REDUCE: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE),
+}
+
+AUDIT_PURCHASE_ACTIONS: list[str] = [a.value for a in _AUDIT_ACTION_TO_OP]
+
+
+def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
+    from bot import texts
+
+    op_title_map = {
+        TariffQuoteOperation.PURCHASE: getattr(texts, "PAYMENT_OP_TITLE_PURCHASE", "Покупка"),
+        TariffQuoteOperation.RENEW: getattr(texts, "PAYMENT_OP_TITLE_RENEW", "Продление"),
+        TariffQuoteOperation.CHANGE: getattr(texts, "PAYMENT_OP_TITLE_CHANGE", "Смена тарифа"),
+    }
+    return op_title_map.get(op, getattr(texts, "PAYMENT_OP_TITLE_DEFAULT", "Операция"))
+
+
+def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
+    from bot import texts
+
+    action_val = action.value if isinstance(action, AdminAuditAction) else str(action)
+    action_enum = getattr(AdminAuditAction, action_val, None) or next(
+        (a for a in AdminAuditAction if a.value == action_val), None
+    )
+    if action_enum and action_enum in _AUDIT_ACTION_TO_OP:
+        op_type, canonical_enum = _AUDIT_ACTION_TO_OP[action_enum]
+        title = (
+            texts.AUDIT_ACTIONS.get(action_val)
+            or texts.AUDIT_ACTIONS.get(canonical_enum.value)
+            or action_val
+        )
+    else:
+        op_type = "grant"
+        title = texts.AUDIT_ACTIONS.get(action_val) or action_val
+    return op_type, title
 
 
 async def get_purchase_logs_paginated(
@@ -54,19 +99,9 @@ async def get_purchase_logs_paginated(
     quote_results = (await session.execute(quote_stmt)).scalars().all()
 
     # 2. Fetch admin sub grants/extensions from AuditLog (bounded by needed count)
-    audit_actions = [
-        "GRANT",
-        "ADMIN_SUB_GRANT",
-        "EXTEND",
-        "ADMIN_SUB_EXTEND",
-        "CHANGE_TARIFF",
-        "ADMIN_SUB_CHANGE",
-        "REDUCE",
-        "ADMIN_SUB_REDUCE",
-    ]
     audit_stmt = (
         select(AuditLog)
-        .where(AuditLog.action.in_(audit_actions))
+        .where(AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS))
         .order_by(AuditLog.created_at.desc())
         .limit(needed)
     )
@@ -110,19 +145,13 @@ async def get_purchase_logs_paginated(
             if target_ver.tariff and target_ver.tariff.name:
                 tariff_name = target_ver.tariff.name
             dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_hours // 24
+            dur_days = target_ver.duration_days
         else:
             tariff_name = "Тариф"
             dev_limit = 1
             dur_days = 30
 
-        op_title_map = {
-            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
-            "renew": texts.PAYMENT_OP_TITLE_RENEW,
-            "change": texts.PAYMENT_OP_TITLE_CHANGE,
-        }
-        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
-
+        op_title = get_quote_op_title(quote.operation_type)
         created_at = quote.consumed_at or quote.created_at
 
         entries.append(
@@ -144,25 +173,13 @@ async def get_purchase_logs_paginated(
         )
 
     # Map AuditLog manual admin actions
-    op_audit_map = {
-        "GRANT": ("grant", "🎁 Выдача админом"),
-        "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
-        "EXTEND": ("extend", "⏳ Продление админом"),
-        "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
-        "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
-        "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
-        "REDUCE": ("reduce", "✂️ Сокращение админом"),
-        "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
-    }
     for log in audit_results:
         u = users_by_tg_id.get(log.target_id) or users_by_id.get(log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
 
-        op_type, op_title = op_audit_map.get(
-            log.action, ("grant", "🎁 Выдача админом")
-        )
+        op_type, op_title = get_audit_op_info(log.action)
 
         tariff_name = "Подписка"
         dev_limit = 1
@@ -205,7 +222,7 @@ async def get_purchase_logs_paginated(
         audit_count = (
             await session.scalar(
                 select(func.count(AuditLog.id)).where(
-                    AuditLog.action.in_(audit_actions)
+                    AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS)
                 )
             )
         ) or 0
@@ -248,17 +265,12 @@ async def get_purchase_log_by_id(
             if target_ver.tariff and target_ver.tariff.name:
                 tariff_name = target_ver.tariff.name
             dev_limit = target_ver.device_limit
-            dur_days = target_ver.duration_hours // 24
+            dur_days = target_ver.duration_days
         else:
             tariff_name = "Тариф"
             dev_limit = 1
             dur_days = 30
-        op_title_map = {
-            "purchase": texts.PAYMENT_OP_TITLE_PURCHASE,
-            "renew": texts.PAYMENT_OP_TITLE_RENEW,
-            "change": texts.PAYMENT_OP_TITLE_CHANGE,
-        }
-        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
+        op_title = get_quote_op_title(quote.operation_type)
 
         return PurchaseLogEntry(
             id=f"quote_{quote.id}",
@@ -294,19 +306,7 @@ async def get_purchase_log_by_id(
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
-        op_audit_map = {
-            "GRANT": ("grant", "🎁 Выдача админом"),
-            "ADMIN_SUB_GRANT": ("grant", "🎁 Выдача админом"),
-            "EXTEND": ("extend", "⏳ Продление админом"),
-            "ADMIN_SUB_EXTEND": ("extend", "⏳ Продление админом"),
-            "CHANGE_TARIFF": ("change", "⚙️ Изменение админом"),
-            "ADMIN_SUB_CHANGE": ("change", "⚙️ Изменение админом"),
-            "REDUCE": ("reduce", "✂️ Сокращение админом"),
-            "ADMIN_SUB_REDUCE": ("reduce", "✂️ Сокращение админом"),
-        }
-        op_type, op_title = op_audit_map.get(
-            log.action, ("grant", "🎁 Выдача админом")
-        )
+        op_type, op_title = get_audit_op_info(log.action)
         tariff_name = "Подписка"
         dev_limit = 1
         dur_days = 30

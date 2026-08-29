@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config.enums import AdminAuditAction
 from database.models import (
     AccountLedgerEntry,
     EntitlementEntry,
@@ -212,7 +213,7 @@ async def _get_or_create_entitlement(
     version: TariffVersion,
     debit_id: int,
 ) -> tuple[EntitlementEntry, bool]:
-    days = version.duration_hours // 24
+    days = version.duration_days
     entry_id = await session.scalar(
         insert(EntitlementEntry)
         .values(
@@ -403,7 +404,7 @@ async def _settle_account_purchase(
     await AuditService.log_action(
         session,
         admin_id=0,
-        action="ACCOUNT_PURCHASE_SETTLED",
+        action=AdminAuditAction.ACCOUNT_PURCHASE_SETTLED,
         target_type="User",
         target_id=user.id,
         details=(

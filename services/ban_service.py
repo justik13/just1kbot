@@ -4,8 +4,9 @@ import logging
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.user_cache import invalidate_user_cache
+from config.enums import AdminAuditAction
 from database.models import Payment, User
+from services.user_cache import invalidate_user_cache
 from database.repositories.users_repo import (
     get_user_by_telegram_id,
     update_user,
@@ -181,7 +182,7 @@ class BanService:
         await AuditService.log_action(
             session,
             admin_id=admin_id,
-            action="BAN_USER",
+            action=AdminAuditAction.BAN_USER,
             target_type="user",
             target_id=locked_user.id,
             details={
@@ -221,7 +222,7 @@ class BanService:
         await AuditService.log_action(
             session,
             admin_id=admin_id,
-            action="UNBAN_USER",
+            action=AdminAuditAction.UNBAN_USER,
             target_type="user",
             target_id=user.id,
             details={"devices_restored": False},
