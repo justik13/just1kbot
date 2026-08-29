@@ -173,51 +173,79 @@ class CliBehaviouralTests(unittest.TestCase):
         subprocess.run(["git", "config", "user.name", "Audit Runner"], cwd=work_dir, check=True)
 
         (work_dir / "README.md").write_text("# Initial", encoding="utf-8")
+        subprocess.run(["git", "checkout", "-B", "main"], cwd=work_dir, check=True)
         subprocess.run(["git", "add", "README.md"], cwd=work_dir, check=True)
         subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=work_dir, check=True)
-        subprocess.run(["git", "push", "origin", "HEAD:main"], cwd=work_dir, check=True)
+        subprocess.run(["git", "push", "-u", "origin", "main"], cwd=work_dir, check=True)
 
         return work_dir
 
+    def _setup_git_work_dir_project(self, work_dir: Path):
+        """Prepare work_dir with required project files so production cmd_update can execute."""
+        scripts_dir = work_dir / "scripts"
+        scripts_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(CLI_PATH, scripts_dir / "cli.sh")
+        (scripts_dir / "cli.sh").chmod(0o755)
+        (work_dir / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
+        (work_dir / ".gitignore").write_text(".env\nbackups/\n*.age\n", encoding="utf-8")
+        env_content = (
+            "BOT_TOKEN=token123\n"
+            "POSTGRES_USER=user\n"
+            "POSTGRES_PASSWORD=pass\n"
+            "POSTGRES_DB=db\n"
+            "DB_ENCRYPTION_KEY=key\n"
+            "BACKUP_AGE_RECIPIENT=age1test\n"
+            "ADMIN_IDS=[123]\n"
+            "DOMAIN=vpn.example.com\n"
+            "SSL_EMAIL=admin@example.com\n"
+            "SUPPORT_USERNAME=support\n"
+            "YOOKASSA_SHOP_ID=123\n"
+            "YOOKASSA_SECRET_KEY=sec\n"
+        )
+        (work_dir / ".env").write_text(env_content, encoding="utf-8")
+        (work_dir / ".env").chmod(0o600)
+        subprocess.run(["git", "add", "scripts", "docker-compose.yml", ".gitignore"], cwd=work_dir, check=True)
+        subprocess.run(["git", "commit", "-m", "Add project files"], cwd=work_dir, check=True)
+        subprocess.run(["git", "push", "origin", "main"], cwd=work_dir, check=True)
+
     def test_git_sync_local_ahead_creates_backup_branch(self):
-        """When local branch has unpushed commits ahead of upstream, a backup branch must be created."""
+        """When local branch has unpushed commits ahead of upstream, production cmd_update creates a backup branch."""
         work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
 
         # Add local unpushed commit
         (work_dir / "local_change.txt").write_text("local only", encoding="utf-8")
         subprocess.run(["git", "add", "local_change.txt"], cwd=work_dir, check=True)
         subprocess.run(["git", "commit", "-m", "Unpushed commit"], cwd=work_dir, check=True)
 
-        # Run the git sync snippet from cmd_update
+        # Run real production cmd_update function
         test_script = f"""
-set -euo pipefail
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
 cd "{work_dir.as_posix()}"
-git fetch origin main >/dev/null 2>&1
-UPSTREAM_COMMIT=$(git rev-parse origin/main)
-LOCAL_COMMIT=$(git rev-parse HEAD)
-BASE_COMMIT=$(git merge-base HEAD origin/main)
+source scripts/cli.sh >/dev/null 2>&1 || true
 
-if [ "$LOCAL_COMMIT" = "$UPSTREAM_COMMIT" ]; then
-    echo "ALREADY_UP_TO_DATE"
-elif [ "$BASE_COMMIT" = "$UPSTREAM_COMMIT" ]; then
-    echo "LOCAL_AHEAD"
-    BACKUP_BRANCH="backup-local-ahead-$(date +%Y%m%d%H%M%S)"
-    git branch "$BACKUP_BRANCH"
-    git reset --hard origin/main
-    echo "CREATED_$BACKUP_BRANCH"
-fi
+# Mock cmd_backup so step 2 passes and update reaches step 3
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
-        self.assertIn("LOCAL_AHEAD", proc.stdout)
-        self.assertIn("CREATED_backup-local-ahead-", proc.stdout)
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), input="y\n", capture_output=True, text=True, check=False)
+        self.assertIn("Локальные коммиты сохранены в резервной ветке: backup-local-ahead-", proc.stdout + proc.stderr)
 
         # Verify branch exists
         branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout
         self.assertIn("backup-local-ahead-", branches)
 
     def test_git_sync_diverged_creates_backup_branch(self):
-        """When local and upstream have diverged, a backup-diverged branch must be created."""
+        """When local and upstream have diverged, production cmd_update creates a backup-diverged branch."""
         work_dir = self._init_git_scenario()
+        self._setup_git_work_dir_project(work_dir)
 
         # Clone another working copy to push upstream change
         other_dir = self.root / "other"
@@ -236,26 +264,25 @@ fi
         subprocess.run(["git", "add", "diverged_local.txt"], cwd=work_dir, check=True)
         subprocess.run(["git", "commit", "-m", "Local diverged commit"], cwd=work_dir, check=True)
 
-        # Run diverged sync test
+        # Run real production cmd_update function
         test_script = f"""
-set -euo pipefail
+export PROJECT_DIR="{work_dir.as_posix()}"
+export JUST1KBOT_DIR="{work_dir.as_posix()}"
+export PATH="{self.bin_dir.as_posix()}:$PATH"
 cd "{work_dir.as_posix()}"
-git fetch origin main >/dev/null 2>&1
-UPSTREAM_COMMIT=$(git rev-parse origin/main)
-LOCAL_COMMIT=$(git rev-parse HEAD)
-BASE_COMMIT=$(git merge-base HEAD origin/main)
+source scripts/cli.sh >/dev/null 2>&1 || true
 
-if [ "$LOCAL_COMMIT" != "$UPSTREAM_COMMIT" ] && [ "$BASE_COMMIT" != "$LOCAL_COMMIT" ] && [ "$BASE_COMMIT" != "$UPSTREAM_COMMIT" ]; then
-    echo "DIVERGED"
-    BACKUP_BRANCH="backup-diverged-$(date +%Y%m%d%H%M%S)"
-    git branch "$BACKUP_BRANCH"
-    git reset --hard origin/main
-    echo "CREATED_$BACKUP_BRANCH"
-fi
+# Mock cmd_backup so step 2 passes and update reaches step 3
+cmd_backup() {{
+    LAST_BACKUP_FILE="{work_dir.as_posix()}/dummy.sql.gz.age"
+    touch "$LAST_BACKUP_FILE"
+    return 0
+}}
+
+cmd_update
 """
-        proc = subprocess.run(["bash", "-c", test_script], capture_output=True, text=True, check=True)
-        self.assertIn("DIVERGED", proc.stdout)
-        self.assertIn("CREATED_backup-diverged-", proc.stdout)
+        proc = subprocess.run(["bash", "-c", test_script], cwd=str(work_dir), input="y\n", capture_output=True, text=True, check=False)
+        self.assertIn("Локальная история сохранена в ветке backup-diverged-", proc.stdout + proc.stderr)
 
         # Verify branch exists
         branches = subprocess.run(["git", "branch"], cwd=work_dir, capture_output=True, text=True, check=True).stdout

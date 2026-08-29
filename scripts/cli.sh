@@ -312,7 +312,10 @@ cmd_update() {
         fi
     elif [[ "$base_hash" == "$local_hash" ]]; then
         info "Обнаружены новые коммиты в origin/$current_branch. Выполняем безопасное обновление (fast-forward pull)..."
-        git pull --ff-only origin "$current_branch"
+        if ! git pull --ff-only origin "$current_branch"; then
+            error "Ошибка при выполнении git pull --ff-only!"
+            return 1
+        fi
     elif [[ "$base_hash" == "$remote_hash" ]]; then
         local ahead_count
         ahead_count=$(git rev-list --count "origin/$current_branch..HEAD" 2>/dev/null || echo "несколько")
@@ -325,7 +328,10 @@ cmd_update() {
             backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
             git branch "$backup_branch"
             log "Локальные коммиты сохранены в резервной ветке: $backup_branch"
-            git reset --hard "origin/$current_branch"
+            if ! git reset --hard "origin/$current_branch"; then
+                error "Ошибка сброса ветки к origin/$current_branch!"
+                return 1
+            fi
         else
             info "Обновление отменено пользователем."
             return 0
@@ -339,7 +345,10 @@ cmd_update() {
             backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
             git branch "$backup_branch"
             log "Локальная история сохранена в ветке $backup_branch"
-            git reset --hard "origin/$current_branch"
+            if ! git reset --hard "origin/$current_branch"; then
+                error "Ошибка сброса ветки к origin/$current_branch!"
+                return 1
+            fi
         else
             info "Обновление отменено пользователем."
             return 0
@@ -910,7 +919,9 @@ interactive_menu() {
                 esac
                 ;;
             3)
-                cmd_update || true
+                if ! cmd_update; then
+                    warn "Операция обновления остановлена."
+                fi
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             4)
@@ -918,9 +929,13 @@ interactive_menu() {
                 echo "[2] Восстановить базу данных из бэкапа"
                 read -r -p "Выберите [1-2]: " b_action
                 if [[ "$b_action" == "2" ]]; then
-                    cmd_restore || true
+                    if ! cmd_restore; then
+                        warn "Операция восстановления отменена или завершилась с ошибкой."
+                    fi
                 else
-                    cmd_backup || true
+                    if ! cmd_backup; then
+                        warn "Создание резервной копии завершилось с ошибкой."
+                    fi
                 fi
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
@@ -943,7 +958,9 @@ interactive_menu() {
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             7)
-                cmd_doctor || true
+                if ! cmd_doctor; then
+                    warn "Диагностика выявила замечания."
+                fi
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             8)

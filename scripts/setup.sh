@@ -54,7 +54,9 @@ cleanup_on_exit() {
         rm -f /tmp/get-docker.sh 2>/dev/null || true
     fi
 }
-trap cleanup_on_exit EXIT INT TERM
+trap cleanup_on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # --- Проверка root прав ---
 check_root() {
