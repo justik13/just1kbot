@@ -221,6 +221,13 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             set(config.enums.ApiOperationStatus),
         )
 
+        # 11. ProviderRefundOperation status
+        from database.refund_models import ProviderRefundOperation
+        self.assertEqual(
+            _extract_check_constraint_in(ProviderRefundOperation.__table__, "ck_provider_refund_operations_status"),
+            set(config.enums.ProviderRefundOperationStatus),
+        )
+
     def test_exact_spelling_and_serialization_integrity(self):
         """Ensure bit-for-bit spelling fidelity for legacy and provider DB compatibility."""
         # YooKassa / DB uses 'canceled' (single 'l') for Payment Provider Status

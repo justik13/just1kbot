@@ -23,7 +23,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database.models import Base
+from config.enums import ProviderRefundOperationStatus
+from database.models import Base, sql_enum_in
 from utils.datetime_helpers import now_utc
 
 
@@ -31,7 +32,7 @@ class ProviderRefundOperation(Base):
     __tablename__ = "provider_refund_operations"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('pending','processing','retry','completed','failed')",
+            sql_enum_in("status", ProviderRefundOperationStatus),
             name="ck_provider_refund_operations_status",
         ),
         CheckConstraint(
