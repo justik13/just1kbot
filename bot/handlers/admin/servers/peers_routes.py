@@ -66,22 +66,31 @@ async def show_server_peers(
     )
     profiles = list((await session.scalars(stmt)).all())
 
-    # 2. Fetch live peers from Amnezia node
+    # 2. Fetch live peers from Amnezia node.
+    # IMPORTANT: get_all_clients() returns None on failure (not []).
+    # We must preserve None to signal "API unavailable" vs [] for "truly empty node".
     client = AmneziaClient(server.api_url, server.api_key)
+    api_available = True
     try:
-        real_clients = await asyncio.wait_for(client.get_all_clients(), timeout=5.0) or []
+        real_clients = await asyncio.wait_for(client.get_all_clients(), timeout=5.0)
+        if real_clients is None:
+            # API returned None — node responded but data is unavailable
+            api_available = False
+            real_clients = []
     except Exception as e:
         logger.warning("Failed to fetch live clients for server %s: %s", server.id, e)
+        api_available = False
         real_clients = []
 
-    real_peer_ids = {c.id for c in real_clients if getattr(c, "id", None)}
+    real_peer_ids: set[str] = {c.id for c in real_clients if getattr(c, "id", None)}
     db_profiles_by_peer_id = {p.peer_id: p for p in profiles if p.peer_id}
 
-    # 3. Match items
-    bot_items = []
+    # 3. Classify bot profiles: on-node vs missing
+    bot_items_on_node = []
+    bot_items_missing = []
     now = now_utc()
     for p in profiles:
-        is_on_node = p.peer_id in real_peer_ids if p.peer_id else False
+        is_on_node = (p.peer_id in real_peer_ids) if (p.peer_id and api_available) else False
         user = getattr(p, "user", None)
         username = f"@{user.username}" if (user and user.username) else (f"ID {user.telegram_id}" if user else "—")
         first_name = safe(user.first_name) if (user and user.first_name) else ""
@@ -103,7 +112,7 @@ async def show_server_peers(
             if is_online
             else texts.ADMIN_SERVER_PEER_STATUS_OFFLINE
         )
-        bot_items.append({
+        item = {
             "type": "bot",
             "profile": p,
             "user": user,
@@ -113,12 +122,22 @@ async def show_server_peers(
             "ip": ip,
             "is_on_node": is_on_node,
             "status_online": status_online,
-        })
+        }
+        if is_on_node or not api_available:
+            bot_items_on_node.append(item)
+        else:
+            bot_items_missing.append(item)
 
+    # 4. External (admin) peers: on node but not in DB
     external_items = []
     for c in real_clients:
         if c.id not in db_profiles_by_peer_id:
-            c_name = getattr(c, "client_name", None) or getattr(c, "peer_name", None) or getattr(c, "username", None) or texts.ADMIN_SERVER_PEERS_FALLBACK_DEVICE
+            c_name = (
+                getattr(c, "client_name", None)
+                or getattr(c, "peer_name", None)
+                or getattr(c, "username", None)
+                or texts.ADMIN_SERVER_PEERS_FALLBACK_DEVICE
+            )
             external_items.append({
                 "type": "external",
                 "client": c,
@@ -127,7 +146,12 @@ async def show_server_peers(
                 "ip": texts.PLACEHOLDER_DASH,
             })
 
-    all_items = bot_items + external_items
+    # 5. Page layout: bot (on-node) first, then external, then missing (DB only)
+    # Semantics: live_peers = peers confirmed on node; missing = DB-only profiles
+    live_peers = len(bot_items_on_node) + len(external_items)
+    missing_count = len(bot_items_missing)
+    all_items = bot_items_on_node + external_items + bot_items_missing
+
     total_items = len(all_items)
     total_pages = max(1, math.ceil(total_items / PEERS_PER_PAGE))
     page = min(max(1, page), total_pages)
@@ -138,13 +162,22 @@ async def show_server_peers(
     flag = server.country_flag or texts.EMOJI_GLOBE
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}", texts.ADMIN_SERVER_PEERS_BREADCRUMB)
 
+    status_banner = texts.ADMIN_SERVER_PEERS_API_ERROR_BANNER if not api_available else ""
+    missing_note = (
+        texts.ADMIN_SERVER_PEERS_MISSING_NOTE.format(missing_count=missing_count)
+        if (api_available and missing_count > 0)
+        else ""
+    )
+
     rendered = texts.ADMIN_SERVER_PEERS_HEADER.format(
         header=header,
         flag=flag,
         server_name=safe(server.name),
-        total_peers=total_items,
-        bot_peers=len(bot_items),
+        status_banner=status_banner,
+        live_peers=live_peers if api_available else "?",
+        bot_peers=len(bot_items_on_node) if api_available else len(profiles),
         external_peers=len(external_items),
+        missing_note=missing_note,
         page=page,
         total_pages=total_pages,
     )
@@ -155,7 +188,7 @@ async def show_server_peers(
     peer_buttons: list[tuple[str, str]] = []
     for item in page_items:
         if item["type"] == "bot":
-            if item["is_on_node"]:
+            if item["is_on_node"] or not api_available:
                 rendered += texts.ADMIN_SERVER_PEER_BOT_ROW.format(
                     username=item["username"],
                     first_name=item["first_name"],

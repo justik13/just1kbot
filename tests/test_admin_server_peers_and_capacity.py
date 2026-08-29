@@ -167,10 +167,10 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             rendered_text = callback.message.edit_text.call_args[0][0]
             reply_markup = callback.message.edit_text.call_args.kwargs["reply_markup"]
 
-            # Assert header counts
-            self.assertIn("Всего: 2", rendered_text)
-            self.assertIn("Пользователи бота: <b>1</b>", rendered_text)
-            self.assertIn("Внешние / Admin: <b>1</b>", rendered_text)
+            # New header format: "На узле: <b>2</b> (Бот: 1, Admin: 1)"
+            self.assertIn("На узле: <b>2</b>", rendered_text)
+            self.assertIn("Бот: 1", rendered_text)
+            self.assertIn("Admin: 1", rendered_text)
 
             # Assert rows
             self.assertIn("@alice", rendered_text)
@@ -185,3 +185,128 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             self.assertIn("admin_server_peer_info:1", button_callbacks)
             self.assertIn("admin_server_card:1", button_callbacks)
             self.assertIn("admin_users_filter:server:1:1", button_callbacks)
+
+    async def test_show_server_peers_api_returns_none_shows_error_banner(self):
+        """When get_all_clients() returns None (API failure), show error banner, not empty list."""
+        server = SimpleNamespace(id=2, name="Germany", country_flag="🇩🇪", api_url="https://de.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        bot_user = SimpleNamespace(id=20, telegram_id=77777, username="bob", first_name="Bob")
+        bot_profile = SimpleNamespace(
+            id=201, server_id=2, peer_id="key-bob", user=bot_user,
+            device_name="Android", allocated_ip="10.8.0.3",
+            last_connected=None, provisioning_status="active",
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [bot_profile]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:2:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            # API returns None — node responded but data unavailable
+            mock_client.get_all_clients = AsyncMock(return_value=None)
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        # Must show error banner — NOT treat as empty node
+        self.assertIn("API узла недоступен", rendered_text)
+        # Must still show the profile from DB (not pretend node is empty)
+        self.assertIn("@bob", rendered_text)
+        # Must NOT show "Не на узле" when API is unavailable (state unknown)
+        self.assertNotIn("Не на узле", rendered_text)
+
+    async def test_show_server_peers_api_exception_shows_error_banner(self):
+        """When get_all_clients() raises, show error banner instead of empty list."""
+        server = SimpleNamespace(id=3, name="Poland", country_flag="🇵🇱", api_url="https://pl.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = []
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:3:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(side_effect=ConnectionError("timeout"))
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        self.assertIn("API узла недоступен", rendered_text)
+
+    async def test_show_server_peers_shows_missing_note_when_db_profiles_absent_from_node(self):
+        """When DB profiles have peer_id not on node, they appear in missing section with warning note."""
+        server = SimpleNamespace(id=4, name="Finland", country_flag="🇫🇮", api_url="https://fi.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        bot_user = SimpleNamespace(id=30, telegram_id=33333, username="carol", first_name="Carol")
+        # Profile with peer_id that is NOT present on node
+        missing_profile = SimpleNamespace(
+            id=301, server_id=4, peer_id="key-carol-missing", user=bot_user,
+            device_name="MacBook", allocated_ip="10.8.0.5",
+            last_connected=None, provisioning_status="active",
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [missing_profile]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:4:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            # Node returns empty list — profile exists in DB but not on node
+            mock_client.get_all_clients = AsyncMock(return_value=[])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        # Should show "Не на узле" for missing profile
+        self.assertIn("Не на узле", rendered_text)
+        # Header must show missing note
+        self.assertIn("Не на узле:", rendered_text)
+        # Live peers = 0, missing = 1
+        self.assertIn("На узле: <b>0</b>", rendered_text)
+
+    async def test_server_list_shows_minus_when_cached_less_than_db(self):
+        """When cached_used < db_used, server list button shows (-N) to alert admin."""
+        server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
+        session = AsyncMock()
+
+        with patch("bot.handlers.admin.servers.common.get_server_peer_counts", AsyncMock(return_value={1: 21})), \
+             patch("services.slots_cache.get_cached_peer_count", return_value=18):
+            rendered, builder = await _build_servers_list_text_and_kb(
+                [server1], page=1, total_pages=1, total=1, session=session
+            )
+            buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
+            labels = [b.text for b in buttons]
+
+            # cached=18, db=21 → should show 18(-3)/240
+            self.assertTrue(any("18(-3)/240" in lbl for lbl in labels))

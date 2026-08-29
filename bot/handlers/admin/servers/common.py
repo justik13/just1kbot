@@ -62,7 +62,11 @@ async def _build_servers_list_text_and_kb(
             cached_used = get_cached_peer_count(server.id)
             total = server.max_clients or 240
             if cached_used is not None and cached_used > db_used:
+                # More live peers than in DB — external admin peers
                 cap_str = f"{db_used}(+{cached_used - db_used})/{total}"
+            elif cached_used is not None and cached_used < db_used:
+                # Fewer live peers than DB — some DB profiles missing on node
+                cap_str = f"{cached_used}(-{db_used - cached_used})/{total}"
             elif cached_used is not None:
                 cap_str = f"{cached_used}/{total}"
             else:

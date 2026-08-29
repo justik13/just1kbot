@@ -115,11 +115,13 @@ ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
 ADMIN_SERVER_BTN_PEERS = "👥 Подключенные пиры ({used}/{total})"
 ADMIN_SERVER_BTN_PEERS_NO_COUNT = "👥 Подключенные пиры"
 ADMIN_SERVER_BTN_SERVER_USERS = "👥 Все пользователи этого сервера"
-ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b> (Всего: {total_peers})
-• Пользователи бота: <b>{bot_peers}</b> | Внешние / Admin: <b>{external_peers}</b>
+ADMIN_SERVER_PEERS_HEADER = """{header}👥 <b>Пиры сервера {flag} {server_name}</b>{status_banner}
+• На узле: <b>{live_peers}</b> (Бот: {bot_peers}, Admin: {external_peers}){missing_note}
 Стр. {page}/{total_pages}:
 
 """
+ADMIN_SERVER_PEERS_API_ERROR_BANNER = "\n⚠️ <i>API узла недоступен (показаны данные из базы бота)</i>"
+ADMIN_SERVER_PEERS_MISSING_NOTE = " | ⚠️ Не на узле: <b>{missing_count}</b>"
 ADMIN_SERVER_PEERS_EMPTY = "<i>На этом сервере пока нет зарегистрированных пиров.</i>\n"
 ADMIN_SERVER_PEERS_BREADCRUMB = "Пиры"
 ADMIN_SERVER_PEERS_FALLBACK_DEVICE = "Внешнее устройство"
