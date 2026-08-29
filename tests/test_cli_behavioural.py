@@ -374,25 +374,122 @@ wait_for_apt_locks 1
         self.assertIn("Восстановление отменено", proc.stdout + proc.stderr)
 
     # -------------------------------------------------------------------------
-    # 5. Amnezia API Installer / Uninstaller Safety
+    # 5. Amnezia API Installer / Uninstaller Safety & Multi-Domain Lifecycle
     # -------------------------------------------------------------------------
+
+    def test_setup_amnezia_help_works_without_root(self):
+        """setup-amnezia-api.sh --help must succeed without requiring root privileges."""
+        amnezia_script = Path(__file__).resolve().parent.parent / "setup-amnezia-api.sh"
+        proc = subprocess.run(
+            ["bash", str(amnezia_script), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("Использование: sudo", proc.stdout)
 
     def test_setup_amnezia_uninstall_exits_without_running_setup(self):
         """setup-amnezia-api.sh --uninstall terminates immediately and never continues into setup."""
         amnezia_script = Path(__file__).resolve().parent.parent / "setup-amnezia-api.sh"
-        test_env = os.environ.copy()
-        test_env["SKIP_ROOT_CHECK"] = "true"
-        test_env["AMNEZIA_SETUP_LOG_FILE"] = (self.root / "amnezia.log").as_posix()
+        test_script = f"""
+source "{amnezia_script.as_posix()}"
+check_root() {{
+    return 0
+}}
+init_logging() {{
+    return 0
+}}
+main --uninstall
+"""
         proc = subprocess.run(
-            ["bash", str(amnezia_script), "--uninstall"],
+            ["bash", "-c", test_script],
             capture_output=True,
             text=True,
-            env=test_env,
             check=False,
         )
         self.assertEqual(proc.returncode, 0)
         self.assertIn("=== Удаление конфигурации Amnezia API Nginx ===", proc.stdout)
+        self.assertIn("Конфигурация не найдена. Нечего удалять.", proc.stdout)
         self.assertNotIn("=== Настройка Amnezia API: Nginx + SSL ===", proc.stdout)
+
+    def test_setup_amnezia_multi_domain_uninstall_lifecycle(self):
+        """setup-amnezia-api.sh deletes specified domain and only removes rate-limit zone when last domain is removed."""
+        amnezia_script = Path(__file__).resolve().parent.parent / "setup-amnezia-api.sh"
+        nginx_dir = self.root / "mock_nginx"
+        sites_avail = nginx_dir / "sites-available"
+        sites_enable = nginx_dir / "sites-enabled"
+        conf_d = nginx_dir / "conf.d"
+        sites_avail.mkdir(parents=True)
+        sites_enable.mkdir(parents=True)
+        conf_d.mkdir(parents=True)
+
+        # Setup Node 1
+        node1_avail = sites_avail / "just1kbot-amnezia-node1.example.com"
+        node1_avail.write_text("server { server_name node1.example.com; }")
+        node1_enable = sites_enable / "just1kbot-amnezia-node1.example.com"
+        node1_enable.symlink_to(node1_avail)
+
+        # Setup Node 2
+        node2_avail = sites_avail / "just1kbot-amnezia-node2.example.com"
+        node2_avail.write_text("server { server_name node2.example.com; }")
+        node2_enable = sites_enable / "just1kbot-amnezia-node2.example.com"
+        node2_enable.symlink_to(node2_avail)
+
+        # Shared rate limit zone
+        rate_limit_conf = conf_d / "just1kbot_amnezia_api_limit.conf"
+        rate_limit_conf.write_text("limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;")
+
+        test_script = f"""
+source "{amnezia_script.as_posix()}"
+check_root() {{
+    return 0
+}}
+init_logging() {{
+    return 0
+}}
+AMNEZIA_NGINX_DIR="{nginx_dir.as_posix()}"
+NGINX_DIR="{nginx_dir.as_posix()}"
+nginx() {{
+    return 0
+}}
+certbot() {{
+    return 0
+}}
+systemctl() {{
+    return 0
+}}
+main "$@"
+"""
+        # Step A: Uninstall node1
+        proc1 = subprocess.run(
+            ["bash", "-c", test_script, "--", "--uninstall", "--domain", "node1.example.com"],
+            input="yes\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc1.returncode, 0)
+        self.assertFalse(node1_avail.exists())
+        self.assertFalse(node1_enable.exists())
+        # Node 2 and shared rate limit MUST still exist!
+        self.assertTrue(node2_avail.exists())
+        self.assertTrue(node2_enable.exists())
+        self.assertTrue(rate_limit_conf.exists())
+
+        # Step B: Uninstall node2 (last node)
+        proc2 = subprocess.run(
+            ["bash", "-c", test_script, "--", "--uninstall", "--domain", "node2.example.com"],
+            input="yes\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc2.returncode, 0)
+        self.assertFalse(node2_avail.exists())
+        self.assertFalse(node2_enable.exists())
+        # Now rate limit file MUST be cleaned up!
+        self.assertFalse(rate_limit_conf.exists())
 
 
 if __name__ == "__main__":

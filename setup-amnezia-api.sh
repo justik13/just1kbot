@@ -32,6 +32,7 @@ IFS=$'\n\t'
 AMNEZIA_PORT=4001
 DEFAULT_PUBLIC_PORT=8443
 LOG_FILE="${AMNEZIA_SETUP_LOG_FILE:-/var/log/just1kbot-amnezia-setup.log}"
+NGINX_DIR="${AMNEZIA_NGINX_DIR:-/etc/nginx}"
 
 # --- Цвета ---
 RED='\033[0;31m'
@@ -41,28 +42,40 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # --- Логирование ---
-mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
-touch "$LOG_FILE" 2>/dev/null || true
+init_logging() {
+    local log_dir
+    log_dir="$(dirname "$LOG_FILE")"
+    if [[ ! -d "$log_dir" ]]; then
+        mkdir -p "$log_dir"
+    fi
+    touch "$LOG_FILE"
+}
 
 log() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${GREEN}[$ts]${NC} $1"
-    echo "[$ts] $1" >> "$LOG_FILE" 2>/dev/null || true
+    if [[ -w "$LOG_FILE" ]]; then
+        echo "[$ts] $1" >> "$LOG_FILE"
+    fi
 }
 
 warn() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${YELLOW}[$ts] ВНИМАНИЕ:${NC} $1"
-    echo "[$ts] WARNING: $1" >> "$LOG_FILE" 2>/dev/null || true
+    if [[ -w "$LOG_FILE" ]]; then
+        echo "[$ts] WARNING: $1" >> "$LOG_FILE"
+    fi
 }
 
 error() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${RED}[$ts] ОШИБКА:${NC} $1" >&2
-    echo "[$ts] ERROR: $1" >> "$LOG_FILE" 2>/dev/null || true
+    if [[ -w "$LOG_FILE" ]]; then
+        echo "[$ts] ERROR: $1" >> "$LOG_FILE"
+    fi
     exit 1
 }
 
@@ -72,7 +85,7 @@ info() {
 
 # --- Проверка root ---
 check_root() {
-    if [[ $EUID -ne 0 ]] && [[ "${SKIP_ROOT_CHECK:-false}" != "true" ]]; then
+    if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}Ошибка: запустите с sudo.${NC}"
         exit 1
     fi
@@ -150,10 +163,10 @@ do_uninstall() {
 
     # Определяем домен из аргумента или существующего конфига
     local conf_file=""
-    if [[ -n "$DOMAIN" && -f "/etc/nginx/sites-available/just1kbot-amnezia-${DOMAIN}" ]]; then
-        conf_file="/etc/nginx/sites-available/just1kbot-amnezia-${DOMAIN}"
+    if [[ -n "$DOMAIN" && -f "${NGINX_DIR}/sites-available/just1kbot-amnezia-${DOMAIN}" ]]; then
+        conf_file="${NGINX_DIR}/sites-available/just1kbot-amnezia-${DOMAIN}"
     else
-        for f in /etc/nginx/sites-available/just1kbot-amnezia-*; do
+        for f in "${NGINX_DIR}"/sites-available/just1kbot-amnezia-*; do
             if [[ -f "$f" ]]; then
                 conf_file="$f"
                 break
@@ -178,12 +191,12 @@ do_uninstall() {
     log "Удаление конфигурации для $domain_name..."
 
     # Удаляем symlink и конфиг
-    rm -f "/etc/nginx/sites-enabled/just1kbot-amnezia-${domain_name}"
+    rm -f "${NGINX_DIR}/sites-enabled/just1kbot-amnezia-${domain_name}"
     rm -f "$conf_file"
 
     # Удаляем rate limit только если не осталось других активных сайтов just1kbot-amnezia
-    if ! ls /etc/nginx/sites-enabled/just1kbot-amnezia-* >/dev/null 2>&1; then
-        rm -f /etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf
+    if ! ls "${NGINX_DIR}"/sites-enabled/just1kbot-amnezia-* >/dev/null 2>&1; then
+        rm -f "${NGINX_DIR}/conf.d/just1kbot_amnezia_api_limit.conf"
     fi
 
     # Удаляем сертификат
@@ -331,7 +344,7 @@ setup_nginx() {
     log "Настройка Nginx reverse proxy..."
 
     local conf_name="just1kbot-amnezia-${DOMAIN}"
-    local conf_path="/etc/nginx/sites-available/${conf_name}"
+    local conf_path="${NGINX_DIR}/sites-available/${conf_name}"
 
     # Предупреждение о существующем конфиге
     if [[ -f "$conf_path" ]]; then
@@ -345,10 +358,10 @@ setup_nginx() {
     fi
 
     # Очищаем возможные дублирующие зоны из главного nginx.conf
-    sed -i '/limit_req_zone.*just1kbot_amnezia_api/d' /etc/nginx/nginx.conf 2>/dev/null || true
+    sed -i '/limit_req_zone.*just1kbot_amnezia_api/d' "${NGINX_DIR}/nginx.conf" 2>/dev/null || true
 
     # Rate limiting zone (в отдельный файл)
-    local rate_limit_conf="/etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf"
+    local rate_limit_conf="${NGINX_DIR}/conf.d/just1kbot_amnezia_api_limit.conf"
     # shellcheck disable=SC2016
     echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
 
@@ -378,7 +391,7 @@ server {
 }
 EOF
 
-    ln -sf "$conf_path" "/etc/nginx/sites-enabled/${conf_name}"
+    ln -sf "$conf_path" "${NGINX_DIR}/sites-enabled/${conf_name}"
     mkdir -p /var/www/certbot
 
     nginx -t 2>> "$LOG_FILE"
@@ -421,7 +434,7 @@ setup_https_config() {
     log "Настройка HTTPS конфига..."
 
     local conf_name="just1kbot-amnezia-${DOMAIN}"
-    local conf_path="/etc/nginx/sites-available/${conf_name}"
+    local conf_path="${NGINX_DIR}/sites-available/${conf_name}"
 
     local redirect_url="https://\$host:${PUBLIC_PORT}\$request_uri"
     if [[ "$PUBLIC_PORT" == "443" ]]; then
@@ -535,7 +548,7 @@ print_result() {
     echo "  Внутренний:      http://127.0.0.1:$AMNEZIA_PORT"
     echo "  Healthcheck:     https://$DOMAIN:$PUBLIC_PORT/health"
     echo ""
-    echo "  Конфиг:          /etc/nginx/sites-available/just1kbot-amnezia-$DOMAIN"
+    echo "  Конфиг:          ${NGINX_DIR}/sites-available/just1kbot-amnezia-$DOMAIN"
     echo "  Сертификат:      /etc/letsencrypt/live/$DOMAIN/"
     echo "  Логи:            /var/log/nginx/amnezia-api-*.log"
     echo "  Добавление сервера в бот:"
@@ -552,6 +565,7 @@ print_result() {
 main() {
     parse_args "$@"
     check_root
+    init_logging
 
     # Обработка --uninstall
     if [[ "$UNINSTALL" == true ]]; then
@@ -571,4 +585,6 @@ main() {
     print_result
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
