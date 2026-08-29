@@ -479,8 +479,8 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         call_kwargs = callback.message.edit_text.call_args.kwargs
         kb = call_kwargs["reply_markup"]
         first_btn = kb.inline_keyboard[0][0]
-        # Must be clean "👥 Подключенные пиры" without any false 21/240
-        self.assertEqual(first_btn.text, "👥 Подключенные пиры")
+        # Must be clean "👥 Пиры на узле" without any false 21/240
+        self.assertEqual(first_btn.text, "👥 Пиры на узле")
         self.assertNotIn("21", first_btn.text)
 
     async def test_show_server_peers_message_length_protection(self):
@@ -640,6 +640,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("На узле: <b>3</b>", rendered)
         self.assertIn("Бот: 2", rendered)
         self.assertIn("Внешние: 1", rendered)
+        self.assertIn("Удаляются: <b>1</b>", rendered)
         self.assertIn("Не на узле: <b>1</b>", rendered)
         self.assertIn("В процессе: <b>1</b>", rendered)
 
@@ -652,3 +653,80 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("@user_pending", rendered)
         self.assertIn("[Внешний пир]", rendered)
         self.assertIn("Manual Client", rendered)
+
+    async def test_show_server_peers_node_authoritative_online_status(self):
+        """Node-reported lastHandshake takes precedence over stale/missing DB last_connected."""
+        server = SimpleNamespace(id=11, name="Denmark", country_flag="🇩🇰", api_url="https://dk.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        # Profile in DB has NO last_connected
+        u = SimpleNamespace(id=1, telegram_id=555, username="streamer", first_name="Streamer")
+        p = SimpleNamespace(
+            id=77, server_id=11, peer_id="key-live", user=u,
+            device_name="TV", allocated_ip="10.8.0.8",
+            last_connected=None, provisioning_status="active",
+        )
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [p]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        # Node reports active handshake 15 seconds ago
+        recent_ts = now_utc().timestamp() - 15
+        node_client = SimpleNamespace(id="key-live", client_name="TV", lastHandshake=recent_ts)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:11:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(return_value=[node_client])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered = callback.message.edit_text.call_args[0][0]
+        # Should be online (🟢 В сети) based on node telemetry, even though DB last_connected was None!
+        self.assertIn("🟢 В сети", rendered)
+
+    async def test_show_server_peers_anomalous_profile_handled_gracefully(self):
+        """Profile with no peer_id and an unexpected status is classified as pending and logged."""
+        server = SimpleNamespace(id=12, name="Sweden", country_flag="🇸🇪", api_url="https://se.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        u = SimpleNamespace(id=2, telegram_id=666, username="anomalous_user", first_name="Anomalous")
+        p = SimpleNamespace(
+            id=88, server_id=12, peer_id=None, user=u,
+            device_name="Router", allocated_ip=None,
+            last_connected=None, provisioning_status="custom_unexpected_status",
+        )
+
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [p]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:12:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(return_value=[])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered = callback.message.edit_text.call_args[0][0]
+        self.assertIn("В процессе: <b>1</b>", rendered)
+        self.assertIn("[custom_unexpected_status]", rendered)

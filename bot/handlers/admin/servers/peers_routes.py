@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 import logging
 import math
 
@@ -8,12 +9,12 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import load_only, selectinload
 
 from bot import texts
 from bot.formatters import format_admin_breadcrumbs
 from bot.keyboards.admin.servers import get_admin_server_peers_keyboard
-from database.models import Server, VPNProfile
+from database.models import Server, User, VPNProfile
 from services.amnezia_client import AmneziaClient
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
@@ -24,6 +25,12 @@ router = Router()
 logger = logging.getLogger(__name__)
 
 PEERS_PER_PAGE = 8
+
+NO_PEER_LIFECYCLE_STATUSES = {
+    "pending_create",
+    "create_cleanup_pending",
+    "create_failed",
+}
 
 
 @router.callback_query(F.data.startswith("admin_server_peers:"))
@@ -59,7 +66,24 @@ async def show_server_peers(
     stmt = (
         select(VPNProfile)
         .where(VPNProfile.server_id == server_id)
-        .options(selectinload(VPNProfile.user))
+        .options(
+            load_only(
+                VPNProfile.id,
+                VPNProfile.server_id,
+                VPNProfile.user_id,
+                VPNProfile.peer_id,
+                VPNProfile.device_name,
+                VPNProfile.client_name,
+                VPNProfile.last_connected,
+                VPNProfile.provisioning_status,
+            ),
+            selectinload(VPNProfile.user).load_only(
+                User.id,
+                User.telegram_id,
+                User.username,
+                User.first_name,
+            ),
+        )
         .order_by(VPNProfile.id.asc())
     )
     profiles = list((await session.scalars(stmt)).all())
@@ -85,6 +109,7 @@ async def show_server_peers(
         real_clients = []
 
     real_peer_ids: set[str] = {c.id for c in real_clients if getattr(c, "id", None)}
+    real_clients_by_id = {c.id: c for c in real_clients if getattr(c, "id", None)}
     db_profiles_by_peer_id = {p.peer_id: p for p in profiles if p.peer_id}
 
     # 3. Classify bot profiles: on-node vs missing vs pending
@@ -110,9 +135,30 @@ async def show_server_peers(
         if len(raw_dev) > 40:
             raw_dev = raw_dev[:39] + "…"
         device_name = safe(raw_dev)
-        ip = safe(p.allocated_ip or texts.PLACEHOLDER_DASH)
+        ip = safe(getattr(p, "allocated_ip", None) or getattr(p, "client_name", None) or texts.PLACEHOLDER_DASH)
 
-        last_activity = getattr(p, "last_connected", None)
+        # Node-authoritative activity: check node telemetry first (lastHandshake/lastSeen/updatedAt),
+        # falling back to database last_connected if unavailable
+        node_client = real_clients_by_id.get(p.peer_id) if (p.peer_id and is_on_node) else None
+        last_activity = None
+        if node_client:
+            last_conn_raw = (
+                getattr(node_client, "lastHandshake", None)
+                or getattr(node_client, "lastSeen", None)
+                or getattr(node_client, "updatedAt", None)
+            )
+            if last_conn_raw:
+                try:
+                    ts = int(float(str(last_conn_raw)))
+                    if ts > 1e12:
+                        ts = ts // 1000
+                    last_activity = datetime.fromtimestamp(ts, tz=timezone.utc)
+                except (ValueError, TypeError, OverflowError):
+                    pass
+
+        if not last_activity:
+            last_activity = getattr(p, "last_connected", None)
+
         is_online = False
         if last_activity:
             if last_activity.tzinfo is None:
@@ -149,8 +195,18 @@ async def show_server_peers(
             # Had a peer_id in DB, but physically absent from node!
             item["type"] = "missing"
             bot_items_missing.append(item)
+        elif p.provisioning_status in NO_PEER_LIFECYCLE_STATUSES:
+            # Legitimate unprovisioned lifecycle state
+            item["type"] = "pending"
+            bot_items_pending.append(item)
         else:
-            # No peer_id yet (e.g. pending_create, create_cleanup_pending)
+            # Anomalous state: no peer_id and not in known lifecycle statuses
+            logger.warning(
+                "Anomalous VPNProfile %s on server %s: no peer_id with status '%s'",
+                p.id,
+                server_id,
+                p.provisioning_status,
+            )
             item["type"] = "pending"
             bot_items_pending.append(item)
 
@@ -166,12 +222,15 @@ async def show_server_peers(
             )
             if len(raw_c_name) > 40:
                 raw_c_name = raw_c_name[:39] + "…"
+            ext_ip = getattr(c, "ip", None) or getattr(c, "allocated_ip", None) or texts.PLACEHOLDER_DASH
+            cid = str(c.id)
+            c_key = f"{cid[:6]}…{cid[-6:]}" if len(cid) > 16 else cid
             external_items.append({
                 "type": "external",
                 "client": c,
                 "device_name": safe(raw_c_name),
-                "key": safe(c.id),
-                "ip": texts.PLACEHOLDER_DASH,
+                "key": safe(c_key),
+                "ip": safe(str(ext_ip)),
             })
 
     # 5. Page layout: bot (on-node) first, then external, then missing, then pending
@@ -204,6 +263,14 @@ async def show_server_peers(
         )
     else:
         status_banner = ""
+        deleting_count = sum(
+            1 for item in bot_items_on_node if item.get("provisioning_status") == "deleting"
+        )
+        deleting_note = (
+            texts.ADMIN_SERVER_PEERS_DELETING_NOTE.format(deleting_count=deleting_count)
+            if deleting_count > 0
+            else ""
+        )
         missing_note = (
             texts.ADMIN_SERVER_PEERS_MISSING_NOTE.format(missing_count=missing_count)
             if missing_count > 0
@@ -222,6 +289,7 @@ async def show_server_peers(
             live_peers=live_peers,
             bot_peers=len(bot_items_on_node),
             external_peers=len(external_items),
+            deleting_note=deleting_note,
             missing_note=missing_note,
             pending_note=pending_note,
             page=page,
@@ -322,7 +390,10 @@ async def show_server_peers(
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug("show_server_peers edit_text failed: %s", e)
+        if "not_modified" in str(e).lower().replace(" ", "_"):
+            logger.debug("show_server_peers message not modified: %s", e)
+        else:
+            logger.warning("TelegramBadRequest in show_server_peers: %s", e)
 
 
 @router.callback_query(F.data.startswith("admin_server_peer_info:"))

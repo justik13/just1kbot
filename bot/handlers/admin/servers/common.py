@@ -203,4 +203,7 @@ async def _show_server_card(
             parse_mode="HTML",
         )
     except TelegramBadRequest as e:
-        logger.debug(f"_show_server_card edit_text failed: {e}")
+        if "not_modified" in str(e).lower().replace(" ", "_"):
+            logger.debug("_show_server_card message not modified: %s", e)
+        else:
+            logger.warning("TelegramBadRequest in _show_server_card: %s", e)
