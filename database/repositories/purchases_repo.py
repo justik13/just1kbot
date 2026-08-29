@@ -223,7 +223,7 @@ async def get_purchase_logs_paginated(
         audit_count = (
             await session.scalar(
                 select(func.count(AuditLog.id)).where(
-                    AuditLog.action.in_(audit_actions)
+                    AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS)
                 )
             )
         ) or 0

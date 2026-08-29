@@ -327,10 +327,10 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         # Unknown action fallback
         op_type, title = get_audit_op_info("SOME_UNKNOWN_ACTION")
         self.assertEqual(op_type, "grant")
+        self.assertEqual(title, "SOME_UNKNOWN_ACTION")
+
     def test_no_active_code_references_to_legacy_incy_or_bridge(self):
         """Active python source files must contain zero references to deprecated INCY or AMNEZIA_BRIDGE_HMAC_SECRET."""
-        from pathlib import Path
-
         root = Path(__file__).parents[1]
         active_dirs = [root / "bot", root / "config", root / "database", root / "services", root / "utils"]
 
