@@ -135,7 +135,7 @@ async def show_server_peers(
         if len(raw_dev) > 40:
             raw_dev = raw_dev[:39] + "…"
         device_name = safe(raw_dev)
-        ip = safe(getattr(p, "allocated_ip", None) or getattr(p, "client_name", None) or texts.PLACEHOLDER_DASH)
+        ip = safe(getattr(p, "client_name", None) or texts.PLACEHOLDER_DASH)
 
         # Node-authoritative activity: check node telemetry first (lastHandshake/lastSeen/updatedAt),
         # falling back to database last_connected if unavailable
@@ -164,7 +164,7 @@ async def show_server_peers(
             if last_activity.tzinfo is None:
                 last_activity = last_activity.replace(tzinfo=now.tzinfo)
             delta_sec = (now - last_activity).total_seconds()
-            if 0 <= delta_sec <= 180:
+            if 0 <= delta_sec <= texts.PEER_ONLINE_THRESHOLD_SECONDS:
                 is_online = True
 
         if p.provisioning_status == "deleting":
@@ -309,7 +309,16 @@ async def show_server_peers(
                 ip=item["ip"],
             )
             if item["user"]:
-                btn_label = truncate_button_text(texts.ADMIN_SERVER_PEER_BTN_BOT.format(username=item["username"], device_name=item["device_name"]))
+                p_status = item.get("provisioning_status")
+                if p_status == "deleting":
+                    btn_icon = texts.ADMIN_SERVER_PEER_ICON_PENDING
+                elif p_status == "create_failed":
+                    btn_icon = texts.ADMIN_SERVER_PEER_ICON_FAILED
+                elif p_status == "create_cleanup_pending":
+                    btn_icon = texts.ADMIN_SERVER_PEER_ICON_CLEANUP
+                else:
+                    btn_icon = "⚪"
+                btn_label = truncate_button_text(f"{btn_icon} {item['username']} • {item['device_name']}")
                 btn_cb = f"admin_user_card:{item['user'].telegram_id}:server_peers:{server_id}:{page}"
                 peer_buttons.append((btn_label, btn_cb))
         elif item["type"] == "bot":
@@ -338,16 +347,16 @@ async def show_server_peers(
             p_status = item.get("provisioning_status", "pending_create")
             if p_status == "pending_create":
                 badge = texts.ADMIN_SERVER_PEER_BADGE_PENDING
-                icon = "⏳"
+                icon = texts.ADMIN_SERVER_PEER_ICON_PENDING
             elif p_status == "create_cleanup_pending":
                 badge = texts.ADMIN_SERVER_PEER_BADGE_CLEANUP
-                icon = "🧹"
+                icon = texts.ADMIN_SERVER_PEER_ICON_CLEANUP
             elif p_status == "create_failed":
                 badge = texts.ADMIN_SERVER_PEER_BADGE_FAILED
-                icon = "❌"
+                icon = texts.ADMIN_SERVER_PEER_ICON_FAILED
             else:
                 badge = texts.ADMIN_SERVER_PEER_BADGE_DEFAULT.format(status=p_status)
-                icon = "⏳"
+                icon = texts.ADMIN_SERVER_PEER_ICON_PENDING
 
             rendered += texts.ADMIN_SERVER_PEER_PENDING_ROW.format(
                 badge=badge,

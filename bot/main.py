@@ -307,9 +307,16 @@ async def _http_correlation_middleware(request: web.Request, handler):
 _http_limiter = HttpRateLimiter()
 
 
+@web.middleware
 async def _http_rate_limit_middleware(request: web.Request, handler):
-    """Process-local rate limiting for incoming HTTP webhooks and endpoints."""
-    if request.path == "/health":
+    """Process-local rate limiting for incoming HTTP webhooks and endpoints.
+
+    Exempt /health and YooKassa webhooks from strict rate limiting:
+    - /health receives frequent container health probes
+    - YooKassa webhooks receive legitimate burst batches and retries and are
+      already strictly guarded by official IP allowlisting
+    """
+    if request.path in {"/health", "/webhook/yookassa", "/yookassa/webhook"}:
         return await handler(request)
     client_ip = get_trusted_client_ip(request)
     is_allowed, retry_after = _http_limiter.check(client_ip)

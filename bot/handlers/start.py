@@ -228,6 +228,7 @@ async def cmd_start(
             texts.WELCOME_TEXT,
             builder.as_markup(),
             force_new=True,
+            session=session,
         )
     else:
         text, kb = await _build_hub_text_and_kb(session, user)
@@ -237,6 +238,7 @@ async def cmd_start(
             text,
             kb,
             force_new=True,
+            session=session,
         )
 
 
@@ -273,6 +275,7 @@ async def handle_legacy_reply_keyboard(
         text,
         kb,
         force_new=True,
+        session=session,
     )
 
 
@@ -331,6 +334,7 @@ async def back_to_main_menu(
         text,
         kb,
         trigger_message_id=callback.message.message_id,
+        session=session,
     )
 
 

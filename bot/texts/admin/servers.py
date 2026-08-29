@@ -108,8 +108,6 @@ ADMIN_SERVER_RENAME_PROMPT = "Введите новое имя сервера:"
 
 ADMIN_SERVER_SLOTS_DB_NOTE = " <i>(в БД: {db_used})</i>"
 ADMIN_SERVER_SLOTS_BREAKDOWN_NOTE = " <i>(на узле: {cached_used}, в БД: {db_used})</i>"
-ADMIN_SERVER_SLOTS_EXTRA_NOTE = " <i>(в боте: {db_used}, внешних: +{extra})</i>"
-ADMIN_SERVER_SLOTS_MISSING_NOTE = " <i>(в боте: {db_used}, ⚠️ не на узле: {missing})</i>"
 
 ADMIN_SERVER_SLOTS_VALUE = "<b>{used_clients} / {max_clients}</b>"
 
@@ -143,6 +141,10 @@ ADMIN_SERVER_PEER_BADGE_PENDING = "⏳ <b>[Создаётся]</b>"
 ADMIN_SERVER_PEER_BADGE_CLEANUP = "🧹 <b>[Очистка сбоя]</b>"
 ADMIN_SERVER_PEER_BADGE_FAILED = "❌ <b>[Сбой создания]</b>"
 ADMIN_SERVER_PEER_BADGE_DEFAULT = "⏳ <b>[{status}]</b>"
+ADMIN_SERVER_PEER_ICON_PENDING = "⏳"
+ADMIN_SERVER_PEER_ICON_CLEANUP = "🧹"
+ADMIN_SERVER_PEER_ICON_FAILED = "❌"
+PEER_ONLINE_THRESHOLD_SECONDS = 180
 ADMIN_SERVER_PEER_BTN_BOT = "🟢 {username} • {device_name}"
 ADMIN_SERVER_PEER_BTN_PENDING = "{icon} {username} • {device_name}"
 ADMIN_SERVER_PEER_BTN_EXTERNAL = "👤 Внешний: {device_name}"
