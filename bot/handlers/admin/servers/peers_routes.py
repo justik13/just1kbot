@@ -13,7 +13,6 @@ from bot import texts
 from bot.formatters import format_admin_breadcrumbs
 from bot.keyboards.admin.servers import get_admin_server_peers_keyboard
 from database.models import Server, VPNProfile
-from database.repositories.profiles_repo import PROFILE_LIST_HIDDEN_STATUSES
 from services.amnezia_client import AmneziaClient
 from utils.admin import is_admin
 from utils.datetime_helpers import now_utc
@@ -54,13 +53,11 @@ async def show_server_peers(
 
     await callback.answer(show_alert=False)
 
-    # 1. Fetch bot profiles for this server
+    # 1. Fetch bot profiles for this server (include all lifecycle states so
+    # in-flight deleting profiles are not falsely classified as external)
     stmt = (
         select(VPNProfile)
-        .where(
-            VPNProfile.server_id == server_id,
-            VPNProfile.provisioning_status.notin_(PROFILE_LIST_HIDDEN_STATUSES),
-        )
+        .where(VPNProfile.server_id == server_id)
         .options(selectinload(VPNProfile.user))
         .order_by(VPNProfile.id.asc())
     )
@@ -72,7 +69,7 @@ async def show_server_peers(
     client = AmneziaClient(server.api_url, server.api_key)
     api_available = True
     try:
-        real_clients = await asyncio.wait_for(client.get_all_clients(), timeout=5.0)
+        real_clients = await asyncio.wait_for(client.get_all_clients(), timeout=10.0)
         if real_clients is None:
             # API returned None — node responded but data is unavailable
             api_available = False

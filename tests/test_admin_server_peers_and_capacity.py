@@ -46,7 +46,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("Netherlands", summary)
             self.assertIn("23/240", summary)
-            self.assertIn("(+2 админ)", summary)
+            self.assertIn("(+2 внешн.)", summary)
 
     async def test_dashboard_server_capacity_summary_normal_when_matching(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
@@ -58,7 +58,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("21/240", summary)
-            self.assertNotIn("админ", summary)
+            self.assertNotIn("внешн.", summary)
 
     async def test_server_list_buttons_include_capacity(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
@@ -167,14 +167,14 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             rendered_text = callback.message.edit_text.call_args[0][0]
             reply_markup = callback.message.edit_text.call_args.kwargs["reply_markup"]
 
-            # New header format: "На узле: <b>2</b> (Бот: 1, Admin: 1)"
+            # New header format: "На узле: <b>2</b> (Бот: 1, Внешние: 1)"
             self.assertIn("На узле: <b>2</b>", rendered_text)
             self.assertIn("Бот: 1", rendered_text)
-            self.assertIn("Admin: 1", rendered_text)
+            self.assertIn("Внешние: 1", rendered_text)
 
             # Assert rows
             self.assertIn("@alice", rendered_text)
-            self.assertIn("Внешний / Admin", rendered_text)
+            self.assertIn("Внешний пир", rendered_text)
             self.assertIn("Windows 11 PC", rendered_text)
 
             # Assert keyboard buttons and contextual navigation
@@ -310,3 +310,59 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
             # cached=18, db=21 → should show 18(-3)/240
             self.assertTrue(any("18(-3)/240" in lbl for lbl in labels))
+
+    async def test_users_list_filter_labels_clean_when_counts_fail(self):
+        """When get_user_filter_counts fails, filter buttons show clean labels without (0)."""
+        from bot.handlers.admin.users.common import _build_users_list_text_and_kb
+        session = AsyncMock()
+
+        with patch("database.repositories.users_repo.get_user_filter_counts", AsyncMock(side_effect=RuntimeError("db error"))):
+            rendered, builder = await _build_users_list_text_and_kb(
+                [], page=1, total_pages=1, total=0, session=session
+            )
+            buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
+            labels = [b.text for b in buttons]
+
+            # Filter buttons must NOT show "(0)" when query fails
+            self.assertFalse(any("(0)" in lbl for lbl in labels))
+            self.assertTrue(any("Все" in lbl for lbl in labels))
+
+    async def test_show_server_peers_includes_deleting_profile_as_bot_peer(self):
+        """A profile in 'deleting' lifecycle state with matching peer_id must be recognized as bot peer, not external."""
+        server = SimpleNamespace(id=5, name="Estonia", country_flag="🇪🇪", api_url="https://ee.example", api_key="key")
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=server)
+
+        bot_user = SimpleNamespace(id=50, telegram_id=88888, username="dan", first_name="Dan")
+        deleting_profile = SimpleNamespace(
+            id=501, server_id=5, peer_id="key-deleting-dan", user=bot_user,
+            device_name="Tablet", allocated_ip="10.8.0.8",
+            last_connected=None, provisioning_status="deleting",
+        )
+        scalars_mock = MagicMock()
+        scalars_mock.all.return_value = [deleting_profile]
+        session.scalars = AsyncMock(return_value=scalars_mock)
+
+        amnezia_peer = SimpleNamespace(id="key-deleting-dan", client_name="Tablet")
+
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=1),
+            data="admin_server_peers:5:1",
+            answer=AsyncMock(),
+            message=SimpleNamespace(edit_text=AsyncMock()),
+        )
+
+        with patch("bot.handlers.admin.servers.peers_routes.is_admin", return_value=True), \
+             patch("bot.handlers.admin.servers.peers_routes.AmneziaClient") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.get_all_clients = AsyncMock(return_value=[amnezia_peer])
+            mock_client_cls.return_value = mock_client
+
+            await show_server_peers(callback, session)
+
+        rendered_text = callback.message.edit_text.call_args[0][0]
+        # Should be classified under bot, not external
+        self.assertIn("Бот: 1", rendered_text)
+        self.assertIn("Внешние: 0", rendered_text)
+        self.assertIn("@dan", rendered_text)
+        self.assertNotIn("Внешний пир", rendered_text)

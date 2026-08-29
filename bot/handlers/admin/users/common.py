@@ -214,7 +214,9 @@ async def _build_users_list_text_and_kb(
 
     def _cnt_label(fmt_str: str, f_name: str, key: str) -> str:
         cnt = filter_counts.get(key)
-        return fmt_str.format(f_name=f_name, count=cnt if cnt is not None else 0)
+        if cnt is None:
+            return f_name
+        return fmt_str.format(f_name=f_name, count=cnt)
 
     filters = [
         ("all", _cnt_label(texts.ADMIN_USER_FILTER_ALL_COUNT, texts.COMMON_VSE, "all"), "none"),
