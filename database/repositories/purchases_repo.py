@@ -31,6 +31,51 @@ class PurchaseLogEntry:
     created_at: datetime
 
 
+AUDIT_PURCHASE_ACTIONS = [
+    AdminAuditAction.GRANT.value,
+    AdminAuditAction.ADMIN_SUB_GRANT.value,
+    AdminAuditAction.EXTEND.value,
+    AdminAuditAction.ADMIN_SUB_EXTEND.value,
+    AdminAuditAction.CHANGE_TARIFF.value,
+    AdminAuditAction.ADMIN_SUB_CHANGE.value,
+    AdminAuditAction.REDUCE.value,
+    AdminAuditAction.ADMIN_SUB_REDUCE.value,
+]
+
+
+def get_quote_op_title(op: str | TariffQuoteOperation) -> str:
+    op_title_map = {
+        TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
+        TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
+        TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
+    }
+    return op_title_map.get(op, texts.PAYMENT_OP_TITLE_DEFAULT)
+
+
+def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
+    action_val = str(action.value if hasattr(action, "value") else action)
+    mapping = {
+        AdminAuditAction.GRANT.value: ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value),
+        AdminAuditAction.ADMIN_SUB_GRANT.value: ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value),
+        AdminAuditAction.EXTEND.value: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND.value),
+        AdminAuditAction.ADMIN_SUB_EXTEND.value: ("extend", AdminAuditAction.ADMIN_SUB_EXTEND.value),
+        AdminAuditAction.CHANGE_TARIFF.value: ("change", AdminAuditAction.ADMIN_SUB_CHANGE.value),
+        AdminAuditAction.ADMIN_SUB_CHANGE.value: ("change", AdminAuditAction.ADMIN_SUB_CHANGE.value),
+        AdminAuditAction.REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
+        AdminAuditAction.ADMIN_SUB_REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
+    }
+    op_type, canonical_action = mapping.get(
+        action_val, ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value)
+    )
+    title = (
+        texts.AUDIT_ACTIONS.get(action_val)
+        or texts.AUDIT_ACTIONS.get(canonical_action)
+        or texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT.value)
+        or action_val
+    )
+    return op_type, title
+
+
 async def get_purchase_logs_paginated(
     session: AsyncSession,
     page: int = 1,
@@ -55,19 +100,9 @@ async def get_purchase_logs_paginated(
     quote_results = (await session.execute(quote_stmt)).scalars().all()
 
     # 2. Fetch admin sub grants/extensions from AuditLog (bounded by needed count)
-    audit_actions = [
-        "GRANT",
-        "ADMIN_SUB_GRANT",
-        "EXTEND",
-        "ADMIN_SUB_EXTEND",
-        "CHANGE_TARIFF",
-        "ADMIN_SUB_CHANGE",
-        "REDUCE",
-        "ADMIN_SUB_REDUCE",
-    ]
     audit_stmt = (
         select(AuditLog)
-        .where(AuditLog.action.in_(audit_actions))
+        .where(AuditLog.action.in_(AUDIT_PURCHASE_ACTIONS))
         .order_by(AuditLog.created_at.desc())
         .limit(needed)
     )
@@ -117,13 +152,7 @@ async def get_purchase_logs_paginated(
             dev_limit = 1
             dur_days = 30
 
-        op_title_map = {
-            TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
-            TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
-            TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
-        }
-        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
-
+        op_title = get_quote_op_title(quote.operation_type)
         created_at = quote.consumed_at or quote.created_at
 
         entries.append(
@@ -145,25 +174,13 @@ async def get_purchase_logs_paginated(
         )
 
     # Map AuditLog manual admin actions
-    op_audit_map = {
-        AdminAuditAction.GRANT: ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, "")),
-        AdminAuditAction.ADMIN_SUB_GRANT: ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, "")),
-        AdminAuditAction.EXTEND: ("extend", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_EXTEND, "")),
-        AdminAuditAction.ADMIN_SUB_EXTEND: ("extend", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_EXTEND, "")),
-        AdminAuditAction.CHANGE_TARIFF: ("change", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_CHANGE, "")),
-        AdminAuditAction.ADMIN_SUB_CHANGE: ("change", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_CHANGE, "")),
-        AdminAuditAction.REDUCE: ("reduce", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_REDUCE, "")),
-        AdminAuditAction.ADMIN_SUB_REDUCE: ("reduce", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_REDUCE, "")),
-    }
     for log in audit_results:
         u = users_by_tg_id.get(log.target_id) or users_by_id.get(log.target_id)
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
 
-        op_type, op_title = op_audit_map.get(
-            log.action, ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, ""))
-        )
+        op_type, op_title = get_audit_op_info(log.action)
 
         tariff_name = "Подписка"
         dev_limit = 1
@@ -254,12 +271,7 @@ async def get_purchase_log_by_id(
             tariff_name = "Тариф"
             dev_limit = 1
             dur_days = 30
-        op_title_map = {
-            TariffQuoteOperation.PURCHASE: texts.PAYMENT_OP_TITLE_PURCHASE,
-            TariffQuoteOperation.RENEW: texts.PAYMENT_OP_TITLE_RENEW,
-            TariffQuoteOperation.CHANGE: texts.PAYMENT_OP_TITLE_CHANGE,
-        }
-        op_title = op_title_map.get(quote.operation_type, texts.PAYMENT_OP_TITLE_DEFAULT)
+        op_title = get_quote_op_title(quote.operation_type)
 
         return PurchaseLogEntry(
             id=f"quote_{quote.id}",
@@ -295,19 +307,7 @@ async def get_purchase_log_by_id(
         tg_id = u.telegram_id if u else (log.target_id or 0)
         username = u.username if u else None
         user_label = f"@{username}" if username else f"ID: {tg_id}"
-        op_audit_map = {
-            AdminAuditAction.GRANT: ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, "")),
-            AdminAuditAction.ADMIN_SUB_GRANT: ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, "")),
-            AdminAuditAction.EXTEND: ("extend", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_EXTEND, "")),
-            AdminAuditAction.ADMIN_SUB_EXTEND: ("extend", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_EXTEND, "")),
-            AdminAuditAction.CHANGE_TARIFF: ("change", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_CHANGE, "")),
-            AdminAuditAction.ADMIN_SUB_CHANGE: ("change", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_CHANGE, "")),
-            AdminAuditAction.REDUCE: ("reduce", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_REDUCE, "")),
-            AdminAuditAction.ADMIN_SUB_REDUCE: ("reduce", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_REDUCE, "")),
-        }
-        op_type, op_title = op_audit_map.get(
-            log.action, ("grant", texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT, ""))
-        )
+        op_type, op_title = get_audit_op_info(log.action)
         tariff_name = "Подписка"
         dev_limit = 1
         dur_days = 30

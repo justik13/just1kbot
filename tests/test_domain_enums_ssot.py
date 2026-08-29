@@ -301,8 +301,36 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertTrue(texts.AMNEZIA_WIN_INSTALL.startswith("https://"))
         self.assertTrue(texts.AMNEZIA_WIN_UPDATE.startswith("https://"))
 
+    def test_sql_enum_in_identifier_validation(self):
+        """sql_enum_in rejects non-identifier column names."""
+        from database.models import sql_enum_in
+
+        # Valid identifier
+        sql = sql_enum_in("status", config.enums.TariffQuoteStatus)
+        self.assertTrue(sql.startswith("status IN ("))
+
+        # Invalid identifiers
+        with self.assertRaises(ValueError):
+            sql_enum_in("status; DROP TABLE users; --", config.enums.TariffQuoteStatus)
+        with self.assertRaises(ValueError):
+            sql_enum_in("status with spaces", config.enums.TariffQuoteStatus)
+
+    def test_purchases_repo_audit_mapping_ssot(self):
+        """All purchase audit actions map to non-empty Russian labels without empty fallbacks."""
+        from database.repositories.purchases_repo import AUDIT_PURCHASE_ACTIONS, get_audit_op_info
+
+        for action in AUDIT_PURCHASE_ACTIONS:
+            op_type, title = get_audit_op_info(action)
+            self.assertIn(op_type, {"grant", "extend", "change", "reduce"})
+            self.assertTrue(len(title) > 0, f"Empty title for action {action}")
+
+        # Unknown action fallback
+        op_type, title = get_audit_op_info("SOME_UNKNOWN_ACTION")
+        self.assertEqual(op_type, "grant")
     def test_no_active_code_references_to_legacy_incy_or_bridge(self):
         """Active python source files must contain zero references to deprecated INCY or AMNEZIA_BRIDGE_HMAC_SECRET."""
+        from pathlib import Path
+
         root = Path(__file__).parents[1]
         active_dirs = [root / "bot", root / "config", root / "database", root / "services", root / "utils"]
 

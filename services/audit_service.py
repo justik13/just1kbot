@@ -46,7 +46,19 @@ class AuditService:
                     formatted_details = str(details)
 
             normalized_target_type = target_type.lower() if target_type else None
-            action_val = action.value if hasattr(action, "value") else str(action)
+            if isinstance(action, AdminAuditAction):
+                action_val = action.value
+            elif isinstance(action, str):
+                try:
+                    action_val = AdminAuditAction(action).value
+                except ValueError:
+                    logger.warning(
+                        "Audit action '%s' is not defined in canonical AdminAuditAction enum.",
+                        action,
+                    )
+                    action_val = action
+            else:
+                action_val = str(action)
 
             begin_nested_fn = getattr(session, "begin_nested", None)
             if callable(begin_nested_fn):
