@@ -61,16 +61,8 @@ async def _build_servers_list_text_and_kb(
             db_used = db_counts.get(server.id, 0)
             cached_used = get_cached_peer_count(server.id)
             total = server.max_clients or 240
-            if cached_used is not None and cached_used > db_used:
-                # More live peers than in DB — external admin peers
-                cap_str = f"{db_used}(+{cached_used - db_used})/{total}"
-            elif cached_used is not None and cached_used < db_used:
-                # Fewer live peers than DB — some DB profiles missing on node
-                cap_str = f"{cached_used}(-{db_used - cached_used})/{total}"
-            elif cached_used is not None:
-                cap_str = f"{cached_used}/{total}"
-            else:
-                cap_str = f"{db_used}/{total}"
+            used = cached_used if cached_used is not None else db_used
+            cap_str = f"{used}/{total}"
             button_text = truncate_button_text(
                 texts.ADMIN_SERVER_LIST_ROW_FORMAT.format(v0=status, v1=flag, v2=server.name, v3=cap_str)
             )
@@ -173,16 +165,9 @@ async def _show_server_card(
     header = format_admin_breadcrumbs(texts.BTN_SERVERS, f"{flag} {server.name}")
 
     if cached_used is not None and cached_used != db_used:
-        if cached_used > db_used:
-            extra = cached_used - db_used
-            slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-                used_clients=used_clients, max_clients=max_clients
-            ) + texts.ADMIN_SERVER_SLOTS_EXTRA_NOTE.format(db_used=db_used, extra=extra)
-        else:
-            missing = db_used - cached_used
-            slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
-                used_clients=used_clients, max_clients=max_clients
-            ) + texts.ADMIN_SERVER_SLOTS_MISSING_NOTE.format(db_used=db_used, missing=missing)
+        slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
+            used_clients=used_clients, max_clients=max_clients
+        ) + texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
     else:
         slots_text = texts.ADMIN_SERVER_SLOTS_VALUE.format(
             used_clients=used_clients, max_clients=max_clients

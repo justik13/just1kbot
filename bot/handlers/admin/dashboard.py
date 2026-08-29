@@ -124,12 +124,8 @@ async def _get_servers_capacity_summary(session: AsyncSession) -> str:
         cached_used = get_cached_peer_count(s.id)
         if cached_used is not None:
             used = cached_used
-            if cached_used > db_used:
-                extra = cached_used - db_used
-                extra_info = texts.ADMIN_DASHBOARD_SERVER_EXTRA_ADMIN.format(extra=extra)
-            elif cached_used < db_used:
-                missing = db_used - cached_used
-                extra_info = texts.ADMIN_DASHBOARD_SERVER_MISSING.format(missing=missing)
+            if cached_used != db_used:
+                extra_info = texts.ADMIN_SERVER_SLOTS_DB_NOTE.format(db_used=db_used)
             else:
                 extra_info = ""
         else:

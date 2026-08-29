@@ -46,7 +46,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
 
             self.assertIn("Netherlands", summary)
             self.assertIn("23/240", summary)
-            self.assertIn("(+2 внешн.)", summary)
+            self.assertIn("(в БД: 21)", summary)
 
     async def test_dashboard_server_capacity_summary_normal_when_matching(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", max_clients=240)
@@ -58,7 +58,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             summary = await _get_servers_capacity_summary(session)
 
             self.assertIn("21/240", summary)
-            self.assertNotIn("внешн.", summary)
+            self.assertNotIn("в БД:", summary)
 
     async def test_server_list_buttons_include_capacity(self):
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
@@ -72,7 +72,7 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
             labels = [b.text for b in buttons]
 
-            self.assertTrue(any("21(+2)/240" in lbl for lbl in labels))
+            self.assertTrue(any("23/240" in lbl for lbl in labels))
 
     async def test_server_card_keyboard_has_peers_button(self):
         kb = get_admin_server_card_keyboard(server_id=1, is_active=True, used_clients=23, max_clients=240)
@@ -223,6 +223,8 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         self.assertIn("API узла недоступен", rendered_text)
         # Must still show the profile from DB (not pretend node is empty)
         self.assertIn("@bob", rendered_text)
+        # Must show explicit unknown status row (⚪ instead of false 🟢)
+        self.assertIn("Состояние на узле неизвестно", rendered_text)
         # Must NOT show "Не на узле" when API is unavailable (state unknown)
         self.assertNotIn("Не на узле", rendered_text)
 
@@ -295,8 +297,8 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
         # Live peers = 0, missing = 1
         self.assertIn("На узле: <b>0</b>", rendered_text)
 
-    async def test_server_list_shows_minus_when_cached_less_than_db(self):
-        """When cached_used < db_used, server list button shows (-N) to alert admin."""
+    async def test_server_list_shows_actual_count_without_misleading_minus(self):
+        """When cached_used < db_used, server list button shows actual live count cleanly without false minus math."""
         server1 = SimpleNamespace(id=1, name="Netherlands", country_flag="🇳🇱", is_active=True, max_clients=240)
         session = AsyncMock()
 
@@ -308,8 +310,9 @@ class TestAdminServerPeersAndCapacity(unittest.IsolatedAsyncioTestCase):
             buttons = [b for row in builder.as_markup().inline_keyboard for b in row]
             labels = [b.text for b in buttons]
 
-            # cached=18, db=21 → should show 18(-3)/240
-            self.assertTrue(any("18(-3)/240" in lbl for lbl in labels))
+            # cached=18, db=21 → should show clean 18/240 without misleading (-3) math
+            self.assertTrue(any("18/240" in lbl for lbl in labels))
+            self.assertFalse(any("(-3)" in lbl for lbl in labels))
 
     async def test_users_list_filter_labels_clean_when_counts_fail(self):
         """When get_user_filter_counts fails, filter buttons show clean labels without (0)."""

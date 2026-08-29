@@ -412,7 +412,7 @@ async def _batch_credit_capacities(
     return capacities
 
 
-async def credit_capacity(
+async def _credit_capacity(
     session: AsyncSession, credit: AccountLedgerEntry
 ) -> Decimal:
     res = await _batch_credit_capacities(session, [credit])
@@ -601,7 +601,7 @@ async def get_payment_refundable_amount(
     )
     if credit is None:
         return ZERO
-    capacity = await credit_capacity(session, credit)
+    capacity = await _credit_capacity(session, credit)
     active_reservations = Decimal(
         await session.scalar(
             select(

@@ -147,9 +147,6 @@ jobs:
           python -m pip install pip-audit
           python -m pip_audit --no-deps -r requirements.lock
 
-      # Dev dependencies (ruff, pip-tools) may have CVEs not exploitable in this
-      # context. Production deps above are audited with hard failure. Soft failure
-      # here is intentional — alerts the developer without blocking CI.
       - name: Audit dev dependencies for known CVEs
         continue-on-error: true
         run: |

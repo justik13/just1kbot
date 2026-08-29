@@ -104,11 +104,14 @@ async def show_server_peers(
             if 0 <= delta_sec <= 180:
                 is_online = True
 
-        status_online = (
-            texts.ADMIN_SERVER_PEER_STATUS_ONLINE
-            if is_online
-            else texts.ADMIN_SERVER_PEER_STATUS_OFFLINE
-        )
+        if p.provisioning_status == "deleting":
+            status_online = texts.ADMIN_SERVER_PEER_STATUS_DELETING
+        else:
+            status_online = (
+                texts.ADMIN_SERVER_PEER_STATUS_ONLINE
+                if is_online
+                else texts.ADMIN_SERVER_PEER_STATUS_OFFLINE
+            )
         item = {
             "type": "bot",
             "profile": p,
@@ -185,7 +188,14 @@ async def show_server_peers(
     peer_buttons: list[tuple[str, str]] = []
     for item in page_items:
         if item["type"] == "bot":
-            if item["is_on_node"] or not api_available:
+            if not api_available:
+                rendered += texts.ADMIN_SERVER_PEER_UNKNOWN_ROW.format(
+                    username=item["username"],
+                    first_name=item["first_name"],
+                    device_name=item["device_name"],
+                    ip=item["ip"],
+                )
+            elif item["is_on_node"]:
                 rendered += texts.ADMIN_SERVER_PEER_BOT_ROW.format(
                     username=item["username"],
                     first_name=item["first_name"],

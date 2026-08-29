@@ -352,7 +352,7 @@ class TestAuditDefectsRemediationAsync(unittest.IsolatedAsyncioTestCase):
         session.flush = AsyncMock()
 
         with patch(
-            "services.referral_bonus.credit_capacity",
+            "services.referral_bonus._credit_capacity",
             AsyncMock(return_value=Decimal(50)),
         ):
             total_reversed = await reverse_referral_bonus_for_topup(

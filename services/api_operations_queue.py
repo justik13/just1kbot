@@ -61,7 +61,7 @@ def classify_create_side_effect_risk(operation: APIOperation) -> str:
     if (operation.status in {"processing", "retry"} or operation.attempts > 0
             or operation.last_error_code in CREATE_SIDE_EFFECT_ERROR_CODES):
         return "may_have_created_peer"
-    # All branches are covered by the conditions above.
+    return "may_have_created_peer"
 
 
 @dataclass(frozen=True)
