@@ -157,7 +157,7 @@ cmd_preflight() {
 
     # 2.1. Проверка отсутствия дублирующихся переменных в .env
     local duplicate_keys
-    duplicate_keys=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "${PROJECT_DIR}/.env" | cut -d'=' -f1 | sort | uniq -d | tr '\n' ' ' || true)
+    duplicate_keys=$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f1 | sort | uniq -d | tr '\n' ' ' || true)
     if [[ -n "${duplicate_keys// }" ]]; then
         error "Обнаружены дублирующиеся переменные в .env: $duplicate_keys"
         has_errors=true
@@ -167,7 +167,7 @@ cmd_preflight() {
     local req_vars=(BOT_TOKEN POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB DB_ENCRYPTION_KEY BACKUP_AGE_RECIPIENT)
     for var_name in "${req_vars[@]}"; do
         local val
-        val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+        val=$(grep -E "^${var_name}=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
         if [[ -z "$val" ]]; then
             error "В .env отсутствует или пуста обязательная переменная: $var_name"
             has_errors=true
@@ -176,7 +176,7 @@ cmd_preflight() {
 
     # 3.1. Проверка идентификаторов администратора (ADMIN_IDS или ADMIN_TELEGRAM_ID)
     local admin_ids
-    admin_ids=$(grep -E "^(ADMIN_IDS|ADMIN_TELEGRAM_ID)=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"[]")
+    admin_ids=$(grep -E "^(ADMIN_IDS|ADMIN_TELEGRAM_ID)=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"[]" || true)
     if [[ -z "$admin_ids" ]]; then
         error "В .env отсутствует обязательная переменная администратора: ADMIN_IDS='[123456789]'"
         has_errors=true
@@ -185,14 +185,14 @@ cmd_preflight() {
     # 4. Проверка устаревших/неподдерживаемых переменных
     local legacy_vars=(AMNEZIA_API_URL AMNEZIA_API_KEY WEBHOOK_URL INCY_HOST INCY_API_KEY AMNEZIA_BRIDGE_HMAC_SECRET)
     for legacy_name in "${legacy_vars[@]}"; do
-        if grep -Eq "^${legacy_name}=" "${PROJECT_DIR}/.env"; then
+        if grep -Eq "^${legacy_name}=" "${PROJECT_DIR}/.env" 2>/dev/null; then
             warn "Обнаружена устаревшая переменная $legacy_name в .env. Она больше не поддерживается проектом."
         fi
     done
 
     # 5. Проверка формата SSL_EMAIL (если задан)
     local ssl_email
-    ssl_email=$(grep -E "^SSL_EMAIL=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+    ssl_email=$(grep -E "^SSL_EMAIL=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
     if [[ -n "$ssl_email" ]] && [[ ! "$ssl_email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
         error "Некорректный email для Let's Encrypt в SSL_EMAIL: '$ssl_email'"
         has_errors=true
@@ -200,7 +200,7 @@ cmd_preflight() {
 
     # 6. Проверка формата DOMAIN (если задан)
     local domain
-    domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" | cut -d'=' -f2- | tr -d " '\"")
+    domain=$(grep -E "^DOMAIN=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || true)
     if [[ -n "$domain" ]] && [[ "$domain" =~ ^https?:// ]]; then
         error "DOMAIN не должен содержать протокол 'http://' или 'https://' (укажите только имя хоста, например: vpn.example.com)"
         has_errors=true
@@ -220,7 +220,7 @@ cmd_preflight() {
 
     # 8. Проверка свободного места на диске (минимум 500 МБ)
     local free_kb
-    free_kb=$(df -k "${PROJECT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || echo "")
+    free_kb=$(df -kP "${PROJECT_DIR}" 2>/dev/null | awk 'NR==2 {print $4}' || echo "")
     if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb < 512000 )); then
         error "Недостаточно свободного места на диске: $(( free_kb / 1024 )) МБ. Требуется минимум 500 МБ для безопасной сборки и создания бэкапов."
         has_errors=true
@@ -303,7 +303,8 @@ cmd_update() {
         echo ""
         read -r -p "Принудительно перезаписать локальные коммиты версией из origin/$current_branch? (y/N): " force_overwrite
         if [[ "$force_overwrite" =~ ^[Yy]$ ]]; then
-            local backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
+            local backup_branch
+            backup_branch="backup-local-ahead-$(date +%Y%m%d_%H%M%S)"
             git branch "$backup_branch"
             log "Локальные коммиты сохранены в резервной ветке: $backup_branch"
             git reset --hard "origin/$current_branch"
@@ -316,7 +317,8 @@ cmd_update() {
         echo ""
         read -r -p "Создать резервную ветку и синхронизировать с origin/$current_branch? (y/N): " confirm_diverge
         if [[ "$confirm_diverge" =~ ^[Yy]$ ]]; then
-            local backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
+            local backup_branch
+            backup_branch="backup-diverged-$(date +%Y%m%d_%H%M%S)"
             git branch "$backup_branch"
             log "Локальная история сохранена в ветке $backup_branch"
             git reset --hard "origin/$current_branch"
@@ -525,20 +527,29 @@ cmd_backup() {
     # Способ 1: Прямой дамп из работающего контейнера db + шифрование age (быстро и надежно)
     if command -v age >/dev/null 2>&1 && [[ -f "${PROJECT_DIR}/.env" ]]; then
         local age_recipient
-        age_recipient=$(grep -E "^BACKUP_AGE_RECIPIENT=" "${PROJECT_DIR}/.env" | cut -d'=' -f2 | tr -d " '\"")
+        age_recipient=$(grep -E "^BACKUP_AGE_RECIPIENT=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
         if [[ -n "$age_recipient" ]]; then
             info "Создание зашифрованного дампа PostgreSQL..."
             local ts
             ts=$(date +%Y%m%d_%H%M%S)
             local backup_file="backups/just1kbot_${ts}.sql.gz.age"
-            local tmp_gz="/tmp/backup_${ts}.sql.gz"
-            local dump_err="/tmp/backup_${ts}.err"
+            local tmp_backup_dir
+            tmp_backup_dir=$(mktemp -d -t just1kbot-backup-XXXXXX)
+            local tmp_gz="${tmp_backup_dir}/backup.sql.gz"
+            local dump_err="${tmp_backup_dir}/backup.err"
 
-            if docker compose exec -T db sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>"$dump_err" | gzip > "$tmp_gz"; then
+            local pg_user pg_db
+            pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+            pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+            pg_user="${pg_user:-just1kbot}"
+            pg_db="${pg_db:-just1kbot_bot}"
+
+            if docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>"$dump_err" | gzip > "$tmp_gz"; then
                 if [[ -s "$tmp_gz" ]] && gzip -t "$tmp_gz" 2>/dev/null; then
                     if age -r "$age_recipient" -o "$backup_file" "$tmp_gz" 2>/dev/null; then
-                        rm -f "$tmp_gz" "$dump_err"
+                        rm -rf "$tmp_backup_dir"
                         log "Бэкап успешно создан: ${BOLD}${backup_file}${NC}"
+                        # shellcheck disable=SC2012
                         ls -lh "$backup_file" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
                         LAST_BACKUP_FILE="$backup_file"
                         rotate_backups 14
@@ -552,17 +563,17 @@ cmd_backup() {
             if [[ -s "$dump_err" ]]; then
                 warn "pg_dump stderr: $(tail -n 3 "$dump_err")"
             fi
-            rm -f "$tmp_gz" "$dump_err"
+            rm -rf "$tmp_backup_dir"
         fi
     fi
 
     # Способ 2: Через отдельный контейнер backup (compose profile tools)
     if docker compose --profile tools run --rm backup; then
         local latest_backup
-        # shellcheck disable=SC2012
-        latest_backup=$(ls -t backups/*.sql.gz.age 2>/dev/null | head -1 || true)
+        latest_backup=$(find backups/ -maxdepth 1 -name "*.sql.gz.age" 2>/dev/null | sort -r | head -1 || echo "")
         if [[ -n "$latest_backup" ]]; then
             log "Бэкап успешно создан: ${BOLD}${latest_backup}${NC}"
+            # shellcheck disable=SC2012
             ls -lh "$latest_backup" | awk '{print "Размер: " $5 ", Создан: " $6 " " $7 " " $8}'
             LAST_BACKUP_FILE="$latest_backup"
             rotate_backups 14
@@ -575,6 +586,7 @@ cmd_backup() {
 }
 
 # --- 5. Безопасное восстановление из бэкапа ---
+# shellcheck disable=SC2120
 cmd_restore() {
     local direct_backup_file="${1:-}"
     echo -e "\n${BOLD}${RED}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
@@ -610,6 +622,7 @@ cmd_restore() {
         local i=1
         for b in "${backups_list[@]}"; do
             local sz
+            # shellcheck disable=SC2012
             sz=$(ls -lh "$b" | awk '{print $5}')
             echo -e "  [${BOLD}$i${NC}] $b ($sz)"
             i=$((i+1))
@@ -670,23 +683,22 @@ cmd_restore() {
     docker compose stop bot
 
     info "4/5. Полная переинициализация базы данных и накат дампа..."
-    # Очищаем целевую БД и создаем заново для предотвращения конфликтов схем/таблиц
-    local pg_user="${POSTGRES_USER:-just1kbot}"
-    local pg_db="${POSTGRES_DB:-just1kbot_bot}"
+    local pg_user pg_db
+    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_user="${pg_user:-just1kbot}"
+    pg_db="${pg_db:-just1kbot_bot}"
 
     docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
     docker compose exec -T db createdb -U "$pg_user" "$pg_db"
 
-    docker cp "$tmp_sql" just1kbot_db:/tmp/restore.sql
-    rm -f "$tmp_sql"
-
-    if ! docker compose exec -T db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -f /tmp/restore.sql'; then
-        docker compose exec -T db rm -f /tmp/restore.sql 2>/dev/null || true
+    if ! docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$tmp_sql"; then
         error "Ошибка при накате SQL дампа в PostgreSQL!"
         return 1
     fi
 
-    docker compose exec -T db rm -f /tmp/restore.sql 2>/dev/null || true
+    rm -rf "$tmp_dir"
+    trap - EXIT INT TERM
 
     info "5/5. Запуск контейнера бота..."
     docker compose start bot
@@ -862,7 +874,7 @@ interactive_menu() {
                 esac
                 ;;
             3)
-                cmd_update
+                cmd_update || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             4)
@@ -870,9 +882,9 @@ interactive_menu() {
                 echo "[2] Восстановить базу данных из бэкапа"
                 read -r -p "Выберите [1-2]: " b_action
                 if [[ "$b_action" == "2" ]]; then
-                    cmd_restore
+                    cmd_restore || true
                 else
-                    cmd_backup
+                    cmd_backup || true
                 fi
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
@@ -883,23 +895,23 @@ interactive_menu() {
                 echo "[4] Запустить проект"
                 read -r -p "Выберите [1-4]: " p_action
                 case "$p_action" in
-                    2) cmd_restart "all" ;;
-                    3) cmd_stop ;;
-                    4) cmd_start ;;
-                    *) cmd_restart "bot" ;;
+                    2) cmd_restart "all" || true ;;
+                    3) cmd_stop || true ;;
+                    4) cmd_start || true ;;
+                    *) cmd_restart "bot" || true ;;
                 esac
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             6)
-                cmd_config
+                cmd_config || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             7)
-                cmd_doctor
+                cmd_doctor || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             8)
-                cmd_clean
+                cmd_clean || true
                 read -r -p "Нажмите Enter для возврата в меню..."
                 ;;
             0|q|exit)
@@ -933,7 +945,7 @@ main() {
                 cmd_backup
                 ;;
             restore)
-                cmd_restore
+                cmd_restore "${2:-}"
                 ;;
             restart)
                 cmd_restart "${2:-bot}"

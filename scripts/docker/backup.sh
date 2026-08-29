@@ -10,8 +10,8 @@ ENCRYPTED_FILE="${BACKUP_FILE}.age"
 
 mkdir -p "$BACKUP_DIR"
 
-# Plaintext dumps are always removed, including on failure/interruption.
-trap 'rm -f "$BACKUP_FILE"' EXIT
+# Plaintext and partial encrypted dumps are always removed on failure/interruption.
+trap 'rm -f "$BACKUP_FILE" "${ENCRYPTED_FILE}.tmp"' EXIT
 
 if [ -z "${BACKUP_AGE_RECIPIENT:-}" ]; then
     echo "ERROR: BACKUP_AGE_RECIPIENT is not set. Backup cannot be encrypted."
@@ -28,9 +28,10 @@ pg_dump -h "$PG_HOST" -U "$PG_USER" -d "$PG_DB" | gzip > "$BACKUP_FILE"
 
 unset PGPASSWORD
 
-echo "Шифрование backup..."
-age -r "$BACKUP_AGE_RECIPIENT" -o "$ENCRYPTED_FILE" "$BACKUP_FILE"
-rm "$BACKUP_FILE"
+echo "Шифрование backup (atomic write)..."
+age -r "$BACKUP_AGE_RECIPIENT" -o "${ENCRYPTED_FILE}.tmp" "$BACKUP_FILE"
+mv -f "${ENCRYPTED_FILE}.tmp" "$ENCRYPTED_FILE"
+rm -f "$BACKUP_FILE"
 
 # Optional independent remote storage. BACKUP_REMOTE_URI should be a HTTPS
 # upload endpoint or a presigned PUT URL. If it contains {filename}, it is
@@ -51,5 +52,5 @@ echo "Backup создан: ${ENCRYPTED_FILE}"
 
 # Keep a short local recovery window; independent remote retention is managed
 # by the remote storage policy.
-find "$BACKUP_DIR" -type f -name "*.sql.gz.age" -mtime +7 -delete
+find "$BACKUP_DIR" -type f \( -name "just1kbot_*.sql.gz*" -o -name "*.tmp" \) -mtime +7 -delete
 echo "Старые локальные бекапы удалены."

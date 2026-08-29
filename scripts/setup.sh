@@ -46,6 +46,16 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+# --- Очистка временных ресурсов при сбое ---
+cleanup_on_exit() {
+    local exit_code=$?
+    if (( exit_code != 0 )); then
+        warn "Скрипт установки завершился с ошибкой (код $exit_code)."
+        rm -f /tmp/get-docker.sh 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT INT TERM
+
 # --- Проверка root прав ---
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -150,6 +160,14 @@ install_dependencies() {
         }
     fi
     log "Docker Compose готов к работе: $(docker compose version)"
+
+    # Настройка брандмауэра UFW (если активен)
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        info "Брандмауэр UFW активен. Открытие портов 80 и 443 для веб-сервера Caddy и webhooks..."
+        ufw allow 80/tcp >/dev/null 2>&1 || true
+        ufw allow 443/tcp >/dev/null 2>&1 || true
+        log "Порты 80/tcp и 443/tcp разрешены в UFW."
+    fi
 
     # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do

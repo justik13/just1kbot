@@ -163,7 +163,7 @@ do_uninstall() {
     local domain_name
     domain_name=$(basename "$conf_file" | sed 's/just1kbot-amnezia-//')
 
-    read -p "Удалить конфигурацию для $domain_name? (yes/N): " confirm
+    read -r -p "Удалить конфигурацию для $domain_name? (yes/N): " confirm
     if [[ "$confirm" != "yes" ]]; then
         echo "Отменено."
         exit 0
@@ -171,12 +171,14 @@ do_uninstall() {
 
     log "Удаление конфигурации для $domain_name..."
 
-    # Удаляем rate limit
-    rm -f /etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf
-
     # Удаляем symlink и конфиг
     rm -f "/etc/nginx/sites-enabled/just1kbot-amnezia-${domain_name}"
     rm -f "$conf_file"
+
+    # Удаляем rate limit только если не осталось других активных сайтов just1kbot-amnezia
+    if ! ls /etc/nginx/sites-available/just1kbot-amnezia-* >/dev/null 2>&1; then
+        rm -f /etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf
+    fi
 
     # Удаляем сертификат
     certbot delete --cert-name "$domain_name" --non-interactive 2>/dev/null || true
@@ -341,6 +343,7 @@ setup_nginx() {
 
     # Rate limiting zone (в отдельный файл)
     local rate_limit_conf="/etc/nginx/conf.d/just1kbot_amnezia_api_limit.conf"
+    # shellcheck disable=SC2016
     echo 'limit_req_zone $binary_remote_addr zone=just1kbot_amnezia_api:10m rate=30r/s;' > "$rate_limit_conf"
 
     local redirect_url="https://\$host:${PUBLIC_PORT}\$request_uri"
@@ -390,6 +393,7 @@ setup_ssl() {
 
     # Используем certonly --webroot чтобы certbot не лез изменять наши nginx конфиги
     if certbot certonly --webroot -w /var/www/certbot \
+        --deploy-hook "systemctl reload nginx" \
         --non-interactive \
         --agree-tos \
         --email "$EMAIL" \
@@ -545,7 +549,6 @@ main() {
     # Обработка --uninstall
     if [[ "$UNINSTALL" == true ]]; then
         do_uninstall
-        exit 0
     fi
 
     echo ""
