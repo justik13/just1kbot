@@ -31,7 +31,7 @@ IFS=$'\n\t'
 # --- Константы ---
 AMNEZIA_PORT=4001
 DEFAULT_PUBLIC_PORT=8443
-LOG_FILE="/var/log/just1kbot-amnezia-setup.log"
+LOG_FILE="${AMNEZIA_SETUP_LOG_FILE:-/var/log/just1kbot-amnezia-setup.log}"
 
 # --- Цвета ---
 RED='\033[0;31m'
@@ -41,28 +41,28 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 # --- Логирование ---
-mkdir -p "$(dirname "$LOG_FILE")"
-touch "$LOG_FILE"
+mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
+touch "$LOG_FILE" 2>/dev/null || true
 
 log() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${GREEN}[$ts]${NC} $1"
-    echo "[$ts] $1" >> "$LOG_FILE"
+    echo "[$ts] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 warn() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${YELLOW}[$ts] ВНИМАНИЕ:${NC} $1"
-    echo "[$ts] WARNING: $1" >> "$LOG_FILE"
+    echo "[$ts] WARNING: $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 error() {
     local ts
     ts=$(date '+%Y-%m-%d %H:%M:%S')
     echo -e "${RED}[$ts] ОШИБКА:${NC} $1" >&2
-    echo "[$ts] ERROR: $1" >> "$LOG_FILE"
+    echo "[$ts] ERROR: $1" >> "$LOG_FILE" 2>/dev/null || true
     exit 1
 }
 
@@ -71,10 +71,12 @@ info() {
 }
 
 # --- Проверка root ---
-if [[ $EUID -ne 0 ]]; then
-    echo -e "${RED}Ошибка: запустите с sudo.${NC}"
-    exit 1
-fi
+check_root() {
+    if [[ $EUID -ne 0 ]] && [[ "${SKIP_ROOT_CHECK:-false}" != "true" ]]; then
+        echo -e "${RED}Ошибка: запустите с sudo.${NC}"
+        exit 1
+    fi
+}
 
 # --- Аргументы ---
 DOMAIN=""
@@ -549,6 +551,7 @@ print_result() {
 # --- Main ---
 main() {
     parse_args "$@"
+    check_root
 
     # Обработка --uninstall
     if [[ "$UNINSTALL" == true ]]; then

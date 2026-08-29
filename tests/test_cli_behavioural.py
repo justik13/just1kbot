@@ -380,10 +380,14 @@ wait_for_apt_locks 1
     def test_setup_amnezia_uninstall_exits_without_running_setup(self):
         """setup-amnezia-api.sh --uninstall terminates immediately and never continues into setup."""
         amnezia_script = Path(__file__).resolve().parent.parent / "setup-amnezia-api.sh"
+        test_env = os.environ.copy()
+        test_env["SKIP_ROOT_CHECK"] = "true"
+        test_env["AMNEZIA_SETUP_LOG_FILE"] = (self.root / "amnezia.log").as_posix()
         proc = subprocess.run(
             ["bash", str(amnezia_script), "--uninstall"],
             capture_output=True,
             text=True,
+            env=test_env,
             check=False,
         )
         self.assertEqual(proc.returncode, 0)
