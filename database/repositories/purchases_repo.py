@@ -64,15 +64,12 @@ def get_audit_op_info(action: str | AdminAuditAction) -> tuple[str, str]:
         AdminAuditAction.REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
         AdminAuditAction.ADMIN_SUB_REDUCE.value: ("reduce", AdminAuditAction.ADMIN_SUB_REDUCE.value),
     }
-    op_type, canonical_action = mapping.get(
-        action_val, ("grant", AdminAuditAction.ADMIN_SUB_GRANT.value)
-    )
-    title = (
-        texts.AUDIT_ACTIONS.get(action_val)
-        or texts.AUDIT_ACTIONS.get(canonical_action)
-        or texts.AUDIT_ACTIONS.get(AdminAuditAction.ADMIN_SUB_GRANT.value)
-        or action_val
-    )
+    if action_val in mapping:
+        op_type, canonical_action = mapping[action_val]
+        title = texts.AUDIT_ACTIONS.get(action_val) or texts.AUDIT_ACTIONS.get(canonical_action) or action_val
+    else:
+        op_type = "grant"
+        title = texts.AUDIT_ACTIONS.get(action_val) or action_val
     return op_type, title
 
 

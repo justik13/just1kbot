@@ -55,7 +55,7 @@ class AuditSyncFixesTests(unittest.IsolatedAsyncioTestCase):
         with open("scripts/setup.sh", "r", encoding="utf-8") as f:
             content = f.read()
         self.assertIn("YOOKASSA_RETURN_URL='https://t.me/{bot_username}'", content)
-        self.assertIn("TRUSTED_PROXIES='127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'", content)
+        self.assertIn("TRUSTED_PROXIES='127.0.0.1,::1,172.16.0.0/12'", content)
 
     def test_cli_help_contains_config(self):
         with open("scripts/cli.sh", "r", encoding="utf-8") as f:
