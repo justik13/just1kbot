@@ -623,7 +623,7 @@ cmd_install_xray_origin() {
     [[ -n "$exit_nl_host" ]] || error "Хост Exit NL обязателен."
     [[ -n "$exit_nl_uuid" ]] || error "UUID Exit NL обязателен."
 
-    # 1. Установка Xray 26.6.27
+    # 1. Установка Xray (зафиксированная версия XRAY_VERSION_PINNED)
     install_xray_core "$XRAY_VERSION_PINNED"
     install_geodata
     setup_xray_service

@@ -65,9 +65,6 @@ HEALTH_UPDATE_FIELDS = {
     "consecutive_successes",
     "recovery_notice_sent",
     "last_alert_sent_state",
-    "xray_instance_epoch",
-    "xray_instance_boot_id",
-    "xray_instance_starttime",
 }
 
 

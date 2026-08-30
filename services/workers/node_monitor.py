@@ -27,6 +27,7 @@ from database.repositories.servers_repo import (
     get_server_by_id,
     update_server,
     update_server_health_snapshot,
+    update_server_xray_epoch_cas,
 )
 from services.amnezia_client import AmneziaClient
 from utils.datetime_helpers import now_utc
@@ -380,11 +381,6 @@ async def check_node_resources_and_alerts(bot: Bot):
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
-            if is_xray_node and xray_epoch:
-                update_kwargs["xray_instance_epoch"] = xray_epoch
-                if xray_data:
-                    update_kwargs["xray_instance_boot_id"] = xray_data.get("boot_id")
-                    update_kwargs["xray_instance_starttime"] = xray_data.get("starttime")
 
         if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED) and st.next_check_at:
             rem = st.next_check_at - now_m
@@ -401,6 +397,24 @@ async def check_node_resources_and_alerts(bot: Bot):
             update_kwargs["disabled_at"] = now_utc()
 
         async with session_scope() as session:
+            # Monotonic CAS update for Xray generation
+            if is_healthy and is_xray_node and xray_epoch:
+                boot_id = xray_data.get("boot_id") if xray_data else None
+                starttime = xray_data.get("starttime") if xray_data else None
+                cas_ok, updated_srv = await update_server_xray_epoch_cas(
+                    session,
+                    server.id,
+                    expected_boot_id=server.xray_instance_boot_id,
+                    expected_starttime=server.xray_instance_starttime,
+                    new_epoch=xray_epoch,
+                    new_boot_id=boot_id,
+                    new_starttime=starttime,
+                )
+                if cas_ok and updated_srv:
+                    server.xray_instance_epoch = updated_srv.xray_instance_epoch
+                    server.xray_instance_boot_id = updated_srv.xray_instance_boot_id
+                    server.xray_instance_starttime = updated_srv.xray_instance_starttime
+
             db_server, applied = await update_server_health_snapshot(
                 session,
                 server.id,
