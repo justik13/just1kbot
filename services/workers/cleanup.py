@@ -44,11 +44,14 @@ PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
 OLD_RECORDS_INTERVAL = 86400.0
-# Auto-expire throughput: each daily pass drains the pending-expiry backlog in
-# bounded batches (≈200 verifications max) instead of capping at 20/day.
+# Auto-expire throughput: each daily pass drains the pending-expiry backlog
+# within a wall-clock budget (and at most MAX_BATCHES batches ≈ 400
+# verifications), so a large backlog shrinks every day without one unbounded
+# or stalled run.
 EXPIRE_VERIFY_BATCH_SIZE = 20
-EXPIRE_MAX_BATCHES_PER_PASS = 10
+EXPIRE_MAX_BATCHES_PER_PASS = 20
 EXPIRE_VERIFY_PARALLELISM = 5
+EXPIRE_TIME_BUDGET_SECONDS = 120.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
@@ -640,7 +643,14 @@ async def _cleanup_old_records():
             result = await YooKassaService.get_payment_result(external_id)
         return payment_id, result
 
+    expire_deadline = time.monotonic() + EXPIRE_TIME_BUDGET_SECONDS
     for _batch in range(EXPIRE_MAX_BATCHES_PER_PASS):
+        if time.monotonic() >= expire_deadline:
+            logger.warning(
+                "Auto-expire time budget (%.0fs) spent; remaining backlog continues next pass",
+                EXPIRE_TIME_BUDGET_SECONDS,
+            )
+            break
         async with session_scope() as session:
             pending_rows = (
                 await session.execute(

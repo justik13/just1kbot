@@ -11,13 +11,14 @@ Operational contract:
 
 Safety:
     Contract: rotation proceeds ONLY when MaintenanceMode is explicitly
-    enabled, or with an explicit `--force` bypass. Stopping the bot container
-    alone does NOT satisfy the guard — the check reads the MaintenanceMode
-    row. Typical flow: stop bot → enable maintenance → rotate → verify →
-    disable maintenance → start bot. Interactive confirmation is required
-    unless `--yes` is passed. The maintenance state is sampled once at
-    startup; the operator must keep the environment frozen (bot stopped,
-    maintenance enabled) until the script exits.
+    enabled, or with an explicit `--force` EMERGENCY override (not a normal
+    mode - it permits live writers during rotation). Stopping the bot
+    container alone does NOT satisfy the guard — the check reads the
+    MaintenanceMode row. Typical flow: stop bot → enable maintenance →
+    rotate → verify → disable maintenance → start bot. Interactive
+    confirmation is required unless `--yes` is passed. The maintenance state
+    is sampled once at startup; the operator must keep the environment
+    frozen (bot stopped, maintenance enabled) until the script exits.
 """
 
 import asyncio
@@ -56,10 +57,14 @@ async def reencrypt_all(*, force: bool = False) -> None:
     if maintenance_enabled is True:
         pass
     elif force:
+        # SECURITY-SENSITIVE OPERATOR OVERRIDE: this allows live writers
+        # during rotation; rows written under the old key become unreadable
+        # once it is removed. Emergency use only - not a normal mode.
         logger.warning(
-            "Maintenance mode state is %r; proceeding because --force was "
-            "given. Rows written by a running bot during rotation may keep "
-            "the old key and become unreadable after the key is removed.",
+            "REENCRYPT --force OVERRIDE: maintenance mode state is %r; "
+            "rotation is proceeding against the operational guard. Rows "
+            "written by a running bot during rotation may keep the old key "
+            "and become unreadable after the key is removed.",
             maintenance_enabled,
         )
     else:

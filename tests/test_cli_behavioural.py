@@ -492,5 +492,23 @@ main "$@"
         self.assertFalse(rate_limit_conf.exists())
 
 
+class SetupScriptErrorSemanticsTests(unittest.TestCase):
+    """Regression guard: `error()` in scripts/setup.sh must abort the whole
+    installer (exit 1). This is what makes the sysctl-overcommit failure path
+    fail-closed instead of a false "настроено" success."""
+
+    def test_error_function_exits_installer(self):
+        setup_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
+        proc = subprocess.run(
+            ["bash", "-c", f". '{setup_script}'; error 'boom-marker'; echo NOT_REACHED"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertNotIn("NOT_REACHED", proc.stdout)
+        self.assertIn("boom-marker", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

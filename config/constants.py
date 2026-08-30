@@ -68,8 +68,12 @@ NOTIFICATION_INTERVAL = 1800
 TRAFFIC_SYNC_INTERVAL = 900
 SELF_HEALING_MAX_PER_CYCLE = 50
 
-# YooKassa payment lifetime: the provider auto-cancels unpaid payments after
-# this window so the local auto-expire worker (48h) and provider truth agree.
+# Local payment-expiry window: the cleanup worker marks a payment canceled
+# only after a provider GET still reports pending (provider-verified LOCAL
+# cancellation - NOT a provider-side auto-cancel). YooKassa does not offer a
+# documented way to expire a redirect payment in `pending`; a late provider
+# success after local expiry is the expected manual_review reconciliation
+# path, never a silent credit.
 PAYMENT_EXPIRATION_HOURS = 48
 
 # API Client timings and concurrency
