@@ -51,6 +51,8 @@ from bot.texts.user.support import (
 from bot.texts.user.white_internet import (
     BTN_WL_BUY_ACCESS,
     BTN_WL_CONNECT_CLIENT,
+    BTN_WL_COPY_LINK,
+    BTN_WL_INSTRUCTIONS,
     BTN_WL_RENEW,
     BTN_WL_SHOW_LINK,
     BTN_WL_TOPUP,
@@ -137,6 +139,8 @@ __all__ = [
     "WELCOME_TEXT",
     "BTN_WL_BUY_ACCESS",
     "BTN_WL_CONNECT_CLIENT",
+    "BTN_WL_COPY_LINK",
+    "BTN_WL_INSTRUCTIONS",
     "BTN_WL_RENEW",
     "BTN_WL_SHOW_LINK",
     "BTN_WL_TOPUP",

@@ -8,7 +8,7 @@ import os
 
 from aiogram import F, Router
 
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, CopyTextButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,8 +88,12 @@ def get_white_internet_overview_keyboard(
                 )
             except Exception as exc:
                 logger.error("Failed to encrypt incy deep link: %s", exc)
-            builder.button(text=texts.BTN_WL_SHOW_LINK, callback_data="wl_show_link")
 
+            builder.button(
+                text=texts.BTN_WL_COPY_LINK,
+                copy_text=CopyTextButton(text=sub_url),
+            )
+            builder.button(text=texts.BTN_WL_INSTRUCTIONS, callback_data="wl_show_link")
 
         # EXHAUSTED may buy a top-up to reactivate; ACTIVE may top up too.
         if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
@@ -98,10 +102,13 @@ def get_white_internet_overview_keyboard(
                 text=texts.BTN_WL_RENEW.format(price=int(WHITE_INTERNET_BASE_PRICE_RUB)),
                 callback_data="wl_renew_confirm",
             )
-        builder.adjust(1, 1, 2, 1)
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
 
-    builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
-    return builder.as_markup()
+        if sub.status == WhiteInternetStatus.ACTIVE and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE and bot_domain:
+            builder.adjust(1, 2, 2, 1)
+        else:
+            builder.adjust(2, 1)
+        return builder.as_markup()
 
 
 

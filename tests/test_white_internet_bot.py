@@ -156,4 +156,18 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(decrypted["url"], f"https://{domain}/sub/wl/{sub.token}")
         self.assertEqual(decrypted["name"], "Just1k Белый Интернет")
 
+        # Find the copy text button
+        copy_button = None
+        instruction_button = None
+        for row in kb.inline_keyboard:
+            for btn in row:
+                if btn.copy_text and btn.copy_text.text == f"https://{domain}/sub/wl/{sub.token}":
+                    copy_button = btn
+                if btn.callback_data == "wl_show_link":
+                    instruction_button = btn
+
+        self.assertIsNotNone(copy_button, "Copy link button with CopyTextButton not found")
+        self.assertEqual(copy_button.copy_text.text, f"https://{domain}/sub/wl/{sub.token}")
+        self.assertIsNotNone(instruction_button, "Instruction button with wl_show_link callback not found")
+
 
