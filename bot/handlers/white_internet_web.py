@@ -98,9 +98,10 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "60"
             return web.Response(
                 status=503,
-                text="Service Unavailable: CDN gateway is not configured",
+                text=texts.WL_WEB_CDN_UNCONFIGURED,
                 headers=headers,
             )
+
 
         vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
         payload = "\n".join(vless_links)
