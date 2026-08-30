@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import ssl
 from typing import Any
 
 import aiohttp
@@ -18,9 +20,10 @@ class XrayNodeClientError(RuntimeError):
 class XrayNodeClient:
     """Client for node-level Xray API management (port 8444/tcp)."""
 
-    def __init__(self, timeout: float = 10.0, max_retries: int = 2):
+    def __init__(self, timeout: float = 10.0, max_retries: int = 2, ca_file: str | None = None):
         self.timeout = timeout
         self.max_retries = max_retries
+        self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
 
     def _get_headers(self, api_key: str) -> dict[str, str]:
         return {
@@ -29,20 +32,21 @@ class XrayNodeClient:
             "Content-Type": "application/json",
         }
 
+    def _ssl_context(self) -> ssl.SSLContext:
+        """Create a verified TLS context; custom CA is supported for node certificates."""
+        return ssl.create_default_context(cafile=self.ca_file)
+
     async def check_health(
         self, api_url: str, api_key: str
     ) -> tuple[bool, str | None, dict[str, Any] | None]:
-        """
-        Check health and retrieve the running xray_instance_epoch.
-        Returns: (is_healthy, node_epoch, raw_response)
-        """
         url = f"{api_url.rstrip('/')}/v1/health"
         headers = self._get_headers(api_key)
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+        ssl_context = self._ssl_context()
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.get(url, headers=headers, ssl=False) as resp:
+                async with session.get(url, headers=headers, ssl=ssl_context) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         is_ok = data.get("status") == "ok" and data.get("xray_running", False)
@@ -58,10 +62,7 @@ class XrayNodeClient:
     async def sync_client(
         self, api_url: str, api_key: str, client_uuid: str, is_active: bool
     ) -> tuple[bool, str | None]:
-        """
-        Idempotent synchronization of a client across inbounds.
-        Returns: (success, error_message_if_any)
-        """
+        """Idempotently synchronize a client across both Origin inbounds."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
         headers = self._get_headers(api_key)
         payload = {
@@ -69,10 +70,11 @@ class XrayNodeClient:
             "desired_state": "active" if is_active else "disabled",
         }
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+        ssl_context = self._ssl_context()
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.post(url, headers=headers, json=payload, ssl=False) as resp:
+                async with session.post(url, headers=headers, json=payload, ssl=ssl_context) as resp:
                     if resp.status in (200, 201):
                         return True, None
                     text = await resp.text()
@@ -91,10 +93,11 @@ class XrayNodeClient:
         url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
         headers = self._get_headers(api_key)
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+        ssl_context = self._ssl_context()
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.delete(url, headers=headers, ssl=False) as resp:
+                async with session.delete(url, headers=headers, ssl=ssl_context) as resp:
                     if resp.status in (200, 204):
                         return True, None
                     text = await resp.text()
@@ -109,18 +112,15 @@ class XrayNodeClient:
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
     ) -> tuple[str | None, dict[str, dict[str, int]] | None]:
-        """
-        Fetch normalized traffic snapshot across inbounds.
-        Returns: (node_epoch, users_traffic_dict)
-        where users_traffic_dict = { uuid: {"uplink": int, "downlink": int} }
-        """
+        """Fetch normalized traffic snapshot across all configured inbounds."""
         url = f"{api_url.rstrip('/')}/v1/traffic/snapshot"
         headers = self._get_headers(api_key)
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+        ssl_context = self._ssl_context()
 
         try:
             async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.get(url, headers=headers, ssl=False) as resp:
+                async with session.get(url, headers=headers, ssl=ssl_context) as resp:
                     if resp.status == 200:
                         data = await resp.json()
                         node_epoch = data.get("node_epoch")
