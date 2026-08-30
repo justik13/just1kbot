@@ -68,6 +68,10 @@ NOTIFICATION_INTERVAL = 1800
 TRAFFIC_SYNC_INTERVAL = 900
 SELF_HEALING_MAX_PER_CYCLE = 50
 
+# YooKassa payment lifetime: the provider auto-cancels unpaid payments after
+# this window so the local auto-expire worker (48h) and provider truth agree.
+PAYMENT_EXPIRATION_HOURS = 48
+
 # API Client timings and concurrency
 API_CONCURRENCY_LIMIT = 20
 API_RETRY_COUNT = 2
@@ -104,6 +108,7 @@ __all__ = [
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
     "PaidValueEntryType",
+    "PAYMENT_EXPIRATION_HOURS",
     "PaymentCheckoutStatus",
     "PaymentDisputeStatus",
     "PaymentFulfillmentStatus",

@@ -34,6 +34,27 @@ BATCH_SIZE = 100
 async def reencrypt_all() -> None:
     logger.info("Starting database re-encryption with primary key...")
 
+    # Best-effort safety net: warn when maintenance mode is off. Non-fatal so
+    # the script stays usable in emergency scenarios.
+    try:
+        from database.models import MaintenanceMode
+
+        async with session_scope() as session:
+            maintenance_enabled = await session.scalar(
+                select(MaintenanceMode.is_enabled).where(MaintenanceMode.id == 1)
+            )
+            if not maintenance_enabled:
+                logger.warning(
+                    "Maintenance mode is OFF. Stop the bot container "
+                    "(docker compose stop bot) before rotating keys, otherwise "
+                    "rows written during rotation may keep the old key."
+                )
+    except Exception as exc:
+        logger.warning(
+            "Could not check maintenance mode (%s); proceeding without it.",
+            type(exc).__name__,
+        )
+
     total_servers = 0
     total_profiles = 0
 
@@ -171,6 +192,24 @@ async def reencrypt_all() -> None:
 
 
 def main():
+    # Operational contract: rotation must run with the bot stopped (or in
+    # maintenance mode), otherwise the still-running process keeps writing
+    # ciphertext under the old primary key and rows diverge between keys.
+    if "--yes" not in sys.argv[1:]:
+        print(__doc__ or "")
+        print(
+            "Убедитесь, что контейнер бота остановлен или включён режим техработ "
+            "(docker compose stop bot). Продолжить? [y/N]: ",
+            end="",
+            flush=True,
+        )
+        try:
+            answer = input().strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in {"y", "yes"}:
+            logger.info("Re-encryption aborted by operator.")
+            sys.exit(1)
     try:
         asyncio.run(reencrypt_all())
     except Exception as exc:

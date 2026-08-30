@@ -115,6 +115,11 @@ def get_trusted_client_ip(request: web.Request) -> str:
     When requests pass through trusted internal ingress (Caddy/Docker/loopback),
     extracts the client IP from X-Real-IP or X-Forwarded-For.
     Direct connections from arbitrary external peers use request.remote directly.
+
+    X-Forwarded-For handling is rightmost-untrusted: entries are walked from the
+    right and trusted proxy hops are skipped, so a client-supplied first entry
+    cannot spoof the resolved address. X-Real-IP is only honoured because the
+    reverse proxy overwrites it (Caddyfile: header_up X-Real-IP {remote_host}).
     """
     peer_ip = request.remote or "127.0.0.1"
     trusted_proxies = None
@@ -127,7 +132,7 @@ def get_trusted_client_ip(request: web.Request) -> str:
             trusted_proxies = None
 
     if _is_trusted_proxy_peer(peer_ip, trusted_proxies):
-        # 1. Prefer X-Real-IP set by Caddy
+        # 1. Prefer X-Real-IP set (overwritten) by the trusted reverse proxy
         real_ip = request.headers.get("X-Real-IP")
         if real_ip:
             candidate = real_ip.strip()

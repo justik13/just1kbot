@@ -698,12 +698,19 @@ cmd_restore() {
             return 1
         fi
     fi
-
     # Изолированная временная директория с гарантированной очисткой
     local tmp_dir
     tmp_dir=$(mktemp -d -t just1kbot-restore-XXXXXX)
     local tmp_gz="${tmp_dir}/dump.sql.gz"
     local tmp_sql="${tmp_dir}/dump.sql"
+
+    # pg_user/pg_db were previously resolved as `local` inside cmd_backup and
+    # therefore undefined here (crash under `set -u`). Resolve them locally.
+    local pg_user pg_db
+    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_user="${pg_user:-just1kbot}"
+    pg_db="${pg_db:-just1kbot_bot}"
 
     # Гарантируем запуск бота и удаление временных файлов при любых ошибках
     # shellcheck disable=SC2064
@@ -722,15 +729,15 @@ cmd_restore() {
     info "3/5. Остановка бота перед восстановлением..."
     docker compose stop bot
 
+    # Страховочный дамп текущего состояния БД сохраняется в ./backups/ (НЕ во
+    # временной директории): он должен пережить завершение restore, чтобы к
+    # нему можно было вернуться, если выбранный бэкап оказался неудачным.
     info "3.1/5. Создание предварительного страховочного дампа текущей БД..."
-    local pg_user pg_db
-    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_user="${pg_user:-just1kbot}"
-    pg_db="${pg_db:-just1kbot_bot}"
-
-    local pre_restore_backup_file="${tmp_dir}/pre_restore_safety.sql"
-    docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" > "$pre_restore_backup_file" 2>/dev/null || true
+    local restore_ts
+    restore_ts=$(date +%Y%m%d_%H%M%S)
+    local pre_restore_backup_file="${PROJECT_DIR}/backups/pre_restore_${restore_ts}.sql.gz"
+    mkdir -p "${PROJECT_DIR}/backups"
+    docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>/dev/null | gzip > "$pre_restore_backup_file" || true
 
     info "4/5. Полная переинициализация базы данных и накат дампа..."
     docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
@@ -742,14 +749,25 @@ cmd_restore() {
             warn "Попытка отката к состоянию базы данных до начала операции восстановления..."
             docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
             docker compose exec -T db createdb -U "$pg_user" "$pg_db"
-            docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$pre_restore_backup_file" >/dev/null 2>&1 || true
-            warn "Исходное состояние базы данных возвращено."
+            if ! gunzip -c "$pre_restore_backup_file" | docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+                warn "Автоматический откат не удался. Страховочный дамп сохранён: $pre_restore_backup_file — восстановите его вручную."
+            else
+                warn "Исходное состояние базы данных возвращено."
+            fi
         fi
         return 1
     fi
 
     rm -rf "$tmp_dir"
     trap - EXIT INT TERM
+
+    # Страховочный дамп сохранён в ./backups/ и переживает restore; храним
+    # ограниченное окно последних дампов, чтобы каталог не рос бесконечно.
+    find "${PROJECT_DIR}/backups" -name "pre_restore_*.sql.gz" -mtime +14 -delete 2>/dev/null || true
+    if [[ -s "$pre_restore_backup_file" ]]; then
+        chmod 600 "$pre_restore_backup_file" 2>/dev/null || true
+        log "Страховочный дамп состояния до восстановления сохранён: ${BOLD}${pre_restore_backup_file}${NC}"
+    fi
 
     info "5/5. Запуск контейнера бота..."
     docker compose start bot

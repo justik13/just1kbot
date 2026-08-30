@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import timedelta
 
 from aiogram import Bot
@@ -26,6 +27,14 @@ from utils.datetime_helpers import now_utc
 logger = logging.getLogger("BackgroundWorker")
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 PAYMENTS_START_DELAY = 60.0
+
+AUTO_FULFILL_MAX_ATTEMPTS = 5
+_AUTO_FULFILL_PERMANENT_CODES = {
+    "quote_expired",
+    "quote_not_found",
+    "quote_not_active",
+    "user_not_found",
+}
 
 
 def _needs_attention():
@@ -68,10 +77,19 @@ def _needs_recovery():
         text("NOT (COALESCE(payments.topup_context, '{}'::jsonb) @> '{\"referral_bonus_processed\": true}'::jsonb)"),
     )
 
+    needs_auto_fulfill_retry = and_(
+        text("payments.provider_status = 'succeeded'"),
+        text("payments.provider_confirmed_at IS NOT NULL"),
+        text("payments.fulfillment_status = 'succeeded'"),
+        text("payments.topup_context ? 'auto_fulfill_action'"),
+        text("payments.topup_context->>'auto_fulfill_status' = 'failed'"),
+    )
+
     return or_(
         text("payments.external_id IS NOT NULL AND payments.provider_status IN ('creating', 'pending', 'waiting_for_capture', 'unknown')"),
         text("payments.provider_status = 'succeeded' AND payments.provider_confirmed_at IS NOT NULL AND payments.fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"),
         needs_bonus_retry,
+        needs_auto_fulfill_retry,
     )
 
 
@@ -207,8 +225,106 @@ async def _recover_stale_topups(bot: Bot | None = None):
                                 "Referral bonus retry failed for topup payment %s",
                                 payment.id,
                             )
+
+                    # Auto-fulfillment retry lane: a paid purchase/renew/tariff change
+                    # whose settlement savepoint failed (transient error, or the
+                    # provider webhook arrived after the quote's 15-minute lifetime).
+                    # Without this lane the payment stays "succeeded" forever while
+                    # the subscription is never granted.
+                    if (
+                        payment.provider_status == "succeeded"
+                        and payment.provider_confirmed_at is not None
+                        and payment.fulfillment_status == "succeeded"
+                        and isinstance(payment.topup_context, dict)
+                        and payment.topup_context.get("auto_fulfill_action")
+                        and payment.topup_context.get("auto_fulfill_status") == "failed"
+                    ):
+                        await _retry_auto_fulfillment(session, payment)
             except Exception:
                 logger.exception("Failed to recover stale topup payment %s", pid)
+
+
+async def _retry_auto_fulfillment(session, payment: Payment) -> None:
+    """Retry a failed auto-fulfillment inside a savepoint with bounded attempts."""
+    from services.account_purchase import (
+        AccountPurchaseError,
+        settle_account_purchase,
+    )
+    from services.account_tariff_change import (
+        AccountTariffChangeError,
+        settle_account_tariff_change,
+    )
+
+    ctx = dict(payment.topup_context or {})
+    action = ctx.get("auto_fulfill_action")
+    quote_raw = ctx.get("quote_public_id")
+    attempts = int(ctx.get("auto_fulfill_attempts") or 0) + 1
+
+    def _mark(status: str, error=None) -> None:
+        current = dict(payment.topup_context or {})
+        update = {
+            **current,
+            "auto_fulfill_status": status,
+            "auto_fulfill_attempts": attempts,
+        }
+        if error is not None:
+            update["auto_fulfill_error"] = str(error)[:500]
+        payment.topup_context = update
+
+    if not quote_raw:
+        _mark("dead", "missing_quote_public_id")
+        logger.error(
+            "Auto-fulfillment dead for payment %s: missing quote_public_id",
+            payment.id,
+        )
+        return
+    try:
+        quote_uuid = uuid.UUID(str(quote_raw))
+        async with session.begin_nested():
+            if action == "tariff_change":
+                await settle_account_tariff_change(
+                    session,
+                    user_id=payment.user_id,
+                    quote_public_id=quote_uuid,
+                )
+            else:
+                await settle_account_purchase(
+                    session,
+                    user_id=payment.user_id,
+                    quote_public_id=quote_uuid,
+                )
+        _mark("succeeded")
+        logger.info(
+            "Auto-fulfillment retry succeeded for payment %s (action=%s)",
+            payment.id,
+            action,
+        )
+    except (AccountPurchaseError, AccountTariffChangeError) as exc:
+        code = getattr(exc, "code", "") or str(exc)
+        if code in _AUTO_FULFILL_PERMANENT_CODES or attempts >= AUTO_FULFILL_MAX_ATTEMPTS:
+            _mark("dead", code)
+            logger.error(
+                "Auto-fulfillment retry dead for payment %s: %s",
+                payment.id,
+                code,
+            )
+        else:
+            _mark("failed", code)
+    except Exception as exc:
+        if attempts >= AUTO_FULFILL_MAX_ATTEMPTS:
+            _mark("dead", type(exc).__name__)
+            logger.exception(
+                "Auto-fulfillment retry dead for payment %s", payment.id
+            )
+        else:
+            _mark("failed", type(exc).__name__)
+            logger.warning(
+                "Auto-fulfillment retry failed for payment %s (attempt %s/%s): %s",
+                payment.id,
+                attempts,
+                AUTO_FULFILL_MAX_ATTEMPTS,
+                type(exc).__name__,
+            )
 
 
 async def _alert_new_stale_payments(bot: Bot, settings):

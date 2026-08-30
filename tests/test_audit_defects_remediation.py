@@ -75,14 +75,25 @@ class TestAuditDefectsRemediationSync(unittest.TestCase):
         self.assertIn("admin_servers", callbacks)
 
     def test_get_real_ip_forwarded_for(self):
-        # Loopback remote with trusted proxy chain -> resolves rightmost untrusted client IP
+        # Loopback remote with trusted proxy chain -> resolves rightmost
+        # untrusted client IP; the client-controllable first entry can never
+        # win, so a spoofed YooKassa allowlist address is ignored.
         request_mock = MagicMock(spec=web.Request)
         request_mock.remote = "127.0.0.1"
         request_mock.app = {"trusted_proxies": "127.0.0.1,::1,10.0.0.0/8"}
         request_mock.headers = {
-            "X-Forwarded-For": "185.71.76.10, 10.0.0.2",
+            "X-Forwarded-For": "185.71.76.10, 198.51.100.9",
         }
-        self.assertEqual(_get_real_ip(request_mock), "185.71.76.10")
+        self.assertEqual(_get_real_ip(request_mock), "198.51.100.9")
+
+        # Spoofed leftmost entry must be ignored even when it mimics a
+        # YooKassa allowlisted address.
+        request_spoof = MagicMock(spec=web.Request)
+        request_spoof.remote = "127.0.0.1"
+        request_spoof.headers = {
+            "X-Forwarded-For": "185.71.76.10, 198.51.100.9, 172.16.0.9",
+        }
+        self.assertEqual(_get_real_ip(request_spoof), "198.51.100.9")
 
         # Trusted proxy peer (declared via app config) with X-Real-IP
         request_mock_real = MagicMock(spec=web.Request)

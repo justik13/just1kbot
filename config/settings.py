@@ -57,7 +57,6 @@ class Settings(BaseSettings):
     # ── Redis ──
     REDIS_URL: str
     REDIS_PASSWORD: str
-    REDIS_KEY_PREFIX: str = "just1kbot_bot:"
 
     # ── YooKassa ──
     YOOKASSA_SHOP_ID: str

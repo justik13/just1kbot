@@ -42,6 +42,10 @@ PROBLEM_OBSERVATION_TIMEOUT = 15 * 60.0  # 15 минут наблюдения з
 AUTO_DISABLED_CHECK_INTERVAL = 900.0  # 15 минут между тихими проверками в режиме AUTO_DISABLED
 REQUIRED_STABLE_SUCCESSES = 3  # 3 успешных ответа подряд для подтверждения восстановления
 DISK_ALERT_COOLDOWN_SECONDS = 3600.0  # 1 час между повторными уведомлениями о диске
+# A hung node can hold a healthcheck for tens of seconds; checking servers in
+# bounded parallel batches keeps one degraded node from freezing alerts for
+# every other node in the cycle.
+CHECK_PARALLELISM = 6
 
 
 class ServerMonitorState:
@@ -150,7 +154,7 @@ async def check_node_resources_and_alerts(bot: Bot):
 
     now_m = time.monotonic()
 
-    for server in servers:
+    async def _check_one(server):
         st = get_server_monitor_state(server.id, server)
 
         # 1. Проверка ручного/автоматического отключения
@@ -173,12 +177,12 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         # 2. Игнорируем сервера, отключенные вручную
         if st.health_state == ServerHealthState.MANUAL_DISABLED:
-            continue
+            return
 
         # 3. Неблокирующая проверка временных интервалов (WAITING_CONFIRMATION или AUTO_DISABLED)
         if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED):
             if st.next_check_at and now_m < st.next_check_at:
-                continue
+                return
 
         # Захватываем ожидаемое состояние ТОЧНО перед выполнением сетевой проверки
         expected_health_state = st.health_state
@@ -428,6 +432,12 @@ async def check_node_resources_and_alerts(bot: Bot):
                                 last_alert_sent_state=st.last_alert_sent_state,
                                 recovery_notice_sent=st.recovery_notice_sent,
                             )
+
+    # Bounded parallel fan-out: one hung node must not freeze monitoring of
+    # the remaining nodes in this cycle.
+    for batch_start in range(0, len(servers), CHECK_PARALLELISM):
+        batch = servers[batch_start:batch_start + CHECK_PARALLELISM]
+        await asyncio.gather(*(_check_one(s) for s in batch))
 
 
 async def node_monitor_loop(bot: Bot, shutdown_event: asyncio.Event):

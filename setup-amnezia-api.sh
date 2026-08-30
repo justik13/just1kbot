@@ -447,6 +447,12 @@ setup_https_config() {
 # Port: $PUBLIC_PORT -> 127.0.0.1:$AMNEZIA_PORT
 # Generated: $(date -Iseconds)
 
+# Map for WebSocket-aware Connection header (empty upgrade -> close).
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 # HTTP -> HTTPS redirect
 server {
     listen 80;
@@ -476,12 +482,6 @@ server {
     ssl_session_timeout 1d;
     ssl_session_tickets off;
 
-    # OCSP Stapling
-    ssl_stapling on;
-    ssl_stapling_verify on;
-    resolver 8.8.8.8 8.8.4.4 valid=300s;
-    resolver_timeout 5s;
-
     # Security headers
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
@@ -510,7 +510,7 @@ server {
 
         # WebSocket support (conditional)
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$http_upgrade;
+        proxy_set_header Connection \$connection_upgrade;
     }
 
     # Скрытие служебных эндпоинтов
