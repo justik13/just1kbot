@@ -147,16 +147,21 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             last_downlink_snapshot=500,
             desired_version=1,
             actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
         )
 
         server = Server(
             id=1,
             name="Origin-Node",
             api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
         )
 
         mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
         mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
 
         @asynccontextmanager
         async def fake_session_scope():

@@ -76,19 +76,19 @@ set_state_val() {
     local val="$2"
     init_state_file
     python3 -c "
-import json
-f = '$STATE_FILE'
+import sys, json
+from datetime import datetime, timezone
+f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     with open(f, 'r', encoding='utf-8') as fp:
         data = json.load(fp)
 except Exception:
     data = {}
-data['$key'] = '$val'
-from datetime import datetime, timezone
+data[k] = v
 data['updated_at'] = datetime.now(timezone.utc).isoformat()
 with open(f, 'w', encoding='utf-8') as fp:
     json.dump(data, fp, indent=2)
-"
+" "$STATE_FILE" "$key" "$val"
 }
 
 get_state_val() {
@@ -99,15 +99,17 @@ get_state_val() {
         return
     fi
     python3 -c "
-import json
+import sys, json
+f, k, d = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
-    with open('$STATE_FILE', 'r', encoding='utf-8') as fp:
+    with open(f, 'r', encoding='utf-8') as fp:
         data = json.load(fp)
-    print(data.get('$key', '$default_val'))
+    print(data.get(k, d))
 except Exception:
-    print('$default_val')
-"
+    print(d)
+" "$STATE_FILE" "$key" "$default_val"
 }
+
 
 show_state() {
     title "СОСТОЯНИЕ УЗЛА (${STATE_FILE})"
@@ -145,6 +147,44 @@ install_common_deps() {
     chmod 755 "$CERTBOT_WEBROOT"
 }
 
+# --- Проверка контрольной суммы SHA-256 Xray ---
+verify_xray_checksum() {
+    local file_path="$1"
+    local version="$2"
+    local arch="$3"
+    local expected_sha=""
+    if [[ "$version" == "26.6.27" ]]; then
+        case "$arch" in
+            64) expected_sha="b3e5902d06d6282fe53cfa2fc426058b9aeaa429b2c812e20887cd47f26d08bf" ;;
+            arm64-v8a) expected_sha="13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931" ;;
+        esac
+    fi
+    if [[ -n "$expected_sha" ]]; then
+        local actual_sha
+        actual_sha="$(sha256sum "$file_path" | awk '{print $1}')"
+        if [[ "$actual_sha" != "$expected_sha" ]]; then
+            error "Контрольная сумма SHA-256 для $file_path не совпадает! Ожидалось: $expected_sha, получено: $actual_sha"
+        fi
+        log "Контрольная сумма SHA-256 проверена и совпадает: ${actual_sha}"
+    else
+        local dgst_url="https://github.com/XTLS/Xray-core/releases/download/v${version}/$(basename "$file_path").dgst"
+        local tmp_dgst="${file_path}.dgst"
+        if wget -q --timeout=15 -O "$tmp_dgst" "$dgst_url" 2>/dev/null || wget -q --timeout=15 -O "$tmp_dgst" "https://ghfast.top/${dgst_url}" 2>/dev/null; then
+            local expected_sha_dgst
+            expected_sha_dgst="$(grep -i 'SHA2-256=' "$tmp_dgst" 2>/dev/null | awk '{print $2}')"
+            rm -f "$tmp_dgst"
+            if [[ -n "$expected_sha_dgst" ]]; then
+                local actual_sha
+                actual_sha="$(sha256sum "$file_path" | awk '{print $1}')"
+                if [[ "$actual_sha" != "$expected_sha_dgst" ]]; then
+                    error "Контрольная сумма SHA-256 из .dgst не совпадает! Ожидалось: $expected_sha_dgst, получено: $actual_sha"
+                fi
+                log "Контрольная сумма SHA-256 из .dgst проверена: ${actual_sha}"
+            fi
+        fi
+    fi
+}
+
 # --- Скачивание и установка бинарника Xray ---
 install_xray_core() {
     local version="${1:-$XRAY_VERSION_PINNED}"
@@ -163,6 +203,8 @@ install_xray_core() {
         wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray core ${version}"
     fi
 
+    verify_xray_checksum "${tmp_dir}/${zip_name}" "$version" "$arch"
+
     unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
     install -m 755 "${tmp_dir}/xray" "$XRAY_BIN"
     mkdir -p "$XRAY_CONFIG_DIR" "$XRAY_SHARE_DIR" "/var/log/xray"
@@ -171,6 +213,7 @@ install_xray_core() {
     log "Xray ${version} успешно установлен в ${XRAY_BIN}"
     "$XRAY_BIN" version | head -n 2
 }
+
 
 # --- Скачивание Geodata (geoip.dat, geosite.dat от Loyalsoldier) ---
 install_geodata() {
@@ -984,6 +1027,8 @@ cmd_update_xray() {
         info "Используем зеркало ${mirror_url}..."
         wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray ${target_version}"
     fi
+
+    verify_xray_checksum "${tmp_dir}/${zip_name}" "$target_version" "$arch"
 
     unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
     local new_binary="${tmp_dir}/xray"

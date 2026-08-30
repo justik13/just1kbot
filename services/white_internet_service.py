@@ -25,7 +25,12 @@ from config.constants import (
 from config.enums import ServerHealthState, TariffQuoteOperation, TariffQuoteStatus, WhiteInternetStatus
 from database.models import Server, Tariff, TariffQuote, WhiteInternetSubscription
 from database.repositories import white_internet_repo
-from database.repositories.account_ledger_repo import AccountLedgerError, InsufficientAccountBalanceError, create_purchase_debit
+from database.repositories.account_ledger_repo import (
+    AccountLedgerError,
+    InsufficientAccountBalanceError,
+    create_purchase_debit,
+    get_account_balance,
+)
 from database.repositories.tariff_quotes_repo import get_or_create_current_version, lock_checkout_user
 from utils.datetime_helpers import now_utc
 
@@ -91,11 +96,17 @@ class WhiteInternetService:
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
-            return False, texts.WL_INSUFFICIENT_BALANCE_BUY.format(price=int(tariff.price_rub), balance=user.balance_rub, shortage=Decimal(tariff.price_rub) - user.balance_rub), None
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            return False, texts.WL_INSUFFICIENT_BALANCE_BUY.format(
+                price=int(tariff.price_rub),
+                balance=balance_snap.available,
+                shortage=max(Decimal(tariff.price_rub) - balance_snap.available, Decimal(0)),
+            ), None
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
         sub = await white_internet_repo.create_white_internet_subscription(session, user_id=user.id, origin_node_id=origin_node.id, token=secrets.token_hex(32), uuid=str(uuid.uuid4()), quote_id=quote.id, price_rub=Decimal(tariff.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
@@ -124,7 +135,12 @@ class WhiteInternetService:
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
-            return False, texts.WL_INSUFFICIENT_BALANCE_RENEW.format(price=int(tariff.price_rub), balance=user.balance_rub, shortage=Decimal(tariff.price_rub) - user.balance_rub), None
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            return False, texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
+                price=int(tariff.price_rub),
+                balance=balance_snap.available,
+                shortage=max(Decimal(tariff.price_rub) - balance_snap.available, Decimal(0)),
+            ), None
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
@@ -164,15 +180,22 @@ class WhiteInternetService:
         except InsufficientAccountBalanceError:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
-            return False, texts.WL_INSUFFICIENT_BALANCE_TOPUP.format(gb=pack_gb, price=int(pack_price), balance=user.balance_rub, shortage=pack_price - user.balance_rub), None
+            balance_snap = await get_account_balance(session, user_id=user.id)
+            return False, texts.WL_INSUFFICIENT_BALANCE_TOPUP.format(
+                gb=pack_gb,
+                price=int(pack_price),
+                balance=balance_snap.available,
+                shortage=max(pack_price - balance_snap.available, Decimal(0)),
+            ), None
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
             await session.flush()
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
+        grant = await white_internet_repo.topup_quota_atomic(session, subscription_id=sub.id, quote_id=quote.id, pack_gb=pack_gb, price_rub=pack_price)
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
-        grant = await white_internet_repo.topup_quota_atomic(session, subscription_id=sub.id, quote_id=quote.id, pack_gb=pack_gb, price_rub=pack_price)
         return True, texts.WL_TOPUP_SUCCESS.format(gb=pack_gb), grant
+
 
     @staticmethod
     def generate_vless_links(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443) -> list[str]:

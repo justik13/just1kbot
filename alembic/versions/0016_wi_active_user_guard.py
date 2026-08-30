@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0016_white_internet_active_user_guard"
+revision: str = "0016_wi_active_user_guard"
 down_revision: str | Sequence[str] | None = "0015_white_internet"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

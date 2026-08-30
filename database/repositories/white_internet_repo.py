@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+import inspect
 from typing import Sequence
+
 
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -99,7 +101,18 @@ async def _lock_all_grants(session: AsyncSession, subscription_id: int) -> Seque
         .order_by(WhiteInternetQuotaGrant.id.asc())
         .with_for_update()
     )
-    return (await session.execute(stmt)).scalars().all()
+    result = await session.execute(stmt)
+    if hasattr(result, "scalars"):
+        scalars = result.scalars()
+        if inspect.iscoroutine(scalars):
+            scalars = await scalars
+        if hasattr(scalars, "all"):
+            val = scalars.all()
+            if inspect.iscoroutine(val):
+                return await val
+            return val
+    return []
+
 
 
 async def expire_subscription_atomic(
