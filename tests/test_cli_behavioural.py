@@ -518,50 +518,143 @@ class SetupScriptErrorSemanticsTests(unittest.TestCase):
 
 
 class SetupOvercommitPersistenceTests(unittest.TestCase):
-    """`ensure_overcommit_persistence` must pin the VALUE 1, not merely the
-    line's existence: a pre-existing `vm.overcommit_memory = 0` entry used to
-    silently survive a "successful" install and revert the setting on reboot."""
+    """`configure_overcommit_memory` must pin the persistence VALUE 1
+    UNCONDITIONALLY — including the scenario `runtime=1 + persistent=0`
+    (e.g. the operator ran `sysctl -w` manually before the installer),
+    which used to revert on reboot. Runtime stubbing keeps these tests
+    rootless: `sysctl -w` is only invoked when runtime != 1."""
 
-    def _run(self, initial_content: str) -> tuple[int, str]:
+    def _configure(self, runtime_content: str, initial_conf: str) -> tuple[int, str]:
         repo_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
-        with tempfile.TemporaryDirectory() as tmp:
-            shutil.copy(repo_script, Path(tmp) / "setup.sh")
-            conf = Path(tmp) / "sysctl.conf"
-            conf.write_text(initial_content, encoding="utf-8")
-            proc = subprocess.run(
-                [
-                    "bash",
-                    "-c",
-                    ". './setup.sh'; "
-                    "JUST1KBOT_SYSCTL_CONF='./sysctl.conf' ensure_overcommit_persistence",
-                ],
-                capture_output=True,
-                text=True,
-                cwd=tmp,
-                check=False,
-            )
-            return proc.returncode, conf.read_text(encoding="utf-8")
+        workdir = tempfile.mkdtemp(prefix="oc_overcommit_")
+        self.addCleanup(shutil.rmtree, workdir, ignore_errors=True)
+        shutil.copy(repo_script, Path(workdir) / "setup.sh")
+        proc_stub = Path(workdir) / "proc_overcommit"
+        proc_stub.write_text(runtime_content, encoding="utf-8")
+        conf = Path(workdir) / "sysctl.conf"
+        conf.write_text(initial_conf, encoding="utf-8")
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                ". './setup.sh'; "
+                "JUST1KBOT_PROC_OVERCOMMIT='./proc_overcommit' "
+                "JUST1KBOT_SYSCTL_CONF='./sysctl.conf' configure_overcommit_memory",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            check=False,
+        )
+        return proc.returncode, conf.read_text(encoding="utf-8")
 
-    def test_existing_zero_entry_is_replaced_with_one(self):
-        code, content = self._run("vm.overcommit_memory = 0\n")
+    def test_runtime_one_with_persistent_zero_is_repaired(self):
+        """The review-requested regression: runtime=1 + persistent=0 must be
+        repaired by the installer (reboot would otherwise revert it)."""
+        code, content = self._configure("1", "vm.overcommit_memory = 0\n")
         self.assertEqual(code, 0)
         self.assertIn("vm.overcommit_memory = 1", content)
         self.assertNotIn("= 0", content.replace("vm.overcommit_memory = 1", ""))
 
-    def test_missing_entry_is_appended(self):
-        code, content = self._run("# some other setting = 5\n")
+    def test_runtime_one_with_missing_entry_is_appended(self):
+        code, content = self._configure("1", "# some other setting = 5\n")
         self.assertEqual(code, 0)
         self.assertIn("vm.overcommit_memory = 1", content)
 
-    def test_existing_correct_value_is_preserved(self):
-        code, content = self._run("vm.overcommit_memory = 1\n")
+    def test_runtime_one_with_correct_persistence_is_preserved(self):
+        code, content = self._configure("1", "vm.overcommit_memory = 1\n")
         self.assertEqual(code, 0)
         self.assertEqual(content.count("vm.overcommit_memory"), 1)
 
-    def test_commented_zero_does_not_trick_the_check(self):
-        code, content = self._run("# vm.overcommit_memory = 0\n")
+    def _configure(
+        self,
+        runtime_content: str,
+        initial_conf: str,
+        *,
+        fake_sysctl_exit: int | None = None,
+    ) -> tuple[int, str, bool]:
+        """Run configure_overcommit_memory against stubs.
+
+        Returns (exit_code, persisted conf content, sysctl_was_invoked).
+        When `fake_sysctl_exit` is set, a recording `sysctl` shim is placed on
+        PATH so the test can observe whether the runtime apply was attempted
+        and control its exit status - all rootless.
+        """
+        repo_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
+        workdir = tempfile.mkdtemp(prefix="oc_overcommit_")
+        self.addCleanup(shutil.rmtree, workdir, ignore_errors=True)
+        shutil.copy(repo_script, Path(workdir) / "setup.sh")
+        proc_stub = Path(workdir) / "proc_overcommit"
+        proc_stub.write_text(runtime_content, encoding="utf-8")
+        conf = Path(workdir) / "sysctl.conf"
+        conf.write_text(initial_conf, encoding="utf-8")
+
+        path_prefix = ""
+        if fake_sysctl_exit is not None:
+            bin_dir = Path(workdir) / "bin"
+            bin_dir.mkdir()
+            shim = bin_dir / "sysctl"
+            # Relative paths only: the subprocess cwd maps into the WSL/interop
+            # filesystem, absolute Windows paths would be invisible there.
+            shim.write_text(
+                "#!/bin/bash\necho called >> ./sysctl_calls\n"
+                f"exit {fake_sysctl_exit}\n",
+                encoding="utf-8",
+            )
+            shim.chmod(0o755)
+            path_prefix = 'export PATH="$PWD/bin:$PATH"; '
+
+        proc = subprocess.run(
+            [
+                "bash",
+                "-c",
+                ". './setup.sh'; "
+                f"JUST1KBOT_PROC_OVERCOMMIT='./proc_overcommit' "
+                f"JUST1KBOT_SYSCTL_CONF='./sysctl.conf' "
+                f"{path_prefix}configure_overcommit_memory",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            check=False,
+        )
+        sysctl_invoked = (Path(workdir) / "sysctl_calls").exists()
+        return proc.returncode, conf.read_text(encoding="utf-8"), sysctl_invoked
+
+    def test_runtime_one_with_persistent_zero_is_repaired(self):
+        """The review-requested regression: runtime=1 + persistent=0 must be
+        repaired by the installer (reboot would otherwise revert it)."""
+        code, content, sysctl_invoked = self._configure(
+            "1", "vm.overcommit_memory = 0\n"
+        )
         self.assertEqual(code, 0)
         self.assertIn("vm.overcommit_memory = 1", content)
+        self.assertNotIn("= 0", content.replace("vm.overcommit_memory = 1", ""))
+        # runtime already 1 → no provider-side sysctl apply attempted.
+        self.assertFalse(sysctl_invoked)
+
+    def test_runtime_one_with_missing_entry_is_appended(self):
+        code, content, _ = self._configure("1", "# some other setting = 5\n")
+        self.assertEqual(code, 0)
+        self.assertIn("vm.overcommit_memory = 1", content)
+
+    def test_runtime_one_with_correct_persistence_is_preserved(self):
+        code, content, _ = self._configure("1", "vm.overcommit_memory = 1\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(content.count("vm.overcommit_memory"), 1)
+
+    def test_runtime_zero_sysctl_failure_is_fail_closed(self):
+        """runtime=0 + failing `sysctl -w` must abort the installer (error →
+        exit 1) without touching persistence - no false success."""
+        code, content, sysctl_invoked = self._configure(
+            "0",
+            "vm.overcommit_memory = 0\n",
+            fake_sysctl_exit=1,
+        )
+        self.assertEqual(code, 1)
+        self.assertTrue(sysctl_invoked)
+        # Persistence must NOT be silently "configured" after a failed apply.
+        self.assertIn("vm.overcommit_memory = 0", content)
 
 
 if __name__ == "__main__":

@@ -53,7 +53,7 @@ title() {
 # приоритет для systemd-sysctl (парсится последним), поэтому запись со
 # значением 1 здесь перекрывает любые `= 0` в /etc/sysctl.d/*.
 ensure_overcommit_persistence() {
-    local conf_file="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
+    local conf_file="${1:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}"
     if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$conf_file" 2>/dev/null; then
         if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1([[:space:]]*(#.*)?)?$' "$conf_file" 2>/dev/null; then
             return 0
@@ -63,6 +63,45 @@ ensure_overcommit_persistence() {
     fi
     echo "vm.overcommit_memory = 1" >> "$conf_file" 2>/dev/null || return 1
     return 0
+}
+
+# --- Гарантия настройки vm.overcommit_memory=1 (runtime + persistence) ---
+# Persistence проверяется и чинится ВСЕГДА, независимо от текущего runtime:
+# сценарий «runtime=1 (например, установлен вручную до запуска установщика),
+# persistent=0» иначе пережил бы установку и откатился после перезагрузки.
+# Пути переопределяются для тестируемости:
+#   JUST1KBOT_PROC_OVERCOMMIT - stub /proc/sys/vm/overcommit_memory
+#   JUST1KBOT_SYSCTL_CONF     - stub /etc/sysctl.conf
+configure_overcommit_memory() {
+    local runtime_file="${JUST1KBOT_PROC_OVERCOMMIT:-/proc/sys/vm/overcommit_memory}"
+    local conf_file="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
+    [[ -f "$runtime_file" ]] || return 0
+
+    local current_overcommit
+    current_overcommit="$(cat "$runtime_file" 2>/dev/null || echo "0")"
+    if [[ "$current_overcommit" != "1" ]]; then
+        info "Включение vm.overcommit_memory=1 для стабильной работы Redis..."
+        # Honest failure handling: a silent false positive here would let
+        # Redis BGSAVE fail under memory pressure after install.
+        if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
+            error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
+        fi
+    fi
+
+    # Persistence must pin the VALUE 1 unconditionally: a pre-existing `= 0`
+    # entry must be replaced, not merely detected, and this must happen even
+    # when the runtime value is already 1.
+    if ! ensure_overcommit_persistence "$conf_file"; then
+        error "Не удалось закрепить vm.overcommit_memory=1 в персистентной конфигурации — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
+    fi
+
+    # Belt-and-braces: runtime must be 1 after all of the above.
+    current_overcommit="$(cat "$runtime_file" 2>/dev/null || echo "0")"
+    if [[ "$current_overcommit" != "1" ]]; then
+        error "vm.overcommit_memory=1 не применилось к runtime — проверьте 'sysctl -w vm.overcommit_memory=1' вручную и запустите установщик снова."
+    fi
+
+    log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
 }
 
 # --- Очистка временных ресурсов при сбое ---
@@ -197,24 +236,7 @@ install_dependencies() {
     fi
 
     # Настройка ядра для Redis (overcommit_memory)
-    if [[ -f /proc/sys/vm/overcommit_memory ]]; then
-        local current_overcommit
-        current_overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")"
-        if [[ "$current_overcommit" != "1" ]]; then
-            info "Включение vm.overcommit_memory=1 для стабильной работы Redis..."
-            # Honest failure handling: a silent false positive here would let
-            # Redis BGSAVE fail under memory pressure after install.
-            if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
-                error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
-            fi
-            # Persistence must pin the VALUE 1: a pre-existing `= 0` entry must
-            # be replaced, not merely detected.
-            if ! ensure_overcommit_persistence; then
-                error "Не удалось закрепить vm.overcommit_memory=1 в персистентной конфигурации — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
-            fi
-            log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
-        fi
-    fi
+    configure_overcommit_memory
 
     # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do
