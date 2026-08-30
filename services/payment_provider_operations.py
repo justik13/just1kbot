@@ -6,7 +6,6 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from bot import texts
-from config.constants import PAYMENT_EXPIRATION_HOURS
 from config.enums import PaymentProviderStatus
 from database.models import Payment, PaymentEvent, PaymentProviderOperation
 from services.payment_provider_state import apply_provider_transition
@@ -58,11 +57,10 @@ def provider_transition_source(claim):
 def create_payload(payment, description, return_url):
     """Build the frozen YooKassa create-payment body.
 
-    ``expiration_date`` is baked into the durable payload (it is part of the
-    idempotent request body), so the provider auto-cancels an unpaid payment on
-    the same schedule the local cleanup worker uses (PAYMENT_EXPIRATION_HOURS).
-    This removes the paid-after-local-expire divergence that used to land in
-    manual review as ``canceled_to_succeeded``.
+    Deliberately limited to fields documented for POST /v3/payments: no
+    speculative parameters may enter a financial request body. The
+    paid-after-local-expire divergence is closed provider-side in the cleanup
+    worker (provider-verified auto-cancel), not by undocumented payload fields.
     """
     return {
         "amount": {
@@ -71,10 +69,6 @@ def create_payload(payment, description, return_url):
         },
         "description": description,
         "confirmation": {"type": "redirect", "return_url": return_url},
-        "expiration_date": (
-            now_utc().replace(microsecond=0)
-            + timedelta(hours=PAYMENT_EXPIRATION_HOURS)
-        ).isoformat(),
         "metadata": {
             "order_id": payment.public_order_id,
             "local_payment_id": str(payment.id),

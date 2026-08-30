@@ -737,7 +737,20 @@ cmd_restore() {
     restore_ts=$(date +%Y%m%d_%H%M%S)
     local pre_restore_backup_file="${PROJECT_DIR}/backups/pre_restore_${restore_ts}.sql.gz"
     mkdir -p "${PROJECT_DIR}/backups"
-    docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>/dev/null | gzip > "$pre_restore_backup_file" || true
+    # Safety dump is a hard precondition of the destructive phase. Fail-closed:
+    # pg_dump/gzip failure (pipefail is global) or an invalid archive aborts
+    # restore BEFORE any DROP DATABASE. No plaintext dump with loose perms.
+    umask 077
+    if ! docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>/dev/null | gzip -c > "$pre_restore_backup_file"; then
+        error "Не удалось создать страховочный дамп текущей БД. Восстановление отменено — база НЕ изменена."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! gzip -t "$pre_restore_backup_file" 2>/dev/null || [[ ! -s "$pre_restore_backup_file" ]]; then
+        error "Страховочный дамп пуст или повреждён. Восстановление отменено — база НЕ изменена."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
 
     info "4/5. Полная переинициализация базы данных и накат дампа..."
     docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
@@ -755,6 +768,7 @@ cmd_restore() {
                 warn "Исходное состояние базы данных возвращено."
             fi
         fi
+        docker compose start bot >/dev/null 2>&1 || true
         return 1
     fi
 

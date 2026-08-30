@@ -10,7 +10,11 @@ from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from config.constants import AdminAuditAction, GRACE_PERIOD_HOURS
+from config.constants import (
+    AdminAuditAction,
+    GRACE_PERIOD_HOURS,
+    PAYMENT_EXPIRATION_HOURS,
+)
 from database.connection import session_scope
 from database.models import (
     APIOperation,
@@ -25,6 +29,7 @@ from database.models import (
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
+from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
@@ -608,24 +613,70 @@ async def _cleanup_old_records():
         HubMessage.created_at < threshold_hub,
     )
 
-    # Auto-expire abandoned pending payments older than 48 hours (short atomic transaction)
-    threshold_payments = current_time - timedelta(hours=48)
+    # Auto-expire abandoned pending payments older than PAYMENT_EXPIRATION_HOURS.
+    # Cancellation is provider-verified: the local row is moved to canceled only
+    # after GET /payments/{id} still reports pending. If the provider reports a
+    # paid/captured payment the row is left untouched for the stale-topup worker
+    # to settle, and on any provider/transport error the row is skipped this
+    # cycle (fail-closed) — a real payment must never be blind-cancelled.
+    threshold_payments = current_time - timedelta(hours=PAYMENT_EXPIRATION_HOURS)
+    payments_expired = 0
     async with session_scope() as session:
-        stmt_payments = (
-            update(Payment)
-            .where(
-                Payment.provider_status == "pending",
-                Payment.created_at < threshold_payments,
+        pending_rows = (
+            await session.execute(
+                select(Payment.id, Payment.external_id)
+                .where(
+                    Payment.provider_status == "pending",
+                    Payment.created_at < threshold_payments,
+                )
+                .order_by(Payment.id)
+                .limit(20)
             )
-            .values(
-                provider_status="canceled",
-                fulfillment_status="failed",
-                reconciliation_status="ok",
-                manual_review_reason="auto_expired_abandoned_pending_48h",
+        ).all()
+
+    cancellable_ids: list[int] = []
+    for payment_id, external_id in pending_rows:
+        if not external_id:
+            logger.warning(
+                "Auto-expire skipped for payment %s: no external_id, provider verification impossible",
+                payment_id,
             )
-        )
-        result_payments = await session.execute(stmt_payments)
-        payments_expired = result_payments.rowcount
+            continue
+        result = await YooKassaService.get_payment_result(external_id)
+        if not result.ok:
+            logger.warning(
+                "Auto-expire skipped for payment %s: provider verification failed (%s)",
+                payment_id,
+                result.error_kind.value if result.error_kind else "unknown",
+            )
+            continue
+        observed = str((result.value or {}).get("status") or "unknown")
+        if observed == "pending":
+            cancellable_ids.append(payment_id)
+        else:
+            logger.info(
+                "Auto-expire skipped for payment %s: provider status %s (left for stale-topup settlement)",
+                payment_id,
+                observed,
+            )
+
+    if cancellable_ids:
+        async with session_scope() as session:
+            stmt_payments = (
+                update(Payment)
+                .where(
+                    Payment.id.in_(cancellable_ids),
+                    Payment.provider_status == "pending",
+                )
+                .values(
+                    provider_status="canceled",
+                    fulfillment_status="failed",
+                    reconciliation_status="ok",
+                    manual_review_reason="auto_expired_abandoned_pending_48h",
+                )
+            )
+            result_payments = await session.execute(stmt_payments)
+            payments_expired = result_payments.rowcount
 
     # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
     threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)

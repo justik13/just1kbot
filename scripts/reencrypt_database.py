@@ -31,28 +31,35 @@ logger = logging.getLogger("reencrypt")
 BATCH_SIZE = 100
 
 
-async def reencrypt_all() -> None:
+async def reencrypt_all(*, force: bool = False) -> None:
     logger.info("Starting database re-encryption with primary key...")
 
-    # Best-effort safety net: warn when maintenance mode is off. Non-fatal so
-    # the script stays usable in emergency scenarios.
-    try:
-        from database.models import MaintenanceMode
+    # Hard safety guard: rotation must not run against a live writer. When the
+    # MaintenanceMode row explicitly says maintenance is OFF, abort unless the
+    # operator passed --force. A missing row (fresh/test schema) cannot be
+    # verified and only produces a warning.
+    from database.models import MaintenanceMode
 
-        async with session_scope() as session:
-            maintenance_enabled = await session.scalar(
-                select(MaintenanceMode.is_enabled).where(MaintenanceMode.id == 1)
+    async with session_scope() as session:
+        maintenance_enabled = await session.scalar(
+            select(MaintenanceMode.is_enabled).where(MaintenanceMode.id == 1)
+        )
+    if maintenance_enabled is False:
+        if force:
+            logger.warning(
+                "Maintenance mode is OFF; proceeding because --force was given. "
+                "Rows written by a running bot during rotation may keep the old key."
             )
-            if not maintenance_enabled:
-                logger.warning(
-                    "Maintenance mode is OFF. Stop the bot container "
-                    "(docker compose stop bot) before rotating keys, otherwise "
-                    "rows written during rotation may keep the old key."
-                )
-    except Exception as exc:
+        else:
+            raise RuntimeError(
+                "Maintenance mode is OFF. Stop the bot container "
+                "(docker compose stop bot) or enable maintenance mode first; "
+                "re-run with --force to consciously bypass this guard."
+            )
+    elif maintenance_enabled is None:
         logger.warning(
-            "Could not check maintenance mode (%s); proceeding without it.",
-            type(exc).__name__,
+            "MaintenanceMode row not found (fresh/test schema?); "
+            "proceeding without a maintenance check."
         )
 
     total_servers = 0
@@ -195,7 +202,9 @@ def main():
     # Operational contract: rotation must run with the bot stopped (or in
     # maintenance mode), otherwise the still-running process keeps writing
     # ciphertext under the old primary key and rows diverge between keys.
-    if "--yes" not in sys.argv[1:]:
+    argv = sys.argv[1:]
+    force = "--force" in argv
+    if "--yes" not in argv:
         print(__doc__ or "")
         print(
             "Убедитесь, что контейнер бота остановлен или включён режим техработ "
@@ -211,7 +220,7 @@ def main():
             logger.info("Re-encryption aborted by operator.")
             sys.exit(1)
     try:
-        asyncio.run(reencrypt_all())
+        asyncio.run(reencrypt_all(force=force))
     except Exception as exc:
         logger.exception("Database re-encryption failed: %s", exc)
         sys.exit(1)

@@ -29,11 +29,25 @@ _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
 PAYMENTS_START_DELAY = 60.0
 
 AUTO_FULFILL_MAX_ATTEMPTS = 5
+# Unambiguously permanent settlement failures: retrying can never succeed
+# because the frozen quote/user/tariff state contradicts the settlement
+# preconditions. Transient-ish states (financial_hold, too_many_devices,
+# account_debt) intentionally stay retryable — they may legitimately resolve.
 _AUTO_FULFILL_PERMANENT_CODES = {
     "quote_expired",
     "quote_not_found",
     "quote_not_active",
+    "quote_operation_mismatch",
+    "quote_price_mismatch",
+    "consumed_quote_incomplete",
     "user_not_found",
+    "purchase_user_missing",
+    "purchase_user_ineligible",
+    "tariff_unavailable",
+    "tariff_price_changed",
+    "subscription_state_changed",
+    "invalid_auto_fulfill_action",
+    "missing_quote_public_id",
 }
 
 
@@ -276,6 +290,16 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
         logger.error(
             "Auto-fulfillment dead for payment %s: missing quote_public_id",
             payment.id,
+        )
+        return
+    # Fail-closed: an unknown durable action must never be silently executed
+    # as a purchase by the recovery subsystem.
+    if action not in {"purchase", "tariff_change"}:
+        _mark("dead", "invalid_auto_fulfill_action")
+        logger.error(
+            "Auto-fulfillment dead for payment %s: unknown auto_fulfill_action %r",
+            payment.id,
+            action,
         )
         return
     try:
