@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import secrets
@@ -228,6 +229,93 @@ class WhiteInternetService:
         tag_de = urllib.parse.quote(texts.WL_VLESS_TAG_DE)
         tag_nl = urllib.parse.quote(texts.WL_VLESS_TAG_NL)
         def build(path: str, tag: str) -> str:
-            return f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
+            return f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
         return [build("/api/v3/de", tag_de), build("/api/v3/nl", tag_nl)]
+
+    @staticmethod
+    def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443) -> dict:
+        """Generate complete Xray client JSON config for INCY / Happ / v2rayN."""
+        return {
+            "log": {"loglevel": "warning"},
+            "inbounds": [
+                {
+                    "tag": "socks-in",
+                    "port": 10808,
+                    "listen": "127.0.0.1",
+                    "protocol": "socks",
+                    "settings": {"auth": "noauth", "udp": True},
+                    "sniffing": {"enabled": True, "destOverride": ["http", "tls"]},
+                }
+            ],
+            "outbounds": [
+                {
+                    "tag": "proxy-de",
+                    "protocol": "vless",
+                    "settings": {
+                        "vnext": [
+                            {
+                                "address": cdn_domain,
+                                "port": port,
+                                "users": [
+                                    {
+                                        "id": subscription.uuid,
+                                        "encryption": "none",
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                    "streamSettings": {
+                        "network": "xhttp",
+                        "security": "tls",
+                        "tlsSettings": {
+                            "serverName": cdn_domain,
+                            "alpn": ["h2"],
+                            "fingerprint": "chrome",
+                        },
+                        "xhttpSettings": {
+                            "path": "/api/v3/de",
+                            "mode": "packet-up",
+                            "uplinkHTTPMethod": "OPTIONS",
+                            "xPaddingObfsMode": True,
+                            "xPaddingKey": "dc",
+                            "xPaddingHeader": "X-Cache",
+                            "xPaddingMethod": "tokenish",
+                            "xPaddingPlacement": "header",
+                        },
+                    },
+                },
+                {"tag": "direct", "protocol": "freedom"},
+                {"tag": "block", "protocol": "blackhole"},
+            ],
+        }
+
+    @staticmethod
+    def generate_amnezia_vpn_key(
+        subscription: WhiteInternetSubscription,
+        cdn_domain: str,
+        port: int = 443,
+        description: str = texts.WL_PROFILE_NAME,
+    ) -> str:
+        """Generate vpn:// key for AmneziaVPN app."""
+        client_cfg = WhiteInternetService.generate_full_xray_config(subscription, cdn_domain, port)
+        amnezia_payload = {
+            "containers": [
+                {
+                    "container": "amnezia-xray",
+                    "xray": {
+                        "isThirdPartyConfig": True,
+                        "last_config": json.dumps(client_cfg, indent=2),
+                    },
+                }
+            ],
+            "defaultContainer": "amnezia-xray",
+            "description": description,
+            "dns1": "1.1.1.1",
+            "dns2": "1.0.0.1",
+            "hostName": cdn_domain,
+        }
+        raw_bytes = json.dumps(amnezia_payload, separators=(",", ":")).encode("utf-8")
+        b64_key = base64.b64encode(raw_bytes).decode("utf-8")
+        return f"vpn://{b64_key}"
 

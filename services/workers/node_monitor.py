@@ -186,12 +186,25 @@ async def check_node_resources_and_alerts(bot: Bot):
         expected_consecutive_successes = st.consecutive_successes
 
         st.last_check_monotonic = now_m
-        client = AmneziaClient(server.api_url, server.api_key)
+        is_xray_node = "xray_origin" in (getattr(server, "capabilities", None) or [])
 
         # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
         try:
-            is_healthy = await client.healthcheck()
+            if is_xray_node:
+                from services.xray_node_client import XrayNodeClient
+                xray_client = XrayNodeClient(timeout=10.0)
+                is_healthy, epoch, data = await xray_client.check_health(
+                    server.api_url, server.api_key
+                )
+                if is_healthy and epoch:
+                    server.xray_instance_epoch = epoch
+                    if data:
+                        server.xray_instance_boot_id = data.get("boot_id")
+                        server.xray_instance_starttime = data.get("starttime")
+            else:
+                client = AmneziaClient(server.api_url, server.api_key)
+                is_healthy = await client.healthcheck()
         except Exception as exc:
             logger.warning("Healthcheck exception for server %s (%s): %s", server.id, server.name, exc)
             is_healthy = False
@@ -223,35 +236,36 @@ async def check_node_resources_and_alerts(bot: Bot):
                         "target_alert_state": ServerHealthState.ONLINE,
                     })
 
-                # Проверка диска (с 1-часовым кулдауном)
-                try:
-                    load_info = await client.get_server_load()
-                    if load_info and isinstance(load_info, dict):
-                        disk_percent = (
-                            load_info.get("disk_percent")
-                            or load_info.get("disk_used_percent")
-                            or load_info.get("disk")
-                        )
-                        if disk_percent is not None and isinstance(disk_percent, (int, float)):
-                            if disk_percent > 85.0:
-                                should_alert = False
-                                if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
-                                    should_alert = True
+                # Проверка диска (с 1-часовым кулдауном) для Amnezia узлов
+                if not is_xray_node:
+                    try:
+                        load_info = await client.get_server_load()
+                        if load_info and isinstance(load_info, dict):
+                            disk_percent = (
+                                load_info.get("disk_percent")
+                                or load_info.get("disk_used_percent")
+                                or load_info.get("disk")
+                            )
+                            if disk_percent is not None and isinstance(disk_percent, (int, float)):
+                                if disk_percent > 85.0:
+                                    should_alert = False
+                                    if st.disk_alert_last_sent is None or (now_m - st.disk_alert_last_sent) >= DISK_ALERT_COOLDOWN_SECONDS:
+                                        should_alert = True
 
-                                if should_alert:
-                                    alerts_to_send.append({
-                                        "text": ALERT_SERVER_DISK_CRITICAL.format(
-                                            server_name=safe(server.name),
-                                            server_id=server.id,
-                                            disk_percent=disk_percent,
-                                        ),
-                                        "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
-                                    })
-                                    st.disk_alert_last_sent = now_m
-                            elif disk_percent <= 80.0:
-                                st.disk_alert_last_sent = None
-                except Exception as exc:
-                    logger.warning("Error reading server load for server %s: %s", server.id, exc)
+                                    if should_alert:
+                                        alerts_to_send.append({
+                                            "text": ALERT_SERVER_DISK_CRITICAL.format(
+                                                server_name=safe(server.name),
+                                                server_id=server.id,
+                                                disk_percent=disk_percent,
+                                            ),
+                                            "reply_markup": get_node_monitor_alert_keyboard(server.id).as_markup(),
+                                        })
+                                        st.disk_alert_last_sent = now_m
+                                elif disk_percent <= 80.0:
+                                    st.disk_alert_last_sent = None
+                    except Exception as exc:
+                        logger.warning("Error reading server load for server %s: %s", server.id, exc)
 
             elif st.health_state == ServerHealthState.PROBLEM:
                 st.consecutive_fails = 0

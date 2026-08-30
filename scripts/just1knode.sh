@@ -516,10 +516,17 @@ cmd_install_amnezia() {
 
     # Настройка Firewall UFW
     info "Настройка сетевого экрана UFW..."
-    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
-    ufw allow 80/tcp || true
-    ufw allow 443/tcp || true
-    ufw --force enable 2>/dev/null || true
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
+    if [[ "$include_xray" == "true" ]]; then
+        local saved_bot_ip
+        saved_bot_ip="$(get_state_val "bot_ip" "")"
+        if [[ -n "$saved_bot_ip" ]]; then
+            ufw allow from "$saved_bot_ip" to any port 8444 proto tcp
+        fi
+    fi
+    ufw --force enable
 
 
     # Сохранение состояния
@@ -893,15 +900,15 @@ EOF
 
     # 6. Настройка UFW
     info "Настройка сетевого экрана UFW..."
-    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
-    ufw allow 80/tcp || true
-    ufw allow 443/tcp || true
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    ufw allow 80/tcp
+    ufw allow 443/tcp
     # Порт 8444 разрешить СТРОГО для IP бота
     ufw delete allow 8444/tcp 2>/dev/null || true
     if [[ -n "${bot_ip}" ]]; then
-        ufw allow from "${bot_ip}" to any port 8444 proto tcp || true
+        ufw allow from "${bot_ip}" to any port 8444 proto tcp
     fi
-    ufw --force enable 2>/dev/null || true
+    ufw --force enable
 
 
     # 7. Сохранение состояния
@@ -1053,13 +1060,13 @@ EOF
 
     # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
-    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
-    ufw allow 80/tcp || true
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    ufw allow 80/tcp
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then
-        ufw allow from "${origin_ip}" to any port 10443 proto tcp || true
+        ufw allow from "${origin_ip}" to any port 10443 proto tcp
     fi
-    ufw --force enable 2>/dev/null || true
+    ufw --force enable
 
 
     set_state_val "role" "xray-exit"
@@ -1351,6 +1358,22 @@ sys.exit(0 if c.is_healthy() else 1)
 }
 
 # =============================================================================
+# КОМАНДА: uninstall
+# =============================================================================
+cmd_uninstall() {
+    log "Удаление компонентов just1knode..."
+    systemctl stop xray-api 2>/dev/null || true
+    systemctl disable xray-api 2>/dev/null || true
+    systemctl stop xray 2>/dev/null || true
+    systemctl disable xray 2>/dev/null || true
+    rm -f /etc/systemd/system/xray-api.service /etc/systemd/system/xray.service
+    systemctl daemon-reload
+    rm -rf /etc/xray /usr/local/share/xray /opt/xray-api /etc/xray-api /var/lib/xray-api
+    rm -f "$STATE_FILE"
+    log "Компоненты Xray и Xray API успешно удалены."
+}
+
+# =============================================================================
 # ИНТЕРАКТИВНОЕ TUI-МЕНЮ
 # =============================================================================
 interactive_menu() {
@@ -1370,10 +1393,11 @@ interactive_menu() {
         echo -e "  [${BOLD}4${NC}] 🔄 ${BOLD}Обновить ядро Xray${NC} (безопасное обновление с rollback)"
         echo -e "  [${BOLD}5${NC}] 🩺 ${BOLD}Самодиагностика узла${NC} (doctor)"
         echo -e "  [${BOLD}6${NC}] 📋 ${BOLD}Показать статус и конфигурацию${NC}"
+        echo -e "  [${BOLD}7${NC}] 🗑️  ${BOLD}Удалить компоненты Xray / just1knode${NC}"
         echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
         echo ""
         echo -e "${CYAN}──────────────────────────────────────────────────────────────────────────────${NC}"
-        read -r -p "Выберите действие [0-6]: " choice
+        read -r -p "Выберите действие [0-7]: " choice
 
         case "$choice" in
             1)
@@ -1399,6 +1423,13 @@ interactive_menu() {
                 ;;
             6)
                 show_state
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            7)
+                read -r -p "Вы уверены, что хотите удалить Xray и Xray API? [y/N]: " confirm_del
+                if [[ "$confirm_del" =~ ^[Yy]$ ]]; then
+                    cmd_uninstall
+                fi
                 read -r -p "Нажмите Enter для продолжения..."
                 ;;
             0|q|exit)
@@ -1460,8 +1491,11 @@ main() {
         status|state)
             show_state
             ;;
+        uninstall)
+            cmd_uninstall
+            ;;
         help|-h|--help)
-            echo "Использование: just1knode [install amnezia|xray-origin|xray-exit | update xray | doctor | status]"
+            echo "Использование: just1knode [install amnezia|xray-origin|xray-exit | update xray | doctor | status | uninstall]"
             ;;
         *)
             error "Неизвестная команда: $action. Используйте 'just1knode help'."

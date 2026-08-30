@@ -1,5 +1,6 @@
 import logging
 import os
+import secrets
 import time
 import uuid as uuid_lib
 from typing import Optional, List, Dict, Any
@@ -60,7 +61,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Node API key is not configured",
         )
-    if not x_api_key or x_api_key != expected_key:
+    if not x_api_key or not secrets.compare_digest(x_api_key, expected_key):
         logger.warning("Unauthorized access attempt with X-API-Key: %s", "present" if x_api_key else "missing")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -127,6 +127,7 @@ async def create_server(
     country_flag: str = None,
     protocol: str = AMNEZIA_PROTOCOL,
     max_clients: int = 50,
+    capabilities: list[str] | None = None,
 ) -> Server:
     server = Server(
         name=name,
@@ -135,6 +136,7 @@ async def create_server(
         country_flag=country_flag,
         protocol=protocol,
         max_clients=max_clients,
+        capabilities=capabilities or [],
     )
     session.add(server)
     await session.flush()

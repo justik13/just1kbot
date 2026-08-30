@@ -94,8 +94,11 @@ class WhiteInternetReconciliationWorker:
                         WhiteInternetSubscription.last_reconciled_node_epoch
                         != target_epoch,
                         WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
-                        WhiteInternetProvisioningStatus.ACTIVE
-                        != WhiteInternetSubscription.provisioning_status,
+                        WhiteInternetSubscription.provisioning_status.in_([
+                            WhiteInternetProvisioningStatus.PENDING_CREATE,
+                            WhiteInternetProvisioningStatus.PENDING_UPDATE,
+                            WhiteInternetProvisioningStatus.PENDING_DELETE,
+                        ]),
                     ),
                 )
                 .order_by(WhiteInternetSubscription.id.asc())
@@ -105,12 +108,12 @@ class WhiteInternetReconciliationWorker:
             pending_subs = res_subs.scalars().all()
 
             for sub_meta in pending_subs:
-                sub = await white_internet_repo.get_subscription_with_lock(session, sub_meta.id)
+                # 1. Read current state and check expiration
+                sub_id = sub_meta.id
+                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
                 if sub is None:
                     continue
 
-                # Expiration is a DB state transition, not merely an HTTP
-                # presentation concern. Close all remaining grants atomically.
                 if sub.expires_at <= now and sub.status in (
                     WhiteInternetStatus.PENDING,
                     WhiteInternetStatus.ACTIVE,
@@ -128,22 +131,22 @@ class WhiteInternetReconciliationWorker:
                         .values(bytes_remaining=0)
                     )
 
-                # PENDING means paid but not yet provisioned. It therefore has
-                # an active desired runtime state while within its paid period.
                 desired_active = (
                     sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
                     and sub.expires_at > now
                 )
-
                 target_version = sub.desired_version
-                # Pre-sync health / generation capture
+                sub_uuid = sub.uuid
+                await session.flush()
+
+                # 2. Perform external network I/O with Xray node
                 is_healthy_pre, epoch_pre, data_pre = await self.client.check_health(
                     server.api_url, server.api_key
                 )
                 if not is_healthy_pre or epoch_pre != target_epoch:
                     logger.warning(
                         "Skipping sync for sub_id=%d: server %d pre-health check failed or epoch changed",
-                        sub.id,
+                        sub_id,
                         server_id,
                     )
                     continue
@@ -151,12 +154,16 @@ class WhiteInternetReconciliationWorker:
                 success, err_msg = await self.client.sync_client(
                     server.api_url,
                     server.api_key,
-                    sub.uuid,
+                    sub_uuid,
                     is_active=desired_active,
                 )
 
+                # 3. Post-sync generation revalidation and atomic state persistence
+                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
+                if sub is None:
+                    continue
+
                 if success:
-                    # Post-sync generation revalidation: verify Xray didn't restart during sync
                     is_healthy_post, epoch_post, data_post = await self.client.check_health(
                         server.api_url, server.api_key
                     )
@@ -177,20 +184,15 @@ class WhiteInternetReconciliationWorker:
                         if sub.status == WhiteInternetStatus.PENDING and desired_active:
                             sub.status = WhiteInternetStatus.ACTIVE
                             sub.status_reason = None
-                        sub.provisioning_status = (
-                            WhiteInternetProvisioningStatus.ACTIVE
-                            if desired_active
-                            else WhiteInternetProvisioningStatus.PENDING_DELETE
-                        )
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
                         sub.last_synced_at = now_utc()
                         sub.last_sync_error = None
                         synced_count += 1
-
                     else:
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                         logger.warning(
                             "Reconciliation post-sync generation check detected race for sub_id=%d on server %d",
-                            sub.id,
+                            sub_id,
                             server_id,
                         )
                 else:
@@ -199,7 +201,7 @@ class WhiteInternetReconciliationWorker:
                     sub.last_synced_at = now_utc()
                     logger.error(
                         "Failed to reconcile White Internet sub_id=%d on server %d: %s",
-                        sub.id,
+                        sub_id,
                         server_id,
                         err_msg,
                     )

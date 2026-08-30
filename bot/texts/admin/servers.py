@@ -3,6 +3,8 @@ from __future__ import annotations
 
 ADMIN_BTN_ADD_SERVER = "➕ Добавить сервер"
 
+PROTOCOL_XRAY_ORIGIN = "Xray (Origin)"
+
 ADMIN_BTN_BACK_TO_SERVERS = "← К списку серверов"
 
 ADMIN_SERVERS_COMMON = """🛠 Админка › 🌍 <b>Серверы</b>

@@ -5,12 +5,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import ssl
 from typing import Any
 
 import aiohttp
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_url(url: str) -> str:
+    """Mask UUIDs and sensitive endpoints in URL for safe logging."""
+    return re.sub(r"/v1/clients/[a-fA-F0-9-]+", "/v1/clients/[MASKED]", url)
 
 
 class XrayNodeClientError(RuntimeError):
@@ -46,6 +52,7 @@ class XrayNodeClient:
     ) -> tuple[int, Any, str | None]:
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
         ssl_context = self._ssl_context()
+        safe_url = _sanitize_url(url)
 
         for attempt in range(self.max_retries + 1):
             try:
@@ -68,7 +75,7 @@ class XrayNodeClient:
                         if status_code in (502, 503, 504) and attempt < self.max_retries:
                             logger.warning(
                                 "%s %s failed with status %d (attempt %d/%d), retrying...",
-                                method, url, status_code, attempt + 1, self.max_retries + 1
+                                method, safe_url, status_code, attempt + 1, self.max_retries + 1
                             )
                             await asyncio.sleep(0.5 * (2**attempt))
                             continue
@@ -77,7 +84,7 @@ class XrayNodeClient:
                 if attempt < self.max_retries:
                     logger.warning(
                         "%s %s failed with %s (attempt %d/%d), retrying...",
-                        method, url, exc, attempt + 1, self.max_retries + 1
+                        method, safe_url, exc, attempt + 1, self.max_retries + 1
                     )
                     await asyncio.sleep(0.5 * (2**attempt))
                     continue
@@ -104,7 +111,7 @@ class XrayNodeClient:
             node_epoch = data.get("node_epoch")
             return is_ok, node_epoch, data
 
-        logger.warning("Node health check failed for %s: %s", url, err)
+        logger.warning("Node health check failed for %s: %s", _sanitize_url(url), err)
         return False, None, None
 
     async def sync_client(
@@ -146,7 +153,7 @@ class XrayNodeClient:
             node_starttime = data.get("starttime")
             users = data.get("users", {})
             return node_epoch, node_boot_id, node_starttime, users
-        logger.error("Traffic snapshot fetch failed for %s: %s", url, err)
+        logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return None, None, None, None
 
 
