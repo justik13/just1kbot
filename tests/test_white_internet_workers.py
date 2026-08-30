@@ -181,8 +181,14 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(processed, 1)
                 mock_deduct.assert_awaited_once_with(
-                    mock_session, subscription_id=sub.id, delta_bytes=200, now=patch("utils.datetime_helpers.now_utc").start() if False else unittest.mock.ANY
+                    mock_session,
+                    subscription_id=sub.id,
+                    delta_bytes=200,
+                    delta_uplink=50,
+                    delta_downlink=150,
+                    now=unittest.mock.ANY,
                 )
                 self.assertEqual(sub.last_uplink_snapshot, 150)
+
                 self.assertEqual(sub.last_downlink_snapshot, 350)
                 self.assertEqual(sub.traffic_stats_epoch, "epoch-100")

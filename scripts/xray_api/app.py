@@ -3,7 +3,7 @@ import os
 import uuid as uuid_lib
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, Header, HTTPException, status, Depends
+from fastapi import FastAPI, Header, HTTPException, status, Depends, Response
 from pydantic import BaseModel, Field, model_validator
 
 from epoch_manager import EpochManager
@@ -97,21 +97,27 @@ class ClientSyncRequest(BaseModel):
 
 # Endpoints
 @app.get("/v1/health")
-def get_health(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Checks service health, Xray core process state, gRPC connectivity, and current epoch.
+    Fail-closed: returns HTTP 503 if Xray is not running or gRPC is unhealthy.
     """
     pid, _ = epoch_manager.get_xray_process_info()
     grpc_ok = grpc_client.is_healthy()
-    current_epoch = epoch_manager.get_current_epoch()
+    is_running = pid is not None
+    is_healthy = is_running and grpc_ok
+    current_epoch = epoch_manager.get_current_running_epoch()
 
-    return {
-        "status": "ok",
-        "xray_running": pid is not None,
+    data = {
+        "status": "ok" if is_healthy else "error",
+        "xray_running": is_running,
         "grpc_ok": grpc_ok,
         "node_epoch": current_epoch,
         "xray_pid": pid,
     }
+    if not is_healthy:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return data
 
 
 @app.get("/v1/traffic/snapshot")
@@ -120,9 +126,15 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     Returns normalized traffic stats aggregated by UUID/email along with the node epoch.
     Format: { "node_epoch": str, "users": { uuid: { "uplink": int, "downlink": int } } }
     """
-    current_epoch = epoch_manager.get_current_epoch()
+    current_epoch = epoch_manager.get_current_running_epoch()
+    if not current_epoch:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Xray is not currently running",
+        )
     try:
         users_stats = grpc_client.get_users_stats(reset=False)
+
     except Exception as e:
         logger.error("Failed to fetch traffic stats from gRPC: %s", e)
         raise HTTPException(

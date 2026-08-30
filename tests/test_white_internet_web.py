@@ -57,8 +57,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
     async def test_exhausted_status_returns_403(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.status = WhiteInternetStatus.EXHAUSTED
-        sub.last_uplink_snapshot = 1000
-        sub.last_downlink_snapshot = 2000
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
         sub.traffic_limit_bytes = 53687091200
         sub.expires_at = datetime(2026, 9, 30, 0, 0, tzinfo=timezone.utc)
 
@@ -72,6 +72,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 resp = await self.client.get("/sub/wl/exhausted-token-1234567890abcdef")
                 self.assertEqual(resp.status, 403)
                 self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
+
 
     @unittest_run_loop
     async def test_runtime_out_of_sync_returns_503(self):
@@ -143,12 +144,15 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             expires_at=now + timedelta(days=30),
             traffic_limit_bytes=53687091200,
             traffic_used_bytes=1000,
+            traffic_uplink_bytes=500,
+            traffic_downlink_bytes=500,
             last_uplink_snapshot=500,
             last_downlink_snapshot=500,
             desired_version=1,
             actual_version=1,
             last_reconciled_node_epoch="epoch-xyz",
         )
+
 
         server = Server(
             id=1,

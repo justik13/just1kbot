@@ -73,7 +73,9 @@ class WhiteInternetTrafficWorker:
                 # A generation change resets counters; the current snapshot is
                 # therefore the first delta of the new generation.
                 if sub.traffic_stats_epoch != node_epoch:
-                    delta = uplink + downlink
+                    delta_up = uplink
+                    delta_down = downlink
+                    delta = delta_up + delta_down
                     sub.traffic_stats_epoch = node_epoch
                 else:
                     delta_up = max(uplink - sub.last_uplink_snapshot, 0)
@@ -90,8 +92,11 @@ class WhiteInternetTrafficWorker:
                     session,
                     subscription_id=sub.id,
                     delta_bytes=delta,
+                    delta_uplink=delta_up,
+                    delta_downlink=delta_down,
                     now=now,
                 )
+
                 total_processed += 1
                 if overage:
                     logger.warning(

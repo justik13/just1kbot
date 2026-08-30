@@ -10,13 +10,14 @@ if str(GENERATED_DIR) not in sys.path:
     sys.path.insert(0, str(GENERATED_DIR))
 
 try:
+    from xray.common.serial import typed_message_pb2
+    from xray.common.protocol import user_pb2
+    from xray.proxy.vless import account_pb2
     from xray.app.proxyman.command import command_pb2 as proxyman_cmd
     from xray.app.proxyman.command import command_pb2_grpc as proxyman_grpc
     from xray.app.stats.command import command_pb2 as stats_cmd
     from xray.app.stats.command import command_pb2_grpc as stats_grpc
-    from xray.common.protocol import user_pb2
-    from xray.common.serial import typed_message_pb2
-    from xray.proxy.vless import account_pb2
+
 except ImportError:
     proxyman_cmd = None
     proxyman_grpc = None
@@ -37,29 +38,46 @@ class XrayGrpcClient:
         self.port = port
         self.target = f"{host}:{port}"
         self.timeout = timeout
+        self._channel = None
 
     def _get_channel(self) -> grpc.Channel:
-        return grpc.insecure_channel(self.target)
+        if self._channel is None:
+            self._channel = grpc.insecure_channel(self.target)
+        return self._channel
+
+    get_channel = _get_channel
+
+    def close(self) -> None:
+        if self._channel is not None:
+            try:
+                self._channel.close()
+            except Exception:
+                pass
+            self._channel = None
 
     def is_healthy(self) -> bool:
         if stats_grpc is None or stats_cmd is None:
             return False
         try:
-            with self._get_channel() as channel:
-                stub = stats_grpc.StatsServiceStub(channel)
-                stub.QueryStats(
-                    stats_cmd.QueryStatsRequest(pattern="", reset=False),
-                    timeout=min(self.timeout, 2.0),
-                )
-                return True
+            channel = self._get_channel()
+            stub = stats_grpc.StatsServiceStub(channel)
+            stub.QueryStats(
+                stats_cmd.QueryStatsRequest(pattern="", reset=False),
+                timeout=min(self.timeout, 2.0),
+            )
+            return True
+
         except grpc.RpcError as exc:
             if exc.code() in (grpc.StatusCode.OK, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT):
                 return True
             logger.debug("gRPC health check RPC error: %s (%s)", exc.code(), exc.details())
+            self.close()
             return False
         except Exception as exc:
             logger.debug("gRPC health check connection failed: %s", exc)
+            self.close()
             return False
+
 
     def add_user(self, inbound_tag: str, user_id: str, flow: str = "") -> bool:
         if proxyman_cmd is None or proxyman_grpc is None:
@@ -77,17 +95,18 @@ class XrayGrpcClient:
         )
         req = proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_typed)
 
-        with self._get_channel() as channel:
-            stub = proxyman_grpc.HandlerServiceStub(channel)
-            try:
-                stub.AlterInbound(req, timeout=self.timeout)
+        channel = self._get_channel()
+        stub = proxyman_grpc.HandlerServiceStub(channel)
+        try:
+            stub.AlterInbound(req, timeout=self.timeout)
+            return True
+        except grpc.RpcError as exc:
+            details = (exc.details() or "").lower()
+            if "already exists" in details or "duplicate" in details:
                 return True
-            except grpc.RpcError as exc:
-                details = (exc.details() or "").lower()
-                if "already exists" in details or "duplicate" in details:
-                    return True
-                logger.error("AlterInbound AddUser failed: %s", exc)
-                raise
+            logger.error("AlterInbound AddUser failed: %s", exc)
+            self.close()
+            raise
 
     def remove_user(self, inbound_tag: str, user_id: str) -> bool:
         if proxyman_cmd is None or proxyman_grpc is None:
@@ -100,17 +119,18 @@ class XrayGrpcClient:
         )
         req = proxyman_cmd.AlterInboundRequest(tag=inbound_tag, operation=op_typed)
 
-        with self._get_channel() as channel:
-            stub = proxyman_grpc.HandlerServiceStub(channel)
-            try:
-                stub.AlterInbound(req, timeout=self.timeout)
+        channel = self._get_channel()
+        stub = proxyman_grpc.HandlerServiceStub(channel)
+        try:
+            stub.AlterInbound(req, timeout=self.timeout)
+            return True
+        except grpc.RpcError as exc:
+            details = (exc.details() or "").lower()
+            if "not found" in details or "does not exist" in details:
                 return True
-            except grpc.RpcError as exc:
-                details = (exc.details() or "").lower()
-                if "not found" in details or "does not exist" in details:
-                    return True
-                logger.error("AlterInbound RemoveUser failed: %s", exc)
-                raise
+            logger.error("AlterInbound RemoveUser failed: %s", exc)
+            self.close()
+            raise
 
     @staticmethod
     def _aggregate_query_stats(resp) -> Dict[str, Dict[str, int]]:
@@ -149,26 +169,29 @@ class XrayGrpcClient:
         if stats_cmd is None or stats_grpc is None:
             raise RuntimeError("Protobuf modules not loaded")
 
-        with self._get_channel() as channel:
-            stub = stats_grpc.StatsServiceStub(channel)
-            try:
-                resp = stub.QueryStats(
-                    stats_cmd.QueryStatsRequest(pattern="user>>>", reset=reset),
-                    timeout=self.timeout,
-                )
-                result = self._aggregate_query_stats(resp)
-                if result:
-                    return result
-                logger.warning("QueryStats returned no user traffic counters; trying GetUsersStats")
-            except grpc.RpcError as exc:
-                logger.warning("QueryStats(user>>>) failed: %s; trying GetUsersStats", exc)
+        channel = self._get_channel()
+        stub = stats_grpc.StatsServiceStub(channel)
+        try:
+            resp = stub.QueryStats(
 
-            try:
-                resp = stub.GetUsersStats(
-                    stats_cmd.GetUsersStatsRequest(include_traffic=True, reset=reset),
-                    timeout=self.timeout,
-                )
-                return self._aggregate_user_stats(resp)
-            except grpc.RpcError as exc:
-                logger.error("Both Xray traffic statistics APIs failed: %s", exc)
-                raise
+                stats_cmd.QueryStatsRequest(pattern="user>>>", reset=reset),
+                timeout=self.timeout,
+            )
+            result = self._aggregate_query_stats(resp)
+            if result:
+                return result
+            logger.warning("QueryStats returned no user traffic counters; trying GetUsersStats")
+        except grpc.RpcError as exc:
+            logger.warning("QueryStats(user>>>) failed: %s; trying GetUsersStats", exc)
+
+        try:
+            resp = stub.GetUsersStats(
+                stats_cmd.GetUsersStatsRequest(include_traffic=True, reset=reset),
+                timeout=self.timeout,
+            )
+            return self._aggregate_user_stats(resp)
+        except grpc.RpcError as exc:
+            logger.error("Both Xray traffic statistics APIs failed: %s", exc)
+            self.close()
+            raise
+

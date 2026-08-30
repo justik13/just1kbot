@@ -106,6 +106,18 @@ def upgrade() -> None:
             server_default=sa.text("0"),
         ),
         sa.Column(
+            "traffic_uplink_bytes",
+            sa.BigInteger(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "traffic_downlink_bytes",
+            sa.BigInteger(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
             "last_uplink_snapshot",
             sa.BigInteger(),
             nullable=False,
@@ -161,9 +173,11 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "traffic_limit_bytes >= 0 AND traffic_used_bytes >= 0 "
+            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
             "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
+
         sa.ForeignKeyConstraint(["origin_node_id"], ["servers.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import ssl
@@ -36,28 +37,75 @@ class XrayNodeClient:
         """Create a verified TLS context; custom CA is supported for node certificates."""
         return ssl.create_default_context(cafile=self.ca_file)
 
-    async def check_health(
-        self, api_url: str, api_key: str
-    ) -> tuple[bool, str | None, dict[str, Any] | None]:
-        url = f"{api_url.rstrip('/')}/v1/health"
-        headers = self._get_headers(api_key)
+    async def _make_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        json_data: dict[str, Any] | None = None,
+    ) -> tuple[int, Any, str | None]:
         client_timeout = aiohttp.ClientTimeout(total=self.timeout)
         ssl_context = self._ssl_context()
 
-        try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.get(url, headers=headers, ssl=ssl_context) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        is_ok = data.get("status") == "ok" and data.get("xray_running", False)
-                        node_epoch = data.get("node_epoch")
-                        return is_ok, node_epoch, data
-                    text = await resp.text()
-                    logger.warning("Node health check failed with status %d: %s", resp.status, text)
-                    return False, None, None
-        except Exception as exc:
-            logger.error("Failed to connect to xray-api health endpoint at %s: %s", url, exc)
-            return False, None, None
+        for attempt in range(self.max_retries + 1):
+            try:
+                async with aiohttp.ClientSession(timeout=client_timeout) as session:
+                    async with session.request(
+                        method, url, headers=headers, json=json_data, ssl=ssl_context
+                    ) as resp:
+                        status_code = resp.status
+                        if status_code in (200, 201):
+                            try:
+                                data = await resp.json()
+                                return status_code, data, None
+                            except Exception:
+                                text = await resp.text()
+                                return status_code, text, None
+                        if status_code in (204,):
+                            return status_code, None, None
+
+                        text = await resp.text()
+                        if status_code in (502, 503, 504) and attempt < self.max_retries:
+                            logger.warning(
+                                "%s %s failed with status %d (attempt %d/%d), retrying...",
+                                method, url, status_code, attempt + 1, self.max_retries + 1
+                            )
+                            await asyncio.sleep(0.5 * (2**attempt))
+                            continue
+                        return status_code, None, f"HTTP {status_code}: {text}"
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "%s %s failed with %s (attempt %d/%d), retrying...",
+                        method, url, exc, attempt + 1, self.max_retries + 1
+                    )
+                    await asyncio.sleep(0.5 * (2**attempt))
+                    continue
+                return 0, None, f"Network failure: {exc}"
+            except Exception as exc:
+                return 0, None, f"Unexpected failure: {exc}"
+
+        return 0, None, "Max retries exceeded"
+
+    async def check_health(
+        self, api_url: str, api_key: str
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """Check node health fail-closed: must have status=ok, xray_running=True, grpc_ok=True."""
+        url = f"{api_url.rstrip('/')}/v1/health"
+        headers = self._get_headers(api_key)
+        status_code, data, err = await self._make_request("GET", url, headers)
+
+        if status_code == 200 and isinstance(data, dict):
+            is_ok = (
+                data.get("status") == "ok"
+                and data.get("xray_running", False) is True
+                and data.get("grpc_ok", False) is True
+            )
+            node_epoch = data.get("node_epoch")
+            return is_ok, node_epoch, data
+
+        logger.warning("Node health check failed for %s: %s", url, err)
+        return False, None, None
 
     async def sync_client(
         self, api_url: str, api_key: str, client_uuid: str, is_active: bool
@@ -69,22 +117,10 @@ class XrayNodeClient:
             "client_id": client_uuid,
             "desired_state": "active" if is_active else "disabled",
         }
-        client_timeout = aiohttp.ClientTimeout(total=self.timeout)
-        ssl_context = self._ssl_context()
-
-        try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.post(url, headers=headers, json=payload, ssl=ssl_context) as resp:
-                    if resp.status in (200, 201):
-                        return True, None
-                    text = await resp.text()
-                    err = f"Sync failed with HTTP {resp.status}: {text}"
-                    logger.error(err)
-                    return False, err
-        except Exception as exc:
-            err = f"Network failure during sync with {url}: {exc}"
-            logger.error(err)
-            return False, err
+        status_code, _data, err = await self._make_request("POST", url, headers, json_data=payload)
+        if status_code in (200, 201):
+            return True, None
+        return False, err or f"Sync failed with HTTP {status_code}"
 
     async def remove_client(
         self, api_url: str, api_key: str, client_uuid: str
@@ -92,22 +128,10 @@ class XrayNodeClient:
         """Remove a client from all inbounds on the node."""
         url = f"{api_url.rstrip('/')}/v1/clients/{client_uuid}"
         headers = self._get_headers(api_key)
-        client_timeout = aiohttp.ClientTimeout(total=self.timeout)
-        ssl_context = self._ssl_context()
-
-        try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.delete(url, headers=headers, ssl=ssl_context) as resp:
-                    if resp.status in (200, 204):
-                        return True, None
-                    text = await resp.text()
-                    err = f"Delete failed with HTTP {resp.status}: {text}"
-                    logger.error(err)
-                    return False, err
-        except Exception as exc:
-            err = f"Network failure during client deletion: {exc}"
-            logger.error(err)
-            return False, err
+        status_code, _data, err = await self._make_request("DELETE", url, headers)
+        if status_code in (200, 204):
+            return True, None
+        return False, err or f"Delete failed with HTTP {status_code}"
 
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
@@ -115,20 +139,11 @@ class XrayNodeClient:
         """Fetch normalized traffic snapshot across all configured inbounds."""
         url = f"{api_url.rstrip('/')}/v1/traffic/snapshot"
         headers = self._get_headers(api_key)
-        client_timeout = aiohttp.ClientTimeout(total=self.timeout)
-        ssl_context = self._ssl_context()
+        status_code, data, err = await self._make_request("GET", url, headers)
+        if status_code == 200 and isinstance(data, dict):
+            node_epoch = data.get("node_epoch")
+            users = data.get("users", {})
+            return node_epoch, users
+        logger.error("Traffic snapshot fetch failed for %s: %s", url, err)
+        return None, None
 
-        try:
-            async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                async with session.get(url, headers=headers, ssl=ssl_context) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        node_epoch = data.get("node_epoch")
-                        users = data.get("users", {})
-                        return node_epoch, users
-                    text = await resp.text()
-                    logger.error("Traffic snapshot fetch failed (%d): %s", resp.status, text)
-                    return None, None
-        except Exception as exc:
-            logger.error("Network failure fetching traffic snapshot from %s: %s", url, exc)
-            return None, None

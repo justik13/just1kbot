@@ -61,7 +61,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         if sub.status == WhiteInternetStatus.EXHAUSTED:
             headers = dict(common_headers)
             headers["Subscription-Userinfo"] = (
-                f"upload={sub.last_uplink_snapshot}; download={sub.last_downlink_snapshot}; "
+                f"upload={sub.traffic_uplink_bytes}; download={sub.traffic_downlink_bytes}; "
                 f"total={sub.traffic_limit_bytes}; expire={int(sub.expires_at.timestamp())}"
             )
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
@@ -105,10 +105,11 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             {
                 "Content-Type": "text/plain; charset=utf-8",
                 "Subscription-Userinfo": (
-                    f"upload={sub.last_uplink_snapshot}; "
-                    f"download={max(0, sub.traffic_used_bytes - sub.last_uplink_snapshot)}; "
+                    f"upload={sub.traffic_uplink_bytes}; "
+                    f"download={sub.traffic_downlink_bytes}; "
                     f"total={sub.traffic_limit_bytes}; expire={int(sub.expires_at.timestamp())}"
                 ),
+
 
                 "Profile-Update-Interval": "6",
                 "Hide-Url": "1",

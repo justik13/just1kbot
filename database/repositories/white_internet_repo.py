@@ -126,11 +126,12 @@ async def expire_subscription_atomic(
         sub.status_reason = reason
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
-    await _lock_all_grants(session, sub.id)
-    for grant in await _lock_all_grants(session, sub.id):
+    grants = await _lock_all_grants(session, sub.id)
+    for grant in grants:
         grant.bytes_remaining = 0
     await session.flush()
     return sub
+
 
 
 async def create_white_internet_subscription(
@@ -237,7 +238,13 @@ async def topup_quota_atomic(
 
 
 async def deduct_traffic_atomic(
-    session: AsyncSession, *, subscription_id: int, delta_bytes: int, now: datetime | None = None
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+    delta_bytes: int,
+    delta_uplink: int = 0,
+    delta_downlink: int = 0,
+    now: datetime | None = None,
 ) -> tuple[int, bool, int]:
     if delta_bytes <= 0:
         return 0, False, 0
@@ -255,14 +262,18 @@ async def deduct_traffic_atomic(
         grant.bytes_remaining -= deduct_from_grant
         remaining_to_deduct -= deduct_from_grant
         consumed_from_grants += deduct_from_grant
-    sub.traffic_used_bytes += delta_bytes
+    sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + delta_bytes
+    sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + max(0, delta_uplink)
+    sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + max(0, delta_downlink)
     unallocated_overage = max(remaining_to_deduct, 0)
+
     available_after = await get_available_quota_bytes(session, subscription_id, now)
     became_exhausted = False
     if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
         sub.desired_version += 1
+
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
         became_exhausted = True
     await session.flush()

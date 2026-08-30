@@ -302,6 +302,161 @@ EOF
     chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-all.sh
 }
 
+render_nginx_modular_config() {
+    local domain="$1"
+    local cert_file="$2"
+    local key_file="$3"
+    local include_amnezia="${4:-false}"
+    local include_xray="${5:-false}"
+    local xray_api_port="${6:-8444}"
+
+    mkdir -p /etc/nginx/just1k.d /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
+
+    cat > /etc/nginx/conf.d/xhttp_map.conf <<'EOF'
+map $request_method $xhttp_proxy_method {
+    default $request_method;
+    OPTIONS POST;
+}
+EOF
+
+    if [[ "$include_amnezia" == "true" ]]; then
+        cat > /etc/nginx/just1k.d/amnezia-locations.conf <<'EOF'
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+EOF
+    fi
+
+    if [[ "$include_xray" == "true" ]]; then
+        cat > /etc/nginx/just1k.d/xray-locations.conf <<'EOF'
+    location = /cdn-check {
+        add_header X-CDN-Origin "ok" always;
+        add_header X-Origin-Method $request_method always;
+        return 204;
+    }
+
+    location /api/v3/de {
+        proxy_pass http://127.0.0.1:8003;
+        proxy_method $xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_headers on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /api/v3/nl {
+        proxy_pass http://127.0.0.1:8004;
+        proxy_method $xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_headers on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+EOF
+    fi
+
+    local config_file="/etc/nginx/sites-available/just1k-${domain}.conf"
+    cat > "$config_file" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 0;
+    client_header_buffer_size 64k;
+    large_client_header_buffers 8 128k;
+
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+
+EOF
+
+    if [[ "$include_xray" == "true" ]]; then
+        echo "    include /etc/nginx/just1k.d/xray-locations.conf;" >> "$config_file"
+    fi
+    if [[ "$include_amnezia" == "true" ]]; then
+        echo "    include /etc/nginx/just1k.d/amnezia-locations.conf;" >> "$config_file"
+    fi
+
+    cat >> "$config_file" <<EOF
+}
+EOF
+
+    if [[ "$include_xray" == "true" ]]; then
+        cat >> "$config_file" <<EOF
+
+server {
+    listen ${xray_api_port} ssl;
+    listen [::]:${xray_api_port} ssl;
+    server_name ${domain};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+    fi
+
+    rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf
+    rm -f /etc/nginx/sites-enabled/just1k-xray-origin.conf
+    ln -sfn "$config_file" "/etc/nginx/sites-enabled/just1k-${domain}.conf"
+    rm -f /etc/nginx/conf.d/acme-challenge.conf
+    nginx -t && systemctl reload nginx
+}
+
 # =============================================================================
 # 1. КОМАНДА: install amnezia
 # =============================================================================
@@ -325,50 +480,24 @@ cmd_install_amnezia() {
 
     obtain_ssl_cert "$domain" "$email"
 
-    # Конфигурация Nginx для Amnezia API
+    set_state_val "has_amnezia" "true"
+    set_state_val "amnezia_domain" "$domain"
+    set_state_val "email" "$email"
+
+    local has_xray
+    has_xray="$(get_state_val "has_xray_origin" "false")"
+    local xray_dom
+    xray_dom="$(get_state_val "origin_domain" "")"
+    local include_xray="false"
+    if [[ "$has_xray" == "true" && "$xray_dom" == "$domain" ]]; then
+        include_xray="true"
+    fi
+
     local cert_dir="/etc/letsencrypt/live/${domain}"
-    cat > "/etc/nginx/sites-available/just1k-amnezia.conf" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${domain};
+    local cert_file="${cert_dir}/fullchain.pem"
+    local key_file="${cert_dir}/privkey.pem"
 
-    location ^~ /.well-known/acme-challenge/ {
-        root ${CERTBOT_WEBROOT};
-        default_type "text/plain";
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${domain};
-
-    ssl_certificate ${cert_dir}/fullchain.pem;
-    ssl_certificate_key ${cert_dir}/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    client_max_body_size 10m;
-
-    location / {
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-    }
-}
-EOF
-
-    ln -sfn "/etc/nginx/sites-available/just1k-amnezia.conf" "/etc/nginx/sites-enabled/just1k-amnezia.conf"
-    rm -f /etc/nginx/conf.d/acme-challenge.conf
-    nginx -t && systemctl reload nginx
+    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "true" "$include_xray" "8444"
 
     # Настройка Firewall UFW
     ufw allow 80/tcp || true
@@ -378,6 +507,7 @@ EOF
     set_state_val "role" "amnezia"
     set_state_val "domain" "$domain"
     set_state_val "email" "$email"
+
     set_state_val "certbot_webroot" "$CERTBOT_WEBROOT"
     from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     set_state_val "installed_at" "$from_ts"
@@ -452,8 +582,9 @@ cmd_install_xray_origin() {
     fi
     if [[ -z "$api_key" ]]; then
         api_key="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
-        info "Сгенерирован новый XRAY_API_KEY: ${api_key}"
+        info "Сгенерирован новый XRAY_API_KEY (сохранен в защищенный файл конфигурации)."
     fi
+
 
     [[ -n "$domain" ]] || error "Домен обязателен."
     [[ -n "$bot_ip" ]] || error "IP-адрес бота обязателен."
@@ -695,114 +826,22 @@ EOF
     info "Проверка синтаксиса конфигурации Xray..."
     "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
 
-    # 4. Конфигурация Nginx Origin
-    info "Настройка конфигурации Nginx..."
-    cat > /etc/nginx/conf.d/xhttp_map.conf <<'EOF'
-map $request_method $xhttp_proxy_method {
-    default $request_method;
-    OPTIONS POST;
-}
-EOF
+    # 4. Конфигурация Nginx Origin (Modular Coexistence)
+    info "Настройка модульной конфигурации Nginx..."
+    set_state_val "has_xray_origin" "true"
+    set_state_val "origin_domain" "$domain"
+    set_state_val "role" "xray-origin"
 
-    cat > "/etc/nginx/sites-available/just1k-xray-origin.conf" <<EOF
-server {
-    listen 80;
-    listen [::]:80;
-    server_name ${domain};
+    local has_amn
+    has_amn="$(get_state_val "has_amnezia" "false")"
+    local amn_dom
+    amn_dom="$(get_state_val "amnezia_domain" "")"
+    local include_amn="false"
+    if [[ "$has_amn" == "true" && "$amn_dom" == "$domain" ]]; then
+        include_amn="true"
+    fi
 
-    location ^~ /.well-known/acme-challenge/ {
-        root ${CERTBOT_WEBROOT};
-        default_type "text/plain";
-    }
-
-    location / {
-        return 301 https://\$host\$request_uri;
-    }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${domain};
-
-    ssl_certificate ${cert_file};
-    ssl_certificate_key ${key_file};
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    client_max_body_size 0;
-    client_header_buffer_size 64k;
-    large_client_header_buffers 8 128k;
-
-    proxy_buffering off;
-    proxy_request_buffering off;
-    proxy_read_timeout 3600s;
-    proxy_send_timeout 3600s;
-
-    location = /cdn-check {
-        add_header X-CDN-Origin "ok" always;
-        add_header X-Origin-Method \$request_method always;
-        return 204;
-    }
-
-    location /api/v3/de {
-        proxy_pass http://127.0.0.1:8003;
-        proxy_method \$xhttp_proxy_method;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_pass_request_headers on;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-
-    location /api/v3/nl {
-        proxy_pass http://127.0.0.1:8004;
-        proxy_method \$xhttp_proxy_method;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_pass_request_headers on;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-}
-
-server {
-    listen 8444 ssl;
-    listen [::]:8444 ssl;
-    server_name ${domain};
-
-    ssl_certificate ${cert_file};
-    ssl_certificate_key ${key_file};
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    location / {
-        proxy_pass http://127.0.0.1:5001;
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_read_timeout 60s;
-    }
-}
-EOF
-
-    ln -sfn "/etc/nginx/sites-available/just1k-xray-origin.conf" "/etc/nginx/sites-enabled/just1k-xray-origin.conf"
-    rm -f /etc/nginx/conf.d/acme-challenge.conf
-    nginx -t && systemctl reload nginx
+    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444"
 
     # 5. Установка автономного агента xray-api
     info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
@@ -839,8 +878,6 @@ EOF
     ufw allow from "${bot_ip}" to any port 8444 proto tcp || true
 
     # 7. Сохранение состояния
-    set_state_val "role" "xray-origin"
-    set_state_val "domain" "$domain"
     set_state_val "bot_ip" "$bot_ip"
     set_state_val "exit_de_host" "$exit_de_host"
     set_state_val "exit_de_uuid" "$exit_de_uuid"
@@ -854,10 +891,11 @@ EOF
     log "Установка Xray Origin успешно завершена!"
     info "Xray Inbounds: 8003 (/api/v3/de), 8004 (/api/v3/nl)"
     info "API Agent: https://${domain}:8444 (доступен только с IP: ${bot_ip})"
-    info "X-API-Key: ${api_key}"
+    info "X-API-Key сохранен в /etc/xray-api/config.env (права 600)"
 }
 
 # =============================================================================
+
 # 3. КОМАНДА: install xray-exit
 # =============================================================================
 cmd_install_xray_exit() {
@@ -1045,9 +1083,24 @@ cmd_update_xray() {
         warn "Конфигурация ${XRAY_CONFIG} не найдена, пропускаем тест конфигурации."
     fi
 
-    info "3. Создание резервной копии текущего бинарника в ${XRAY_BIN}.bak..."
+    info "3. Создание версионированной резервной копии..."
+    local backup_id
+    backup_id="$(date -u +"%Y%m%d%H%M%S")"
+    local backup_dir="/var/backups/just1knode/xray-${backup_id}"
+    mkdir -p "$backup_dir"
     if [[ -f "$XRAY_BIN" ]]; then
+        cp -f "$XRAY_BIN" "${backup_dir}/xray"
         cp -f "$XRAY_BIN" "${XRAY_BIN}.bak"
+    fi
+    if [[ -f "$XRAY_CONFIG" ]]; then
+        cp -f "$XRAY_CONFIG" "${backup_dir}/config.json"
+    fi
+
+    # Ротация резервных копий (сохранять 3 последних)
+    local old_backups
+    old_backups="$(find /var/backups/just1knode -mindepth 1 -maxdepth 1 -type d -name "xray-*" 2>/dev/null | sort | head -n -3 || true)"
+    if [[ -n "$old_backups" ]]; then
+        echo "$old_backups" | xargs rm -rf 2>/dev/null || true
     fi
 
     info "4. Атомарная замена исполняемого файла..."
@@ -1056,9 +1109,9 @@ cmd_update_xray() {
 
     info "5. Перезапуск службы Xray..."
     systemctl restart xray || true
-    sleep 1
+    sleep 2
 
-    info "6. Проверка здоровья gRPC API (порт 10085)..."
+    info "6. Проверка здоровья узла (gRPC и функциональный тест)..."
     local healthy=false
     if [[ -f "${XRAY_API_DIR}/venv/bin/python3" ]]; then
         if "${XRAY_API_DIR}/venv/bin/python3" -c "
@@ -1074,14 +1127,34 @@ sys.exit(0 if c.is_healthy() else 1)
         healthy=true
     fi
 
+    local role
+    role="$(get_state_val "role" "")"
+    if [[ "$healthy" == "true" && "$role" == "xray-origin" ]]; then
+        if command -v curl >/dev/null 2>&1; then
+            local check_code
+            check_code="$(curl -s -k -o /dev/null -w "%{http_code}" https://127.0.0.1/cdn-check --resolve "*:443:127.0.0.1" 2>/dev/null || echo "000")"
+            if [[ "$check_code" != "204" ]]; then
+                warn "Функциональный тест /cdn-check вернул HTTP ${check_code}, ожидалось 204."
+                healthy=false
+            fi
+        fi
+    fi
+
     if [[ "$healthy" == "true" ]]; then
         log "Обновление Xray до версии ${target_version} прошло успешно!"
         set_state_val "xray_version" "$target_version"
         "$XRAY_BIN" version | head -n 2
     else
-        warn "Служба Xray не отвечает после обновления. Выполняется автоматический откат (ROLLBACK)..."
-        if [[ -f "${XRAY_BIN}.bak" ]]; then
-            cp -f "${XRAY_BIN}.bak" "$XRAY_BIN"
+        warn "Служба Xray не прошла валидацию после обновления. Выполняется автоматический откат (ROLLBACK)..."
+        if [[ -f "${backup_dir}/xray" ]]; then
+            install -m 755 "${backup_dir}/xray" "$XRAY_BIN"
+            if [[ -f "${backup_dir}/config.json" ]]; then
+                cp -f "${backup_dir}/config.json" "$XRAY_CONFIG"
+            fi
+            systemctl restart xray
+            log "Откат к предыдущей версии выполнен успешно из ${backup_dir}."
+        elif [[ -f "${XRAY_BIN}.bak" ]]; then
+            install -m 755 "${XRAY_BIN}.bak" "$XRAY_BIN"
             systemctl restart xray
             log "Откат к предыдущей версии выполнен успешно."
         else
@@ -1089,6 +1162,7 @@ sys.exit(0 if c.is_healthy() else 1)
         fi
         exit 1
     fi
+
 }
 
 # =============================================================================

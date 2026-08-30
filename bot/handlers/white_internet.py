@@ -127,7 +127,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         )
     else:
         available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
-        total_limit = available_bytes + sub.traffic_used_bytes
+        total_limit = sub.traffic_limit_bytes
         status_text_map = {
             WhiteInternetStatus.ACTIVE: texts.STATUS_SUBSCRIPTION_ACTIVE,
             WhiteInternetStatus.PENDING: texts.WL_STATUS_PENDING,
@@ -143,6 +143,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             total=_format_bytes(total_limit),
             progress=_render_progress_bar(sub.traffic_used_bytes, total_limit),
         )
+
 
     kb = get_white_internet_overview_keyboard(sub, bot_domain)
     try:

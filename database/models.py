@@ -1207,6 +1207,7 @@ class WhiteInternetSubscription(Base):
         ),
         CheckConstraint(
             "traffic_limit_bytes >= 0 AND traffic_used_bytes >= 0 "
+            "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
             "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
@@ -1248,12 +1249,19 @@ class WhiteInternetSubscription(Base):
     traffic_used_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
+    traffic_uplink_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    traffic_downlink_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     last_uplink_snapshot: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
     last_downlink_snapshot: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
+
     traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     provisioning_status: Mapped[str] = mapped_column(

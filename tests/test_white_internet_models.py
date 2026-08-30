@@ -84,9 +84,12 @@ class WhiteInternetModelsTests(unittest.TestCase):
             "expires_at": None,
             "traffic_limit_bytes": BigInteger,
             "traffic_used_bytes": BigInteger,
+            "traffic_uplink_bytes": BigInteger,
+            "traffic_downlink_bytes": BigInteger,
             "last_uplink_snapshot": BigInteger,
             "last_downlink_snapshot": BigInteger,
             "traffic_stats_epoch": String,
+
             "provisioning_status": String,
             "desired_version": Integer,
             "actual_version": Integer,
