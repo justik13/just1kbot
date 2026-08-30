@@ -82,12 +82,6 @@ API_TIMEOUT = 15
 # UI & Message limits
 TELEGRAM_MESSAGE_LIMIT = 4096
 
-# In-memory Caches
-HUB_CACHE_MAX_SIZE = 10000
-HUB_CACHE_TTL = 43200
-USER_CONTEXT_CACHE_MAX_SIZE = 2000
-USER_CONTEXT_CACHE_TTL = 15.0
-
 # White Internet Service Constants
 WHITE_INTERNET_SERVICE_TYPE = "white_internet"
 WHITE_INTERNET_BASE_PRICE_RUB = Decimal("250.00")
@@ -95,9 +89,9 @@ WHITE_INTERNET_BASE_DURATION_DAYS = 30
 WHITE_INTERNET_BASE_TRAFFIC_BYTES = 53_687_091_200  # 50 GiB
 WHITE_INTERNET_MAX_QUOTA_BYTES = 536_870_912_000   # 500 GiB
 WHITE_INTERNET_TOPUP_PACKS: dict[int, Decimal] = {
-    10: Decimal("40.00"),
-    25: Decimal("100.00"),
-    50: Decimal("200.00"),
+    10: Decimal("30.00"),
+    25: Decimal("75.00"),
+    50: Decimal("150.00"),
 }
 
 
@@ -157,4 +151,3 @@ __all__ = [
     "WORKER_ERROR_SLEEP_INTERVAL",
     "YOOKASSA_IP_RANGES",
 ]
-
