@@ -124,3 +124,36 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                         self.session.commit.assert_awaited_once()
                         mock_menu.assert_awaited_once_with(query, self.session)
 
+    def test_overview_keyboard_generates_valid_incy_deep_link(self):
+        """Active subscription keyboard must include decrypted-valid incy://crypt1/ deep link."""
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from services.incy_crypto import decrypt_link
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=42,
+            token="secure-token-123456789",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+        )
+
+        domain = "vpn.just1k.online"
+        kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
+
+        # Find the connect button with URL
+        connect_button = None
+        for row in kb.inline_keyboard:
+            for btn in row:
+                if btn.url and btn.url.startswith("incy://crypt1/"):
+                    connect_button = btn
+                    break
+
+        self.assertIsNotNone(connect_button, "Connect in App button with incy://crypt1/ URL not found")
+        decrypted = decrypt_link(connect_button.url)
+        self.assertEqual(decrypted["url"], f"https://{domain}/sub/wl/{sub.token}")
+        self.assertEqual(decrypted["name"], "Just1k Белый Интернет")
+
+
