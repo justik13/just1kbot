@@ -1,13 +1,19 @@
 """CLI script to re-encrypt all encrypted fields in the database with the primary key.
 
 Usage:
-    python -m scripts.reencrypt_database
+    python -m scripts.reencrypt_database [--yes] [--force]
 
-Requirements:
+Operational contract:
     DB_ENCRYPTION_KEY in .env must be set to the NEW primary encryption key.
     DB_ENCRYPTION_KEYS (optional) should list old key(s) to allow decrypting existing data:
     DB_ENCRYPTION_KEY='<NEW_PRIMARY_KEY>'
     DB_ENCRYPTION_KEYS='<OLD_KEY_1>,<OLD_KEY_2>'
+
+Safety:
+    The bot must be stopped (docker compose stop bot) or maintenance mode must
+    be enabled while rotating keys. When MaintenanceMode is explicitly OFF the
+    script aborts; `--force` is the only conscious bypass. Interactive
+    confirmation is required unless `--yes` is passed.
 """
 
 import asyncio
