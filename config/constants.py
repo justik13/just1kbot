@@ -102,6 +102,7 @@ WHITE_INTERNET_TOPUP_PACKS: dict[int, Decimal] = {
 }
 SUPPORTED_MIN_XRAY_VERSION = "26.5.9"
 DEFAULT_PINNED_XRAY_VERSION = "26.7.28"
+DEFAULT_XRAY_ORIGIN_MAX_CLIENTS = 1000
 INCY_LINK_ENCODER_VERSION = "1.0.0"
 
 
@@ -118,6 +119,8 @@ __all__ = [
     "AdminAuditAction",
     "ApiOperationStatus",
     "ApiOperationType",
+    "DEFAULT_PINNED_XRAY_VERSION",
+    "DEFAULT_XRAY_ORIGIN_MAX_CLIENTS",
     "DEVICE_DAILY_LIMIT",
     "EntitlementEntryType",
     "GRACE_PERIOD_HOURS",

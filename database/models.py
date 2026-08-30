@@ -1205,7 +1205,7 @@ class WhiteInternetSubscription(Base):
             name="ck_white_internet_subscriptions_status",
         ),
         CheckConstraint(
-            "provisioning_status IN ('PENDING_CREATE', 'ACTIVE', 'PENDING_UPDATE', 'PENDING_DELETE', 'FAILED')",
+            "provisioning_status IN ('PENDING_CREATE', 'ACTIVE', 'PENDING_UPDATE', 'PENDING_DELETE', 'SYNCED_INACTIVE', 'FAILED')",
             name="ck_white_internet_subscriptions_provisioning_status",
         ),
         CheckConstraint(

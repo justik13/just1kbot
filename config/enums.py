@@ -234,6 +234,7 @@ class WhiteInternetProvisioningStatus(StrEnum):
     ACTIVE = "ACTIVE"
     PENDING_UPDATE = "PENDING_UPDATE"
     PENDING_DELETE = "PENDING_DELETE"
+    SYNCED_INACTIVE = "SYNCED_INACTIVE"
     FAILED = "FAILED"
 
 

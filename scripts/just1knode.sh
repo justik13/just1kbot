@@ -233,18 +233,22 @@ install_xray_core() {
 install_geodata() {
     info "Установка актуальных geodata (Loyalsoldier/v2ray-rules-dat)..."
     mkdir -p "$XRAY_SHARE_DIR"
-    local geoip_url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
-    local geosite_url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+    local base_url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download"
+    local tmp_dir="/tmp/geodata-$$"
+    mkdir -p "$tmp_dir"
 
-    if ! curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geoip.dat" "$geoip_url"; then
-        curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geoip.dat" "https://ghfast.top/${geoip_url}" || warn "Не удалось скачать geoip.dat"
-    fi
-
-    if ! curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geosite.dat" "$geosite_url"; then
-        curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geosite.dat" "https://ghfast.top/${geosite_url}" || warn "Не удалось скачать geosite.dat"
-    fi
-
-    log "Geodata размещены в ${XRAY_SHARE_DIR}"
+    for file in geoip.dat geosite.dat; do
+        if ! curl -fsSL --connect-timeout 30 -o "${tmp_dir}/${file}" "${base_url}/${file}"; then
+            error "Не удалось скачать ${file} из ${base_url}/${file}. Установка прервана."
+        fi
+        if curl -fsSL --connect-timeout 20 -o "${tmp_dir}/${file}.sha256sum" "${base_url}/${file}.sha256sum"; then
+            (cd "$tmp_dir" && sha256sum -c "${file}.sha256sum" >/dev/null 2>&1) || error "Контрольная сумма SHA-256 для ${file} не совпала! Установка прервана."
+            log "Контрольная сумма ${file} проверена [OK]"
+        fi
+        install -m 644 "${tmp_dir}/${file}" "${XRAY_SHARE_DIR}/${file}"
+    done
+    rm -rf "$tmp_dir"
+    log "Geodata успешно проверены и размещены в ${XRAY_SHARE_DIR}"
 }
 
 # --- Создание systemd-сервиса Xray ---
@@ -302,7 +306,7 @@ EOF
         --non-interactive --agree-tos --email "$email" -d "$domain"; then
         log "SSL-сертификат для ${domain} успешно получен!"
     else
-        warn "Certbot не смог получить сертификат через webroot. Проверьте A-запись DNS для ${domain}."
+        error "Certbot не смог выпустить сертификат для ${domain}. Проверьте A-запись DNS и доступность порта 80. Установка прервана."
     fi
 
     # Настройка автоматического хука перезагрузки Nginx и Xray при продлении

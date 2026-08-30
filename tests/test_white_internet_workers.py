@@ -134,6 +134,62 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sub.last_reconciled_node_epoch, "epoch-200")
                 self.assertEqual(sub.actual_version, 2)
 
+    async def test_reconciliation_inactive_sub_sets_synced_inactive(self):
+        """When sub is expired/disabled, sync sets provisioning_status to SYNCED_INACTIVE."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=1,
+            name="Origin-MSK",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=1000,
+        )
+
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=server.id,
+            token="token123",
+            uuid="client-uuid-1",
+            status=WhiteInternetStatus.EXPIRED,
+            started_at=now - timedelta(days=35),
+            expires_at=now - timedelta(days=5),
+            traffic_limit_bytes=50 * 1024**3,
+            traffic_used_bytes=0,
+            desired_version=2,
+            actual_version=1,
+            provisioning_status=WhiteInternetProvisioningStatus.PENDING_DELETE,
+            last_reconciled_node_epoch="epoch-100",
+        )
+
+        mock_client = AsyncMock()
+        mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 1000})
+        mock_client.sync_client.return_value = (True, None)
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),     # pending subs query
+        ]
+
+        with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
+            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+                synced = await worker.run_reconciliation_cycle(mock_session)
+
+                self.assertEqual(synced, 1)
+                mock_client.sync_client.assert_awaited_once_with(
+                    server.api_url, server.api_key, sub.uuid, is_active=False
+                )
+                self.assertEqual(sub.actual_version, 2)
+                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
+
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
     """Test monotonic traffic delta computation and grant ledger deduction."""

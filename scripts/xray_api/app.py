@@ -192,6 +192,7 @@ def sync_client(
     client_uuid = req.client_id
     desired_state = req.desired_state
 
+    succeeded_inbounds: List[str] = []
     failed_inbounds: List[str] = []
     for tag in TARGET_INBOUNDS:
         try:
@@ -199,11 +200,19 @@ def sync_client(
                 grpc_client.add_user(tag, client_uuid)
             else:
                 grpc_client.remove_user(tag, client_uuid)
+            succeeded_inbounds.append(tag)
         except Exception as e:
             logger.error("Failed to sync user %s on inbound %s: %s", client_uuid, tag, e)
             failed_inbounds.append(tag)
 
     if failed_inbounds:
+        # Atomic rollback: if activating and one inbound failed, remove user from already added inbounds
+        if desired_state == "active":
+            for rb_tag in succeeded_inbounds:
+                try:
+                    grpc_client.remove_user(rb_tag, client_uuid)
+                except Exception as rb_exc:
+                    logger.error("Rollback failed for user %s on inbound %s: %s", client_uuid, rb_tag, rb_exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",

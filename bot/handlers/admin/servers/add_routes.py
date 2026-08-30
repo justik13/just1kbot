@@ -231,8 +231,9 @@ async def process_add_server(
             is_xray = False
 
         if is_xray:
+            from config.constants import DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             api_server_name = all_data["name"]
-            api_max_peers = 1000
+            api_max_peers = DEFAULT_XRAY_ORIGIN_MAX_CLIENTS
             protocol_name = "xray"
             capabilities = ["xray_origin"]
             server = await create_server(

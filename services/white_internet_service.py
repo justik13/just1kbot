@@ -11,7 +11,7 @@ import uuid
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
@@ -72,8 +72,18 @@ class WhiteInternetService:
                 and server.api_key
                 and server.api_key.strip()
             ):
-                return server
-        raise RuntimeError("No healthy server with xray_origin capability and valid API credentials is available.")
+                active_count = await session.scalar(
+                    select(func.count(WhiteInternetSubscription.id)).where(
+                        WhiteInternetSubscription.origin_node_id == server.id,
+                        WhiteInternetSubscription.status.in_([
+                            WhiteInternetStatus.PENDING,
+                            WhiteInternetStatus.ACTIVE,
+                        ]),
+                    )
+                ) or 0
+                if active_count < server.max_clients:
+                    return server
+        raise RuntimeError("No healthy server with xray_origin capability and available capacity is available.")
 
 
     @staticmethod

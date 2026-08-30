@@ -46,6 +46,10 @@ class ServerUpdateFields(TypedDict, total=False):
     consecutive_successes: int
     recovery_notice_sent: bool
     last_alert_sent_state: str | None
+    capabilities: list
+    xray_instance_epoch: str | None
+    xray_instance_boot_id: str | None
+    xray_instance_starttime: int | None
 
 
 PROTECTED_SERVER_FIELDS = {"id", "created_at"}
@@ -61,6 +65,9 @@ HEALTH_UPDATE_FIELDS = {
     "consecutive_successes",
     "recovery_notice_sent",
     "last_alert_sent_state",
+    "xray_instance_epoch",
+    "xray_instance_boot_id",
+    "xray_instance_starttime",
 }
 
 

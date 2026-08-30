@@ -190,18 +190,15 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         # 4. Исполнение проверки с гарантированным отловом любых сетевых ошибок/таймаутов
         is_healthy = False
+        xray_epoch = None
+        xray_data = None
         try:
             if is_xray_node:
                 from services.xray_node_client import XrayNodeClient
                 xray_client = XrayNodeClient(timeout=10.0)
-                is_healthy, epoch, data = await xray_client.check_health(
+                is_healthy, xray_epoch, xray_data = await xray_client.check_health(
                     server.api_url, server.api_key
                 )
-                if is_healthy and epoch:
-                    server.xray_instance_epoch = epoch
-                    if data:
-                        server.xray_instance_boot_id = data.get("boot_id")
-                        server.xray_instance_starttime = data.get("starttime")
             else:
                 client = AmneziaClient(server.api_url, server.api_key)
                 is_healthy = await client.healthcheck()
@@ -383,6 +380,11 @@ async def check_node_resources_and_alerts(bot: Bot):
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None
+            if is_xray_node and xray_epoch:
+                update_kwargs["xray_instance_epoch"] = xray_epoch
+                if xray_data:
+                    update_kwargs["xray_instance_boot_id"] = xray_data.get("boot_id")
+                    update_kwargs["xray_instance_starttime"] = xray_data.get("starttime")
 
         if st.health_state in (ServerHealthState.WAITING_CONFIRMATION, ServerHealthState.AUTO_DISABLED) and st.next_check_at:
             rem = st.next_check_at - now_m
