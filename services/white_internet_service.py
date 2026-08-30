@@ -6,8 +6,10 @@ import base64
 import json
 import logging
 import secrets
+import struct
 import urllib.parse
 import uuid
+import zlib
 from datetime import timedelta
 from decimal import Decimal
 
@@ -63,6 +65,7 @@ class WhiteInternetService:
                 Server.is_active.is_(True),
             )
             .order_by(Server.id.asc())
+            .with_for_update()
         )
         for server in (await session.execute(stmt)).scalars():
             if (
@@ -298,6 +301,33 @@ class WhiteInternetService:
                 {"tag": "direct", "protocol": "freedom"},
                 {"tag": "block", "protocol": "blackhole"},
             ],
+            "dns": {
+                "servers": [
+                    "https://1.1.1.1/dns-query",
+                    "https://77.88.8.8/dns-query",
+                    "localhost",
+                ]
+            },
+            "routing": {
+                "domainStrategy": "IPIfNonMatch",
+                "rules": [
+                    {
+                        "type": "field",
+                        "ip": ["geoip:private", "geoip:ru"],
+                        "outboundTag": "direct",
+                    },
+                    {
+                        "type": "field",
+                        "domain": ["geosite:ru", "geosite:category-ru"],
+                        "outboundTag": "direct",
+                    },
+                    {
+                        "type": "field",
+                        "port": "0-65535",
+                        "outboundTag": "proxy-de",
+                    },
+                ],
+            },
         }
 
     @staticmethod
@@ -326,6 +356,24 @@ class WhiteInternetService:
             "hostName": cdn_domain,
         }
         raw_bytes = json.dumps(amnezia_payload, separators=(",", ":")).encode("utf-8")
-        b64_key = base64.b64encode(raw_bytes).decode("utf-8")
+        # Qt qCompress format: 4-byte big-endian uncompressed length + zlib compressed payload
+        qcompressed = struct.pack(">I", len(raw_bytes)) + zlib.compress(raw_bytes, 8)
+        b64_key = base64.urlsafe_b64encode(qcompressed).decode("utf-8").rstrip("=")
         return f"vpn://{b64_key}"
+
+    @staticmethod
+    def decode_amnezia_vpn_key(vpn_key: str) -> dict:
+        """Decode and decompress Amnezia vpn:// connection key into JSON config dict."""
+        if not vpn_key.startswith("vpn://"):
+            raise ValueError("Invalid key format: missing 'vpn://' scheme")
+        raw_b64 = vpn_key[6:].strip()
+        padding = "=" * ((4 - len(raw_b64) % 4) % 4)
+        compressed = base64.urlsafe_b64decode(raw_b64 + padding)
+        if len(compressed) < 4:
+            raise ValueError("Compressed payload is too short")
+        uncompressed_len = struct.unpack(">I", compressed[:4])[0]
+        decompressed = zlib.decompress(compressed[4:])
+        if len(decompressed) != uncompressed_len:
+            raise ValueError(f"Uncompressed length mismatch: expected {uncompressed_len}, got {len(decompressed)}")
+        return json.loads(decompressed.decode("utf-8"))
 

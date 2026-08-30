@@ -216,7 +216,7 @@ async def update_server_health_snapshot(
     # 3. Apply health updates
     kwargs = {"health_state": new_health_state, **health_kwargs}
     for key, value in kwargs.items():
-        if key in PROTECTED_SERVER_FIELDS:
+        if key in PROTECTED_SERVER_FIELDS or key not in HEALTH_UPDATE_FIELDS:
             continue
         if hasattr(current, key):
             setattr(current, key, value)
