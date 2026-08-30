@@ -177,10 +177,15 @@ class WhiteInternetReconciliationWorker:
                         if sub.status == WhiteInternetStatus.PENDING and desired_active:
                             sub.status = WhiteInternetStatus.ACTIVE
                             sub.status_reason = None
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                        sub.provisioning_status = (
+                            WhiteInternetProvisioningStatus.ACTIVE
+                            if desired_active
+                            else WhiteInternetProvisioningStatus.PENDING_DELETE
+                        )
                         sub.last_synced_at = now_utc()
                         sub.last_sync_error = None
                         synced_count += 1
+
                     else:
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                         logger.warning(

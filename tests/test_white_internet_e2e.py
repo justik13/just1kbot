@@ -223,8 +223,9 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
             with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
                 with patch("database.repositories.white_internet_repo.deduct_traffic_atomic") as mock_deduct:
-                    with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
+                    with patch("database.repositories.white_internet_repo.record_traffic_event_atomic"):
                         mock_deduct.return_value = (up_1 + down_1, False, 0)
+
                         await traffic_worker.run_traffic_cycle(traffic_session)
 
                         mock_deduct.assert_awaited_once_with(
@@ -255,8 +256,9 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         with patch("database.repositories.servers_repo.update_server_xray_epoch_cas", return_value=(True, server)):
             with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
                 with patch("database.repositories.white_internet_repo.deduct_traffic_atomic") as mock_deduct:
-                    with patch("database.repositories.white_internet_repo.record_traffic_event_atomic") as mock_event:
+                    with patch("database.repositories.white_internet_repo.record_traffic_event_atomic"):
                         mock_deduct.return_value = (grant.bytes_remaining, True, 5 * 1024**3)
+
                         sub.status = WhiteInternetStatus.EXHAUSTED
                         sub.desired_version = 2
                         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE

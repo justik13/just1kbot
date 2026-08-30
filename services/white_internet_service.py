@@ -53,11 +53,27 @@ class WhiteInternetService:
 
     @staticmethod
     async def select_origin_node(session: AsyncSession) -> Server:
-        stmt = select(Server).where(Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION])).order_by(Server.id.asc())
+        stmt = (
+            select(Server)
+            .where(
+                Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+                Server.api_url.is_not(None),
+                Server.api_key.is_not(None),
+                Server.is_active.is_(True),
+            )
+            .order_by(Server.id.asc())
+        )
         for server in (await session.execute(stmt)).scalars():
-            if "xray_origin" in (server.capabilities or []):
+            if (
+                "xray_origin" in (server.capabilities or [])
+                and server.api_url
+                and server.api_url.strip()
+                and server.api_key
+                and server.api_key.strip()
+            ):
                 return server
-        raise RuntimeError("No healthy server with xray_origin capability is available.")
+        raise RuntimeError("No healthy server with xray_origin capability and valid API credentials is available.")
+
 
     @staticmethod
     def _new_quote(*, user_id: int, operation_type: str, target_version_id: int, amount_due: Decimal, expires_at, resulting_paid_hours: int = 0, resulting_paid_value: Decimal = Decimal("0"), source_version_id: int | None = None) -> TariffQuote:

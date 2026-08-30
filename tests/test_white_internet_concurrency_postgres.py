@@ -15,7 +15,7 @@ import asyncio
 import os
 import unittest
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import select, text
@@ -26,9 +26,9 @@ from config.enums import (
     TariffQuoteOperation,
     TariffQuoteStatus,
     WhiteInternetGrantType,
-    WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
+
 from database.models import (
     Server,
     Tariff,
@@ -317,11 +317,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
             sub_id = sub.id
 
         # Attempt to concurrently purchase 10 packs of 50 GiB each (500 GiB + 50 GiB base = 550 GiB > 500 GiB cap)
-        successes = 0
-        cap_errors = 0
-
-        async def try_topup(idx: int):
-            nonlocal successes, cap_errors
+        async def try_topup(idx: int) -> bool:
             async with self.sessions.begin() as session:
                 # Create unique quote for this topup
                 q = TariffQuote(
@@ -345,8 +341,6 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                 session.add(q)
                 await session.flush()
 
-
-
                 try:
                     await white_internet_repo.topup_quota_atomic(
                         session,
@@ -358,15 +352,15 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
                     q.status = TariffQuoteStatus.CONSUMED
                     q.consumed_at = now
                     await session.flush()
-                    successes += 1
+                    return True
                 except white_internet_repo.WhiteInternetQuotaCapExceededError:
                     q.status = TariffQuoteStatus.CANCELLED
                     await session.flush()
-                    cap_errors += 1
+                    return False
 
-
-        for i in range(10):
-            await try_topup(i)
+        results = await asyncio.gather(*(try_topup(i) for i in range(10)))
+        successes = sum(1 for r in results if r is True)
+        cap_errors = sum(1 for r in results if r is False)
 
         # 50 GiB base + 9 * 50 GiB topups = 500 GiB (exactly at cap). 10th must fail!
         self.assertEqual(successes, 9)
@@ -375,3 +369,4 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
             self.assertEqual(avail, 500 * 1024**3)
+

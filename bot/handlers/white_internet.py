@@ -5,9 +5,9 @@ from __future__ import annotations
 import html
 import logging
 import os
-import urllib.parse
 
 from aiogram import F, Router
+
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from sqlalchemy.ext.asyncio import AsyncSession

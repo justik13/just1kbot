@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STATE_DIR="/etc/just1knode"
 STATE_FILE="${STATE_DIR}/state.json"
-XRAY_VERSION_PINNED="26.6.27"
+XRAY_VERSION_PINNED="26.7.28"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG="${XRAY_CONFIG_DIR}/config.json"
@@ -166,10 +166,10 @@ verify_xray_checksum() {
     local version="$2"
     local arch="$3"
     local expected_sha=""
-    if [[ "$version" == "26.6.27" ]]; then
+    if [[ "$version" == "26.7.28" ]]; then
         case "$arch" in
-            64) expected_sha="b3e5902d06d6282fe53cfa2fc426058b9aeaa429b2c812e20887cd47f26d08bf" ;;
-            arm64-v8a) expected_sha="13a251379bea366c2cf10363ad71e75734193d401f26f518bf0c25e5c8f8c931" ;;
+            64) expected_sha="8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40" ;;
+            arm64-v8a) expected_sha="f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501" ;;
         esac
     fi
     if [[ -n "$expected_sha" ]]; then
@@ -182,19 +182,22 @@ verify_xray_checksum() {
     else
         local dgst_url="https://github.com/XTLS/Xray-core/releases/download/v${version}/$(basename "$file_path").dgst"
         local tmp_dgst="${file_path}.dgst"
-        if wget -q --timeout=15 -O "$tmp_dgst" "$dgst_url" 2>/dev/null || wget -q --timeout=15 -O "$tmp_dgst" "https://ghfast.top/${dgst_url}" 2>/dev/null; then
-            local expected_sha_dgst
-            expected_sha_dgst="$(grep -i 'SHA2-256=' "$tmp_dgst" 2>/dev/null | awk '{print $2}')"
+        if ! wget -q --timeout=15 -O "$tmp_dgst" "$dgst_url"; then
             rm -f "$tmp_dgst"
-            if [[ -n "$expected_sha_dgst" ]]; then
-                local actual_sha
-                actual_sha="$(sha256sum "$file_path" | awk '{print $1}')"
-                if [[ "$actual_sha" != "$expected_sha_dgst" ]]; then
-                    error "Контрольная сумма SHA-256 из .dgst не совпадает! Ожидалось: $expected_sha_dgst, получено: $actual_sha"
-                fi
-                log "Контрольная сумма SHA-256 из .dgst проверена: ${actual_sha}"
-            fi
+            error "Не удалось скачать файл контрольных сумм .dgst из официального репозитория GitHub (${dgst_url}). Установка прервана."
         fi
+        local expected_sha_dgst
+        expected_sha_dgst="$(grep -i 'SHA2-256=' "$tmp_dgst" 2>/dev/null | awk '{print $2}')"
+        rm -f "$tmp_dgst"
+        if [[ -z "$expected_sha_dgst" ]]; then
+            error "В файле .dgst не найдена контрольная сумма SHA2-256. Установка прервана."
+        fi
+        local actual_sha
+        actual_sha="$(sha256sum "$file_path" | awk '{print $1}')"
+        if [[ "$actual_sha" != "$expected_sha_dgst" ]]; then
+            error "Контрольная сумма SHA-256 из .dgst не совпадает! Ожидалось: $expected_sha_dgst, получено: $actual_sha"
+        fi
+        log "Контрольная сумма SHA-256 из официального .dgst проверена: ${actual_sha}"
     fi
 }
 
@@ -210,13 +213,11 @@ install_xray_core() {
     info "Скачивание Xray ${version} (${arch})..."
     mkdir -p "$tmp_dir"
     if ! wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$download_url"; then
-        # Резервный источник через зеркало
-        local mirror_url="https://ghfast.top/${download_url}"
-        info "Прямое скачивание не удалось, используем зеркало: ${mirror_url}..."
-        wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray core ${version}"
+        error "Не удалось скачать Xray core ${version} из официального релиза GitHub (${download_url}). Установка прервана."
     fi
 
     verify_xray_checksum "${tmp_dir}/${zip_name}" "$version" "$arch"
+
 
     unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
     install -m 755 "${tmp_dir}/xray" "$XRAY_BIN"
@@ -514,8 +515,12 @@ cmd_install_amnezia() {
     render_nginx_modular_config "$domain" "$cert_file" "$key_file" "true" "$include_xray" "8444"
 
     # Настройка Firewall UFW
+    info "Настройка сетевого экрана UFW..."
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
     ufw allow 80/tcp || true
     ufw allow 443/tcp || true
+    ufw --force enable 2>/dev/null || true
+
 
     # Сохранение состояния
     set_state_val "role" "amnezia"
@@ -888,11 +893,16 @@ EOF
 
     # 6. Настройка UFW
     info "Настройка сетевого экрана UFW..."
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
     ufw allow 80/tcp || true
     ufw allow 443/tcp || true
     # Порт 8444 разрешить СТРОГО для IP бота
     ufw delete allow 8444/tcp 2>/dev/null || true
-    ufw allow from "${bot_ip}" to any port 8444 proto tcp || true
+    if [[ -n "${bot_ip}" ]]; then
+        ufw allow from "${bot_ip}" to any port 8444 proto tcp || true
+    fi
+    ufw --force enable 2>/dev/null || true
+
 
     # 7. Сохранение состояния
     set_state_val "bot_ip" "$bot_ip"
@@ -1043,9 +1053,14 @@ EOF
 
     # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp || true
     ufw allow 80/tcp || true
     ufw delete allow 10443/tcp 2>/dev/null || true
-    ufw allow from "${origin_ip}" to any port 10443 proto tcp || true
+    if [[ -n "${origin_ip}" ]]; then
+        ufw allow from "${origin_ip}" to any port 10443 proto tcp || true
+    fi
+    ufw --force enable 2>/dev/null || true
+
 
     set_state_val "role" "xray-exit"
     set_state_val "domain" "$domain"
@@ -1078,12 +1093,12 @@ cmd_update_xray() {
     mkdir -p "$tmp_dir"
     info "1. Скачивание нового ядра в ${tmp_dir}..."
     if ! wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$download_url"; then
-        local mirror_url="https://ghfast.top/${download_url}"
-        info "Используем зеркало ${mirror_url}..."
-        wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray ${target_version}"
+        rm -rf "$tmp_dir"
+        error "Не удалось скачать Xray ${target_version} из официального репозитория GitHub (${download_url}). Обновление отменено."
     fi
 
     verify_xray_checksum "${tmp_dir}/${zip_name}" "$target_version" "$arch"
+
 
     unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
     local new_binary="${tmp_dir}/xray"
@@ -1312,6 +1327,18 @@ sys.exit(0 if c.is_healthy() else 1)
             ((issues++))
         fi
     fi
+
+    # 7. Проверка сетевого экрана UFW
+    info "Проверка статуса UFW..."
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -qw "active"; then
+            log "UFW: сетевой экран активен и защищает открытые порты [OK]"
+        else
+            warn "UFW: сетевой экран НЕ активен! Включите его: ufw enable [WARN]"
+            ((issues++))
+        fi
+    fi
+
 
     echo ""
     if (( issues == 0 )); then

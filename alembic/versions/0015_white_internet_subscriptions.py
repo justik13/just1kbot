@@ -416,19 +416,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 7. Remove seeded tariff data
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM tariff_versions WHERE tariff_id IN (
-                SELECT id FROM tariffs WHERE service_type = 'white_internet'
-            );
-            DELETE FROM tariffs WHERE service_type = 'white_internet';
-            """
-        )
-    )
-
-    # 6. Drop white_internet_traffic_events
+    # 1. Drop white_internet_traffic_events
     op.drop_index(
         "ix_white_internet_traffic_events_created_at",
         table_name="white_internet_traffic_events",
@@ -439,7 +427,7 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_traffic_events")
 
-    # 5. Drop white_internet_quota_grants
+    # 2. Drop white_internet_quota_grants
     op.drop_index(
         "ix_white_internet_quota_grants_expires_at",
         table_name="white_internet_quota_grants",
@@ -453,6 +441,7 @@ def downgrade() -> None:
         table_name="white_internet_quota_grants",
     )
     op.drop_table("white_internet_quota_grants")
+
 
     # 4. Drop white_internet_subscriptions
     op.drop_index(
@@ -481,7 +470,34 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_subscriptions")
 
-    # 3. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
+    # 4. Clean up seeded White Internet tariff data if unreferenced
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariff_versions WHERE tariff_id IN (
+                SELECT id FROM tariffs WHERE service_type = 'white_internet'
+            ) AND id NOT IN (
+                SELECT target_tariff_version_id FROM tariff_quotes WHERE target_tariff_version_id IS NOT NULL
+                UNION
+                SELECT source_tariff_version_id FROM tariff_quotes WHERE source_tariff_version_id IS NOT NULL
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariffs WHERE service_type = 'white_internet'
+            AND id NOT IN (
+                SELECT tariff_id FROM tariff_versions
+            )
+            """
+        )
+    )
+
+    # 5. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
+
+
     op.drop_column("servers", "xray_instance_starttime")
     op.drop_column("servers", "xray_instance_boot_id")
     op.drop_column("servers", "xray_instance_epoch")
