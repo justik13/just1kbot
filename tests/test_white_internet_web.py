@@ -1,10 +1,12 @@
 """Unit tests for White Internet HTTP subscription feed endpoint (/sub/wl/{token})."""
 
 import base64
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from urllib.parse import unquote
+
 
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
@@ -171,25 +173,74 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
-        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=40 * 1024**3):
-                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=40 * 1024**3):
+                        resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
 
-                    self.assertEqual(resp.status, 200)
-                    self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
-                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
-                    self.assertEqual(resp.headers.get("Hide-Url"), "1")
-                    self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
+                        self.assertEqual(resp.status, 200)
+                        self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
+                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
+                        self.assertEqual(resp.headers.get("Hide-Url"), "1")
+                        self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
 
-                    body_b64 = await resp.text()
-                    decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
-                    self.assertEqual(len(decoded_lines), 2)
+                        body_b64 = await resp.text()
+                        decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
+                        self.assertEqual(len(decoded_lines), 2)
 
-                    de_url = decoded_lines[0]
-                    nl_url = decoded_lines[1]
-                    self.assertTrue(de_url.startswith("vless://"))
-                    self.assertTrue(nl_url.startswith("vless://"))
-                    self.assertIn("/api/v3/de", unquote(de_url))
-                    self.assertIn("/api/v3/nl", unquote(nl_url))
-                    self.assertIn("OPTIONS", unquote(de_url))
+                        de_url = decoded_lines[0]
+                        nl_url = decoded_lines[1]
+                        self.assertTrue(de_url.startswith("vless://"))
+                        self.assertTrue(nl_url.startswith("vless://"))
+                        self.assertIn("/api/v3/de", unquote(de_url))
+                        self.assertIn("/api/v3/nl", unquote(nl_url))
+                        self.assertIn("OPTIONS", unquote(de_url))
+
+    @unittest_run_loop
+    async def test_missing_cdn_domain_returns_503_fail_closed(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            traffic_used_bytes=0,
+            traffic_uplink_bytes=0,
+            traffic_downlink_bytes=0,
+            last_uplink_snapshot=0,
+            last_downlink_snapshot=0,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=40 * 1024**3):
+                        resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                        self.assertEqual(resp.status, 503)
+                        self.assertEqual(resp.headers.get("Retry-After"), "60")
+

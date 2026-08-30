@@ -158,7 +158,7 @@ async def process_white_internet_buy(query: CallbackQuery, session: AsyncSession
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
-    balance_snapshot = await get_account_balance(session, user.id)
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
     if balance_snapshot.available < WHITE_INTERNET_BASE_PRICE_RUB:
         shortage = WHITE_INTERNET_BASE_PRICE_RUB - balance_snapshot.available
         kb = InlineKeyboardBuilder()
@@ -192,7 +192,7 @@ async def process_white_internet_renew(query: CallbackQuery, session: AsyncSessi
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is None:
         return
-    balance_snapshot = await get_account_balance(session, user.id)
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
     if balance_snapshot.available < WHITE_INTERNET_BASE_PRICE_RUB:
         shortage = WHITE_INTERNET_BASE_PRICE_RUB - balance_snapshot.available
         kb = InlineKeyboardBuilder()
@@ -246,7 +246,8 @@ async def process_topup_pack(query: CallbackQuery, session: AsyncSession):
     if pack_price is None:
         return
 
-    balance_snapshot = await get_account_balance(session, user.id)
+    balance_snapshot = await get_account_balance(session, user_id=user.id)
+
     if balance_snapshot.available < pack_price:
         shortage = pack_price - balance_snapshot.available
         kb = InlineKeyboardBuilder()

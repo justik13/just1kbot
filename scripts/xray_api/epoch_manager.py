@@ -134,31 +134,52 @@ class EpochManager:
         state = self.load_state()
         return state.get("node_epoch")
 
+    def get_process_and_epoch(self) -> tuple[Optional[int], Optional[int], Optional[str]]:
+        """
+        Atomically inspects /proc once and returns (pid, starttime, running_epoch).
+        Returns (None, None, None) if Xray is not running.
+        """
+        pid, starttime = self.get_xray_process_info()
+        if pid is None or starttime is None:
+            return None, None, None
+
+        state = self.load_state()
+        saved_epoch = state.get("node_epoch")
+        saved_pid = state.get("xray_pid")
+        saved_starttime = state.get("xray_starttime")
+
+        if not saved_epoch or saved_pid != pid or saved_starttime != starttime:
+            new_epoch = f"epoch_{int(time.time())}_{uuid.uuid4().hex[:12]}"
+            logger.info(
+                "Detected xray instance change (pid=%s, starttime=%s). New epoch: %s",
+                pid,
+                starttime,
+                new_epoch,
+            )
+            self.save_state(new_epoch, pid, starttime)
+            return pid, starttime, new_epoch
+        return pid, starttime, saved_epoch
+
+    def get_current_running_epoch(self) -> Optional[str]:
+        """
+        Returns the active runtime epoch if and only if Xray is currently running.
+        If Xray is stopped, returns None (fail-closed).
+        """
+        _pid, _starttime, epoch = self.get_process_and_epoch()
+        return epoch
+
     def get_current_epoch(self) -> str:
         """
         Returns the current active epoch.
         If xray was restarted (PID or starttime changed), generates and persists a new epoch.
         If xray is not detected as running, returns last known persisted epoch (or initializes a baseline).
         """
-        pid, starttime = self.get_xray_process_info()
+        _pid, _starttime, epoch = self.get_process_and_epoch()
+        if epoch is not None:
+            return epoch
+
         state = self.load_state()
         saved_epoch = state.get("node_epoch")
-        saved_pid = state.get("xray_pid")
-        saved_starttime = state.get("xray_starttime")
-
-        if pid is not None and starttime is not None:
-            if not saved_epoch or saved_pid != pid or saved_starttime != starttime:
-                new_epoch = f"epoch_{int(time.time())}_{uuid.uuid4().hex[:12]}"
-                logger.info(
-                    "Detected xray instance change (pid=%s, starttime=%s). New epoch: %s",
-                    pid,
-                    starttime,
-                    new_epoch,
-                )
-                self.save_state(new_epoch, pid, starttime)
-                return new_epoch
-            return saved_epoch
-
         if saved_epoch:
             return saved_epoch
 
@@ -166,20 +187,8 @@ class EpochManager:
         self.save_state(new_epoch, None, None)
         return new_epoch
 
-    def get_current_running_epoch(self) -> Optional[str]:
-        """
-        Returns the active runtime epoch if and only if Xray is currently running.
-        If Xray is stopped, returns None (fail-closed).
-        """
-        pid, starttime = self.get_xray_process_info()
-        if pid is None or starttime is None:
-            return None
-        return self.get_current_epoch()
-
     def get_state_summary(self) -> Dict[str, Any]:
-
-        pid, _ = self.get_xray_process_info()
-        running_epoch = self.get_current_running_epoch()
+        pid, _starttime, running_epoch = self.get_process_and_epoch()
         last_known = self.get_last_known_epoch()
         return {
             "node_epoch": running_epoch,
@@ -187,4 +196,5 @@ class EpochManager:
             "xray_running": pid is not None,
             "xray_pid": pid,
         }
+
 

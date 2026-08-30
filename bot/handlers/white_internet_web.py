@@ -5,9 +5,9 @@ from __future__ import annotations
 import base64
 import logging
 import os
-import urllib.parse
 
 from aiohttp import web
+
 from sqlalchemy import select
 
 from bot import texts
@@ -93,12 +93,19 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
 
         cdn_domain = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
         if not cdn_domain:
-            parsed = urllib.parse.urlparse(server.api_url)
-            cdn_domain = parsed.hostname or os.getenv("DOMAIN", "origin.example.com")
+            logger.error("Configuration error: WHITE_INTERNET_CDN_DOMAIN environment variable is missing")
+            headers = dict(common_headers)
+            headers["Retry-After"] = "60"
+            return web.Response(
+                status=503,
+                text="Service Unavailable: CDN gateway is not configured",
+                headers=headers,
+            )
 
         vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
+
 
         response_headers = dict(common_headers)
         response_headers.update(

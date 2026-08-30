@@ -1,7 +1,9 @@
 import logging
 import os
+import time
 import uuid as uuid_lib
 from typing import Optional, List, Dict, Any
+
 
 from fastapi import FastAPI, Header, HTTPException, status, Depends, Response
 from pydantic import BaseModel, Field, model_validator
@@ -102,11 +104,10 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     Checks service health, Xray core process state, gRPC connectivity, and current epoch.
     Fail-closed: returns HTTP 503 if Xray is not running or gRPC is unhealthy.
     """
-    pid, _ = epoch_manager.get_xray_process_info()
+    pid, _starttime, current_epoch = epoch_manager.get_process_and_epoch()
     grpc_ok = grpc_client.is_healthy()
     is_running = pid is not None
-    is_healthy = is_running and grpc_ok
-    current_epoch = epoch_manager.get_current_running_epoch()
+    is_healthy = is_running and grpc_ok and (current_epoch is not None)
 
     data = {
         "status": "ok" if is_healthy else "error",
@@ -125,28 +126,46 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
     Returns normalized traffic stats aggregated by UUID/email along with the node epoch.
     Format: { "node_epoch": str, "users": { uuid: { "uplink": int, "downlink": int } } }
+    Guarantees generation atomicity: validates epoch_before == epoch_after around QueryStats.
     """
-    current_epoch = epoch_manager.get_current_running_epoch()
-    if not current_epoch:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Xray is not currently running",
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        _pid1, _st1, epoch_before = epoch_manager.get_process_and_epoch()
+        if not epoch_before:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Xray is not currently running",
+            )
+        try:
+            users_stats = grpc_client.get_users_stats(reset=False)
+        except Exception as e:
+            logger.error("Failed to fetch traffic stats from gRPC: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Xray gRPC stats failure: {str(e)}",
+            ) from e
+
+        _pid2, _st2, epoch_after = epoch_manager.get_process_and_epoch()
+        if epoch_before == epoch_after and epoch_after is not None:
+            return {
+                "node_epoch": epoch_after,
+                "users": users_stats,
+            }
+
+        logger.warning(
+            "Epoch mismatch during traffic snapshot (attempt %d/%d): before=%s, after=%s",
+            attempt + 1,
+            max_attempts,
+            epoch_before,
+            epoch_after,
         )
-    try:
-        users_stats = grpc_client.get_users_stats(reset=False)
+        time.sleep(0.1)
 
-    except Exception as e:
-        logger.error("Failed to fetch traffic stats from gRPC: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Xray gRPC stats failure: {str(e)}",
-        ) from e
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Concurrent Xray restart detected during traffic snapshot; generation mismatch",
+    )
 
-
-    return {
-        "node_epoch": current_epoch,
-        "users": users_stats,
-    }
 
 
 @app.post("/v1/clients/sync")

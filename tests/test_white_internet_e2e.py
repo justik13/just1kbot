@@ -15,10 +15,12 @@ Verifies:
 from __future__ import annotations
 
 import base64
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
+
 
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
@@ -175,17 +177,19 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         self.assertEqual(sub.last_reconciled_node_epoch, node_epoch)
 
         # 4. Feed check after reconciliation -> 200 OK with VLESS links
-        with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
-            session = AsyncMock()
-            session.scalar.return_value = server
-            session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
-            mock_scope.return_value.__aenter__.return_value = session
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
+                session = AsyncMock()
+                session.scalar.return_value = server
+                session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+                mock_scope.return_value.__aenter__.return_value = session
 
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=base_bytes):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
-                    self.assertEqual(resp.status, 200)
-                    self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=base_bytes):
+                        resp = await self.client.get(f"/sub/wl/{sub.token}")
+                        self.assertEqual(resp.status, 200)
+                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
+
 
                     body_b64 = await resp.text()
                     decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
@@ -318,13 +322,15 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
 
 
         # Feed is restored to 200 OK
-        with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
-            session = AsyncMock()
-            session.scalar.return_value = server
-            session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
-            mock_scope.return_value.__aenter__.return_value = session
+        with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
+            with patch("bot.handlers.white_internet_web.session_scope") as mock_scope:
+                session = AsyncMock()
+                session.scalar.return_value = server
+                session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+                mock_scope.return_value.__aenter__.return_value = session
 
-            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=topup_bytes):
-                    resp = await self.client.get(f"/sub/wl/{sub.token}")
-                    self.assertEqual(resp.status, 200)
+                with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=topup_bytes):
+                        resp = await self.client.get(f"/sub/wl/{sub.token}")
+                        self.assertEqual(resp.status, 200)
+
