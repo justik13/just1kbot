@@ -524,48 +524,6 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
     which used to revert on reboot. Runtime stubbing keeps these tests
     rootless: `sysctl -w` is only invoked when runtime != 1."""
 
-    def _configure(self, runtime_content: str, initial_conf: str) -> tuple[int, str]:
-        repo_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
-        workdir = tempfile.mkdtemp(prefix="oc_overcommit_")
-        self.addCleanup(shutil.rmtree, workdir, ignore_errors=True)
-        shutil.copy(repo_script, Path(workdir) / "setup.sh")
-        proc_stub = Path(workdir) / "proc_overcommit"
-        proc_stub.write_text(runtime_content, encoding="utf-8")
-        conf = Path(workdir) / "sysctl.conf"
-        conf.write_text(initial_conf, encoding="utf-8")
-        proc = subprocess.run(
-            [
-                "bash",
-                "-c",
-                ". './setup.sh'; "
-                "JUST1KBOT_PROC_OVERCOMMIT='./proc_overcommit' "
-                "JUST1KBOT_SYSCTL_CONF='./sysctl.conf' configure_overcommit_memory",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=workdir,
-            check=False,
-        )
-        return proc.returncode, conf.read_text(encoding="utf-8")
-
-    def test_runtime_one_with_persistent_zero_is_repaired(self):
-        """The review-requested regression: runtime=1 + persistent=0 must be
-        repaired by the installer (reboot would otherwise revert it)."""
-        code, content = self._configure("1", "vm.overcommit_memory = 0\n")
-        self.assertEqual(code, 0)
-        self.assertIn("vm.overcommit_memory = 1", content)
-        self.assertNotIn("= 0", content.replace("vm.overcommit_memory = 1", ""))
-
-    def test_runtime_one_with_missing_entry_is_appended(self):
-        code, content = self._configure("1", "# some other setting = 5\n")
-        self.assertEqual(code, 0)
-        self.assertIn("vm.overcommit_memory = 1", content)
-
-    def test_runtime_one_with_correct_persistence_is_preserved(self):
-        code, content = self._configure("1", "vm.overcommit_memory = 1\n")
-        self.assertEqual(code, 0)
-        self.assertEqual(content.count("vm.overcommit_memory"), 1)
-
     def _configure(
         self,
         runtime_content: str,
