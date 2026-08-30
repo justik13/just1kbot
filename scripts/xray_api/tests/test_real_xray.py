@@ -3,7 +3,6 @@ import os
 import shutil
 import subprocess
 import time
-from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
@@ -74,7 +73,9 @@ def test_end_to_end_with_real_xray():
         [XRAY_BIN, "run", "-test", "-config", config_path],
         capture_output=True,
         text=True,
+        check=False,
     )
+
     assert test_proc.returncode == 0, f"Xray test failed: {test_proc.stderr}"
 
     # 3. Start real Xray process

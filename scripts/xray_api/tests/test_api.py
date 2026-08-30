@@ -1,7 +1,6 @@
 import os
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi.testclient import TestClient
-import pytest
 
 # Ensure XRAY_API_KEY is set before importing app
 os.environ["XRAY_API_KEY"] = "test-secret-key-12345"

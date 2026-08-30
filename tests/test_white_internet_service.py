@@ -7,31 +7,16 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from config.constants import (
-    WHITE_INTERNET_BASE_DURATION_DAYS,
-    WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_BASE_TRAFFIC_BYTES,
-    WHITE_INTERNET_MAX_QUOTA_BYTES,
-    WHITE_INTERNET_SERVICE_TYPE,
-    WHITE_INTERNET_TOPUP_PACKS,
-)
 from config.enums import (
     WhiteInternetGrantType,
-    WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 from database.models import (
-    Server,
-    Tariff,
-    TariffQuote,
-    TariffVersion,
-    User,
     WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
 )
 from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
-from utils.datetime_helpers import now_utc
 
 
 class TestWhiteInternetVlessGeneration(unittest.TestCase):

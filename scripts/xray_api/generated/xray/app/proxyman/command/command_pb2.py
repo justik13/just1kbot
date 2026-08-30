@@ -22,8 +22,6 @@ _runtime_version.ValidateProtobufRuntimeVersion(
 _sym_db = _symbol_database.Default()
 
 
-from xray.common.protocol import user_pb2 as xray_dot_common_dot_protocol_dot_user__pb2
-from xray.common.serial import typed_message_pb2 as xray_dot_common_dot_serial_dot_typed__message__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\'xray/app/proxyman/command/command.proto\x12\x19xray.app.proxyman.command\x1a\x1fxray/common/protocol/user.proto\x1a&xray/common/serial/typed_message.proto\"<\n\x10\x41\x64\x64UserOperation\x12(\n\x04user\x18\x01 \x01(\x0b\x32\x1a.xray.common.protocol.User\"$\n\x13RemoveUserOperation\x12\r\n\x05\x65mail\x18\x01 \x01(\t\"W\n\x13\x41lterInboundRequest\x12\x0b\n\x03tag\x18\x01 \x01(\t\x12\x33\n\toperation\x18\x02 \x01(\x0b\x32 .xray.common.serial.TypedMessage\"\x16\n\x14\x41lterInboundResponse2\x83\x01\n\x0eHandlerService\x12q\n\x0c\x41lterInbound\x12..xray.app.proxyman.command.AlterInboundRequest\x1a/.xray.app.proxyman.command.AlterInboundResponse\"\x00\x62\x06proto3')

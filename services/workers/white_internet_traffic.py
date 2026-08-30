@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 
 from aiogram import Bot
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import ServerHealthState, WhiteInternetStatus
+from config.enums import ServerHealthState
 from database.connection import session_scope
 from database.models import Server, User, WhiteInternetSubscription
 from database.repositories import white_internet_repo

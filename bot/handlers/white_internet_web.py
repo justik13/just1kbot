@@ -6,7 +6,6 @@ import base64
 import logging
 import os
 import urllib.parse
-from datetime import datetime
 
 from aiohttp import web
 from sqlalchemy import select
@@ -14,7 +13,7 @@ from sqlalchemy import select
 from bot import texts
 from config.enums import WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, WhiteInternetSubscription
+from database.models import Server
 from database.repositories import white_internet_repo
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc

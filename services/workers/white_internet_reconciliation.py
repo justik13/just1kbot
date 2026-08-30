@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 
 from aiogram import Bot
 from sqlalchemy import or_, select
@@ -57,8 +56,9 @@ class WhiteInternetReconciliationWorker:
             server_map = {s.id: s for s in servers}
 
         # Check health and update node epoch for each server
-        for server_id, server in server_map.items():
+        for _server_id, server in server_map.items():
             if not server.api_url or not server.api_key:
+
                 continue
             is_healthy, current_epoch, _ = await self.client.check_health(server.api_url, server.api_key)
             if is_healthy and current_epoch and current_epoch != server.xray_instance_epoch:

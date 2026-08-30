@@ -1,8 +1,7 @@
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict
 
 import grpc
 
@@ -19,7 +18,7 @@ try:
     from xray.common.protocol import user_pb2
     from xray.common.serial import typed_message_pb2
     from xray.proxy.vless import account_pb2
-except ImportError as e:
+except ImportError:
     proxyman_cmd = None
     proxyman_grpc = None
     stats_cmd = None

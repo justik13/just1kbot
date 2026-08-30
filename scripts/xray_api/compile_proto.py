@@ -33,8 +33,9 @@ def compile_protos():
     print("Compilation finished successfully.")
 
     # Create __init__.py in all subdirectories of generated
-    for root, dirs, files in os.walk(out_dir):
+    for root, _dirs, _files in os.walk(out_dir):
         init_file = Path(root) / "__init__.py"
+
         init_file.touch()
 
 if __name__ == "__main__":

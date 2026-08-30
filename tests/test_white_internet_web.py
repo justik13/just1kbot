@@ -1,7 +1,6 @@
 """Unit tests for White Internet HTTP subscription feed endpoint (/sub/wl/{token})."""
 
 import base64
-import unittest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch

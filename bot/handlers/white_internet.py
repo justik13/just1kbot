@@ -6,26 +6,20 @@ import html
 import logging
 import os
 import urllib.parse
-from datetime import datetime
-from decimal import Decimal
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
-from bot.keyboards.common import get_back_button
 from config.constants import (
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
-    WHITE_INTERNET_MAX_QUOTA_BYTES,
     WHITE_INTERNET_TOPUP_PACKS,
 )
 from config.enums import WhiteInternetStatus
-from database.connection import session_scope
-from database.models import Server, User, WhiteInternetSubscription
+from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import get_user_by_telegram_id

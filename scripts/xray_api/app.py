@@ -22,13 +22,14 @@ if os.path.exists(CONFIG_ENV_FILE):
     try:
         with open(CONFIG_ENV_FILE, "r", encoding="utf-8") as f:
             for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
+                line_str = line.strip()
+                if line_str and not line_str.startswith("#") and "=" in line_str:
+                    k, v = line_str.split("=", 1)
                     k = k.strip()
                     v = v.strip().strip("'\"")
                     if k not in os.environ:
                         os.environ[k] = v
+
     except Exception as e:
         logger.warning("Failed to load %s: %s", CONFIG_ENV_FILE, e)
 
@@ -84,7 +85,8 @@ class ClientSyncRequest(BaseModel):
             try:
                 uuid_lib.UUID(values["client_id"])
             except ValueError:
-                raise ValueError(f"Invalid UUID format: {values['client_id']}")
+                raise ValueError(f"Invalid UUID format: {values['client_id']}") from None
+
 
             state = str(values.get("desired_state", "")).strip().lower()
             if state not in ("active", "disabled"):
@@ -126,7 +128,8 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Xray gRPC stats failure: {str(e)}",
-        )
+        ) from e
+
 
     return {
         "node_epoch": current_epoch,
@@ -181,7 +184,8 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
         raise HTTPException(
             status_code=422,
             detail=f"Invalid UUID: {uuid}",
-        )
+        ) from None
+
 
     failed_inbounds: List[str] = []
     for tag in TARGET_INBOUNDS:

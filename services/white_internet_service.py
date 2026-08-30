@@ -8,7 +8,6 @@ import secrets
 import urllib.parse
 import uuid
 from decimal import Decimal
-from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,16 +25,12 @@ from config.enums import (
     ServerHealthState,
     TariffQuoteOperation,
     TariffQuoteStatus,
-    WhiteInternetGrantType,
-    WhiteInternetProvisioningStatus,
     WhiteInternetStatus,
 )
 from database.models import (
     Server,
     Tariff,
     TariffQuote,
-    TariffVersion,
-    User,
     WhiteInternetQuotaGrant,
     WhiteInternetSubscription,
 )

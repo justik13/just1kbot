@@ -1,10 +1,6 @@
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-import pytest
 
 from xray_grpc import XrayGrpcClient
-import xray.app.proxyman.command.command_pb2 as proxyman_cmd
 import xray.app.stats.command.command_pb2 as stats_cmd
 
 

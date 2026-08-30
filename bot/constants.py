@@ -43,6 +43,7 @@ from config.constants import (
     TariffQuoteStatus,
     USER_CONTEXT_CACHE_MAX_SIZE,
     USER_CONTEXT_CACHE_TTL,
+    VPN_ACCESS_GRACE_HOURS,
     VPNProvisioningStatus,
     WebhookInboxStatus,
     WhiteInternetGrantType,
