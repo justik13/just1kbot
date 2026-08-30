@@ -6,12 +6,12 @@ import asyncio
 import logging
 
 from aiogram import Bot
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, WhiteInternetSubscription
+from database.models import Server, WhiteInternetQuotaGrant, WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
@@ -30,52 +30,43 @@ class WhiteInternetReconciliationWorker:
         self.client = node_client or XrayNodeClient()
 
     async def run_reconciliation_cycle(self, session: AsyncSession) -> int:
-        """
-        Execute one reconciliation cycle:
-        1. Discover active Origin servers and check their health/node epoch.
-        2. Detect epoch drift (Xray restart) and update server.xray_instance_epoch.
-        3. Identify subscriptions where:
-           actual_version != desired_version OR last_reconciled_node_epoch != server.xray_instance_epoch
-        4. Reconcile each subscription idempotently via sync_client().
-        """
         now = now_utc()
 
-        # 1. Fetch servers with capability 'xray_origin'
-        stmt_servers = select(Server).where(Server.api_url.is_not(None))
+        # Only explicitly provisioned Xray Origin nodes are eligible. Never
+        # fall back to an arbitrary Amnezia/other server.
+        stmt_servers = select(Server).where(Server.api_url.is_not(None)).order_by(Server.id.asc())
         res_servers = await session.execute(stmt_servers)
         servers = res_servers.scalars().all()
+        server_map = {
+            server.id: server
+            for server in servers
+            if "xray_origin" in (server.capabilities or [])
+        }
 
-        server_map: dict[int, Server] = {}
-        for s in servers:
-            caps = s.capabilities or []
-            if "xray_origin" in caps or "xray" in (s.protocol or "").lower():
-                server_map[s.id] = s
-
-        # If no servers explicitly tagged, include all active servers
-        if not server_map and servers:
-            server_map = {s.id: s for s in servers}
-
-        # Check health and update node epoch for each server
-        for _server_id, server in server_map.items():
+        # Refresh node generation before selecting subscriptions. The epoch is
+        # the runtime truth for the Xray process, not the Python agent process.
+        for server in server_map.values():
             if not server.api_url or not server.api_key:
-
                 continue
-            is_healthy, current_epoch, _ = await self.client.check_health(server.api_url, server.api_key)
-            if is_healthy and current_epoch and current_epoch != server.xray_instance_epoch:
-                logger.info(
-                    "Detected new Xray epoch for server %d (%s): %s (was %s). Triggering reconciliation.",
-                    server.id,
-                    server.name,
-                    current_epoch,
-                    server.xray_instance_epoch,
-                )
-                server.xray_instance_epoch = current_epoch
-                await session.flush()
+            is_healthy, current_epoch, _ = await self.client.check_health(
+                server.api_url, server.api_key
+            )
+            if is_healthy and current_epoch:
+                if current_epoch != server.xray_instance_epoch:
+                    logger.info(
+                        "Detected new Xray epoch for server %d (%s): %s (was %s).",
+                        server.id,
+                        server.name,
+                        current_epoch,
+                        server.xray_instance_epoch,
+                    )
+                    server.xray_instance_epoch = current_epoch
+                    await session.flush()
 
-        # 2. Query subscriptions needing reconciliation
         synced_count = 0
         for server_id, server in server_map.items():
-            if not server.xray_instance_epoch:
+            target_epoch = server.xray_instance_epoch
+            if not target_epoch:
                 continue
 
             stmt_subs = (
@@ -83,67 +74,78 @@ class WhiteInternetReconciliationWorker:
                 .where(
                     WhiteInternetSubscription.origin_node_id == server_id,
                     or_(
-                        WhiteInternetSubscription.actual_version != WhiteInternetSubscription.desired_version,
-                        WhiteInternetSubscription.last_reconciled_node_epoch != server.xray_instance_epoch,
+                        WhiteInternetSubscription.actual_version
+                        != WhiteInternetSubscription.desired_version,
+                        WhiteInternetSubscription.last_reconciled_node_epoch
+                        != target_epoch,
                         WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
+                        WhiteInternetSubscription.provisioning_status
+                        != WhiteInternetProvisioningStatus.ACTIVE,
                     ),
                 )
+                .order_by(WhiteInternetSubscription.id.asc())
                 .limit(BATCH_SIZE)
             )
             res_subs = await session.execute(stmt_subs)
             pending_subs = res_subs.scalars().all()
 
             for sub_meta in pending_subs:
-                # Lock row under transaction
                 sub = await white_internet_repo.get_subscription_with_lock(session, sub_meta.id)
                 if sub is None:
                     continue
 
-                # Re-verify condition under lock
-                if (
-                    sub.actual_version == sub.desired_version
-                    and sub.last_reconciled_node_epoch == server.xray_instance_epoch
-                ):
-                    continue
-
+                # Expiration is a DB state transition, not merely an HTTP
+                # presentation concern. Close all remaining grants atomically.
                 if sub.expires_at <= now and sub.status in (
+                    WhiteInternetStatus.PENDING,
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
                 ):
                     sub.status = WhiteInternetStatus.EXPIRED
                     sub.status_reason = "subscription_expired"
                     sub.desired_version += 1
+                    await session.execute(
+                        update(WhiteInternetQuotaGrant)
+                        .where(
+                            WhiteInternetQuotaGrant.subscription_id == sub.id,
+                            WhiteInternetQuotaGrant.bytes_remaining > 0,
+                        )
+                        .values(bytes_remaining=0)
+                    )
 
+                # PENDING means paid but not yet provisioned. It therefore has
+                # an active desired runtime state while within its paid period.
                 desired_active = (
-                    sub.status == WhiteInternetStatus.ACTIVE
+                    sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
                     and sub.expires_at > now
                 )
 
-
                 target_version = sub.desired_version
-                target_epoch = server.xray_instance_epoch
-
                 success, err_msg = await self.client.sync_client(
-                    server.api_url, server.api_key, sub.uuid, is_active=desired_active
+                    server.api_url,
+                    server.api_key,
+                    sub.uuid,
+                    is_active=desired_active,
                 )
 
                 if success:
-                    # Stale-write check
-                    if sub.desired_version == target_version:
+                    # The Xray call may have raced with a purchase/topup/expiry.
+                    # Never commit an obsolete version or epoch as current.
+                    current_epoch = server.xray_instance_epoch
+                    if sub.desired_version == target_version and current_epoch == target_epoch:
                         sub.actual_version = target_version
                         sub.last_reconciled_node_epoch = target_epoch
-                        sub.provisioning_status = (
-                            WhiteInternetProvisioningStatus.ACTIVE
-                            if desired_active
-                            else WhiteInternetProvisioningStatus.ACTIVE
-                        )
-                        sub.last_synced_at = now
+                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                            sub.status = WhiteInternetStatus.ACTIVE
+                            sub.status_reason = None
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.ACTIVE
+                        sub.last_synced_at = now_utc()
                         sub.last_sync_error = None
                         synced_count += 1
                 else:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
                     sub.last_sync_error = err_msg
-                    sub.last_synced_at = now
+                    sub.last_synced_at = now_utc()
                     logger.error(
                         "Failed to reconcile White Internet sub_id=%d on server %d: %s",
                         sub.id,
