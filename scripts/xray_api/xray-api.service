@@ -1,0 +1,21 @@
+[Unit]
+Description=Just1kBot Autonomous Xray API Service
+After=network.target xray.service
+Wants=xray.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/xray-api
+EnvironmentFile=-/etc/xray-api/config.env
+ExecStart=/opt/xray-api/venv/bin/uvicorn app:app --host 127.0.0.1 --port 5001 --workers 1 --log-level info
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,205 @@
+import logging
+import os
+import uuid as uuid_lib
+from typing import Optional, List, Dict, Any
+
+from fastapi import FastAPI, Header, HTTPException, status, Depends
+from pydantic import BaseModel, Field, model_validator
+
+from epoch_manager import EpochManager
+from xray_grpc import XrayGrpcClient
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("xray_api")
+
+# Configuration from environment / config file
+CONFIG_ENV_FILE = "/etc/xray-api/config.env"
+if os.path.exists(CONFIG_ENV_FILE):
+    try:
+        with open(CONFIG_ENV_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k not in os.environ:
+                        os.environ[k] = v
+    except Exception as e:
+        logger.warning("Failed to load %s: %s", CONFIG_ENV_FILE, e)
+
+API_KEY = os.getenv("XRAY_API_KEY", "")
+GRPC_HOST = os.getenv("XRAY_GRPC_HOST", "127.0.0.1")
+GRPC_PORT = int(os.getenv("XRAY_GRPC_PORT", "10085"))
+INBOUND_TAGS_RAW = os.getenv("XRAY_INBOUND_TAGS", "inbound-de,inbound-nl")
+TARGET_INBOUNDS = [tag.strip() for tag in INBOUND_TAGS_RAW.split(",") if tag.strip()]
+
+epoch_manager = EpochManager()
+grpc_client = XrayGrpcClient(host=GRPC_HOST, port=GRPC_PORT)
+
+app = FastAPI(
+    title="Just1kBot Xray API Agent",
+    description="Autonomous server agent for Xray management and traffic stats",
+    version="1.0.0",
+)
+
+
+# Security dependency
+def verify_api_key(x_api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    expected_key = os.getenv("XRAY_API_KEY") or API_KEY
+    if not expected_key:
+        logger.error("XRAY_API_KEY is not configured on the node")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Node API key is not configured",
+        )
+    if not x_api_key or x_api_key != expected_key:
+        logger.warning("Unauthorized access attempt with X-API-Key: %s", "present" if x_api_key else "missing")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing X-API-Key",
+        )
+    return True
+
+
+# Models
+class ClientSyncRequest(BaseModel):
+    client_id: Optional[str] = Field(None, description="Client UUID")
+    uuid: Optional[str] = Field(None, description="Client UUID alias")
+    desired_state: str = Field(..., description="Target state: 'active' or 'disabled'")
+
+    @model_validator(mode="before")
+    @classmethod
+    def resolve_uuid(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            cid = values.get("client_id") or values.get("uuid")
+            if not cid:
+                raise ValueError("client_id or uuid is required")
+            values["client_id"] = str(cid).strip()
+            # Validate UUID format
+            try:
+                uuid_lib.UUID(values["client_id"])
+            except ValueError:
+                raise ValueError(f"Invalid UUID format: {values['client_id']}")
+
+            state = str(values.get("desired_state", "")).strip().lower()
+            if state not in ("active", "disabled"):
+                raise ValueError("desired_state must be 'active' or 'disabled'")
+            values["desired_state"] = state
+        return values
+
+
+# Endpoints
+@app.get("/v1/health")
+def get_health(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """
+    Checks service health, Xray core process state, gRPC connectivity, and current epoch.
+    """
+    pid, _ = epoch_manager.get_xray_process_info()
+    grpc_ok = grpc_client.is_healthy()
+    current_epoch = epoch_manager.get_current_epoch()
+
+    return {
+        "status": "ok",
+        "xray_running": pid is not None,
+        "grpc_ok": grpc_ok,
+        "node_epoch": current_epoch,
+        "xray_pid": pid,
+    }
+
+
+@app.get("/v1/traffic/snapshot")
+def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """
+    Returns normalized traffic stats aggregated by UUID/email along with the node epoch.
+    Format: { "node_epoch": str, "users": { uuid: { "uplink": int, "downlink": int } } }
+    """
+    current_epoch = epoch_manager.get_current_epoch()
+    try:
+        users_stats = grpc_client.get_users_stats(reset=False)
+    except Exception as e:
+        logger.error("Failed to fetch traffic stats from gRPC: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Xray gRPC stats failure: {str(e)}",
+        )
+
+    return {
+        "node_epoch": current_epoch,
+        "users": users_stats,
+    }
+
+
+@app.post("/v1/clients/sync")
+def sync_client(
+    req: ClientSyncRequest, _: bool = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Brings client's status across inbound-de and inbound-nl to the desired state idempotently.
+    """
+    client_uuid = req.client_id
+    desired_state = req.desired_state
+
+    failed_inbounds: List[str] = []
+    for tag in TARGET_INBOUNDS:
+        try:
+            if desired_state == "active":
+                grpc_client.add_user(tag, client_uuid)
+            else:
+                grpc_client.remove_user(tag, client_uuid)
+        except Exception as e:
+            logger.error("Failed to sync user %s on inbound %s: %s", client_uuid, tag, e)
+            failed_inbounds.append(tag)
+
+    if failed_inbounds:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to sync user on inbounds: {failed_inbounds}",
+        )
+
+    return {
+        "status": "ok",
+        "client_id": client_uuid,
+        "state": desired_state,
+        "inbounds": TARGET_INBOUNDS,
+    }
+
+
+@app.delete("/v1/clients/{uuid}")
+def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any]:
+    """
+    Deletes client from both inbound-de and inbound-nl idempotently.
+    """
+    # Validate UUID
+    try:
+        clean_uuid = str(uuid_lib.UUID(uuid.strip()))
+    except ValueError:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid UUID: {uuid}",
+        )
+
+    failed_inbounds: List[str] = []
+    for tag in TARGET_INBOUNDS:
+        try:
+            grpc_client.remove_user(tag, clean_uuid)
+        except Exception as e:
+            logger.error("Failed to delete user %s from inbound %s: %s", clean_uuid, tag, e)
+            failed_inbounds.append(tag)
+
+    if failed_inbounds:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to remove user from inbounds: {failed_inbounds}",
+        )
+
+    return {
+        "status": "ok",
+        "client_id": clean_uuid,
+        "action": "deleted",
+        "inbounds": TARGET_INBOUNDS,
+    }

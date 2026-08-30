@@ -301,6 +301,11 @@ class Server(Base):
     recovery_notice_sent: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     last_alert_sent_state: Mapped[str | None] = mapped_column(String(30), nullable=True)
 
+    capabilities: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    xray_instance_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
@@ -309,9 +314,10 @@ class Tariff(Base):
 
     __table_args__ = (
         UniqueConstraint(
+            "service_type",
             "device_limit",
             "duration_days",
-            name="uq_tariffs_device_limit_duration_days",
+            name="uq_tariffs_service_device_duration",
         ),
     )
 
@@ -320,6 +326,9 @@ class Tariff(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    service_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="awg", server_default="awg"
+    )
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     device_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
     price_rub: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -373,8 +382,9 @@ class TariffQuote(Base):
         CheckConstraint("operation_type <> 'change' OR (source_tariff_version_id IS NOT NULL AND target_tariff_version_id IS NOT NULL AND source_tariff_version_id <> target_tariff_version_id AND balance_as_of IS NOT NULL AND source_subscription_end IS NOT NULL AND source_balance_fingerprint IS NOT NULL AND source_entitlement_entry_ids IS NOT NULL AND source_ledger_entry_ids IS NOT NULL)", name="ck_tariff_quotes_change_source_snapshot"),
         CheckConstraint("source_balance_fingerprint IS NULL OR source_balance_fingerprint ~ '^[0-9a-f]{64}$'", name="ck_tariff_quotes_fingerprint"),
         CheckConstraint("(status = 'consumed' AND consumed_at IS NOT NULL AND manual_review_at IS NULL) OR (status = 'manual_review' AND manual_review_at IS NOT NULL) OR (status IN ('active','expired','cancelled') AND consumed_at IS NULL AND manual_review_at IS NULL)", name="ck_tariff_quotes_lifecycle_timestamps"),
+        CheckConstraint("service_type IN ('awg', 'white_internet')", name="ck_tariff_quotes_service_type"),
         Index("uq_tariff_quotes_active_change_user", "user_id", unique=True, postgresql_where=text("operation_type='change' AND status='active'")),
-        Index("uq_tariff_quotes_active_checkout", "user_id", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
+        Index("uq_tariff_quotes_active_checkout", "user_id", "service_type", "target_tariff_version_id", unique=True, postgresql_where=text("status='active' AND operation_type IN ('purchase','renew')")),
         Index(
             "ix_tariff_quotes_consumed_journal",
             text("consumed_at DESC NULLS LAST"),
@@ -385,6 +395,9 @@ class TariffQuote(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     public_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), index=True)
+    service_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, default="awg", server_default="awg"
+    )
     operation_type: Mapped[str] = mapped_column(String(20))
     source_tariff_version_id: Mapped[int | None] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
     target_tariff_version_id: Mapped[int] = mapped_column(ForeignKey("tariff_versions.id", ondelete="RESTRICT"))
@@ -1176,4 +1189,173 @@ class SystemSetting(Base):
         default=now_utc,
         onupdate=now_utc,
     )
+
+
+class WhiteInternetSubscription(Base):
+    """White Internet (Белый Интернет) subscription lifecycle and node state."""
+
+    __tablename__ = "white_internet_subscriptions"
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING', 'ACTIVE', 'EXHAUSTED', 'EXPIRED', 'DISABLED')",
+            name="ck_white_internet_subscriptions_status",
+        ),
+        CheckConstraint(
+            "provisioning_status IN ('PENDING_CREATE', 'ACTIVE', 'PENDING_UPDATE', 'PENDING_DELETE', 'FAILED')",
+            name="ck_white_internet_subscriptions_provisioning_status",
+        ),
+        CheckConstraint(
+            "traffic_limit_bytes >= 0 AND traffic_used_bytes >= 0 "
+            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0",
+            name="ck_white_internet_subscriptions_traffic_nonnegative",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    origin_node_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("servers.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    uuid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="PENDING", server_default=text("'PENDING'"), index=True
+    )
+    status_reason: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+    traffic_limit_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=53687091200, server_default=text("53687091200")
+    )
+    traffic_used_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    last_uplink_snapshot: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    last_downlink_snapshot: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    traffic_stats_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    provisioning_status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="PENDING_CREATE",
+        server_default=text("'PENDING_CREATE'"),
+    )
+    desired_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    actual_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    last_reconciled_node_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=now_utc,
+        onupdate=now_utc,
+        server_default=text("now()"),
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+    origin_node = relationship("Server", foreign_keys=[origin_node_id])
+    grants = relationship(
+        "WhiteInternetQuotaGrant",
+        back_populates="subscription",
+        cascade="all, delete-orphan",
+    )
+
+
+class WhiteInternetQuotaGrant(Base):
+    """Single Source of Truth (SSOT) for remaining White Internet quota grants."""
+
+    __tablename__ = "white_internet_quota_grants"
+
+    __table_args__ = (
+        CheckConstraint(
+            "grant_type IN ('BASE', 'TOPUP')",
+            name="ck_white_internet_quota_grants_grant_type",
+        ),
+        CheckConstraint(
+            "bytes_granted > 0",
+            name="ck_white_internet_quota_grants_bytes_granted_positive",
+        ),
+        CheckConstraint(
+            "bytes_remaining >= 0",
+            name="ck_white_internet_quota_grants_bytes_remaining_nonnegative",
+        ),
+        CheckConstraint(
+            "bytes_remaining <= bytes_granted",
+            name="ck_white_internet_quota_grants_bytes_remaining_le_granted",
+        ),
+        CheckConstraint(
+            "price_rub >= 0",
+            name="ck_white_internet_quota_grants_price_nonnegative",
+        ),
+        UniqueConstraint(
+            "subscription_id",
+            "quote_id",
+            "grant_type",
+            name="uq_white_internet_quota_grants_sub_quote_type",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    subscription_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("white_internet_subscriptions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    grant_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    bytes_granted: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    bytes_remaining: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    price_rub: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default=text("0.00")
+    )
+    quote_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("tariff_quotes.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+    subscription = relationship("WhiteInternetSubscription", back_populates="grants")
+    quote = relationship("TariffQuote", foreign_keys=[quote_id])
+
 

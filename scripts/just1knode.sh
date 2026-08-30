@@ -1,0 +1,1311 @@
+#!/usr/bin/env bash
+# =============================================================================
+# JUST1KBOT - Утилита управления серверными узлами (just1knode)
+# =============================================================================
+#
+# Поддерживаемые команды:
+#   just1knode install amnezia     - Установка только Amnezia API с Nginx и Certbot
+#   just1knode install xray-origin - Установка Xray Origin (Xray, Geodata, XHTTP, API)
+#   just1knode install xray-exit   - Установка Xray Exit (Xray Vision Inbound, Firewall)
+#   just1knode update xray         - Безопасное обновление ядра Xray с rollback
+#   just1knode doctor              - Комплексная самодиагностика узла
+#   just1knode status              - Текущее состояние и конфигурация узла
+#
+# =============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="/etc/just1knode"
+STATE_FILE="${STATE_DIR}/state.json"
+XRAY_VERSION_PINNED="26.6.27"
+XRAY_BIN="/usr/local/bin/xray"
+XRAY_CONFIG_DIR="/usr/local/etc/xray"
+XRAY_CONFIG="${XRAY_CONFIG_DIR}/config.json"
+XRAY_SHARE_DIR="/usr/local/share/xray"
+CERTBOT_WEBROOT="/var/www/certbot"
+XRAY_API_DIR="/opt/xray-api"
+
+# Цветовая палитра
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+log() {
+    echo -e "${GREEN}[+]${NC} $1"
+}
+
+warn() {
+    echo -e "${YELLOW}[!] ВНИМАНИЕ:${NC} $1"
+}
+
+error() {
+    echo -e "${RED}[✗] ОШИБКА:${NC} $1" >&2
+    exit 1
+}
+
+info() {
+    echo -e "${CYAN}[i]${NC} $1"
+}
+
+title() {
+    echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
+}
+
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        error "Скрипт должен быть запущен с правами суперпользователя (root или sudo)."
+    fi
+}
+
+# --- Управление состоянием узла (/etc/just1knode/state.json) ---
+init_state_file() {
+    mkdir -p "$STATE_DIR"
+    if [[ ! -f "$STATE_FILE" ]]; then
+        echo "{}" > "$STATE_FILE"
+        chmod 600 "$STATE_FILE"
+    fi
+}
+
+set_state_val() {
+    local key="$1"
+    local val="$2"
+    init_state_file
+    python3 -c "
+import json
+f = '$STATE_FILE'
+try:
+    with open(f, 'r', encoding='utf-8') as fp:
+        data = json.load(fp)
+except Exception:
+    data = {}
+data['$key'] = '$val'
+from datetime import datetime, timezone
+data['updated_at'] = datetime.now(timezone.utc).isoformat()
+with open(f, 'w', encoding='utf-8') as fp:
+    json.dump(data, fp, indent=2)
+"
+}
+
+get_state_val() {
+    local key="$1"
+    local default_val="${2:-}"
+    if [[ ! -f "$STATE_FILE" ]]; then
+        echo "$default_val"
+        return
+    fi
+    python3 -c "
+import json
+try:
+    with open('$STATE_FILE', 'r', encoding='utf-8') as fp:
+        data = json.load(fp)
+    print(data.get('$key', '$default_val'))
+except Exception:
+    print('$default_val')
+"
+}
+
+show_state() {
+    title "СОСТОЯНИЕ УЗЛА (${STATE_FILE})"
+    if [[ -f "$STATE_FILE" ]]; then
+        python3 -m json.tool "$STATE_FILE" 2>/dev/null || cat "$STATE_FILE"
+    else
+        warn "Файл состояния не найден. Узел еще не настроен."
+    fi
+}
+
+# --- Определение архитектуры процессора ---
+get_arch() {
+    local arch
+    arch="$(uname -m)"
+    case "$arch" in
+        x86_64|amd64)
+            echo "64"
+            ;;
+        aarch64|arm64)
+            echo "arm64-v8a"
+            ;;
+        *)
+            error "Неподдерживаемая архитектура: $arch"
+            ;;
+    esac
+}
+
+# --- Установка базовых пакетов ОС ---
+install_common_deps() {
+    info "Обновление индексов пакетов и установка зависимостей..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq curl wget unzip nginx certbot ufw python3 python3-pip python3-venv socat
+    mkdir -p "$CERTBOT_WEBROOT"
+    chmod 755 "$CERTBOT_WEBROOT"
+}
+
+# --- Скачивание и установка бинарника Xray ---
+install_xray_core() {
+    local version="${1:-$XRAY_VERSION_PINNED}"
+    local arch
+    arch="$(get_arch)"
+    local zip_name="Xray-linux-${arch}.zip"
+    local download_url="https://github.com/XTLS/Xray-core/releases/download/v${version}/${zip_name}"
+    local tmp_dir="/tmp/xray-install-$$"
+
+    info "Скачивание Xray ${version} (${arch})..."
+    mkdir -p "$tmp_dir"
+    if ! wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$download_url"; then
+        # Резервный источник через зеркало
+        local mirror_url="https://ghfast.top/${download_url}"
+        info "Прямое скачивание не удалось, используем зеркало: ${mirror_url}..."
+        wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray core ${version}"
+    fi
+
+    unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
+    install -m 755 "${tmp_dir}/xray" "$XRAY_BIN"
+    mkdir -p "$XRAY_CONFIG_DIR" "$XRAY_SHARE_DIR" "/var/log/xray"
+    rm -rf "$tmp_dir"
+
+    log "Xray ${version} успешно установлен в ${XRAY_BIN}"
+    "$XRAY_BIN" version | head -n 2
+}
+
+# --- Скачивание Geodata (geoip.dat, geosite.dat от Loyalsoldier) ---
+install_geodata() {
+    info "Установка актуальных geodata (Loyalsoldier/v2ray-rules-dat)..."
+    mkdir -p "$XRAY_SHARE_DIR"
+    local geoip_url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+    local geosite_url="https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+
+    if ! curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geoip.dat" "$geoip_url"; then
+        curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geoip.dat" "https://ghfast.top/${geoip_url}" || warn "Не удалось скачать geoip.dat"
+    fi
+
+    if ! curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geosite.dat" "$geosite_url"; then
+        curl -fsSL --connect-timeout 20 -o "${XRAY_SHARE_DIR}/geosite.dat" "https://ghfast.top/${geosite_url}" || warn "Не удалось скачать geosite.dat"
+    fi
+
+    log "Geodata размещены в ${XRAY_SHARE_DIR}"
+}
+
+# --- Создание systemd-сервиса Xray ---
+setup_xray_service() {
+    info "Настройка systemd сервиса Xray..."
+    cat > /etc/systemd/system/xray.service <<EOF
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=root
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+}
+
+# --- Получение SSL-сертификата Certbot через единый webroot ---
+obtain_ssl_cert() {
+    local domain="$1"
+    local email="$2"
+
+    mkdir -p "$CERTBOT_WEBROOT"
+    mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
+
+    # Создаем базовый конфиг HTTP для прохождения ACME челленджа
+    cat > /etc/nginx/conf.d/acme-challenge.conf <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+        allow all;
+    }
+}
+EOF
+    nginx -t && systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null || true
+
+    info "Запрос SSL-сертификата Let's Encrypt для домена ${domain}..."
+    if certbot certonly --webroot -w "$CERTBOT_WEBROOT" \
+        --non-interactive --agree-tos --email "$email" -d "$domain"; then
+        log "SSL-сертификат для ${domain} успешно получен!"
+    else
+        warn "Certbot не смог получить сертификат через webroot. Проверьте A-запись DNS для ${domain}."
+    fi
+
+    # Настройка автоматического хука перезагрузки Nginx и Xray при продлении
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    cat > /etc/letsencrypt/renewal-hooks/deploy/reload-all.sh <<'EOF'
+#!/bin/sh
+set -e
+systemctl reload nginx 2>/dev/null || true
+systemctl restart xray 2>/dev/null || true
+EOF
+    chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-all.sh
+}
+
+# =============================================================================
+# 1. КОМАНДА: install amnezia
+# =============================================================================
+cmd_install_amnezia() {
+    title "УСТАНОВКА AMNEZIA API УЗЛА"
+    check_root
+    install_common_deps
+
+    local domain="${1:-}"
+    local email="${2:-}"
+
+    if [[ -z "$domain" ]]; then
+        read -r -p "Введите домен для Amnezia API: " domain
+    fi
+    if [[ -z "$email" ]]; then
+        read -r -p "Введите Email для Let's Encrypt: " email
+    fi
+
+    [[ -n "$domain" ]] || error "Домен обязателен для установки."
+    [[ -n "$email" ]] || error "Email обязателен для установки."
+
+    obtain_ssl_cert "$domain" "$email"
+
+    # Конфигурация Nginx для Amnezia API
+    local cert_dir="/etc/letsencrypt/live/${domain}"
+    cat > "/etc/nginx/sites-available/just1k-amnezia.conf" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert_dir}/fullchain.pem;
+    ssl_certificate_key ${cert_dir}/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+
+    ln -sfn "/etc/nginx/sites-available/just1k-amnezia.conf" "/etc/nginx/sites-enabled/just1k-amnezia.conf"
+    rm -f /etc/nginx/conf.d/acme-challenge.conf
+    nginx -t && systemctl reload nginx
+
+    # Настройка Firewall UFW
+    ufw allow 80/tcp || true
+    ufw allow 443/tcp || true
+
+    # Сохранение состояния
+    set_state_val "role" "amnezia"
+    set_state_val "domain" "$domain"
+    set_state_val "email" "$email"
+    set_state_val "certbot_webroot" "$CERTBOT_WEBROOT"
+    from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    set_state_val "installed_at" "$from_ts"
+
+    log "Установка Amnezia API завершена. Домен: https://${domain}"
+}
+
+# =============================================================================
+# 2. КОМАНДА: install xray-origin
+# =============================================================================
+cmd_install_xray_origin() {
+    title "УСТАНОВКА XRAY ORIGIN УЗЛА"
+    check_root
+    install_common_deps
+
+    local domain=""
+    local bot_ip=""
+    local exit_de_host=""
+    local exit_de_uuid=""
+    local exit_nl_host=""
+    local exit_nl_uuid=""
+    local email=""
+    local api_key=""
+
+    # Разбор параметров CLI (позиционные или именованные)
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --domain) domain="$2"; shift 2 ;;
+            --bot-ip) bot_ip="$2"; shift 2 ;;
+            --exit-de-host) exit_de_host="$2"; shift 2 ;;
+            --exit-de-uuid) exit_de_uuid="$2"; shift 2 ;;
+            --exit-nl-host) exit_nl_host="$2"; shift 2 ;;
+            --exit-nl-uuid) exit_nl_uuid="$2"; shift 2 ;;
+            --email) email="$2"; shift 2 ;;
+            --api-key) api_key="$2"; shift 2 ;;
+            *)
+                # Если позиционные аргументы
+                if [[ -z "$domain" ]]; then domain="$1"
+                elif [[ -z "$bot_ip" ]]; then bot_ip="$1"
+                elif [[ -z "$exit_de_host" ]]; then exit_de_host="$1"
+                elif [[ -z "$exit_de_uuid" ]]; then exit_de_uuid="$1"
+                elif [[ -z "$exit_nl_host" ]]; then exit_nl_host="$1"
+                elif [[ -z "$exit_nl_uuid" ]]; then exit_nl_uuid="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Интерактивный запрос недостающих параметров
+    if [[ -z "$domain" ]]; then
+        read -r -p "Введите Origin-домен (например, origin.example.com): " domain
+    fi
+    if [[ -z "$bot_ip" ]]; then
+        read -r -p "Введите IP-адрес хоста Telegram-бота: " bot_ip
+    fi
+    if [[ -z "$exit_de_host" ]]; then
+        read -r -p "Введите хост/IP Exit-сервера Германии: " exit_de_host
+    fi
+    if [[ -z "$exit_de_uuid" ]]; then
+        read -r -p "Введите VLESS UUID для Exit-сервера Германии: " exit_de_uuid
+    fi
+    if [[ -z "$exit_nl_host" ]]; then
+        read -r -p "Введите хост/IP Exit-сервера Нидерландов: " exit_nl_host
+    fi
+    if [[ -z "$exit_nl_uuid" ]]; then
+        read -r -p "Введите VLESS UUID для Exit-сервера Нидерландов: " exit_nl_uuid
+    fi
+    if [[ -z "$email" ]]; then
+        read -r -p "Введите Email для Let's Encrypt (admin@${domain}): " email
+        email="${email:-admin@${domain}}"
+    fi
+    if [[ -z "$api_key" ]]; then
+        api_key="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
+        info "Сгенерирован новый XRAY_API_KEY: ${api_key}"
+    fi
+
+    [[ -n "$domain" ]] || error "Домен обязателен."
+    [[ -n "$bot_ip" ]] || error "IP-адрес бота обязателен."
+    [[ -n "$exit_de_host" ]] || error "Хост Exit DE обязателен."
+    [[ -n "$exit_de_uuid" ]] || error "UUID Exit DE обязателен."
+    [[ -n "$exit_nl_host" ]] || error "Хост Exit NL обязателен."
+    [[ -n "$exit_nl_uuid" ]] || error "UUID Exit NL обязателен."
+
+    # 1. Установка Xray 26.6.27
+    install_xray_core "$XRAY_VERSION_PINNED"
+    install_geodata
+    setup_xray_service
+
+    # 2. Получение SSL сертификата
+    obtain_ssl_cert "$domain" "$email"
+    local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
+    local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
+
+    # 3. Генерация конфигурации Xray Origin
+    info "Генерация конфигурации Xray Origin (${XRAY_CONFIG})..."
+    cat > "$XRAY_CONFIG" <<EOF
+{
+  "log": {
+    "loglevel": "warning",
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log"
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true
+      }
+    },
+    "system": {
+      "statsInboundUplink": true,
+      "statsInboundDownlink": true,
+      "statsOutboundUplink": true,
+      "statsOutboundDownlink": true
+    }
+  },
+  "dns": {
+    "servers": [
+      {
+        "address": "77.88.8.8",
+        "port": 53,
+        "domains": [
+          "domain:ru",
+          "geosite:category-ru",
+          "geosite:category-gov-ru"
+        ],
+        "expectIPs": [
+          "geoip:ru"
+        ]
+      },
+      {
+        "address": "1.1.1.1",
+        "port": 53,
+        "domains": []
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "inbound-de",
+      "listen": "127.0.0.1",
+      "port": 8003,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "path": "/api/v3/de",
+          "mode": "packet-up",
+          "uplinkHTTPMethod": "OPTIONS",
+          "xPaddingObfsMode": true,
+          "xPaddingKey": "dc",
+          "xPaddingHeader": "X-Cache",
+          "xPaddingMethod": "tokenish"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "inbound-nl",
+      "listen": "127.0.0.1",
+      "port": 8004,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "path": "/api/v3/nl",
+          "mode": "packet-up",
+          "uplinkHTTPMethod": "OPTIONS",
+          "xPaddingObfsMode": true,
+          "xPaddingKey": "dc",
+          "xPaddingHeader": "X-Cache",
+          "xPaddingMethod": "tokenish"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "port": 10085,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "to-exit-de",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${exit_de_host}",
+            "port": 10443,
+            "users": [
+              {
+                "id": "${exit_de_uuid}",
+                "flow": "xtls-rprx-vision",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${exit_de_host}",
+          "allowInsecure": false
+        }
+      }
+    },
+    {
+      "tag": "to-exit-nl",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${exit_nl_host}",
+            "port": 10443,
+            "users": [
+              {
+                "id": "${exit_nl_uuid}",
+                "flow": "xtls-rprx-vision",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${exit_nl_host}",
+          "allowInsecure": false
+        }
+      }
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": ["api"],
+        "outboundTag": "api"
+      },
+      {
+        "type": "field",
+        "domain": [
+          "domain:ru",
+          "geosite:category-ru",
+          "geosite:category-gov-ru"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:ru",
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["inbound-de"],
+        "outboundTag": "to-exit-de"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["inbound-nl"],
+        "outboundTag": "to-exit-nl"
+      }
+    ]
+  }
+}
+EOF
+
+    # Проверка конфигурации Xray
+    info "Проверка синтаксиса конфигурации Xray..."
+    "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
+
+    # 4. Конфигурация Nginx Origin
+    info "Настройка конфигурации Nginx..."
+    cat > /etc/nginx/conf.d/xhttp_map.conf <<'EOF'
+map $request_method $xhttp_proxy_method {
+    default $request_method;
+    OPTIONS POST;
+}
+EOF
+
+    cat > "/etc/nginx/sites-available/just1k-xray-origin.conf" <<EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${domain};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root ${CERTBOT_WEBROOT};
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://\$host\$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${domain};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    client_max_body_size 0;
+    client_header_buffer_size 64k;
+    large_client_header_buffers 8 128k;
+
+    proxy_buffering off;
+    proxy_request_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+
+    location = /cdn-check {
+        add_header X-CDN-Origin "ok" always;
+        add_header X-Origin-Method \$request_method always;
+        return 204;
+    }
+
+    location /api/v3/de {
+        proxy_pass http://127.0.0.1:8003;
+        proxy_method \$xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_headers on;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /api/v3/nl {
+        proxy_pass http://127.0.0.1:8004;
+        proxy_method \$xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_headers on;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+}
+
+server {
+    listen 8444 ssl;
+    listen [::]:8444 ssl;
+    server_name ${domain};
+
+    ssl_certificate ${cert_file};
+    ssl_certificate_key ${key_file};
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 60s;
+    }
+}
+EOF
+
+    ln -sfn "/etc/nginx/sites-available/just1k-xray-origin.conf" "/etc/nginx/sites-enabled/just1k-xray-origin.conf"
+    rm -f /etc/nginx/conf.d/acme-challenge.conf
+    nginx -t && systemctl reload nginx
+
+    # 5. Установка автономного агента xray-api
+    info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
+    mkdir -p "$XRAY_API_DIR"
+    cp -r "${SCRIPT_DIR}/xray_api/"* "$XRAY_API_DIR/"
+
+    python3 -m venv "${XRAY_API_DIR}/venv"
+    "${XRAY_API_DIR}/venv/bin/pip" install --upgrade pip -q
+    "${XRAY_API_DIR}/venv/bin/pip" install -r "${XRAY_API_DIR}/requirements.txt" -q
+
+    mkdir -p /etc/xray-api
+    cat > /etc/xray-api/config.env <<EOF
+XRAY_API_KEY=${api_key}
+XRAY_GRPC_HOST=127.0.0.1
+XRAY_GRPC_PORT=10085
+XRAY_INBOUND_TAGS=inbound-de,inbound-nl
+EPOCH_FILE_PATH=/var/lib/xray-api/epoch.json
+EOF
+    chmod 600 /etc/xray-api/config.env
+
+    cp "${XRAY_API_DIR}/xray-api.service" /etc/systemd/system/xray-api.service
+    systemctl daemon-reload
+    systemctl enable --now xray-api
+    systemctl enable --now xray
+    systemctl restart xray
+    systemctl restart xray-api
+
+    # 6. Настройка UFW
+    info "Настройка сетевого экрана UFW..."
+    ufw allow 80/tcp || true
+    ufw allow 443/tcp || true
+    # Порт 8444 разрешить СТРОГО для IP бота
+    ufw delete allow 8444/tcp 2>/dev/null || true
+    ufw allow from "${bot_ip}" to any port 8444 proto tcp || true
+
+    # 7. Сохранение состояния
+    set_state_val "role" "xray-origin"
+    set_state_val "domain" "$domain"
+    set_state_val "bot_ip" "$bot_ip"
+    set_state_val "exit_de_host" "$exit_de_host"
+    set_state_val "exit_de_uuid" "$exit_de_uuid"
+    set_state_val "exit_nl_host" "$exit_nl_host"
+    set_state_val "exit_nl_uuid" "$exit_nl_uuid"
+    set_state_val "xray_version" "$XRAY_VERSION_PINNED"
+    set_state_val "api_port" "8444"
+    from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    set_state_val "installed_at" "$from_ts"
+
+    log "Установка Xray Origin успешно завершена!"
+    info "Xray Inbounds: 8003 (/api/v3/de), 8004 (/api/v3/nl)"
+    info "API Agent: https://${domain}:8444 (доступен только с IP: ${bot_ip})"
+    info "X-API-Key: ${api_key}"
+}
+
+# =============================================================================
+# 3. КОМАНДА: install xray-exit
+# =============================================================================
+cmd_install_xray_exit() {
+    title "УСТАНОВКА XRAY EXIT УЗЛА"
+    check_root
+    install_common_deps
+
+    local origin_ip=""
+    local domain=""
+    local client_uuid=""
+    local email=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --origin-ip) origin_ip="$2"; shift 2 ;;
+            --domain) domain="$2"; shift 2 ;;
+            --uuid) client_uuid="$2"; shift 2 ;;
+            --email) email="$2"; shift 2 ;;
+            *)
+                if [[ -z "$origin_ip" ]]; then origin_ip="$1"
+                elif [[ -z "$domain" ]]; then domain="$1"
+                elif [[ -z "$client_uuid" ]]; then client_uuid="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$origin_ip" ]]; then
+        read -r -p "Введите IP-адрес Origin-сервера: " origin_ip
+    fi
+    if [[ -z "$domain" ]]; then
+        read -r -p "Введите домен Exit-сервера (например, relay.example.com): " domain
+    fi
+    if [[ -z "$client_uuid" ]]; then
+        read -r -p "Введите VLESS UUID для авторизации Origin: " client_uuid
+    fi
+    if [[ -z "$email" ]]; then
+        read -r -p "Введите Email для Let's Encrypt (admin@${domain}): " email
+        email="${email:-admin@${domain}}"
+    fi
+
+    [[ -n "$origin_ip" ]] || error "IP-адрес Origin обязателен."
+    [[ -n "$domain" ]] || error "Домен Exit обязателен."
+    [[ -n "$client_uuid" ]] || error "UUID клиента обязателен."
+
+    install_xray_core "$XRAY_VERSION_PINNED"
+    setup_xray_service
+
+    obtain_ssl_cert "$domain" "$email"
+    local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
+    local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
+
+    info "Генерация конфигурации Xray Exit (${XRAY_CONFIG})..."
+    cat > "$XRAY_CONFIG" <<EOF
+{
+  "log": {
+    "loglevel": "warning",
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log"
+  },
+  "inbounds": [
+    {
+      "tag": "from-origin",
+      "listen": "0.0.0.0",
+      "port": 10443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "${client_uuid}",
+            "flow": "xtls-rprx-vision",
+            "level": 0
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "${cert_file}",
+              "keyFile": "${key_file}"
+            }
+          ]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "inboundTag": ["from-origin"],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}
+EOF
+
+    "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
+    systemctl enable --now xray
+    systemctl restart xray
+
+    # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
+    info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
+    ufw allow 80/tcp || true
+    ufw delete allow 10443/tcp 2>/dev/null || true
+    ufw allow from "${origin_ip}" to any port 10443 proto tcp || true
+
+    set_state_val "role" "xray-exit"
+    set_state_val "domain" "$domain"
+    set_state_val "origin_ip" "$origin_ip"
+    set_state_val "client_uuid" "$client_uuid"
+    set_state_val "xray_version" "$XRAY_VERSION_PINNED"
+    from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    set_state_val "installed_at" "$from_ts"
+
+    log "Установка Xray Exit успешно завершена!"
+    info "Inbound: port 10443 VLESS Vision TLS (доступен строго для ${origin_ip})"
+}
+
+# =============================================================================
+# 4. КОМАНДА: update xray (безопасное обновление с rollback)
+# =============================================================================
+cmd_update_xray() {
+    title "БЕЗОПАСНОЕ ОБНОВЛЕНИЕ XRAY CORE"
+    check_root
+
+    local target_version="${1:-$XRAY_VERSION_PINNED}"
+    info "Целевая версия для обновления: ${target_version}"
+
+    local arch
+    arch="$(get_arch)"
+    local zip_name="Xray-linux-${arch}.zip"
+    local download_url="https://github.com/XTLS/Xray-core/releases/download/v${target_version}/${zip_name}"
+    local tmp_dir="/tmp/xray-update-$$"
+
+    mkdir -p "$tmp_dir"
+    info "1. Скачивание нового ядра в ${tmp_dir}..."
+    if ! wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$download_url"; then
+        local mirror_url="https://ghfast.top/${download_url}"
+        info "Используем зеркало ${mirror_url}..."
+        wget -q --timeout=30 -O "${tmp_dir}/${zip_name}" "$mirror_url" || error "Не удалось скачать Xray ${target_version}"
+    fi
+
+    unzip -q -o "${tmp_dir}/${zip_name}" -d "$tmp_dir"
+    local new_binary="${tmp_dir}/xray"
+    chmod +x "$new_binary"
+
+    info "2. Тестирование конфигурации новым бинарником..."
+    if [[ -f "$XRAY_CONFIG" ]]; then
+        if ! "$new_binary" run -test -config "$XRAY_CONFIG"; then
+            rm -rf "$tmp_dir"
+            error "Тест конфигурации новым бинарником завершился с ошибкой. Обновление отменено!"
+        fi
+        log "Тест конфигурации пройден успешно."
+    else
+        warn "Конфигурация ${XRAY_CONFIG} не найдена, пропускаем тест конфигурации."
+    fi
+
+    info "3. Создание резервной копии текущего бинарника в ${XRAY_BIN}.bak..."
+    if [[ -f "$XRAY_BIN" ]]; then
+        cp -f "$XRAY_BIN" "${XRAY_BIN}.bak"
+    fi
+
+    info "4. Атомарная замена исполняемого файла..."
+    install -m 755 "$new_binary" "$XRAY_BIN"
+    rm -rf "$tmp_dir"
+
+    info "5. Перезапуск службы Xray..."
+    systemctl restart xray || true
+    sleep 1
+
+    info "6. Проверка здоровья gRPC API (порт 10085)..."
+    local healthy=false
+    if [[ -f "${XRAY_API_DIR}/venv/bin/python3" ]]; then
+        if "${XRAY_API_DIR}/venv/bin/python3" -c "
+import sys
+sys.path.insert(0, '${XRAY_API_DIR}')
+from xray_grpc import XrayGrpcClient
+c = XrayGrpcClient(timeout=3.0)
+sys.exit(0 if c.is_healthy() else 1)
+" 2>/dev/null; then
+            healthy=true
+        fi
+    elif systemctl is-active --quiet xray; then
+        healthy=true
+    fi
+
+    if [[ "$healthy" == "true" ]]; then
+        log "Обновление Xray до версии ${target_version} прошло успешно!"
+        set_state_val "xray_version" "$target_version"
+        "$XRAY_BIN" version | head -n 2
+    else
+        warn "Служба Xray не отвечает после обновления. Выполняется автоматический откат (ROLLBACK)..."
+        if [[ -f "${XRAY_BIN}.bak" ]]; then
+            cp -f "${XRAY_BIN}.bak" "$XRAY_BIN"
+            systemctl restart xray
+            log "Откат к предыдущей версии выполнен успешно."
+        else
+            error "Резервная копия не найдена, откат невозможен."
+        fi
+        exit 1
+    fi
+}
+
+# =============================================================================
+# 5. КОМАНДА: doctor (комплексная самодиагностика)
+# =============================================================================
+cmd_doctor() {
+    title "КОМПЛЕКСНАЯ ДИАГНОСТИКА УЗЛА (DOCTOR)"
+    local issues=0
+
+    # 1. Проверка Nginx
+    info "Проверка Nginx..."
+    if command -v nginx >/dev/null 2>&1; then
+        if nginx -t >/dev/null 2>&1; then
+            log "Nginx: синтаксис конфигурации корректен [OK]"
+        else
+            warn "Nginx: ошибка в конфигурации [FAIL]"
+            nginx -t || true
+            ((issues++))
+        fi
+        if systemctl is-active --quiet nginx 2>/dev/null; then
+            log "Nginx: служба активна [OK]"
+        else
+            warn "Nginx: служба не запущена [WARN]"
+            ((issues++))
+        fi
+    else
+        info "Nginx не установлен на узле."
+    fi
+
+    # 2. Проверка Xray
+    info "Проверка Xray Core..."
+    if [[ -f "$XRAY_BIN" ]]; then
+        log "Xray: бинарник найден (${XRAY_BIN}) [OK]"
+        if [[ -f "$XRAY_CONFIG" ]]; then
+            if "$XRAY_BIN" run -test -config "$XRAY_CONFIG" >/dev/null 2>&1; then
+                log "Xray: конфигурация валидна [OK]"
+            else
+                warn "Xray: ошибка валидации конфигурации [FAIL]"
+                "$XRAY_BIN" run -test -config "$XRAY_CONFIG" || true
+                ((issues++))
+            fi
+        else
+            warn "Xray: файл конфигурации ${XRAY_CONFIG} отсутствует [WARN]"
+            ((issues++))
+        fi
+
+        if systemctl is-active --quiet xray 2>/dev/null; then
+            log "Xray: служба активна [OK]"
+        else
+            warn "Xray: служба не запущена [WARN]"
+            ((issues++))
+        fi
+    else
+        info "Xray Core не установлен на узле."
+    fi
+
+    # 3. Проверка сетевых портов
+    info "Проверка сетевых портов..."
+    check_port() {
+        local port="$1"
+        local name="$2"
+        if ss -tulpn 2>/dev/null | grep -q ":${port} "; then
+            log "Порт ${port} (${name}): слушается [OK]"
+        else
+            warn "Порт ${port} (${name}): НЕ слушается [WARN]"
+            ((issues++))
+        fi
+    }
+
+    local role
+    role="$(get_state_val 'role' 'unknown')"
+    info "Определенная роль узла: ${role}"
+
+    case "$role" in
+        xray-origin)
+            check_port 80 "HTTP / ACME"
+            check_port 443 "HTTPS / XHTTP"
+            check_port 8003 "Xray Inbound DE"
+            check_port 8004 "Xray Inbound NL"
+            check_port 10085 "Xray gRPC API"
+            check_port 8444 "Nginx Xray-API proxy"
+            check_port 5001 "Xray-API internal"
+            ;;
+        xray-exit)
+            check_port 80 "HTTP / ACME"
+            check_port 10443 "Xray Vision Inbound"
+            ;;
+        amnezia)
+            check_port 80 "HTTP / ACME"
+            check_port 443 "HTTPS Amnezia Proxy"
+            ;;
+        *)
+            # Общая проверка
+            ss -tulpn 2>/dev/null | grep -E ':(80|443|8003|8004|10085|8444|10443|5001)\b' || true
+            ;;
+    esac
+
+    # 4. Проверка доступности gRPC 127.0.0.1:10085
+    if [[ "$role" == "xray-origin" ]]; then
+        info "Проверка доступности gRPC 127.0.0.1:10085..."
+        if [[ -f "${XRAY_API_DIR}/venv/bin/python3" ]]; then
+            if "${XRAY_API_DIR}/venv/bin/python3" -c "
+import sys
+sys.path.insert(0, '${XRAY_API_DIR}')
+from xray_grpc import XrayGrpcClient
+c = XrayGrpcClient(timeout=2.0)
+sys.exit(0 if c.is_healthy() else 1)
+" 2>/dev/null; then
+                log "gRPC 127.0.0.1:10085 отвечает на вызовы [OK]"
+            else
+                warn "gRPC 127.0.0.1:10085 не отвечает [FAIL]"
+                ((issues++))
+            fi
+        fi
+    fi
+
+    # 5. Проверка Certbot SSL
+    info "Проверка сертификатов Certbot..."
+    if command -v certbot >/dev/null 2>&1; then
+        certbot certificates 2>/dev/null | grep -E "Certificate Name|Expiry Date|Domains" || warn "Сертификаты не обнаружены."
+    fi
+
+    # 6. Проверка службы xray-api
+    if [[ "$role" == "xray-origin" ]]; then
+        info "Проверка службы xray-api..."
+        if systemctl is-active --quiet xray-api 2>/dev/null; then
+            log "xray-api: служба активна [OK]"
+        else
+            warn "xray-api: служба не запущена [FAIL]"
+            ((issues++))
+        fi
+    fi
+
+    echo ""
+    if (( issues == 0 )); then
+        echo -e "${GREEN}${BOLD}✓ Самодиагностика узла завершена успешно. Замечаний не обнаружено.${NC}\n"
+        return 0
+    else
+        echo -e "${YELLOW}${BOLD}! Самодиагностика выявила ${issues} замечаний.${NC}\n"
+        return 1
+    fi
+}
+
+# =============================================================================
+# ИНТЕРАКТИВНОЕ TUI-МЕНЮ
+# =============================================================================
+interactive_menu() {
+    while true; do
+        clear 2>/dev/null || true
+        echo -e "${BOLD}${BLUE}╔══════════════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${BOLD}${BLUE}║${NC}             ${BOLD}${CYAN}JUST1KNODE - МЕНЕДЖЕР СЕРВЕРНОГО УЗЛА VPN / XRAY${NC}                 ${BOLD}${BLUE}║${NC}"
+        echo -e "${BOLD}${BLUE}╚══════════════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        local role
+        role="$(get_state_val 'role' 'не установлен')"
+        echo -e "  Текущая роль узла: ${GREEN}${BOLD}${role}${NC}"
+        echo ""
+        echo -e "  [${BOLD}1${NC}] 📦 ${BOLD}Установить Amnezia API${NC} (Nginx + Certbot webroot)"
+        echo -e "  [${BOLD}2${NC}] 🚀 ${BOLD}Установить Xray Origin${NC} (XHTTP + Nginx + gRPC + Xray-API)"
+        echo -e "  [${BOLD}3${NC}] 🛡️  ${BOLD}Установить Xray Exit${NC} (Vision Inbound + UFW)"
+        echo -e "  [${BOLD}4${NC}] 🔄 ${BOLD}Обновить ядро Xray${NC} (безопасное обновление с rollback)"
+        echo -e "  [${BOLD}5${NC}] 🩺 ${BOLD}Самодиагностика узла${NC} (doctor)"
+        echo -e "  [${BOLD}6${NC}] 📋 ${BOLD}Показать статус и конфигурацию${NC}"
+        echo -e "  [${BOLD}0${NC}] ❌ ${BOLD}Выход${NC}"
+        echo ""
+        echo -e "${CYAN}──────────────────────────────────────────────────────────────────────────────${NC}"
+        read -r -p "Выберите действие [0-6]: " choice
+
+        case "$choice" in
+            1)
+                cmd_install_amnezia
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            2)
+                cmd_install_xray_origin
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            3)
+                cmd_install_xray_exit
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            4)
+                read -r -p "Версия Xray для обновления [по умолчанию ${XRAY_VERSION_PINNED}]: " target_v
+                cmd_update_xray "${target_v:-$XRAY_VERSION_PINNED}"
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            5)
+                cmd_doctor || true
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            6)
+                show_state
+                read -r -p "Нажмите Enter для продолжения..."
+                ;;
+            0|q|exit)
+                echo -e "\n${GREEN}До свидания!${NC}\n"
+                exit 0
+                ;;
+            *)
+                warn "Неверный выбор."
+                sleep 1
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# ДИСПЕТЧЕР CLI КОМАНД
+# =============================================================================
+main() {
+    if [[ $# -eq 0 ]]; then
+        interactive_menu
+        return
+    fi
+
+    local action="$1"
+    shift
+
+    case "$action" in
+        install)
+            local target="${1:-}"
+            [[ -n "$target" ]] || error "Укажите компонент для установки: amnezia, xray-origin, xray-exit"
+            shift
+            case "$target" in
+                amnezia)
+                    cmd_install_amnezia "$@"
+                    ;;
+                xray-origin)
+                    cmd_install_xray_origin "$@"
+                    ;;
+                xray-exit)
+                    cmd_install_xray_exit "$@"
+                    ;;
+                *)
+                    error "Неизвестный компонент для установки: $target. Допустимо: amnezia, xray-origin, xray-exit"
+                    ;;
+            esac
+            ;;
+        update)
+            local target="${1:-xray}"
+            if [[ "$target" == "xray" ]]; then
+                shift 2>/dev/null || true
+                cmd_update_xray "$@"
+            else
+                cmd_update_xray "$target"
+            fi
+            ;;
+        doctor|check)
+            cmd_doctor
+            ;;
+        status|state)
+            show_state
+            ;;
+        help|-h|--help)
+            echo "Использование: just1knode [install amnezia|xray-origin|xray-exit | update xray | doctor | status]"
+            ;;
+        *)
+            error "Неизвестная команда: $action. Используйте 'just1knode help'."
+            ;;
+    esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

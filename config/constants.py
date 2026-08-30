@@ -6,6 +6,7 @@ integrations, services, and bot layers without architectural cycles.
 """
 
 from datetime import datetime, timezone
+from decimal import Decimal
 
 from config.enums import (
     AccountLedgerEntryType,
@@ -25,11 +26,16 @@ from config.enums import (
     PaymentReconciliationStatus,
     ProviderRefundOperationStatus,
     ServerHealthState,
+    ServiceType,
     TariffQuoteOperation,
     TariffQuoteStatus,
     VPNProvisioningStatus,
     WebhookInboxStatus,
+    WhiteInternetGrantType,
+    WhiteInternetProvisioningStatus,
+    WhiteInternetStatus,
 )
+
 
 # Protocol
 AMNEZIA_PROTOCOL = "amneziawg2"
@@ -82,6 +88,18 @@ HUB_CACHE_TTL = 43200
 USER_CONTEXT_CACHE_MAX_SIZE = 2000
 USER_CONTEXT_CACHE_TTL = 15.0
 
+# White Internet Service Constants
+WHITE_INTERNET_SERVICE_TYPE = "white_internet"
+WHITE_INTERNET_BASE_PRICE_RUB = Decimal("250.00")
+WHITE_INTERNET_BASE_DURATION_DAYS = 30
+WHITE_INTERNET_BASE_TRAFFIC_BYTES = 53_687_091_200  # 50 GiB
+WHITE_INTERNET_MAX_QUOTA_BYTES = 536_870_912_000   # 500 GiB
+WHITE_INTERNET_TOPUP_PACKS: dict[int, Decimal] = {
+    10: Decimal("40.00"),
+    25: Decimal("100.00"),
+    50: Decimal("200.00"),
+}
+
 
 __all__ = [
     "AMNEZIA_PROTOCOL",
@@ -116,6 +134,7 @@ __all__ = [
     "RATE_LIMIT_REQUESTS_PER_MINUTE",
     "SELF_HEALING_MAX_PER_CYCLE",
     "ServerHealthState",
+    "ServiceType",
     "STALE_PAYMENT_THRESHOLD",
     "TELEGRAM_MESSAGE_LIMIT",
     "TRAFFIC_SYNC_INTERVAL",
@@ -125,7 +144,17 @@ __all__ = [
     "USER_CONTEXT_CACHE_TTL",
     "VPN_ACCESS_GRACE_HOURS",
     "VPNProvisioningStatus",
+    "WHITE_INTERNET_BASE_DURATION_DAYS",
+    "WHITE_INTERNET_BASE_PRICE_RUB",
+    "WHITE_INTERNET_BASE_TRAFFIC_BYTES",
+    "WHITE_INTERNET_MAX_QUOTA_BYTES",
+    "WHITE_INTERNET_SERVICE_TYPE",
+    "WHITE_INTERNET_TOPUP_PACKS",
     "WebhookInboxStatus",
+    "WhiteInternetGrantType",
+    "WhiteInternetProvisioningStatus",
+    "WhiteInternetStatus",
     "WORKER_ERROR_SLEEP_INTERVAL",
     "YOOKASSA_IP_RANGES",
 ]
+

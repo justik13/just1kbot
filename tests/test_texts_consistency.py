@@ -458,6 +458,13 @@ class TextsConsistencyTests(unittest.TestCase):
             "Payload too large",
             "Invalid webhook",
             "Database unavailable",
+            "Not Found",
+            "no-store, private, no-cache, must-revalidate",
+            "text/plain; charset=utf-8",
+            "; download=",
+            "; total=",
+            "; expire=",
+
             "can't parse entities",
             "HTML parse failed for user %s, falling back to plain text",
             "manual review",
