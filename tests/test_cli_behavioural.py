@@ -498,16 +498,70 @@ class SetupScriptErrorSemanticsTests(unittest.TestCase):
     fail-closed instead of a false "настроено" success."""
 
     def test_error_function_exits_installer(self):
-        setup_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
-        proc = subprocess.run(
-            ["bash", "-c", f". '{setup_script}'; error 'boom-marker'; echo NOT_REACHED"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        repo_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copy(repo_script, Path(tmp) / "setup.sh")
+            proc = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    ". './setup.sh'; error 'boom-marker'; echo NOT_REACHED",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                check=False,
+            )
         self.assertEqual(proc.returncode, 1)
         self.assertNotIn("NOT_REACHED", proc.stdout)
         self.assertIn("boom-marker", proc.stderr)
+
+
+class SetupOvercommitPersistenceTests(unittest.TestCase):
+    """`ensure_overcommit_persistence` must pin the VALUE 1, not merely the
+    line's existence: a pre-existing `vm.overcommit_memory = 0` entry used to
+    silently survive a "successful" install and revert the setting on reboot."""
+
+    def _run(self, initial_content: str) -> tuple[int, str]:
+        repo_script = Path(__file__).resolve().parent.parent / "scripts" / "setup.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            shutil.copy(repo_script, Path(tmp) / "setup.sh")
+            conf = Path(tmp) / "sysctl.conf"
+            conf.write_text(initial_content, encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    ". './setup.sh'; "
+                    "JUST1KBOT_SYSCTL_CONF='./sysctl.conf' ensure_overcommit_persistence",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=tmp,
+                check=False,
+            )
+            return proc.returncode, conf.read_text(encoding="utf-8")
+
+    def test_existing_zero_entry_is_replaced_with_one(self):
+        code, content = self._run("vm.overcommit_memory = 0\n")
+        self.assertEqual(code, 0)
+        self.assertIn("vm.overcommit_memory = 1", content)
+        self.assertNotIn("= 0", content.replace("vm.overcommit_memory = 1", ""))
+
+    def test_missing_entry_is_appended(self):
+        code, content = self._run("# some other setting = 5\n")
+        self.assertEqual(code, 0)
+        self.assertIn("vm.overcommit_memory = 1", content)
+
+    def test_existing_correct_value_is_preserved(self):
+        code, content = self._run("vm.overcommit_memory = 1\n")
+        self.assertEqual(code, 0)
+        self.assertEqual(content.count("vm.overcommit_memory"), 1)
+
+    def test_commented_zero_does_not_trick_the_check(self):
+        code, content = self._run("# vm.overcommit_memory = 0\n")
+        self.assertEqual(code, 0)
+        self.assertIn("vm.overcommit_memory = 1", content)
 
 
 if __name__ == "__main__":

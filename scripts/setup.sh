@@ -46,6 +46,25 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+# --- Гарантия персистентного значения vm.overcommit_memory=1 ---
+# Проверяется ЗНАЧЕНИЕ, а не наличие строки: уже существующая запись
+# `vm.overcommit_memory = 0` иначе тихо переживёт "успешную" установку и
+# откатит параметр после перезагрузки. /etc/sysctl.conf имеет наивысший
+# приоритет для systemd-sysctl (парсится последним), поэтому запись со
+# значением 1 здесь перекрывает любые `= 0` в /etc/sysctl.d/*.
+ensure_overcommit_persistence() {
+    local conf_file="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
+    if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$conf_file" 2>/dev/null; then
+        if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1([[:space:]]*(#.*)?)?$' "$conf_file" 2>/dev/null; then
+            return 0
+        fi
+        sed -i -E 's|^[[:space:]]*vm\.overcommit_memory[[:space:]]*=.*|vm.overcommit_memory = 1|' "$conf_file" || return 1
+        return 0
+    fi
+    echo "vm.overcommit_memory = 1" >> "$conf_file" 2>/dev/null || return 1
+    return 0
+}
+
 # --- Очистка временных ресурсов при сбое ---
 cleanup_on_exit() {
     local exit_code=$?
@@ -188,10 +207,10 @@ install_dependencies() {
             if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
                 error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
             fi
-            if ! grep -qs "^vm.overcommit_memory" /etc/sysctl.conf /etc/sysctl.d/* 2>/dev/null; then
-                if ! echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf 2>/dev/null; then
-                    error "Не удалось сохранить vm.overcommit_memory=1 в /etc/sysctl.conf — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
-                fi
+            # Persistence must pin the VALUE 1: a pre-existing `= 0` entry must
+            # be replaced, not merely detected.
+            if ! ensure_overcommit_persistence; then
+                error "Не удалось закрепить vm.overcommit_memory=1 в персистентной конфигурации — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
             fi
             log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
         fi
