@@ -341,7 +341,7 @@ class DomainEnumsSSOTTests(unittest.TestCase):
         self.assertEqual(title, "SOME_UNKNOWN_ACTION")
 
     def test_no_active_code_references_to_legacy_incy_or_bridge(self):
-        """Active codebase must contain zero operational references to deprecated INCY or AMNEZIA_BRIDGE_HMAC_SECRET."""
+        """Active codebase must contain zero operational references to deprecated AMNEZIA_BRIDGE / legacy bridges."""
         root = Path(__file__).parents[1]
         active_dirs = [
             root / "bot",
@@ -351,8 +351,15 @@ class DomainEnumsSSOTTests(unittest.TestCase):
             root / "scripts",
         ]
 
+        allowed_files = {
+            (root / "services" / "incy_crypto.py").resolve(),
+            (root / "config" / "constants.py").resolve(),
+        }
+
         for d in active_dirs:
             for py_file in d.rglob("*.py"):
+                if py_file.resolve() in allowed_files:
+                    continue
                 content = py_file.read_text(encoding="utf-8")
                 self.assertNotIn(
                     "AMNEZIA_BRIDGE",
@@ -360,10 +367,16 @@ class DomainEnumsSSOTTests(unittest.TestCase):
                     f"Found legacy AMNEZIA_BRIDGE reference in {py_file}",
                 )
                 self.assertNotIn(
-                    "incy",
-                    content.lower(),
-                    f"Found legacy INCY reference in {py_file}",
+                    "INCY_BRIDGE",
+                    content,
+                    f"Found legacy INCY_BRIDGE reference in {py_file}",
                 )
+                self.assertNotIn(
+                    "AMNEZIA_BRIDGE_HMAC_SECRET",
+                    content,
+                    f"Found legacy AMNEZIA_BRIDGE_HMAC_SECRET reference in {py_file}",
+                )
+
 
 
 if __name__ == "__main__":

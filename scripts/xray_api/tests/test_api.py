@@ -23,7 +23,7 @@ def test_auth_enforcement():
 
     # Correct header
     with patch.object(grpc_client, "is_healthy", return_value=True):
-        with patch.object(epoch_manager, "get_process_and_epoch", return_value=(1234, 100, "epoch_123")):
+        with patch.object(epoch_manager, "get_process_and_epoch", return_value=(1234, 100, "boot_1", "epoch_123")):
             res = client.get("/v1/health", headers=VALID_HEADERS)
             assert res.status_code == 200
             data = res.json()
@@ -31,6 +31,8 @@ def test_auth_enforcement():
             assert data["xray_running"] is True
             assert data["grpc_ok"] is True
             assert data["node_epoch"] == "epoch_123"
+            assert data["boot_id"] == "boot_1"
+            assert data["starttime"] == 100
 
 
 def test_traffic_snapshot():
@@ -38,11 +40,13 @@ def test_traffic_snapshot():
         "a2b9d4e1-73c5-4812-b964-f3e7b85a1902": {"uplink": 1024, "downlink": 2048}
     }
     with patch.object(grpc_client, "get_users_stats", return_value=mock_stats):
-        with patch.object(epoch_manager, "get_process_and_epoch", return_value=(1234, 100, "epoch_test_123")):
+        with patch.object(epoch_manager, "get_process_and_epoch", return_value=(1234, 100, "boot_1", "epoch_test_123")):
             res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
             assert res.status_code == 200
             data = res.json()
             assert data["node_epoch"] == "epoch_test_123"
+            assert data["boot_id"] == "boot_1"
+            assert data["starttime"] == 100
             assert data["users"] == mock_stats
 
 
@@ -53,17 +57,20 @@ def test_traffic_snapshot_epoch_mismatch_retry_and_recovery():
             epoch_manager,
             "get_process_and_epoch",
             side_effect=[
-                (1234, 100, "epoch_1"),
-                (1235, 200, "epoch_2"),
-                (1235, 200, "epoch_2"),
-                (1235, 200, "epoch_2"),
+                (1234, 100, "boot_1", "epoch_1"),
+                (1235, 200, "boot_1", "epoch_2"),
+                (1235, 200, "boot_1", "epoch_2"),
+                (1235, 200, "boot_1", "epoch_2"),
             ],
         ):
             res = client.get("/v1/traffic/snapshot", headers=VALID_HEADERS)
             assert res.status_code == 200
             data = res.json()
             assert data["node_epoch"] == "epoch_2"
+            assert data["boot_id"] == "boot_1"
+            assert data["starttime"] == 200
             assert data["users"] == mock_stats
+
 
 
 

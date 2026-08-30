@@ -18,7 +18,7 @@ from config.constants import (
     WHITE_INTERNET_MAX_QUOTA_BYTES,
 )
 from config.enums import WhiteInternetGrantType, WhiteInternetProvisioningStatus, WhiteInternetStatus
-from database.models import WhiteInternetQuotaGrant, WhiteInternetSubscription
+from database.models import WhiteInternetQuotaGrant, WhiteInternetSubscription, WhiteInternetTrafficEvent
 from utils.datetime_helpers import now_utc
 
 
@@ -73,6 +73,26 @@ async def get_available_quota_bytes(session: AsyncSession, subscription_id: int,
     return int(await session.scalar(stmt) or 0)
 
 
+async def get_period_grants(
+    session: AsyncSession, subscription_id: int, now: datetime | None = None
+) -> Sequence[WhiteInternetQuotaGrant]:
+    """Returns all grants active in current period (expires_at > now), including depleted ones."""
+    now = now or now_utc()
+    stmt = (
+        select(WhiteInternetQuotaGrant)
+        .where(
+            WhiteInternetQuotaGrant.subscription_id == subscription_id,
+            WhiteInternetQuotaGrant.expires_at > now,
+        )
+        .order_by(
+            case((WhiteInternetQuotaGrant.grant_type == WhiteInternetGrantType.BASE, 0), else_=1).asc(),
+            WhiteInternetQuotaGrant.created_at.asc(),
+            WhiteInternetQuotaGrant.id.asc(),
+        )
+    )
+    return (await session.execute(stmt)).scalars().all()
+
+
 async def get_active_grants_for_deduction(
     session: AsyncSession, subscription_id: int, now: datetime | None = None
 ) -> Sequence[WhiteInternetQuotaGrant]:
@@ -114,7 +134,6 @@ async def _lock_all_grants(session: AsyncSession, subscription_id: int) -> Seque
     return []
 
 
-
 async def expire_subscription_atomic(
     session: AsyncSession, subscription_id: int, *, reason: str = "subscription_expired"
 ) -> WhiteInternetSubscription:
@@ -133,7 +152,6 @@ async def expire_subscription_atomic(
     return sub
 
 
-
 async def create_white_internet_subscription(
     session: AsyncSession, *, user_id: int, origin_node_id: int, token: str, uuid: str,
     quote_id: int, price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
@@ -146,7 +164,8 @@ async def create_white_internet_subscription(
         user_id=user_id, origin_node_id=origin_node_id, token=token, uuid=uuid,
         status=WhiteInternetStatus.PENDING, status_reason=None, started_at=now,
         expires_at=expires_at, traffic_limit_bytes=base_bytes, traffic_used_bytes=0,
-        last_uplink_snapshot=0, last_downlink_snapshot=0, traffic_stats_epoch=None,
+        traffic_overage_bytes=0, last_uplink_snapshot=0, last_downlink_snapshot=0,
+        traffic_stats_epoch=None,
         provisioning_status=WhiteInternetProvisioningStatus.PENDING_CREATE,
         desired_version=1, actual_version=0, last_reconciled_node_epoch=None,
     )
@@ -237,6 +256,50 @@ async def topup_quota_atomic(
     return grant
 
 
+async def record_traffic_event_atomic(
+    session: AsyncSession,
+    *,
+    subscription_id: int,
+    node_epoch: str,
+    node_boot_id: str | None,
+    node_starttime: int | None,
+    snapshot_uplink_before: int,
+    snapshot_uplink_after: int,
+    snapshot_downlink_before: int,
+    snapshot_downlink_after: int,
+    delta_uplink: int,
+    delta_downlink: int,
+    allocated_bytes: int,
+    overage_bytes: int,
+    now: datetime | None = None,
+) -> WhiteInternetTrafficEvent | None:
+    """
+    Creates an immutable audit event for accounted traffic transition.
+    If delta is 0, no event is created (returns None).
+    """
+    if delta_uplink == 0 and delta_downlink == 0:
+        return None
+
+    event = WhiteInternetTrafficEvent(
+        subscription_id=subscription_id,
+        node_epoch=node_epoch,
+        node_boot_id=node_boot_id,
+        node_starttime=node_starttime,
+        snapshot_uplink_before=snapshot_uplink_before,
+        snapshot_uplink_after=snapshot_uplink_after,
+        snapshot_downlink_before=snapshot_downlink_before,
+        snapshot_downlink_after=snapshot_downlink_after,
+        delta_uplink=delta_uplink,
+        delta_downlink=delta_downlink,
+        allocated_bytes=allocated_bytes,
+        overage_bytes=overage_bytes,
+        created_at=now or now_utc(),
+    )
+    session.add(event)
+    await session.flush()
+    return event
+
+
 async def deduct_traffic_atomic(
     session: AsyncSession,
     *,
@@ -252,6 +315,21 @@ async def deduct_traffic_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+
+    # If subscription already expired, entire delta is unallocated overage
+    if sub.expires_at <= now or sub.status == WhiteInternetStatus.EXPIRED:
+        if sub.status not in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
+            sub.status = WhiteInternetStatus.EXPIRED
+            sub.status_reason = "subscription_expired"
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+        sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + delta_bytes
+        sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + delta_bytes
+        sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + max(0, delta_uplink)
+        sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + max(0, delta_downlink)
+        await session.flush()
+        return 0, False, delta_bytes
+
     grants = await get_active_grants_for_deduction(session, subscription_id, now)
     remaining_to_deduct = delta_bytes
     consumed_from_grants = 0
@@ -262,10 +340,12 @@ async def deduct_traffic_atomic(
         grant.bytes_remaining -= deduct_from_grant
         remaining_to_deduct -= deduct_from_grant
         consumed_from_grants += deduct_from_grant
+
+    unallocated_overage = max(remaining_to_deduct, 0)
     sub.traffic_used_bytes = (sub.traffic_used_bytes or 0) + delta_bytes
     sub.traffic_uplink_bytes = (sub.traffic_uplink_bytes or 0) + max(0, delta_uplink)
     sub.traffic_downlink_bytes = (sub.traffic_downlink_bytes or 0) + max(0, delta_downlink)
-    unallocated_overage = max(remaining_to_deduct, 0)
+    sub.traffic_overage_bytes = (sub.traffic_overage_bytes or 0) + unallocated_overage
 
     available_after = await get_available_quota_bytes(session, subscription_id, now)
     became_exhausted = False
@@ -273,8 +353,11 @@ async def deduct_traffic_atomic(
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
         sub.desired_version += 1
-
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
         became_exhausted = True
+
+    # Update cache-only traffic_limit_bytes field
+    sub.traffic_limit_bytes = available_after + sub.traffic_used_bytes
     await session.flush()
     return consumed_from_grants, became_exhausted, unallocated_overage
+

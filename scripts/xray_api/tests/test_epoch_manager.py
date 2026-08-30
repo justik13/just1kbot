@@ -25,8 +25,9 @@ def test_epoch_change_detection():
         epoch_file = Path(tmpdir) / "epoch.json"
         mgr = EpochManager(file_path=str(epoch_file))
 
-        # Seed initial state with a fake PID and starttime
-        mgr.save_state("epoch_initial", pid=1001, starttime=50000)
+        # Seed initial state with a fake PID, starttime, and boot_id
+        mgr.get_system_boot_id = lambda: "boot_01"
+        mgr.save_state("epoch_initial", pid=1001, starttime=50000, boot_id="boot_01")
         assert mgr.get_current_epoch() == "epoch_initial"
 
         # Mock get_xray_process_info to simulate process restart (new PID, new starttime)
@@ -41,3 +42,6 @@ def test_epoch_change_detection():
         assert state["node_epoch"] == epoch_new
         assert state["xray_pid"] == 1002
         assert state["xray_starttime"] == 60000
+        assert state["boot_id"] == "boot_01"
+
+

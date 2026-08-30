@@ -65,6 +65,7 @@ check_root() {
 # --- Управление состоянием узла (/etc/just1knode/state.json) ---
 init_state_file() {
     mkdir -p "$STATE_DIR"
+    chmod 700 "$STATE_DIR"
     if [[ ! -f "$STATE_FILE" ]]; then
         echo "{}" > "$STATE_FILE"
         chmod 600 "$STATE_FILE"
@@ -76,7 +77,7 @@ set_state_val() {
     local val="$2"
     init_state_file
     python3 -c "
-import sys, json
+import sys, json, os, tempfile
 from datetime import datetime, timezone
 f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
@@ -86,10 +87,22 @@ except Exception:
     data = {}
 data[k] = v
 data['updated_at'] = datetime.now(timezone.utc).isoformat()
-with open(f, 'w', encoding='utf-8') as fp:
+dir_name = os.path.dirname(f)
+tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix='state_', suffix='.tmp')
+with os.fdopen(tmp_fd, 'w', encoding='utf-8') as fp:
     json.dump(data, fp, indent=2)
+    fp.flush()
+    os.fsync(fp.fileno())
+os.replace(tmp_path, f)
+try:
+    dfd = os.open(dir_name, os.O_RDONLY)
+    os.fsync(dfd)
+    os.close(dfd)
+except Exception:
+    pass
 " "$STATE_FILE" "$key" "$val"
 }
+
 
 get_state_val() {
     local key="$1"
@@ -313,7 +326,7 @@ render_nginx_modular_config() {
     mkdir -p /etc/nginx/just1k.d /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
 
     cat > /etc/nginx/conf.d/xhttp_map.conf <<'EOF'
-map $request_method $xhttp_proxy_method {
+map $request_method $just1k_xhttp_proxy_method {
     default $request_method;
     OPTIONS POST;
 }
@@ -342,7 +355,7 @@ EOF
 
     location /api/v3/de {
         proxy_pass http://127.0.0.1:8003;
-        proxy_method $xhttp_proxy_method;
+        proxy_method $just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass_request_headers on;
@@ -359,7 +372,7 @@ EOF
 
     location /api/v3/nl {
         proxy_pass http://127.0.0.1:8004;
-        proxy_method $xhttp_proxy_method;
+        proxy_method $just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass_request_headers on;
@@ -375,6 +388,7 @@ EOF
     }
 EOF
     fi
+
 
     local config_file="/etc/nginx/sites-available/just1k-${domain}.conf"
     cat > "$config_file" <<EOF
@@ -674,7 +688,8 @@ cmd_install_xray_origin() {
           "xPaddingObfsMode": true,
           "xPaddingKey": "dc",
           "xPaddingHeader": "X-Cache",
-          "xPaddingMethod": "tokenish"
+          "xPaddingMethod": "tokenish",
+          "xPaddingPlacement": "header"
         }
       },
       "sniffing": {
@@ -700,9 +715,11 @@ cmd_install_xray_origin() {
           "xPaddingObfsMode": true,
           "xPaddingKey": "dc",
           "xPaddingHeader": "X-Cache",
-          "xPaddingMethod": "tokenish"
+          "xPaddingMethod": "tokenish",
+          "xPaddingPlacement": "header"
         }
       },
+
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"]

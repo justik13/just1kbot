@@ -135,15 +135,18 @@ class XrayNodeClient:
 
     async def get_traffic_snapshot(
         self, api_url: str, api_key: str
-    ) -> tuple[str | None, dict[str, dict[str, int]] | None]:
+    ) -> tuple[str | None, str | None, int | None, dict[str, dict[str, int]] | None]:
         """Fetch normalized traffic snapshot across all configured inbounds."""
         url = f"{api_url.rstrip('/')}/v1/traffic/snapshot"
         headers = self._get_headers(api_key)
         status_code, data, err = await self._make_request("GET", url, headers)
         if status_code == 200 and isinstance(data, dict):
             node_epoch = data.get("node_epoch")
+            node_boot_id = data.get("boot_id")
+            node_starttime = data.get("starttime")
             users = data.get("users", {})
-            return node_epoch, users
+            return node_epoch, node_boot_id, node_starttime, users
         logger.error("Traffic snapshot fetch failed for %s: %s", url, err)
-        return None, None
+        return None, None, None, None
+
 

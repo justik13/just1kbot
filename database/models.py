@@ -305,8 +305,11 @@ class Server(Base):
         JSONB, nullable=False, default=list, server_default="[]"
     )
     xray_instance_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    xray_instance_boot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    xray_instance_starttime: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
 
 
 class Tariff(Base):
@@ -1208,7 +1211,8 @@ class WhiteInternetSubscription(Base):
         CheckConstraint(
             "traffic_limit_bytes >= 0 AND traffic_used_bytes >= 0 "
             "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
-            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0",
+            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0 "
+            "AND traffic_overage_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
     )
@@ -1255,6 +1259,9 @@ class WhiteInternetSubscription(Base):
     traffic_downlink_bytes: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
+    traffic_overage_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
     last_uplink_snapshot: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default=text("0")
     )
@@ -1298,6 +1305,10 @@ class WhiteInternetSubscription(Base):
         "WhiteInternetQuotaGrant",
         back_populates="subscription",
         cascade="all, delete-orphan",
+    )
+    traffic_events = relationship(
+        "WhiteInternetTrafficEvent",
+        back_populates="subscription",
     )
 
 
@@ -1365,5 +1376,78 @@ class WhiteInternetQuotaGrant(Base):
 
     subscription = relationship("WhiteInternetSubscription", back_populates="grants")
     quote = relationship("TariffQuote", foreign_keys=[quote_id])
+
+
+class WhiteInternetTrafficEvent(Base):
+    """Immutable append-only audit ledger for accounted White Internet traffic snapshots."""
+
+    __tablename__ = "white_internet_traffic_events"
+
+    __table_args__ = (
+        CheckConstraint(
+            "delta_uplink >= 0 AND delta_downlink >= 0",
+            name="ck_white_internet_traffic_events_deltas_nonnegative",
+        ),
+        CheckConstraint(
+            "allocated_bytes >= 0 AND overage_bytes >= 0",
+            name="ck_white_internet_traffic_events_alloc_nonnegative",
+        ),
+        CheckConstraint(
+            "snapshot_uplink_after >= snapshot_uplink_before OR snapshot_uplink_before = 0",
+            name="ck_white_internet_traffic_events_uplink_monotonic",
+        ),
+        CheckConstraint(
+            "snapshot_downlink_after >= snapshot_downlink_before OR snapshot_downlink_before = 0",
+            name="ck_white_internet_traffic_events_downlink_monotonic",
+        ),
+        CheckConstraint(
+            "allocated_bytes + overage_bytes = delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_conservation",
+        ),
+        CheckConstraint(
+            "allocated_bytes <= delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_allocated_le_delta",
+        ),
+        CheckConstraint(
+            "overage_bytes <= delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_overage_le_delta",
+        ),
+        UniqueConstraint(
+            "subscription_id",
+            "node_epoch",
+            "snapshot_uplink_after",
+            "snapshot_downlink_after",
+            name="uq_white_internet_traffic_event_snapshot",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+
+    subscription_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("white_internet_subscriptions.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    node_epoch: Mapped[str] = mapped_column(String(64), nullable=False)
+    node_boot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    node_starttime: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    snapshot_uplink_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    snapshot_uplink_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    snapshot_downlink_before: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    snapshot_downlink_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    delta_uplink: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    delta_downlink: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    allocated_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    overage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=now_utc, server_default=text("now()")
+    )
+
+    subscription = relationship("WhiteInternetSubscription", back_populates="traffic_events")
+
 
 

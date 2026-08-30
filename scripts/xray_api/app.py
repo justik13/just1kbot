@@ -104,7 +104,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     Checks service health, Xray core process state, gRPC connectivity, and current epoch.
     Fail-closed: returns HTTP 503 if Xray is not running or gRPC is unhealthy.
     """
-    pid, _starttime, current_epoch = epoch_manager.get_process_and_epoch()
+    pid, starttime, boot_id, current_epoch = epoch_manager.get_process_and_epoch()
     grpc_ok = grpc_client.is_healthy()
     is_running = pid is not None
     is_healthy = is_running and grpc_ok and (current_epoch is not None)
@@ -114,6 +114,8 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "xray_running": is_running,
         "grpc_ok": grpc_ok,
         "node_epoch": current_epoch,
+        "boot_id": boot_id,
+        "starttime": starttime,
         "xray_pid": pid,
     }
     if not is_healthy:
@@ -124,13 +126,13 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
 @app.get("/v1/traffic/snapshot")
 def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
     """
-    Returns normalized traffic stats aggregated by UUID/email along with the node epoch.
-    Format: { "node_epoch": str, "users": { uuid: { "uplink": int, "downlink": int } } }
+    Returns normalized traffic stats aggregated by UUID/email along with the node epoch, boot_id, and starttime.
+    Format: { "node_epoch": str, "boot_id": str, "starttime": int, "users": { uuid: { "uplink": int, "downlink": int } } }
     Guarantees generation atomicity: validates epoch_before == epoch_after around QueryStats.
     """
     max_attempts = 3
     for attempt in range(max_attempts):
-        _pid1, _st1, epoch_before = epoch_manager.get_process_and_epoch()
+        _pid1, st1, boot1, epoch_before = epoch_manager.get_process_and_epoch()
         if not epoch_before:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -145,19 +147,29 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
                 detail=f"Xray gRPC stats failure: {str(e)}",
             ) from e
 
-        _pid2, _st2, epoch_after = epoch_manager.get_process_and_epoch()
-        if epoch_before == epoch_after and epoch_after is not None:
+        _pid2, st2, boot2, epoch_after = epoch_manager.get_process_and_epoch()
+        if (
+            epoch_before == epoch_after
+            and (st1, boot1) == (st2, boot2)
+            and epoch_after is not None
+        ):
             return {
                 "node_epoch": epoch_after,
+                "boot_id": boot2,
+                "starttime": st2,
                 "users": users_stats,
             }
 
         logger.warning(
-            "Epoch mismatch during traffic snapshot (attempt %d/%d): before=%s, after=%s",
+            "Generation mismatch during traffic snapshot (attempt %d/%d): before=(%s,%s,%s), after=(%s,%s,%s)",
             attempt + 1,
             max_attempts,
             epoch_before,
+            boot1,
+            st1,
             epoch_after,
+            boot2,
+            st2,
         )
         time.sleep(0.1)
 
@@ -165,6 +177,7 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Concurrent Xray restart detected during traffic snapshot; generation mismatch",
     )
+
 
 
 

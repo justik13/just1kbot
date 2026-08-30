@@ -68,6 +68,12 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertTrue(table.columns["xray_instance_epoch"].nullable)
         self.assertEqual(table.columns["xray_instance_epoch"].type.length, 64)
 
+        self.assertIn("xray_instance_boot_id", table.columns)
+        self.assertTrue(table.columns["xray_instance_boot_id"].nullable)
+
+        self.assertIn("xray_instance_starttime", table.columns)
+        self.assertTrue(table.columns["xray_instance_starttime"].nullable)
+
     def test_white_internet_subscription_table_structure(self):
         table = WhiteInternetSubscription.__table__
         self.assertEqual(table.name, "white_internet_subscriptions")
@@ -86,10 +92,10 @@ class WhiteInternetModelsTests(unittest.TestCase):
             "traffic_used_bytes": BigInteger,
             "traffic_uplink_bytes": BigInteger,
             "traffic_downlink_bytes": BigInteger,
+            "traffic_overage_bytes": BigInteger,
             "last_uplink_snapshot": BigInteger,
             "last_downlink_snapshot": BigInteger,
             "traffic_stats_epoch": String,
-
             "provisioning_status": String,
             "desired_version": Integer,
             "actual_version": Integer,
@@ -160,6 +166,24 @@ class WhiteInternetModelsTests(unittest.TestCase):
         self.assertIn("ck_white_internet_quota_grants_price_nonnegative", constraint_names)
         self.assertIn("uq_white_internet_quota_grants_sub_quote_type", constraint_names)
 
+    def test_white_internet_traffic_event_table_structure(self):
+        from database.models import WhiteInternetTrafficEvent
+        table = WhiteInternetTrafficEvent.__table__
+        self.assertEqual(table.name, "white_internet_traffic_events")
+
+        self.assertIsInstance(table.columns["id"].type, BigInteger)
+        self.assertTrue(table.columns["id"].primary_key)
+        self.assertTrue(table.columns["subscription_id"].index)
+        self.assertIn("created_at", table.columns)
+
+        constraint_names = {c.name for c in table.constraints if c.name}
+        self.assertIn("ck_white_internet_traffic_events_conservation", constraint_names)
+        self.assertIn("ck_white_internet_traffic_events_uplink_monotonic", constraint_names)
+        self.assertIn("ck_white_internet_traffic_events_downlink_monotonic", constraint_names)
+        self.assertIn("uq_white_internet_traffic_event_snapshot", constraint_names)
+
 
 if __name__ == "__main__":
     unittest.main()
+
+

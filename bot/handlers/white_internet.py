@@ -23,6 +23,7 @@ from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import get_user_by_telegram_id
+from services.incy_crypto import encrypt_link
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
@@ -45,7 +46,7 @@ def _render_progress_bar(used_bytes: int, total_bytes: int, length: int = 10) ->
 
 def get_white_internet_overview_keyboard(
     sub: WhiteInternetSubscription | None,
-    bot_domain: str,
+    bot_domain: str | None,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
 
@@ -72,15 +73,23 @@ def get_white_internet_overview_keyboard(
         # Paid but not provisioned: never expose a connection promise.
         builder.adjust(1)
     else:
-        if sub.status == WhiteInternetStatus.ACTIVE and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE:
+        if (
+            sub.status == WhiteInternetStatus.ACTIVE
+            and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE
+            and bot_domain
+        ):
             sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
-            encoded_sub_url = urllib.parse.quote(sub_url, safe="")
-            builder.button(
-                text=texts.BTN_WL_CONNECT_CLIENT,
-                url=f"https://t.me/share/url?url={encoded_sub_url}",
-                style="success",
-            )
+            try:
+                incy_deep_link = encrypt_link(sub_url, name=texts.WL_PROFILE_NAME)
+                builder.button(
+                    text=texts.BTN_WL_CONNECT_CLIENT,
+                    url=incy_deep_link,
+                    style="success",
+                )
+            except Exception as exc:
+                logger.error("Failed to encrypt incy deep link: %s", exc)
             builder.button(text=texts.BTN_WL_SHOW_LINK, callback_data="wl_show_link")
+
 
         # EXHAUSTED may buy a top-up to reactivate; ACTIVE may top up too.
         if sub.status in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
@@ -93,6 +102,7 @@ def get_white_internet_overview_keyboard(
 
     builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
     return builder.as_markup()
+
 
 
 def get_topup_keyboard() -> InlineKeyboardMarkup:
@@ -116,7 +126,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = os.getenv("DOMAIN", "t.me")
+    bot_domain = os.getenv("DOMAIN")
     now = now_utc()
 
     if sub is None:
@@ -143,7 +153,6 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
             total=_format_bytes(total_limit),
             progress=_render_progress_bar(sub.traffic_used_bytes, total_limit),
         )
-
 
     kb = get_white_internet_overview_keyboard(sub, bot_domain)
     try:
@@ -226,8 +235,9 @@ async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is not None:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+        bot_domain = os.getenv("DOMAIN")
         if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
-            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, os.getenv("DOMAIN", "t.me")))
+            await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
             return
     await query.message.edit_text(texts.WL_TOPUP_MENU_TEXT, reply_markup=get_topup_keyboard(), parse_mode="HTML")
 
@@ -283,10 +293,16 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
+    bot_domain = os.getenv("DOMAIN")
     if sub is None or sub.status != WhiteInternetStatus.ACTIVE:
-        await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, os.getenv("DOMAIN", "t.me")))
+        await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
         return
-    bot_domain = os.getenv("DOMAIN", "t.me")
+    if not bot_domain:
+        kb = InlineKeyboardBuilder()
+        kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+        await query.message.edit_text(texts.WL_DOMAIN_UNCONFIGURED, reply_markup=kb.as_markup())
+        return
+
     sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
     kb = InlineKeyboardBuilder()
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
@@ -295,3 +311,4 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
+

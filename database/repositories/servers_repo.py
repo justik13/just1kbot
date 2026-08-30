@@ -274,3 +274,66 @@ async def delete_profiles_by_server_id(session: AsyncSession, server_id: int) ->
     result = await session.execute(sql_delete(VPNProfile).where(VPNProfile.server_id == server_id))
     await session.flush()
     return result.rowcount
+
+
+async def update_server_xray_epoch_cas(
+    session: AsyncSession,
+    server_id: int,
+    *,
+    expected_boot_id: str | None,
+    expected_starttime: int | None,
+    new_epoch: str,
+    new_boot_id: str | None,
+    new_starttime: int | None,
+) -> tuple[bool, Server | None]:
+    """
+    Atomically updates Server.xray_instance_epoch using compare-and-swap (CAS)
+    against expected_boot_id and expected_starttime under row-level lock.
+    Returns (True, server) if generation was accepted/updated, (False, None) if rejected as stale.
+    """
+    stmt = select(Server).where(Server.id == server_id).with_for_update()
+    server = (await session.execute(stmt)).scalar_one_or_none()
+    if server is None:
+        return False, None
+
+    # Primary registration: server has no recorded boot_id/epoch yet
+    if server.xray_instance_boot_id is None:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    # Verify expected state matches current database generation
+    cur_boot = server.xray_instance_boot_id
+    cur_st = server.xray_instance_starttime or 0
+
+    if (cur_boot, cur_st) != (expected_boot_id, expected_starttime or 0):
+        # Stale writer: database generation advanced while worker was gathering snapshot
+        return False, None
+
+    # Apply new generation:
+    # 1. New boot generation (reboot)
+    # 2. Same boot, newer starttime (process restart)
+    # 3. Same exact generation (idempotent no-op)
+    if new_boot_id != cur_boot:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    new_st = new_starttime or 0
+    if new_st > cur_st:
+        server.xray_instance_epoch = new_epoch
+        server.xray_instance_boot_id = new_boot_id
+        server.xray_instance_starttime = new_starttime
+        await session.flush()
+        return True, server
+
+    if new_st == cur_st and server.xray_instance_epoch == new_epoch:
+        return True, server
+
+    # Stale starttime within same boot
+    return False, None
+

@@ -58,20 +58,24 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_PENDING, headers=headers)
 
-        if sub.status == WhiteInternetStatus.EXHAUSTED:
+        period_grants = await white_internet_repo.get_period_grants(session, sub.id, now)
+        available_bytes = sum(g.bytes_remaining for g in period_grants)
+        current_period_total = sum(g.bytes_granted for g in period_grants)
+        current_period_used = min(current_period_total, max(0, current_period_total - available_bytes))
+        expire_ts = int(sub.expires_at.timestamp())
+
+        if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
             headers = dict(common_headers)
-            headers["Subscription-Userinfo"] = (
-                f"upload={sub.traffic_uplink_bytes}; download={sub.traffic_downlink_bytes}; "
-                f"total={sub.traffic_limit_bytes}; expire={int(sub.expires_at.timestamp())}"
+            headers["Subscription-Userinfo"] = texts.WL_USERINFO_HEADER_TEMPLATE.format(
+                upload=0,
+                download=current_period_total,
+                total=current_period_total,
+                expire=expire_ts,
             )
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
 
         if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED) or sub.expires_at <= now:
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
-
-        available_bytes = await white_internet_repo.get_available_quota_bytes(session, sub.id, now)
-        if available_bytes <= 0:
-            return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=common_headers)
 
         server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
         if server is None or "xray_origin" not in (server.capabilities or []):
@@ -102,28 +106,27 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 headers=headers,
             )
 
-
         vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
         payload = "\n".join(vless_links)
         b64_payload = base64.b64encode(payload.encode("utf-8")).decode("utf-8")
-
 
         response_headers = dict(common_headers)
         response_headers.update(
             {
                 "Content-Type": "text/plain; charset=utf-8",
-                "Subscription-Userinfo": (
-                    f"upload={sub.traffic_uplink_bytes}; "
-                    f"download={sub.traffic_downlink_bytes}; "
-                    f"total={sub.traffic_limit_bytes}; expire={int(sub.expires_at.timestamp())}"
+                "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
+                    upload=0,
+                    download=current_period_used,
+                    total=current_period_total,
+                    expire=expire_ts,
                 ),
-
-
-                "Profile-Update-Interval": "6",
-                "Hide-Url": "1",
-                "No-Limit-Enabled": "1",
+                "Profile-Title": "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
+                "Profile-Update-Interval": "1",
+                "hide-url": "1",
+                "no-limit-enabled": "1",
             }
         )
+
         return web.Response(status=200, text=b64_payload, headers=response_headers)
 
 
@@ -131,3 +134,4 @@ def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed route."""
     app.router.add_get("/sub/wl/{token}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed route registered: GET /sub/wl/{token}")
+

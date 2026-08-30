@@ -60,6 +60,8 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         self.assertEqual(extra["xPaddingKey"], "dc")
         self.assertEqual(extra["xPaddingHeader"], "X-Cache")
         self.assertEqual(extra["xPaddingMethod"], "tokenish")
+        self.assertEqual(extra["xPaddingPlacement"], "header")
+
 
 
 class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):

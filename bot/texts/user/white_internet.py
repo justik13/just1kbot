@@ -104,3 +104,7 @@ WL_WEB_CDN_UNCONFIGURED = "Сетевой шлюз временно недост
 WL_VLESS_TAG_DE = "⚪️ Белый Интернет — Германия 🇩🇪"
 WL_VLESS_TAG_NL = "⚪️ Белый Интернет — Нидерланды 🇳🇱"
 WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
+WL_PROFILE_NAME = "Just1k Белый Интернет"
+WL_DOMAIN_UNCONFIGURED = "Ошибка: домен бота не настроен в конфигурации."
+WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={total}; expire={expire}"
+

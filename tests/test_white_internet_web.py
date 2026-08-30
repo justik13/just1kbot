@@ -58,12 +58,17 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
     @unittest_run_loop
     async def test_exhausted_status_returns_403(self):
         sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.traffic_uplink_bytes = 1000
         sub.traffic_downlink_bytes = 2000
         sub.traffic_limit_bytes = 53687091200
         sub.expires_at = datetime(2026, 9, 30, 0, 0, tzinfo=timezone.utc)
 
+        mock_grant = MagicMock()
+        mock_grant.bytes_granted = 53687091200
+        mock_grant.bytes_remaining = 0
+
         mock_session = AsyncMock()
         @asynccontextmanager
         async def fake_session_scope():
@@ -71,29 +76,45 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                resp = await self.client.get("/sub/wl/exhausted-token-1234567890abcdef")
-                self.assertEqual(resp.status, 403)
-                self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
-
+                with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[mock_grant]):
+                    resp = await self.client.get("/sub/wl/exhausted-token-1234567890abcdef")
+                    self.assertEqual(resp.status, 403)
+                    self.assertIn("upload=0", resp.headers.get("Subscription-Userinfo", ""))
+                    self.assertIn(f"download={53687091200}", resp.headers.get("Subscription-Userinfo", ""))
 
     @unittest_run_loop
     async def test_runtime_out_of_sync_returns_503(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = MagicMock(spec=WhiteInternetSubscription)
         sub.id = 1
+        sub.origin_node_id = 1
         sub.status = WhiteInternetStatus.ACTIVE
         sub.expires_at = now + timedelta(days=20)
         sub.desired_version = 2
         sub.actual_version = 1  # Not yet synced!
 
+        mock_grant = MagicMock()
+        mock_grant.bytes_granted = 53687091200
+        mock_grant.bytes_remaining = 10 * 1024**3
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch_xyz",
+            capabilities=["xray_origin"],
+        )
+
         mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+
         @asynccontextmanager
         async def fake_session_scope():
             yield mock_session
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3):
+                with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[mock_grant]):
                     resp = await self.client.get("/sub/wl/unsynced-token-1234567890abcdef")
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
@@ -110,15 +131,20 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         sub.actual_version = 2  # Versions match...
         sub.last_reconciled_node_epoch = "epoch_old"  # ...but epoch is old!
 
+        mock_grant = MagicMock()
+        mock_grant.bytes_granted = 53687091200
+        mock_grant.bytes_remaining = 10 * 1024**3
+
         server = Server(
             id=1,
             name="Origin-Node",
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch_new",  # Node restarted with new epoch!
+            capabilities=["xray_origin"],
         )
 
         mock_session = AsyncMock()
-        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+        mock_session.scalar.return_value = server
 
         @asynccontextmanager
         async def fake_session_scope():
@@ -126,11 +152,10 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
 
         with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
             with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3):
+                with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[mock_grant]):
                     resp = await self.client.get("/sub/wl/epoch-mismatch-token-1234567890")
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
-
 
     @unittest_run_loop
     async def test_active_and_synced_returns_base64_vless_feed(self):
@@ -155,6 +180,9 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             last_reconciled_node_epoch="epoch-xyz",
         )
 
+        grant = MagicMock()
+        grant.bytes_granted = 53687091200
+        grant.bytes_remaining = 40 * 1024**3
 
         server = Server(
             id=1,
@@ -168,7 +196,6 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         mock_session.scalar.return_value = server
         mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
 
-
         @asynccontextmanager
         async def fake_session_scope():
             yield mock_session
@@ -176,14 +203,15 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         with patch.dict(os.environ, {"WHITE_INTERNET_CDN_DOMAIN": "cdn.just1k.online"}):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=40 * 1024**3):
+                    with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant]):
                         resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
 
                         self.assertEqual(resp.status, 200)
                         self.assertEqual(resp.headers.get("Content-Type"), "text/plain; charset=utf-8")
-                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "6")
-                        self.assertEqual(resp.headers.get("Hide-Url"), "1")
-                        self.assertEqual(resp.headers.get("No-Limit-Enabled"), "1")
+                        self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
+                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "1")
+                        self.assertEqual(resp.headers.get("hide-url"), "1")
+                        self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
 
                         body_b64 = await resp.text()
                         decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()
@@ -196,6 +224,7 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         self.assertIn("/api/v3/de", unquote(de_url))
                         self.assertIn("/api/v3/nl", unquote(nl_url))
                         self.assertIn("OPTIONS", unquote(de_url))
+
 
     @unittest_run_loop
     async def test_missing_cdn_domain_returns_503_fail_closed(self):
@@ -236,11 +265,16 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
         async def fake_session_scope():
             yield mock_session
 
+        grant = MagicMock()
+        grant.bytes_granted = 53687091200
+        grant.bytes_remaining = 40 * 1024**3
+
         with patch.dict(os.environ, {}, clear=True):
             with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
                 with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
-                    with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=40 * 1024**3):
+                    with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant]):
                         resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
                         self.assertEqual(resp.status, 503)
                         self.assertEqual(resp.headers.get("Retry-After"), "60")
+
 

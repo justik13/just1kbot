@@ -70,6 +70,15 @@ def upgrade() -> None:
         "servers",
         sa.Column("xray_instance_epoch", sa.String(length=64), nullable=True),
     )
+    op.add_column(
+        "servers",
+        sa.Column("xray_instance_boot_id", sa.String(length=64), nullable=True),
+    )
+    op.add_column(
+        "servers",
+        sa.Column("xray_instance_starttime", sa.BigInteger(), nullable=True),
+    )
+
 
     # 4. white_internet_subscriptions table, constraints and indexes
     op.create_table(
@@ -113,6 +122,12 @@ def upgrade() -> None:
         ),
         sa.Column(
             "traffic_downlink_bytes",
+            sa.BigInteger(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "traffic_overage_bytes",
             sa.BigInteger(),
             nullable=False,
             server_default=sa.text("0"),
@@ -174,9 +189,11 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "traffic_limit_bytes >= 0 AND traffic_used_bytes >= 0 "
             "AND traffic_uplink_bytes >= 0 AND traffic_downlink_bytes >= 0 "
-            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0",
+            "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0 "
+            "AND traffic_overage_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
         ),
+
 
         sa.ForeignKeyConstraint(["origin_node_id"], ["servers.id"], ondelete="RESTRICT"),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
@@ -296,8 +313,132 @@ def upgrade() -> None:
         ["expires_at"],
     )
 
+    # 6. white_internet_traffic_events table, constraints and indexes
+    op.create_table(
+        "white_internet_traffic_events",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("subscription_id", sa.Integer(), nullable=False),
+        sa.Column("node_epoch", sa.String(length=64), nullable=False),
+        sa.Column("node_boot_id", sa.String(length=64), nullable=True),
+        sa.Column("node_starttime", sa.BigInteger(), nullable=True),
+        sa.Column("snapshot_uplink_before", sa.BigInteger(), nullable=False),
+        sa.Column("snapshot_uplink_after", sa.BigInteger(), nullable=False),
+        sa.Column("snapshot_downlink_before", sa.BigInteger(), nullable=False),
+        sa.Column("snapshot_downlink_after", sa.BigInteger(), nullable=False),
+        sa.Column("delta_uplink", sa.BigInteger(), nullable=False),
+        sa.Column("delta_downlink", sa.BigInteger(), nullable=False),
+        sa.Column("allocated_bytes", sa.BigInteger(), nullable=False),
+        sa.Column("overage_bytes", sa.BigInteger(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.CheckConstraint(
+            "delta_uplink >= 0 AND delta_downlink >= 0",
+            name="ck_white_internet_traffic_events_deltas_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "allocated_bytes >= 0 AND overage_bytes >= 0",
+            name="ck_white_internet_traffic_events_alloc_nonnegative",
+        ),
+        sa.CheckConstraint(
+            "snapshot_uplink_after >= snapshot_uplink_before OR snapshot_uplink_before = 0",
+            name="ck_white_internet_traffic_events_uplink_monotonic",
+        ),
+        sa.CheckConstraint(
+            "snapshot_downlink_after >= snapshot_downlink_before OR snapshot_downlink_before = 0",
+            name="ck_white_internet_traffic_events_downlink_monotonic",
+        ),
+        sa.CheckConstraint(
+            "allocated_bytes + overage_bytes = delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_conservation",
+        ),
+        sa.CheckConstraint(
+            "allocated_bytes <= delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_allocated_le_delta",
+        ),
+        sa.CheckConstraint(
+            "overage_bytes <= delta_uplink + delta_downlink",
+            name="ck_white_internet_traffic_events_overage_le_delta",
+        ),
+        sa.ForeignKeyConstraint(
+            ["subscription_id"],
+            ["white_internet_subscriptions.id"],
+            ondelete="RESTRICT",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "subscription_id",
+            "node_epoch",
+            "snapshot_uplink_after",
+            "snapshot_downlink_after",
+            name="uq_white_internet_traffic_event_snapshot",
+        ),
+    )
+    op.create_index(
+        "ix_white_internet_traffic_events_subscription_id",
+        "white_internet_traffic_events",
+        ["subscription_id"],
+    )
+    op.create_index(
+        "ix_white_internet_traffic_events_created_at",
+        "white_internet_traffic_events",
+        ["created_at"],
+    )
+
+    # 7. Seed canonical default White Internet Tariff and TariffVersion
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO tariffs (name, service_type, device_limit, duration_days, price_rub, is_active, sort_order, created_at)
+            VALUES ('Белый Интернет 50 ГБ', 'white_internet', 1, 30, 250, true, 0, now())
+            ON CONFLICT (service_type, device_limit, duration_days) DO NOTHING
+            """
+        )
+    )
+
+
+    op.execute(
+        sa.text(
+            """
+            INSERT INTO tariff_versions (tariff_id, version_number, name_snapshot, duration_hours, device_limit, price_rub, currency, created_at)
+            SELECT id, 1, 'Белый Интернет 50 ГБ', 720, 1, 250.00, 'RUB', now()
+            FROM tariffs
+            WHERE service_type = 'white_internet' AND device_limit = 1 AND duration_days = 30
+            ON CONFLICT (tariff_id, version_number) DO NOTHING
+            """
+        )
+    )
+
+
+
 
 def downgrade() -> None:
+    # 7. Remove seeded tariff data
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariff_versions WHERE tariff_id IN (
+                SELECT id FROM tariffs WHERE service_type = 'white_internet'
+            );
+            DELETE FROM tariffs WHERE service_type = 'white_internet';
+            """
+        )
+    )
+
+    # 6. Drop white_internet_traffic_events
+    op.drop_index(
+        "ix_white_internet_traffic_events_created_at",
+        table_name="white_internet_traffic_events",
+    )
+    op.drop_index(
+        "ix_white_internet_traffic_events_subscription_id",
+        table_name="white_internet_traffic_events",
+    )
+    op.drop_table("white_internet_traffic_events")
+
     # 5. Drop white_internet_quota_grants
     op.drop_index(
         "ix_white_internet_quota_grants_expires_at",
@@ -322,7 +463,6 @@ def downgrade() -> None:
         "ix_white_internet_subscriptions_expires_at",
         table_name="white_internet_subscriptions",
     )
-
     op.drop_index(
         "ix_white_internet_subscriptions_status",
         table_name="white_internet_subscriptions",
@@ -341,7 +481,9 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_subscriptions")
 
-    # 3. servers: drop xray_instance_epoch and capabilities
+    # 3. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
+    op.drop_column("servers", "xray_instance_starttime")
+    op.drop_column("servers", "xray_instance_boot_id")
     op.drop_column("servers", "xray_instance_epoch")
     op.drop_column("servers", "capabilities")
 
@@ -369,3 +511,4 @@ def downgrade() -> None:
         ["device_limit", "duration_days"],
     )
     op.drop_column("tariffs", "service_type")
+

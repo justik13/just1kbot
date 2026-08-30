@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server, WhiteInternetQuotaGrant, WhiteInternetSubscription
-from database.repositories import white_internet_repo
+from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
 
@@ -48,20 +48,35 @@ class WhiteInternetReconciliationWorker:
         for server in server_map.values():
             if not server.api_url or not server.api_key:
                 continue
-            is_healthy, current_epoch, _ = await self.client.check_health(
+            is_healthy, current_epoch, health_data = await self.client.check_health(
                 server.api_url, server.api_key
             )
-            if is_healthy and current_epoch:
-                if current_epoch != server.xray_instance_epoch:
-                    logger.info(
-                        "Detected new Xray epoch for server %d (%s): %s (was %s).",
+            if is_healthy and current_epoch and health_data:
+                boot_id = health_data.get("boot_id")
+                starttime = health_data.get("starttime")
+                if (
+                    current_epoch != server.xray_instance_epoch
+                    or boot_id != server.xray_instance_boot_id
+                    or starttime != server.xray_instance_starttime
+                ):
+                    cas_ok, updated_server = await servers_repo.update_server_xray_epoch_cas(
+                        session,
                         server.id,
-                        server.name,
-                        current_epoch,
-                        server.xray_instance_epoch,
+                        expected_boot_id=server.xray_instance_boot_id,
+                        expected_starttime=server.xray_instance_starttime,
+                        new_epoch=current_epoch,
+                        new_boot_id=boot_id,
+                        new_starttime=starttime,
                     )
-                    server.xray_instance_epoch = current_epoch
-                    await session.flush()
+                    if cas_ok and updated_server:
+                        logger.info(
+                            "Updated Xray generation for server %d (%s): epoch=%s, boot_id=%s, starttime=%s",
+                            server.id,
+                            server.name,
+                            current_epoch,
+                            boot_id,
+                            starttime,
+                        )
 
         synced_count = 0
         for server_id, server in server_map.items():
@@ -79,8 +94,8 @@ class WhiteInternetReconciliationWorker:
                         WhiteInternetSubscription.last_reconciled_node_epoch
                         != target_epoch,
                         WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
-                        WhiteInternetSubscription.provisioning_status
-                        != WhiteInternetProvisioningStatus.ACTIVE,
+                        WhiteInternetProvisioningStatus.ACTIVE
+                        != WhiteInternetSubscription.provisioning_status,
                     ),
                 )
                 .order_by(WhiteInternetSubscription.id.asc())
@@ -121,6 +136,18 @@ class WhiteInternetReconciliationWorker:
                 )
 
                 target_version = sub.desired_version
+                # Pre-sync health / generation capture
+                is_healthy_pre, epoch_pre, data_pre = await self.client.check_health(
+                    server.api_url, server.api_key
+                )
+                if not is_healthy_pre or epoch_pre != target_epoch:
+                    logger.warning(
+                        "Skipping sync for sub_id=%d: server %d pre-health check failed or epoch changed",
+                        sub.id,
+                        server_id,
+                    )
+                    continue
+
                 success, err_msg = await self.client.sync_client(
                     server.api_url,
                     server.api_key,
@@ -129,10 +156,22 @@ class WhiteInternetReconciliationWorker:
                 )
 
                 if success:
-                    # The Xray call may have raced with a purchase/topup/expiry.
-                    # Never commit an obsolete version or epoch as current.
-                    current_epoch = server.xray_instance_epoch
-                    if sub.desired_version == target_version and current_epoch == target_epoch:
+                    # Post-sync generation revalidation: verify Xray didn't restart during sync
+                    is_healthy_post, epoch_post, data_post = await self.client.check_health(
+                        server.api_url, server.api_key
+                    )
+                    boot_pre = data_pre.get("boot_id") if data_pre else None
+                    st_pre = data_pre.get("starttime") if data_pre else None
+                    boot_post = data_post.get("boot_id") if data_post else None
+                    st_post = data_post.get("starttime") if data_post else None
+
+                    gen_intact = (
+                        is_healthy_post
+                        and (epoch_pre, boot_pre, st_pre) == (epoch_post, boot_post, st_post)
+                        and epoch_post == server.xray_instance_epoch
+                    )
+
+                    if sub.desired_version == target_version and gen_intact:
                         sub.actual_version = target_version
                         sub.last_reconciled_node_epoch = target_epoch
                         if sub.status == WhiteInternetStatus.PENDING and desired_active:
@@ -142,6 +181,13 @@ class WhiteInternetReconciliationWorker:
                         sub.last_synced_at = now_utc()
                         sub.last_sync_error = None
                         synced_count += 1
+                    else:
+                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                        logger.warning(
+                            "Reconciliation post-sync generation check detected race for sub_id=%d on server %d",
+                            sub.id,
+                            server_id,
+                        )
                 else:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
                     sub.last_sync_error = err_msg
@@ -156,6 +202,7 @@ class WhiteInternetReconciliationWorker:
                 await session.flush()
 
         return synced_count
+
 
 
 async def white_internet_reconciliation_loop(
