@@ -129,6 +129,85 @@ class AutoFulfillRetryGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payment.topup_context.get("auto_fulfill_error"), "quote_expired")
         self.assertEqual(payment.topup_context.get("auto_fulfill_attempts"), 1)
 
+    async def test_attempts_at_cap_never_buys_an_extra_settlement(self):
+        """A corrupted-but-int counter >= MAX must dead-letter BEFORE any
+        settlement call (bounded-retry invariant)."""
+        for capped in (5, 6, 100):
+            with self.subTest(attempts=capped):
+                payment = _payment(
+                    {
+                        "auto_fulfill_action": "purchase",
+                        "quote_public_id": "00000000-0000-0000-0000-000000000001",
+                        "auto_fulfill_attempts": capped,
+                        "auto_fulfill_status": "failed",
+                    }
+                )
+                session = _session()
+                with patch(
+                    "services.account_purchase.settle_account_purchase",
+                    new_callable=AsyncMock,
+                ) as mock_settle:
+                    await _retry_auto_fulfillment(session, payment)
+
+                mock_settle.assert_not_awaited()
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_status"), "dead"
+                )
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_error"),
+                    "auto_fulfill_attempts_exhausted",
+                )
+
+    async def test_negative_attempts_counter_dead_letters(self):
+        """A negative counter must never disable the retry cap."""
+        for negative in (-1, -100):
+            with self.subTest(attempts=negative):
+                payment = _payment(
+                    {
+                        "auto_fulfill_action": "purchase",
+                        "quote_public_id": "00000000-0000-0000-0000-000000000001",
+                        "auto_fulfill_attempts": negative,
+                        "auto_fulfill_status": "failed",
+                    }
+                )
+                session = _session()
+                with patch(
+                    "services.account_purchase.settle_account_purchase",
+                    new_callable=AsyncMock,
+                ) as mock_settle:
+                    await _retry_auto_fulfillment(session, payment)
+
+                mock_settle.assert_not_awaited()
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_status"), "dead"
+                )
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_error"),
+                    "invalid_auto_fulfill_attempts",
+                )
+
+    async def test_success_retry_clears_stale_telemetry(self):
+        """A successful retry must not keep the old auto_fulfill_error."""
+        payment = _payment(
+            {
+                "auto_fulfill_action": "purchase",
+                "quote_public_id": "00000000-0000-0000-0000-000000000001",
+                "auto_fulfill_attempts": 1,
+                "auto_fulfill_status": "failed",
+                "auto_fulfill_error": "TimeoutError",
+            }
+        )
+        session = _session()
+        with patch(
+            "services.account_purchase.settle_account_purchase",
+            new_callable=AsyncMock,
+        ):
+            await _retry_auto_fulfillment(session, payment)
+
+        self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "succeeded")
+        self.assertNotIn("auto_fulfill_error", payment.topup_context)
+        self.assertEqual(payment.topup_context.get("auto_fulfill_attempts"), 2)
+
     async def test_unknown_action_is_fail_closed(self):
         """An unknown durable action must never be executed as a purchase."""
         payment = _payment(

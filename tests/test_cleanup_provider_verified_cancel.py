@@ -31,26 +31,36 @@ class ProviderVerifiedAutoExpireTests(unittest.IsolatedAsyncioTestCase):
     locally cancelled after the provider still reports pending (fail-closed)."""
 
     def _make_scopes(self, pending_rows):
+        """Statement-type-driven harness, robust to the batched expiry loop:
+        Update statements after the first Select are the expire-cancel UPDATE;
+        the first Select returns the seeded rows, later Selects return empty
+        (loop drain)."""
+        from sqlalchemy.sql.dml import Update as SAUpdate
+
         select_res = MagicMock()
         select_res.all.return_value = pending_rows
+        empty_select = MagicMock()
+        empty_select.all.return_value = []
         generic_res = MagicMock()
         update_res = MagicMock()
         update_res.rowcount = 1
         calls = {"scope_count": 0, "update_used": False}
+        state = {"selects": 0}
 
         @asynccontextmanager
         async def fake_scope():
             calls["scope_count"] += 1
-            role = calls["scope_count"]
             session = MagicMock()
 
             async def _execute(stmt):
-                if role == 2:
-                    return select_res
-                if role == 3:
+                if isinstance(stmt, SAUpdate):
+                    if state["selects"] == 0:
+                        # Stuck-broadcast UPDATE precedes the expiry loop.
+                        return generic_res
                     calls["update_used"] = True
                     return update_res
-                return generic_res
+                state["selects"] += 1
+                return select_res if state["selects"] == 1 else empty_select
 
             session.execute.side_effect = _execute
             yield session

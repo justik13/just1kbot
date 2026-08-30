@@ -44,6 +44,11 @@ PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
 OLD_RECORDS_INTERVAL = 86400.0
+# Auto-expire throughput: each daily pass drains the pending-expiry backlog in
+# bounded batches (≈200 verifications max) instead of capping at 20/day.
+EXPIRE_VERIFY_BATCH_SIZE = 20
+EXPIRE_MAX_BATCHES_PER_PASS = 10
+EXPIRE_VERIFY_PARALLELISM = 5
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
@@ -625,82 +630,96 @@ async def _cleanup_old_records():
     # 15s timeout could stall the once-a-day old-records pass for ~5 minutes.
     threshold_payments = current_time - timedelta(hours=PAYMENT_EXPIRATION_HOURS)
     payments_expired = 0
-    async with session_scope() as session:
-        pending_rows = (
-            await session.execute(
-                select(Payment.id, Payment.external_id)
-                .where(
-                    Payment.provider_status == "pending",
-                    Payment.created_at < threshold_payments,
-                )
-                .order_by(Payment.id)
-                .limit(20)
-            )
-        ).all()
+    last_id = 0
+    # Bounded drain: up to EXPIRE_MAX_BATCHES_PER_PASS batches per daily pass,
+    # each batch committed separately, so a large backlog shrinks every day
+    # without one unbounded run.
+    async def _verify(row: tuple[int, str], semaphore: asyncio.Semaphore):
+        payment_id, external_id = row
+        async with semaphore:
+            result = await YooKassaService.get_payment_result(external_id)
+        return payment_id, result
 
-    verifiable = [(pid, ext) for pid, ext in pending_rows if ext]
-    cancellable_ids: list[int] = []
-    if verifiable:
-        semaphore = asyncio.Semaphore(5)
-
-        async def _verify(row: tuple[int, str]):
-            payment_id, external_id = row
-            async with semaphore:
-                result = await YooKassaService.get_payment_result(external_id)
-            return payment_id, result
-
-        verify_results = await asyncio.gather(
-            *(_verify(row) for row in verifiable), return_exceptions=True
-        )
-    else:
-        verify_results = []
-    for payment_id, _external_id in pending_rows:
-        if not _external_id:
-            logger.warning(
-                "Auto-expire skipped for payment %s: no external_id, provider verification impossible",
-                payment_id,
-            )
-    for item in verify_results:
-        if isinstance(item, Exception) or not isinstance(item, tuple):
-            logger.warning(
-                "Auto-expire verification task failed unexpectedly: %r", item
-            )
-            continue
-        payment_id, result = item
-        if not result.ok:
-            logger.warning(
-                "Auto-expire skipped for payment %s: provider verification failed (%s)",
-                payment_id,
-                result.error_kind.value if result.error_kind else "unknown",
-            )
-            continue
-        observed = str((result.value or {}).get("status") or "unknown")
-        if observed == "pending":
-            cancellable_ids.append(payment_id)
-        else:
-            logger.info(
-                "Auto-expire skipped for payment %s: provider status %s (left for stale-topup settlement)",
-                payment_id,
-                observed,
-            )
-
-    if cancellable_ids:
+    for _batch in range(EXPIRE_MAX_BATCHES_PER_PASS):
         async with session_scope() as session:
-            stmt_payments = (
-                update(Payment)
-                .where(
-                    Payment.id.in_(cancellable_ids),
-                    Payment.provider_status == "pending",
+            pending_rows = (
+                await session.execute(
+                    select(Payment.id, Payment.external_id)
+                    .where(
+                        Payment.provider_status == "pending",
+                        Payment.created_at < threshold_payments,
+                        Payment.id > last_id,
+                    )
+                    .order_by(Payment.id)
+                    .limit(EXPIRE_VERIFY_BATCH_SIZE)
                 )
-                .values(
-                    provider_status="canceled",
-                    fulfillment_status="failed",
-                    reconciliation_status="ok",
-                    manual_review_reason="auto_expired_abandoned_pending_48h",
+            ).all()
+        if not pending_rows:
+            break
+        pending_ids = [pid for pid, _ext in pending_rows]
+        if not pending_ids:
+            break
+        last_id = pending_ids[-1]
+
+        verifiable = [(pid, ext) for pid, ext in pending_rows if ext]
+        for payment_id, _external_id in pending_rows:
+            if not _external_id:
+                logger.warning(
+                    "Auto-expire skipped for payment %s: no external_id, provider verification impossible",
+                    payment_id,
                 )
+
+        cancellable_ids: list[int] = []
+        if verifiable:
+            semaphore = asyncio.Semaphore(EXPIRE_VERIFY_PARALLELISM)
+
+            verify_results = await asyncio.gather(
+                *(_verify(row, semaphore) for row in verifiable),
+                return_exceptions=True,
             )
-            result_payments = await session.execute(stmt_payments)
-            payments_expired = result_payments.rowcount
+        else:
+            verify_results = []
+        for item in verify_results:
+            if isinstance(item, Exception) or not isinstance(item, tuple):
+                logger.warning(
+                    "Auto-expire verification task failed unexpectedly: %r", item
+                )
+                continue
+            payment_id, result = item
+            if not result.ok:
+                logger.warning(
+                    "Auto-expire skipped for payment %s: provider verification failed (%s)",
+                    payment_id,
+                    result.error_kind.value if result.error_kind else "unknown",
+                )
+                continue
+            observed = str((result.value or {}).get("status") or "unknown")
+            if observed == "pending":
+                cancellable_ids.append(payment_id)
+            else:
+                logger.info(
+                    "Auto-expire skipped for payment %s: provider status %s (left for stale-topup settlement)",
+                    payment_id,
+                    observed,
+                )
+
+        if cancellable_ids:
+            async with session_scope() as session:
+                stmt_payments = (
+                    update(Payment)
+                    .where(
+                        Payment.id.in_(cancellable_ids),
+                        Payment.provider_status == "pending",
+                    )
+                    .values(
+                        provider_status="canceled",
+                        fulfillment_status="failed",
+                        reconciliation_status="ok",
+                        manual_review_reason="auto_expired_abandoned_pending_48h",
+                    )
+                )
+                result_payments = await session.execute(stmt_payments)
+                payments_expired += result_payments.rowcount
 
     # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
     threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)

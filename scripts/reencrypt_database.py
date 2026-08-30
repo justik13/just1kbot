@@ -10,13 +10,14 @@ Operational contract:
     DB_ENCRYPTION_KEYS='<OLD_KEY_1>,<OLD_KEY_2>'
 
 Safety:
-    The bot must be stopped (docker compose stop bot) or maintenance mode must
-    be enabled while rotating keys. Rotation proceeds ONLY with maintenance
-    explicitly enabled; every other state aborts. `--force` is the only
-    conscious bypass. Interactive confirmation is required unless `--yes` is
-    passed. Note: the maintenance state is sampled once at startup — a long
-    rotation must still be supervised by the operator (keep the bot stopped
-    until the script exits).
+    Contract: rotation proceeds ONLY when MaintenanceMode is explicitly
+    enabled, or with an explicit `--force` bypass. Stopping the bot container
+    alone does NOT satisfy the guard — the check reads the MaintenanceMode
+    row. Typical flow: stop bot → enable maintenance → rotate → verify →
+    disable maintenance → start bot. Interactive confirmation is required
+    unless `--yes` is passed. The maintenance state is sampled once at
+    startup; the operator must keep the environment frozen (bot stopped,
+    maintenance enabled) until the script exits.
 """
 
 import asyncio
@@ -65,8 +66,8 @@ async def reencrypt_all(*, force: bool = False) -> None:
         raise RuntimeError(
             "Maintenance mode must be enabled before rotation "
             f"(current state: {maintenance_enabled!r}). Enable maintenance "
-            "mode or stop the bot container (docker compose stop bot), then "
-            "re-run; --force consciously bypasses this guard."
+            "mode first, then re-run; --force consciously bypasses this "
+            "guard."
         )
 
     total_servers = 0

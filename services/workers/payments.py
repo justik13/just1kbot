@@ -57,6 +57,7 @@ _AUTO_FULFILL_PERMANENT_CODES = {
     "subscription_state_changed",
     "invalid_auto_fulfill_action",
     "invalid_auto_fulfill_attempts",
+    "auto_fulfill_attempts_exhausted",
     "missing_quote_public_id",
 }
 
@@ -293,6 +294,9 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
         }
         if error is not None:
             update["auto_fulfill_error"] = str(error)[:500]
+        elif status == "succeeded":
+            # Stale durable telemetry must not outlive a successful retry.
+            update.pop("auto_fulfill_error", None)
         payment.topup_context = update
 
     # The attempts counter lives in durable JSONB and is written only by this
@@ -304,6 +308,25 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
         _mark("dead", "invalid_auto_fulfill_attempts")
         logger.error(
             "Auto-fulfillment dead for payment %s: poisoned auto_fulfill_attempts %r",
+            payment.id,
+            raw_attempts,
+        )
+        return
+    # The bounded-retry invariant is checked BEFORE any settlement attempt:
+    # a corrupted-but-int counter must never buy an extra attempt, and a
+    # negative counter must never disable the cap.
+    if raw_attempts < 0:
+        _mark("dead", "invalid_auto_fulfill_attempts")
+        logger.error(
+            "Auto-fulfillment dead for payment %s: corrupted negative attempts %r",
+            payment.id,
+            raw_attempts,
+        )
+        return
+    if raw_attempts >= AUTO_FULFILL_MAX_ATTEMPTS:
+        _mark("dead", "auto_fulfill_attempts_exhausted")
+        logger.error(
+            "Auto-fulfillment dead for payment %s: attempts counter at cap (%r)",
             payment.id,
             raw_attempts,
         )
