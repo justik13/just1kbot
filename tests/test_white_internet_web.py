@@ -96,6 +96,40 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
 
     @unittest_run_loop
+    async def test_epoch_mismatch_returns_503(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.ACTIVE
+        sub.expires_at = now + timedelta(days=20)
+        sub.desired_version = 2
+        sub.actual_version = 2  # Versions match...
+        sub.last_reconciled_node_epoch = "epoch_old"  # ...but epoch is old!
+
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch_new",  # Node restarted with new epoch!
+        )
+
+        mock_session = AsyncMock()
+        mock_session.execute.return_value = MagicMock(scalar_one_or_none=lambda: server)
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                with patch("database.repositories.white_internet_repo.get_available_quota_bytes", return_value=10 * 1024**3):
+                    resp = await self.client.get("/sub/wl/epoch-mismatch-token-1234567890")
+                    self.assertEqual(resp.status, 503)
+                    self.assertEqual(resp.headers.get("Retry-After"), "5")
+
+
+    @unittest_run_loop
     async def test_active_and_synced_returns_base64_vless_feed(self):
         now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
         sub = WhiteInternetSubscription(

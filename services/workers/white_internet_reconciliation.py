@@ -106,10 +106,19 @@ class WhiteInternetReconciliationWorker:
                 ):
                     continue
 
+                if sub.expires_at <= now and sub.status in (
+                    WhiteInternetStatus.ACTIVE,
+                    WhiteInternetStatus.EXHAUSTED,
+                ):
+                    sub.status = WhiteInternetStatus.EXPIRED
+                    sub.status_reason = "subscription_expired"
+                    sub.desired_version += 1
+
                 desired_active = (
                     sub.status == WhiteInternetStatus.ACTIVE
                     and sub.expires_at > now
                 )
+
 
                 target_version = sub.desired_version
                 target_epoch = server.xray_instance_epoch

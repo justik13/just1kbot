@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import logging
 import os
 import urllib.parse
+
 
 from aiohttp import web
 from sqlalchemy import select
@@ -112,18 +114,35 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 headers=headers,
             )
 
+        # Fetch origin server to verify node epoch and resolve CDN domain
+        stmt_server = select(Server).where(Server.id == sub.origin_node_id)
+        res_server = await session.execute(stmt_server)
+        server = res_server.scalar_one_or_none()
+        if inspect.iscoroutine(server):
+            server = await server
+
+        # Epoch check: if server has a recorded epoch and subscription was reconciled with a different epoch
+        if server is not None and getattr(server, "xray_instance_epoch", None) is not None:
+            if sub.last_reconciled_node_epoch != server.xray_instance_epoch:
+                headers = dict(common_headers)
+                headers["Retry-After"] = "5"
+                return web.Response(
+                    status=503,
+                    text=texts.WL_WEB_UNSYNCED,
+                    headers=headers,
+                )
+
         # Determine CDN domain
         cdn_domain = os.getenv("WHITE_INTERNET_CDN_DOMAIN")
         if not cdn_domain:
             # Fallback to origin server's hostname or app domain
-            stmt_server = select(Server).where(Server.id == sub.origin_node_id)
-            res_server = await session.execute(stmt_server)
-            server = res_server.scalar_one_or_none()
             if server and server.api_url:
                 parsed = urllib.parse.urlparse(server.api_url)
                 cdn_domain = parsed.hostname or os.getenv("DOMAIN", "origin.example.com")
             else:
                 cdn_domain = os.getenv("DOMAIN", "origin.example.com")
+
+
 
         # Generate VLESS links
         vless_links = WhiteInternetService.generate_vless_links(sub, cdn_domain=cdn_domain)
