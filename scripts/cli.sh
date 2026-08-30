@@ -753,19 +753,31 @@ cmd_restore() {
     fi
 
     info "4/5. Полная переинициализация базы данных и накат дампа..."
-    docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
-    docker compose exec -T db createdb -U "$pg_user" "$pg_db"
+    # Destructive phase is strict: any dropdb/createdb failure aborts BEFORE
+    # the database is left in a partially reinitialized state.
+    if ! docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1; then
+        error "Не удалось удалить текущую базу данных '$pg_db'. Восстановление отменено."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! docker compose exec -T db createdb -U "$pg_user" "$pg_db"; then
+        error "Не удалось создать базу данных '$pg_db' после удаления. Автоматический откат невозможен — восстановите исходное состояние вручную из: $pre_restore_backup_file"
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
 
     if ! docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$tmp_sql"; then
         error "Ошибка при накате SQL дампа в PostgreSQL!"
         if [[ -s "$pre_restore_backup_file" ]]; then
             warn "Попытка отката к состоянию базы данных до начала операции восстановления..."
-            docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
-            docker compose exec -T db createdb -U "$pg_user" "$pg_db"
-            if ! gunzip -c "$pre_restore_backup_file" | docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
-                warn "Автоматический откат не удался. Страховочный дамп сохранён: $pre_restore_backup_file — восстановите его вручную."
-            else
+            # Rollback is also strict: if reinitialize+replay of the safety
+            # dump cannot be completed, say so loudly instead of pretending.
+            if docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 \
+                && docker compose exec -T db createdb -U "$pg_user" "$pg_db" \
+                && gunzip -c "$pre_restore_backup_file" | docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
                 warn "Исходное состояние базы данных возвращено."
+            else
+                warn "Автоматический откат не удался. Страховочный дамп сохранён: $pre_restore_backup_file — восстановите его вручную."
             fi
         fi
         docker compose start bot >/dev/null 2>&1 || true

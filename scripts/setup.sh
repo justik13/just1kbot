@@ -183,11 +183,17 @@ install_dependencies() {
         current_overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")"
         if [[ "$current_overcommit" != "1" ]]; then
             info "Включение vm.overcommit_memory=1 для стабильной работы Redis..."
-            sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
-            if ! grep -qs "^vm.overcommit_memory" /etc/sysctl.conf /etc/sysctl.d/* 2>/dev/null; then
-                echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf 2>/dev/null || true
+            # Honest failure handling: a silent false positive here would let
+            # Redis BGSAVE fail under memory pressure after install.
+            if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
+                error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
             fi
-            log "Параметр vm.overcommit_memory=1 настроен."
+            if ! grep -qs "^vm.overcommit_memory" /etc/sysctl.conf /etc/sysctl.d/* 2>/dev/null; then
+                if ! echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf 2>/dev/null; then
+                    error "Не удалось сохранить vm.overcommit_memory=1 в /etc/sysctl.conf — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
+                fi
+            fi
+            log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
         fi
     fi
 

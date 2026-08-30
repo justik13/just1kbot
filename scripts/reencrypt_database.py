@@ -11,9 +11,10 @@ Operational contract:
 
 Safety:
     The bot must be stopped (docker compose stop bot) or maintenance mode must
-    be enabled while rotating keys. When MaintenanceMode is explicitly OFF the
-    script aborts; `--force` is the only conscious bypass. Interactive
-    confirmation is required unless `--yes` is passed.
+    be enabled while rotating keys. Rotation proceeds ONLY with maintenance
+    explicitly enabled; every other state aborts. `--force` is the only
+    conscious bypass. Interactive confirmation is required unless `--yes` is
+    passed.
 """
 
 import asyncio
@@ -40,32 +41,30 @@ BATCH_SIZE = 100
 async def reencrypt_all(*, force: bool = False) -> None:
     logger.info("Starting database re-encryption with primary key...")
 
-    # Hard safety guard: rotation must not run against a live writer. When the
-    # MaintenanceMode row explicitly says maintenance is OFF, abort unless the
-    # operator passed --force. A missing row (fresh/test schema) cannot be
-    # verified and only produces a warning.
+    # Hard safety guard: rotation must not run against a live writer. Rotation
+    # proceeds ONLY with maintenance explicitly enabled; every other state
+    # (row missing, maintenance OFF) aborts unless the operator passed --force.
     from database.models import MaintenanceMode
 
     async with session_scope() as session:
         maintenance_enabled = await session.scalar(
             select(MaintenanceMode.is_enabled).where(MaintenanceMode.id == 1)
         )
-    if maintenance_enabled is False:
-        if force:
-            logger.warning(
-                "Maintenance mode is OFF; proceeding because --force was given. "
-                "Rows written by a running bot during rotation may keep the old key."
-            )
-        else:
-            raise RuntimeError(
-                "Maintenance mode is OFF. Stop the bot container "
-                "(docker compose stop bot) or enable maintenance mode first; "
-                "re-run with --force to consciously bypass this guard."
-            )
-    elif maintenance_enabled is None:
+    if maintenance_enabled is True:
+        pass
+    elif force:
         logger.warning(
-            "MaintenanceMode row not found (fresh/test schema?); "
-            "proceeding without a maintenance check."
+            "Maintenance mode state is %r; proceeding because --force was "
+            "given. Rows written by a running bot during rotation may keep "
+            "the old key and become unreadable after the key is removed.",
+            maintenance_enabled,
+        )
+    else:
+        raise RuntimeError(
+            "Maintenance mode must be enabled before rotation "
+            f"(current state: {maintenance_enabled!r}). Enable maintenance "
+            "mode or stop the bot container (docker compose stop bot), then "
+            "re-run; --force consciously bypasses this guard."
         )
 
     total_servers = 0
