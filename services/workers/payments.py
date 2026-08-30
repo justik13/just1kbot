@@ -8,6 +8,10 @@ from datetime import timedelta
 from aiogram import Bot
 from bot.texts.common.status import STATUS_NOT_SPECIFIED
 from bot.texts.runtime.alerts import (
+    ALERT_STALE_BTN_DISMISS,
+    ALERT_STALE_BTN_OPEN_CARD,
+    ALERT_STALE_BTN_PAYMENTS,
+    ALERT_STALE_BTN_QUEUES,
     ALERT_STALE_PAYMENT_ROW,
     ALERT_STALE_PAYMENTS_HEADER,
     ALERT_STALE_PAYMENTS_MORE,
@@ -26,6 +30,11 @@ from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
 _alerted_stale_payments: TTLCache[int, bool] = TTLCache(maxsize=50000, ttl=7200)
+# Chat-hygiene state for the stale payments card: one editable message per
+# admin instead of a new message every reminder cycle, plus the last rendered
+# text so unchanged reminders stay silent.
+_stale_alert_message_ids: dict[int, int] = {}
+_stale_alert_last_text: dict[int, str] = {}
 PAYMENTS_START_DELAY = 60.0
 
 AUTO_FULFILL_MAX_ATTEMPTS = 5
@@ -47,6 +56,7 @@ _AUTO_FULFILL_PERMANENT_CODES = {
     "tariff_price_changed",
     "subscription_state_changed",
     "invalid_auto_fulfill_action",
+    "invalid_auto_fulfill_attempts",
     "missing_quote_public_id",
 }
 
@@ -272,7 +282,7 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
     ctx = dict(payment.topup_context or {})
     action = ctx.get("auto_fulfill_action")
     quote_raw = ctx.get("quote_public_id")
-    attempts = int(ctx.get("auto_fulfill_attempts") or 0) + 1
+    attempts = 0
 
     def _mark(status: str, error=None) -> None:
         current = dict(payment.topup_context or {})
@@ -284,6 +294,21 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
         if error is not None:
             update["auto_fulfill_error"] = str(error)[:500]
         payment.topup_context = update
+
+    # The attempts counter lives in durable JSONB and is written only by this
+    # worker as an integer. Anything else (str, float, dict, list, bool) is a
+    # poisoned recovery record and must dead-letter instead of crashing the
+    # recovery transaction forever or being silently coerced by `or 0`.
+    raw_attempts = ctx.get("auto_fulfill_attempts", 0)
+    if isinstance(raw_attempts, bool) or not isinstance(raw_attempts, int):
+        _mark("dead", "invalid_auto_fulfill_attempts")
+        logger.error(
+            "Auto-fulfillment dead for payment %s: poisoned auto_fulfill_attempts %r",
+            payment.id,
+            raw_attempts,
+        )
+        return
+    attempts = raw_attempts + 1
 
     if not quote_raw:
         _mark("dead", "missing_quote_public_id")
@@ -394,10 +419,54 @@ async def _alert_new_stale_payments(bot: Bot, settings):
         count=len(new_rows),
         details="".join(details),
     )
+    markup = _build_stale_alert_markup(new_rows)
     for admin_id in settings.ADMIN_IDS:
         try:
-            await bot.send_message(admin_id, message, parse_mode="HTML")
+            # Chat hygiene: never spam new messages. One persistent card per
+            # admin; unchanged reminders are silent, changed state edits the
+            # card in place. Dismiss button removes it until state changes.
+            last_text = _stale_alert_last_text.get(admin_id)
+            if last_text == message:
+                continue
+            delivered = False
+            old_id = _stale_alert_message_ids.get(admin_id)
+            if old_id is not None:
+                try:
+                    await bot.edit_message_text(
+                        chat_id=admin_id,
+                        message_id=old_id,
+                        text=message,
+                        reply_markup=markup,
+                        parse_mode="HTML",
+                    )
+                    delivered = True
+                except Exception:
+                    delivered = False
+            if not delivered:
+                sent = await bot.send_message(
+                    admin_id, message, reply_markup=markup, parse_mode="HTML"
+                )
+                _stale_alert_message_ids[admin_id] = sent.message_id
+            _stale_alert_last_text[admin_id] = message
         except Exception as exc:
             logger.error("Stale alert failed to %s: %s", admin_id, exc)
     for payment, _ in new_rows:
         _alerted_stale_payments[payment.id] = True
+
+
+def _build_stale_alert_markup(new_rows):
+    """Actionable keyboard: per-payment card for the first rows, queue
+    diagnostics, payments list and a dismiss button."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    builder = InlineKeyboardBuilder()
+    for payment, _ in new_rows[:5]:
+        builder.button(
+            text=ALERT_STALE_BTN_OPEN_CARD.format(payment_id=payment.id),
+            callback_data=f"admin_payment_card:{payment.id}",
+        )
+    builder.button(text=ALERT_STALE_BTN_QUEUES, callback_data="aq:home")
+    builder.button(text=ALERT_STALE_BTN_PAYMENTS, callback_data="admin_payments")
+    builder.button(text=ALERT_STALE_BTN_DISMISS, callback_data="stale_alerts:dismiss")
+    builder.adjust(1)
+    return builder.as_markup()

@@ -14,7 +14,9 @@ Safety:
     be enabled while rotating keys. Rotation proceeds ONLY with maintenance
     explicitly enabled; every other state aborts. `--force` is the only
     conscious bypass. Interactive confirmation is required unless `--yes` is
-    passed.
+    passed. Note: the maintenance state is sampled once at startup — a long
+    rotation must still be supervised by the operator (keep the bot stopped
+    until the script exits).
 """
 
 import asyncio

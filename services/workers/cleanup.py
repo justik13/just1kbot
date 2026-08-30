@@ -614,11 +614,15 @@ async def _cleanup_old_records():
     )
 
     # Auto-expire abandoned pending payments older than PAYMENT_EXPIRATION_HOURS.
-    # Cancellation is provider-verified: the local row is moved to canceled only
-    # after GET /payments/{id} still reports pending. If the provider reports a
-    # paid/captured payment the row is left untouched for the stale-topup worker
-    # to settle, and on any provider/transport error the row is skipped this
-    # cycle (fail-closed) — a real payment must never be blind-cancelled.
+    # This is a provider-verified LOCAL cancellation (not a provider-side
+    # cancel): the local row is moved to canceled only after GET
+    # /payments/{id} still reports pending. If the provider later confirms a
+    # paid payment, apply_provider_transition treats it as
+    # canceled_to_succeeded → manual_review — the expected reconciliation
+    # path, never a silent credit. Missing external_id or any transport error
+    # skips the row this cycle (fail-closed).
+    # Verifications run in bounded parallel batches: 20 sequential GETs with a
+    # 15s timeout could stall the once-a-day old-records pass for ~5 minutes.
     threshold_payments = current_time - timedelta(hours=PAYMENT_EXPIRATION_HOURS)
     payments_expired = 0
     async with session_scope() as session:
@@ -634,15 +638,35 @@ async def _cleanup_old_records():
             )
         ).all()
 
+    verifiable = [(pid, ext) for pid, ext in pending_rows if ext]
     cancellable_ids: list[int] = []
-    for payment_id, external_id in pending_rows:
-        if not external_id:
+    if verifiable:
+        semaphore = asyncio.Semaphore(5)
+
+        async def _verify(row: tuple[int, str]):
+            payment_id, external_id = row
+            async with semaphore:
+                result = await YooKassaService.get_payment_result(external_id)
+            return payment_id, result
+
+        verify_results = await asyncio.gather(
+            *(_verify(row) for row in verifiable), return_exceptions=True
+        )
+    else:
+        verify_results = []
+    for payment_id, _external_id in pending_rows:
+        if not _external_id:
             logger.warning(
                 "Auto-expire skipped for payment %s: no external_id, provider verification impossible",
                 payment_id,
             )
+    for item in verify_results:
+        if isinstance(item, Exception) or not isinstance(item, tuple):
+            logger.warning(
+                "Auto-expire verification task failed unexpectedly: %r", item
+            )
             continue
-        result = await YooKassaService.get_payment_result(external_id)
+        payment_id, result = item
         if not result.ok:
             logger.warning(
                 "Auto-expire skipped for payment %s: provider verification failed (%s)",
