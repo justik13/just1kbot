@@ -836,6 +836,17 @@ cmd_doctor() {
         info "Версия ядра Linux: $kernel_ver"
     fi
 
+    # 0.1 Проверка памяти ядра для Redis
+    if [[ -f /proc/sys/vm/overcommit_memory ]]; then
+        local overcommit
+        overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo '0')"
+        if [[ "$overcommit" == "1" ]]; then
+            log "Параметр ядра vm.overcommit_memory=1 активен (Redis BGSAVE защищен)."
+        else
+            warn "vm.overcommit_memory=$overcommit. Рекомендуется установить 'sysctl vm.overcommit_memory=1' для предотвращения сбоев Redis BGSAVE."
+        fi
+    fi
+
     # 1. Docker демон и сокет
     if docker info >/dev/null 2>&1; then
         log "Docker демон активен и отвечает."

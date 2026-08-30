@@ -177,6 +177,20 @@ install_dependencies() {
         log "Порты 80/tcp, 443/tcp и 443/udp разрешены в UFW."
     fi
 
+    # Настройка ядра для Redis (overcommit_memory)
+    if [[ -f /proc/sys/vm/overcommit_memory ]]; then
+        local current_overcommit
+        current_overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo "0")"
+        if [[ "$current_overcommit" != "1" ]]; then
+            info "Включение vm.overcommit_memory=1 для стабильной работы Redis..."
+            sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1 || true
+            if ! grep -qs "^vm.overcommit_memory" /etc/sysctl.conf /etc/sysctl.d/* 2>/dev/null; then
+                echo "vm.overcommit_memory = 1" >> /etc/sysctl.conf 2>/dev/null || true
+            fi
+            log "Параметр vm.overcommit_memory=1 настроен."
+        fi
+    fi
+
     # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do
         if ss -tlnp 2>/dev/null | grep -q ":${port} " || netstat -tlnp 2>/dev/null | grep -q ":${port} "; then
