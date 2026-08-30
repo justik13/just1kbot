@@ -36,16 +36,13 @@ class WhiteInternetInactiveSubscriptionError(WhiteInternetError):
     """Raised when an operation requires a live subscription."""
 
 
-async def get_subscription_by_token(
-    session: AsyncSession, token: str
-) -> WhiteInternetSubscription | None:
-    stmt = select(WhiteInternetSubscription).where(WhiteInternetSubscription.token == token)
-    return (await session.execute(stmt)).scalar_one_or_none()
+async def get_subscription_by_token(session: AsyncSession, token: str) -> WhiteInternetSubscription | None:
+    return (await session.execute(
+        select(WhiteInternetSubscription).where(WhiteInternetSubscription.token == token)
+    )).scalar_one_or_none()
 
 
-async def get_subscription_by_user_id(
-    session: AsyncSession, user_id: int
-) -> WhiteInternetSubscription | None:
+async def get_subscription_by_user_id(session: AsyncSession, user_id: int) -> WhiteInternetSubscription | None:
     stmt = (
         select(WhiteInternetSubscription)
         .where(WhiteInternetSubscription.user_id == user_id)
@@ -55,30 +52,17 @@ async def get_subscription_by_user_id(
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def get_subscription_by_id(
-    session: AsyncSession, subscription_id: int
-) -> WhiteInternetSubscription | None:
-    return await session.scalar(
-        select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id)
-    )
+async def get_subscription_by_id(session: AsyncSession, subscription_id: int) -> WhiteInternetSubscription | None:
+    return await session.scalar(select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id))
 
 
-async def get_subscription_with_lock(
-    session: AsyncSession, subscription_id: int
-) -> WhiteInternetSubscription | None:
-    stmt = (
-        select(WhiteInternetSubscription)
-        .where(WhiteInternetSubscription.id == subscription_id)
-        .with_for_update()
-    )
+async def get_subscription_with_lock(session: AsyncSession, subscription_id: int) -> WhiteInternetSubscription | None:
+    stmt = select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id).with_for_update()
     return (await session.execute(stmt)).scalar_one_or_none()
 
 
-async def get_available_quota_bytes(
-    session: AsyncSession, subscription_id: int, now: datetime | None = None
-) -> int:
-    if now is None:
-        now = now_utc()
+async def get_available_quota_bytes(session: AsyncSession, subscription_id: int, now: datetime | None = None) -> int:
+    now = now or now_utc()
     stmt = select(func.coalesce(func.sum(WhiteInternetQuotaGrant.bytes_remaining), 0)).where(
         WhiteInternetQuotaGrant.subscription_id == subscription_id,
         WhiteInternetQuotaGrant.expires_at > now,
@@ -90,8 +74,7 @@ async def get_available_quota_bytes(
 async def get_active_grants_for_deduction(
     session: AsyncSession, subscription_id: int, now: datetime | None = None
 ) -> Sequence[WhiteInternetQuotaGrant]:
-    if now is None:
-        now = now_utc()
+    now = now or now_utc()
     stmt = (
         select(WhiteInternetQuotaGrant)
         .where(
@@ -109,9 +92,7 @@ async def get_active_grants_for_deduction(
     return (await session.execute(stmt)).scalars().all()
 
 
-async def _lock_all_grants(
-    session: AsyncSession, subscription_id: int
-) -> Sequence[WhiteInternetQuotaGrant]:
+async def _lock_all_grants(session: AsyncSession, subscription_id: int) -> Sequence[WhiteInternetQuotaGrant]:
     stmt = (
         select(WhiteInternetQuotaGrant)
         .where(WhiteInternetQuotaGrant.subscription_id == subscription_id)
@@ -121,64 +102,54 @@ async def _lock_all_grants(
     return (await session.execute(stmt)).scalars().all()
 
 
+async def expire_subscription_atomic(
+    session: AsyncSession, subscription_id: int, *, reason: str = "subscription_expired"
+) -> WhiteInternetSubscription:
+    sub = await get_subscription_with_lock(session, subscription_id)
+    if sub is None:
+        raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
+    if sub.status not in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
+        sub.status = WhiteInternetStatus.EXPIRED
+        sub.status_reason = reason
+        sub.desired_version += 1
+        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+    await _lock_all_grants(session, sub.id)
+    for grant in await _lock_all_grants(session, sub.id):
+        grant.bytes_remaining = 0
+    await session.flush()
+    return sub
+
+
 async def create_white_internet_subscription(
-    session: AsyncSession,
-    *,
-    user_id: int,
-    origin_node_id: int,
-    token: str,
-    uuid: str,
-    quote_id: int,
-    price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
+    session: AsyncSession, *, user_id: int, origin_node_id: int, token: str, uuid: str,
+    quote_id: int, price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
 ) -> WhiteInternetSubscription:
     now = now_utc()
     expires_at = now + timedelta(days=duration_days)
     subscription = WhiteInternetSubscription(
-        user_id=user_id,
-        origin_node_id=origin_node_id,
-        token=token,
-        uuid=uuid,
-        status=WhiteInternetStatus.PENDING,
-        status_reason=None,
-        started_at=now,
-        expires_at=expires_at,
-        traffic_limit_bytes=base_bytes,
-        traffic_used_bytes=0,
-        last_uplink_snapshot=0,
-        last_downlink_snapshot=0,
-        traffic_stats_epoch=None,
+        user_id=user_id, origin_node_id=origin_node_id, token=token, uuid=uuid,
+        status=WhiteInternetStatus.PENDING, status_reason=None, started_at=now,
+        expires_at=expires_at, traffic_limit_bytes=base_bytes, traffic_used_bytes=0,
+        last_uplink_snapshot=0, last_downlink_snapshot=0, traffic_stats_epoch=None,
         provisioning_status=WhiteInternetProvisioningStatus.PENDING_CREATE,
-        desired_version=1,
-        actual_version=0,
-        last_reconciled_node_epoch=None,
+        desired_version=1, actual_version=0, last_reconciled_node_epoch=None,
     )
     session.add(subscription)
     await session.flush()
-
-    session.add(
-        WhiteInternetQuotaGrant(
-            subscription_id=subscription.id,
-            grant_type=WhiteInternetGrantType.BASE,
-            bytes_granted=base_bytes,
-            bytes_remaining=base_bytes,
-            price_rub=price_rub,
-            quote_id=quote_id,
-            expires_at=expires_at,
-            created_at=now,
-        )
-    )
+    session.add(WhiteInternetQuotaGrant(
+        subscription_id=subscription.id, grant_type=WhiteInternetGrantType.BASE,
+        bytes_granted=base_bytes, bytes_remaining=base_bytes, price_rub=price_rub,
+        quote_id=quote_id, expires_at=expires_at, created_at=now,
+    ))
     await session.flush()
     await session.refresh(subscription)
     return subscription
 
 
 async def renew_subscription_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    quote_id: int,
+    session: AsyncSession, *, subscription_id: int, quote_id: int,
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
@@ -187,48 +158,30 @@ async def renew_subscription_atomic(
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-    if sub.status == WhiteInternetStatus.DISABLED:
-        raise WhiteInternetInactiveSubscriptionError("Disabled subscriptions cannot be renewed")
-    if sub.status == WhiteInternetStatus.PENDING:
-        raise WhiteInternetInactiveSubscriptionError("Pending subscriptions cannot be renewed")
-
+    if sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
+        raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for renewal")
     all_grants = await _lock_all_grants(session, sub.id)
     base_time = sub.expires_at if sub.expires_at > now else now
     new_expires_at = base_time + timedelta(days=duration_days)
-
-    # Base is the expiring monthly entitlement. All old BASE remnants burn.
     for grant in all_grants:
         if grant.grant_type == WhiteInternetGrantType.BASE:
             grant.bytes_remaining = 0
-
-    # Purchased TOPUP is durable and is explicitly moved to the new period.
-    for grant in all_grants:
-        if grant.grant_type == WhiteInternetGrantType.TOPUP and grant.bytes_remaining > 0:
+        elif grant.grant_type == WhiteInternetGrantType.TOPUP and grant.bytes_remaining > 0:
             if grant.expires_at > now:
                 grant.expires_at = new_expires_at
             else:
                 grant.bytes_remaining = 0
-
     sub.expires_at = new_expires_at
     sub.status = WhiteInternetStatus.ACTIVE
     sub.status_reason = None
     sub.desired_version += 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-
-    session.add(
-        WhiteInternetQuotaGrant(
-            subscription_id=sub.id,
-            grant_type=WhiteInternetGrantType.BASE,
-            bytes_granted=base_bytes,
-            bytes_remaining=base_bytes,
-            price_rub=price_rub,
-            quote_id=quote_id,
-            expires_at=new_expires_at,
-            created_at=now,
-        )
-    )
+    session.add(WhiteInternetQuotaGrant(
+        subscription_id=sub.id, grant_type=WhiteInternetGrantType.BASE,
+        bytes_granted=base_bytes, bytes_remaining=base_bytes, price_rub=price_rub,
+        quote_id=quote_id, expires_at=new_expires_at, created_at=now,
+    ))
     await session.flush()
-
     available = await get_available_quota_bytes(session, sub.id, now)
     sub.traffic_limit_bytes = available + sub.traffic_used_bytes
     await session.flush()
@@ -237,12 +190,7 @@ async def renew_subscription_atomic(
 
 
 async def topup_quota_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    quote_id: int,
-    pack_gb: int,
-    price_rub: Decimal,
+    session: AsyncSession, *, subscription_id: int, quote_id: int, pack_gb: int, price_rub: Decimal
 ) -> WhiteInternetQuotaGrant:
     now = now_utc()
     sub = await get_subscription_with_lock(session, subscription_id)
@@ -252,9 +200,6 @@ async def topup_quota_atomic(
         raise WhiteInternetInactiveSubscriptionError("Subscription is not eligible for top-up")
     if sub.status == WhiteInternetStatus.EXPIRED or sub.expires_at <= now:
         raise WhiteInternetInactiveSubscriptionError("Cannot top up an expired subscription")
-
-    # The subscription row serializes all quota mutations for this subscription;
-    # the second lock level makes the ledger state explicit and deterministic.
     await _lock_all_grants(session, sub.id)
     current_available = await get_available_quota_bytes(session, sub.id, now)
     pack_bytes = pack_gb * 1024 * 1024 * 1024
@@ -262,46 +207,31 @@ async def topup_quota_atomic(
         raise WhiteInternetQuotaCapExceededError(
             f"Adding {pack_gb} GiB would exceed the 500 GiB maximum accumulation cap."
         )
-
     grant = WhiteInternetQuotaGrant(
-        subscription_id=sub.id,
-        grant_type=WhiteInternetGrantType.TOPUP,
-        bytes_granted=pack_bytes,
-        bytes_remaining=pack_bytes,
-        price_rub=price_rub,
-        quote_id=quote_id,
-        expires_at=sub.expires_at,
-        created_at=now,
+        subscription_id=sub.id, grant_type=WhiteInternetGrantType.TOPUP,
+        bytes_granted=pack_bytes, bytes_remaining=pack_bytes, price_rub=price_rub,
+        quote_id=quote_id, expires_at=sub.expires_at, created_at=now,
     )
     session.add(grant)
     sub.traffic_limit_bytes += pack_bytes
-
     if sub.status == WhiteInternetStatus.EXHAUSTED:
         sub.status = WhiteInternetStatus.ACTIVE
         sub.status_reason = None
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-
     await session.flush()
     return grant
 
 
 async def deduct_traffic_atomic(
-    session: AsyncSession,
-    *,
-    subscription_id: int,
-    delta_bytes: int,
-    now: datetime | None = None,
+    session: AsyncSession, *, subscription_id: int, delta_bytes: int, now: datetime | None = None
 ) -> tuple[int, bool, int]:
     if delta_bytes <= 0:
         return 0, False, 0
-    if now is None:
-        now = now_utc()
-
+    now = now or now_utc()
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
-
     grants = await get_active_grants_for_deduction(session, subscription_id, now)
     remaining_to_deduct = delta_bytes
     consumed_from_grants = 0
@@ -312,18 +242,15 @@ async def deduct_traffic_atomic(
         grant.bytes_remaining -= deduct_from_grant
         remaining_to_deduct -= deduct_from_grant
         consumed_from_grants += deduct_from_grant
-
     sub.traffic_used_bytes += delta_bytes
     unallocated_overage = max(remaining_to_deduct, 0)
     available_after = await get_available_quota_bytes(session, subscription_id, now)
     became_exhausted = False
-
     if available_after == 0 and sub.status == WhiteInternetStatus.ACTIVE:
         sub.status = WhiteInternetStatus.EXHAUSTED
         sub.status_reason = "quota_exhausted"
         sub.desired_version += 1
         sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
         became_exhausted = True
-
     await session.flush()
     return consumed_from_grants, became_exhausted, unallocated_overage
