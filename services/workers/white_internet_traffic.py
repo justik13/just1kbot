@@ -22,70 +22,57 @@ TRAFFIC_SYNC_INTERVAL_SECONDS = 60.0
 
 
 class WhiteInternetTrafficWorker:
-    """Worker polling Xray nodes and updating White Internet quota accounting."""
+    """Worker polling Xray Origin and updating the grant ledger."""
 
     def __init__(self, bot: Bot | None = None, node_client: XrayNodeClient | None = None):
         self.bot = bot
         self.client = node_client or XrayNodeClient()
 
     async def run_traffic_cycle(self, session: AsyncSession) -> int:
-        """
-        Execute one traffic sync cycle across all active Origin servers:
-        1. Fetch normalized snapshot from GET /v1/traffic/snapshot.
-        2. Compute monotonic deltas per UUID.
-        3. Deduct traffic via Base-First -> TOPUP FIFO ledger.
-        4. Handle quota overshoot and notify user if exhausted.
-        """
         now = now_utc()
-
-        # Find servers with Xray Origin capability
         stmt = select(Server).where(
             Server.api_url.is_not(None),
             Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
         )
-        res = await session.execute(stmt)
-        servers = res.scalars().all()
-
+        servers = (await session.execute(stmt)).scalars().all()
         total_processed = 0
 
         for server in servers:
-            caps = server.capabilities or []
-            if "xray_origin" not in caps and "xray" not in (server.protocol or "").lower() and len(servers) > 1:
+            # Never treat an arbitrary server as an accounting source.
+            if "xray_origin" not in (server.capabilities or []):
                 continue
 
             node_epoch, users_stats = await self.client.get_traffic_snapshot(
                 server.api_url, server.api_key
             )
-            if not node_epoch or not users_stats:
+            if not node_epoch or users_stats is None:
                 continue
 
-            # Update server's last known epoch if not set
             if server.xray_instance_epoch != node_epoch:
                 server.xray_instance_epoch = node_epoch
                 await session.flush()
 
             for client_uuid, stats in users_stats.items():
-                uplink = stats.get("uplink", 0)
-                downlink = stats.get("downlink", 0)
+                uplink = max(int(stats.get("uplink", 0)), 0)
+                downlink = max(int(stats.get("downlink", 0)), 0)
 
-                # Look up subscription by UUID
-                stmt_sub = (
-                    select(WhiteInternetSubscription)
-                    .where(WhiteInternetSubscription.uuid == client_uuid)
+                sub_meta = await session.scalar(
+                    select(WhiteInternetSubscription).where(
+                        WhiteInternetSubscription.uuid == client_uuid,
+                        WhiteInternetSubscription.origin_node_id == server.id,
+                    )
                 )
-                res_sub = await session.execute(stmt_sub)
-                sub_meta = res_sub.scalar_one_or_none()
                 if sub_meta is None:
                     continue
 
-                # Lock subscription row
                 sub = await white_internet_repo.get_subscription_with_lock(session, sub_meta.id)
                 if sub is None:
                     continue
 
-                # Monotonic delta calculation with epoch drift handling
+                # Xray counters are monotonic within one process generation.
+                # A generation change resets counters; the current snapshot is
+                # therefore the first delta of the new generation.
                 if sub.traffic_stats_epoch != node_epoch:
-                    # Epoch changed (Xray restart): counters reset to zero, take current as delta
                     delta = uplink + downlink
                     sub.traffic_stats_epoch = node_epoch
                 else:
@@ -99,14 +86,21 @@ class WhiteInternetTrafficWorker:
                 if delta <= 0:
                     continue
 
-                # Deduct traffic from grant ledger
-                consumed, became_exhausted, overage = await white_internet_repo.deduct_traffic_atomic(
-                    session, subscription_id=sub.id, delta_bytes=delta, now=now
+                _consumed, became_exhausted, overage = await white_internet_repo.deduct_traffic_atomic(
+                    session,
+                    subscription_id=sub.id,
+                    delta_bytes=delta,
+                    now=now,
                 )
                 total_processed += 1
+                if overage:
+                    logger.warning(
+                        "White Internet quota overshoot: sub_id=%d overage=%d bytes",
+                        sub.id,
+                        overage,
+                    )
 
                 if became_exhausted and self.bot is not None:
-                    # Fetch user to notify
                     user = await session.scalar(select(User).where(User.id == sub.user_id))
                     if user and user.telegram_id:
                         try:
@@ -117,8 +111,11 @@ class WhiteInternetTrafficWorker:
                                 parse_mode="HTML",
                             )
                         except Exception as exc:
-                            logger.warning("Failed to send quota exhaustion alert to user %d: %s", user.id, exc)
-
+                            logger.warning(
+                                "Failed to send quota exhaustion alert to user %d: %s",
+                                user.id,
+                                exc,
+                            )
 
             await session.flush()
 
@@ -132,7 +129,6 @@ async def white_internet_traffic_loop(
     """Background loop polling traffic snapshots and updating ledgers."""
     event = shutdown_event or asyncio.Event()
     worker = WhiteInternetTrafficWorker(bot=bot)
-
     logger.info("White Internet traffic worker started.")
 
     while not event.is_set():
