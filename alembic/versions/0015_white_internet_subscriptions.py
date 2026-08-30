@@ -195,6 +195,16 @@ def upgrade() -> None:
         "white_internet_subscriptions",
         ["expires_at"],
     )
+    op.create_index(
+        "uq_white_internet_live_user",
+        "white_internet_subscriptions",
+        ["user_id"],
+        unique=True,
+        postgresql_where=sa.text(
+            "status IN ('PENDING', 'ACTIVE', 'EXHAUSTED')"
+        ),
+    )
+
 
     # 5. white_internet_quota_grants table, constraints and indexes
     op.create_table(
@@ -291,9 +301,14 @@ def downgrade() -> None:
 
     # 4. Drop white_internet_subscriptions
     op.drop_index(
+        "uq_white_internet_live_user",
+        table_name="white_internet_subscriptions",
+    )
+    op.drop_index(
         "ix_white_internet_subscriptions_expires_at",
         table_name="white_internet_subscriptions",
     )
+
     op.drop_index(
         "ix_white_internet_subscriptions_status",
         table_name="white_internet_subscriptions",
