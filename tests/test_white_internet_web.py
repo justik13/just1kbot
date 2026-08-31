@@ -79,8 +79,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                 with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[mock_grant]):
                     resp = await self.client.get("/sub/wl/exhausted-token-1234567890abcdef")
                     self.assertEqual(resp.status, 403)
-                    self.assertIn("upload=0", resp.headers.get("Subscription-Userinfo", ""))
-                    self.assertIn(f"download={53687091200}", resp.headers.get("Subscription-Userinfo", ""))
+                    self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
+                    self.assertIn("download=2000", resp.headers.get("Subscription-Userinfo", ""))
 
     @unittest_run_loop
     async def test_runtime_out_of_sync_returns_503(self):
@@ -212,6 +212,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         self.assertEqual(resp.headers.get("Profile-Update-Interval"), "1")
                         self.assertEqual(resp.headers.get("hide-url"), "1")
                         self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
+                        self.assertIn("upload=500", resp.headers.get("Subscription-Userinfo", ""))
+                        self.assertIn("download=500", resp.headers.get("Subscription-Userinfo", ""))
 
                         body_b64 = await resp.text()
                         decoded_lines = base64.b64decode(body_b64).decode("utf-8").splitlines()

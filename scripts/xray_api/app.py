@@ -182,6 +182,12 @@ def get_traffic_snapshot(_: bool = Depends(verify_api_key)) -> Dict[str, Any]:
 
 
 
+def _mask_uuid(val: str) -> str:
+    if not val or len(val) < 8:
+        return "***"
+    return f"{val[:8]}...masked"
+
+
 @app.post("/v1/clients/sync")
 def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
@@ -202,7 +208,7 @@ def sync_client(
                 grpc_client.remove_user(tag, client_uuid)
             succeeded_inbounds.append(tag)
         except Exception as e:
-            logger.error("Failed to sync user %s on inbound %s: %s", client_uuid, tag, e)
+            logger.error("Failed to sync user %s on inbound %s: %s", _mask_uuid(client_uuid), tag, e)
             failed_inbounds.append(tag)
 
     if failed_inbounds:
@@ -212,7 +218,7 @@ def sync_client(
                 try:
                     grpc_client.remove_user(rb_tag, client_uuid)
                 except Exception as rb_exc:
-                    logger.error("Rollback failed for user %s on inbound %s: %s", client_uuid, rb_tag, rb_exc)
+                    logger.error("Rollback failed for user %s on inbound %s: %s", _mask_uuid(client_uuid), rb_tag, rb_exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",
@@ -246,7 +252,7 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
         try:
             grpc_client.remove_user(tag, clean_uuid)
         except Exception as e:
-            logger.error("Failed to delete user %s from inbound %s: %s", clean_uuid, tag, e)
+            logger.error("Failed to delete user %s from inbound %s: %s", _mask_uuid(clean_uuid), tag, e)
             failed_inbounds.append(tag)
 
     if failed_inbounds:

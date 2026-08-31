@@ -56,18 +56,27 @@ class WhiteInternetService:
 
     @staticmethod
     async def select_origin_node(session: AsyncSession) -> Server:
-        stmt = (
-            select(Server)
-            .where(
-                Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
-                Server.api_url.is_not(None),
-                Server.api_key.is_not(None),
-                Server.is_active.is_(True),
+        candidate_ids = (
+            await session.scalars(
+                select(Server.id)
+                .where(
+                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+                    Server.api_url.is_not(None),
+                    Server.api_key.is_not(None),
+                    Server.is_active.is_(True),
+                )
+                .order_by(Server.id.asc())
             )
-            .order_by(Server.id.asc())
-            .with_for_update()
-        )
-        for server in (await session.execute(stmt)).scalars():
+        ).all()
+
+        for srv_id in candidate_ids:
+            server = await session.scalar(
+                select(Server)
+                .where(Server.id == srv_id)
+                .with_for_update()
+            )
+            if server is None:
+                continue
             if (
                 "xray_origin" in (server.capabilities or [])
                 and server.api_url

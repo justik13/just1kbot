@@ -282,8 +282,8 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     resp = await self.client.get(f"/sub/wl/{sub.token}")
                     self.assertEqual(resp.status, 403)
                     userinfo = resp.headers.get("Subscription-Userinfo", "")
-                    self.assertIn("upload=0;", userinfo)
-                    self.assertIn(f"download={base_bytes};", userinfo)
+                    self.assertIn(f"upload={sub.traffic_uplink_bytes};", userinfo)
+                    self.assertIn(f"download={sub.traffic_downlink_bytes};", userinfo)
                     self.assertIn(f"total={base_bytes};", userinfo)
 
         # 8. Reconciliation de-provisions exhausted user from Xray

@@ -21,26 +21,34 @@ from utils.http_rate_limiter import HttpRateLimiter, get_trusted_client_ip
 
 logger = logging.getLogger(__name__)
 
-# Rate limit is deliberately scoped to both caller IP and secret token. This
-# prevents one token from consuming the entire IP bucket shared by other users.
-_sub_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
+# Scoped rate limiters: IP bucket prevents unauthenticated DoS / token brute force,
+# token bucket prevents single subscription thrashing across rotating IPs.
+_ip_rate_limiter = HttpRateLimiter(rate_per_minute=60.0, burst=15)
+_token_rate_limiter = HttpRateLimiter(rate_per_minute=30.0, burst=10)
 
 
 async def white_internet_subscription_feed_handler(request: web.Request) -> web.Response:
     """Serve the no-store Base64 subscription feed only after runtime reconciliation."""
-    token = request.match_info.get("token", "").strip()
     client_ip = get_trusted_client_ip(request)
-    rate_key = f"{client_ip}:{token}"
-    allowed, retry_after = _sub_rate_limiter.check(rate_key)
-    if not allowed:
+    allowed_ip, retry_after_ip = _ip_rate_limiter.check(client_ip)
+    if not allowed_ip:
         return web.Response(
             status=429,
             text=texts.WL_WEB_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+            headers={"Retry-After": str(retry_after_ip), "Cache-Control": "no-store"},
         )
 
+    token = request.match_info.get("token", "").strip()
     if not token or len(token) < 16:
         return web.Response(status=404, text="Not Found", headers={"Cache-Control": "no-store"})
+
+    allowed_tok, retry_after_tok = _token_rate_limiter.check(token)
+    if not allowed_tok:
+        return web.Response(
+            status=429,
+            text=texts.WL_WEB_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after_tok), "Cache-Control": "no-store"},
+        )
 
     now = now_utc()
     common_headers = {
@@ -61,14 +69,15 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
         period_grants = await white_internet_repo.get_period_grants(session, sub.id, now)
         available_bytes = sum(g.bytes_remaining for g in period_grants)
         current_period_total = sum(g.bytes_granted for g in period_grants)
-        current_period_used = min(current_period_total, max(0, current_period_total - available_bytes))
         expire_ts = int(sub.expires_at.timestamp())
+        upload_bytes = sub.traffic_uplink_bytes or 0
+        download_bytes = sub.traffic_downlink_bytes or 0
 
         if sub.status == WhiteInternetStatus.EXHAUSTED or available_bytes <= 0:
             headers = dict(common_headers)
             headers["Subscription-Userinfo"] = texts.WL_USERINFO_HEADER_TEMPLATE.format(
-                upload=0,
-                download=current_period_total,
+                upload=upload_bytes,
+                download=download_bytes,
                 total=current_period_total,
                 expire=expire_ts,
             )
@@ -115,8 +124,8 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             {
                 "Content-Type": "text/plain; charset=utf-8",
                 "Subscription-Userinfo": texts.WL_USERINFO_HEADER_TEMPLATE.format(
-                    upload=0,
-                    download=current_period_used,
+                    upload=upload_bytes,
+                    download=download_bytes,
                     total=current_period_total,
                     expire=expire_ts,
                 ),
