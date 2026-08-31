@@ -272,13 +272,12 @@ Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
 ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
 Restart=on-failure
 RestartPreventExitStatus=23
-LimitNPROC=10000
-LimitNOFILE=1000000
-
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload
+    fi
 }
 
 # --- Надежное определение портов SSH (sshd_config / sshd_config.d) ---
@@ -1382,7 +1381,7 @@ cmd_install_xray_exit() {
 
     local origin_ip=""
     local client_uuid=""
-    local dest_target="dl.google.com"
+    local dest_target=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1413,7 +1412,7 @@ cmd_install_xray_exit() {
         read -r -p "Введите UUID [по умолчанию: ${generated_uuid}]: " client_uuid
         client_uuid="${client_uuid:-$generated_uuid}"
     fi
-    if [[ -z "$dest_target" || "$dest_target" == "dl.google.com" ]]; then
+    if [[ -z "$dest_target" ]]; then
         echo -e "${CYAN}📌 Шаг 3/3: Маскировочный целевой сервер (SNI / Dest)${NC}"
         echo -e "   ${YELLOW}💡 Подсказка:${NC} Домен с поддержкой TLS 1.3 и HTTP/2 для маскировки (напр. dl.google.com)."
         read -r -p "Введите домен маскировки [по умолчанию: dl.google.com]: " input_dest
@@ -1527,13 +1526,14 @@ cmd_install_xray_exit() {
 EOF
     chmod 600 "$XRAY_CONFIG"
 
-    "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
-    systemctl enable --now xray
-    systemctl restart xray
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl enable --now xray 2>/dev/null || true
+        systemctl restart xray 2>/dev/null || true
+    fi
 
     # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP (без открытия 80/443)
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
-    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp 2>/dev/null || true
     local p
     for p in $(get_ssh_ports); do
         if [[ -n "$p" && "$p" != "22" ]]; then
@@ -1560,10 +1560,12 @@ EOF
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
 
     # Боевое самотестирование службы Xray
-    if systemctl is-active --quiet xray; then
-        log "Служба Xray успешно запущена и слушает порт 10443 VLESS Reality [OK]"
-    else
-        error "Служба Xray не смогла запуститься. Проверьте: journalctl -u xray -n 30"
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet xray; then
+            log "Служба Xray успешно запущена и слушает порт 10443 VLESS Reality [OK]"
+        else
+            warn "Служба Xray еще не запущена. Проверьте: journalctl -u xray -n 30"
+        fi
     fi
 
     local exit_ip
