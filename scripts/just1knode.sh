@@ -920,23 +920,16 @@ cmd_install_xray_origin() {
         exit_nl_sni="${p_sni:-$exit_nl_sni}"
     fi
 
-    # Интерактивный запрос недостающих параметров
+    # Интерактивный запрос только обязательных параметров
     if [[ -z "$domain" ]]; then
-        echo -e "${CYAN}📌 Шаг 1/8: Origin-домен${NC}"
+        echo -e "${CYAN}📌 Шаг 1/2: Origin-домен${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
         read -r -p "Введите Origin-домен: " domain
     fi
-    if [[ -z "$bot_ip" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/8: IP-адрес хоста Telegram-бота${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера бота (выполните 'curl ifconfig.me' на сервере бота)."
-        echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт API 8444 будет открыт в UFW строго для этого IP-адреса."
-        read -r -p "Введите IP-адрес Telegram-бота [по умолчанию: 127.0.0.1]: " input_bot_ip
-        bot_ip="${input_bot_ip:-127.0.0.1}"
-    fi
     if [[ -z "$exit_de_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 3/8: Подключение к Exit-серверу Германии (DE)${NC}"
-        echo -e "   ${YELLOW}💡 Подсказка:${NC} Вставьте строку быстрого импорта из шага установки Exit (IP:PORT:UUID:PUBKEY:SHORTID:SNI) или просто IP/домен:"
-        read -r -p "Введите строку импорта или IP Exit DE: " input_exit_de
+        echo -e "${CYAN}📌 Шаг 2/2: Подключение к Exit-серверу Германии (DE)${NC}"
+        echo -e "   ${YELLOW}💡 Подсказка:${NC} Вставьте строку быстрого импорта из шага установки Exit (IP:PORT:UUID:PUBKEY:SHORTID:SNI):"
+        read -r -p "Введите строку импорта Exit DE: " input_exit_de
         if [[ "$input_exit_de" == *":"*":"*":"* ]]; then
             IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$input_exit_de"
             exit_de_host="$p_host"
@@ -950,22 +943,20 @@ cmd_install_xray_origin() {
         fi
     fi
     if [[ -z "$exit_de_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 4/8: VLESS UUID Exit-сервера Германии${NC}"
         read -r -p "Введите VLESS UUID Exit DE: " exit_de_uuid
     fi
     if [[ -z "$exit_de_pubkey" ]]; then
-        echo -e "${CYAN}📌 Шаг 5/8: Reality Public Key Exit-сервера Германии${NC}"
         read -r -p "Введите Reality Public Key Exit DE: " exit_de_pubkey
     fi
     if [[ -z "$exit_de_shortid" ]]; then
-        read -r -p "Введите Reality Short ID Exit DE [нажмите Enter если нет]: " exit_de_shortid
+        exit_de_shortid=""
     fi
     if [[ -z "$exit_de_sni" ]]; then
-        read -r -p "Введите SNI маскировки Exit DE [по умолчанию: dl.google.com]: " input_sni
-        exit_de_sni="${input_sni:-dl.google.com}"
+        exit_de_sni="dl.google.com"
     fi
 
-    # Дублируем для NL, если не задан отдельный сервер
+    # Автогенерация и безопасные дефолты
+    bot_ip="${bot_ip:-127.0.0.1}"
     exit_nl_host="${exit_nl_host:-$exit_de_host}"
     exit_nl_port="${exit_nl_port:-$exit_de_port}"
     exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
@@ -974,29 +965,16 @@ cmd_install_xray_origin() {
     exit_nl_sni="${exit_nl_sni:-$exit_de_sni}"
 
     if [[ -z "$path_de" ]]; then
-        local gen_path_de
-        gen_path_de="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
-        echo -e "${CYAN}📌 Шаг 6/8: URL-путь XHTTP для Германии (DE)${NC}"
-        echo -e "   ${YELLOW}💡 Безопасность:${NC} Уникальный случайный путь предотвращает DPI-сигнатурный анализ."
-        read -r -p "Введите путь XHTTP DE [по умолчанию: ${gen_path_de}]: " input_path_de
-        path_de="${input_path_de:-$gen_path_de}"
+        path_de="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
     fi
     if [[ -z "$path_nl" ]]; then
-        local gen_path_nl
-        gen_path_nl="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
-        echo -e "${CYAN}📌 Шаг 7/8: URL-путь XHTTP для Нидерландов (NL)${NC}"
-        echo -e "   ${YELLOW}💡 Безопасность:${NC} Уникальный случайный путь предотвращает DPI-сигнатурный анализ."
-        read -r -p "Введите путь XHTTP NL [по умолчанию: ${gen_path_nl}]: " input_path_nl
-        path_nl="${input_path_nl:-$gen_path_nl}"
+        path_nl="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
     fi
     if [[ -z "$email" ]]; then
-        echo -e "${CYAN}📌 Шаг 8/8: Email для SSL-сертификата Let's Encrypt (Origin)${NC}"
-        read -r -p "Введите Email [admin@${domain}]: " email
-        email="${email:-admin@${domain}}"
+        email="admin@${domain}"
     fi
     if [[ -z "$api_key" ]]; then
         api_key="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
-        info "Сгенерирован новый XRAY_API_KEY (сохранен в защищенный файл конфигурации)."
     fi
 
     # Санитизация входных параметров
@@ -1291,7 +1269,18 @@ EOF
 
     info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
     mkdir -p "$XRAY_API_DIR"
-    cp -r "${SCRIPT_DIR}/xray_api/"* "$XRAY_API_DIR/"
+    if [[ -d "${SCRIPT_DIR}/xray_api" && -f "${SCRIPT_DIR}/xray_api/app.py" ]]; then
+        cp -r "${SCRIPT_DIR}/xray_api/"* "$XRAY_API_DIR/"
+    else
+        info "Загрузка модулей xray-api из репозитория GitHub..."
+        local tmp_tar
+        tmp_tar="$(mktemp /tmp/just1kbot_tar_XXXXXX.tar.gz)"
+        local branch="feature/white-internet-just1knode"
+        curl -fsSL "https://github.com/justik13/just1kbot/archive/refs/heads/${branch}.tar.gz" -o "$tmp_tar" 2>/dev/null || \
+        curl -fsSL "https://github.com/justik13/just1kbot/archive/refs/heads/main.tar.gz" -o "$tmp_tar"
+        tar --wildcards -xzf "$tmp_tar" --strip-components=3 -C "$XRAY_API_DIR" "*/scripts/xray_api/*"
+        rm -f "$tmp_tar"
+    fi
 
     python3 -m venv "${XRAY_API_DIR}/venv"
     "${XRAY_API_DIR}/venv/bin/pip" install --upgrade pip -q
