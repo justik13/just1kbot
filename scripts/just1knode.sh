@@ -468,6 +468,26 @@ EOF
         return 204;
     }
 
+    # Обратная совместимость для существующих клиентов (/api/v3/secure-data)
+    location /api/v3/secure-data {
+        access_log off;
+        rewrite ^/api/v3/secure-data(.*)$ /api/v3/de$1 break;
+        proxy_pass http://127.0.0.1:8003;
+        proxy_method $just1k_xhttp_proxy_method;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_headers on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
     location /api/v3/de {
         access_log off;
         proxy_pass http://127.0.0.1:8003;
@@ -767,6 +787,29 @@ cmd_install_xray_origin() {
     local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
     local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
 
+    # Считывание существующих клиентов для обратной совместимости
+    local existing_clients="[]"
+    if [[ -f "$XRAY_CONFIG" ]]; then
+        existing_clients="$(python3 -c '
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        data = json.load(f)
+    clients = []
+    for inb in data.get("inbounds", []):
+        if inb.get("protocol") == "vless":
+            for c in inb.get("settings", {}).get("clients", []):
+                if c.get("id") and c not in clients:
+                    clients.append(c)
+    print(json.dumps(clients))
+except Exception:
+    print("[]")
+' "$XRAY_CONFIG" 2>/dev/null || echo "[]")"
+        if [[ "$existing_clients" != "[]" ]]; then
+            info "Обнаружены и сохранены существующие клиенты Xray: ${existing_clients}"
+        fi
+    fi
+
     # 3. Генерация конфигурации Xray Origin
     info "Генерация конфигурации Xray Origin (${XRAY_CONFIG})..."
     cat > "$XRAY_CONFIG" <<EOF
@@ -833,7 +876,7 @@ cmd_install_xray_origin() {
       "port": 8003,
       "protocol": "vless",
       "settings": {
-        "clients": [],
+        "clients": ${existing_clients},
         "decryption": "none"
       },
       "streamSettings": {
