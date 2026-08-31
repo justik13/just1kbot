@@ -279,6 +279,28 @@ EOF
     systemctl daemon-reload
 }
 
+# --- Надежное определение портов SSH (sshd, ssh.socket, sshd_config) ---
+get_ssh_ports() {
+    local ports=""
+    # 1. Поиск активных слушателей процесса sshd (TCP)
+    ports="$(ss -tlnp 2>/dev/null | grep -E 'users:\(\("sshd"' | awk '{print $4}' | awk -F: '{print $NF}' | sort -un | tr '\n' ' ')"
+
+    # 2. Если пустой — проверка systemd socket активации ssh.socket (Ubuntu 22.10+)
+    if [[ -z "${ports// }" ]]; then
+        if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
+            ports="$(systemctl show ssh.socket sshd.socket -p Listen 2>/dev/null | grep -oE ':[0-9]+' | tr -d ':' | sort -un | tr '\n' ' ')"
+        fi
+    fi
+
+    # 3. Если по-прежнему пустой — чтение конфигурационных файлов sshd
+    if [[ -z "${ports// }" ]]; then
+        ports="$(grep -rhE '^\s*Port\s+[0-9]+' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | awk '{print $2}' | sort -un | tr '\n' ' ')"
+    fi
+
+    ports="${ports:-22}"
+    echo "$ports"
+}
+
 # --- Определение публичного IP текущего сервера ---
 get_public_ip() {
     local ip
@@ -616,13 +638,14 @@ pre_install_safety_audit() {
     title "ПРЕДВАРИТЕЛЬНЫЙ АУДИТ БЕЗОПАСНОСТИ VPS (${role})"
 
     # 1. Определение порта SSH
-    local ssh_port
-    ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
-    ssh_port="${ssh_port:-22}"
-    info "Обнаружен активный порт SSH: ${ssh_port}"
-    if [[ "$ssh_port" != "22" ]]; then
-        log "Зафиксирован нестандартный порт SSH (${ssh_port}). Правило в UFW будет гарантированно добавлено."
-    fi
+    local ssh_ports
+    ssh_ports="$(get_ssh_ports)"
+    info "Обнаружен активный порт SSH: ${ssh_ports}"
+    for p in $ssh_ports; do
+        if [[ "$p" != "22" ]]; then
+            log "Зафиксирован нестандартный порт SSH (${p}). Правило в UFW будет гарантированно добавлено."
+        fi
+    done
 
     # 2. Проверка активных Docker-контейнеров
     if command -v docker &>/dev/null; then
@@ -1168,13 +1191,13 @@ EOF
 
     # 6. Настройка UFW
     info "Настройка сетевого экрана UFW..."
-    local active_ssh_port
-    active_ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
-    active_ssh_port="${active_ssh_port:-22}"
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
-    if [[ "$active_ssh_port" != "22" && -n "$active_ssh_port" ]]; then
-        ufw allow "${active_ssh_port}/tcp" 2>/dev/null || true
-    fi
+    local p
+    for p in $(get_ssh_ports); do
+        if [[ -n "$p" && "$p" != "22" ]]; then
+            ufw allow "${p}/tcp" 2>/dev/null || true
+        fi
+    done
     ufw allow 80/tcp
     ufw allow 443/tcp
     # Порт 8444 разрешить СТРОГО для IP бота
@@ -1367,13 +1390,13 @@ EOF
 
     # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
-    local active_ssh_port
-    active_ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
-    active_ssh_port="${active_ssh_port:-22}"
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
-    if [[ "$active_ssh_port" != "22" && -n "$active_ssh_port" ]]; then
-        ufw allow "${active_ssh_port}/tcp" 2>/dev/null || true
-    fi
+    local p
+    for p in $(get_ssh_ports); do
+        if [[ -n "$p" && "$p" != "22" ]]; then
+            ufw allow "${p}/tcp" 2>/dev/null || true
+        fi
+    done
     ufw allow 80/tcp
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then
