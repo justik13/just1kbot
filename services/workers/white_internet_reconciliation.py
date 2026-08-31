@@ -116,14 +116,9 @@ class WhiteInternetReconciliationWorker:
             res_subs = await session.execute(stmt_subs)
             pending_subs = res_subs.scalars().all()
 
-            # Phase 1: Collect candidates and expire overdue subscriptions
+            # Phase 1: Collect candidates and expire overdue subscriptions atomically
             sync_tasks: list[dict] = []
-            for sub_meta in pending_subs:
-                sub_id = sub_meta.id
-                sub = await session.get(WhiteInternetSubscription, sub_id)
-                if sub is None:
-                    continue
-
+            for sub in pending_subs:
                 if sub.expires_at <= now and sub.status in (
                     WhiteInternetStatus.PENDING,
                     WhiteInternetStatus.ACTIVE,
@@ -132,15 +127,7 @@ class WhiteInternetReconciliationWorker:
                     sub.status = WhiteInternetStatus.EXPIRED
                     sub.status_reason = "subscription_expired"
                     sub.desired_version += 1
-                    await session.execute(
-                        update(WhiteInternetQuotaGrant)
-                        .where(
-                            WhiteInternetQuotaGrant.subscription_id == sub.id,
-                            WhiteInternetQuotaGrant.bytes_remaining > 0,
-                        )
-                        .values(bytes_remaining=0)
-                    )
-                    await session.flush()
+                    await white_internet_repo.expire_subscription_atomic(session, sub.id, now=now)
 
                 desired_active = (
                     sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
@@ -160,18 +147,7 @@ class WhiteInternetReconciliationWorker:
                 desired_active = task["desired_active"]
                 target_version = task["target_version"]
 
-                # 2. Perform external network I/O with Xray node (NO DB LOCK HELD)
-                is_healthy_pre, epoch_pre, data_pre = await self.client.check_health(
-                    server.api_url, server.api_key
-                )
-                if not is_healthy_pre or epoch_pre != target_epoch:
-                    logger.warning(
-                        "Skipping sync for sub_id=%d: server %d pre-health check failed or epoch changed",
-                        sub_id,
-                        server_id,
-                    )
-                    continue
-
+                # 2. Perform external network I/O with Xray node
                 success, err_msg = await self.client.sync_client(
                     server.api_url,
                     server.api_key,
@@ -179,29 +155,12 @@ class WhiteInternetReconciliationWorker:
                     is_active=desired_active,
                 )
 
-                if success:
-                    is_healthy_post, epoch_post, data_post = await self.client.check_health(
-                        server.api_url, server.api_key
-                    )
-                    boot_pre = data_pre.get("boot_id") if data_pre else None
-                    st_pre = data_pre.get("starttime") if data_pre else None
-                    boot_post = data_post.get("boot_id") if data_post else None
-                    st_post = data_post.get("starttime") if data_post else None
-
-                    gen_intact = (
-                        is_healthy_post
-                        and (epoch_pre, boot_pre, st_pre) == (epoch_post, boot_post, st_post)
-                        and epoch_post == server.xray_instance_epoch
-                    )
-                else:
-                    gen_intact = False
-
                 # 3. Post-sync atomic state persistence under brief row lock
                 sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
                 if sub is None:
                     continue
 
-                if success and sub.desired_version == target_version and gen_intact:
+                if success and sub.desired_version == target_version:
                     sub.actual_version = target_version
                     sub.last_reconciled_node_epoch = target_epoch
                     if sub.status == WhiteInternetStatus.PENDING and desired_active:
@@ -228,7 +187,7 @@ class WhiteInternetReconciliationWorker:
                 else:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
                     logger.warning(
-                        "Reconciliation post-sync generation check detected race for sub_id=%d on server %d",
+                        "Reconciliation detected version drift during sync for sub_id=%d on server %d",
                         sub_id,
                         server_id,
                     )

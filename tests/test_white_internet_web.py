@@ -11,6 +11,7 @@ from urllib.parse import unquote
 from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
+from bot import texts
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
 from config.enums import ServerHealthState, WhiteInternetStatus
 from database.models import Server, WhiteInternetSubscription
@@ -81,6 +82,30 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     self.assertEqual(resp.status, 403)
                     self.assertIn("upload=1000", resp.headers.get("Subscription-Userinfo", ""))
                     self.assertIn("download=2000", resp.headers.get("Subscription-Userinfo", ""))
+
+    @unittest_run_loop
+    async def test_expired_status_returns_403(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = MagicMock(spec=WhiteInternetSubscription)
+        sub.id = 1
+        sub.origin_node_id = 1
+        sub.status = WhiteInternetStatus.EXPIRED
+        sub.traffic_uplink_bytes = 1000
+        sub.traffic_downlink_bytes = 2000
+        sub.traffic_limit_bytes = 53687091200
+        sub.expires_at = now - timedelta(days=1)
+
+        mock_session = AsyncMock()
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                resp = await self.client.get("/sub/wl/expired-token-1234567890abcdef")
+                self.assertEqual(resp.status, 403)
+                text = await resp.text()
+                self.assertEqual(text, texts.WL_WEB_EXPIRED)
 
     @unittest_run_loop
     async def test_runtime_out_of_sync_returns_503(self):

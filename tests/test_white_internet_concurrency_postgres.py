@@ -83,7 +83,7 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
 
         get_settings.cache_clear()
 
-        self.engine = create_async_engine(DB, pool_size=15, max_overflow=15, pool_timeout=60)
+        self.engine = create_async_engine(DB, pool_size=20, max_overflow=20, pool_timeout=60, connect_args={"timeout": 30})
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
 
         async with self.sessions.begin() as session:

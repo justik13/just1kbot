@@ -67,6 +67,9 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_PENDING, headers=headers)
 
+        if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED) or sub.expires_at <= now:
+            return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
+
         period_grants = await white_internet_repo.get_period_grants(session, sub.id, now)
         available_bytes = sum(g.bytes_remaining for g in period_grants)
         current_period_total = sum(g.bytes_granted for g in period_grants)
@@ -83,9 +86,6 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                 expire=expire_ts,
             )
             return web.Response(status=403, text=texts.WL_WEB_EXHAUSTED, headers=headers)
-
-        if sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED) or sub.expires_at <= now:
-            return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
         server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
         if (

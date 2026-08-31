@@ -108,24 +108,26 @@ class WhiteInternetTrafficWorker:
                     before_down = sub.last_downlink_snapshot
                     delta_up = uplink - before_up
                     delta_down = downlink - before_down
-                else:
-                    # New epoch or counter reset within epoch: reset baseline to 0
-                    if sub.traffic_stats_epoch == node_epoch and (
-                        uplink < sub.last_uplink_snapshot or downlink < sub.last_downlink_snapshot
-                    ):
-                        logger.info(
-                            "Counter reset detected within same epoch for sub_id=%d on server %d: up(%d < %d), down(%d < %d). Resetting baseline.",
-                            sub.id,
-                            server.id,
-                            uplink,
-                            sub.last_uplink_snapshot,
-                            downlink,
-                            sub.last_downlink_snapshot,
-                        )
+                elif sub.traffic_stats_epoch != node_epoch:
+                    # New epoch from verified Xray restart: snapshot_before is 0
                     before_up = 0
                     before_down = 0
                     delta_up = uplink
                     delta_down = downlink
+                else:
+                    # Counter decrease detected within same epoch without verified process restart.
+                    # This is an anomaly (e.g. transient flap or stat glitch).
+                    # DO NOT charge traffic blindly. Log warning, preserve baseline, and skip until verified epoch update.
+                    logger.warning(
+                        "Counter anomaly detected within same epoch for sub_id=%d on server %d: up(%d < %d), down(%d < %d). Skipping charge until verified epoch update.",
+                        sub.id,
+                        server.id,
+                        uplink,
+                        sub.last_uplink_snapshot,
+                        downlink,
+                        sub.last_downlink_snapshot,
+                    )
+                    continue
 
                 delta = delta_up + delta_down
                 if delta <= 0:
