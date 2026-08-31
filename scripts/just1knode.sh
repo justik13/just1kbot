@@ -180,7 +180,8 @@ verify_xray_checksum() {
         fi
         log "Контрольная сумма SHA-256 проверена и совпадает: ${actual_sha}"
     else
-        local dgst_url="https://github.com/XTLS/Xray-core/releases/download/v${version}/$(basename "$file_path").dgst"
+        local dgst_url
+        dgst_url="https://github.com/XTLS/Xray-core/releases/download/v${version}/$(basename "$file_path").dgst"
         local tmp_dgst="${file_path}.dgst"
         if ! wget -q --timeout=15 -O "$tmp_dgst" "$dgst_url"; then
             rm -f "$tmp_dgst"
