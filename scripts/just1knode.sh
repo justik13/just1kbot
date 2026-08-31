@@ -80,6 +80,8 @@ set_state_val() {
 import sys, json, os, tempfile
 from datetime import datetime, timezone
 f, k, v = sys.argv[1], sys.argv[2], sys.argv[3]
+dir_name = os.path.dirname(f)
+os.makedirs(dir_name, exist_ok=True)
 try:
     with open(f, 'r', encoding='utf-8') as fp:
         data = json.load(fp)
@@ -87,7 +89,6 @@ except Exception:
     data = {}
 data[k] = v
 data['updated_at'] = datetime.now(timezone.utc).isoformat()
-dir_name = os.path.dirname(f)
 tmp_fd, tmp_path = tempfile.mkstemp(dir=dir_name, prefix='state_', suffix='.tmp')
 with os.fdopen(tmp_fd, 'w', encoding='utf-8') as fp:
     json.dump(data, fp, indent=2)
