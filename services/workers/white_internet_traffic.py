@@ -28,7 +28,12 @@ class WhiteInternetTrafficWorker:
         self.bot = bot
         self.client = node_client or XrayNodeClient()
 
-    async def run_traffic_cycle(self, session: AsyncSession) -> int:
+    async def run_traffic_cycle(self, session: AsyncSession | None = None) -> int:
+        if session is not None:
+            return await self._run_cycle_scoped(session)
+        return await self._run_cycle_decoupled()
+
+    async def _run_cycle_scoped(self, session: AsyncSession) -> int:
         now = now_utc()
         stmt = (
             select(Server)
@@ -45,7 +50,6 @@ class WhiteInternetTrafficWorker:
         exhausted_users_to_notify: list[int] = []
 
         for server in servers:
-            # Never treat an arbitrary server as an accounting source.
             if "xray_origin" not in (server.capabilities or []):
                 continue
 
@@ -55,7 +59,6 @@ class WhiteInternetTrafficWorker:
             if not node_epoch or users_stats is None:
                 continue
 
-            # CAS verification: validate server generation before processing any traffic
             if (
                 server.xray_instance_epoch != node_epoch
                 or server.xray_instance_boot_id != node_boot_id
@@ -98,7 +101,6 @@ class WhiteInternetTrafficWorker:
                 if sub is None:
                     continue
 
-                # Monotonicity check within same epoch
                 if (
                     sub.traffic_stats_epoch == node_epoch
                     and uplink >= sub.last_uplink_snapshot
@@ -109,15 +111,11 @@ class WhiteInternetTrafficWorker:
                     delta_up = uplink - before_up
                     delta_down = downlink - before_down
                 elif sub.traffic_stats_epoch != node_epoch:
-                    # New epoch from verified Xray restart: snapshot_before is 0
                     before_up = 0
                     before_down = 0
                     delta_up = uplink
                     delta_down = downlink
                 else:
-                    # Counter decrease detected within same epoch without verified process restart.
-                    # This is an anomaly (e.g. transient flap or stat glitch).
-                    # DO NOT charge traffic blindly. Log warning, preserve baseline, and skip until verified epoch update.
                     logger.warning(
                         "Counter anomaly detected within same epoch for sub_id=%d on server %d: up(%d < %d), down(%d < %d). Skipping charge until verified epoch update.",
                         sub.id,
@@ -176,7 +174,6 @@ class WhiteInternetTrafficWorker:
 
             await session.flush()
 
-        # Decouple Telegram notifications: send after DB operations have completed
         if self.bot is not None and exhausted_users_to_notify:
             for uid in set(exhausted_users_to_notify):
                 user = await session.scalar(select(User).where(User.id == uid))
@@ -185,6 +182,161 @@ class WhiteInternetTrafficWorker:
                         from bot import texts
                         await self.bot.send_message(
                             chat_id=user.telegram_id,
+                            text=texts.WL_TRAFFIC_EXHAUSTED_ALERT,
+                            parse_mode="HTML",
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to send quota exhaustion alert to user %d: %s",
+                            uid,
+                            exc,
+                        )
+
+        return total_processed
+
+    async def _run_cycle_decoupled(self) -> int:
+        now = now_utc()
+        async with session_scope() as sess:
+            stmt = (
+                select(Server)
+                .where(
+                    Server.api_url.is_not(None),
+                    Server.api_key.is_not(None),
+                    Server.is_active.is_(True),
+                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+                )
+                .order_by(Server.id.asc())
+            )
+            servers = (await sess.execute(stmt)).scalars().all()
+            server_list = [
+                (s.id, s.api_url, s.api_key, s.xray_instance_epoch, s.xray_instance_boot_id, s.xray_instance_starttime)
+                for s in servers
+                if "xray_origin" in (s.capabilities or []) and s.api_url and s.api_key
+            ]
+
+        total_processed = 0
+        exhausted_users_to_notify: list[int] = []
+
+        for server_id, api_url, api_key, cur_epoch, cur_boot_id, cur_starttime in server_list:
+            # Network I/O outside DB transaction
+            node_epoch, node_boot_id, node_starttime, users_stats = await self.client.get_traffic_snapshot(
+                api_url, api_key
+            )
+            if not node_epoch or users_stats is None:
+                continue
+
+            if (
+                cur_epoch != node_epoch
+                or cur_boot_id != node_boot_id
+                or cur_starttime != node_starttime
+            ):
+                async with session_scope() as sess:
+                    cas_ok, updated = await servers_repo.update_server_xray_epoch_cas(
+                        sess,
+                        server_id,
+                        expected_boot_id=cur_boot_id,
+                        expected_starttime=cur_starttime,
+                        new_epoch=node_epoch,
+                        new_boot_id=node_boot_id,
+                        new_starttime=node_starttime,
+                    )
+                    if not cas_ok:
+                        logger.warning(
+                            "CAS rejected stale snapshot for server %d. Discarding snapshot.",
+                            server_id,
+                        )
+                        continue
+
+            for client_uuid, stats in users_stats.items():
+                uplink = max(int(stats.get("uplink", 0)), 0)
+                downlink = max(int(stats.get("downlink", 0)), 0)
+
+                async with session_scope() as sess:
+                    sub_meta = await sess.scalar(
+                        select(WhiteInternetSubscription).where(
+                            WhiteInternetSubscription.uuid == client_uuid,
+                            WhiteInternetSubscription.origin_node_id == server_id,
+                        )
+                    )
+                    if sub_meta is None:
+                        continue
+
+                    sub = await white_internet_repo.get_subscription_with_lock(sess, sub_meta.id)
+                    if sub is None:
+                        continue
+
+                    if (
+                        sub.traffic_stats_epoch == node_epoch
+                        and uplink >= sub.last_uplink_snapshot
+                        and downlink >= sub.last_downlink_snapshot
+                    ):
+                        before_up = sub.last_uplink_snapshot
+                        before_down = sub.last_downlink_snapshot
+                        delta_up = uplink - before_up
+                        delta_down = downlink - before_down
+                    elif sub.traffic_stats_epoch != node_epoch:
+                        before_up = 0
+                        before_down = 0
+                        delta_up = uplink
+                        delta_down = downlink
+                    else:
+                        logger.warning(
+                            "Counter anomaly detected within same epoch for sub_id=%d on server %d. Skipping charge.",
+                            sub.id,
+                            server_id,
+                        )
+                        continue
+
+                    delta = delta_up + delta_down
+                    if delta <= 0:
+                        continue
+
+                    consumed, became_exhausted, overage = await white_internet_repo.deduct_traffic_atomic(
+                        sess,
+                        subscription_id=sub.id,
+                        delta_bytes=delta,
+                        delta_uplink=delta_up,
+                        delta_downlink=delta_down,
+                        now=now,
+                    )
+
+                    await white_internet_repo.record_traffic_event_atomic(
+                        sess,
+                        subscription_id=sub.id,
+                        node_epoch=node_epoch,
+                        node_boot_id=node_boot_id,
+                        node_starttime=node_starttime,
+                        snapshot_uplink_before=before_up,
+                        snapshot_uplink_after=uplink,
+                        snapshot_downlink_before=before_down,
+                        snapshot_downlink_after=downlink,
+                        delta_uplink=delta_up,
+                        delta_downlink=delta_down,
+                        allocated_bytes=consumed,
+                        overage_bytes=overage,
+                        now=now,
+                    )
+
+                    sub.last_uplink_snapshot = uplink
+                    sub.last_downlink_snapshot = downlink
+                    sub.traffic_stats_epoch = node_epoch
+                    total_processed += 1
+
+                    if became_exhausted:
+                        exhausted_users_to_notify.append(sub.user_id)
+
+        # Send Telegram notifications strictly outside all DB transactions
+        if self.bot is not None and exhausted_users_to_notify:
+            for uid in set(exhausted_users_to_notify):
+                async with session_scope() as sess:
+                    user = await sess.scalar(select(User).where(User.id == uid))
+                    telegram_id = user.telegram_id if user else None
+
+                if telegram_id:
+                    try:
+                        from bot import texts
+                        await self.bot.send_message(
+                            chat_id=telegram_id,
                             text=texts.WL_TRAFFIC_EXHAUSTED_ALERT,
                             parse_mode="HTML",
                         )
@@ -209,10 +361,9 @@ async def white_internet_traffic_loop(
 
     while not event.is_set():
         try:
-            async with session_scope() as session:
-                processed = await worker.run_traffic_cycle(session)
-                if processed > 0:
-                    logger.debug("Processed traffic for %d White Internet subscriptions.", processed)
+            processed = await worker.run_traffic_cycle()
+            if processed > 0:
+                logger.debug("Processed traffic for %d White Internet subscriptions.", processed)
         except Exception as exc:
             logger.error("Unhandled error in White Internet traffic cycle: %s", exc, exc_info=True)
 

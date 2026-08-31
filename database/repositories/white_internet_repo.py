@@ -227,6 +227,7 @@ async def renew_subscription_atomic(
     sub.traffic_used_bytes = 0
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0
+    sub.traffic_overage_bytes = 0
 
     session.add(WhiteInternetQuotaGrant(
         subscription_id=sub.id, grant_type=WhiteInternetGrantType.BASE,
@@ -376,7 +377,7 @@ async def deduct_traffic_atomic(
         became_exhausted = True
 
     # Update cache-only traffic_limit_bytes field
-    sub.traffic_limit_bytes = available_after + sub.traffic_used_bytes
+    sub.traffic_limit_bytes = available_after + (sub.traffic_used_bytes - (sub.traffic_overage_bytes or 0))
     await session.flush()
     return consumed_from_grants, became_exhausted, unallocated_overage
 

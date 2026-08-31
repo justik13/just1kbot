@@ -31,6 +31,19 @@ class XrayNodeClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.ca_file = ca_file or os.getenv("XRAY_NODE_CA_FILE")
+        self._session: aiohttp.ClientSession | None = None
+
+    async def __aenter__(self) -> XrayNodeClient:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
+
+    async def close(self) -> None:
+        """Close internal aiohttp ClientSession and connector pool."""
+        if self._session and not self._session.closed:
+            await self._session.close()
+            self._session = None
 
     def _get_headers(self, api_key: str) -> dict[str, str]:
         return {
@@ -43,6 +56,21 @@ class XrayNodeClient:
         """Create a verified TLS context; custom CA is supported for node certificates."""
         return ssl.create_default_context(cafile=self.ca_file)
 
+    async def _get_session(self) -> aiohttp.ClientSession:
+        if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(
+                limit=50,
+                ttl_dns_cache=300,
+                enable_cleanup_closed=True,
+                ssl=self._ssl_context(),
+            )
+            client_timeout = aiohttp.ClientTimeout(total=self.timeout)
+            self._session = aiohttp.ClientSession(
+                timeout=client_timeout,
+                connector=connector,
+            )
+        return self._session
+
     async def _make_request(
         self,
         method: str,
@@ -50,36 +78,34 @@ class XrayNodeClient:
         headers: dict[str, str],
         json_data: dict[str, Any] | None = None,
     ) -> tuple[int, Any, str | None]:
-        client_timeout = aiohttp.ClientTimeout(total=self.timeout)
-        ssl_context = self._ssl_context()
         safe_url = _sanitize_url(url)
+        session = await self._get_session()
 
         for attempt in range(self.max_retries + 1):
             try:
-                async with aiohttp.ClientSession(timeout=client_timeout) as session:
-                    async with session.request(
-                        method, url, headers=headers, json=json_data, ssl=ssl_context
-                    ) as resp:
-                        status_code = resp.status
-                        if status_code in (200, 201):
-                            try:
-                                data = await resp.json()
-                                return status_code, data, None
-                            except Exception:
-                                text = await resp.text()
-                                return status_code, text, None
-                        if status_code in (204,):
-                            return status_code, None, None
+                async with session.request(
+                    method, url, headers=headers, json=json_data
+                ) as resp:
+                    status_code = resp.status
+                    if status_code in (200, 201):
+                        try:
+                            data = await resp.json()
+                            return status_code, data, None
+                        except Exception:
+                            text = await resp.text()
+                            return status_code, text, None
+                    if status_code in (204,):
+                        return status_code, None, None
 
-                        text = await resp.text()
-                        if status_code in (502, 503, 504) and attempt < self.max_retries:
-                            logger.warning(
-                                "%s %s failed with status %d (attempt %d/%d), retrying...",
-                                method, safe_url, status_code, attempt + 1, self.max_retries + 1
-                            )
-                            await asyncio.sleep(0.5 * (2**attempt))
-                            continue
-                        return status_code, None, f"HTTP {status_code}: {text}"
+                    text = await resp.text()
+                    if status_code in (502, 503, 504) and attempt < self.max_retries:
+                        logger.warning(
+                            "%s %s failed with status %d (attempt %d/%d), retrying...",
+                            method, safe_url, status_code, attempt + 1, self.max_retries + 1
+                        )
+                        await asyncio.sleep(0.5 * (2**attempt))
+                        continue
+                    return status_code, None, f"HTTP {status_code}: {text}"
             except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
                 if attempt < self.max_retries:
                     logger.warning(

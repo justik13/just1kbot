@@ -178,9 +178,9 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     self.assertTrue(exhausted)
                     self.assertEqual(overage, 5 * 1024**3)
                     self.assertEqual(grant_base.bytes_remaining, 0)
-                    self.assertEqual(grant_topup.bytes_remaining, 0)
-                    # Full actual traffic recorded
                     self.assertEqual(sub.traffic_used_bytes, 80 * 1024**3)
+                    self.assertEqual(sub.traffic_overage_bytes, 5 * 1024**3)
+                    self.assertEqual(sub.traffic_limit_bytes, 75 * 1024**3)
                     self.assertEqual(sub.status, WhiteInternetStatus.EXHAUSTED)
                     self.assertEqual(sub.desired_version, 2)
 
@@ -246,6 +246,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
             expires_at=now + timedelta(days=1),
             traffic_limit_bytes=75 * 1024**3,
             traffic_used_bytes=47 * 1024**3,
+            traffic_overage_bytes=2 * 1024**3,
             traffic_uplink_bytes=18 * 1024**3,
             traffic_downlink_bytes=29 * 1024**3,
             last_uplink_snapshot=18 * 1024**3,
@@ -302,6 +303,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     # Invariants:
                     # 1. Period counters reset to 0
                     self.assertEqual(renewed.traffic_used_bytes, 0)
+                    self.assertEqual(renewed.traffic_overage_bytes, 0)
                     self.assertEqual(renewed.traffic_uplink_bytes, 0)
                     self.assertEqual(renewed.traffic_downlink_bytes, 0)
                     # Node snapshots and epoch are preserved as baseline

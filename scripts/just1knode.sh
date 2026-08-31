@@ -709,7 +709,7 @@ cmd_install_xray_origin() {
         "xhttpSettings": {
           "path": "/api/v3/de",
           "mode": "packet-up",
-          "uplinkHTTPMethod": "OPTIONS",
+          "uplinkHTTPMethod": "POST",
           "xPaddingObfsMode": true,
           "xPaddingKey": "dc",
           "xPaddingHeader": "X-Cache",
@@ -736,7 +736,7 @@ cmd_install_xray_origin() {
         "xhttpSettings": {
           "path": "/api/v3/nl",
           "mode": "packet-up",
-          "uplinkHTTPMethod": "OPTIONS",
+          "uplinkHTTPMethod": "POST",
           "xPaddingObfsMode": true,
           "xPaddingKey": "dc",
           "xPaddingHeader": "X-Cache",
@@ -1184,8 +1184,10 @@ sys.exit(0 if c.is_healthy() else 1)
     role="$(get_state_val "role" "")"
     if [[ "$healthy" == "true" && "$role" == "xray-origin" ]]; then
         if command -v curl >/dev/null 2>&1; then
+            local check_domain
+            check_domain="$(get_state_val "domain" "127.0.0.1")"
             local check_code
-            check_code="$(curl -s -k -o /dev/null -w "%{http_code}" https://127.0.0.1/cdn-check --resolve "*:443:127.0.0.1" 2>/dev/null || echo "000")"
+            check_code="$(curl -s -k -o /dev/null -w "%{http_code}" "https://${check_domain}/cdn-check" --resolve "${check_domain}:443:127.0.0.1" 2>/dev/null || echo "000")"
             if [[ "$check_code" != "204" ]]; then
                 warn "Функциональный тест /cdn-check вернул HTTP ${check_code}, ожидалось 204."
                 healthy=false
