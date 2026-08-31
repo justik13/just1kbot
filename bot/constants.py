@@ -105,4 +105,3 @@ __all__ = [
     "WORKER_ERROR_SLEEP_INTERVAL",
     "YOOKASSA_IP_RANGES",
 ]
-

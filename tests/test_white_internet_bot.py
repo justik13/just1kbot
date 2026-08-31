@@ -226,5 +226,3 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertIn("wl_topup_menu", callbacks_active)
         self.assertIn("wl_renew_confirm", callbacks_active)
         self.assertIn("back_to_main_menu", callbacks_active)
-
-

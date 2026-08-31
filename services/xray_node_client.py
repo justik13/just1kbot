@@ -181,5 +181,3 @@ class XrayNodeClient:
             return node_epoch, node_boot_id, node_starttime, users
         logger.error("Traffic snapshot fetch failed for %s: %s", _sanitize_url(url), err)
         return None, None, None, None
-
-

@@ -369,4 +369,3 @@ class WhiteInternetConcurrencyPostgresTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             avail = await white_internet_repo.get_available_quota_bytes(session, sub_id, now=now)
             self.assertEqual(avail, 500 * 1024**3)
-

@@ -149,4 +149,3 @@ def setup_white_internet_web_routes(app: web.Application) -> None:
     """Register White Internet HTTP subscription feed route."""
     app.router.add_get("/sub/wl/{token}", white_internet_subscription_feed_handler)
     logger.info("White Internet subscription feed route registered: GET /sub/wl/{token}")
-

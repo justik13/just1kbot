@@ -322,4 +322,3 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         reply_markup=kb.as_markup(),
         parse_mode="HTML",
     )
-

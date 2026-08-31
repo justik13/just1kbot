@@ -43,5 +43,3 @@ def test_epoch_change_detection():
         assert state["xray_pid"] == 1002
         assert state["xray_starttime"] == 60000
         assert state["boot_id"] == "boot_01"
-
-

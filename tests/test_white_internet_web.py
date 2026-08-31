@@ -358,5 +358,3 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                     resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
                     self.assertEqual(resp.status, 503)
                     self.assertEqual(resp.headers.get("Retry-After"), "5")
-
-

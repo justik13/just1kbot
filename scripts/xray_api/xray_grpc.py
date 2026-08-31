@@ -194,4 +194,3 @@ class XrayGrpcClient:
             logger.error("Both Xray traffic statistics APIs failed: %s", exc)
             self.close()
             raise
-

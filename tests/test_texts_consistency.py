@@ -121,7 +121,7 @@ class TextsConsistencyTests(unittest.TestCase):
                             # Skip if this is an explicit alias
                             if target.id in CANONICAL_ALIASES:
                                 continue
-                            
+
                             # SKIP DICT/LIST LABELS WHICH INTENTIONALLY SHARE STRINGS
                             if target.id.endswith("_LABELS") or target.id == "AUDIT_ACTIONS":
                                 continue
@@ -438,7 +438,7 @@ class TextsConsistencyTests(unittest.TestCase):
             PROJECT_ROOT / "integrations",
         ]
 
-        
+
         ALLOWED_INTERNAL_STRINGS = {
             "db error", "api_failed", "slots_unknown", "unknown",
             "Requeued by stuck profile cleanup worker for peer reconciliation",
@@ -508,9 +508,9 @@ class TextsConsistencyTests(unittest.TestCase):
                 return False
             if s in ALLOWED_INTERNAL_STRINGS:
                 return False
-            
+
             clean_s = re.sub(r"<[^>]+>", "", s)
-            
+
             if re.search(r"[\u0400-\u04FF]", clean_s):
                 return True
             # Emoji/symbols (icon + space) are strong UI markers; plain technical
@@ -563,7 +563,7 @@ class TextsConsistencyTests(unittest.TestCase):
                                     f"{rel_path}:{node.lineno} contains hardcoded f-string part: {part.value[:50]!r}"
                                 )
                 self.generic_visit(node)
-                
+
         for base_dir in scanned_dirs:
             for py_file in base_dir.rglob("*.py"):
                 if "integrations" in base_dir.parts:
@@ -603,7 +603,7 @@ class TextsConsistencyTests(unittest.TestCase):
             "status = 'Платёж создан'",
             "alert = 'VPN server восстановлен'",
         ]
-        
+
         def _is_user_facing_string(s: str) -> bool:
             if not isinstance(s, str) or not s.strip():
                 return False

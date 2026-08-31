@@ -395,4 +395,3 @@ class WhiteInternetService:
         if len(decompressed) != uncompressed_len:
             raise ValueError(f"Uncompressed length mismatch: expected {uncompressed_len}, got {len(decompressed)}")
         return json.loads(decompressed.decode("utf-8"))
-

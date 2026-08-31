@@ -256,6 +256,3 @@ class EpochManager:
             "xray_running": pid is not None,
             "xray_pid": pid,
         }
-
-
-

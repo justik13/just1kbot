@@ -166,4 +166,3 @@ def test_end_to_end_with_real_xray():
         os.remove(config_path)
     if os.path.exists("/tmp/test_epoch.json"):
         os.remove("/tmp/test_epoch.json")
-

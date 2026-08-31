@@ -1467,6 +1467,3 @@ class WhiteInternetTrafficEvent(Base):
     )
 
     subscription = relationship("WhiteInternetSubscription", back_populates="traffic_events")
-
-
-

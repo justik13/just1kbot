@@ -358,4 +358,3 @@ async def update_server_xray_epoch_cas(
 
     # Stale starttime within same boot
     return False, None
-

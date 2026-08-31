@@ -380,4 +380,3 @@ async def deduct_traffic_atomic(
     sub.traffic_limit_bytes = available_after + (sub.traffic_used_bytes - (sub.traffic_overage_bytes or 0))
     await session.flush()
     return consumed_from_grants, became_exhausted, unallocated_overage
-

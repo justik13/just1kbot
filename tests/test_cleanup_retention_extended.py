@@ -166,5 +166,3 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(matches_webhook_retention("retry", old_dt), "Retry webhook must NEVER be deleted")
         self.assertFalse(matches_webhook_retention("succeeded", recent_dt), "Recent succeeded webhook must NOT be deleted")
         self.assertFalse(matches_webhook_retention("dead", recent_dt), "Recent dead webhook must NOT be deleted")
-
-

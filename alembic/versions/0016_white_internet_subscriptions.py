@@ -534,4 +534,3 @@ def downgrade() -> None:
         ["device_limit", "duration_days"],
     )
     op.drop_column("tariffs", "service_type")
-

@@ -270,4 +270,3 @@ __all__ = [
     "WhiteInternetProvisioningStatus",
     "WhiteInternetStatus",
 ]
-

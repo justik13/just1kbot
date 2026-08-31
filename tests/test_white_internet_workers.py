@@ -462,4 +462,3 @@ class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(sub.last_uplink_snapshot, 50)
                     self.assertEqual(sub.last_downlink_snapshot, 150)
                     self.assertEqual(sub.traffic_stats_epoch, "epoch-200")
-

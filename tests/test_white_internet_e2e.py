@@ -364,5 +364,3 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant, grant_topup]):
                         resp = await self.client.get(f"/sub/wl/{sub.token}")
                         self.assertEqual(resp.status, 200)
-
-

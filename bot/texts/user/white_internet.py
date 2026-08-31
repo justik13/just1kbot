@@ -115,4 +115,3 @@ WL_DEFAULT_TARIFF_NAME = "Белый Интернет 50 ГБ"
 WL_PROFILE_NAME = "Just1k Белый Интернет"
 WL_DOMAIN_UNCONFIGURED = "Ошибка: домен бота не настроен в конфигурации."
 WL_USERINFO_HEADER_TEMPLATE = "upload={upload}; download={download}; total={total}; expire={expire}"
-
