@@ -35,7 +35,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
         # Verify DE link
         self.assertTrue(link_de.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
         self.assertIn("type=xhttp", link_de)
-        self.assertIn("path=%2Fapi%2Fv3%2Fde", link_de)
+        self.assertIn("path=%2Fstream%2Fv1%2Fde", link_de)
         self.assertIn("mode=packet-up", link_de)
         self.assertIn("security=tls", link_de)
         self.assertIn("sni=cdn.just1k.online", link_de)
@@ -43,7 +43,7 @@ class TestWhiteInternetVlessGeneration(unittest.TestCase):
 
         # Verify NL link
         self.assertTrue(link_nl.startswith(f"vless://{sub.uuid}@{cdn_domain}:443"))
-        self.assertIn("path=%2Fapi%2Fv3%2Fnl", link_nl)
+        self.assertIn("path=%2Fstream%2Fv1%2Fnl", link_nl)
         self.assertIn("Нидерланды", urllib.parse.unquote(link_nl))
 
         # Decode and verify 'extra' parameters JSON
