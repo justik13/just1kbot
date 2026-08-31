@@ -124,10 +124,7 @@ class WhiteInternetReconciliationWorker:
                     WhiteInternetStatus.ACTIVE,
                     WhiteInternetStatus.EXHAUSTED,
                 ):
-                    sub.status = WhiteInternetStatus.EXPIRED
-                    sub.status_reason = "subscription_expired"
-                    sub.desired_version += 1
-                    await white_internet_repo.expire_subscription_atomic(session, sub.id, now=now)
+                    await white_internet_repo.expire_subscription_atomic(session, sub.id)
 
                 desired_active = (
                     sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)

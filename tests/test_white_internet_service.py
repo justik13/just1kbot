@@ -296,6 +296,7 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                         price_rub=Decimal("250.00"),
                         duration_days=30,
                         base_bytes=50 * 1024**3,
+                        now=now,
                     )
 
                     # Invariants:

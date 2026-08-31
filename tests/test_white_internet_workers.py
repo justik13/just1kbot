@@ -196,6 +196,70 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
 
+    async def test_reconciliation_expires_overdue_active_subscription(self):
+        """Active subscription with expires_at <= now must be atomically expired and synced inactive."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        server = Server(
+            id=1,
+            name="Origin-NL",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://nl.origin.just1k.online:8444",
+            api_key="secret-key",
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
+            xray_instance_epoch="epoch-100",
+            xray_instance_boot_id="boot-1",
+            xray_instance_starttime=12345,
+        )
+
+        sub = WhiteInternetSubscription(
+            id=10,
+            user_id=100,
+            origin_node_id=1,
+            token="sub-token-xyz",
+            uuid="11111111-2222-3333-4444-555555555555",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now - timedelta(days=31),
+            expires_at=now - timedelta(days=1),  # Overdue!
+            traffic_limit_bytes=50 * 1024**3,
+            traffic_used_bytes=10 * 1024**3,
+            desired_version=3,
+            actual_version=3,
+            last_reconciled_node_epoch="epoch-100",
+            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+        )
+
+        mock_client = AsyncMock(spec=XrayNodeClient)
+        mock_client.check_health.return_value = (True, "epoch-100", {"boot_id": "boot-1", "starttime": 12345})
+        mock_client.sync_client.return_value = (True, None)
+
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+
+        mock_session = AsyncMock()
+        mock_session.execute.side_effect = [
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
+            MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),     # pending subs query
+        ]
+
+        async def fake_expire(session, sub_id, *, reason="subscription_expired", now=None):
+            sub.status = WhiteInternetStatus.EXPIRED
+            sub.desired_version += 1
+            sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_DELETE
+            return sub
+
+        with patch("database.repositories.white_internet_repo.expire_subscription_atomic", side_effect=fake_expire) as mock_exp:
+            with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+                synced = await worker.run_reconciliation_cycle(mock_session)
+
+                self.assertEqual(synced, 1)
+                mock_exp.assert_awaited_once_with(mock_session, sub.id)
+                mock_client.sync_client.assert_awaited_once_with(
+                    server.api_url, server.api_key, sub.uuid, is_active=False
+                )
+                self.assertEqual(sub.status, WhiteInternetStatus.EXPIRED)
+                self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
+
     async def test_disabled_or_problematic_node_skipped_from_reconciliation(self):
         """Disabled or unhealthy nodes must be excluded from reconciliation cycle."""
         server_disabled = Server(

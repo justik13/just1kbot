@@ -140,7 +140,11 @@ async def _lock_all_grants(session: AsyncSession, subscription_id: int) -> Seque
 
 
 async def expire_subscription_atomic(
-    session: AsyncSession, subscription_id: int, *, reason: str = "subscription_expired"
+    session: AsyncSession,
+    subscription_id: int,
+    *,
+    reason: str = "subscription_expired",
+    now: datetime | None = None,
 ) -> WhiteInternetSubscription:
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
@@ -191,8 +195,9 @@ async def renew_subscription_atomic(
     price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB,
     duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS,
     base_bytes: int = WHITE_INTERNET_BASE_TRAFFIC_BYTES,
+    now: datetime | None = None,
 ) -> WhiteInternetSubscription:
-    now = now_utc()
+    now = now or now_utc()
     sub = await get_subscription_with_lock(session, subscription_id)
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")

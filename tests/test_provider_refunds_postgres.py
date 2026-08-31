@@ -3,6 +3,7 @@
 import os
 import unittest
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select, text
@@ -146,7 +147,7 @@ class ProviderRefundPostgresTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(operation.status, "retry")
             self.assertEqual(operation.provider_status, "pending")
-            operation.next_attempt_at = now_utc()
+            operation.next_attempt_at = now_utc() - timedelta(seconds=10)
 
         async with self.sessions.begin() as session:
             second_claim = await claim(session, "refund-worker")

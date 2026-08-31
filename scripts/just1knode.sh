@@ -241,10 +241,11 @@ install_geodata() {
         if ! curl -fsSL --connect-timeout 30 -o "${tmp_dir}/${file}" "${base_url}/${file}"; then
             error "Не удалось скачать ${file} из ${base_url}/${file}. Установка прервана."
         fi
-        if curl -fsSL --connect-timeout 20 -o "${tmp_dir}/${file}.sha256sum" "${base_url}/${file}.sha256sum"; then
-            (cd "$tmp_dir" && sha256sum -c "${file}.sha256sum" >/dev/null 2>&1) || error "Контрольная сумма SHA-256 для ${file} не совпала! Установка прервана."
-            log "Контрольная сумма ${file} проверена [OK]"
+        if ! curl -fsSL --connect-timeout 20 -o "${tmp_dir}/${file}.sha256sum" "${base_url}/${file}.sha256sum"; then
+            error "Не удалось скачать контрольную сумму ${file}.sha256sum. Установка прервана."
         fi
+        (cd "$tmp_dir" && sha256sum -c "${file}.sha256sum" >/dev/null 2>&1) || error "Контрольная сумма SHA-256 для ${file} не совпала! Установка прервана."
+        log "Контрольная сумма ${file} проверена [OK]"
         install -m 644 "${tmp_dir}/${file}" "${XRAY_SHARE_DIR}/${file}"
     done
     rm -rf "$tmp_dir"
@@ -1199,14 +1200,16 @@ sys.exit(0 if c.is_healthy() else 1)
     else
         warn "Служба Xray не прошла валидацию после обновления. Выполняется автоматический откат (ROLLBACK)..."
         if [[ -f "${backup_dir}/xray" ]]; then
-            install -m 755 "${backup_dir}/xray" "$XRAY_BIN"
+            install -m 755 "${backup_dir}/xray" "${XRAY_BIN}.new"
+            mv -f "${XRAY_BIN}.new" "$XRAY_BIN"
             if [[ -f "${backup_dir}/config.json" ]]; then
                 cp -f "${backup_dir}/config.json" "$XRAY_CONFIG"
             fi
             systemctl restart xray
             log "Откат к предыдущей версии выполнен успешно из ${backup_dir}."
         elif [[ -f "${XRAY_BIN}.bak" ]]; then
-            install -m 755 "${XRAY_BIN}.bak" "$XRAY_BIN"
+            install -m 755 "${XRAY_BIN}.bak" "${XRAY_BIN}.new"
+            mv -f "${XRAY_BIN}.new" "$XRAY_BIN"
             systemctl restart xray
             log "Откат к предыдущей версии выполнен успешно."
         else
