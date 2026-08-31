@@ -58,6 +58,7 @@ def get_white_internet_overview_keyboard(
             callback_data="wl_buy_confirm",
             style="success",
         )
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1, 1)
     elif sub.status == WhiteInternetStatus.EXPIRED:
         builder.button(
@@ -65,11 +66,10 @@ def get_white_internet_overview_keyboard(
             callback_data="wl_renew_confirm",
             style="success",
         )
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1, 1)
-    elif sub.status == WhiteInternetStatus.DISABLED:
-        builder.adjust(1)
-    elif sub.status == WhiteInternetStatus.PENDING:
-        # Paid but not provisioned: never expose a connection promise.
+    elif sub.status in (WhiteInternetStatus.DISABLED, WhiteInternetStatus.PENDING):
+        builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
         builder.adjust(1)
     else:
         if (
@@ -97,7 +97,8 @@ def get_white_internet_overview_keyboard(
             builder.adjust(1, 1, 2, 1)
         else:
             builder.adjust(2, 1)
-        return builder.as_markup()
+
+    return builder.as_markup()
 
 
 

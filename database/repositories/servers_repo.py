@@ -100,7 +100,6 @@ async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
             WhiteInternetSubscription.status.in_([
                 WhiteInternetStatus.PENDING,
                 WhiteInternetStatus.ACTIVE,
-                WhiteInternetStatus.EXHAUSTED,
             ]),
         )
         .group_by(WhiteInternetSubscription.origin_node_id)

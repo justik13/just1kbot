@@ -23,6 +23,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             api_url="https://origin.just1k.online:8444",
             api_key="secret-key",
+            is_active=True,
             health_state=ServerHealthState.ONLINE,
             xray_instance_epoch="epoch-100",
         )
@@ -81,6 +82,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             api_url="https://origin.just1k.online:8444",
             api_key="secret-key",
+            is_active=True,
             health_state=ServerHealthState.ONLINE,
             xray_instance_epoch="epoch-100",  # DB holds old epoch
             xray_instance_boot_id="boot-1",
@@ -144,6 +146,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
             capabilities=["xray_origin"],
             api_url="https://origin.just1k.online:8444",
             api_key="secret-key",
+            is_active=True,
             health_state=ServerHealthState.ONLINE,
             xray_instance_epoch="epoch-100",
             xray_instance_boot_id="boot-1",
@@ -189,6 +192,33 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(sub.actual_version, 2)
                 self.assertEqual(sub.provisioning_status, WhiteInternetProvisioningStatus.SYNCED_INACTIVE)
+
+    async def test_disabled_or_problematic_node_skipped_from_reconciliation(self):
+        """Disabled or unhealthy nodes must be excluded from reconciliation cycle."""
+        server_disabled = Server(
+            id=1,
+            name="Origin-Disabled",
+            protocol="xray",
+            capabilities=["xray_origin"],
+            api_url="https://origin.just1k.online:8444",
+            api_key="secret-key",
+            is_active=False,
+            health_state=ServerHealthState.MANUAL_DISABLED,
+        )
+
+        mock_client = AsyncMock()
+        worker = WhiteInternetReconciliationWorker(node_client=mock_client)
+
+        mock_session = AsyncMock()
+        # When DB query filters is_active=True and health_state IN (ONLINE, WAITING_CONFIRMATION),
+        # disabled server is not in the active server list
+        active_servers = [s for s in [server_disabled] if s.is_active and s.health_state == ServerHealthState.ONLINE]
+        mock_session.execute.return_value = MagicMock(scalars=lambda: MagicMock(all=lambda: active_servers))
+
+        synced = await worker.run_reconciliation_cycle(mock_session)
+        self.assertEqual(synced, 0)
+        mock_client.check_health.assert_not_called()
+        mock_client.sync_client.assert_not_called()
 
 
 class TestWhiteInternetTrafficWorker(unittest.IsolatedAsyncioTestCase):

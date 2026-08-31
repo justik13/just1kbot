@@ -502,6 +502,14 @@ def downgrade() -> None:
             """
         )
     )
+    op.execute(
+        sa.text(
+            """
+            UPDATE tariffs SET duration_days = -abs(duration_days)
+            WHERE service_type = 'white_internet' AND id IN (SELECT tariff_id FROM tariff_versions)
+            """
+        )
+    )
 
     # 5. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
 

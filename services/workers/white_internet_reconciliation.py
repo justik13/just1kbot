@@ -9,7 +9,7 @@ from aiogram import Bot
 from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server, WhiteInternetQuotaGrant, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
@@ -32,9 +32,17 @@ class WhiteInternetReconciliationWorker:
     async def run_reconciliation_cycle(self, session: AsyncSession) -> int:
         now = now_utc()
 
-        # Only explicitly provisioned Xray Origin nodes are eligible. Never
-        # fall back to an arbitrary Amnezia/other server.
-        stmt_servers = select(Server).where(Server.api_url.is_not(None)).order_by(Server.id.asc())
+        # Only explicitly provisioned, active and healthy Xray Origin nodes are eligible.
+        # Disabled or problematic nodes are skipped from reconciliation.
+        stmt_servers = (
+            select(Server)
+            .where(
+                Server.api_url.is_not(None),
+                Server.is_active.is_(True),
+                Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+            )
+            .order_by(Server.id.asc())
+        )
         res_servers = await session.execute(stmt_servers)
         servers = res_servers.scalars().all()
         server_map = {
@@ -45,7 +53,7 @@ class WhiteInternetReconciliationWorker:
 
         # Refresh node generation before selecting subscriptions. The epoch is
         # the runtime truth for the Xray process, not the Python agent process.
-        for server in server_map.values():
+        for server in list(server_map.values()):
             if not server.api_url or not server.api_key:
                 continue
             is_healthy, current_epoch, health_data = await self.client.check_health(
@@ -69,6 +77,7 @@ class WhiteInternetReconciliationWorker:
                         new_starttime=starttime,
                     )
                     if cas_ok and updated_server:
+                        server_map[server.id] = updated_server
                         logger.info(
                             "Updated Xray generation for server %d (%s): epoch=%s, boot_id=%s, starttime=%s",
                             server.id,

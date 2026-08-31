@@ -165,4 +165,66 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(copy_button.copy_text.text, f"https://{domain}/sub/wl/{sub.token}")
         self.assertIsNotNone(instruction_button, "Instruction button with wl_show_link callback not found")
 
+    def test_overview_keyboard_all_states_return_valid_markup(self):
+        """All subscription states must return non-empty InlineKeyboardMarkup with appropriate buttons."""
+        from bot.handlers.white_internet import get_white_internet_overview_keyboard
+        from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+        from database.models import WhiteInternetSubscription
+
+        domain = "vpn.just1k.online"
+
+        # 1. No subscription -> Buy button + Back button
+        kb_none = get_white_internet_overview_keyboard(None, bot_domain=domain)
+        self.assertIsNotNone(kb_none)
+        callbacks_none = [btn.callback_data for row in kb_none.inline_keyboard for btn in row]
+        self.assertIn("wl_buy_confirm", callbacks_none)
+        self.assertIn("back_to_main_menu", callbacks_none)
+
+        # 2. EXPIRED -> Renew button + Back button
+        sub_expired = WhiteInternetSubscription(id=1, user_id=1, status=WhiteInternetStatus.EXPIRED)
+        kb_expired = get_white_internet_overview_keyboard(sub_expired, bot_domain=domain)
+        self.assertIsNotNone(kb_expired)
+        callbacks_expired = [btn.callback_data for row in kb_expired.inline_keyboard for btn in row]
+        self.assertIn("wl_renew_confirm", callbacks_expired)
+        self.assertIn("back_to_main_menu", callbacks_expired)
+
+        # 3. DISABLED -> Back button only
+        sub_disabled = WhiteInternetSubscription(id=2, user_id=1, status=WhiteInternetStatus.DISABLED)
+        kb_disabled = get_white_internet_overview_keyboard(sub_disabled, bot_domain=domain)
+        self.assertIsNotNone(kb_disabled)
+        callbacks_disabled = [btn.callback_data for row in kb_disabled.inline_keyboard for btn in row]
+        self.assertEqual(callbacks_disabled, ["back_to_main_menu"])
+
+        # 4. PENDING -> Back button only
+        sub_pending = WhiteInternetSubscription(id=3, user_id=1, status=WhiteInternetStatus.PENDING)
+        kb_pending = get_white_internet_overview_keyboard(sub_pending, bot_domain=domain)
+        self.assertIsNotNone(kb_pending)
+        callbacks_pending = [btn.callback_data for row in kb_pending.inline_keyboard for btn in row]
+        self.assertEqual(callbacks_pending, ["back_to_main_menu"])
+
+        # 5. EXHAUSTED -> Top-up + Renew + Back button
+        sub_exhausted = WhiteInternetSubscription(id=4, user_id=1, status=WhiteInternetStatus.EXHAUSTED)
+        kb_exhausted = get_white_internet_overview_keyboard(sub_exhausted, bot_domain=domain)
+        self.assertIsNotNone(kb_exhausted)
+        callbacks_exhausted = [btn.callback_data for row in kb_exhausted.inline_keyboard for btn in row]
+        self.assertIn("wl_topup_menu", callbacks_exhausted)
+        self.assertIn("wl_renew_confirm", callbacks_exhausted)
+        self.assertIn("back_to_main_menu", callbacks_exhausted)
+
+        # 6. ACTIVE + Provisioned -> Copy text + Instructions + Top-up + Renew + Back button
+        sub_active = WhiteInternetSubscription(
+            id=5,
+            user_id=1,
+            token="tok123",
+            status=WhiteInternetStatus.ACTIVE,
+            provisioning_status=WhiteInternetProvisioningStatus.ACTIVE,
+        )
+        kb_active = get_white_internet_overview_keyboard(sub_active, bot_domain=domain)
+        self.assertIsNotNone(kb_active)
+        callbacks_active = [btn.callback_data for row in kb_active.inline_keyboard for btn in row if btn.callback_data]
+        self.assertIn("wl_show_link", callbacks_active)
+        self.assertIn("wl_topup_menu", callbacks_active)
+        self.assertIn("wl_renew_confirm", callbacks_active)
+        self.assertIn("back_to_main_menu", callbacks_active)
+
 
