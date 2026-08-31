@@ -156,10 +156,14 @@ async def _show_payments_list(
 
 @router.callback_query(F.data == "stale_alerts:dismiss")
 async def dismiss_stale_alert(callback: CallbackQuery):
-    """Close the persistent stale-payments card until its state changes."""
+    """Dismiss semantics: hide the card now, keep it silent while the
+    underlying state is unchanged, re-deliver a fresh card on change."""
     if not is_admin(callback.from_user.id):
         await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
         return
+    from services.workers.payments import dismiss_stale_alert_card
+
+    dismiss_stale_alert_card(callback.from_user.id)
     try:
         await callback.message.delete()
     except Exception:

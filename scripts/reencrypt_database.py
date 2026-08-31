@@ -19,6 +19,9 @@ Safety:
     confirmation is required unless `--yes` is passed. The maintenance state
     is sampled once at startup; the operator must keep the environment
     frozen (bot stopped, maintenance enabled) until the script exits.
+    Rotation commits batch-by-batch and is RESUMABLE, not atomic: a mid-run
+    failure leaves part of the rows on the new key. Keep old keys in
+    DB_ENCRYPTION_KEYS until the verification phase passes, then re-run.
 """
 
 import asyncio

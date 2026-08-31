@@ -601,6 +601,22 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(content.count("vm.overcommit_memory"), 1)
 
+    def test_mixed_duplicate_entries_are_normalized_to_single_one(self):
+        """A `= 1` line followed by a later `= 0` line would win when sysctl
+        applies the file sequentially. The normalizer must collapse ALL
+        entries into a single authoritative `= 1`."""
+        code, content, _ = self._configure(
+            "1", "vm.overcommit_memory = 1\nother = 7\nvm.overcommit_memory = 0\n"
+        )
+        self.assertEqual(code, 0)
+        matches = [
+            line
+            for line in content.splitlines()
+            if line.strip().startswith("vm.overcommit_memory")
+        ]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].strip(), "vm.overcommit_memory = 1")
+
     def test_runtime_zero_sysctl_failure_is_fail_closed(self):
         """runtime=0 + failing `sysctl -w` must abort the installer (error →
         exit 1) without touching persistence - no false success."""

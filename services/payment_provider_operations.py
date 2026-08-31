@@ -6,7 +6,10 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from bot import texts
-from config.enums import PaymentProviderStatus
+from config.enums import (
+    PaymentCheckoutStatus,
+    PaymentProviderStatus,
+)
 from database.models import Payment, PaymentEvent, PaymentProviderOperation
 from services.payment_provider_state import apply_provider_transition
 from services.payment_queue_timing import PROVIDER_LEASE_SECONDS
@@ -424,7 +427,17 @@ async def finalize(session, claim, result, bot=None):
                             retryable=True,
                             ambiguous=False,
                         )
-                    elif not old_url and payment.payment_url and bot is not None:
+                    elif (
+                        not old_url
+                        and payment.payment_url
+                        and bot is not None
+                        # Defense-in-depth: a locally expired/abandoned
+                        # checkout (e.g. provider-verified local expiry in
+                        # the cleanup worker) must never receive a fresh
+                        # payment URL push.
+                        and payment.checkout_status
+                        == PaymentCheckoutStatus.ACTIVE
+                    ):
                         # URL just became available — push payment link to user immediately
                         await _push_payment_url(bot, session, payment)
             if result.ok:

@@ -26,10 +26,16 @@ INDEX_NAME = "ix_payments_auto_fulfill_retry"
 
 
 def _drop_invalid_index_concurrently(conn, index_name: str):
+    # Schema-aware: match the index within the search_path schemas only, so a
+    # same-named index in another schema can neither false-positive the check
+    # nor multi-row the scalar().
     res = conn.execute(
         sa.text(
-            f"SELECT 1 FROM pg_index i JOIN pg_class c ON i.indexrelid = c.oid "
-            f"WHERE c.relname = '{index_name}' AND i.indisvalid = false"
+            f"SELECT 1 FROM pg_index i "
+            f"JOIN pg_class c ON i.indexrelid = c.oid "
+            f"JOIN pg_namespace n ON c.relnamespace = n.oid "
+            f"WHERE c.relname = '{index_name}' AND i.indisvalid = false "
+            f"AND n.nspname = ANY (current_schemas(false))"
         )
     )
     # Offline (--sql) mode emits statements instead of executing them and

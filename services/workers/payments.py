@@ -40,8 +40,9 @@ PAYMENTS_START_DELAY = 60.0
 AUTO_FULFILL_MAX_ATTEMPTS = 5
 # Unambiguously permanent settlement failures: retrying can never succeed
 # because the frozen quote/user/tariff state contradicts the settlement
-# preconditions. Transient-ish states (financial_hold, too_many_devices,
-# account_debt) intentionally stay retryable — they may legitimately resolve.
+# preconditions. Deliberately retryable (may legitimately resolve, bounded
+# by the 5-attempt cap): financial_hold, too_many_devices, account_debt,
+# insufficient_balance, change_cooldown_active.
 _AUTO_FULFILL_PERMANENT_CODES = {
     "quote_expired",
     "quote_not_found",
@@ -55,6 +56,16 @@ _AUTO_FULFILL_PERMANENT_CODES = {
     "tariff_unavailable",
     "tariff_price_changed",
     "subscription_state_changed",
+    "change_user_ineligible",
+    "quote_amount_invalid",
+    "quote_tariff_version_invalid",
+    "quote_currency_invalid",
+    "quote_economics_invalid",
+    "quote_economics_changed",
+    "subscription_balance_untracked",
+    "quote_source_history_changed",
+    "active_quote_has_existing_debit",
+    "paid_value_ledger_conflict",
     "invalid_auto_fulfill_action",
     "invalid_auto_fulfill_attempts",
     "auto_fulfill_attempts_exhausted",
@@ -341,11 +352,14 @@ async def _retry_auto_fulfillment(session, payment: Payment) -> None:
         )
         return
     # Fail-closed: an unknown durable action must never be silently executed
-    # as a purchase by the recovery subsystem.
-    if action not in {"purchase", "tariff_change"}:
+    # as a purchase by the recovery subsystem. The isinstance guard comes
+    # FIRST: a poisoned JSONB list/dict would raise TypeError (unhashable)
+    # in the set-membership test, crash outside the try block and poison the
+    # recovery lane forever.
+    if not isinstance(action, str) or action not in {"purchase", "tariff_change"}:
         _mark("dead", "invalid_auto_fulfill_action")
         logger.error(
-            "Auto-fulfillment dead for payment %s: unknown auto_fulfill_action %r",
+            "Auto-fulfillment dead for payment %s: invalid auto_fulfill_action %r",
             payment.id,
             action,
         )
@@ -411,15 +425,18 @@ async def _alert_new_stale_payments(bot: Bot, settings):
                 .limit(1000)
             )
         ).all()
+    if not rows:
+        return
+    # The persistent card renders the CURRENT stale-payment snapshot (not
+    # just first-time rows), so resolved rows leave the card and unresolved
+    # ones never silently disappear when a newer payment appears.
     new_rows = [
         (payment, telegram_id)
         for payment, telegram_id in rows
         if payment.id not in _alerted_stale_payments
     ]
-    if not new_rows:
-        return
     details = []
-    for payment, telegram_id in new_rows[:10]:
+    for payment, telegram_id in rows[:10]:
         icon = "⚠️" if payment_display_status(payment) == "requires_manual_review" else "⏳"
         method = payment.payment_method or STATUS_NOT_SPECIFIED
         details.append(
@@ -432,22 +449,23 @@ async def _alert_new_stale_payments(bot: Bot, settings):
                 method=method,
             )
         )
-    if len(new_rows) > 10:
+    if len(rows) > 10:
         details.append(
             ALERT_STALE_PAYMENTS_MORE.format(
-                more_count=len(new_rows) - 10,
+                more_count=len(rows) - 10,
             )
         )
     message = ALERT_STALE_PAYMENTS_HEADER.format(
-        count=len(new_rows),
+        count=len(rows),
         details="".join(details),
     )
-    markup = _build_stale_alert_markup(new_rows)
+    markup = _build_stale_alert_markup(rows)
+    delivered_any = False
     for admin_id in settings.ADMIN_IDS:
         try:
             # Chat hygiene: never spam new messages. One persistent card per
-            # admin; unchanged reminders are silent, changed state edits the
-            # card in place. Dismiss button removes it until state changes.
+            # admin; unchanged snapshots are silent, changed state edits the
+            # card in place. Dismiss removes it until the state changes.
             last_text = _stale_alert_last_text.get(admin_id)
             if last_text == message:
                 continue
@@ -471,19 +489,32 @@ async def _alert_new_stale_payments(bot: Bot, settings):
                 )
                 _stale_alert_message_ids[admin_id] = sent.message_id
             _stale_alert_last_text[admin_id] = message
+            delivered_any = True
         except Exception as exc:
             logger.error("Stale alert failed to %s: %s", admin_id, exc)
-    for payment, _ in new_rows:
-        _alerted_stale_payments[payment.id] = True
+    # A payment counts as alerted only when at least one admin actually
+    # received/updated the card; otherwise it retries on the next cycle
+    # instead of disappearing behind the TTL cache during a Telegram outage.
+    if delivered_any:
+        for payment, _ in new_rows:
+            _alerted_stale_payments[payment.id] = True
 
 
-def _build_stale_alert_markup(new_rows):
+def dismiss_stale_alert_card(admin_id: int) -> None:
+    """Dismiss semantics: hide the card now, but keep the last rendered
+    snapshot — an unchanged state stays silent, a changed state re-delivers
+    a fresh card (the old message id is dropped, so the next delivery is a
+    new message after the admin deleted the card)."""
+    _stale_alert_message_ids.pop(admin_id, None)
+
+
+def _build_stale_alert_markup(rows):
     """Actionable keyboard: per-payment card for the first rows, queue
     diagnostics, payments list and a dismiss button."""
     from aiogram.utils.keyboard import InlineKeyboardBuilder
 
     builder = InlineKeyboardBuilder()
-    for payment, _ in new_rows[:5]:
+    for payment, _ in rows[:5]:
         builder.button(
             text=ALERT_STALE_BTN_OPEN_CARD.format(payment_id=payment.id),
             callback_data=f"admin_payment_card:{payment.id}",

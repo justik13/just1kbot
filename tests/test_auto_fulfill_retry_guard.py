@@ -209,33 +209,49 @@ class AutoFulfillRetryGuardTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payment.topup_context.get("auto_fulfill_attempts"), 2)
 
     async def test_unknown_action_is_fail_closed(self):
-        """An unknown durable action must never be executed as a purchase."""
-        payment = _payment(
-            {
-                "auto_fulfill_action": "banana",
-                "quote_public_id": "00000000-0000-0000-0000-000000000001",
-            }
-        )
-        session = _session()
-        with (
-            patch(
-                "services.account_purchase.settle_account_purchase",
-                new_callable=AsyncMock,
-            ) as mock_purchase,
-            patch(
-                "services.account_tariff_change.settle_account_tariff_change",
-                new_callable=AsyncMock,
-            ) as mock_change,
+        """An unknown durable action must never be executed as a purchase.
+        Non-string poison (list/dict) must dead-letter too: a bare set
+        membership test would raise TypeError (unhashable) outside the try
+        block and poison the recovery lane forever."""
+        for poisoned in (
+            "banana",
+            None,
+            123,
+            True,
+            [],
+            {},
+            ["purchase"],
+            {"action": "purchase"},
         ):
-            await _retry_auto_fulfillment(session, payment)
+            with self.subTest(action=poisoned):
+                payment = _payment(
+                    {
+                        "auto_fulfill_action": poisoned,
+                        "quote_public_id": "00000000-0000-0000-0000-000000000001",
+                    }
+                )
+                session = _session()
+                with (
+                    patch(
+                        "services.account_purchase.settle_account_purchase",
+                        new_callable=AsyncMock,
+                    ) as mock_purchase,
+                    patch(
+                        "services.account_tariff_change.settle_account_tariff_change",
+                        new_callable=AsyncMock,
+                    ) as mock_change,
+                ):
+                    await _retry_auto_fulfillment(session, payment)
 
-        mock_purchase.assert_not_awaited()
-        mock_change.assert_not_awaited()
-        self.assertEqual(payment.topup_context.get("auto_fulfill_status"), "dead")
-        self.assertEqual(
-            payment.topup_context.get("auto_fulfill_error"),
-            "invalid_auto_fulfill_action",
-        )
+                mock_purchase.assert_not_awaited()
+                mock_change.assert_not_awaited()
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_status"), "dead"
+                )
+                self.assertEqual(
+                    payment.topup_context.get("auto_fulfill_error"),
+                    "invalid_auto_fulfill_action",
+                )
 
 
 if __name__ == "__main__":

@@ -54,12 +54,12 @@ title() {
 # значением 1 здесь перекрывает любые `= 0` в /etc/sysctl.d/*.
 ensure_overcommit_persistence() {
     local conf_file="${1:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}"
+    # Normalize: collapse ANY number of existing entries (possibly conflicting
+    # values like `= 1` followed by `= 0`) into a single authoritative
+    # `= 1` line. A mere "some entry with value 1 exists" check is not enough -
+    # a later `= 0` line would win when sysctl applies the file sequentially.
     if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$conf_file" 2>/dev/null; then
-        if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=[[:space:]]*1([[:space:]]*(#.*)?)?$' "$conf_file" 2>/dev/null; then
-            return 0
-        fi
-        sed -i -E 's|^[[:space:]]*vm\.overcommit_memory[[:space:]]*=.*|vm.overcommit_memory = 1|' "$conf_file" || return 1
-        return 0
+        sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$conf_file" || return 1
     fi
     echo "vm.overcommit_memory = 1" >> "$conf_file" 2>/dev/null || return 1
     return 0
