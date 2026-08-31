@@ -567,11 +567,12 @@ class SetupOvercommitPersistenceTests(unittest.TestCase):
             [
                 "bash",
                 "-c",
+                f"{path_prefix}"
                 ". './setup.sh'; "
                 f"JUST1KBOT_PROC_OVERCOMMIT='./proc_overcommit' "
                 f"JUST1KBOT_SYSCTL_D_CONF='./sysctl.d/99-just1kbot.conf' "
                 f"JUST1KBOT_SYSCTL_CONF='./sysctl.conf' "
-                f"{path_prefix}configure_overcommit_memory",
+                "configure_overcommit_memory",
             ],
             capture_output=True,
             text=True,

@@ -48,6 +48,7 @@ from services.account_topup import (
     settle_succeeded_topup,
     settle_succeeded_topup_by_id,
 )
+from tests.db_utils import TRUNCATE_SQL
 from utils.datetime_helpers import now_utc
 
 DB = os.getenv("TEST_DATABASE_URL")
@@ -59,17 +60,7 @@ class AccountLedgerPostgresTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine(DB)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions.begin() as session:
-            await session.execute(
-                text(
-                    "TRUNCATE account_balance_reservations, "
-                    "account_ledger_allocations, account_ledger_entries, "
-                    "entitlement_entries, paid_value_ledger, "
-                    "tariff_quotes, tariff_versions, payments, users, tariffs, system_settings, payment_disputes "
-
-                    "RESTART IDENTITY CASCADE"
-
-                )
-            )
+            await session.execute(text(TRUNCATE_SQL))
             user = User(telegram_id=uuid.uuid4().int % 10**12)
             tariff = Tariff(
                 name="Account test",

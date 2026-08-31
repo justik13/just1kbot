@@ -15,12 +15,12 @@ from database.models import (
 
 
 class WhiteInternetModelsTests(unittest.TestCase):
-    def test_alembic_migration_0015_revision_chain(self):
+    def test_alembic_migration_0016_revision_chain(self):
         scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-        rev_0015 = scripts.get_revision("0015_white_internet")
-        self.assertIsNotNone(rev_0015)
-        self.assertEqual(rev_0015.down_revision, "0014_drop_sub_token")
-        self.assertEqual(scripts.get_heads(), ["0015_white_internet"])
+        rev_0016 = scripts.get_revision("0016_white_internet")
+        self.assertIsNotNone(rev_0016)
+        self.assertEqual(rev_0016.down_revision, "0015_auto_fulfill_retry_idx")
+        self.assertEqual(scripts.get_heads(), ["0016_white_internet"])
 
 
 
