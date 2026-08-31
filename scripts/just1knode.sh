@@ -279,10 +279,117 @@ EOF
     systemctl daemon-reload
 }
 
+# --- Определение публичного IP текущего сервера ---
+get_public_ip() {
+    local ip
+    ip="$(curl -s4 --max-time 4 https://api.ipify.org 2>/dev/null || curl -s4 --max-time 4 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
+    echo "${ip:-127.0.0.1}"
+}
+
+# --- Проверка формата UUIDv4 (RFC 4122) ---
+validate_uuid() {
+    local u="$1"
+    if [[ "$u" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# --- Проверка формата IP или Домена ---
+validate_host_or_ip() {
+    local h="$1"
+    if [[ -z "$h" ]]; then
+        return 1
+    fi
+    if python3 -c "
+import sys, ipaddress, re
+val = sys.argv[1].strip()
+try:
+    ipaddress.ip_address(val)
+    sys.exit(0)
+except ValueError:
+    pass
+domain_regex = re.compile(r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63}$')
+if domain_regex.match(val):
+    sys.exit(0)
+sys.exit(1)
+" "$h" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# --- Проверка резолвинга DNS перед вызовом Certbot ---
+check_dns_resolves_to_me() {
+    local domain="$1"
+    local my_ip
+    my_ip="$(get_public_ip)"
+    info "Проверка DNS-записи для домена ${domain}..."
+    local resolved_ip
+    resolved_ip="$(python3 -c "
+import sys, socket
+try:
+    print(socket.gethostbyname(sys.argv[1].strip()))
+except Exception:
+    pass
+" "$domain" 2>/dev/null)"
+
+    if [[ -z "$resolved_ip" ]]; then
+        warn "Домен ${domain} пока не резолвится в DNS (запись A не найдена или не обновилась)."
+        info "Текущий публичный IP этого сервера: ${my_ip}"
+        info "Создайте запись A: '${domain}' ➔ '${my_ip}' в панели управления доменом."
+        if [[ -t 0 ]]; then
+            read -r -p "Продолжить попытку выпуска сертификата (y/N)? " answer
+            if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+                error "Установка прервана для настройки DNS."
+            fi
+        fi
+    elif [[ -n "$my_ip" && "$resolved_ip" != "$my_ip" && "$my_ip" != "127.0.0.1" ]]; then
+        warn "Внимание: домен ${domain} указывает в DNS на ${resolved_ip}, но публичный IP этого сервера — ${my_ip}!"
+        warn "Если трафик не проксируется на этот сервер, Certbot завершится ошибкой валидации."
+        if [[ -t 0 ]]; then
+            read -r -p "Все равно попытаться выпустить сертификат (y/N)? " answer
+            if [[ ! "$answer" =~ ^[Yy]$ ]]; then
+                error "Установка прервана для корректировки DNS-записи."
+            fi
+        fi
+    else
+        log "DNS проверен: ${domain} успешно указывает на IP этого сервера (${resolved_ip}) [OK]"
+    fi
+}
+
+# --- Проверка доступности порта Exit-сервера (TCP 10443) ---
+check_exit_port_reachable() {
+    local host="$1"
+    local port="${2:-10443}"
+    info "Тестирование сетевой доступности Exit-сервера (${host}:${port})..."
+    if python3 -c "
+import sys, socket
+h, p = sys.argv[1], int(sys.argv[2])
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(4.0)
+try:
+    s.connect((h, p))
+    s.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" "$host" "$port" 2>/dev/null; then
+        log "Exit-сервер (${host}:${port}) доступен и отвечает по TCP [OK]"
+    else
+        warn "Порт ${port} на Exit-сервере (${host}) сейчас не отвечает."
+        info "Возможные причины:"
+        info "  1. На Exit-сервере еще не запущен Xray (команда 'just1knode install xray-exit')."
+        info "  2. В фаерволе (UFW) Exit-сервера не разрешен IP этого Origin-сервера ($(get_public_ip))."
+        info "Установка Origin будет продолжена, но проверьте связь после запуска Exit-сервера."
+    fi
+}
+
 # --- Получение SSL-сертификата Certbot через единый webroot ---
 obtain_ssl_cert() {
     local domain="$1"
     local email="$2"
+    check_dns_resolves_to_me "$domain"
 
     mkdir -p "$CERTBOT_WEBROOT"
     mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
@@ -590,27 +697,42 @@ cmd_install_xray_origin() {
         esac
     done
 
-    # Интерактивный запрос недостающих параметров
+    # Интерактивный запрос недостающих параметров с подробными подсказками
     if [[ -z "$domain" ]]; then
-        read -r -p "Введите Origin-домен (например, origin.example.com): " domain
+        echo -e "${CYAN}📌 Шаг 1/7: Origin-домен${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
+        read -r -p "Введите Origin-домен: " domain
     fi
     if [[ -z "$bot_ip" ]]; then
-        read -r -p "Введите IP-адрес хоста Telegram-бота: " bot_ip
+        echo -e "${CYAN}📌 Шаг 2/7: IP-адрес хоста Telegram-бота${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера, где запущен бот (выполните 'curl ifconfig.me' на сервере бота)."
+        echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт API 8444 будет открыт в UFW строго для этого IP-адреса."
+        read -r -p "Введите IP-адрес Telegram-бота: " bot_ip
     fi
     if [[ -z "$exit_de_host" ]]; then
+        echo -e "${CYAN}📌 Шаг 3/7: Хост Exit-сервера Германии (DE)${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Доменное имя (relay.example.com) или IP-адрес вашего Exit-сервера в Германии."
         read -r -p "Введите хост/IP Exit-сервера Германии: " exit_de_host
     fi
     if [[ -z "$exit_de_uuid" ]]; then
-        read -r -p "Введите VLESS UUID для Exit-сервера Германии: " exit_de_uuid
+        echo -e "${CYAN}📌 Шаг 4/7: VLESS UUID Exit-сервера Германии${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} UUID, который вы указали при установке 'just1knode install xray-exit' на сервере Германии."
+        read -r -p "Введите VLESS UUID Exit DE: " exit_de_uuid
     fi
     if [[ -z "$exit_nl_host" ]]; then
-        read -r -p "Введите хост/IP Exit-сервера Нидерландов: " exit_nl_host
+        echo -e "${CYAN}📌 Шаг 5/7: Хост Exit-сервера Нидерландов (NL)${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Домен/IP второго Exit-сервера (если сервер один, укажите тот же хост Германии: ${exit_de_host})."
+        read -r -p "Введите хост/IP Exit NL [по умолчанию: ${exit_de_host}]: " exit_nl_host
+        exit_nl_host="${exit_nl_host:-$exit_de_host}"
     fi
     if [[ -z "$exit_nl_uuid" ]]; then
-        read -r -p "Введите VLESS UUID для Exit-сервера Нидерландов: " exit_nl_uuid
+        echo -e "${CYAN}📌 Шаг 6/7: VLESS UUID Exit-сервера Нидерландов${NC}"
+        read -r -p "Введите VLESS UUID Exit NL [по умолчанию: ${exit_de_uuid}]: " exit_nl_uuid
+        exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
     fi
     if [[ -z "$email" ]]; then
-        read -r -p "Введите Email для Let's Encrypt (admin@${domain}): " email
+        echo -e "${CYAN}📌 Шаг 7/7: Email для SSL-сертификата Let's Encrypt${NC}"
+        read -r -p "Введите Email [admin@${domain}]: " email
         email="${email:-admin@${domain}}"
     fi
     if [[ -z "$api_key" ]]; then
@@ -618,13 +740,22 @@ cmd_install_xray_origin() {
         info "Сгенерирован новый XRAY_API_KEY (сохранен в защищенный файл конфигурации)."
     fi
 
-
+    # Строгая валидация введенных параметров
     [[ -n "$domain" ]] || error "Домен обязателен."
+    validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
     [[ -n "$bot_ip" ]] || error "IP-адрес бота обязателен."
+    validate_host_or_ip "$bot_ip" || error "Некорректный IP-адрес бота: ${bot_ip}"
     [[ -n "$exit_de_host" ]] || error "Хост Exit DE обязателен."
+    validate_host_or_ip "$exit_de_host" || error "Некорректный хост/IP Exit DE: ${exit_de_host}"
     [[ -n "$exit_de_uuid" ]] || error "UUID Exit DE обязателен."
+    validate_uuid "$exit_de_uuid" || error "Некорректный формат UUID для Exit DE: ${exit_de_uuid} (ожидается формат RFC 4122: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
     [[ -n "$exit_nl_host" ]] || error "Хост Exit NL обязателен."
+    validate_host_or_ip "$exit_nl_host" || error "Некорректный хост/IP Exit NL: ${exit_nl_host}"
     [[ -n "$exit_nl_uuid" ]] || error "UUID Exit NL обязателен."
+    validate_uuid "$exit_nl_uuid" || error "Некорректный формат UUID для Exit NL: ${exit_nl_uuid}"
+
+    # Проверка сетевой связности до Exit-сервера
+    check_exit_port_reachable "$exit_de_host" 10443
 
     # 1. Установка Xray (зафиксированная версия XRAY_VERSION_PINNED)
     install_xray_core "$XRAY_VERSION_PINNED"
@@ -936,10 +1067,23 @@ EOF
     from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     set_state_val "installed_at" "$from_ts"
 
+    # 8. Боевое самотестирование API и ядра Xray
+    info "Выполнение боевого самотестирования xray-api..."
+    sleep 2
+    local health_response
+    health_response="$(curl -s --max-time 5 -H "X-API-Key: ${api_key}" "http://127.0.0.1:8444/v1/health" 2>/dev/null || true)"
+    if echo "$health_response" | grep -q '"status":"ok"'; then
+        log "Боевой тест пройден: xray-api успешно отвечает, gRPC подключен к Xray, эпоха ноды инициализирована [OK]"
+    else
+        warn "xray-api пока не вернул статус 'ok'. Ответ: ${health_response}"
+        info "Проверьте логи службы: journalctl -u xray-api -n 20"
+    fi
+
     log "Установка Xray Origin успешно завершена!"
     info "Xray Inbounds: 8003 (/api/v3/de), 8004 (/api/v3/nl)"
-    info "API Agent: https://${domain}:8444 (доступен только с IP: ${bot_ip})"
-    info "X-API-Key сохранен в /etc/xray-api/config.env (права 600)"
+    info "API Agent: http://${domain}:8444 (доступен только с IP: ${bot_ip})"
+    info "X-API-Key: ${api_key}"
+    info "Ключ сохранен в /etc/xray-api/config.env (права 600)"
 }
 
 # =============================================================================
@@ -973,22 +1117,37 @@ cmd_install_xray_exit() {
     done
 
     if [[ -z "$origin_ip" ]]; then
-        read -r -p "Введите IP-адрес Origin-сервера: " origin_ip
+        echo -e "${CYAN}📌 Шаг 1/4: IP-адрес Origin-сервера (РФ / Москва)${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP вашего российского Origin-сервера."
+        echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт 10443 (VLESS Vision) будет открыт в UFW строго для этого IP-адреса."
+        read -r -p "Введите IP Origin-сервера: " origin_ip
     fi
     if [[ -z "$domain" ]]; then
-        read -r -p "Введите домен Exit-сервера (например, relay.example.com): " domain
+        echo -e "${CYAN}📌 Шаг 2/4: Доменное имя Exit-сервера${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} A-запись в DNS (напр. relay.example.com), указывающая на IP этого сервера ($(get_public_ip))."
+        read -r -p "Введите домен Exit-сервера: " domain
     fi
     if [[ -z "$client_uuid" ]]; then
-        read -r -p "Введите VLESS UUID для авторизации Origin: " client_uuid
+        echo -e "${CYAN}📌 Шаг 3/4: VLESS UUID для авторизации Origin${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Секретный UUID для туннеля (нажмите Enter для автоматической генерации)."
+        local generated_uuid
+        generated_uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
+        read -r -p "Введите UUID [по умолчанию: ${generated_uuid}]: " client_uuid
+        client_uuid="${client_uuid:-$generated_uuid}"
     fi
     if [[ -z "$email" ]]; then
-        read -r -p "Введите Email для Let's Encrypt (admin@${domain}): " email
+        echo -e "${CYAN}📌 Шаг 4/4: Email для Let's Encrypt сертификата${NC}"
+        read -r -p "Введите Email [admin@${domain}]: " email
         email="${email:-admin@${domain}}"
     fi
 
+    # Строгая валидация введенных параметров
     [[ -n "$origin_ip" ]] || error "IP-адрес Origin обязателен."
+    validate_host_or_ip "$origin_ip" || error "Некорректный IP-адрес Origin: ${origin_ip}"
     [[ -n "$domain" ]] || error "Домен Exit обязателен."
+    validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
     [[ -n "$client_uuid" ]] || error "UUID клиента обязателен."
+    validate_uuid "$client_uuid" || error "Некорректный формат UUID: ${client_uuid} (ожидается формат RFC 4122: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
 
     install_xray_core "$XRAY_VERSION_PINNED"
     setup_xray_service
@@ -1089,10 +1248,17 @@ EOF
     set_state_val "client_uuid" "$client_uuid"
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
     from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    set_state_val "installed_at" "$from_ts"
+    # 5. Боевое самотестирование службы Xray
+    if systemctl is-active --quiet xray; then
+        log "Служба Xray успешно запущена и слушает порт 10443 VLESS Vision [OK]"
+    else
+        error "Служба Xray не смогла запуститься. Проверьте: journalctl -u xray -n 30"
+    fi
 
     log "Установка Xray Exit успешно завершена!"
     info "Inbound: port 10443 VLESS Vision TLS (доступен строго для ${origin_ip})"
+    info "VLESS UUID: ${client_uuid}"
+    info "Запомните этот UUID и домен (${domain}) — они понадобятся при установке Origin-сервера!"
 }
 
 # =============================================================================
