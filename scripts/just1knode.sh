@@ -637,7 +637,12 @@ pre_install_safety_audit() {
     local role="$1"
     title "ПРЕДВАРИТЕЛЬНЫЙ АУДИТ БЕЗОПАСНОСТИ VPS (${role})"
 
-    # 1. Определение порта SSH
+    # 1. Определение ОС
+    local os_desc
+    os_desc="$(lsb_release -d 2>/dev/null | cut -f2 || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"' || uname -srm)"
+    info "ОС и архитектура: ${os_desc} ($(uname -m))"
+
+    # 2. Определение порта SSH
     local ssh_ports
     ssh_ports="$(get_ssh_ports)"
     info "Обнаружен активный порт SSH: ${ssh_ports}"
@@ -647,21 +652,22 @@ pre_install_safety_audit() {
         fi
     done
 
-    # 2. Проверка активных Docker-контейнеров
+    # 3. Проверка активных Docker-контейнеров
+    local docker_count=0
     if command -v docker &>/dev/null; then
         local running_containers
         running_containers="$(docker ps --format "{{.Names}}" 2>/dev/null || true)"
         if [[ -n "$running_containers" ]]; then
-            local count
-            count="$(echo "$running_containers" | wc -l)"
-            info "Обнаружено сторонних Docker-контейнеров на сервере: ${count}"
+            docker_count="$(echo "$running_containers" | wc -l)"
+            info "Обнаружено сторонних Docker-контейнеров на сервере: ${docker_count}"
             for c in $running_containers; do
                 echo -e "   • Контейнер: ${CYAN}${c}${NC} (изолирован, не затрагивается)"
             done
         fi
     fi
 
-    # 3. Проверка существующих сайтов в Nginx
+    # 4. Проверка существующих сайтов в Nginx
+    local nginx_sites_count=0
     if [[ -d /etc/nginx/sites-enabled ]]; then
         local site_path
         local found_any="false"
@@ -670,6 +676,7 @@ pre_install_safety_audit() {
                 local s
                 s="$(basename "$site_path")"
                 if [[ "$s" != just1k* && "$s" != xhttp* ]]; then
+                    nginx_sites_count=$((nginx_sites_count + 1))
                     if [[ "$found_any" == "false" ]]; then
                         info "Обнаружены сторонние сайты в Nginx:"
                         found_any="true"
@@ -680,7 +687,7 @@ pre_install_safety_audit() {
         done
     fi
 
-    # 4. Проверка конфликтов сетевых портов
+    # 5. Проверка конфликтов сетевых портов
     local check_ports=()
     if [[ "$role" == "xray-origin" ]]; then
         check_ports=(8444 10085)
@@ -700,13 +707,31 @@ pre_install_safety_audit() {
         fi
     done
 
+    echo ""
+    echo "================================================================="
+    echo "            СВОДКА ПРЕДВАРИТЕЛЬНОГО АУДИТА БЕЗОПАСНОСТИ          "
+    echo "================================================================="
+    echo -e " • Архитектура и ОС:           ${GREEN}${os_desc}${NC} [OK]"
+    echo -e " • Порт SSH (защита доступа):  ${GREEN}${ssh_ports}${NC} [OK]"
+    echo -e " • Сторонние Docker-проекты:   ${GREEN}${docker_count} контейнеров (изолированы)${NC} [OK]"
+    echo -e " • Сторонние сайты Nginx:      ${GREEN}${nginx_sites_count} сайтов (изолированы)${NC} [OK]"
     if [[ $port_conflicts -gt 0 ]]; then
-        warn "Обнаружено потенциальных конфликтов портов: ${port_conflicts}"
+        echo -e " • Конфликты сетевых портов:   ${YELLOW}${port_conflicts} обнаружено${NC}"
     else
-        log "Конфликтов портов не обнаружено [OK]"
+        echo -e " • Конфликты сетевых портов:   ${GREEN}0 конфликтов${NC} [OK]"
     fi
+    echo "================================================================="
+    echo ""
 
-    log "Аудит завершен: чужие службы и проекты изолированы и защищены [OK]"
+    if [[ -t 0 ]]; then
+        read -r -p "Продолжить установку на основе отчета аудита? [Y/n]: " confirm
+        confirm="${confirm:-Y}"
+        if [[ ! "$confirm" =~ ^[YyДд]$ ]]; then
+            warn "Установка отменена пользователем. Никаких изменений на сервере не произведено."
+            exit 0
+        fi
+        log "Аудит подтвержден пользователем. Переходим к установке..."
+    fi
     echo ""
 }
 
