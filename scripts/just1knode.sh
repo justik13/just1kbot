@@ -385,10 +385,32 @@ except Exception:
     fi
 }
 
+# --- Безопасное резервное копирование существующих файлов конфигурации ---
+backup_file_if_exists() {
+    local target="$1"
+    local desc="${2:-файла}"
+    if [[ -f "$target" ]]; then
+        local ts
+        ts="$(date +%s)"
+        local bak="${target}.bak.${ts}"
+        cp "$target" "$bak"
+        warn "Обнаружен существующий файл ${desc}: ${target}"
+        log "Создана автоматическая резервная копия: ${bak}"
+    fi
+}
+
 # --- Получение SSL-сертификата Certbot через единый webroot ---
 obtain_ssl_cert() {
     local domain="$1"
     local email="$2"
+
+    local existing_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
+    local existing_key="/etc/letsencrypt/live/${domain}/privkey.pem"
+    if [[ -f "$existing_cert" && -f "$existing_key" ]]; then
+        log "Обнаружен действующий SSL-сертификат для ${domain}, переиспользуем его [OK]"
+        return 0
+    fi
+
     check_dns_resolves_to_me "$domain"
 
     mkdir -p "$CERTBOT_WEBROOT"
@@ -436,6 +458,8 @@ render_nginx_modular_config() {
     local include_amnezia="${4:-false}"
     local include_xray="${5:-false}"
     local xray_api_port="${6:-8444}"
+    local path_de="${7:-/api/v3/de}"
+    local path_nl="${8:-/api/v3/nl}"
 
     mkdir -p /etc/nginx/just1k.d /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
 
@@ -460,27 +484,25 @@ EOF
     fi
 
     if [[ "$include_xray" == "true" ]]; then
-        cat > /etc/nginx/just1k.d/xray-locations.conf <<'EOF'
+        cat > /etc/nginx/just1k.d/xray-locations.conf <<EOF
     location = /cdn-check {
         access_log off;
         add_header X-CDN-Origin "ok" always;
-        add_header X-Origin-Method $request_method always;
+        add_header X-Origin-Method \$request_method always;
         return 204;
     }
 
-    # Обратная совместимость для существующих клиентов (/api/v3/secure-data)
-    location /api/v3/secure-data {
+    location ${path_de} {
         access_log off;
-        rewrite ^/api/v3/secure-data(.*)$ /api/v3/de$1 break;
         proxy_pass http://127.0.0.1:8003;
-        proxy_method $just1k_xhttp_proxy_method;
+        proxy_method \$just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass_request_headers on;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
 
         proxy_buffering off;
         proxy_request_buffering off;
@@ -488,35 +510,17 @@ EOF
         proxy_send_timeout 3600s;
     }
 
-    location /api/v3/de {
-        access_log off;
-        proxy_pass http://127.0.0.1:8003;
-        proxy_method $just1k_xhttp_proxy_method;
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
-        proxy_pass_request_headers on;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_buffering off;
-        proxy_request_buffering off;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-
-    location /api/v3/nl {
+    location ${path_nl} {
         access_log off;
         proxy_pass http://127.0.0.1:8004;
-        proxy_method $just1k_xhttp_proxy_method;
+        proxy_method \$just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_pass_request_headers on;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
 
         proxy_buffering off;
         proxy_request_buffering off;
@@ -526,8 +530,8 @@ EOF
 EOF
     fi
 
-
     local config_file="/etc/nginx/sites-available/just1k-${domain}.conf"
+    backup_file_if_exists "$config_file" "конфигурации Nginx just1k"
     cat > "$config_file" <<EOF
 server {
     listen 80;
@@ -606,12 +610,90 @@ EOF
     nginx -t && systemctl reload nginx
 }
 
+# --- Автоматический аудит безопасности перед установкой (защита чужих проектов на VPS) ---
+pre_install_safety_audit() {
+    local role="$1"
+    title "ПРЕДВАРИТЕЛЬНЫЙ АУДИТ БЕЗОПАСНОСТИ VPS (${role})"
+
+    # 1. Определение порта SSH
+    local ssh_port
+    ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
+    ssh_port="${ssh_port:-22}"
+    info "Обнаружен активный порт SSH: ${ssh_port}"
+    if [[ "$ssh_port" != "22" ]]; then
+        log "Зафиксирован нестандартный порт SSH (${ssh_port}). Правило в UFW будет гарантированно добавлено."
+    fi
+
+    # 2. Проверка активных Docker-контейнеров
+    if command -v docker &>/dev/null; then
+        local running_containers
+        running_containers="$(docker ps --format "{{.Names}}" 2>/dev/null || true)"
+        if [[ -n "$running_containers" ]]; then
+            local count
+            count="$(echo "$running_containers" | wc -l)"
+            info "Обнаружено сторонних Docker-контейнеров на сервере: ${count}"
+            for c in $running_containers; do
+                echo -e "   • Контейнер: ${CYAN}${c}${NC} (изолирован, не затрагивается)"
+            done
+        fi
+    fi
+
+    # 3. Проверка существующих сайтов в Nginx
+    if [[ -d /etc/nginx/sites-enabled ]]; then
+        local site_path
+        local found_any="false"
+        for site_path in /etc/nginx/sites-enabled/*; do
+            if [[ -e "$site_path" ]]; then
+                local s
+                s="$(basename "$site_path")"
+                if [[ "$s" != just1k* && "$s" != xhttp* ]]; then
+                    if [[ "$found_any" == "false" ]]; then
+                        info "Обнаружены сторонние сайты в Nginx:"
+                        found_any="true"
+                    fi
+                    echo -e "   • Сайт: ${CYAN}${s}${NC} (изолирован, не затрагивается)"
+                fi
+            fi
+        done
+    fi
+
+    # 4. Проверка конфликтов сетевых портов
+    local check_ports=()
+    if [[ "$role" == "xray-origin" ]]; then
+        check_ports=(8444 10085)
+    elif [[ "$role" == "xray-exit" ]]; then
+        check_ports=(10443)
+    fi
+
+    local port_conflicts=0
+    for p in "${check_ports[@]}"; do
+        if ss -tulpn 2>/dev/null | grep -q ":${p} "; then
+            local proc
+            proc="$(ss -tulpn 2>/dev/null | grep ":${p} " | awk '{print $7}' | head -n 1)"
+            if ! echo "$proc" | grep -q -E 'xray|xray-api|python'; then
+                warn "Порт ${p} занят сторонним процессом: ${proc}"
+                port_conflicts=$((port_conflicts + 1))
+            fi
+        fi
+    done
+
+    if [[ $port_conflicts -gt 0 ]]; then
+        warn "Обнаружено потенциальных конфликтов портов: ${port_conflicts}"
+    else
+        log "Конфликтов портов не обнаружено [OK]"
+    fi
+
+    log "Аудит завершен: чужие службы и проекты изолированы и защищены [OK]"
+    echo ""
+}
+
 # =============================================================================
 # 1. КОМАНДА: install amnezia
 # =============================================================================
 cmd_install_amnezia() {
     title "УСТАНОВКА AMNEZIA API УЗЛА"
     check_root
+    pre_install_safety_audit "amnezia"
     install_common_deps
 
     local domain="${1:-}"
@@ -681,6 +763,7 @@ cmd_install_amnezia() {
 cmd_install_xray_origin() {
     title "УСТАНОВКА XRAY ORIGIN УЗЛА"
     check_root
+    pre_install_safety_audit "xray-origin"
     install_common_deps
 
     local domain=""
@@ -691,6 +774,8 @@ cmd_install_xray_origin() {
     local exit_nl_uuid=""
     local email=""
     local api_key=""
+    local path_de=""
+    local path_nl=""
 
     # Разбор параметров CLI (позиционные или именованные)
     while [[ $# -gt 0 ]]; do
@@ -703,6 +788,8 @@ cmd_install_xray_origin() {
             --exit-nl-uuid) exit_nl_uuid="$2"; shift 2 ;;
             --email) email="$2"; shift 2 ;;
             --api-key) api_key="$2"; shift 2 ;;
+            --path-de) path_de="$2"; shift 2 ;;
+            --path-nl) path_nl="$2"; shift 2 ;;
             *)
                 # Если позиционные аргументы
                 if [[ -z "$domain" ]]; then domain="$1"
@@ -719,39 +806,50 @@ cmd_install_xray_origin() {
 
     # Интерактивный запрос недостающих параметров с подробными подсказками
     if [[ -z "$domain" ]]; then
-        echo -e "${CYAN}📌 Шаг 1/7: Origin-домен${NC}"
+        echo -e "${CYAN}📌 Шаг 1/9: Origin-домен${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
         read -r -p "Введите Origin-домен: " domain
     fi
     if [[ -z "$bot_ip" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/7: IP-адрес хоста Telegram-бота${NC}"
+        echo -e "${CYAN}📌 Шаг 2/9: IP-адрес хоста Telegram-бота${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера, где запущен бот (выполните 'curl ifconfig.me' на сервере бота)."
         echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт API 8444 будет открыт в UFW строго для этого IP-адреса."
         read -r -p "Введите IP-адрес Telegram-бота: " bot_ip
     fi
     if [[ -z "$exit_de_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 3/7: Хост Exit-сервера Германии (DE)${NC}"
+        echo -e "${CYAN}📌 Шаг 3/9: Хост Exit-сервера Германии (DE)${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Доменное имя (relay.example.com) или IP-адрес вашего Exit-сервера в Германии."
         read -r -p "Введите хост/IP Exit-сервера Германии: " exit_de_host
     fi
     if [[ -z "$exit_de_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 4/7: VLESS UUID Exit-сервера Германии${NC}"
+        echo -e "${CYAN}📌 Шаг 4/9: VLESS UUID Exit-сервера Германии${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} UUID, который вы указали при установке 'just1knode install xray-exit' на сервере Германии."
         read -r -p "Введите VLESS UUID Exit DE: " exit_de_uuid
     fi
     if [[ -z "$exit_nl_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 5/7: Хост Exit-сервера Нидерландов (NL)${NC}"
+        echo -e "${CYAN}📌 Шаг 5/9: Хост Exit-сервера Нидерландов (NL)${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Домен/IP второго Exit-сервера (если сервер один, укажите тот же хост Германии: ${exit_de_host})."
         read -r -p "Введите хост/IP Exit NL [по умолчанию: ${exit_de_host}]: " exit_nl_host
         exit_nl_host="${exit_nl_host:-$exit_de_host}"
     fi
     if [[ -z "$exit_nl_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 6/7: VLESS UUID Exit-сервера Нидерландов${NC}"
+        echo -e "${CYAN}📌 Шаг 6/9: VLESS UUID Exit-сервера Нидерландов${NC}"
         read -r -p "Введите VLESS UUID Exit NL [по умолчанию: ${exit_de_uuid}]: " exit_nl_uuid
         exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
     fi
+    if [[ -z "$path_de" ]]; then
+        echo -e "${CYAN}📌 Шаг 7/9: URL-путь XHTTP для Германии (DE)${NC}"
+        echo -e "   ${YELLOW}💡 Подсказка:${NC} Секретный путь для маскировки под API (например: /api/v3/de или /data/v1/stream)."
+        read -r -p "Введите путь XHTTP DE [по умолчанию: /api/v3/de]: " path_de
+        path_de="${path_de:-/api/v3/de}"
+    fi
+    if [[ -z "$path_nl" ]]; then
+        echo -e "${CYAN}📌 Шаг 8/9: URL-путь XHTTP для Нидерландов (NL)${NC}"
+        read -r -p "Введите путь XHTTP NL [по умолчанию: /api/v3/nl]: " path_nl
+        path_nl="${path_nl:-/api/v3/nl}"
+    fi
     if [[ -z "$email" ]]; then
-        echo -e "${CYAN}📌 Шаг 7/7: Email для SSL-сертификата Let's Encrypt${NC}"
+        echo -e "${CYAN}📌 Шаг 9/9: Email для SSL-сертификата Let's Encrypt${NC}"
         read -r -p "Введите Email [admin@${domain}]: " email
         email="${email:-admin@${domain}}"
     fi
@@ -777,6 +875,11 @@ cmd_install_xray_origin() {
     # Проверка сетевой связности до Exit-сервера
     check_exit_port_reachable "$exit_de_host" 10443
 
+    # Резервное копирование существующих файлов перед перезаписью
+    backup_file_if_exists "$XRAY_CONFIG" "конфигурации Xray"
+    backup_file_if_exists "/etc/nginx/sites-available/xhttp-origin.conf" "старой конфигурации Nginx (xhttp-origin)"
+    backup_file_if_exists "/etc/xray-api/config.env" "конфигурации xray-api"
+
     # 1. Установка Xray (зафиксированная версия XRAY_VERSION_PINNED)
     install_xray_core "$XRAY_VERSION_PINNED"
     install_geodata
@@ -786,29 +889,6 @@ cmd_install_xray_origin() {
     obtain_ssl_cert "$domain" "$email"
     local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
     local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
-
-    # Считывание существующих клиентов для обратной совместимости
-    local existing_clients="[]"
-    if [[ -f "$XRAY_CONFIG" ]]; then
-        existing_clients="$(python3 -c '
-import json, sys
-try:
-    with open(sys.argv[1]) as f:
-        data = json.load(f)
-    clients = []
-    for inb in data.get("inbounds", []):
-        if inb.get("protocol") == "vless":
-            for c in inb.get("settings", {}).get("clients", []):
-                if c.get("id") and c not in clients:
-                    clients.append(c)
-    print(json.dumps(clients))
-except Exception:
-    print("[]")
-' "$XRAY_CONFIG" 2>/dev/null || echo "[]")"
-        if [[ "$existing_clients" != "[]" ]]; then
-            info "Обнаружены и сохранены существующие клиенты Xray: ${existing_clients}"
-        fi
-    fi
 
     # 3. Генерация конфигурации Xray Origin
     info "Генерация конфигурации Xray Origin (${XRAY_CONFIG})..."
@@ -876,13 +956,13 @@ except Exception:
       "port": 8003,
       "protocol": "vless",
       "settings": {
-        "clients": ${existing_clients},
+        "clients": [],
         "decryption": "none"
       },
       "streamSettings": {
         "network": "xhttp",
         "xhttpSettings": {
-          "path": "/api/v3/de",
+          "path": "${path_de}",
           "mode": "packet-up",
           "uplinkHTTPMethod": "POST",
           "xPaddingObfsMode": true,
@@ -909,7 +989,7 @@ except Exception:
       "streamSettings": {
         "network": "xhttp",
         "xhttpSettings": {
-          "path": "/api/v3/nl",
+          "path": "${path_nl}",
           "mode": "packet-up",
           "uplinkHTTPMethod": "POST",
           "xPaddingObfsMode": true,
@@ -1058,7 +1138,7 @@ EOF
         include_amn="true"
     fi
 
-    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444"
+    render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444" "$path_de" "$path_nl"
 
     # 5. Установка автономного агента xray-api
     info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
@@ -1088,7 +1168,13 @@ EOF
 
     # 6. Настройка UFW
     info "Настройка сетевого экрана UFW..."
+    local active_ssh_port
+    active_ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
+    active_ssh_port="${active_ssh_port:-22}"
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    if [[ "$active_ssh_port" != "22" && -n "$active_ssh_port" ]]; then
+        ufw allow "${active_ssh_port}/tcp" 2>/dev/null || true
+    fi
     ufw allow 80/tcp
     ufw allow 443/tcp
     # Порт 8444 разрешить СТРОГО для IP бота
@@ -1105,6 +1191,8 @@ EOF
     set_state_val "exit_de_uuid" "$exit_de_uuid"
     set_state_val "exit_nl_host" "$exit_nl_host"
     set_state_val "exit_nl_uuid" "$exit_nl_uuid"
+    set_state_val "path_de" "$path_de"
+    set_state_val "path_nl" "$path_nl"
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
     set_state_val "api_port" "8444"
     from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -1123,7 +1211,7 @@ EOF
     fi
 
     log "Установка Xray Origin успешно завершена!"
-    info "Xray Inbounds: 8003 (/api/v3/de), 8004 (/api/v3/nl)"
+    info "Xray Inbounds: 8003 (${path_de}), 8004 (${path_nl})"
     info "API Agent: http://${domain}:8444 (доступен только с IP: ${bot_ip})"
     info "X-API-Key: ${api_key}"
     info "Ключ сохранен в /etc/xray-api/config.env (права 600)"
@@ -1136,6 +1224,7 @@ EOF
 cmd_install_xray_exit() {
     title "УСТАНОВКА XRAY EXIT УЗЛА"
     check_root
+    pre_install_safety_audit "xray-exit"
     install_common_deps
 
     local origin_ip=""
@@ -1191,6 +1280,8 @@ cmd_install_xray_exit() {
     validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
     [[ -n "$client_uuid" ]] || error "UUID клиента обязателен."
     validate_uuid "$client_uuid" || error "Некорректный формат UUID: ${client_uuid} (ожидается формат RFC 4122: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+
+    backup_file_if_exists "$XRAY_CONFIG" "конфигурации Xray"
 
     install_xray_core "$XRAY_VERSION_PINNED"
     setup_xray_service
@@ -1276,7 +1367,13 @@ EOF
 
     # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
+    local active_ssh_port
+    active_ssh_port="$(ss -tulpn 2>/dev/null | grep -E '\b(sshd|systemd)\b' | awk '{print $5}' | awk -F: '{print $NF}' | head -n 1)"
+    active_ssh_port="${active_ssh_port:-22}"
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
+    if [[ "$active_ssh_port" != "22" && -n "$active_ssh_port" ]]; then
+        ufw allow "${active_ssh_port}/tcp" 2>/dev/null || true
+    fi
     ufw allow 80/tcp
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then

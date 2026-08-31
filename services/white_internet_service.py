@@ -18,6 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot import texts
 from config.constants import (
+    DEFAULT_WHITE_INTERNET_PADDING_KEY,
+    DEFAULT_WHITE_INTERNET_PATH_DE,
+    DEFAULT_WHITE_INTERNET_PATH_NL,
     WHITE_INTERNET_BASE_DURATION_DAYS,
     WHITE_INTERNET_BASE_PRICE_RUB,
     WHITE_INTERNET_BASE_TRAFFIC_BYTES,
@@ -247,7 +250,7 @@ class WhiteInternetService:
             "mode": "packet-up",
             "uplinkHTTPMethod": "OPTIONS",
             "xPaddingObfsMode": True,
-            "xPaddingKey": "dc",
+            "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
             "xPaddingHeader": "X-Cache",
             "xPaddingMethod": "tokenish",
             "xPaddingPlacement": "header",
@@ -257,7 +260,7 @@ class WhiteInternetService:
         tag_nl = urllib.parse.quote(texts.WL_VLESS_TAG_NL)
         def build(path: str, tag: str) -> str:
             return f"vless://{subscription.uuid}@{cdn_domain}:{port}?encryption=none&security=tls&sni={cdn_domain}&alpn=h2&fp=chrome&type=xhttp&path={urllib.parse.quote(path, safe='')}&mode=packet-up&extra={extra_param}#{tag}"
-        return [build("/api/v3/de", tag_de), build("/api/v3/nl", tag_nl)]
+        return [build(DEFAULT_WHITE_INTERNET_PATH_DE, tag_de), build(DEFAULT_WHITE_INTERNET_PATH_NL, tag_nl)]
 
     @staticmethod
     def generate_full_xray_config(subscription: WhiteInternetSubscription, cdn_domain: str, port: int = 443) -> dict:
@@ -301,11 +304,11 @@ class WhiteInternetService:
                             "fingerprint": "chrome",
                         },
                         "xhttpSettings": {
-                            "path": "/api/v3/de",
+                            "path": DEFAULT_WHITE_INTERNET_PATH_DE,
                             "mode": "packet-up",
                             "uplinkHTTPMethod": "OPTIONS",
                             "xPaddingObfsMode": True,
-                            "xPaddingKey": "dc",
+                            "xPaddingKey": DEFAULT_WHITE_INTERNET_PADDING_KEY,
                             "xPaddingHeader": "X-Cache",
                             "xPaddingMethod": "tokenish",
                             "xPaddingPlacement": "header",

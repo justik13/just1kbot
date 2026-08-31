@@ -5,6 +5,7 @@ internal dependencies, allowing safe downward imports by utils, database,
 integrations, services, and bot layers without architectural cycles.
 """
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -112,6 +113,9 @@ SUPPORTED_MIN_XRAY_VERSION = "26.5.9"
 DEFAULT_PINNED_XRAY_VERSION = "26.7.28"
 DEFAULT_XRAY_ORIGIN_MAX_CLIENTS = 1000
 INCY_LINK_ENCODER_VERSION = "1.0.0"
+DEFAULT_WHITE_INTERNET_PATH_DE = os.getenv("WHITE_INTERNET_XHTTP_PATH_DE", "/api/v3/de")
+DEFAULT_WHITE_INTERNET_PATH_NL = os.getenv("WHITE_INTERNET_XHTTP_PATH_NL", "/api/v3/nl")
+DEFAULT_WHITE_INTERNET_PADDING_KEY = os.getenv("WHITE_INTERNET_PADDING_KEY", "dc")
 
 
 

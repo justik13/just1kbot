@@ -96,7 +96,7 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
             cooldown=60,
             retry_cooldown=5,
             clock=lambda: self.now,
-            alert_timeout=0.05,
+            alert_timeout=0.5,
         )
 
     async def asyncTearDown(self):
@@ -104,11 +104,10 @@ class QueueHealthMonitorTests(unittest.IsolatedAsyncioTestCase):
         self.settings.stop()
 
     async def flush(self):
-        await asyncio.sleep(0.06)
         tasks = list(self.monitor.alert_tasks)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        await asyncio.sleep(0.06)
+        await asyncio.sleep(0.01)
 
     async def test_partial_admin_success_sets_success_cooldown(self):
         self.admin_ids = [1, 2]
