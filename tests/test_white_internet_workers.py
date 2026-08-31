@@ -52,6 +52,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
         mock_session = AsyncMock()
+        mock_session.get.return_value = sub
 
         # Execute mock query returns
         mock_session.execute.side_effect = [
@@ -113,6 +114,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
 
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
         mock_session = AsyncMock()
+        mock_session.get.return_value = sub
 
         mock_session.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
@@ -177,6 +179,7 @@ class TestWhiteInternetReconciliationWorker(unittest.IsolatedAsyncioTestCase):
         worker = WhiteInternetReconciliationWorker(node_client=mock_client)
 
         mock_session = AsyncMock()
+        mock_session.get.return_value = sub
         mock_session.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),     # pending subs query

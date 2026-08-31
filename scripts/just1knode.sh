@@ -483,8 +483,6 @@ server {
 EOF
     fi
 
-    rm -f /etc/nginx/sites-enabled/just1k-amnezia.conf
-    rm -f /etc/nginx/sites-enabled/just1k-xray-origin.conf
     ln -sfn "$config_file" "/etc/nginx/sites-enabled/just1k-${domain}.conf"
     rm -f /etc/nginx/conf.d/acme-challenge.conf
     nginx -t && systemctl reload nginx

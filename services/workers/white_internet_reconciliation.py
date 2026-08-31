@@ -116,10 +116,11 @@ class WhiteInternetReconciliationWorker:
             res_subs = await session.execute(stmt_subs)
             pending_subs = res_subs.scalars().all()
 
+            # Phase 1: Collect candidates and expire overdue subscriptions
+            sync_tasks: list[dict] = []
             for sub_meta in pending_subs:
-                # 1. Read current state and check expiration
                 sub_id = sub_meta.id
-                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
+                sub = await session.get(WhiteInternetSubscription, sub_id)
                 if sub is None:
                     continue
 
@@ -139,16 +140,27 @@ class WhiteInternetReconciliationWorker:
                         )
                         .values(bytes_remaining=0)
                     )
+                    await session.flush()
 
                 desired_active = (
                     sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
                     and sub.expires_at > now
                 )
-                target_version = sub.desired_version
-                sub_uuid = sub.uuid
-                await session.flush()
+                sync_tasks.append({
+                    "sub_id": sub.id,
+                    "uuid": sub.uuid,
+                    "desired_active": desired_active,
+                    "target_version": sub.desired_version,
+                })
 
-                # 2. Perform external network I/O with Xray node
+            # Phase 2 & 3: Perform remote network I/O with Xray, then CAS write under brief lock
+            for task in sync_tasks:
+                sub_id = task["sub_id"]
+                sub_uuid = task["uuid"]
+                desired_active = task["desired_active"]
+                target_version = task["target_version"]
+
+                # 2. Perform external network I/O with Xray node (NO DB LOCK HELD)
                 is_healthy_pre, epoch_pre, data_pre = await self.client.check_health(
                     server.api_url, server.api_key
                 )
@@ -167,11 +179,6 @@ class WhiteInternetReconciliationWorker:
                     is_active=desired_active,
                 )
 
-                # 3. Post-sync generation revalidation and atomic state persistence
-                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
-                if sub is None:
-                    continue
-
                 if success:
                     is_healthy_post, epoch_post, data_post = await self.client.check_health(
                         server.api_url, server.api_key
@@ -186,29 +193,29 @@ class WhiteInternetReconciliationWorker:
                         and (epoch_pre, boot_pre, st_pre) == (epoch_post, boot_post, st_post)
                         and epoch_post == server.xray_instance_epoch
                     )
-
-                    if sub.desired_version == target_version and gen_intact:
-                        sub.actual_version = target_version
-                        sub.last_reconciled_node_epoch = target_epoch
-                        if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                            sub.status = WhiteInternetStatus.ACTIVE
-                            sub.status_reason = None
-                        sub.provisioning_status = (
-                            WhiteInternetProvisioningStatus.ACTIVE
-                            if desired_active
-                            else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                        )
-                        sub.last_synced_at = now_utc()
-                        sub.last_sync_error = None
-                        synced_count += 1
-                    else:
-                        sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                        logger.warning(
-                            "Reconciliation post-sync generation check detected race for sub_id=%d on server %d",
-                            sub_id,
-                            server_id,
-                        )
                 else:
+                    gen_intact = False
+
+                # 3. Post-sync atomic state persistence under brief row lock
+                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
+                if sub is None:
+                    continue
+
+                if success and sub.desired_version == target_version and gen_intact:
+                    sub.actual_version = target_version
+                    sub.last_reconciled_node_epoch = target_epoch
+                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
+                        sub.status = WhiteInternetStatus.ACTIVE
+                        sub.status_reason = None
+                    sub.provisioning_status = (
+                        WhiteInternetProvisioningStatus.ACTIVE
+                        if desired_active
+                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
+                    )
+                    sub.last_synced_at = now_utc()
+                    sub.last_sync_error = None
+                    synced_count += 1
+                elif not success:
                     sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
                     sub.last_sync_error = err_msg
                     sub.last_synced_at = now_utc()
@@ -217,6 +224,13 @@ class WhiteInternetReconciliationWorker:
                         sub_id,
                         server_id,
                         err_msg,
+                    )
+                else:
+                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+                    logger.warning(
+                        "Reconciliation post-sync generation check detected race for sub_id=%d on server %d",
+                        sub_id,
+                        server_id,
                     )
 
                 await session.flush()

@@ -156,6 +156,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         recon_worker = WhiteInternetReconciliationWorker(node_client=mock_node_client)
 
         recon_session = AsyncMock()
+        recon_session.get.return_value = sub
         recon_session.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),  # servers query
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),     # pending subscriptions query
@@ -292,6 +293,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         mock_node_client.sync_client.return_value = (True, None)
 
         recon_session_2 = AsyncMock()
+        recon_session_2.get.return_value = sub
         recon_session_2.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),
@@ -309,8 +311,10 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                 )
                 self.assertEqual(sub.actual_version, 2)
 
-        # 9. Top-up grant recovery: user purchases 30 GB topup
-        topup_bytes = 30 * 1024**3
+        # 9. Top-up grant recovery: user purchases real 25 GB topup pack (100 RUB)
+        topup_gb = 25
+        topup_bytes = topup_gb * 1024**3
+        topup_price = Decimal("100.00")
         sub.traffic_limit_bytes += topup_bytes
         sub.status = WhiteInternetStatus.ACTIVE
         sub.desired_version = 3
@@ -321,7 +325,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             grant_type=WhiteInternetGrantType.TOPUP,
             bytes_granted=topup_bytes,
             bytes_remaining=topup_bytes,
-            price_rub=Decimal("120.00"),
+            price_rub=topup_price,
             quote_id=102,
             expires_at=sub.expires_at,
             created_at=now,
@@ -330,6 +334,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
         # Reconciliation re-enables user on node
         mock_node_client.sync_client.reset_mock()
         recon_session_3 = AsyncMock()
+        recon_session_3.get.return_value = sub
         recon_session_3.execute.side_effect = [
             MagicMock(scalars=lambda: MagicMock(all=lambda: [server])),
             MagicMock(scalars=lambda: MagicMock(all=lambda: [sub])),

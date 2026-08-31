@@ -118,8 +118,8 @@ WORKERS: tuple[WorkerDefinition, ...] = (
     WorkerDefinition("heartbeat", _heartbeat, False),
     WorkerDefinition("queue_health", _queue_health, False),
     WorkerDefinition("node_monitor", _node_monitor, False),
-    WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, False),
-    WorkerDefinition("white_internet_traffic", _white_internet_traffic, False),
+    WorkerDefinition("white_internet_reconciliation", _white_internet_reconciliation, True),
+    WorkerDefinition("white_internet_traffic", _white_internet_traffic, True),
     WorkerDefinition("api_operations", _api_operations, True),
     WorkerDefinition("payment_pipeline", _payment_pipeline, True),
 )
