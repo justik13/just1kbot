@@ -6,12 +6,12 @@ import asyncio
 import logging
 
 from aiogram import Bot
-from sqlalchemy import or_, select, update
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.enums import ServerHealthState, WhiteInternetProvisioningStatus, WhiteInternetStatus
 from database.connection import session_scope
-from database.models import Server, WhiteInternetQuotaGrant, WhiteInternetSubscription
+from database.models import Server, WhiteInternetSubscription
 from database.repositories import servers_repo, white_internet_repo
 from services.xray_node_client import XrayNodeClient
 from utils.datetime_helpers import now_utc
