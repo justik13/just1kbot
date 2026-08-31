@@ -279,26 +279,34 @@ EOF
     systemctl daemon-reload
 }
 
-# --- Надежное определение портов SSH (sshd, ssh.socket, sshd_config) ---
+# --- Надежное определение портов SSH (sshd_config / sshd_config.d) ---
 get_ssh_ports() {
     local ports=""
-    # 1. Поиск активных слушателей процесса sshd (TCP)
-    ports="$(ss -tlnp 2>/dev/null | grep -E 'users:\(\("sshd"' | awk '{print $4}' | awk -F: '{print $NF}' | sort -un | tr '\n' ' ')"
-
-    # 2. Если пустой — проверка systemd socket активации ssh.socket (Ubuntu 22.10+)
-    if [[ -z "${ports// }" ]]; then
-        if systemctl is-active --quiet ssh.socket 2>/dev/null || systemctl is-active --quiet sshd.socket 2>/dev/null; then
-            ports="$(systemctl show ssh.socket sshd.socket -p Listen 2>/dev/null | grep -oE ':[0-9]+' | tr -d ':' | sort -un | tr '\n' ' ')"
-        fi
+    if [[ -f /etc/ssh/sshd_config ]]; then
+        while read -r line; do
+            if [[ "$line" =~ ^[[:space:]]*[Pp][Oo][Rr][Tt][[:space:]]+([0-9]+) ]]; then
+                ports="${ports} ${BASH_REMATCH[1]}"
+            fi
+        done < /etc/ssh/sshd_config
     fi
-
-    # 3. Если по-прежнему пустой — чтение конфигурационных файлов sshd
-    if [[ -z "${ports// }" ]]; then
-        ports="$(grep -rhE '^\s*Port\s+[0-9]+' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/ 2>/dev/null | awk '{print $2}' | sort -un | tr '\n' ' ')"
+    if compgen -G "/etc/ssh/sshd_config.d/*.conf" > /dev/null; then
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+            if [[ -f "$f" ]]; then
+                while read -r line; do
+                    if [[ "$line" =~ ^[[:space:]]*[Pp][Oo][Rr][Tt][[:space:]]+([0-9]+) ]]; then
+                        ports="${ports} ${BASH_REMATCH[1]}"
+                    fi
+                done < "$f"
+            fi
+        done
     fi
-
-    ports="${ports:-22}"
-    echo "$ports"
+    local trimmed
+    trimmed="$(echo "$ports" | xargs 2>/dev/null || true)"
+    if [[ -z "$trimmed" ]]; then
+        echo "22"
+    else
+        echo "$trimmed"
+    fi
 }
 
 # --- Определение публичного IP текущего сервера ---
@@ -632,14 +640,32 @@ EOF
     nginx -t && systemctl reload nginx
 }
 
+# --- Очистка и санитизация домена/хоста от префиксов протоколов и пробелов ---
+sanitize_host() {
+    local val="$1"
+    val="$(echo "$val" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    val="${val#http://}"
+    val="${val#https://}"
+    val="${val%%/*}"
+    val="${val%%:*}"
+    echo "$val"
+}
+
 # --- Автоматический аудит безопасности перед установкой (защита чужих проектов на VPS) ---
 pre_install_safety_audit() {
     local role="$1"
     title "ПРЕДВАРИТЕЛЬНЫЙ АУДИТ БЕЗОПАСНОСТИ VPS (${role})"
 
     # 1. Определение ОС
-    local os_desc
-    os_desc="$(lsb_release -d 2>/dev/null | cut -f2 || cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"' || uname -srm)"
+    local os_desc="Linux"
+    if command -v lsb_release &>/dev/null; then
+        os_desc="$(lsb_release -ds 2>/dev/null || true)"
+    elif [[ -f /etc/os-release ]]; then
+        os_desc="$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '"' || true)"
+    fi
+    if [[ -z "$os_desc" ]]; then
+        os_desc="$(uname -srm)"
+    fi
     info "ОС и архитектура: ${os_desc} ($(uname -m))"
 
     # 2. Определение порта SSH
@@ -753,6 +779,9 @@ cmd_install_amnezia() {
     if [[ -z "$email" ]]; then
         read -r -p "Введите Email для Let's Encrypt: " email
     fi
+
+    domain="$(sanitize_host "$domain")"
+    email="$(echo "$email" | tr -d '[:space:]')"
 
     [[ -n "$domain" ]] || error "Домен обязателен для установки."
     [[ -n "$email" ]] || error "Email обязателен для установки."
@@ -905,6 +934,15 @@ cmd_install_xray_origin() {
         api_key="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
         info "Сгенерирован новый XRAY_API_KEY (сохранен в защищенный файл конфигурации)."
     fi
+
+    # Автоматическая санитизация входных параметров
+    domain="$(sanitize_host "$domain")"
+    bot_ip="$(sanitize_host "$bot_ip")"
+    exit_de_host="$(sanitize_host "$exit_de_host")"
+    exit_nl_host="$(sanitize_host "$exit_nl_host")"
+    exit_de_uuid="$(echo "$exit_de_uuid" | tr -d '[:space:]')"
+    exit_nl_uuid="$(echo "$exit_nl_uuid" | tr -d '[:space:]')"
+    email="$(echo "$email" | tr -d '[:space:]')"
 
     # Строгая валидация введенных параметров
     [[ -n "$domain" ]] || error "Домен обязателен."
@@ -1320,6 +1358,12 @@ cmd_install_xray_exit() {
         read -r -p "Введите Email [admin@${domain}]: " email
         email="${email:-admin@${domain}}"
     fi
+
+    # Автоматическая санитизация входных параметров
+    origin_ip="$(sanitize_host "$origin_ip")"
+    domain="$(sanitize_host "$domain")"
+    client_uuid="$(echo "$client_uuid" | tr -d '[:space:]')"
+    email="$(echo "$email" | tr -d '[:space:]')"
 
     # Строгая валидация введенных параметров
     [[ -n "$origin_ip" ]] || error "IP-адрес Origin обязателен."
