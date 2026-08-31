@@ -124,12 +124,11 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
                         self.session.commit.assert_awaited_once()
                         mock_menu.assert_awaited_once_with(query, self.session)
 
-    def test_overview_keyboard_generates_valid_incy_deep_link(self):
-        """Active subscription keyboard must include decrypted-valid incy://crypt1/ deep link."""
+    def test_overview_keyboard_generates_valid_telegram_buttons(self):
+        """Active subscription keyboard must use native CopyTextButton and Bot API compliant buttons."""
         from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
         from database.models import WhiteInternetSubscription
         from bot.handlers.white_internet import get_white_internet_overview_keyboard
-        from services.incy_crypto import decrypt_link
 
         sub = WhiteInternetSubscription(
             id=1,
@@ -143,20 +142,16 @@ class TestWhiteInternetBotHandlers(unittest.IsolatedAsyncioTestCase):
         domain = "vpn.just1k.online"
         kb = get_white_internet_overview_keyboard(sub, bot_domain=domain)
 
-        # Find the connect button with URL
-        connect_button = None
+        # Telegram Bot API contract: inline keyboard URLs must only be http/https/tg
         for row in kb.inline_keyboard:
             for btn in row:
-                if btn.url and btn.url.startswith("incy://crypt1/"):
-                    connect_button = btn
-                    break
+                if btn.url:
+                    self.assertTrue(
+                        btn.url.startswith(("http://", "https://", "tg://")),
+                        f"Forbidden custom URL scheme in inline button: {btn.url}",
+                    )
 
-        self.assertIsNotNone(connect_button, "Connect in App button with incy://crypt1/ URL not found")
-        decrypted = decrypt_link(connect_button.url)
-        self.assertEqual(decrypted["url"], f"https://{domain}/sub/wl/{sub.token}")
-        self.assertEqual(decrypted["name"], "Just1k Белый Интернет")
-
-        # Find the copy text button
+        # Find the copy text button and instruction button
         copy_button = None
         instruction_button = None
         for row in kb.inline_keyboard:

@@ -12,7 +12,7 @@ from aiohttp import web
 from aiohttp.test_utils import AioHTTPTestCase, unittest_run_loop
 
 from bot.handlers.white_internet_web import setup_white_internet_web_routes
-from config.enums import WhiteInternetStatus
+from config.enums import ServerHealthState, WhiteInternetStatus
 from database.models import Server, WhiteInternetSubscription
 
 
@@ -103,6 +103,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch_xyz",
             capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
         )
 
         mock_session = AsyncMock()
@@ -141,6 +143,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch_new",  # Node restarted with new epoch!
             capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
         )
 
         mock_session = AsyncMock()
@@ -190,6 +194,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
         )
 
         mock_session = AsyncMock()
@@ -257,6 +263,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
             api_url="https://cdn.just1k.online:8444",
             xray_instance_epoch="epoch-xyz",
             capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.ONLINE,
         )
 
         mock_session = AsyncMock()
@@ -278,5 +286,52 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
                         self.assertEqual(resp.status, 503)
                         self.assertEqual(resp.headers.get("Retry-After"), "60")
+
+    @unittest_run_loop
+    async def test_offline_server_returns_503_fail_closed(self):
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="valid-token-1234567890abcdef",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now,
+            expires_at=now + timedelta(days=30),
+            traffic_limit_bytes=53687091200,
+            desired_version=1,
+            actual_version=1,
+            last_reconciled_node_epoch="epoch-xyz",
+        )
+
+        # Server is marked PROBLEM
+        server = Server(
+            id=1,
+            name="Origin-Node",
+            api_url="https://cdn.just1k.online:8444",
+            xray_instance_epoch="epoch-xyz",
+            capabilities=["xray_origin"],
+            is_active=True,
+            health_state=ServerHealthState.PROBLEM,
+        )
+
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = server
+
+        @asynccontextmanager
+        async def fake_session_scope():
+            yield mock_session
+
+        grant = MagicMock()
+        grant.bytes_granted = 53687091200
+        grant.bytes_remaining = 40 * 1024**3
+
+        with patch("bot.handlers.white_internet_web.session_scope", fake_session_scope):
+            with patch("database.repositories.white_internet_repo.get_subscription_by_token", return_value=sub):
+                with patch("database.repositories.white_internet_repo.get_period_grants", return_value=[grant]):
+                    resp = await self.client.get("/sub/wl/valid-token-1234567890abcdef")
+                    self.assertEqual(resp.status, 503)
+                    self.assertEqual(resp.headers.get("Retry-After"), "5")
 
 

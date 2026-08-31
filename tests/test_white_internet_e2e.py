@@ -69,6 +69,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
             api_url="https://origin.just1k.online:8444",
             api_key="node-secret-key",
             health_state=ServerHealthState.ONLINE,
+            is_active=True,
             xray_instance_epoch=node_epoch,
         )
 

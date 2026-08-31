@@ -23,7 +23,6 @@ from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
 from database.repositories.users_repo import get_user_by_telegram_id
-from services.incy_crypto import encrypt_link
 from services.white_internet_service import WhiteInternetService
 from utils.datetime_helpers import now_utc
 
@@ -79,16 +78,6 @@ def get_white_internet_overview_keyboard(
             and bot_domain
         ):
             sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
-            try:
-                incy_deep_link = encrypt_link(sub_url, name=texts.WL_PROFILE_NAME)
-                builder.button(
-                    text=texts.BTN_WL_CONNECT_CLIENT,
-                    url=incy_deep_link,
-                    style="success",
-                )
-            except Exception as exc:
-                logger.error("Failed to encrypt incy deep link: %s", exc)
-
             builder.button(
                 text=texts.BTN_WL_COPY_LINK,
                 copy_text=CopyTextButton(text=sub_url),
@@ -105,7 +94,7 @@ def get_white_internet_overview_keyboard(
         builder.button(text=texts.BTN_BACK, callback_data="back_to_main_menu")
 
         if sub.status == WhiteInternetStatus.ACTIVE and sub.provisioning_status == WhiteInternetProvisioningStatus.ACTIVE and bot_domain:
-            builder.adjust(1, 2, 2, 1)
+            builder.adjust(1, 1, 2, 1)
         else:
             builder.adjust(2, 1)
         return builder.as_markup()

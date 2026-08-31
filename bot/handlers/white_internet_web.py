@@ -11,7 +11,7 @@ from aiohttp import web
 from sqlalchemy import select
 
 from bot import texts
-from config.enums import WhiteInternetStatus
+from config.enums import ServerHealthState, WhiteInternetStatus
 from database.connection import session_scope
 from database.models import Server
 from database.repositories import white_internet_repo
@@ -87,7 +87,12 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
             return web.Response(status=403, text=texts.WL_WEB_EXPIRED, headers=common_headers)
 
         server = await session.scalar(select(Server).where(Server.id == sub.origin_node_id))
-        if server is None or "xray_origin" not in (server.capabilities or []):
+        if (
+            server is None
+            or not server.is_active
+            or server.health_state != ServerHealthState.ONLINE
+            or "xray_origin" not in (server.capabilities or [])
+        ):
             headers = dict(common_headers)
             headers["Retry-After"] = "5"
             return web.Response(status=503, text=texts.WL_WEB_UNSYNCED, headers=headers)

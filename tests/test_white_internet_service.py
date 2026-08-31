@@ -231,3 +231,88 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(grant.bytes_granted, 10 * 1024**3)
                 self.assertEqual(grant.bytes_remaining, 10 * 1024**3)
                 self.assertEqual(grant.expires_at, sub.expires_at)
+
+    async def test_renew_subscription_resets_period_usage_and_preserves_carried_topup(self):
+        """Renewal must reset period usage to 0, clear node snapshots, and carry active topup grants."""
+        now = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
+        sub = WhiteInternetSubscription(
+            id=1,
+            user_id=10,
+            origin_node_id=1,
+            token="test-token-12345",
+            uuid="a2b9d4e1-73c5-4812-b964-f3e7b85a1902",
+            status=WhiteInternetStatus.ACTIVE,
+            started_at=now - timedelta(days=29),
+            expires_at=now + timedelta(days=1),
+            traffic_limit_bytes=75 * 1024**3,
+            traffic_used_bytes=47 * 1024**3,
+            traffic_uplink_bytes=18 * 1024**3,
+            traffic_downlink_bytes=29 * 1024**3,
+            last_uplink_snapshot=18 * 1024**3,
+            last_downlink_snapshot=29 * 1024**3,
+            traffic_stats_epoch="epoch-1",
+            desired_version=2,
+            actual_version=2,
+        )
+
+        grant_base = WhiteInternetQuotaGrant(
+            id=1,
+            subscription_id=1,
+            grant_type=WhiteInternetGrantType.BASE,
+            bytes_granted=50 * 1024**3,
+            bytes_remaining=3 * 1024**3,
+            price_rub=Decimal("250.00"),
+            expires_at=sub.expires_at,
+            created_at=now - timedelta(days=29),
+        )
+
+        grant_topup = WhiteInternetQuotaGrant(
+            id=2,
+            subscription_id=1,
+            grant_type=WhiteInternetGrantType.TOPUP,
+            bytes_granted=25 * 1024**3,
+            bytes_remaining=25 * 1024**3,
+            price_rub=Decimal("100.00"),
+            expires_at=sub.expires_at,
+            created_at=now - timedelta(days=5),
+        )
+
+        mock_session = AsyncMock()
+        mock_session.add = MagicMock()
+
+        with patch("database.repositories.white_internet_repo.get_subscription_with_lock", return_value=sub):
+            with patch(
+                "database.repositories.white_internet_repo._lock_all_grants",
+                return_value=[grant_base, grant_topup],
+            ):
+                with patch(
+                    "database.repositories.white_internet_repo.get_available_quota_bytes",
+                    return_value=75 * 1024**3,  # 50 GiB new base + 25 GiB carried topup
+                ):
+                    renewed = await white_internet_repo.renew_subscription_atomic(
+                        mock_session,
+                        subscription_id=1,
+                        quote_id=42,
+                        price_rub=Decimal("250.00"),
+                        duration_days=30,
+                        base_bytes=50 * 1024**3,
+                    )
+
+                    # Invariants:
+                    # 1. Period counters reset to 0
+                    self.assertEqual(renewed.traffic_used_bytes, 0)
+                    self.assertEqual(renewed.traffic_uplink_bytes, 0)
+                    self.assertEqual(renewed.traffic_downlink_bytes, 0)
+                    self.assertIsNone(renewed.last_uplink_snapshot)
+                    self.assertIsNone(renewed.last_downlink_snapshot)
+                    self.assertIsNone(renewed.traffic_stats_epoch)
+
+                    # 2. Limit is fresh available quota (50 GiB base + 25 GiB topup = 75 GiB)
+                    self.assertEqual(renewed.traffic_limit_bytes, 75 * 1024**3)
+
+                    # 3. Old base grant zeroed out
+                    self.assertEqual(grant_base.bytes_remaining, 0)
+
+                    # 4. Active topup grant extended to new expiration
+                    self.assertEqual(grant_topup.bytes_remaining, 25 * 1024**3)
+                    self.assertEqual(grant_topup.expires_at, renewed.expires_at)

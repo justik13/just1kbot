@@ -209,6 +209,17 @@ async def renew_subscription_atomic(
     sub.status_reason = None
     sub.desired_version += 1
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
+
+    # Period Usage Reset: Historical traffic events remain permanently preserved in
+    # WhiteInternetTrafficEvent records. Reset period counters so UI and Subscription-Userinfo
+    # reflect exact current period consumption.
+    sub.traffic_used_bytes = 0
+    sub.traffic_uplink_bytes = 0
+    sub.traffic_downlink_bytes = 0
+    sub.last_uplink_snapshot = None
+    sub.last_downlink_snapshot = None
+    sub.traffic_stats_epoch = None
+
     session.add(WhiteInternetQuotaGrant(
         subscription_id=sub.id, grant_type=WhiteInternetGrantType.BASE,
         bytes_granted=base_bytes, bytes_remaining=base_bytes, price_rub=price_rub,
@@ -216,7 +227,7 @@ async def renew_subscription_atomic(
     ))
     await session.flush()
     available = await get_available_quota_bytes(session, sub.id, now)
-    sub.traffic_limit_bytes = available + sub.traffic_used_bytes
+    sub.traffic_limit_bytes = available
     await session.flush()
     await session.refresh(sub)
     return sub
