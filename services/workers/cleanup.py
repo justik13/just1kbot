@@ -720,7 +720,11 @@ async def _cleanup_old_records():
                 # Terminal-boundary semantics for the whole payment lifecycle,
                 # mirroring apply_provider_transition's `canceled` branch:
                 # close the checkout, hide the UI, drop the payment URL.
-                stmt_payments = (
+                # RETURNING is race-safety: a webhook flipping pending→succeeded
+                # between the provider GET and this UPDATE yields no row for
+                # that payment, and the queue cancellation + audit event below
+                # then apply ONLY to payments actually transitioned here.
+                result_payments = await session.execute(
                     update(Payment)
                     .where(
                         Payment.id.in_(cancellable_ids),
@@ -735,37 +739,40 @@ async def _cleanup_old_records():
                         payment_url=None,
                         manual_review_reason="auto_expired_abandoned_pending_48h",
                     )
+                    .returning(Payment.id)
                 )
-                result_payments = await session.execute(stmt_payments)
-                payments_expired += result_payments.rowcount
-                # Queue synchronization: cancel still-queued provider
-                # operations so the pipeline never pushes a payment URL for
-                # (or re-reconciles) a locally expired checkout. In-flight
-                # (processing) operations are left alone - their finalizers
-                # handle the canceled state via the state machine.
-                await session.execute(
-                    update(PaymentProviderOperation)
-                    .where(
-                        PaymentProviderOperation.payment_id.in_(cancellable_ids),
-                        PaymentProviderOperation.status.in_(("pending", "retry")),
-                    )
-                    .values(
-                        status="cancelled",
-                        completed_at=now_utc(),
-                        last_error_code="payment_locally_expired",
-                    )
-                )
-                # Immutable audit trail: one event per expired payment.
-                for pid in cancellable_ids:
-                    session.add(
-                        PaymentEvent(
-                            payment_id=pid,
-                            event_type="payment_locally_expired",
-                            provider_status="canceled",
-                            reason="auto_expired_abandoned_pending_48h",
-                            source="cleanup_worker",
+                expired_ids = [row[0] for row in result_payments.all()]
+                payments_expired += len(expired_ids)
+                if expired_ids:
+                    # Queue synchronization: cancel still-queued provider
+                    # operations so the pipeline never pushes a payment URL for
+                    # (or re-reconciles) a locally expired checkout. In-flight
+                    # (processing) operations are left alone - their finalizers
+                    # handle the canceled state via the state machine.
+                    await session.execute(
+                        update(PaymentProviderOperation)
+                        .where(
+                            PaymentProviderOperation.payment_id.in_(expired_ids),
+                            PaymentProviderOperation.status.in_(("pending", "retry")),
+                        )
+                        .values(
+                            status="cancelled",
+                            completed_at=now_utc(),
+                            last_error_code="payment_locally_expired",
                         )
                     )
+                    # Immutable audit trail: one event per ACTUALLY expired
+                    # payment (not per GET-verified candidate).
+                    for pid in expired_ids:
+                        session.add(
+                            PaymentEvent(
+                                payment_id=pid,
+                                event_type="payment_locally_expired",
+                                provider_status="canceled",
+                                reason="auto_expired_abandoned_pending_48h",
+                                source="cleanup_worker",
+                            )
+                        )
 
     # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
     threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)

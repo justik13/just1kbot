@@ -47,21 +47,27 @@ title() {
 }
 
 # --- Гарантия персистентного значения vm.overcommit_memory=1 ---
-# Проверяется ЗНАЧЕНИЕ, а не наличие строки: уже существующая запись
-# `vm.overcommit_memory = 0` иначе тихо переживёт "успешную" установку и
-# откатит параметр после перезагрузки. /etc/sysctl.conf имеет наивысший
-# приоритет для systemd-sysctl (парсится последним), поэтому запись со
-# значением 1 здесь перекрывает любые `= 0` в /etc/sysctl.d/*.
-ensure_overcommit_persistence() {
-    local conf_file="${1:-${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}}"
-    # Normalize: collapse ANY number of existing entries (possibly conflicting
-    # values like `= 1` followed by `= 0`) into a single authoritative
-    # `= 1` line. A mere "some entry with value 1 exists" check is not enough -
-    # a later `= 0` line would win when sysctl applies the file sequentially.
-    if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$conf_file" 2>/dev/null; then
-        sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$conf_file" || return 1
+# Boot-time источник для systemd: /etc/sysctl.d/*.conf (sysctl.d(5)); файлы
+# упорядочиваются лексикографически и более позднее имя побеждает, поэтому
+# 99-just1kbot.conf перекрывает типовые дистрибутивные файлы (10-90).
+# /etc/sysctl.conf нормализуется ДОПОЛНИТЕЛЬНО: его читает procps-ng
+# (sysctl --system/-p, применяет последним) и старые сборки systemd —
+# так stale `= 0` не сможет выиграть ни в одном из путей загрузки.
+# Свертываются ВСЕ записи в одну `= 1`: наличие `= 1` не гарантирует
+# ничего, если за ней следует `= 0` (sysctl применяет файл последовательно).
+normalize_overcommit_file() {
+    local file="$1"
+    mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
+    if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$file" 2>/dev/null; then
+        sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$file" || return 1
     fi
-    echo "vm.overcommit_memory = 1" >> "$conf_file" 2>/dev/null || return 1
+    echo "vm.overcommit_memory = 1" >> "$file" 2>/dev/null || return 1
+    return 0
+}
+
+ensure_overcommit_persistence() {
+    normalize_overcommit_file "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
+    normalize_overcommit_file "${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}" || return 1
     return 0
 }
 
