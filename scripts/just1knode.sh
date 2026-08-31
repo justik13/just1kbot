@@ -1318,14 +1318,14 @@ EOF
     done
     ufw allow 80/tcp
     ufw allow 443/tcp
-    ufw status numbered 2>/dev/null | grep -E '8444/tcp|8444 ' | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
+    (ufw status numbered 2>/dev/null || true) | (grep -E '8444/tcp|8444 ' || true) | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
         [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
     done
     ufw delete allow 8444/tcp 2>/dev/null || true
     if [[ -n "${bot_ip}" ]]; then
-        ufw allow from "${bot_ip}" to any port 8444 proto tcp
+        ufw allow from "${bot_ip}" to any port 8444 proto tcp 2>/dev/null || true
     fi
-    ufw --force enable
+    ufw --force enable 2>/dev/null || true
 
     set_state_val "domain" "$domain"
     set_state_val "bot_ip" "$bot_ip"
@@ -1538,14 +1538,14 @@ EOF
             ufw allow "${p}/tcp" 2>/dev/null || true
         fi
     done
-    ufw status numbered 2>/dev/null | grep -E '10443/tcp|10443 ' | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
+    (ufw status numbered 2>/dev/null || true) | (grep -E '10443/tcp|10443 ' || true) | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
         [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
     done
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then
-        ufw allow from "${origin_ip}" to any port 10443 proto tcp
+        ufw allow from "${origin_ip}" to any port 10443 proto tcp 2>/dev/null || true
     fi
-    ufw --force enable
+    ufw --force enable 2>/dev/null || true
 
     set_state_val "role" "xray-exit"
     set_state_val "origin_ip" "$origin_ip"
