@@ -698,12 +698,19 @@ cmd_restore() {
             return 1
         fi
     fi
-
     # Изолированная временная директория с гарантированной очисткой
     local tmp_dir
     tmp_dir=$(mktemp -d -t just1kbot-restore-XXXXXX)
     local tmp_gz="${tmp_dir}/dump.sql.gz"
     local tmp_sql="${tmp_dir}/dump.sql"
+
+    # pg_user/pg_db were previously resolved as `local` inside cmd_backup and
+    # therefore undefined here (crash under `set -u`). Resolve them locally.
+    local pg_user pg_db
+    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
+    pg_user="${pg_user:-just1kbot}"
+    pg_db="${pg_db:-just1kbot_bot}"
 
     # Гарантируем запуск бота и удаление временных файлов при любых ошибках
     # shellcheck disable=SC2064
@@ -722,34 +729,71 @@ cmd_restore() {
     info "3/5. Остановка бота перед восстановлением..."
     docker compose stop bot
 
+    # Страховочный дамп текущего состояния БД сохраняется в ./backups/ (НЕ во
+    # временной директории): он должен пережить завершение restore, чтобы к
+    # нему можно было вернуться, если выбранный бэкап оказался неудачным.
     info "3.1/5. Создание предварительного страховочного дампа текущей БД..."
-    local pg_user pg_db
-    pg_user=$(grep -E "^POSTGRES_USER=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_db=$(grep -E "^POSTGRES_DB=" "${PROJECT_DIR}/.env" 2>/dev/null | cut -d'=' -f2- | tr -d " '\"" || echo "")
-    pg_user="${pg_user:-just1kbot}"
-    pg_db="${pg_db:-just1kbot_bot}"
-
-    local pre_restore_backup_file="${tmp_dir}/pre_restore_safety.sql"
-    docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" > "$pre_restore_backup_file" 2>/dev/null || true
+    local restore_ts
+    restore_ts=$(date +%Y%m%d_%H%M%S)
+    local pre_restore_backup_file="${PROJECT_DIR}/backups/pre_restore_${restore_ts}.sql.gz"
+    mkdir -p "${PROJECT_DIR}/backups"
+    # Safety dump is a hard precondition of the destructive phase. Fail-closed:
+    # pg_dump/gzip failure (pipefail is global) or an invalid archive aborts
+    # restore BEFORE any DROP DATABASE. No plaintext dump with loose perms.
+    umask 077
+    if ! docker compose exec -T db pg_dump -U "$pg_user" -d "$pg_db" 2>/dev/null | gzip -c > "$pre_restore_backup_file"; then
+        error "Не удалось создать страховочный дамп текущей БД. Восстановление отменено — база НЕ изменена."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! gzip -t "$pre_restore_backup_file" 2>/dev/null || [[ ! -s "$pre_restore_backup_file" ]]; then
+        error "Страховочный дамп пуст или повреждён. Восстановление отменено — база НЕ изменена."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
 
     info "4/5. Полная переинициализация базы данных и накат дампа..."
-    docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
-    docker compose exec -T db createdb -U "$pg_user" "$pg_db"
+    # Destructive phase is strict: any dropdb/createdb failure aborts BEFORE
+    # the database is left in a partially reinitialized state.
+    if ! docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1; then
+        error "Не удалось удалить текущую базу данных '$pg_db'. Восстановление отменено."
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
+    if ! docker compose exec -T db createdb -U "$pg_user" "$pg_db"; then
+        error "Не удалось создать базу данных '$pg_db' после удаления. Автоматический откат невозможен — восстановите исходное состояние вручную из: $pre_restore_backup_file"
+        docker compose start bot >/dev/null 2>&1 || true
+        return 1
+    fi
 
     if ! docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$tmp_sql"; then
         error "Ошибка при накате SQL дампа в PostgreSQL!"
         if [[ -s "$pre_restore_backup_file" ]]; then
             warn "Попытка отката к состоянию базы данных до начала операции восстановления..."
-            docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 || true
-            docker compose exec -T db createdb -U "$pg_user" "$pg_db"
-            docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 < "$pre_restore_backup_file" >/dev/null 2>&1 || true
-            warn "Исходное состояние базы данных возвращено."
+            # Rollback is also strict: if reinitialize+replay of the safety
+            # dump cannot be completed, say so loudly instead of pretending.
+            if docker compose exec -T db dropdb -U "$pg_user" --if-exists "$pg_db" >/dev/null 2>&1 \
+                && docker compose exec -T db createdb -U "$pg_user" "$pg_db" \
+                && gunzip -c "$pre_restore_backup_file" | docker compose exec -T db psql -U "$pg_user" -d "$pg_db" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+                warn "Исходное состояние базы данных возвращено."
+            else
+                warn "Автоматический откат не удался. Страховочный дамп сохранён: $pre_restore_backup_file — восстановите его вручную."
+            fi
         fi
+        docker compose start bot >/dev/null 2>&1 || true
         return 1
     fi
 
     rm -rf "$tmp_dir"
     trap - EXIT INT TERM
+
+    # Страховочный дамп сохранён в ./backups/ и переживает restore; храним
+    # ограниченное окно последних дампов, чтобы каталог не рос бесконечно.
+    find "${PROJECT_DIR}/backups" -name "pre_restore_*.sql.gz" -mtime +14 -delete 2>/dev/null || true
+    if [[ -s "$pre_restore_backup_file" ]]; then
+        chmod 600 "$pre_restore_backup_file" 2>/dev/null || true
+        log "Страховочный дамп состояния до восстановления сохранён: ${BOLD}${pre_restore_backup_file}${NC}"
+    fi
 
     info "5/5. Запуск контейнера бота..."
     docker compose start bot
@@ -816,6 +860,17 @@ cmd_doctor() {
         fi
     else
         info "Версия ядра Linux: $kernel_ver"
+    fi
+
+    # 0.1 Проверка памяти ядра для Redis
+    if [[ -f /proc/sys/vm/overcommit_memory ]]; then
+        local overcommit
+        overcommit="$(cat /proc/sys/vm/overcommit_memory 2>/dev/null || echo '0')"
+        if [[ "$overcommit" == "1" ]]; then
+            log "Параметр ядра vm.overcommit_memory=1 активен (Redis BGSAVE защищен)."
+        else
+            warn "vm.overcommit_memory=$overcommit. Рекомендуется установить 'sysctl vm.overcommit_memory=1' для предотвращения сбоев Redis BGSAVE."
+        fi
     fi
 
     # 1. Docker демон и сокет

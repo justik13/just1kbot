@@ -1,0 +1,182 @@
+import os
+import unittest
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
+
+os.environ.setdefault("BOT_TOKEN", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+os.environ.setdefault("ADMIN_IDS", "[100]")
+os.environ.setdefault("SUPPORT_USERNAME", "test_support")
+os.environ.setdefault("DB_ENCRYPTION_KEY", "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+os.environ.setdefault("REDIS_PASSWORD", "testpass")
+os.environ.setdefault("YOOKASSA_SHOP_ID", "12345")
+os.environ.setdefault("YOOKASSA_SECRET_KEY", "test_key")
+os.environ.setdefault("YOOKASSA_RETURN_URL", "https://t.me/test_bot?start={bot_username}")
+os.environ.setdefault("YOOKASSA_WEBHOOK_PORT", "8080")
+os.environ.setdefault("DOMAIN", "myrealdomain.com")
+os.environ.setdefault("SSL_EMAIL", "admin@myrealdomain.com")
+# NOTE: no DATABASE_URL setdefault here — this module must not flip the
+# skipUnless live-database marker of tests/test_database_startup.py.
+
+from services.workers.cleanup import _cleanup_old_records
+from services.yookassa_service import YooKassaErrorKind, YooKassaResult
+
+
+def _payment_row(payment_id=501, external_id="ext-501"):
+    return (payment_id, external_id)
+
+
+class ProviderVerifiedAutoExpireTests(unittest.IsolatedAsyncioTestCase):
+    """Pending payments older than PAYMENT_EXPIRATION_HOURS may only be
+    locally cancelled after the provider still reports pending (fail-closed)."""
+
+    def _make_scopes(self, pending_rows, expired_rows=None):
+        """Statement-type-driven harness, robust to the batched expiry loop:
+        Update statements after the first Select are the expire-cancel UPDATE;
+        the first Select returns the seeded rows, later Selects return empty
+        (loop drain).
+
+        `expired_rows` simulates the UPDATE..RETURNING result (which payments
+        actually transitioned pending→canceled). Defaults to all seeded rows.
+        """
+        from sqlalchemy.sql.dml import Update as SAUpdate
+
+        select_res = MagicMock()
+        select_res.all.return_value = pending_rows
+        empty_select = MagicMock()
+        empty_select.all.return_value = []
+        generic_res = MagicMock()
+        expired_rows = list(pending_rows) if expired_rows is None else expired_rows
+        update_res = MagicMock()
+        update_res.all.return_value = expired_rows
+        update_res.rowcount = len(expired_rows)
+        calls = {"scope_count": 0, "update_used": False, "stmts": [], "added": []}
+        state = {"selects": 0}
+
+        @asynccontextmanager
+        async def fake_scope():
+            calls["scope_count"] += 1
+            session = MagicMock()
+            session.add.side_effect = calls["added"].append
+
+            async def _execute(stmt):
+                calls["stmts"].append(stmt)
+                if isinstance(stmt, SAUpdate):
+                    if state["selects"] == 0:
+                        # Stuck-broadcast UPDATE precedes the expiry loop.
+                        return generic_res
+                    calls["update_used"] = True
+                    return update_res
+                state["selects"] += 1
+                return select_res if state["selects"] == 1 else empty_select
+
+            session.execute.side_effect = _execute
+            yield session
+
+        return fake_scope, calls
+
+    def _patches(self, fake_scope, mock_svc, get_result_return):
+        return (
+            patch("services.workers.cleanup.session_scope", side_effect=fake_scope),
+            patch(
+                "services.workers.cleanup.clear_audit_logs",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch(
+                "services.workers.cleanup._batch_delete_matching",
+                new_callable=AsyncMock,
+                return_value=0,
+            ),
+            patch("services.workers.cleanup.YooKassaService", mock_svc),
+        )
+
+    async def test_provider_pending_payment_is_cancelled(self):
+        fake_scope, calls = self._make_scopes([_payment_row()])
+        mock_svc = MagicMock()
+        mock_svc.get_payment_result = AsyncMock(
+            return_value=YooKassaResult(True, value={"id": "ext-501", "status": "pending"})
+        )
+        patches = self._patches(fake_scope, mock_svc, None)
+        with patches[0], patches[1], patches[2], patches[3]:
+            await _cleanup_old_records()
+        mock_svc.get_payment_result.assert_awaited_once_with("ext-501")
+        self.assertTrue(calls["update_used"])
+
+    async def test_provider_succeeded_payment_is_never_cancelled(self):
+        fake_scope, calls = self._make_scopes([_payment_row()])
+        mock_svc = MagicMock()
+        mock_svc.get_payment_result = AsyncMock(
+            return_value=YooKassaResult(True, value={"id": "ext-501", "status": "succeeded"})
+        )
+        patches = self._patches(fake_scope, mock_svc, None)
+        with patches[0], patches[1], patches[2], patches[3]:
+            await _cleanup_old_records()
+        mock_svc.get_payment_result.assert_awaited_once_with("ext-501")
+        self.assertFalse(calls["update_used"])
+
+    async def test_provider_error_is_fail_closed(self):
+        fake_scope, calls = self._make_scopes([_payment_row()])
+        mock_svc = MagicMock()
+        mock_svc.get_payment_result = AsyncMock(
+            return_value=YooKassaResult(False, error_kind=YooKassaErrorKind.NETWORK_ERROR)
+        )
+        patches = self._patches(fake_scope, mock_svc, None)
+        with patches[0], patches[1], patches[2], patches[3]:
+            await _cleanup_old_records()
+        self.assertFalse(calls["update_used"])
+
+    async def test_missing_external_id_is_fail_closed(self):
+        fake_scope, calls = self._make_scopes([_payment_row(external_id=None)])
+        mock_svc = MagicMock()
+        mock_svc.get_payment_result = AsyncMock()
+        patches = self._patches(fake_scope, mock_svc, None)
+        with patches[0], patches[1], patches[2], patches[3]:
+            await _cleanup_old_records()
+        mock_svc.get_payment_result.assert_not_awaited()
+        self.assertFalse(calls["update_used"])
+
+    async def test_queue_cancel_and_event_apply_only_to_returned_rows(self):
+        """The review-requested cleanup race: two payments verified pending
+        by the provider, but a webhook flips #502 to succeeded between the
+        provider GET and the local UPDATE. The UPDATE..RETURNING transitions
+        only #501, so the provider-operation cancellation and the audit
+        event must apply to #501 ONLY (never to a payment that was not
+        actually locally expired)."""
+        from sqlalchemy.sql.dml import Update as SAUpdate
+
+        fake_scope, calls = self._make_scopes(
+            [_payment_row(501, "ext-501"), _payment_row(502, "ext-502")],
+            expired_rows=[(501, "ext-501")],
+        )
+        mock_svc = MagicMock()
+        mock_svc.get_payment_result = AsyncMock(
+            return_value=YooKassaResult(True, value={"id": "ext", "status": "pending"})
+        )
+        patches = self._patches(fake_scope, mock_svc, None)
+        with patches[0], patches[1], patches[2], patches[3]:
+            await _cleanup_old_records()
+
+        ppo_updates = [
+            stmt
+            for stmt in calls["stmts"]
+            if isinstance(stmt, SAUpdate)
+            and getattr(stmt.table, "name", None) == "payment_provider_operations"
+        ]
+        self.assertEqual(len(ppo_updates), 1)
+        compiled = str(
+            ppo_updates[0].compile(
+                dialect=postgresql_dialect(), compile_kwargs={"literal_binds": True}
+            )
+        )
+        self.assertIn("501", compiled)
+        self.assertNotIn("502", compiled)
+        # The audit event is written for the actually-expired payment only.
+        added_events = [obj for obj in calls["added"] if type(obj).__name__ == "PaymentEvent"]
+        self.assertEqual([ev.payment_id for ev in added_events], [501])
+
+
+if __name__ == "__main__":
+    unittest.main()

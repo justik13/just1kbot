@@ -268,6 +268,8 @@ class DatabaseReencryptionScriptTests(unittest.IsolatedAsyncioTestCase):
 
             with patch("scripts.reencrypt_database.session_scope") as mock_session_scope:
                 mock_session = AsyncMock()
+                # Maintenance guard must see maintenance explicitly enabled.
+                mock_session.scalar = AsyncMock(return_value=True)
                 mock_session_scope.return_value.__aenter__.return_value = mock_session
 
                 server1 = MagicMock(id=1, api_key="secret_key_1")
@@ -332,7 +334,7 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
 
                 with patch("scripts.reencrypt_database.session_scope", side_effect=test_session_scope):
                     try:
-                        await reencrypt_all()
+                        await reencrypt_all(force=True)
                     except Exception:
                         pass
         await self.engine.dispose()
@@ -389,7 +391,10 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(InvalidToken):
             f_new.decrypt(raw_ciphertext_old.encode("utf-8"))
 
-        # 3. Run reencrypt_all() with NEW_KEY as primary and OLD_KEY in DB_ENCRYPTION_KEYS
+        # 3. Run reencrypt_all() with NEW_KEY as primary and OLD_KEY in DB_ENCRYPTION_KEYS.
+        # force=True mirrors the operator contract: the live test schema has
+        # MaintenanceMode(id=1, is_enabled=False) seeded, so the hard guard
+        # must be consciously bypassed exactly like `reencrypt --force` does.
         env_new = {
             **BASE_MOCK_ENV,
             "DB_ENCRYPTION_KEY": self._new_key,
@@ -407,7 +412,7 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
                     await session.commit()
 
             with patch("scripts.reencrypt_database.session_scope", side_effect=test_session_scope):
-                await reencrypt_all()
+                await reencrypt_all(force=True)
 
         # 4. Read raw SQL ciphertext to verify it is NOW encrypted with NEW_KEY!
         async with self.engine.connect() as conn:
@@ -426,3 +431,100 @@ class DatabaseReencryptionPostgresTests(unittest.IsolatedAsyncioTestCase):
         # OLD_KEY CANNOT decrypt the new ciphertext anymore
         with self.assertRaises(InvalidToken):
             f_old.decrypt(raw_ciphertext_new.encode("utf-8"))
+
+
+class ReencryptionMaintenanceGuardTests(unittest.IsolatedAsyncioTestCase):
+    """The hard maintenance guard: rotation proceeds ONLY with maintenance
+    explicitly enabled; missing row / OFF both abort unless force=True
+    (mirrors the `--force` operator flag)."""
+
+    def _scope(self, mock_session):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def scope():
+            yield mock_session
+
+        return scope
+
+    async def test_guard_aborts_when_maintenance_off(self):
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = False
+        with patch(
+            "scripts.reencrypt_database.session_scope",
+            side_effect=self._scope(mock_session),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Maintenance mode must be enabled"):
+                await reencrypt_all()
+        mock_session.scalar.assert_awaited_once()
+
+    async def test_guard_aborts_when_maintenance_row_missing(self):
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = None
+        with patch(
+            "scripts.reencrypt_database.session_scope",
+            side_effect=self._scope(mock_session),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Maintenance mode must be enabled"):
+                await reencrypt_all()
+        mock_session.scalar.assert_awaited_once()
+
+    async def test_guard_proceeds_when_maintenance_enabled(self):
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = True
+        empty = MagicMock()
+        empty.all.return_value = []
+        mock_session.scalars.return_value = empty
+        exec_res = MagicMock()
+        exec_res.all.return_value = []
+        mock_session.execute.return_value = exec_res
+
+        env = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+            "DB_ENCRYPTION_KEYS": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            from config.settings import get_settings
+
+            get_settings.cache_clear()
+            _get_fernet_engine.cache_clear()
+            try:
+                with patch(
+                    "scripts.reencrypt_database.session_scope",
+                    side_effect=self._scope(mock_session),
+                ):
+                    await reencrypt_all()
+            finally:
+                get_settings.cache_clear()
+                _get_fernet_engine.cache_clear()
+
+    async def test_guard_force_bypasses_and_completes(self):
+        mock_session = AsyncMock()
+        mock_session.scalar.return_value = False
+        empty = MagicMock()
+        empty.all.return_value = []
+        mock_session.scalars.return_value = empty
+        exec_res = MagicMock()
+        exec_res.all.return_value = []
+        mock_session.execute.return_value = exec_res
+
+        env = {
+            **BASE_MOCK_ENV,
+            "DB_ENCRYPTION_KEY": Fernet.generate_key().decode("utf-8"),
+            "DB_ENCRYPTION_KEYS": "",
+        }
+        with patch.dict("os.environ", env, clear=True):
+            from config.settings import get_settings
+
+            get_settings.cache_clear()
+            _get_fernet_engine.cache_clear()
+            try:
+                with patch(
+                    "scripts.reencrypt_database.session_scope",
+                    side_effect=self._scope(mock_session),
+                ):
+                    await reencrypt_all(force=True)
+            finally:
+                get_settings.cache_clear()
+                _get_fernet_engine.cache_clear()

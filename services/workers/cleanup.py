@@ -10,13 +10,19 @@ from bot.texts.runtime.notifications import NOTIFY_DEVICES_DELETED
 from cachetools import TTLCache
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from config.constants import AdminAuditAction, GRACE_PERIOD_HOURS
+from config.constants import (
+    AdminAuditAction,
+    GRACE_PERIOD_HOURS,
+    PAYMENT_EXPIRATION_HOURS,
+)
 from database.connection import session_scope
 from database.models import (
     APIOperation,
     BroadcastProgress,
     HubMessage,
     Payment,
+    PaymentEvent,
+    PaymentProviderOperation,
     Server,
     User,
     VPNProfile,
@@ -25,6 +31,7 @@ from database.models import (
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
 from services.profile_deletion_service import ProfileDeletionService
+from services.yookassa_service import YooKassaService
 from utils.datetime_helpers import now_utc
 
 logger = logging.getLogger("BackgroundWorker")
@@ -39,6 +46,14 @@ PENDING_RETRY_INTERVAL = 3600
 CLEANUP_START_DELAY = 60.0
 CLEANUP_LOOP_INTERVAL = 900.0
 OLD_RECORDS_INTERVAL = 86400.0
+# Auto-expire throughput: each daily pass drains the pending-expiry backlog
+# within a wall-clock budget (and at most MAX_BATCHES batches ≈ 400
+# verifications), so a large backlog shrinks every day without one unbounded
+# or stalled run.
+EXPIRE_VERIFY_BATCH_SIZE = 20
+EXPIRE_MAX_BATCHES_PER_PASS = 20
+EXPIRE_VERIFY_PARALLELISM = 5
+EXPIRE_TIME_BUDGET_SECONDS = 120.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
@@ -608,24 +623,156 @@ async def _cleanup_old_records():
         HubMessage.created_at < threshold_hub,
     )
 
-    # Auto-expire abandoned pending payments older than 48 hours (short atomic transaction)
-    threshold_payments = current_time - timedelta(hours=48)
-    async with session_scope() as session:
-        stmt_payments = (
-            update(Payment)
-            .where(
-                Payment.provider_status == "pending",
-                Payment.created_at < threshold_payments,
+    # Auto-expire abandoned pending payments older than PAYMENT_EXPIRATION_HOURS.
+    # This is a provider-verified LOCAL cancellation (not a provider-side
+    # cancel): the local row is moved to canceled only after GET
+    # /payments/{id} still reports pending. If the provider later confirms a
+    # paid payment, apply_provider_transition treats it as
+    # canceled_to_succeeded → manual_review — the expected reconciliation
+    # path, never a silent credit. Missing external_id or any transport error
+    # skips the row this cycle (fail-closed).
+    # Verifications run in bounded parallel batches: 20 sequential GETs with a
+    # 15s timeout could stall the once-a-day old-records pass for ~5 minutes.
+    threshold_payments = current_time - timedelta(hours=PAYMENT_EXPIRATION_HOURS)
+    payments_expired = 0
+    last_id = 0
+    # Bounded drain: up to EXPIRE_MAX_BATCHES_PER_PASS batches per daily pass,
+    # each batch committed separately, so a large backlog shrinks every day
+    # without one unbounded run.
+    async def _verify(row: tuple[int, str], semaphore: asyncio.Semaphore):
+        payment_id, external_id = row
+        async with semaphore:
+            result = await YooKassaService.get_payment_result(external_id)
+        return payment_id, result
+
+    expire_deadline = time.monotonic() + EXPIRE_TIME_BUDGET_SECONDS
+    for _batch in range(EXPIRE_MAX_BATCHES_PER_PASS):
+        if time.monotonic() >= expire_deadline:
+            logger.warning(
+                "Auto-expire time budget (%.0fs) spent; remaining backlog continues next pass",
+                EXPIRE_TIME_BUDGET_SECONDS,
             )
-            .values(
-                provider_status="canceled",
-                fulfillment_status="failed",
-                reconciliation_status="ok",
-                manual_review_reason="auto_expired_abandoned_pending_48h",
+            break
+        async with session_scope() as session:
+            pending_rows = (
+                await session.execute(
+                    select(Payment.id, Payment.external_id)
+                    .where(
+                        Payment.provider_status == "pending",
+                        Payment.created_at < threshold_payments,
+                        Payment.id > last_id,
+                    )
+                    .order_by(Payment.id)
+                    .limit(EXPIRE_VERIFY_BATCH_SIZE)
+                )
+            ).all()
+        if not pending_rows:
+            break
+        pending_ids = [pid for pid, _ext in pending_rows]
+        if not pending_ids:
+            break
+        last_id = pending_ids[-1]
+
+        verifiable = [(pid, ext) for pid, ext in pending_rows if ext]
+        for payment_id, _external_id in pending_rows:
+            if not _external_id:
+                logger.warning(
+                    "Auto-expire skipped for payment %s: no external_id, provider verification impossible",
+                    payment_id,
+                )
+
+        cancellable_ids: list[int] = []
+        if verifiable:
+            semaphore = asyncio.Semaphore(EXPIRE_VERIFY_PARALLELISM)
+
+            verify_results = await asyncio.gather(
+                *(_verify(row, semaphore) for row in verifiable),
+                return_exceptions=True,
             )
-        )
-        result_payments = await session.execute(stmt_payments)
-        payments_expired = result_payments.rowcount
+        else:
+            verify_results = []
+        for item in verify_results:
+            if isinstance(item, Exception) or not isinstance(item, tuple):
+                logger.warning(
+                    "Auto-expire verification task failed unexpectedly: %r", item
+                )
+                continue
+            payment_id, result = item
+            if not result.ok:
+                logger.warning(
+                    "Auto-expire skipped for payment %s: provider verification failed (%s)",
+                    payment_id,
+                    result.error_kind.value if result.error_kind else "unknown",
+                )
+                continue
+            observed = str((result.value or {}).get("status") or "unknown")
+            if observed == "pending":
+                cancellable_ids.append(payment_id)
+            else:
+                logger.info(
+                    "Auto-expire skipped for payment %s: provider status %s (left for stale-topup settlement)",
+                    payment_id,
+                    observed,
+                )
+
+        if cancellable_ids:
+            async with session_scope() as session:
+                # Terminal-boundary semantics for the whole payment lifecycle,
+                # mirroring apply_provider_transition's `canceled` branch:
+                # close the checkout, hide the UI, drop the payment URL.
+                # RETURNING is race-safety: a webhook flipping pending→succeeded
+                # between the provider GET and this UPDATE yields no row for
+                # that payment, and the queue cancellation + audit event below
+                # then apply ONLY to payments actually transitioned here.
+                result_payments = await session.execute(
+                    update(Payment)
+                    .where(
+                        Payment.id.in_(cancellable_ids),
+                        Payment.provider_status == "pending",
+                    )
+                    .values(
+                        provider_status="canceled",
+                        fulfillment_status="failed",
+                        reconciliation_status="ok",
+                        checkout_status="abandoned",
+                        ui_visible=False,
+                        payment_url=None,
+                        manual_review_reason="auto_expired_abandoned_pending_48h",
+                    )
+                    .returning(Payment.id)
+                )
+                expired_ids = [row[0] for row in result_payments.all()]
+                payments_expired += len(expired_ids)
+                if expired_ids:
+                    # Queue synchronization: cancel still-queued provider
+                    # operations so the pipeline never pushes a payment URL for
+                    # (or re-reconciles) a locally expired checkout. In-flight
+                    # (processing) operations are left alone - their finalizers
+                    # handle the canceled state via the state machine.
+                    await session.execute(
+                        update(PaymentProviderOperation)
+                        .where(
+                            PaymentProviderOperation.payment_id.in_(expired_ids),
+                            PaymentProviderOperation.status.in_(("pending", "retry")),
+                        )
+                        .values(
+                            status="cancelled",
+                            completed_at=now_utc(),
+                            last_error_code="payment_locally_expired",
+                        )
+                    )
+                    # Immutable audit trail: one event per ACTUALLY expired
+                    # payment (not per GET-verified candidate).
+                    for pid in expired_ids:
+                        session.add(
+                            PaymentEvent(
+                                payment_id=pid,
+                                event_type="payment_locally_expired",
+                                provider_status="canceled",
+                                reason="auto_expired_abandoned_pending_48h",
+                                source="cleanup_worker",
+                            )
+                        )
 
     # Prune old succeeded/dead webhook inbox records in per-batch committed transactions
     threshold_webhooks = current_time - timedelta(days=WEBHOOK_INBOX_RETENTION_DAYS)

@@ -545,6 +545,17 @@ class Payment(Base):
                 "provider_status = 'succeeded' AND provider_confirmed_at IS NOT NULL AND fulfillment_status NOT IN ('succeeded', 'reversed', 'manual_review')"
             ),
         ),
+        Index(
+            "ix_payments_auto_fulfill_retry",
+            "created_at",
+            postgresql_where=text(
+                "provider_status = 'succeeded' "
+                "AND provider_confirmed_at IS NOT NULL "
+                "AND fulfillment_status = 'succeeded' "
+                "AND topup_context ? 'auto_fulfill_action' "
+                "AND topup_context->>'auto_fulfill_status' = 'failed'"
+            ),
+        ),
         CheckConstraint(
             sql_enum_in("provider_status", PaymentProviderStatus),
             name="ck_payments_provider_status",

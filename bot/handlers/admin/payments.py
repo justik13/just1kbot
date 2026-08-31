@@ -154,6 +154,25 @@ async def _show_payments_list(
         logger.debug("_show_payments_list edit_text failed: %s", e)
 
 
+@router.callback_query(F.data == "stale_alerts:dismiss")
+async def dismiss_stale_alert(callback: CallbackQuery):
+    """Dismiss semantics: hide the card now, keep it silent while the
+    underlying state is unchanged, re-deliver a fresh card on change."""
+    if not is_admin(callback.from_user.id):
+        await callback.answer(texts.ERROR_ACCESS_DENIED, show_alert=True)
+        return
+    from services.workers.payments import dismiss_stale_alert_card
+
+    dismiss_stale_alert_card(callback.from_user.id)
+    try:
+        await callback.message.delete()
+    except Exception:
+        logger.debug(
+            "Stale alert dismiss: message %s already gone", callback.message.message_id
+        )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "admin_payments")
 async def show_payments_list(
     callback: CallbackQuery,

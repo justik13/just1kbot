@@ -10,7 +10,7 @@
 |---|---|---|
 | **Core Framework** | Python 3.12, `aiogram 3.x`, `aiohttp` | Асинхронный Telegram-бот и HTTP/Webhook сервер |
 | **База данных** | PostgreSQL 16, `SQLAlchemy 2.0 (asyncio)`, `asyncpg`, `Alembic` | Реляционное хранилище с транзакционной целостностью и row-level locking |
-| **Кэш & Блокировки** | Redis 7, `redis-py (asyncio)` | Rate limiters, FSM storage, single-flight locks, deduplication |
+| **FSM Storage** | Redis 7, `redis-py (asyncio)` | FSM-состояния бота с TTL (24h) и socket-таймаутами. Rate limiting, single-flight, дедупликация и распределённые блокировки — НЕ на Redis: rate limiting в памяти (TTLCache), координация и fencing — в PostgreSQL (`pg_advisory_xact_lock`, `FOR UPDATE SKIP LOCKED`, lease по `locked_by`+`attempts`). |
 | **Reverse Proxy** | Caddy 2 | TLS-терминация, HSTS, X-Content-Type-Options, защита от атак |
 | **VPN Core API** | `kyoresuas/amnezia-api` (Fastify / AWG 2.0) | Сторонний REST API для управления пирами AmneziaWG на серверах |
 | **Платежи** | ЮKassa API v3 (webhook inbox, reconciliation) | Обработка платежей с проверкой IP, статусов и идемпотентности |
