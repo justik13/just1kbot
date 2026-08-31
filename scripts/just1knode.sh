@@ -930,7 +930,8 @@ cmd_install_xray_origin() {
         echo -e "${CYAN}📌 Шаг 2/8: IP-адрес хоста Telegram-бота${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера бота (выполните 'curl ifconfig.me' на сервере бота)."
         echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт API 8444 будет открыт в UFW строго для этого IP-адреса."
-        read -r -p "Введите IP-адрес Telegram-бота: " bot_ip
+        read -r -p "Введите IP-адрес Telegram-бота [по умолчанию: 127.0.0.1]: " input_bot_ip
+        bot_ip="${input_bot_ip:-127.0.0.1}"
     fi
     if [[ -z "$exit_de_host" ]]; then
         echo -e "${CYAN}📌 Шаг 3/8: Подключение к Exit-серверу Германии (DE)${NC}"
@@ -973,14 +974,20 @@ cmd_install_xray_origin() {
     exit_nl_sni="${exit_nl_sni:-$exit_de_sni}"
 
     if [[ -z "$path_de" ]]; then
+        local gen_path_de
+        gen_path_de="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
         echo -e "${CYAN}📌 Шаг 6/8: URL-путь XHTTP для Германии (DE)${NC}"
-        read -r -p "Введите путь XHTTP DE [по умолчанию: /stream/v1/de]: " path_de
-        path_de="${path_de:-/stream/v1/de}"
+        echo -e "   ${YELLOW}💡 Безопасность:${NC} Уникальный случайный путь предотвращает DPI-сигнатурный анализ."
+        read -r -p "Введите путь XHTTP DE [по умолчанию: ${gen_path_de}]: " input_path_de
+        path_de="${input_path_de:-$gen_path_de}"
     fi
     if [[ -z "$path_nl" ]]; then
+        local gen_path_nl
+        gen_path_nl="/xhttp-$(openssl rand -hex 6 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(6))')"
         echo -e "${CYAN}📌 Шаг 7/8: URL-путь XHTTP для Нидерландов (NL)${NC}"
-        read -r -p "Введите путь XHTTP NL [по умолчанию: /stream/v1/nl]: " path_nl
-        path_nl="${path_nl:-/stream/v1/nl}"
+        echo -e "   ${YELLOW}💡 Безопасность:${NC} Уникальный случайный путь предотвращает DPI-сигнатурный анализ."
+        read -r -p "Введите путь XHTTP NL [по умолчанию: ${gen_path_nl}]: " input_path_nl
+        path_nl="${input_path_nl:-$gen_path_nl}"
     fi
     if [[ -z "$email" ]]; then
         echo -e "${CYAN}📌 Шаг 8/8: Email для SSL-сертификата Let's Encrypt (Origin)${NC}"
