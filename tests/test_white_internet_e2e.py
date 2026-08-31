@@ -191,7 +191,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                         resp = await self.client.get(f"/sub/wl/{sub.token}")
                         self.assertEqual(resp.status, 200)
                         self.assertEqual(resp.headers.get("Profile-Title"), "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==")
-                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "1")
+                        self.assertEqual(resp.headers.get("Profile-Update-Interval"), "12")
                         self.assertEqual(resp.headers.get("hide-url"), "1")
                         self.assertEqual(resp.headers.get("no-limit-enabled"), "1")
 

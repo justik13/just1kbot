@@ -27,6 +27,7 @@ from database.models import (
     User,
     VPNProfile,
     WebhookInbox,
+    WhiteInternetTrafficEvent,
 )
 from database.repositories.audit_repo import clear_audit_logs
 from services.amnezia_client import AmneziaClient
@@ -57,6 +58,7 @@ EXPIRE_TIME_BUDGET_SECONDS = 120.0
 
 AUDIT_LOG_RETENTION_DAYS = 180
 WEBHOOK_INBOX_RETENTION_DAYS = 30
+WHITE_INTERNET_TRAFFIC_EVENTS_RETENTION_DAYS = 30
 
 _last_old_cleanup: float = 0.0
 
@@ -782,21 +784,30 @@ async def _cleanup_old_records():
         WebhookInbox.received_at < threshold_webhooks,
     )
 
+    # Prune immutable traffic event logs older than retention period
+    threshold_traffic_events = current_time - timedelta(days=WHITE_INTERNET_TRAFFIC_EVENTS_RETENTION_DAYS)
+    traffic_events_deleted = await _batch_delete_matching(
+        WhiteInternetTrafficEvent,
+        WhiteInternetTrafficEvent.created_at < threshold_traffic_events,
+    )
+
     if (
         broadcasts_deleted > 0
         or deleted_logs > 0
         or hub_deleted > 0
         or payments_expired > 0
         or webhooks_deleted > 0
+        or traffic_events_deleted > 0
     ):
         logger.info(
             "Cleanup: %s old broadcasts, %s old audit logs, "
             "%s old hub_messages deleted, %s abandoned pending payments expired, "
-            "%s old webhooks deleted",
+            "%s old webhooks deleted, %s old traffic events deleted",
             broadcasts_deleted,
             deleted_logs,
             hub_deleted,
             payments_expired,
             webhooks_deleted,
+            traffic_events_deleted,
         )
 

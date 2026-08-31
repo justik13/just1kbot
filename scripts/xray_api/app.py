@@ -212,13 +212,15 @@ def sync_client(
             failed_inbounds.append(tag)
 
     if failed_inbounds:
-        # Atomic rollback: if activating and one inbound failed, remove user from already added inbounds
-        if desired_state == "active":
-            for rb_tag in succeeded_inbounds:
-                try:
+        # Atomic rollback: keep inbounds consistent if any inbound operation fails
+        for rb_tag in succeeded_inbounds:
+            try:
+                if desired_state == "active":
                     grpc_client.remove_user(rb_tag, client_uuid)
-                except Exception as rb_exc:
-                    logger.error("Rollback failed for user %s on inbound %s: %s", _mask_uuid(client_uuid), rb_tag, rb_exc)
+                else:
+                    grpc_client.add_user(rb_tag, client_uuid)
+            except Exception as rb_exc:
+                logger.error("Rollback failed for user %s on inbound %s: %s", _mask_uuid(client_uuid), rb_tag, rb_exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",

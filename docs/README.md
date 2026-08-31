@@ -13,6 +13,9 @@
 ### 2. [Architecture & Security Reference](architecture_and_security.md)
 * **Назначение:** Архитектура бэкенда, база данных PostgreSQL и модели SQLAlchemy, MultiFernet шифрование данных, фоновые воркеры уведомлений и платежей, Rate Limiting и руководство по обновлению продакшена через `just1kbot update`.
 
+### 3. [White Internet («Белый Интернет») Architecture & Operations](white_internet.md)
+* **Назначение:** Архитектура XHTTP (SplitHTTP) over CDN, Nginx OPTIONS->POST трансляция, VLESS Vision туннели, биллинг грантов и руководство по установке узлов через `just1knode`.
+
 ---
 
 ## 🛠 Быстрые команды для разработки

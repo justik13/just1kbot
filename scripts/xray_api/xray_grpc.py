@@ -60,38 +60,15 @@ class XrayGrpcClient:
             return False
         try:
             channel = self._get_channel()
-            # 1. Verify StatsService responsiveness
+            # Verify Xray API responsiveness via lightweight read-only StatsService query
             stub = stats_grpc.StatsServiceStub(channel)
             stub.QueryStats(
                 stats_cmd.QueryStatsRequest(pattern="", reset=False),
                 timeout=min(self.timeout, 2.0),
             )
-
-            # 2. Verify HandlerService responsiveness via non-destructive probe
-            handler_stub = proxyman_grpc.HandlerServiceStub(channel)
-            probe_op = typed_message_pb2.TypedMessage(
-                type="xray.app.proxyman.command.AddUserOperation",
-                value=b"",
-            )
-            try:
-                handler_stub.AlterInbound(
-                    proxyman_cmd.AlterInboundRequest(tag="__health_probe__", operation=probe_op),
-                    timeout=min(self.timeout, 2.0),
-                )
-            except grpc.RpcError as probe_exc:
-                if probe_exc.code() not in (
-                    grpc.StatusCode.OK,
-                    grpc.StatusCode.NOT_FOUND,
-                    grpc.StatusCode.INVALID_ARGUMENT,
-                ):
-                    logger.debug("HandlerService probe error: %s (%s)", probe_exc.code(), probe_exc.details())
-                    self.close()
-                    return False
-
             return True
-
         except grpc.RpcError as exc:
-            if exc.code() in (grpc.StatusCode.OK, grpc.StatusCode.NOT_FOUND, grpc.StatusCode.INVALID_ARGUMENT):
+            if exc.code() in (grpc.StatusCode.OK, grpc.StatusCode.NOT_FOUND):
                 return True
             logger.debug("gRPC health check RPC error: %s (%s)", exc.code(), exc.details())
             self.close()

@@ -46,10 +46,20 @@ ADMIN_SERVER_DELETE_BLOCKED_PENDING = """⚠️ <b>Удаление сервер
 
 ADMIN_SERVER_DELETE_BLOCKED_PENDING_CLIENT = "На сервере есть незавершённое создание клиента. Дождитесь reconciliation и повторите удаление."
 
+ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_ALERT = "Удаление заблокировано: к серверу привязано {count} активных подписок White Internet. Сначала отключите их."
+
+ADMIN_SERVER_DELETE_BLOCKED_ACTIVE_WL_TEXT = """❌ <b>Удаление сервера невозможно</b>
+
+К серверу <b>{name}</b> привязано активных подписок Белый Интернет: <b>{count}</b>.
+
+Перед удалением сервера необходимо отключить или перенести активные подписки."""
+
 ADMIN_SERVER_DELETE_CONFIRM = """⚠️ <b>Удаление сервера</b>
 
 Вы уверены, что хотите удалить сервер {flag} <b>{name}</b>?
 📱 Активных устройств на сервере: <b>{profiles_count}</b>"""
+
+ADMIN_SERVER_DELETE_WL_SUBS_NOTE = "\n\n🌐 <i>К серверу также привязано подписок Белый Интернет: {count}</i>"
 
 ADMIN_SERVER_DELETE_SUCCESS_NOTICE = "✅ Сервер {v0} удалён ({v1} устр.)"
 

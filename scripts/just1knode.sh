@@ -846,88 +846,144 @@ cmd_install_xray_origin() {
 
     local domain=""
     local bot_ip=""
+    local exit_de_conn=""
     local exit_de_host=""
+    local exit_de_port="10443"
     local exit_de_uuid=""
+    local exit_de_pubkey=""
+    local exit_de_shortid=""
+    local exit_de_sni="dl.google.com"
+
+    local exit_nl_conn=""
     local exit_nl_host=""
+    local exit_nl_port="10443"
     local exit_nl_uuid=""
+    local exit_nl_pubkey=""
+    local exit_nl_shortid=""
+    local exit_nl_sni="dl.google.com"
+
     local email=""
     local api_key=""
     local path_de=""
     local path_nl=""
 
-    # Разбор параметров CLI (позиционные или именованные)
+    # Разбор параметров CLI
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --domain) domain="$2"; shift 2 ;;
             --bot-ip) bot_ip="$2"; shift 2 ;;
+            --exit-de|--exit-de-conn) exit_de_conn="$2"; shift 2 ;;
             --exit-de-host) exit_de_host="$2"; shift 2 ;;
             --exit-de-uuid) exit_de_uuid="$2"; shift 2 ;;
+            --exit-de-pubkey) exit_de_pubkey="$2"; shift 2 ;;
+            --exit-de-shortid) exit_de_shortid="$2"; shift 2 ;;
+            --exit-de-sni) exit_de_sni="$2"; shift 2 ;;
+            --exit-nl|--exit-nl-conn) exit_nl_conn="$2"; shift 2 ;;
             --exit-nl-host) exit_nl_host="$2"; shift 2 ;;
             --exit-nl-uuid) exit_nl_uuid="$2"; shift 2 ;;
+            --exit-nl-pubkey) exit_nl_pubkey="$2"; shift 2 ;;
+            --exit-nl-shortid) exit_nl_shortid="$2"; shift 2 ;;
+            --exit-nl-sni) exit_nl_sni="$2"; shift 2 ;;
             --email) email="$2"; shift 2 ;;
             --api-key) api_key="$2"; shift 2 ;;
             --path-de) path_de="$2"; shift 2 ;;
             --path-nl) path_nl="$2"; shift 2 ;;
             *)
-                # Если позиционные аргументы
                 if [[ -z "$domain" ]]; then domain="$1"
                 elif [[ -z "$bot_ip" ]]; then bot_ip="$1"
-                elif [[ -z "$exit_de_host" ]]; then exit_de_host="$1"
-                elif [[ -z "$exit_de_uuid" ]]; then exit_de_uuid="$1"
-                elif [[ -z "$exit_nl_host" ]]; then exit_nl_host="$1"
-                elif [[ -z "$exit_nl_uuid" ]]; then exit_nl_uuid="$1"
+                elif [[ -z "$exit_de_conn" ]]; then exit_de_conn="$1"
                 fi
                 shift
                 ;;
         esac
     done
 
-    # Интерактивный запрос недостающих параметров с подробными подсказками
+    # Парсинг строки подключения Exit DE, если передана в формате IP:PORT:UUID:PUBKEY:SHORTID:SNI
+    if [[ -n "$exit_de_conn" ]]; then
+        IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$exit_de_conn"
+        exit_de_host="${p_host:-$exit_de_host}"
+        exit_de_port="${p_port:-$exit_de_port}"
+        exit_de_uuid="${p_uuid:-$exit_de_uuid}"
+        exit_de_pubkey="${p_pubkey:-$exit_de_pubkey}"
+        exit_de_shortid="${p_shortid:-$exit_de_shortid}"
+        exit_de_sni="${p_sni:-$exit_de_sni}"
+    fi
+
+    # Парсинг строки подключения Exit NL, если передана
+    if [[ -n "$exit_nl_conn" ]]; then
+        IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$exit_nl_conn"
+        exit_nl_host="${p_host:-$exit_nl_host}"
+        exit_nl_port="${p_port:-$exit_nl_port}"
+        exit_nl_uuid="${p_uuid:-$exit_nl_uuid}"
+        exit_nl_pubkey="${p_pubkey:-$exit_nl_pubkey}"
+        exit_nl_shortid="${p_shortid:-$exit_nl_shortid}"
+        exit_nl_sni="${p_sni:-$exit_nl_sni}"
+    fi
+
+    # Интерактивный запрос недостающих параметров
     if [[ -z "$domain" ]]; then
-        echo -e "${CYAN}📌 Шаг 1/9: Origin-домен${NC}"
+        echo -e "${CYAN}📌 Шаг 1/8: Origin-домен${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Поддомен в вашей DNS-панели (напр. origin.example.com), направленный A-записью на IP этого сервера ($(get_public_ip))."
         read -r -p "Введите Origin-домен: " domain
     fi
     if [[ -z "$bot_ip" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/9: IP-адрес хоста Telegram-бота${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера, где запущен бот (выполните 'curl ifconfig.me' на сервере бота)."
+        echo -e "${CYAN}📌 Шаг 2/8: IP-адрес хоста Telegram-бота${NC}"
+        echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP сервера бота (выполните 'curl ifconfig.me' на сервере бота)."
         echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт API 8444 будет открыт в UFW строго для этого IP-адреса."
         read -r -p "Введите IP-адрес Telegram-бота: " bot_ip
     fi
     if [[ -z "$exit_de_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 3/9: Хост Exit-сервера Германии (DE)${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} Доменное имя (relay.example.com) или IP-адрес вашего Exit-сервера в Германии."
-        read -r -p "Введите хост/IP Exit-сервера Германии: " exit_de_host
+        echo -e "${CYAN}📌 Шаг 3/8: Подключение к Exit-серверу Германии (DE)${NC}"
+        echo -e "   ${YELLOW}💡 Подсказка:${NC} Вставьте строку быстрого импорта из шага установки Exit (IP:PORT:UUID:PUBKEY:SHORTID:SNI) или просто IP/домен:"
+        read -r -p "Введите строку импорта или IP Exit DE: " input_exit_de
+        if [[ "$input_exit_de" == *":"*":"*":"* ]]; then
+            IFS=':' read -r p_host p_port p_uuid p_pubkey p_shortid p_sni <<< "$input_exit_de"
+            exit_de_host="$p_host"
+            exit_de_port="${p_port:-10443}"
+            exit_de_uuid="$p_uuid"
+            exit_de_pubkey="$p_pubkey"
+            exit_de_shortid="$p_shortid"
+            exit_de_sni="${p_sni:-dl.google.com}"
+        else
+            exit_de_host="$input_exit_de"
+        fi
     fi
     if [[ -z "$exit_de_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 4/9: VLESS UUID Exit-сервера Германии${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} UUID, который вы указали при установке 'just1knode install xray-exit' на сервере Германии."
+        echo -e "${CYAN}📌 Шаг 4/8: VLESS UUID Exit-сервера Германии${NC}"
         read -r -p "Введите VLESS UUID Exit DE: " exit_de_uuid
     fi
-    if [[ -z "$exit_nl_host" ]]; then
-        echo -e "${CYAN}📌 Шаг 5/9: Хост Exit-сервера Нидерландов (NL)${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} Домен/IP второго Exit-сервера (если сервер один, укажите тот же хост Германии: ${exit_de_host})."
-        read -r -p "Введите хост/IP Exit NL [по умолчанию: ${exit_de_host}]: " exit_nl_host
-        exit_nl_host="${exit_nl_host:-$exit_de_host}"
+    if [[ -z "$exit_de_pubkey" ]]; then
+        echo -e "${CYAN}📌 Шаг 5/8: Reality Public Key Exit-сервера Германии${NC}"
+        read -r -p "Введите Reality Public Key Exit DE: " exit_de_pubkey
     fi
-    if [[ -z "$exit_nl_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 6/9: VLESS UUID Exit-сервера Нидерландов${NC}"
-        read -r -p "Введите VLESS UUID Exit NL [по умолчанию: ${exit_de_uuid}]: " exit_nl_uuid
-        exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
+    if [[ -z "$exit_de_shortid" ]]; then
+        read -r -p "Введите Reality Short ID Exit DE [нажмите Enter если нет]: " exit_de_shortid
     fi
+    if [[ -z "$exit_de_sni" ]]; then
+        read -r -p "Введите SNI маскировки Exit DE [по умолчанию: dl.google.com]: " input_sni
+        exit_de_sni="${input_sni:-dl.google.com}"
+    fi
+
+    # Дублируем для NL, если не задан отдельный сервер
+    exit_nl_host="${exit_nl_host:-$exit_de_host}"
+    exit_nl_port="${exit_nl_port:-$exit_de_port}"
+    exit_nl_uuid="${exit_nl_uuid:-$exit_de_uuid}"
+    exit_nl_pubkey="${exit_nl_pubkey:-$exit_de_pubkey}"
+    exit_nl_shortid="${exit_nl_shortid:-$exit_de_shortid}"
+    exit_nl_sni="${exit_nl_sni:-$exit_de_sni}"
+
     if [[ -z "$path_de" ]]; then
-        echo -e "${CYAN}📌 Шаг 7/9: URL-путь XHTTP для Германии (DE)${NC}"
-        echo -e "   ${YELLOW}💡 Подсказка:${NC} Секретный путь для маскировки под стриминг/API (например: /stream/v1/de или /sync/live/data)."
+        echo -e "${CYAN}📌 Шаг 6/8: URL-путь XHTTP для Германии (DE)${NC}"
         read -r -p "Введите путь XHTTP DE [по умолчанию: /stream/v1/de]: " path_de
         path_de="${path_de:-/stream/v1/de}"
     fi
     if [[ -z "$path_nl" ]]; then
-        echo -e "${CYAN}📌 Шаг 8/9: URL-путь XHTTP для Нидерландов (NL)${NC}"
+        echo -e "${CYAN}📌 Шаг 7/8: URL-путь XHTTP для Нидерландов (NL)${NC}"
         read -r -p "Введите путь XHTTP NL [по умолчанию: /stream/v1/nl]: " path_nl
         path_nl="${path_nl:-/stream/v1/nl}"
     fi
     if [[ -z "$email" ]]; then
-        echo -e "${CYAN}📌 Шаг 9/9: Email для SSL-сертификата Let's Encrypt${NC}"
+        echo -e "${CYAN}📌 Шаг 8/8: Email для SSL-сертификата Let's Encrypt (Origin)${NC}"
         read -r -p "Введите Email [admin@${domain}]: " email
         email="${email:-admin@${domain}}"
     fi
@@ -936,16 +992,17 @@ cmd_install_xray_origin() {
         info "Сгенерирован новый XRAY_API_KEY (сохранен в защищенный файл конфигурации)."
     fi
 
-    # Автоматическая санитизация входных параметров
+    # Санитизация входных параметров
     domain="$(sanitize_host "$domain")"
     bot_ip="$(sanitize_host "$bot_ip")"
     exit_de_host="$(sanitize_host "$exit_de_host")"
-    exit_nl_host="$(sanitize_host "$exit_nl_host")"
     exit_de_uuid="$(echo "$exit_de_uuid" | tr -d '[:space:]')"
-    exit_nl_uuid="$(echo "$exit_nl_uuid" | tr -d '[:space:]')"
+    exit_de_pubkey="$(echo "$exit_de_pubkey" | tr -d '[:space:]')"
+    exit_de_shortid="$(echo "$exit_de_shortid" | tr -d '[:space:]')"
+    exit_de_sni="$(sanitize_host "$exit_de_sni")"
     email="$(echo "$email" | tr -d '[:space:]')"
 
-    # Строгая валидация введенных параметров
+    # Валидация
     [[ -n "$domain" ]] || error "Домен обязателен."
     validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
     [[ -n "$bot_ip" ]] || error "IP-адрес бота обязателен."
@@ -953,31 +1010,23 @@ cmd_install_xray_origin() {
     [[ -n "$exit_de_host" ]] || error "Хост Exit DE обязателен."
     validate_host_or_ip "$exit_de_host" || error "Некорректный хост/IP Exit DE: ${exit_de_host}"
     [[ -n "$exit_de_uuid" ]] || error "UUID Exit DE обязателен."
-    validate_uuid "$exit_de_uuid" || error "Некорректный формат UUID для Exit DE: ${exit_de_uuid} (ожидается формат RFC 4122: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
-    [[ -n "$exit_nl_host" ]] || error "Хост Exit NL обязателен."
-    validate_host_or_ip "$exit_nl_host" || error "Некорректный хост/IP Exit NL: ${exit_nl_host}"
-    [[ -n "$exit_nl_uuid" ]] || error "UUID Exit NL обязателен."
-    validate_uuid "$exit_nl_uuid" || error "Некорректный формат UUID для Exit NL: ${exit_nl_uuid}"
+    validate_uuid "$exit_de_uuid" || error "Некорректный формат UUID для Exit DE: ${exit_de_uuid}"
+    [[ -n "$exit_de_pubkey" ]] || error "Reality Public Key для Exit DE обязателен."
 
-    # Проверка сетевой связности до Exit-сервера
-    check_exit_port_reachable "$exit_de_host" 10443
+    check_exit_port_reachable "$exit_de_host" "$exit_de_port"
 
-    # Резервное копирование существующих файлов перед перезаписью
     backup_file_if_exists "$XRAY_CONFIG" "конфигурации Xray"
     backup_file_if_exists "/etc/nginx/sites-available/xhttp-origin.conf" "старой конфигурации Nginx (xhttp-origin)"
     backup_file_if_exists "/etc/xray-api/config.env" "конфигурации xray-api"
 
-    # 1. Установка Xray (зафиксированная версия XRAY_VERSION_PINNED)
     install_xray_core "$XRAY_VERSION_PINNED"
     install_geodata
     setup_xray_service
 
-    # 2. Получение SSL сертификата
     obtain_ssl_cert "$domain" "$email"
     local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
     local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
 
-    # 3. Генерация конфигурации Xray Origin
     info "Генерация конфигурации Xray Origin (${XRAY_CONFIG})..."
     cat > "$XRAY_CONFIG" <<EOF
 {
@@ -1086,7 +1135,6 @@ cmd_install_xray_origin() {
           "xPaddingPlacement": "header"
         }
       },
-
       "sniffing": {
         "enabled": true,
         "destOverride": ["http", "tls", "quic"]
@@ -1110,7 +1158,7 @@ cmd_install_xray_origin() {
         "vnext": [
           {
             "address": "${exit_de_host}",
-            "port": 10443,
+            "port": ${exit_de_port},
             "users": [
               {
                 "id": "${exit_de_uuid}",
@@ -1123,10 +1171,14 @@ cmd_install_xray_origin() {
       },
       "streamSettings": {
         "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "${exit_de_host}",
-          "allowInsecure": false
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${exit_de_sni}",
+          "fingerprint": "chrome",
+          "show": false,
+          "publicKey": "${exit_de_pubkey}",
+          "shortId": "${exit_de_shortid}",
+          "spiderX": ""
         }
       }
     },
@@ -1137,7 +1189,7 @@ cmd_install_xray_origin() {
         "vnext": [
           {
             "address": "${exit_nl_host}",
-            "port": 10443,
+            "port": ${exit_nl_port},
             "users": [
               {
                 "id": "${exit_nl_uuid}",
@@ -1150,10 +1202,14 @@ cmd_install_xray_origin() {
       },
       "streamSettings": {
         "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "${exit_nl_host}",
-          "allowInsecure": false
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${exit_nl_sni}",
+          "fingerprint": "chrome",
+          "show": false,
+          "publicKey": "${exit_nl_pubkey}",
+          "shortId": "${exit_nl_shortid}",
+          "spiderX": ""
         }
       }
     },
@@ -1205,12 +1261,11 @@ cmd_install_xray_origin() {
   }
 }
 EOF
+    chmod 600 "$XRAY_CONFIG"
 
-    # Проверка конфигурации Xray
     info "Проверка синтаксиса конфигурации Xray..."
     "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
 
-    # 4. Конфигурация Nginx Origin (Modular Coexistence)
     info "Настройка модульной конфигурации Nginx..."
     set_state_val "has_xray_origin" "true"
     set_state_val "origin_domain" "$domain"
@@ -1227,7 +1282,6 @@ EOF
 
     render_nginx_modular_config "$domain" "$cert_file" "$key_file" "$include_amn" "true" "8444" "$path_de" "$path_nl"
 
-    # 5. Установка автономного агента xray-api
     info "Установка сервиса xray-api в ${XRAY_API_DIR}..."
     mkdir -p "$XRAY_API_DIR"
     cp -r "${SCRIPT_DIR}/xray_api/"* "$XRAY_API_DIR/"
@@ -1253,7 +1307,6 @@ EOF
     systemctl restart xray
     systemctl restart xray-api
 
-    # 6. Настройка UFW
     info "Настройка сетевого экрана UFW..."
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
     local p
@@ -1264,71 +1317,79 @@ EOF
     done
     ufw allow 80/tcp
     ufw allow 443/tcp
-    # Порт 8444 разрешить СТРОГО для IP бота
+    ufw status numbered 2>/dev/null | grep -E '8444/tcp|8444 ' | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
+        [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
+    done
     ufw delete allow 8444/tcp 2>/dev/null || true
     if [[ -n "${bot_ip}" ]]; then
         ufw allow from "${bot_ip}" to any port 8444 proto tcp
     fi
     ufw --force enable
 
-
-    # 7. Сохранение состояния
+    set_state_val "domain" "$domain"
     set_state_val "bot_ip" "$bot_ip"
     set_state_val "exit_de_host" "$exit_de_host"
     set_state_val "exit_de_uuid" "$exit_de_uuid"
-    set_state_val "exit_nl_host" "$exit_nl_host"
-    set_state_val "exit_nl_uuid" "$exit_nl_uuid"
+    set_state_val "exit_de_pubkey" "$exit_de_pubkey"
+    set_state_val "exit_de_shortid" "$exit_de_shortid"
     set_state_val "path_de" "$path_de"
     set_state_val "path_nl" "$path_nl"
+    set_state_val "api_key" "$api_key"
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
-    set_state_val "api_port" "8444"
-    from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    set_state_val "installed_at" "$from_ts"
 
-    # 8. Боевое самотестирование API и ядра Xray
-    info "Выполнение боевого самотестирования xray-api..."
+    info "Выполнение боевой самодиагностики xray-api..."
     sleep 2
-    local health_response
-    health_response="$(curl -s --max-time 5 -H "X-API-Key: ${api_key}" "http://127.0.0.1:8444/v1/health" 2>/dev/null || true)"
-    if echo "$health_response" | grep -q '"status":"ok"'; then
-        log "Боевой тест пройден: xray-api успешно отвечает, gRPC подключен к Xray, эпоха ноды инициализирована [OK]"
+    local api_check
+    api_check="$(curl -s -k -H "X-API-Key: ${api_key}" --resolve "${domain}:8444:127.0.0.1" --cacert "$cert_file" "https://${domain}:8444/v1/health" 2>/dev/null || curl -s -H "X-API-Key: ${api_key}" "http://127.0.0.1:5001/v1/health" 2>/dev/null || echo "FAILED")"
+    if echo "$api_check" | grep -q '"status":"ok"'; then
+        log "xray-api: self-test пройден успешно (HTTP 200 OK) [OK]"
     else
-        warn "xray-api пока не вернул статус 'ok'. Ответ: ${health_response}"
-        info "Проверьте логи службы: journalctl -u xray-api -n 20"
+        warn "xray-api: self-test не ответил OK (${api_check}). Проверьте: journalctl -u xray-api -n 30"
     fi
 
-    log "Установка Xray Origin успешно завершена!"
-    info "Xray Inbounds: 8003 (${path_de}), 8004 (${path_nl})"
-    info "API Agent: http://${domain}:8444 (доступен только с IP: ${bot_ip})"
-    info "X-API-Key: ${api_key}"
-    info "Ключ сохранен в /etc/xray-api/config.env (права 600)"
+    local pub_ip
+    pub_ip="$(get_public_ip)"
+    echo ""
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo -e "         ${BOLD}${GREEN}УСТАНОВКА XRAY ORIGIN УЗЛА УСПЕШНО ЗАВЕРШЕНА!${NC}"
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo -e " • Роль узла:         ${CYAN}xray-origin (XHTTP + Reality Outbound)${NC}"
+    echo -e " • Домен:             ${CYAN}${domain}${NC} (IP: ${pub_ip})"
+    echo -e " • Публичный порт:    ${CYAN}443/tcp (HTTPS / XHTTP)${NC}"
+    echo -e " • Порт управления:   ${CYAN}8444/tcp (Xray-API, доступен для ${bot_ip})${NC}"
+    echo -e " • Путь XHTTP DE:     ${CYAN}${path_de}${NC}"
+    echo -e " • Путь XHTTP NL:     ${CYAN}${path_nl}${NC}"
+    echo -e " • Туннель к Exit:    ${CYAN}${exit_de_host}:${exit_de_port} (VLESS Reality + Vision)${NC}"
+    echo -e " • XRAY_API_KEY:      ${YELLOW}${api_key}${NC}"
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo ""
+    echo -e "${YELLOW}📋 Данные для добавления узла в бота (/admin -> Серверы):${NC}"
+    echo -e " • Capabilities:      ${CYAN}[\"xray_origin\"]${NC}"
+    echo -e " • API URL:           ${CYAN}https://${domain}:8444/stream/v1${NC}"
+    echo -e " • API Key:           ${CYAN}${api_key}${NC}"
+    echo ""
 }
 
-# =============================================================================
 
-# 3. КОМАНДА: install xray-exit
-# =============================================================================
 cmd_install_xray_exit() {
-    title "УСТАНОВКА XRAY EXIT УЗЛА"
+    title "УСТАНОВКА XRAY EXIT УЗЛА (VLESS REALITY)"
     check_root
     pre_install_safety_audit "xray-exit"
     install_common_deps
 
     local origin_ip=""
-    local domain=""
     local client_uuid=""
-    local email=""
+    local dest_target="dl.google.com"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --origin-ip) origin_ip="$2"; shift 2 ;;
-            --domain) domain="$2"; shift 2 ;;
-            --uuid) client_uuid="$2"; shift 2 ;;
-            --email) email="$2"; shift 2 ;;
+            --client-uuid) client_uuid="$2"; shift 2 ;;
+            --dest|--sni) dest_target="$2"; shift 2 ;;
             *)
                 if [[ -z "$origin_ip" ]]; then origin_ip="$1"
-                elif [[ -z "$domain" ]]; then domain="$1"
                 elif [[ -z "$client_uuid" ]]; then client_uuid="$1"
+                elif [[ -z "$dest_target" ]]; then dest_target="$1"
                 fi
                 shift
                 ;;
@@ -1336,41 +1397,36 @@ cmd_install_xray_exit() {
     done
 
     if [[ -z "$origin_ip" ]]; then
-        echo -e "${CYAN}📌 Шаг 1/4: IP-адрес Origin-сервера (РФ / Москва)${NC}"
+        echo -e "${CYAN}📌 Шаг 1/3: IP-адрес Origin-сервера (РФ / Москва)${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Публичный IP вашего российского Origin-сервера."
-        echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт 10443 (VLESS Vision) будет открыт в UFW строго для этого IP-адреса."
+        echo -e "   ${YELLOW}🔒 Безопасность:${NC} Порт 10443 (VLESS Reality) будет открыт в UFW строго для этого IP-адреса."
         read -r -p "Введите IP Origin-сервера: " origin_ip
     fi
-    if [[ -z "$domain" ]]; then
-        echo -e "${CYAN}📌 Шаг 2/4: Доменное имя Exit-сервера${NC}"
-        echo -e "   ${YELLOW}💡 Где взять:${NC} A-запись в DNS (напр. relay.example.com), указывающая на IP этого сервера ($(get_public_ip))."
-        read -r -p "Введите домен Exit-сервера: " domain
-    fi
     if [[ -z "$client_uuid" ]]; then
-        echo -e "${CYAN}📌 Шаг 3/4: VLESS UUID для авторизации Origin${NC}"
+        echo -e "${CYAN}📌 Шаг 2/3: VLESS UUID для авторизации Origin${NC}"
         echo -e "   ${YELLOW}💡 Где взять:${NC} Секретный UUID для туннеля (нажмите Enter для автоматической генерации)."
         local generated_uuid
         generated_uuid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())')"
         read -r -p "Введите UUID [по умолчанию: ${generated_uuid}]: " client_uuid
         client_uuid="${client_uuid:-$generated_uuid}"
     fi
-    if [[ -z "$email" ]]; then
-        echo -e "${CYAN}📌 Шаг 4/4: Email для Let's Encrypt сертификата${NC}"
-        read -r -p "Введите Email [admin@${domain}]: " email
-        email="${email:-admin@${domain}}"
+    if [[ -z "$dest_target" || "$dest_target" == "dl.google.com" ]]; then
+        echo -e "${CYAN}📌 Шаг 3/3: Маскировочный целевой сервер (SNI / Dest)${NC}"
+        echo -e "   ${YELLOW}💡 Подсказка:${NC} Домен с поддержкой TLS 1.3 и HTTP/2 для маскировки (напр. dl.google.com)."
+        read -r -p "Введите домен маскировки [по умолчанию: dl.google.com]: " input_dest
+        dest_target="${input_dest:-dl.google.com}"
     fi
 
     # Автоматическая санитизация входных параметров
     origin_ip="$(sanitize_host "$origin_ip")"
-    domain="$(sanitize_host "$domain")"
+    dest_target="$(sanitize_host "$dest_target")"
     client_uuid="$(echo "$client_uuid" | tr -d '[:space:]')"
-    email="$(echo "$email" | tr -d '[:space:]')"
 
     # Строгая валидация введенных параметров
     [[ -n "$origin_ip" ]] || error "IP-адрес Origin обязателен."
     validate_host_or_ip "$origin_ip" || error "Некорректный IP-адрес Origin: ${origin_ip}"
-    [[ -n "$domain" ]] || error "Домен Exit обязателен."
-    validate_host_or_ip "$domain" || error "Некорректный формат домена: ${domain}"
+    [[ -n "$dest_target" ]] || error "Целевой домен маскировки обязателен."
+    validate_host_or_ip "$dest_target" || error "Некорректный формат домена маскировки: ${dest_target}"
     [[ -n "$client_uuid" ]] || error "UUID клиента обязателен."
     validate_uuid "$client_uuid" || error "Некорректный формат UUID: ${client_uuid} (ожидается формат RFC 4122: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
 
@@ -1380,9 +1436,17 @@ cmd_install_xray_exit() {
     install_geodata
     setup_xray_service
 
-    obtain_ssl_cert "$domain" "$email"
-    local cert_file="/etc/letsencrypt/live/${domain}/fullchain.pem"
-    local key_file="/etc/letsencrypt/live/${domain}/privkey.pem"
+    info "Генерация криптографических ключей Reality (x25519)..."
+    local key_pair
+    key_pair="$($XRAY_BIN x25519)"
+    local private_key
+    private_key="$(echo "$key_pair" | awk '/PrivateKey:/ {print $2}')"
+    local public_key
+    public_key="$(echo "$key_pair" | awk '/PublicKey/ {print $NF}')"
+    local short_id
+    short_id="$(openssl rand -hex 8)"
+
+    [[ -n "$private_key" && -n "$public_key" ]] || error "Не удалось сгенерировать ключи x25519 через $XRAY_BIN"
 
     info "Генерация конфигурации Xray Exit (${XRAY_CONFIG})..."
     cat > "$XRAY_CONFIG" <<EOF
@@ -1410,14 +1474,18 @@ cmd_install_xray_exit() {
       },
       "streamSettings": {
         "network": "tcp",
-        "security": "tls",
-        "tlsSettings": {
-          "alpn": ["h2", "http/1.1"],
-          "certificates": [
-            {
-              "certificateFile": "${cert_file}",
-              "keyFile": "${key_file}"
-            }
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "${dest_target}:443",
+          "xver": 0,
+          "serverNames": [
+            "${dest_target}"
+          ],
+          "privateKey": "${private_key}",
+          "shortIds": [
+            "${short_id}",
+            ""
           ]
         }
       },
@@ -1454,12 +1522,13 @@ cmd_install_xray_exit() {
   }
 }
 EOF
+    chmod 600 "$XRAY_CONFIG"
 
     "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
     systemctl enable --now xray
     systemctl restart xray
 
-    # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP
+    # Настройка UFW: порт 10443 разрешить СТРОГО для Origin IP (без открытия 80/443)
     info "Настройка UFW: доступ к порту 10443 только для ${origin_ip}..."
     ufw allow OpenSSH 2>/dev/null || ufw allow 22/tcp
     local p
@@ -1468,36 +1537,52 @@ EOF
             ufw allow "${p}/tcp" 2>/dev/null || true
         fi
     done
-    ufw allow 80/tcp
+    ufw status numbered 2>/dev/null | grep -E '10443/tcp|10443 ' | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
+        [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
+    done
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then
         ufw allow from "${origin_ip}" to any port 10443 proto tcp
     fi
     ufw --force enable
 
-
     set_state_val "role" "xray-exit"
-    set_state_val "domain" "$domain"
     set_state_val "origin_ip" "$origin_ip"
     set_state_val "client_uuid" "$client_uuid"
+    set_state_val "public_key" "$public_key"
+    set_state_val "short_id" "$short_id"
+    set_state_val "dest_target" "$dest_target"
     set_state_val "xray_version" "$XRAY_VERSION_PINNED"
-    from_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-    # 5. Боевое самотестирование службы Xray
+
+    # Боевое самотестирование службы Xray
     if systemctl is-active --quiet xray; then
-        log "Служба Xray успешно запущена и слушает порт 10443 VLESS Vision [OK]"
+        log "Служба Xray успешно запущена и слушает порт 10443 VLESS Reality [OK]"
     else
         error "Служба Xray не смогла запуститься. Проверьте: journalctl -u xray -n 30"
     fi
 
-    log "Установка Xray Exit успешно завершена!"
-    info "Inbound: port 10443 VLESS Vision TLS (доступен строго для ${origin_ip})"
-    info "VLESS UUID: ${client_uuid}"
-    info "Запомните этот UUID и домен (${domain}) — они понадобятся при установке Origin-сервера!"
+    local exit_ip
+    exit_ip="$(get_public_ip)"
+
+    echo ""
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo -e "         ${BOLD}${GREEN}УСТАНОВКА XRAY EXIT (REALITY) УСПЕШНО ЗАВЕРШЕНА!${NC}"
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo -e " • Роль узла:       ${CYAN}xray-exit (VLESS Reality + Vision)${NC}"
+    echo -e " • Входящий порт:   ${CYAN}10443/tcp${NC} (строго для IP: ${origin_ip})"
+    echo -e " • Public IP Exit:  ${CYAN}${exit_ip}${NC}"
+    echo -e " • VLESS UUID:      ${CYAN}${client_uuid}${NC}"
+    echo -e " • Reality PubKey:  ${CYAN}${public_key}${NC}"
+    echo -e " • Short ID:        ${CYAN}${short_id}${NC}"
+    echo -e " • SNI / Dest:      ${CYAN}${dest_target}${NC}"
+    echo -e "${BOLD}${GREEN}=================================================================${NC}"
+    echo ""
+    echo -e "${YELLOW}📋 Скопируйте строку подключения для Origin-сервера (Москва):${NC}"
+    echo -e "${BOLD}${CYAN}${exit_ip}:10443:${client_uuid}:${public_key}:${short_id}:${dest_target}${NC}"
+    echo ""
 }
 
-# =============================================================================
-# 4. КОМАНДА: update xray (безопасное обновление с rollback)
-# =============================================================================
+
 cmd_update_xray() {
     title "БЕЗОПАСНОЕ ОБНОВЛЕНИЕ XRAY CORE"
     check_root

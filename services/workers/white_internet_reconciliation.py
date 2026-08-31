@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import logging
 
 from aiogram import Bot
@@ -25,165 +26,27 @@ BATCH_SIZE = 50
 class WhiteInternetReconciliationWorker:
     """Worker keeping White Internet subscriptions in sync with Xray nodes."""
 
-    def __init__(self, bot: Bot | None = None, node_client: XrayNodeClient | None = None):
+    def __init__(
+        self,
+        bot: Bot | None = None,
+        node_client: XrayNodeClient | None = None,
+        session_factory=None,
+    ):
         self.bot = bot
         self.client = node_client or XrayNodeClient()
+        self.session_factory = session_factory or session_scope
 
     async def run_reconciliation_cycle(self, session: AsyncSession | None = None) -> int:
+        now = now_utc()
+        sf = self.session_factory
         if session is not None:
-            return await self._run_cycle_scoped(session)
-        return await self._run_cycle_decoupled()
+            @asynccontextmanager
+            async def _session_ctx():
+                yield session
 
-    async def _run_cycle_scoped(self, session: AsyncSession) -> int:
-        now = now_utc()
-        stmt_servers = (
-            select(Server)
-            .where(
-                Server.api_url.is_not(None),
-                Server.is_active.is_(True),
-                Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
-            )
-            .order_by(Server.id.asc())
-        )
-        res_servers = await session.execute(stmt_servers)
-        servers = res_servers.scalars().all()
-        server_map = {
-            server.id: server
-            for server in servers
-            if "xray_origin" in (server.capabilities or [])
-        }
+            sf = _session_ctx
 
-        for server in list(server_map.values()):
-            if not server.api_url or not server.api_key:
-                continue
-            is_healthy, current_epoch, health_data = await self.client.check_health(
-                server.api_url, server.api_key
-            )
-            if is_healthy and current_epoch and health_data:
-                boot_id = health_data.get("boot_id")
-                starttime = health_data.get("starttime")
-                if (
-                    current_epoch != server.xray_instance_epoch
-                    or boot_id != server.xray_instance_boot_id
-                    or starttime != server.xray_instance_starttime
-                ):
-                    cas_ok, updated_server = await servers_repo.update_server_xray_epoch_cas(
-                        session,
-                        server.id,
-                        expected_boot_id=server.xray_instance_boot_id,
-                        expected_starttime=server.xray_instance_starttime,
-                        new_epoch=current_epoch,
-                        new_boot_id=boot_id,
-                        new_starttime=starttime,
-                    )
-                    if cas_ok and updated_server:
-                        server_map[server.id] = updated_server
-
-        synced_count = 0
-        for server_id, server in server_map.items():
-            target_epoch = server.xray_instance_epoch
-            if not target_epoch:
-                continue
-
-            stmt_subs = (
-                select(WhiteInternetSubscription)
-                .where(
-                    WhiteInternetSubscription.origin_node_id == server_id,
-                    or_(
-                        WhiteInternetSubscription.actual_version
-                        != WhiteInternetSubscription.desired_version,
-                        WhiteInternetSubscription.last_reconciled_node_epoch
-                        != target_epoch,
-                        WhiteInternetSubscription.last_reconciled_node_epoch.is_(None),
-                        WhiteInternetSubscription.provisioning_status.in_([
-                            WhiteInternetProvisioningStatus.PENDING_CREATE,
-                            WhiteInternetProvisioningStatus.PENDING_UPDATE,
-                            WhiteInternetProvisioningStatus.PENDING_DELETE,
-                        ]),
-                    ),
-                )
-                .order_by(WhiteInternetSubscription.id.asc())
-                .limit(BATCH_SIZE)
-            )
-            res_subs = await session.execute(stmt_subs)
-            pending_subs = res_subs.scalars().all()
-
-            sync_tasks: list[dict] = []
-            for sub in pending_subs:
-                if sub.expires_at <= now and sub.status in (
-                    WhiteInternetStatus.PENDING,
-                    WhiteInternetStatus.ACTIVE,
-                    WhiteInternetStatus.EXHAUSTED,
-                ):
-                    await white_internet_repo.expire_subscription_atomic(session, sub.id)
-
-                desired_active = (
-                    sub.status in (WhiteInternetStatus.PENDING, WhiteInternetStatus.ACTIVE)
-                    and sub.expires_at > now
-                )
-                sync_tasks.append({
-                    "sub_id": sub.id,
-                    "uuid": sub.uuid,
-                    "desired_active": desired_active,
-                    "target_version": sub.desired_version,
-                })
-
-            for task in sync_tasks:
-                sub_id = task["sub_id"]
-                sub_uuid = task["uuid"]
-                desired_active = task["desired_active"]
-                target_version = task["target_version"]
-
-                success, err_msg = await self.client.sync_client(
-                    server.api_url,
-                    server.api_key,
-                    sub_uuid,
-                    is_active=desired_active,
-                )
-
-                sub = await white_internet_repo.get_subscription_with_lock(session, sub_id)
-                if sub is None:
-                    continue
-
-                if success and sub.desired_version == target_version:
-                    sub.actual_version = target_version
-                    sub.last_reconciled_node_epoch = target_epoch
-                    if sub.status == WhiteInternetStatus.PENDING and desired_active:
-                        sub.status = WhiteInternetStatus.ACTIVE
-                        sub.status_reason = None
-                    sub.provisioning_status = (
-                        WhiteInternetProvisioningStatus.ACTIVE
-                        if desired_active
-                        else WhiteInternetProvisioningStatus.SYNCED_INACTIVE
-                    )
-                    sub.last_synced_at = now_utc()
-                    sub.last_sync_error = None
-                    synced_count += 1
-                elif not success:
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.FAILED
-                    sub.last_sync_error = err_msg
-                    sub.last_synced_at = now_utc()
-                    logger.error(
-                        "Failed to reconcile White Internet sub_id=%d on server %d: %s",
-                        sub_id,
-                        server_id,
-                        err_msg,
-                    )
-                else:
-                    sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
-                    logger.warning(
-                        "Reconciliation detected version drift during sync for sub_id=%d on server %d",
-                        sub_id,
-                        server_id,
-                    )
-
-                await session.flush()
-
-        return synced_count
-
-    async def _run_cycle_decoupled(self) -> int:
-        now = now_utc()
-        async with session_scope() as sess:
+        async with sf() as sess:
             stmt_servers = (
                 select(Server)
                 .where(
@@ -214,7 +77,7 @@ class WhiteInternetReconciliationWorker:
                     or boot_id != cur_boot_id
                     or starttime != cur_starttime
                 ):
-                    async with session_scope() as sess:
+                    async with sf() as sess:
                         cas_ok, updated = await servers_repo.update_server_xray_epoch_cas(
                             sess,
                             server_id,
@@ -226,6 +89,11 @@ class WhiteInternetReconciliationWorker:
                         )
                         if cas_ok and updated:
                             target_node_epoch = node_epoch
+                        else:
+                            # CAS Fencing: reload fresh state from DB to get the true winner's epoch
+                            fresh_server = await sess.scalar(select(Server).where(Server.id == server_id))
+                            target_node_epoch = fresh_server.xray_instance_epoch if fresh_server else None
+
                 active_server_targets.append((server_id, api_url, api_key, target_node_epoch or node_epoch))
 
         synced_count = 0
@@ -234,7 +102,7 @@ class WhiteInternetReconciliationWorker:
                 continue
 
             sync_tasks: list[dict] = []
-            async with session_scope() as sess:
+            async with sf() as sess:
                 stmt_subs = (
                     select(WhiteInternetSubscription)
                     .where(
@@ -292,7 +160,7 @@ class WhiteInternetReconciliationWorker:
                 )
 
                 # Persist result in short transaction under lock
-                async with session_scope() as sess:
+                async with sf() as sess:
                     sub = await white_internet_repo.get_subscription_with_lock(sess, sub_id)
                     if sub is None:
                         continue

@@ -136,7 +136,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
                     expire=expire_ts,
                 ),
                 "Profile-Title": "base64:SnVzdDFrINCR0LXQu9GL0Lkg0JjQvdGC0LXRgNC90LXRgg==",
-                "Profile-Update-Interval": "1",
+                "Profile-Update-Interval": "12",
                 "hide-url": "1",
                 "no-limit-enabled": "1",
             }

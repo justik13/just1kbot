@@ -67,13 +67,8 @@ class EpochManager:
             logger.warning("Failed to load epoch state from %s: %s", self.file_path, e)
         return {}
 
-    def save_state(
-        self,
-        epoch: str,
-        pid: Optional[int],
-        starttime: Optional[int],
-        boot_id: Optional[str],
-    ) -> None:
+    def save_state(self, epoch: str, pid: Optional[int], starttime: Optional[int], boot_id: Optional[str]) -> bool:
+        """Persists the epoch metadata atomically. Returns True on success, False on error."""
         self._ensure_dir()
         temp_path = self.file_path.with_suffix(".tmp")
         data = {
@@ -93,8 +88,10 @@ class EpochManager:
             self._last_pid = pid
             self._last_starttime = starttime
             self._last_boot_id = boot_id
+            return True
         except Exception as e:
             logger.error("Failed to save epoch state to %s: %s", self.file_path, e)
+            return False
 
     def get_xray_process_info(self) -> Tuple[Optional[int], Optional[int]]:
         """
@@ -208,7 +205,9 @@ class EpochManager:
                     boot_id,
                     new_epoch,
                 )
-                self.save_state(new_epoch, pid, starttime, boot_id)
+                if not self.save_state(new_epoch, pid, starttime, boot_id):
+                    logger.error("Fail-closed: could not persist epoch state to disk. Reporting node epoch as None.")
+                    return pid, starttime, boot_id, None
                 return pid, starttime, boot_id, new_epoch
             return pid, starttime, boot_id, saved_epoch
         finally:

@@ -9,6 +9,7 @@ BTN_WL_BUY_ACCESS = "🚀 Оформить доступ ({price} ₽ / {days} д
 BTN_WL_CONNECT_CLIENT = "📱 Подключить в приложении"
 BTN_WL_COPY_LINK = "📋 Скопировать ссылку"
 BTN_WL_SHOW_LINK = "📋 Получить ссылку подписки"
+BTN_WL_AMNEZIA_KEY = "🛡️ Скопировать ключ AmneziaVPN"
 BTN_WL_INSTRUCTIONS = "ℹ️ Инструкция по подключению"
 BTN_WL_TOPUP = "➕ Докупить трафик"
 BTN_WL_RENEW = "🔄 Продлить на 30 дней ({price} ₽)"

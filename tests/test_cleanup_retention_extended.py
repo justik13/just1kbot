@@ -108,7 +108,7 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
         ):
             mock_scope.return_value.__aenter__.return_value = mock_session
             mock_clear_audit.return_value = 15
-            mock_batch_del.side_effect = [3, 2, 8]  # broadcasts, hub, webhooks
+            mock_batch_del.side_effect = [3, 2, 8, 5]  # broadcasts, hub, webhooks, traffic_events
 
             await _cleanup_old_records()
 
@@ -120,7 +120,8 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             # 1. BroadcastProgress
             # 2. HubMessage
             # 3. WebhookInbox
-            self.assertEqual(3, mock_batch_del.call_count)
+            # 4. WhiteInternetTrafficEvent
+            self.assertEqual(4, mock_batch_del.call_count)
 
             # 1. BroadcastProgress call
             bp_call = mock_batch_del.call_args_list[0]
@@ -133,6 +134,11 @@ class TestCleanupRetentionExtended(unittest.IsolatedAsyncioTestCase):
             # 3. WebhookInbox call: verify status IN ('succeeded', 'dead')
             wh_call = mock_batch_del.call_args_list[2]
             self.assertIs(wh_call[0][0], WebhookInbox)
+
+            # 4. WhiteInternetTrafficEvent call
+            from database.models import WhiteInternetTrafficEvent
+            te_call = mock_batch_del.call_args_list[3]
+            self.assertIs(te_call[0][0], WhiteInternetTrafficEvent)
 
             # Verify info log
             mock_logger.info.assert_called_once()

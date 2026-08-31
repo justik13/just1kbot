@@ -118,6 +118,8 @@ def test_end_to_end_with_real_xray():
         assert epoch is not None and epoch.startswith("epoch_")
 
         # Test FastAPI end-to-end
+        import app as app_module
+        app_module.epoch_manager = epoch_mgr
         os.environ["XRAY_API_KEY"] = "live-test-secret"
         os.environ["XRAY_GRPC_PORT"] = "10085"
         api_client = TestClient(app)

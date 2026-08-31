@@ -52,10 +52,12 @@ class WhiteInternetService:
             Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE,
             Tariff.duration_days == duration_days,
             Tariff.device_limit == 1,
-            Tariff.is_active.is_(True),
         ).limit(1)
         tariff = (await session.execute(stmt)).scalar_one_or_none()
         if tariff is not None:
+            if not tariff.is_active:
+                tariff.is_active = True
+                await session.flush()
             return tariff
         tariff = Tariff(name=texts.WL_DEFAULT_TARIFF_NAME, service_type=WHITE_INTERNET_SERVICE_TYPE, device_limit=1, duration_days=duration_days, price_rub=int(price_rub), is_active=True, sort_order=100)
         session.add(tariff)
@@ -68,7 +70,7 @@ class WhiteInternetService:
             await session.scalars(
                 select(Server.id)
                 .where(
-                    Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+                    Server.health_state == ServerHealthState.ONLINE,
                     Server.api_url.is_not(None),
                     Server.api_key.is_not(None),
                     Server.is_active.is_(True),

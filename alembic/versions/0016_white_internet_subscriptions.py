@@ -478,35 +478,26 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_subscriptions")
 
-    # 4. Clean up seeded White Internet tariff data if unreferenced
+    # 4. Clean up White Internet tariff data and references completely to allow reverting unique constraint
     op.execute(
         sa.text(
             """
+            UPDATE tariff_quotes SET target_tariff_version_id = NULL
+            WHERE target_tariff_version_id IN (
+                SELECT id FROM tariff_versions WHERE tariff_id IN (
+                    SELECT id FROM tariffs WHERE service_type = 'white_internet'
+                )
+            );
+            UPDATE tariff_quotes SET source_tariff_version_id = NULL
+            WHERE source_tariff_version_id IN (
+                SELECT id FROM tariff_versions WHERE tariff_id IN (
+                    SELECT id FROM tariffs WHERE service_type = 'white_internet'
+                )
+            );
             DELETE FROM tariff_versions WHERE tariff_id IN (
                 SELECT id FROM tariffs WHERE service_type = 'white_internet'
-            ) AND id NOT IN (
-                SELECT target_tariff_version_id FROM tariff_quotes WHERE target_tariff_version_id IS NOT NULL
-                UNION
-                SELECT source_tariff_version_id FROM tariff_quotes WHERE source_tariff_version_id IS NOT NULL
-            )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            DELETE FROM tariffs WHERE service_type = 'white_internet'
-            AND id NOT IN (
-                SELECT tariff_id FROM tariff_versions
-            )
-            """
-        )
-    )
-    op.execute(
-        sa.text(
-            """
-            UPDATE tariffs SET is_active = false
-            WHERE service_type = 'white_internet' AND id IN (SELECT tariff_id FROM tariff_versions)
+            );
+            DELETE FROM tariffs WHERE service_type = 'white_internet';
             """
         )
     )

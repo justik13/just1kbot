@@ -19,6 +19,7 @@ from config.constants import (
     WHITE_INTERNET_TOPUP_PACKS,
 )
 from config.enums import WhiteInternetProvisioningStatus, WhiteInternetStatus
+from config.settings import get_settings
 from database.models import WhiteInternetSubscription
 from database.repositories import white_internet_repo
 from database.repositories.account_ledger_repo import get_account_balance
@@ -123,7 +124,7 @@ async def show_white_internet_menu(query: CallbackQuery, session: AsyncSession):
         return
 
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = os.getenv("DOMAIN")
+    bot_domain = get_settings().DOMAIN
     now = now_utc()
 
     if sub is None:
@@ -232,7 +233,7 @@ async def show_topup_menu(query: CallbackQuery, session: AsyncSession):
     user = await get_user_by_telegram_id(session, query.from_user.id)
     if user is not None:
         sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-        bot_domain = os.getenv("DOMAIN")
+        bot_domain = get_settings().DOMAIN
         if sub is None or sub.status not in (WhiteInternetStatus.ACTIVE, WhiteInternetStatus.EXHAUSTED):
             await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
             return
@@ -290,7 +291,7 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
     if user is None:
         return
     sub = await white_internet_repo.get_subscription_by_user_id(session, user.id)
-    bot_domain = os.getenv("DOMAIN")
+    bot_domain = get_settings().DOMAIN
     if sub is None or sub.status != WhiteInternetStatus.ACTIVE:
         await query.message.edit_text(texts.WL_SUB_NOT_READY, reply_markup=get_white_internet_overview_keyboard(sub, bot_domain))
         return
@@ -301,8 +302,21 @@ async def show_subscription_link(query: CallbackQuery, session: AsyncSession):
         return
 
     sub_url = f"https://{bot_domain}/sub/wl/{sub.token}"
+    cdn_domain = os.getenv("WHITE_INTERNET_CDN_DOMAIN") or bot_domain
+    amnezia_key = WhiteInternetService.generate_amnezia_vpn_key(sub, cdn_domain=cdn_domain)
+
     kb = InlineKeyboardBuilder()
+    kb.button(
+        text=texts.BTN_WL_COPY_LINK,
+        copy_text=CopyTextButton(text=sub_url),
+    )
+    kb.button(
+        text=texts.BTN_WL_AMNEZIA_KEY,
+        copy_text=CopyTextButton(text=amnezia_key),
+    )
     kb.button(text=texts.BTN_BACK, callback_data="white_internet")
+    kb.adjust(1, 1, 1)
+
     await query.message.edit_text(
         texts.WL_SHOW_LINK_TEXT.format(url=html.escape(sub_url)),
         reply_markup=kb.as_markup(),
