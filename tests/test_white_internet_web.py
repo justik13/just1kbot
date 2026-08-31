@@ -254,8 +254,8 @@ class TestWhiteInternetWebFeed(AioHTTPTestCase):
                         nl_url = decoded_lines[1]
                         self.assertTrue(de_url.startswith("vless://"))
                         self.assertTrue(nl_url.startswith("vless://"))
-                        self.assertIn("/api/v3/de", unquote(de_url))
-                        self.assertIn("/api/v3/nl", unquote(nl_url))
+                        self.assertIn("/stream/v1/de", unquote(de_url))
+                        self.assertIn("/stream/v1/nl", unquote(nl_url))
                         self.assertIn("OPTIONS", unquote(de_url))
 
 

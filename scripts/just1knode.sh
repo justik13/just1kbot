@@ -458,8 +458,8 @@ render_nginx_modular_config() {
     local include_amnezia="${4:-false}"
     local include_xray="${5:-false}"
     local xray_api_port="${6:-8444}"
-    local path_de="${7:-/api/v3/de}"
-    local path_nl="${8:-/api/v3/nl}"
+    local path_de="${7:-/stream/v1/de}"
+    local path_nl="${8:-/stream/v1/nl}"
 
     mkdir -p /etc/nginx/just1k.d /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d
 
@@ -839,14 +839,14 @@ cmd_install_xray_origin() {
     fi
     if [[ -z "$path_de" ]]; then
         echo -e "${CYAN}📌 Шаг 7/9: URL-путь XHTTP для Германии (DE)${NC}"
-        echo -e "   ${YELLOW}💡 Подсказка:${NC} Секретный путь для маскировки под API (например: /api/v3/de или /data/v1/stream)."
-        read -r -p "Введите путь XHTTP DE [по умолчанию: /api/v3/de]: " path_de
-        path_de="${path_de:-/api/v3/de}"
+        echo -e "   ${YELLOW}💡 Подсказка:${NC} Секретный путь для маскировки под стриминг/API (например: /stream/v1/de или /sync/live/data)."
+        read -r -p "Введите путь XHTTP DE [по умолчанию: /stream/v1/de]: " path_de
+        path_de="${path_de:-/stream/v1/de}"
     fi
     if [[ -z "$path_nl" ]]; then
         echo -e "${CYAN}📌 Шаг 8/9: URL-путь XHTTP для Нидерландов (NL)${NC}"
-        read -r -p "Введите путь XHTTP NL [по умолчанию: /api/v3/nl]: " path_nl
-        path_nl="${path_nl:-/api/v3/nl}"
+        read -r -p "Введите путь XHTTP NL [по умолчанию: /stream/v1/nl]: " path_nl
+        path_nl="${path_nl:-/stream/v1/nl}"
     fi
     if [[ -z "$email" ]]; then
         echo -e "${CYAN}📌 Шаг 9/9: Email для SSL-сертификата Let's Encrypt${NC}"
