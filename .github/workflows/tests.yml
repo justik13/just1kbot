@@ -155,7 +155,7 @@ jobs:
       - name: Run xray-api microservice tests
         run: |
           python -m pip install -r scripts/xray_api/requirements.txt
-          pytest scripts/xray_api/tests -v
+          (cd scripts/xray_api && pytest -v)
 
       - name: Audit locked dependencies for known CVEs
         run: |
