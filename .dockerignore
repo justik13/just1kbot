@@ -40,3 +40,10 @@ backups/
 docker-compose.yml
 Caddyfile
 Caddyfile.ci
+
+# Private keys must NEVER enter container image layers. setup.sh generates the
+# age backup key in the project directory; keeping it on the host is already
+# discouraged, baking it into the image would be worse.
+backup_private_key.txt
+backup.agekey
+*.agekey

@@ -74,6 +74,14 @@ NOTIFICATION_INTERVAL = 1800
 TRAFFIC_SYNC_INTERVAL = 900
 SELF_HEALING_MAX_PER_CYCLE = 50
 
+# Local payment-expiry window: the cleanup worker marks a payment canceled
+# only after a provider GET still reports pending (provider-verified LOCAL
+# cancellation - NOT a provider-side auto-cancel). YooKassa does not offer a
+# documented way to expire a redirect payment in `pending`; a late provider
+# success after local expiry is the expected manual_review reconciliation
+# path, never a silent credit.
+PAYMENT_EXPIRATION_HOURS = 48
+
 # API Client timings and concurrency
 API_CONCURRENCY_LIMIT = 20
 API_RETRY_COUNT = 2
@@ -131,6 +139,7 @@ __all__ = [
     "PERMANENT_END_DATE",
     "PERMANENT_SUBSCRIPTION_DAYS",
     "PaidValueEntryType",
+    "PAYMENT_EXPIRATION_HOURS",
     "PaymentCheckoutStatus",
     "PaymentDisputeStatus",
     "PaymentFulfillmentStatus",

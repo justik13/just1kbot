@@ -46,6 +46,70 @@ title() {
     echo -e "\n${BOLD}${BLUE}=== $1 ===${NC}\n"
 }
 
+# --- Гарантия персистентного значения vm.overcommit_memory=1 ---
+# Boot-time источник для systemd: /etc/sysctl.d/*.conf (sysctl.d(5)); файлы
+# упорядочиваются лексикографически и более позднее имя побеждает, поэтому
+# 99-just1kbot.conf перекрывает типовые дистрибутивные файлы (10-90).
+# /etc/sysctl.conf нормализуется ДОПОЛНИТЕЛЬНО: его читает procps-ng
+# (sysctl --system/-p, применяет последним) и старые сборки systemd —
+# так stale `= 0` не сможет выиграть ни в одном из путей загрузки.
+# Свертываются ВСЕ записи в одну `= 1`: наличие `= 1` не гарантирует
+# ничего, если за ней следует `= 0` (sysctl применяет файл последовательно).
+normalize_overcommit_file() {
+    local file="$1"
+    mkdir -p "$(dirname "$file")" 2>/dev/null || return 1
+    if grep -Eq '^[[:space:]]*vm\.overcommit_memory[[:space:]]*=' "$file" 2>/dev/null; then
+        sed -i -E '/^[[:space:]]*vm\.overcommit_memory[[:space:]]*=/d' "$file" || return 1
+    fi
+    echo "vm.overcommit_memory = 1" >> "$file" 2>/dev/null || return 1
+    return 0
+}
+
+ensure_overcommit_persistence() {
+    normalize_overcommit_file "${JUST1KBOT_SYSCTL_D_CONF:-/etc/sysctl.d/99-just1kbot.conf}" || return 1
+    normalize_overcommit_file "${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}" || return 1
+    return 0
+}
+
+# --- Гарантия настройки vm.overcommit_memory=1 (runtime + persistence) ---
+# Persistence проверяется и чинится ВСЕГДА, независимо от текущего runtime:
+# сценарий «runtime=1 (например, установлен вручную до запуска установщика),
+# persistent=0» иначе пережил бы установку и откатился после перезагрузки.
+# Пути переопределяются для тестируемости:
+#   JUST1KBOT_PROC_OVERCOMMIT - stub /proc/sys/vm/overcommit_memory
+#   JUST1KBOT_SYSCTL_CONF     - stub /etc/sysctl.conf
+configure_overcommit_memory() {
+    local runtime_file="${JUST1KBOT_PROC_OVERCOMMIT:-/proc/sys/vm/overcommit_memory}"
+    local conf_file="${JUST1KBOT_SYSCTL_CONF:-/etc/sysctl.conf}"
+    [[ -f "$runtime_file" ]] || return 0
+
+    local current_overcommit
+    current_overcommit="$(cat "$runtime_file" 2>/dev/null || echo "0")"
+    if [[ "$current_overcommit" != "1" ]]; then
+        info "Включение vm.overcommit_memory=1 для стабильной работы Redis..."
+        # Honest failure handling: a silent false positive here would let
+        # Redis BGSAVE fail under memory pressure after install.
+        if ! sysctl -w vm.overcommit_memory=1 >/dev/null 2>&1; then
+            error "Не удалось применить 'sysctl -w vm.overcommit_memory=1' (проверьте права root и ограничения хоста). Настройте параметр вручную и запустите установщик снова."
+        fi
+    fi
+
+    # Persistence must pin the VALUE 1 unconditionally: a pre-existing `= 0`
+    # entry must be replaced, not merely detected, and this must happen even
+    # when the runtime value is already 1.
+    if ! ensure_overcommit_persistence "$conf_file"; then
+        error "Не удалось закрепить vm.overcommit_memory=1 в персистентной конфигурации — настройка не переживёт перезагрузку. Добавьте её вручную и запустите установщик снова."
+    fi
+
+    # Belt-and-braces: runtime must be 1 after all of the above.
+    current_overcommit="$(cat "$runtime_file" 2>/dev/null || echo "0")"
+    if [[ "$current_overcommit" != "1" ]]; then
+        error "vm.overcommit_memory=1 не применилось к runtime — проверьте 'sysctl -w vm.overcommit_memory=1' вручную и запустите установщик снова."
+    fi
+
+    log "Параметр vm.overcommit_memory=1 настроен (runtime + persistence)."
+}
+
 # --- Очистка временных ресурсов при сбое ---
 cleanup_on_exit() {
     local exit_code=$?
@@ -176,6 +240,9 @@ install_dependencies() {
         ufw allow 443/udp >/dev/null 2>&1 || true
         log "Порты 80/tcp, 443/tcp и 443/udp разрешены в UFW."
     fi
+
+    # Настройка ядра для Redis (overcommit_memory)
+    configure_overcommit_memory
 
     # Проверка занятости портов 80 и 443 сторонними процессами
     for port in 80 443; do
@@ -424,6 +491,8 @@ generate_secrets() {
         log "Локальный файл приватного ключа удален с сервера."
     else
         warn "Файл приватного ключа сохранен в: $AGE_KEY_FILE (chmod 600). Обязательно скачайте и удалите его вручную!"
+        warn "Политика проекта: приватный ключ age НЕ должен храниться на production-сервере."
+        warn "Файл исключён из git и Docker-образа (.gitignore/.dockerignore), но правильное решение — перенести ключ на локальный ПК и удалить его здесь."
     fi
 }
 

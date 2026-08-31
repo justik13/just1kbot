@@ -1,3 +1,9 @@
+[project]
+name = "just1kbot"
+version = "1.0.0"
+description = "Telegram bot for selling VPN access based on AmneziaWG 2.0"
+requires-python = ">=3.12"
+
 [tool.ruff]
 target-version = "py312"
 line-length = 100

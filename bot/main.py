@@ -5,6 +5,7 @@ import os
 import uuid
 import signal
 import traceback
+from datetime import timedelta
 
 import aiofiles.os
 from aiogram import Bot, Dispatcher
@@ -213,7 +214,19 @@ async def setup_bot(bot: Bot | None = None, storage: BaseStorage | None = None) 
     if bot is None:
         bot = Bot(token=settings.BOT_TOKEN)
     if storage is None:
-        storage = RedisStorage.from_url(settings.REDIS_URL)
+        # Bounded FSM lifetime + bounded I/O: without state_ttl/data_ttl Redis
+        # keys live forever (OOM under noeviction), and without socket
+        # timeouts a hung Redis stalls every FSM operation indefinitely.
+        storage = RedisStorage.from_url(
+            settings.REDIS_URL,
+            state_ttl=timedelta(hours=24),
+            data_ttl=timedelta(hours=24),
+            connection_kwargs={
+                "socket_timeout": 5.0,
+                "socket_connect_timeout": 5.0,
+                "health_check_interval": 30,
+            },
+        )
     dp = Dispatcher(storage=storage)
 
     dp.message.middleware(CorrelationMiddleware())

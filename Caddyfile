@@ -1,61 +1,65 @@
 {
-    email {$SSL_EMAIL}
-    servers {
-        max_header_size 8KB
-    }
+	email {$SSL_EMAIL}
+	servers {
+		max_header_size 8KB
+	}
 }
 
 {$DOMAIN} {
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "no-referrer"
-        X-Robots-Tag "noindex, nofollow, noarchive"
-        X-Permitted-Cross-Domain-Policies "none"
-        Permissions-Policy "geolocation=(), camera=(), microphone=()"
-        Cross-Origin-Opener-Policy "same-origin"
-        -Server
-    }
-    @limited_body_paths path /health
-    handle @limited_body_paths {
-        request_body {
-            max_size 2KB
-        }
-        reverse_proxy bot:8080 {
-            header_up X-Real-IP {remote_host}
-        }
-    }
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		X-Permitted-Cross-Domain-Policies "none"
+		Permissions-Policy "geolocation=(), camera=(), microphone=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+	@limited_body_paths path /health
+	handle @limited_body_paths {
+		request_body {
+			max_size 2KB
+		}
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-    handle {
-        reverse_proxy bot:8080 {
-            header_up X-Real-IP {remote_host}
-        }
-    }
+	@allowed_paths path /webhook/* /yookassa/*
+	handle @allowed_paths {
+		reverse_proxy bot:8080 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
 
-    handle_errors {
-        header {
-            Content-Type "text/html; charset=utf-8"
-            Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
-            Pragma "no-cache"
-            Strict-Transport-Security "max-age=31536000; includeSubDomains"
-            Referrer-Policy "no-referrer"
-            X-Content-Type-Options "nosniff"
-            X-Frame-Options "DENY"
-            X-Robots-Tag "noindex, nofollow, noarchive"
-            X-Permitted-Cross-Domain-Policies "none"
-            Permissions-Policy "geolocation=(), camera=(), microphone=()"
-            Cross-Origin-Opener-Policy "same-origin"
-            Cross-Origin-Resource-Policy "same-origin"
-            Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none';"
-        }
-        @rate_limited `{err.status_code} == 429`
-        handle @rate_limited {
-            respond `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Слишком много запросов</title><style>:root{--bg:#0f172a;--card-bg:#1e293b;--text-primary:#f8fafc;--text-secondary:#94a3b8;--border:#334155;--error:#ef4444;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg);color:var(--text-primary);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}.card{background-color:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px 24px;max-width:440px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);}h1{font-size:22px;font-weight:700;margin-bottom:12px;color:var(--error);}p{color:var(--text-secondary);font-size:15px;line-height:1.5;}</style></head><body><div class="card"><h1>Слишком много запросов</h1><p>Превышен лимит запросов. Пожалуйста, подождите и повторите попытку позже.</p></div></body></html>` 429
-        }
-        handle {
-            respond `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ошибка сервера ({err.status_code})</title><style>:root{--bg:#0f172a;--card-bg:#1e293b;--text-primary:#f8fafc;--text-secondary:#94a3b8;--border:#334155;--error:#ef4444;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg);color:var(--text-primary);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}.card{background-color:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px 24px;max-width:440px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);}h1{font-size:22px;font-weight:700;margin-bottom:12px;color:var(--error);}p{color:var(--text-secondary);font-size:15px;line-height:1.5;}</style></head><body><div class="card"><h1>Временная ошибка сервиса</h1><p>Не удалось связаться с сервером (Код: {err.status_code}). Пожалуйста, попробуйте позже.</p></div></body></html>` {err.status_code}
-        }
-    }
+	handle {
+		respond "Not Found" 404
+	}
 
+	handle_errors {
+		header {
+			Content-Type "text/html; charset=utf-8"
+			Cache-Control "no-store, no-cache, must-revalidate, max-age=0"
+			Pragma "no-cache"
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			Referrer-Policy "no-referrer"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			X-Robots-Tag "noindex, nofollow, noarchive"
+			X-Permitted-Cross-Domain-Policies "none"
+			Permissions-Policy "geolocation=(), camera=(), microphone=()"
+			Cross-Origin-Opener-Policy "same-origin"
+			Cross-Origin-Resource-Policy "same-origin"
+			Content-Security-Policy "default-src 'none'; style-src 'unsafe-inline'; form-action 'none'; frame-ancestors 'none';"
+		}
+		@rate_limited `{err.status_code} == 429`
+		handle @rate_limited {
+			respond `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Слишком много запросов</title><style>:root{--bg:#0f172a;--card-bg:#1e293b;--text-primary:#f8fafc;--text-secondary:#94a3b8;--border:#334155;--error:#ef4444;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg);color:var(--text-primary);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}.card{background-color:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px 24px;max-width:440px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);}h1{font-size:22px;font-weight:700;margin-bottom:12px;color:var(--error);}p{color:var(--text-secondary);font-size:15px;line-height:1.5;}</style></head><body><div class="card"><h1>Слишком много запросов</h1><p>Превышен лимит запросов. Пожалуйста, подождите и повторите попытку позже.</p></div></body></html>` 429
+		}
+		handle {
+			respond `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Ошибка сервера ({err.status_code})</title><style>:root{--bg:#0f172a;--card-bg:#1e293b;--text-primary:#f8fafc;--text-secondary:#94a3b8;--border:#334155;--error:#ef4444;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background-color:var(--bg);color:var(--text-primary);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;}.card{background-color:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:32px 24px;max-width:440px;width:100%;text-align:center;box-shadow:0 20px 25px -5px rgba(0,0,0,0.5);}h1{font-size:22px;font-weight:700;margin-bottom:12px;color:var(--error);}p{color:var(--text-secondary);font-size:15px;line-height:1.5;}</style></head><body><div class="card"><h1>Временная ошибка сервиса</h1><p>Не удалось связаться с сервером (Код: {err.status_code}). Пожалуйста, попробуйте позже.</p></div></body></html>` {err.status_code}
+		}
+	}
 }

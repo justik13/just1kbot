@@ -59,3 +59,23 @@ class DockerComposeSecurityTests(unittest.TestCase):
         # 5. Postgres and Bot graceful shutdown
         self.assertIn("stop_grace_period: 30s", compose)
         self.assertIn('shm_size: "256m"', compose)
+
+    def test_caddy_ingress_routes_are_strictly_bounded_and_fail_closed_404(self):
+        root = Path(__file__).parents[1]
+        for fname in ("Caddyfile", "Caddyfile.ci"):
+            content = (root / fname).read_text(encoding="utf-8")
+            self.assertIn("@allowed_paths path /webhook/* /yookassa/*", content)
+            self.assertIn("@limited_body_paths path /health", content)
+            self.assertIn('respond "Not Found" 404', content)
+            # Ensure no catch-all reverse_proxy block exists
+            self.assertNotIn("handle {\n\t\treverse_proxy bot:8080", content)
+            self.assertNotIn("handle {\n        reverse_proxy bot:8080", content)
+
+    def test_scripts_contain_redis_overcommit_configuration_and_doctor_check(self):
+        root = Path(__file__).parents[1]
+        setup_sh = (root / "scripts" / "setup.sh").read_text(encoding="utf-8")
+        cli_sh = (root / "scripts" / "cli.sh").read_text(encoding="utf-8")
+        self.assertIn("vm.overcommit_memory", setup_sh)
+        self.assertIn("vm.overcommit_memory=1", setup_sh)
+        self.assertIn("vm.overcommit_memory", cli_sh)
+

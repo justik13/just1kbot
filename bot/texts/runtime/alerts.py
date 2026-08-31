@@ -60,6 +60,11 @@ ALERT_STALE_PAYMENTS_MORE = """• ...и ещё {more_count} платежей
 ALERT_STALE_PAYMENT_ROW = """• {icon} #{payment_id} (user {telegram_id}): {amount} {currency} via {method}
 """
 
+ALERT_STALE_BTN_OPEN_CARD = "💳 Платёж #{payment_id}: обработать"
+ALERT_STALE_BTN_QUEUES = "🧰 Диагностика очередей"
+ALERT_STALE_BTN_PAYMENTS = "📁 Все платежи"
+ALERT_STALE_BTN_DISMISS = "✕ Скрыть"
+
 
 ALERT_TITLE_CRITICAL_STOP = "Критическая остановка фоновых задач"
 

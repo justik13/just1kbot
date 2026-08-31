@@ -30,7 +30,7 @@ Telegram-бот для продажи VPN-доступа на базе **Amnezia
 Проект спроектирован с упором на отказоустойчивость (fault-tolerance) и корректную работу в конкурентной среде:
 
 - **Идемпотентность и атомарность:** Строгая обработка платежей, диспутов и возвратов ЮKassa, защита от race conditions с использованием row-level locks (уровня PostgreSQL).
-- **Background Workers & Supervision:** Встроенный супервизор фоновых задач с heartbeat-мониторингом, circuit breaker для нод и распределенными блокировками в Redis (fence tokens).
+- **Background Workers & Supervision:** Встроенный супервизор фоновых задач с heartbeat-мониторингом, circuit breaker для нод и durability-очередями на PostgreSQL с fenced-leases (проверка владельца по `locked_by` + номеру попытки).
 - **Auto-healing Webhook Inbox:** Идемпотентная обработка вебхуков с автоматическим восстановлением и дедупликацией событий.
 - **Безопасные вебхуки:** Корректная обработка IP-адресов от прокси-серверов (Caddy) с извлечением реальных IP-адресов клиента для защиты от SSRF и IP-спуфинга.
 - **CI/CD:** Настроены процессы GitHub Actions для автоматической проверки линтером `ruff`, запуска юнит-тестов и проверки сборки Docker (smoke tests) перед деплоем.
@@ -309,7 +309,8 @@ age encrypt (BACKUP_AGE_RECIPIENT)
 После успешного шифрования plaintext dump удаляется. При ошибке backup script
 также удаляет временный plaintext dump.
 
-Старые encrypted backups старше 7 дней удаляются автоматически.
+Старые encrypted backups старше 14 дней удаляются автоматически (политика
+`rotate_backups 14` в CLI и `backup.sh`).
 
 ## Удалённые бэкапы (Offsite Remote Storage)
 
@@ -366,9 +367,10 @@ age encrypt (BACKUP_AGE_RECIPIENT)
 # Безопасность
 
 - не коммитьте `.env`;
-- не храните private age key на production-сервере;
+- не храните private age key на production-сервере (файл исключён из git и Docker-образа);
 - не публикуйте `8080` бота наружу — публичный трафик должен идти через Caddy;
 - используйте отдельные сильные пароли PostgreSQL и Redis;
+- сужайте `TRUSTED_PROXIES` до подсети конкретного ingress (по умолчанию loopback + Docker-сеть);
 - регулярно копируйте encrypted backups во внешнее хранилище.
 
 # Troubleshooting

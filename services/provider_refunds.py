@@ -567,12 +567,32 @@ async def apply_balance_topup_refund_success(
             },
         )
         if created:
-            await _consume_matching_reservation(
+            consumed = await _consume_matching_reservation(
                 session,
                 payment_id=payment.id,
                 amount=amount,
                 reservation_id=reservation_id,
             )
+            if consumed is None and reservation_id is not None:
+                # A refund reservation was expected to fund this refund but no
+                # active reservation could be matched or split. Without a flag
+                # the stale reservation would silently keep shrinking the
+                # user's available balance until manual repair.
+                await place_financial_hold(
+                    session,
+                    payment=payment,
+                    reason="orphan_refund_reservation",
+                )
+                session.add(
+                    PaymentEvent(
+                        payment_id=payment.id,
+                        event_type="refund_orphan_reservation",
+                        provider_status=payment.provider_status,
+                        reason="expected reservation not found or insufficient",
+                        source="provider_refund",
+                        details=f"reservation_id={reservation_id}",
+                    )
+                )
             await _update_topup_after_refund(session, payment)
             from services.referral_bonus import reverse_referral_bonus_for_topup
             await reverse_referral_bonus_for_topup(session, payment_id=payment.id)
