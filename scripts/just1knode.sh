@@ -267,6 +267,7 @@ User=root
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
+Environment=XRAY_LOCATION_ASSET=/usr/local/share/xray
 ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG}
 Restart=on-failure
 RestartPreventExitStatus=23
@@ -1376,6 +1377,7 @@ cmd_install_xray_exit() {
     backup_file_if_exists "$XRAY_CONFIG" "конфигурации Xray"
 
     install_xray_core "$XRAY_VERSION_PINNED"
+    install_geodata
     setup_xray_service
 
     obtain_ssl_cert "$domain" "$email"
