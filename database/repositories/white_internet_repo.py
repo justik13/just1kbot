@@ -59,7 +59,12 @@ async def get_subscription_by_id(session: AsyncSession, subscription_id: int) ->
 
 
 async def get_subscription_with_lock(session: AsyncSession, subscription_id: int) -> WhiteInternetSubscription | None:
-    stmt = select(WhiteInternetSubscription).where(WhiteInternetSubscription.id == subscription_id).with_for_update()
+    stmt = (
+        select(WhiteInternetSubscription)
+        .where(WhiteInternetSubscription.id == subscription_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     return (await session.execute(stmt)).scalar_one_or_none()
 
 

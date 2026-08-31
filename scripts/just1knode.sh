@@ -359,17 +359,6 @@ EOF
         return 204;
     }
 
-    location ^~ /sub/wl/ {
-        access_log off;
-        log_not_found off;
-        proxy_pass http://127.0.0.1:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
     location /api/v3/de {
         access_log off;
         proxy_pass http://127.0.0.1:8003;
@@ -691,10 +680,17 @@ cmd_install_xray_origin() {
         ]
       },
       {
-        "address": "1.1.1.1",
-        "port": 53,
+        "address": "https://1.1.1.1/dns-query",
+        "domains": [
+          "geosite:geolocation-!cn"
+        ]
+      },
+      {
+        "address": "https://dns.google/dns-query",
         "domains": []
-      }
+      },
+      "1.1.1.1",
+      "8.8.8.8"
     ]
   },
   "inbounds": [
@@ -1159,7 +1155,8 @@ cmd_update_xray() {
     fi
 
     info "4. Атомарная замена исполняемого файла..."
-    install -m 755 "$new_binary" "$XRAY_BIN"
+    install -m 755 "$new_binary" "${XRAY_BIN}.new"
+    mv -f "${XRAY_BIN}.new" "$XRAY_BIN"
     rm -rf "$tmp_dir"
 
     info "5. Перезапуск службы Xray..."
@@ -1235,13 +1232,13 @@ cmd_doctor() {
         else
             warn "Nginx: ошибка в конфигурации [FAIL]"
             nginx -t || true
-            ((issues++))
+            issues=$((issues + 1))
         fi
         if systemctl is-active --quiet nginx 2>/dev/null; then
             log "Nginx: служба активна [OK]"
         else
             warn "Nginx: служба не запущена [WARN]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     else
         info "Nginx не установлен на узле."
@@ -1257,18 +1254,18 @@ cmd_doctor() {
             else
                 warn "Xray: ошибка валидации конфигурации [FAIL]"
                 "$XRAY_BIN" run -test -config "$XRAY_CONFIG" || true
-                ((issues++))
+                issues=$((issues + 1))
             fi
         else
             warn "Xray: файл конфигурации ${XRAY_CONFIG} отсутствует [WARN]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
 
         if systemctl is-active --quiet xray 2>/dev/null; then
             log "Xray: служба активна [OK]"
         else
             warn "Xray: служба не запущена [WARN]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     else
         info "Xray Core не установлен на узле."
@@ -1283,7 +1280,7 @@ cmd_doctor() {
             log "Порт ${port} (${name}): слушается [OK]"
         else
             warn "Порт ${port} (${name}): НЕ слушается [WARN]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     }
 
@@ -1329,7 +1326,7 @@ sys.exit(0 if c.is_healthy() else 1)
                 log "gRPC 127.0.0.1:10085 отвечает на вызовы [OK]"
             else
                 warn "gRPC 127.0.0.1:10085 не отвечает [FAIL]"
-                ((issues++))
+                issues=$((issues + 1))
             fi
         fi
     fi
@@ -1347,7 +1344,7 @@ sys.exit(0 if c.is_healthy() else 1)
             log "xray-api: служба активна [OK]"
         else
             warn "xray-api: служба не запущена [FAIL]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     fi
 
@@ -1358,7 +1355,7 @@ sys.exit(0 if c.is_healthy() else 1)
             log "UFW: сетевой экран активен и защищает открытые порты [OK]"
         else
             warn "UFW: сетевой экран НЕ активен! Включите его: ufw enable [WARN]"
-            ((issues++))
+            issues=$((issues + 1))
         fi
     fi
 

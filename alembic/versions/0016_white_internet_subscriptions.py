@@ -1,7 +1,7 @@
 """Add White Internet subscriptions and quota grants schema.
 
-Revision ID: 0015_white_internet
-Revises: 0014_drop_sub_token
+Revision ID: 0016_white_internet
+Revises: 0015_auto_fulfill_retry_idx
 Create Date: 2026-08-30 00:00:00.000000
 """
 from collections.abc import Sequence
@@ -505,7 +505,7 @@ def downgrade() -> None:
     op.execute(
         sa.text(
             """
-            UPDATE tariffs SET duration_days = -abs(duration_days)
+            UPDATE tariffs SET is_active = false, is_archived = true, duration_days = duration_days + 10000
             WHERE service_type = 'white_internet' AND id IN (SELECT tariff_id FROM tariff_versions)
             """
         )

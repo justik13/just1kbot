@@ -30,9 +30,15 @@ class WhiteInternetTrafficWorker:
 
     async def run_traffic_cycle(self, session: AsyncSession) -> int:
         now = now_utc()
-        stmt = select(Server).where(
-            Server.api_url.is_not(None),
-            Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+        stmt = (
+            select(Server)
+            .where(
+                Server.api_url.is_not(None),
+                Server.api_key.is_not(None),
+                Server.is_active.is_(True),
+                Server.health_state.in_([ServerHealthState.ONLINE, ServerHealthState.WAITING_CONFIRMATION]),
+            )
+            .order_by(Server.id.asc())
         )
         servers = (await session.execute(stmt)).scalars().all()
         total_processed = 0
@@ -93,10 +99,22 @@ class WhiteInternetTrafficWorker:
                     continue
 
                 # Monotonicity check within same epoch
-                if sub.traffic_stats_epoch == node_epoch:
-                    if uplink < sub.last_uplink_snapshot or downlink < sub.last_downlink_snapshot:
-                        logger.warning(
-                            "Counter decrease detected within same epoch for sub_id=%d on server %d: up(%d < %d), down(%d < %d). Skipping.",
+                if (
+                    sub.traffic_stats_epoch == node_epoch
+                    and uplink >= sub.last_uplink_snapshot
+                    and downlink >= sub.last_downlink_snapshot
+                ):
+                    before_up = sub.last_uplink_snapshot
+                    before_down = sub.last_downlink_snapshot
+                    delta_up = uplink - before_up
+                    delta_down = downlink - before_down
+                else:
+                    # New epoch or counter reset within epoch: reset baseline to 0
+                    if sub.traffic_stats_epoch == node_epoch and (
+                        uplink < sub.last_uplink_snapshot or downlink < sub.last_downlink_snapshot
+                    ):
+                        logger.info(
+                            "Counter reset detected within same epoch for sub_id=%d on server %d: up(%d < %d), down(%d < %d). Resetting baseline.",
                             sub.id,
                             server.id,
                             uplink,
@@ -104,13 +122,6 @@ class WhiteInternetTrafficWorker:
                             downlink,
                             sub.last_downlink_snapshot,
                         )
-                        continue
-                    before_up = sub.last_uplink_snapshot
-                    before_down = sub.last_downlink_snapshot
-                    delta_up = uplink - before_up
-                    delta_down = downlink - before_down
-                else:
-                    # New epoch: snapshot_before is 0
                     before_up = 0
                     before_down = 0
                     delta_up = uplink
