@@ -211,14 +211,12 @@ async def renew_subscription_atomic(
     sub.provisioning_status = WhiteInternetProvisioningStatus.PENDING_UPDATE
 
     # Period Usage Reset: Historical traffic events remain permanently preserved in
-    # WhiteInternetTrafficEvent records. Reset period counters so UI and Subscription-Userinfo
-    # reflect exact current period consumption.
+    # WhiteInternetTrafficEvent records. Reset period consumption so UI and Subscription-Userinfo
+    # reflect exact current period usage, while preserving the node snapshot baseline to prevent
+    # double-counting historical Xray counters.
     sub.traffic_used_bytes = 0
     sub.traffic_uplink_bytes = 0
     sub.traffic_downlink_bytes = 0
-    sub.last_uplink_snapshot = None
-    sub.last_downlink_snapshot = None
-    sub.traffic_stats_epoch = None
 
     session.add(WhiteInternetQuotaGrant(
         subscription_id=sub.id, grant_type=WhiteInternetGrantType.BASE,

@@ -303,9 +303,10 @@ class TestWhiteInternetQuotaLedgerLogic(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(renewed.traffic_used_bytes, 0)
                     self.assertEqual(renewed.traffic_uplink_bytes, 0)
                     self.assertEqual(renewed.traffic_downlink_bytes, 0)
-                    self.assertIsNone(renewed.last_uplink_snapshot)
-                    self.assertIsNone(renewed.last_downlink_snapshot)
-                    self.assertIsNone(renewed.traffic_stats_epoch)
+                    # Node snapshots and epoch are preserved as baseline
+                    self.assertEqual(renewed.last_uplink_snapshot, 18 * 1024**3)
+                    self.assertEqual(renewed.last_downlink_snapshot, 29 * 1024**3)
+                    self.assertEqual(renewed.traffic_stats_epoch, "epoch-1")
 
                     # 2. Limit is fresh available quota (50 GiB base + 25 GiB topup = 75 GiB)
                     self.assertEqual(renewed.traffic_limit_bytes, 75 * 1024**3)

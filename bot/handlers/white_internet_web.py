@@ -54,6 +54,7 @@ async def white_internet_subscription_feed_handler(request: web.Request) -> web.
     common_headers = {
         "Cache-Control": "no-store, private, no-cache, must-revalidate",
         "Pragma": "no-cache",
+        "X-Content-Type-Options": "nosniff",
     }
 
     async with session_scope() as session:

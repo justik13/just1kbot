@@ -45,7 +45,12 @@ class WhiteInternetService:
 
     @staticmethod
     async def get_or_create_white_internet_tariff(session: AsyncSession, *, price_rub: Decimal = WHITE_INTERNET_BASE_PRICE_RUB, duration_days: int = WHITE_INTERNET_BASE_DURATION_DAYS) -> Tariff:
-        stmt = select(Tariff).where(Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE, Tariff.duration_days == duration_days, Tariff.device_limit == 1).limit(1)
+        stmt = select(Tariff).where(
+            Tariff.service_type == WHITE_INTERNET_SERVICE_TYPE,
+            Tariff.duration_days == duration_days,
+            Tariff.device_limit == 1,
+            Tariff.is_active.is_(True),
+        ).limit(1)
         tariff = (await session.execute(stmt)).scalar_one_or_none()
         if tariff is not None:
             return tariff
@@ -127,7 +132,7 @@ class WhiteInternetService:
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
         origin_node = await cls.select_origin_node(session)
-        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.PURCHASE, target_version_id=tariff_version.id, amount_due=Decimal(tariff.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
+        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.PURCHASE, target_version_id=tariff_version.id, amount_due=Decimal(tariff_version.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
         session.add(quote)
         await session.flush()
         try:
@@ -137,9 +142,9 @@ class WhiteInternetService:
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
             return False, texts.WL_INSUFFICIENT_BALANCE_BUY.format(
-                price=int(tariff.price_rub),
+                price=int(tariff_version.price_rub),
                 balance=balance_snap.available,
-                shortage=max(Decimal(tariff.price_rub) - balance_snap.available, Decimal(0)),
+                shortage=max(Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)),
             ), None
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
@@ -148,7 +153,7 @@ class WhiteInternetService:
 
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
-        sub = await white_internet_repo.create_white_internet_subscription(session, user_id=user.id, origin_node_id=origin_node.id, token=secrets.token_hex(32), uuid=str(uuid.uuid4()), quote_id=quote.id, price_rub=Decimal(tariff.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
+        sub = await white_internet_repo.create_white_internet_subscription(session, user_id=user.id, origin_node_id=origin_node.id, token=secrets.token_hex(32), uuid=str(uuid.uuid4()), quote_id=quote.id, price_rub=Decimal(tariff_version.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
         return True, texts.WL_BUY_SUCCESS, sub
 
     @classmethod
@@ -166,7 +171,7 @@ class WhiteInternetService:
         tariff = await cls.get_or_create_white_internet_tariff(session)
         tariff_version = await get_or_create_current_version(session, tariff)
         now = now_utc()
-        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.RENEW, target_version_id=tariff_version.id, source_version_id=tariff_version.id, amount_due=Decimal(tariff.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
+        quote = cls._new_quote(user_id=user.id, operation_type=TariffQuoteOperation.RENEW, target_version_id=tariff_version.id, source_version_id=tariff_version.id, amount_due=Decimal(tariff_version.price_rub), expires_at=now + timedelta(minutes=15), resulting_paid_hours=tariff_version.duration_hours, resulting_paid_value=Decimal(tariff_version.price_rub))
         session.add(quote)
         await session.flush()
         try:
@@ -176,9 +181,9 @@ class WhiteInternetService:
             await session.flush()
             balance_snap = await get_account_balance(session, user_id=user.id)
             return False, texts.WL_INSUFFICIENT_BALANCE_RENEW.format(
-                price=int(tariff.price_rub),
+                price=int(tariff_version.price_rub),
                 balance=balance_snap.available,
-                shortage=max(Decimal(tariff.price_rub) - balance_snap.available, Decimal(0)),
+                shortage=max(Decimal(tariff_version.price_rub) - balance_snap.available, Decimal(0)),
             ), None
         except AccountLedgerError as exc:
             quote.status = TariffQuoteStatus.CANCELLED
@@ -186,7 +191,7 @@ class WhiteInternetService:
             return False, f"{texts.WL_DEBIT_FAILED}: {exc}", None
         quote.status = TariffQuoteStatus.CONSUMED
         quote.consumed_at = now_utc()
-        renewed = await white_internet_repo.renew_subscription_atomic(session, subscription_id=sub.id, quote_id=quote.id, price_rub=Decimal(tariff.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
+        renewed = await white_internet_repo.renew_subscription_atomic(session, subscription_id=sub.id, quote_id=quote.id, price_rub=Decimal(tariff_version.price_rub), duration_days=tariff.duration_days, base_bytes=WHITE_INTERNET_BASE_TRAFFIC_BYTES)
         return True, texts.WL_RENEW_SUCCESS, renewed
 
     @classmethod

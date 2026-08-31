@@ -353,12 +353,25 @@ EOF
     if [[ "$include_xray" == "true" ]]; then
         cat > /etc/nginx/just1k.d/xray-locations.conf <<'EOF'
     location = /cdn-check {
+        access_log off;
         add_header X-CDN-Origin "ok" always;
         add_header X-Origin-Method $request_method always;
         return 204;
     }
 
+    location ^~ /sub/wl/ {
+        access_log off;
+        log_not_found off;
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location /api/v3/de {
+        access_log off;
         proxy_pass http://127.0.0.1:8003;
         proxy_method $just1k_xhttp_proxy_method;
         proxy_http_version 1.1;
@@ -376,6 +389,7 @@ EOF
     }
 
     location /api/v3/nl {
+        access_log off;
         proxy_pass http://127.0.0.1:8004;
         proxy_method $just1k_xhttp_proxy_method;
         proxy_http_version 1.1;

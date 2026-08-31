@@ -356,6 +356,14 @@ def upgrade() -> None:
             name="ck_white_internet_traffic_events_conservation",
         ),
         sa.CheckConstraint(
+            "delta_uplink = snapshot_uplink_after - snapshot_uplink_before",
+            name="ck_white_internet_traffic_events_delta_uplink_arithmetic",
+        ),
+        sa.CheckConstraint(
+            "delta_downlink = snapshot_downlink_after - snapshot_downlink_before",
+            name="ck_white_internet_traffic_events_delta_downlink_arithmetic",
+        ),
+        sa.CheckConstraint(
             "allocated_bytes <= delta_uplink + delta_downlink",
             name="ck_white_internet_traffic_events_allocated_le_delta",
         ),

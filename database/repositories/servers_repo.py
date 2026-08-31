@@ -81,12 +81,34 @@ async def get_active_servers(session: AsyncSession) -> list[Server]:
 
 
 async def get_server_peer_counts(session: AsyncSession) -> dict[int, int]:
-    result = await session.execute(
+    # 1. VPNProfile counts (AWG)
+    vpn_result = await session.execute(
         select(VPNProfile.server_id, func.count(VPNProfile.id))
         .where(_capacity_consuming_profiles_condition())
         .group_by(VPNProfile.server_id)
     )
-    return {row[0]: row[1] for row in result.all()}
+    counts = {row[0]: row[1] for row in vpn_result.all()}
+
+    # 2. WhiteInternetSubscription counts (Xray Origin)
+    from config.enums import WhiteInternetStatus
+    from database.models import WhiteInternetSubscription
+
+    wl_result = await session.execute(
+        select(WhiteInternetSubscription.origin_node_id, func.count(WhiteInternetSubscription.id))
+        .where(
+            WhiteInternetSubscription.origin_node_id.is_not(None),
+            WhiteInternetSubscription.status.in_([
+                WhiteInternetStatus.PENDING,
+                WhiteInternetStatus.ACTIVE,
+                WhiteInternetStatus.EXHAUSTED,
+            ]),
+        )
+        .group_by(WhiteInternetSubscription.origin_node_id)
+    )
+    for srv_id, count in wl_result.all():
+        counts[srv_id] = counts.get(srv_id, 0) + count
+
+    return counts
 
 
 async def get_available_servers(session: AsyncSession) -> list[Server]:
@@ -94,14 +116,14 @@ async def get_available_servers(session: AsyncSession) -> list[Server]:
     if not servers:
         return []
 
-    result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(_capacity_consuming_profiles_condition())
-        .group_by(VPNProfile.server_id)
-    )
-    db_counts = {row[0]: row[1] for row in result.all()}
+    # Filter servers for AWG allocation: exclude dedicated Xray Origin nodes
+    awg_servers = [s for s in servers if "xray_origin" not in (s.capabilities or [])]
+    if not awg_servers:
+        return []
+
+    db_counts = await get_server_peer_counts(session)
     available: list[Server] = []
-    for server in servers:
+    for server in awg_servers:
         cached_count = get_cached_peer_count(server.id)
         db_count = db_counts.get(server.id, 0)
         effective_count = max(cached_count, db_count) if cached_count is not None else db_count
@@ -236,12 +258,7 @@ async def get_total_free_ips(session: AsyncSession) -> int:
     if not active_servers:
         return 0
 
-    result = await session.execute(
-        select(VPNProfile.server_id, func.count(VPNProfile.id))
-        .where(_capacity_consuming_profiles_condition())
-        .group_by(VPNProfile.server_id)
-    )
-    db_counts = {row[0]: row[1] for row in result.all()}
+    db_counts = await get_server_peer_counts(session)
 
     total_free = 0
     for server in active_servers:
