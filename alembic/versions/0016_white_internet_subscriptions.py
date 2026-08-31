@@ -505,7 +505,7 @@ def downgrade() -> None:
     op.execute(
         sa.text(
             """
-            UPDATE tariffs SET is_active = false, is_archived = true, duration_days = duration_days + 10000
+            UPDATE tariffs SET is_active = false, duration_days = duration_days + 10000
             WHERE service_type = 'white_internet' AND id IN (SELECT tariff_id FROM tariff_versions)
             """
         )
