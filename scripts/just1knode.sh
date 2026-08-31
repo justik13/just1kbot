@@ -1319,7 +1319,9 @@ EOF
     ufw allow 80/tcp
     ufw allow 443/tcp
     (ufw status numbered 2>/dev/null || true) | (grep -E '8444/tcp|8444 ' || true) | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
-        [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
+        if [[ -n "$num" ]]; then
+            yes | ufw delete "$num" 2>/dev/null || true
+        fi
     done
     ufw delete allow 8444/tcp 2>/dev/null || true
     if [[ -n "${bot_ip}" ]]; then
@@ -1539,7 +1541,9 @@ EOF
         fi
     done
     (ufw status numbered 2>/dev/null || true) | (grep -E '10443/tcp|10443 ' || true) | awk -F"[][]" '{print $2}' | sort -rn | while read -r num; do
-        [[ -n "$num" ]] && yes | ufw delete "$num" 2>/dev/null || true
+        if [[ -n "$num" ]]; then
+            yes | ufw delete "$num" 2>/dev/null || true
+        fi
     done
     ufw delete allow 10443/tcp 2>/dev/null || true
     if [[ -n "${origin_ip}" ]]; then
