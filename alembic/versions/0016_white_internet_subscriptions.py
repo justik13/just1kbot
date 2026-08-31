@@ -478,29 +478,62 @@ def downgrade() -> None:
     )
     op.drop_table("white_internet_subscriptions")
 
-    # 4. Clean up White Internet tariff data and references completely to allow reverting unique constraint
+    # 4. Clean up White Internet tariff quotes, ledger entries, tariff versions and tariffs
+    op.execute(sa.text("ALTER TABLE account_ledger_allocations DISABLE TRIGGER USER"))
+    op.execute(sa.text("ALTER TABLE account_ledger_entries DISABLE TRIGGER USER"))
+    op.execute(sa.text("ALTER TABLE tariff_quotes DISABLE TRIGGER USER"))
+
     op.execute(
         sa.text(
             """
-            UPDATE tariff_quotes SET target_tariff_version_id = NULL
-            WHERE target_tariff_version_id IN (
-                SELECT id FROM tariff_versions WHERE tariff_id IN (
-                    SELECT id FROM tariffs WHERE service_type = 'white_internet'
+            DELETE FROM account_ledger_allocations WHERE debit_entry_id IN (
+                SELECT id FROM account_ledger_entries WHERE quote_id IN (
+                    SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
                 )
-            );
-            UPDATE tariff_quotes SET source_tariff_version_id = NULL
-            WHERE source_tariff_version_id IN (
-                SELECT id FROM tariff_versions WHERE tariff_id IN (
-                    SELECT id FROM tariffs WHERE service_type = 'white_internet'
+            ) OR credit_entry_id IN (
+                SELECT id FROM account_ledger_entries WHERE quote_id IN (
+                    SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
                 )
-            );
-            DELETE FROM tariff_versions WHERE tariff_id IN (
-                SELECT id FROM tariffs WHERE service_type = 'white_internet'
-            );
-            DELETE FROM tariffs WHERE service_type = 'white_internet';
+            )
             """
         )
     )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM account_ledger_entries WHERE quote_id IN (
+                SELECT id FROM tariff_quotes WHERE service_type = 'white_internet'
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariff_quotes WHERE service_type = 'white_internet'
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariff_versions WHERE tariff_id IN (
+                SELECT id FROM tariffs WHERE service_type = 'white_internet'
+            )
+            """
+        )
+    )
+    op.execute(
+        sa.text(
+            """
+            DELETE FROM tariffs WHERE service_type = 'white_internet'
+            """
+        )
+    )
+
+    op.execute(sa.text("ALTER TABLE tariff_quotes ENABLE TRIGGER USER"))
+    op.execute(sa.text("ALTER TABLE account_ledger_entries ENABLE TRIGGER USER"))
+    op.execute(sa.text("ALTER TABLE account_ledger_allocations ENABLE TRIGGER USER"))
 
     # 5. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
 
