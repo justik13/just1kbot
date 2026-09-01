@@ -494,7 +494,7 @@ EOF
     # Создание venv для xray-api и установка точных версий
     python3 -m venv "${XRAY_API_DIR}/venv"
     "${XRAY_API_DIR}/venv/bin/pip" install --upgrade pip -q
-    "${XRAY_API_DIR}/venv/bin/pip" install fastapi==0.115.6 uvicorn==0.34.0 grpcio==1.68.1 protobuf==5.29.2 pydantic==2.10.4 -q
+    "${XRAY_API_DIR}/venv/bin/pip" install fastapi==0.115.6 uvicorn==0.34.0 grpcio==1.68.1 protobuf==7.35.1 pydantic==2.10.4 -q
 
     # Systemd служба для xray-api
     cat > /etc/systemd/system/xray-api.service <<EOF
