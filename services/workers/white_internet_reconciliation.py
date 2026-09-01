@@ -157,6 +157,7 @@ class WhiteInternetReconciliationWorker:
                     api_key,
                     sub_uuid,
                     is_active=desired_active,
+                    version=target_version,
                 )
 
                 # Persist result in short transaction under lock

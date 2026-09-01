@@ -48,6 +48,35 @@ GRPC_PORT = int(os.getenv("XRAY_GRPC_PORT", "10085"))
 RELAYS_FILE_PATH = Path(os.getenv("RELAYS_FILE_PATH", "/etc/just1knode/relays.json"))
 XRAY_CONFIG_PATH = Path(os.getenv("XRAY_CONFIG_PATH", "/usr/local/etc/xray/config.json"))
 CLIENTS_FILE_PATH = Path(os.getenv("CLIENTS_FILE_PATH", "/etc/just1knode/clients.json"))
+STATE_FILE_PATH = Path(os.getenv("STATE_FILE_PATH", "/etc/just1knode/state.json"))
+
+
+def get_secret_base_path() -> str:
+    """Discovers canonical secret XHTTP base path configured for this Origin node."""
+    if STATE_FILE_PATH.exists():
+        try:
+            with open(STATE_FILE_PATH, "r", encoding="utf-8") as f:
+                st = json.load(f)
+                if isinstance(st, dict) and st.get("secret_base_path"):
+                    return st["secret_base_path"]
+        except Exception as e:
+            logger.warning("Could not read secret_base_path from %s: %s", STATE_FILE_PATH, e)
+
+    # Fallback: check config.json inbounds path
+    if XRAY_CONFIG_PATH.exists():
+        try:
+            with open(XRAY_CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                for ib in cfg.get("inbounds", []):
+                    path = ib.get("streamSettings", {}).get("xhttpSettings", {}).get("path", "")
+                    if path and path.startswith("/"):
+                        parts = [p for p in path.strip("/").split("/") if p]
+                        if parts:
+                            return f"/{parts[0]}"
+        except Exception:
+            pass
+
+    return os.getenv("WHITE_INTERNET_PATH", "/stream/v1")
 
 
 def get_target_inbounds() -> List[str]:
@@ -108,7 +137,7 @@ epoch_manager = EpochManager()
 
 # --- Thread/Process Safe Local Client Storage ---
 class ClientStore:
-    """Manages persistent active client UUIDs in a local JSON file (Zero-Loss State) with file locking."""
+    """Manages persistent active client UUIDs and versions in a local JSON file (Zero-Loss State) with file locking."""
 
     def __init__(self, file_path: Path):
         self.file_path = file_path
@@ -120,27 +149,38 @@ class ClientStore:
         except Exception as e:
             logger.warning("Could not create directory %s: %s", self.file_path.parent, e)
 
-    def load_clients(self) -> set[str]:
+    def load_client_entries(self) -> Dict[str, Dict[str, Any]]:
+        """Loads all client metadata entries {uuid: {is_active: bool, version: int, updated_at: float}}."""
         if not self.file_path.exists() or self.file_path.stat().st_size == 0:
-            return set()
+            return {}
         try:
             with open(self.file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                # Format 1: Direct dict of dicts: {"clients": {uuid: {...}}}
+                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], dict):
+                    return data["clients"]
+                # Format 2: Dict of lists: {"clients": ["uuid1", "uuid2"]}
+                if isinstance(data, dict) and "clients" in data and isinstance(data["clients"], list):
+                    return {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in data["clients"]}
+                # Format 3: Raw list: ["uuid1", "uuid2"]
                 if isinstance(data, list):
-                    return set(data)
-                if isinstance(data, dict) and "clients" in data:
-                    return set(data["clients"])
+                    return {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in data}
         except Exception as e:
             logger.error("Failed to load clients from %s: %s", self.file_path, e)
-        return set()
+        return {}
 
-    def save_clients(self, clients: set[str]) -> bool:
+    def load_clients(self) -> set[str]:
+        """Returns set of currently active client UUIDs."""
+        entries = self.load_client_entries()
+        return {u for u, meta in entries.items() if meta.get("is_active", True) is True}
+
+    def save_client_entries(self, entries: Dict[str, Dict[str, Any]]) -> bool:
         self._ensure_dir()
         temp_path = self.file_path.with_suffix(".tmp")
         data = {
-            "clients": sorted(list(clients)),
+            "clients": entries,
             "updated_at": time.time(),
-            "count": len(clients),
+            "count": len([u for u, m in entries.items() if m.get("is_active", True) is True]),
         }
         try:
             with open(temp_path, "w", encoding="utf-8") as f:
@@ -148,12 +188,21 @@ class ClientStore:
                 f.flush()
                 os.fsync(f.fileno())
             temp_path.replace(self.file_path)
+            try:
+                os.chmod(self.file_path, 0o600)
+            except Exception:
+                pass
             return True
         except Exception as e:
             logger.error("Failed to save clients to %s: %s", self.file_path, e)
             return False
 
-    def add_client(self, client_uuid: str) -> None:
+    def save_clients(self, clients: set[str]) -> bool:
+        """Backward-compatible save using set of active UUIDs."""
+        entries = {u: {"is_active": True, "version": 1, "updated_at": time.time()} for u in clients}
+        return self.save_client_entries(entries)
+
+    def add_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
         lock_fd = None
         if fcntl is not None:
@@ -163,9 +212,16 @@ class ClientStore:
             except Exception as e:
                 logger.debug("Could not acquire client store lock: %s", e)
         try:
-            clients = self.load_clients()
-            clients.add(client_uuid)
-            self.save_clients(clients)
+            entries = self.load_client_entries()
+            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            new_ver = version if version is not None else max(curr_ver + 1, 1)
+            entries[client_uuid] = {
+                "is_active": True,
+                "version": new_ver,
+                "updated_at": time.time(),
+            }
+            if not self.save_client_entries(entries):
+                raise IOError(f"Failed to persist client addition to disk: {client_uuid}")
         finally:
             if fcntl is not None and lock_fd is not None:
                 try:
@@ -174,7 +230,7 @@ class ClientStore:
                 except Exception:
                     pass
 
-    def remove_client(self, client_uuid: str) -> None:
+    def remove_client(self, client_uuid: str, version: Optional[int] = None) -> None:
         self._ensure_dir()
         lock_fd = None
         if fcntl is not None:
@@ -184,10 +240,39 @@ class ClientStore:
             except Exception as e:
                 logger.debug("Could not acquire client store lock: %s", e)
         try:
-            clients = self.load_clients()
-            if client_uuid in clients:
-                clients.remove(client_uuid)
-                self.save_clients(clients)
+            entries = self.load_client_entries()
+            curr_ver = entries.get(client_uuid, {}).get("version", 0) if client_uuid in entries else 0
+            new_ver = version if version is not None else max(curr_ver + 1, 1)
+            entries[client_uuid] = {
+                "is_active": False,
+                "version": new_ver,
+                "updated_at": time.time(),
+            }
+            if not self.save_client_entries(entries):
+                raise IOError(f"Failed to persist client deactivation to disk: {client_uuid}")
+        finally:
+            if fcntl is not None and lock_fd is not None:
+                try:
+                    fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+                    lock_fd.close()
+                except Exception:
+                    pass
+
+    def delete_client(self, client_uuid: str) -> None:
+        self._ensure_dir()
+        lock_fd = None
+        if fcntl is not None:
+            try:
+                lock_fd = open(self.lock_path, "w")
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX)
+            except Exception as e:
+                logger.debug("Could not acquire client store lock: %s", e)
+        try:
+            entries = self.load_client_entries()
+            if client_uuid in entries:
+                del entries[client_uuid]
+                if not self.save_client_entries(entries):
+                    raise IOError(f"Failed to persist client deletion to disk: {client_uuid}")
         finally:
             if fcntl is not None and lock_fd is not None:
                 try:
@@ -201,23 +286,23 @@ client_store = ClientStore(CLIENTS_FILE_PATH)
 
 
 def restore_persisted_clients_to_xray() -> int:
-    """Restores all persisted clients from disk into Xray RAM via gRPC."""
-    clients = client_store.load_clients()
-    if not clients:
-        logger.info("No persisted clients to restore.")
+    """Restores ONLY active persisted clients from disk into Xray RAM via gRPC upon startup."""
+    active_clients = client_store.load_clients()
+    if not active_clients:
+        logger.info("No active persisted clients to restore.")
         return 0
 
     target_inbounds = get_target_inbounds()
     restored = 0
-    for client_uuid in clients:
+    for client_uuid in active_clients:
         for tag in target_inbounds:
             try:
                 grpc_client.add_user(tag, client_uuid)
                 restored += 1
             except Exception as e:
                 logger.warning("Failed to restore client %s on inbound %s: %s", client_uuid[:8], tag, e)
-    logger.info("Restored %d client registrations across inbounds %s.", restored, target_inbounds)
-    return len(clients)
+    logger.info("Restored %d active client registrations across inbounds %s.", restored, target_inbounds)
+    return len(active_clients)
 
 
 @asynccontextmanager
@@ -268,6 +353,7 @@ class ClientSyncRequest(BaseModel):
     client_id: Optional[str] = Field(None, description="Client UUID")
     uuid: Optional[str] = Field(None, description="Client UUID alias")
     desired_state: str = Field(..., description="Target state: 'active' or 'disabled'")
+    version: Optional[int] = Field(None, description="Monotonic desired version")
 
     @model_validator(mode="before")
     @classmethod
@@ -305,6 +391,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
     active_clients = client_store.load_clients()
     target_inbounds = get_target_inbounds()
     relays = get_active_relays()
+    secret_path = get_secret_base_path()
 
     running_epoch = epoch_manager.get_current_running_epoch() if epoch_manager else None
     _pid, starttime = epoch_manager.get_xray_process_info() if epoch_manager else (None, None)
@@ -326,6 +413,7 @@ def get_health(response: Response, _: bool = Depends(verify_api_key)) -> Dict[st
         "active_clients_count": len(active_clients),
         "inbounds": target_inbounds,
         "relays": relays,
+        "secret_base_path": secret_path,
         "node_epoch": running_epoch if is_running else None,
         "boot_id": boot_id or "boot_active",
         "starttime": starttime or 0,
@@ -393,11 +481,33 @@ def sync_client(
     req: ClientSyncRequest, _: bool = Depends(verify_api_key)
 ) -> Dict[str, Any]:
     """
-    Brings client's status across all inbounds to the desired state and updates local persistent storage.
+    Brings client's status across all inbounds to the desired state with monotonic version fencing.
     """
     client_uuid = req.client_id
     desired_state = req.desired_state
     target_inbounds = get_target_inbounds()
+
+    # Monotonic version fencing check
+    if req.version is not None:
+        entries = client_store.load_client_entries()
+        curr_entry = entries.get(client_uuid)
+        if curr_entry:
+            curr_ver = curr_entry.get("version")
+            if curr_ver is not None and req.version < curr_ver:
+                logger.warning(
+                    "Stale sync request for %s: incoming version %d < stored version %d. Fencing.",
+                    _mask_uuid(client_uuid),
+                    req.version,
+                    curr_ver,
+                )
+                return {
+                    "status": "ok",
+                    "client_id": client_uuid,
+                    "state": "active" if curr_entry.get("is_active") else "disabled",
+                    "version": curr_ver,
+                    "fenced": True,
+                    "inbounds": target_inbounds,
+                }
 
     succeeded_inbounds: List[str] = []
     failed_inbounds: List[str] = []
@@ -427,16 +537,24 @@ def sync_client(
             detail=f"Failed to sync user on inbounds: {failed_inbounds}",
         )
 
-    # Update local persistent client store
-    if desired_state == "active":
-        client_store.add_client(client_uuid)
-    else:
-        client_store.remove_client(client_uuid)
+    # Update local persistent client store with monotonic version
+    try:
+        if desired_state == "active":
+            client_store.add_client(client_uuid, version=req.version)
+        else:
+            client_store.remove_client(client_uuid, version=req.version)
+    except Exception as e:
+        logger.error("Failed to persist client state to disk: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist client state: {str(e)}",
+        ) from e
 
     return {
         "status": "ok",
         "client_id": client_uuid,
         "state": desired_state,
+        "version": req.version,
         "inbounds": target_inbounds,
     }
 
@@ -469,7 +587,10 @@ def delete_client(uuid: str, _: bool = Depends(verify_api_key)) -> Dict[str, Any
             detail=f"Failed to remove user from inbounds: {failed_inbounds}",
         )
 
-    client_store.remove_client(clean_uuid)
+    try:
+        client_store.delete_client(clean_uuid)
+    except Exception as e:
+        logger.warning("Could not delete client from store: %s", e)
 
     return {
         "status": "ok",

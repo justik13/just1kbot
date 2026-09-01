@@ -141,15 +141,22 @@ class XrayNodeClient:
         return False, None, None
 
     async def sync_client(
-        self, api_url: str, api_key: str, client_uuid: str, is_active: bool
+        self,
+        api_url: str,
+        api_key: str,
+        client_uuid: str,
+        is_active: bool,
+        version: int | None = None,
     ) -> tuple[bool, str | None]:
-        """Idempotently synchronize a client across both Origin inbounds."""
+        """Idempotently synchronize a client across both Origin inbounds with optional monotonic version fencing."""
         url = f"{api_url.rstrip('/')}/v1/clients/sync"
         headers = self._get_headers(api_key)
-        payload = {
+        payload: dict[str, Any] = {
             "client_id": client_uuid,
             "desired_state": "active" if is_active else "disabled",
         }
+        if version is not None:
+            payload["version"] = version
         status_code, _data, err = await self._make_request("POST", url, headers, json_data=payload)
         if status_code in (200, 201):
             return True, None

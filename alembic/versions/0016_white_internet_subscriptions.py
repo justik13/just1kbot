@@ -62,6 +62,15 @@ def upgrade() -> None:
             server_default=sa.text("'[]'::jsonb"),
         ),
     )
+    op.add_column(
+        "servers",
+        sa.Column(
+            "extra_data",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+    )
     op.execute(
         "UPDATE servers SET capabilities = '[\"amnezia\"]'::jsonb "
         "WHERE capabilities = '[]'::jsonb OR capabilities IS NULL"
@@ -535,12 +544,11 @@ def downgrade() -> None:
     op.execute(sa.text("ALTER TABLE account_ledger_entries ENABLE TRIGGER USER"))
     op.execute(sa.text("ALTER TABLE account_ledger_allocations ENABLE TRIGGER USER"))
 
-    # 5. servers: drop starttime, boot_id, xray_instance_epoch and capabilities
-
-
+    # 5. servers: drop starttime, boot_id, xray_instance_epoch, extra_data and capabilities
     op.drop_column("servers", "xray_instance_starttime")
     op.drop_column("servers", "xray_instance_boot_id")
     op.drop_column("servers", "xray_instance_epoch")
+    op.drop_column("servers", "extra_data")
     op.drop_column("servers", "capabilities")
 
     # 2. tariff_quotes: revert index, check constraint, drop service_type

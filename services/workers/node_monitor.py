@@ -382,6 +382,14 @@ async def check_node_resources_and_alerts(bot: Bot):
 
         if is_healthy:
             update_kwargs["last_successful_check"] = now_utc()
+            if is_xray_node and xray_data:
+                extra = dict(server.extra_data or {})
+                if "relays" in xray_data:
+                    extra["relays"] = xray_data["relays"]
+                if "secret_base_path" in xray_data:
+                    extra["secret_base_path"] = xray_data["secret_base_path"]
+                update_kwargs["extra_data"] = extra
+
             if st.health_state == ServerHealthState.ONLINE:
                 update_kwargs["problem_started_at"] = None
                 update_kwargs["next_check_at"] = None

@@ -171,6 +171,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     server.api_key,
                     sub.uuid,
                     is_active=True,
+                    version=1,
                 )
 
         # After reconciliation, state is ACTIVE with aligned epoch
@@ -307,6 +308,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     server.api_key,
                     sub.uuid,
                     is_active=False,
+                    version=2,
                 )
                 self.assertEqual(sub.actual_version, 2)
 
@@ -348,6 +350,7 @@ class TestWhiteInternetEndToEndLifecycle(AioHTTPTestCase):
                     server.api_key,
                     sub.uuid,
                     is_active=True,
+                    version=3,
                 )
                 self.assertEqual(sub.actual_version, 3)
 

@@ -47,6 +47,7 @@ class ServerUpdateFields(TypedDict, total=False):
     recovery_notice_sent: bool
     last_alert_sent_state: str | None
     capabilities: list
+    extra_data: dict
     xray_instance_epoch: str | None
     xray_instance_boot_id: str | None
     xray_instance_starttime: int | None
@@ -65,6 +66,7 @@ HEALTH_UPDATE_FIELDS = {
     "consecutive_successes",
     "recovery_notice_sent",
     "last_alert_sent_state",
+    "extra_data",
 }
 
 

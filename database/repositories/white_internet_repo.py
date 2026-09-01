@@ -336,8 +336,8 @@ async def deduct_traffic_atomic(
     if sub is None:
         raise WhiteInternetSubscriptionNotFoundError(f"Subscription {subscription_id} not found")
 
-    # If subscription already expired, entire delta is unallocated overage
-    if sub.expires_at <= now or sub.status == WhiteInternetStatus.EXPIRED:
+    # If subscription already expired or disabled, entire delta is unallocated overage
+    if sub.expires_at <= now or sub.status in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
         if sub.status not in (WhiteInternetStatus.EXPIRED, WhiteInternetStatus.DISABLED):
             sub.status = WhiteInternetStatus.EXPIRED
             sub.status_reason = "subscription_expired"

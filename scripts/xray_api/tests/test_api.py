@@ -121,3 +121,36 @@ def test_client_delete():
 def test_client_delete_invalid_uuid():
     res = client.delete("/v1/clients/invalid-uuid", headers=VALID_HEADERS)
     assert res.status_code == 422
+
+
+def test_client_sync_version_fencing():
+    uuid = "a2b9d4e1-73c5-4812-b964-f3e7b85a1902"
+    with patch.object(grpc_client, "add_user", return_value=True):
+        # Sync version 5
+        res = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "active", "version": 5},
+            headers=VALID_HEADERS,
+        )
+        assert res.status_code == 200
+        assert res.json()["version"] == 5
+
+    # Try sync older version 4 (should be fenced/ignored)
+    with patch.object(grpc_client, "remove_user", return_value=True) as mock_remove:
+        res = client.post(
+            "/v1/clients/sync",
+            json={"client_id": uuid, "desired_state": "disabled", "version": 4},
+            headers=VALID_HEADERS,
+        )
+        assert res.status_code == 200
+        assert res.json().get("fenced") is True
+        assert mock_remove.call_count == 0  # Not executed!
+
+
+def test_health_includes_secret_base_path():
+    with patch.object(grpc_client, "is_healthy", return_value=True):
+        res = client.get("/v1/health", headers=VALID_HEADERS)
+        assert res.status_code == 200
+        data = res.json()
+        assert "secret_base_path" in data
+

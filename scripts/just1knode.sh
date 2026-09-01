@@ -500,18 +500,22 @@ outbounds.append({'tag': 'block', 'protocol': 'blackhole'})
 rules.insert(0, {'type': 'field', 'inboundTag': ['api-grpc'], 'outboundTag': 'api'})
 rules.append({'type': 'field', 'inboundTag': ['inbound-default'], 'outboundTag': 'direct'})
 
-final_config = {
-    'log': {'loglevel': 'warning'},
-    'api': {'tag': 'api', 'services': ['HandlerService', 'StatsService']},
-    'stats': {},
-    'policy': {
-        'levels': {'0': {'statsUserUplink': True, 'statsUserDownlink': True}},
-        'system': {'statsInboundUplink': True, 'statsInboundDownlink': True}
-    },
-    'inbounds': inbounds,
-    'outbounds': outbounds,
-    'routing': {'rules': rules}
-}
+final_config = dict(existing)
+final_config['log'] = existing.get('log') or {'loglevel': 'warning'}
+final_config['api'] = {'tag': 'api', 'services': ['HandlerService', 'StatsService']}
+final_config['stats'] = existing.get('stats') if isinstance(existing.get('stats'), dict) else {}
+final_config['policy'] = existing.get('policy') if isinstance(existing.get('policy'), dict) else {}
+levels = final_config['policy'].setdefault('levels', {})
+levels.setdefault('0', {})['statsUserUplink'] = True
+levels['0']['statsUserDownlink'] = True
+system = final_config['policy'].setdefault('system', {})
+system['statsInboundUplink'] = True
+system['statsInboundDownlink'] = True
+
+final_config['inbounds'] = inbounds
+final_config['outbounds'] = outbounds
+routing = final_config.setdefault('routing', {})
+routing['rules'] = rules
 
 with open(config_file, 'w', encoding='utf-8') as f:
     json.dump(final_config, f, indent=2)
@@ -912,7 +916,13 @@ add_relay_node() {
     fi
 
     log "Добавление Relay-узла: $name ($code) -> $ip:$port (Транспорт: $security_type, SNI: $sni)..."
+    create_backup "$RELAYS_FILE"
     create_backup "$XRAY_CONFIG"
+
+    local nginx_conf_path="/etc/nginx/just1k_relays.d/${code}.conf"
+    if [[ -f "$nginx_conf_path" ]]; then
+        create_backup "$nginx_conf_path"
+    fi
 
     python3 -c "
 import sys, json, os
@@ -1100,9 +1110,18 @@ if os.path.exists(env_file):
 " "$RELAYS_FILE" "$XRAY_CONFIG" "$STATE_FILE" "$name" "$ip" "$port" "$uuid" "$code" "$security_type" "$pubkey" "$shortid" "$sni"
     chmod 600 "$XRAY_CONFIG"
 
-    # Валидация и безопасный перезапуск
-    nginx -t && systemctl reload nginx
-    "$XRAY_BIN" run -test -config "$XRAY_CONFIG"
+    # Валидация конфигурации перед перезапуском
+    if ! nginx -t; then
+        rm -f "$nginx_conf_path"
+        error "Ошибка конфигурации Nginx при добавлении релея $name ($code). Изменения отменены."
+    fi
+
+    if ! "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        rm -f "$nginx_conf_path"
+        error "Ошибка тестирования Xray при добавлении релея $name ($code). Изменения отменены."
+    fi
+
+    systemctl reload nginx
     systemctl restart xray
     systemctl restart xray-api
 
@@ -1112,6 +1131,26 @@ if os.path.exists(env_file):
 remove_relay_node() {
     local target="$1"
     log "Удаление Relay-узла: $target..."
+
+    local found
+    found=$(python3 -c "
+import sys, json, os
+relays_file = sys.argv[1]
+target = sys.argv[2]
+try:
+    with open(relays_file, 'r', encoding='utf-8') as f: relays = json.load(f)
+    matched = [r for r in relays if r.get('code') == target or r.get('name') == target]
+    print(len(matched))
+except Exception:
+    print(0)
+" "$RELAYS_FILE" "$target")
+
+    if [[ "$found" -eq 0 ]]; then
+        warn "Relay-узел '$target' не найден среди активных релеев."
+        return 0
+    fi
+
+    create_backup "$RELAYS_FILE"
     create_backup "$XRAY_CONFIG"
 
     python3 -c "
@@ -1164,10 +1203,13 @@ if os.path.exists(env_file):
 " "$RELAYS_FILE" "$XRAY_CONFIG" "$target"
     chmod 600 "$XRAY_CONFIG"
 
-    nginx -t && systemctl reload nginx || true
-    "$XRAY_BIN" run -test -config "$XRAY_CONFIG" || true
-    systemctl restart xray || true
-    systemctl restart xray-api || true
+    if nginx -t; then
+        systemctl reload nginx
+    fi
+    if "$XRAY_BIN" run -test -config "$XRAY_CONFIG"; then
+        systemctl restart xray
+    fi
+    systemctl restart xray-api
     log "Relay $target удален."
 }
 
@@ -1339,15 +1381,18 @@ update_xray() {
 
         log "Применение обновления..."
         cp /tmp/xray_new/xray "$XRAY_BIN"
+        set +e
         systemctl restart xray
+        local restart_rc=$?
+        set -e
 
-        if systemctl is-active --quiet xray; then
+        if [[ $restart_rc -eq 0 ]] && systemctl is-active --quiet xray; then
             log "Обновление завершено успешно! Версия: $($XRAY_BIN version | head -n 1)"
         else
             warn "Xray не запустился после обновления! Выполняем откат на предыдущую версию..."
             if [[ -f "$backup_bin" ]]; then
                 cp "$backup_bin" "$XRAY_BIN"
-                systemctl restart xray
+                systemctl restart xray || true
                 log "Откат завершен."
             fi
             error "Обновление прервано из-за сбоя запуска службы."

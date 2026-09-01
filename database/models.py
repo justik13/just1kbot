@@ -304,6 +304,9 @@ class Server(Base):
     capabilities: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default="[]"
     )
+    extra_data: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     xray_instance_epoch: Mapped[str | None] = mapped_column(String(64), nullable=True)
     xray_instance_boot_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     xray_instance_starttime: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
@@ -1225,6 +1228,12 @@ class WhiteInternetSubscription(Base):
             "AND last_uplink_snapshot >= 0 AND last_downlink_snapshot >= 0 "
             "AND traffic_overage_bytes >= 0",
             name="ck_white_internet_subscriptions_traffic_nonnegative",
+        ),
+        Index(
+            "uq_white_internet_live_user",
+            "user_id",
+            unique=True,
+            postgresql_where=text("status IN ('PENDING', 'ACTIVE', 'EXHAUSTED')"),
         ),
     )
 
